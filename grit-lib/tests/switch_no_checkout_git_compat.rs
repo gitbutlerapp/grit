@@ -10,7 +10,8 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::{Error, OverwriteReason};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions, SwitchOutcome};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
@@ -46,7 +47,7 @@ fn no_checkout(source: &Path, with_grit: bool) -> tempfile::TempDir {
                 ..CloneOptions::new(source.to_string_lossy(), dest.path().to_owned())
             },
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("grit clone");
@@ -96,7 +97,7 @@ fn switch(
             hooks: PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
 }
 
@@ -391,10 +392,11 @@ fn initial_switch_hook_receives_actual_previous_head() {
         dry_run: true,
         hooks: PostOperationHooks::Run,
     };
-    switch_repository(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+    switch_repository(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
     assert_eq!(bytes(dest.path()), before);
     opts.dry_run = false;
-    let outcome = switch_repository(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+    let outcome =
+        switch_repository(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
     assert_eq!(
         outcome.hooks_run,
         vec![grit_lib::command_runner::hooks::HookName::PostCheckout]

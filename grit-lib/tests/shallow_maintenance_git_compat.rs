@@ -17,7 +17,7 @@ use grit_lib::maintenance::{
 };
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::gc::prune_loose_unreachable;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::pack::pack_cache_guard;
@@ -212,7 +212,7 @@ fn parents_of(work: &Path, commit: ObjectId) -> Vec<String> {
 }
 
 fn grit_fsck(repo: &Repository, opts: &FsckOptions) -> fsck::FsckReport {
-    fsck::fsck(repo, opts, &mut NullProgress, &NeverCancel).expect("grit fsck")
+    fsck::fsck(repo, opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck")
 }
 
 /// Repack packs the history down to the boundary and nothing below it.

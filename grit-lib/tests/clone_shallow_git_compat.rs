@@ -6,7 +6,7 @@ use std::process::Command;
 
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -123,7 +123,7 @@ fn clone_depth_one_lightweight_tag_matches_git() {
             ..CloneOptions::new(url, grit_dest.clone())
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("shallow tag clone");
@@ -187,7 +187,7 @@ fn clone_depth_one_annotated_tag_matches_git() {
             ..CloneOptions::new(url, grit_dest.clone())
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("shallow annotated tag clone");
@@ -236,7 +236,7 @@ fn clone_depth_one_records_shallow_boundary_and_limits_history() {
             ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("shallow clone");
@@ -355,7 +355,7 @@ fn shallow_clone_matches_git_single_branch_on_multi_branch_remote() {
             ..CloneOptions::new(url, grit_dest.clone())
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("grit shallow clone");
@@ -452,7 +452,7 @@ fn shallow_clone_with_root_annotated_tag_matches_git_shallow_file() {
             ..CloneOptions::new(url, grit_dest.clone())
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("grit shallow clone");
@@ -500,7 +500,7 @@ fn shallow_clone_includes_annotated_tag_on_tip_not_on_old_commit() {
             ..CloneOptions::new(url, grit_dest.clone())
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("grit shallow clone");
@@ -564,7 +564,7 @@ fn shallow_depth_two_keeps_annotated_tag_on_fetched_parent() {
             ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("depth-2 shallow clone");

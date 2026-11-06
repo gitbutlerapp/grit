@@ -131,7 +131,7 @@ fn init_grit_conflict_merge(root: &Path) -> Repository {
         side,
         "side",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -189,7 +189,7 @@ fn commit_auto_stage_rejects_custom_conflict_marker_size() {
         &commit_req("marker-commit"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -228,7 +228,7 @@ fn commit_with_auto_stage_rejects_unresolved_conflict_markers() {
         &commit_req("oops"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -275,7 +275,7 @@ fn create_commit_rejects_unmerged_index_like_git() {
         &repo,
         &commit_req("oops"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -301,8 +301,12 @@ fn stage_for_commit_then_create_commit_concludes_resolved_merge_without_prior_ad
     let repo = init_conflict_merge(root);
 
     std::fs::write(root.join("f"), b"resolved\n").unwrap();
-    stage_for_commit(&repo, &mut NullProgress, &grit_lib::progress::NeverCancel)
-        .expect("stage resolved merge");
+    stage_for_commit(
+        &repo,
+        &mut NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )
+    .expect("stage resolved merge");
     assert!(
         !repo
             .index_handle()
@@ -319,7 +323,7 @@ fn stage_for_commit_then_create_commit_concludes_resolved_merge_without_prior_ad
         &repo,
         &commit_req("merge side without add"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge commit");
 
@@ -351,7 +355,7 @@ fn create_commit_concludes_resolved_merge_with_two_parents() {
         &repo,
         &commit_req("merge side"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge commit");
 
@@ -410,7 +414,7 @@ fn create_commit_concludes_merge_when_resolved_as_ours() {
         &repo,
         &commit_req("resolve as ours"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge commit with unchanged tree vs first parent");
 
@@ -481,7 +485,7 @@ fn create_commit_applies_merge_autostash_like_git() {
         &repo,
         &commit_req("merge with autostash"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge commit");
 
@@ -546,7 +550,7 @@ fn create_commit_clears_merge_rerere_state_like_git() {
         &repo,
         &commit_req("merge with rerere"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge commit");
 

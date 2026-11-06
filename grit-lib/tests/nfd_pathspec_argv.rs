@@ -67,7 +67,7 @@ fn library_nfd_resolved_pathspec_stages_nfc_index_entry() {
             ..StageOptions::default()
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage nfd pathspec");
 

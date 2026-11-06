@@ -5,6 +5,7 @@
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     apply_rewrite, reword, ApplyOptions, EmptyPolicy, RefScope, RewriteOptions,
@@ -69,7 +70,7 @@ fn main() -> Result<()> {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )?;
 
     println!("head={}", applied.head.to_hex());

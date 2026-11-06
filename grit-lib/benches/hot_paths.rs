@@ -127,7 +127,7 @@ fn bench_sparse_stash_pop(c: &mut Criterion) {
                             0,
                             &grit_lib::stash::StashApplyOptions::default(),
                             &mut grit_lib::progress::NullProgress,
-                            &grit_lib::progress::NeverCancel,
+                            &grit_lib::progress::CancelToken::never(),
                         )
                         .expect("pop"),
                 )

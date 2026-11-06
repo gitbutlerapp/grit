@@ -15,6 +15,7 @@ use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::porcelain::add::{stage, StageOptions};
 use crate::porcelain::commit::{create_commit, CommitRequest};
+use crate::progress::CancelToken;
 use crate::progress::NullProgress;
 use crate::repo::{init_repository, Repository};
 use crate::write_tree::{cache_tree_update, write_tree_update_index, WriteTreeFlags};
@@ -264,7 +265,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             ..Default::default()
         },
         &mut NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -300,7 +301,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             ..Default::default()
         },
         &mut NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
     .unwrap();
     metrics.set_freshen_counting(false);
@@ -379,7 +380,7 @@ fn stage_one_modified_file_hashes_one_blob() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
     .unwrap();
     metrics.set_blob_counting(false);
@@ -440,7 +441,7 @@ fn pack_signature_not_restatted_per_object() {
             ..Default::default()
         },
         &mut NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -515,7 +516,7 @@ fn pack_signature_not_restatted_per_object() {
             ..Default::default()
         },
         &mut NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
     .unwrap();
     metrics.set_stamp_counting(false);

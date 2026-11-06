@@ -8,7 +8,8 @@ use grit_lib::config::ident_resolve::{IdentRole, IdentityError};
 use grit_lib::error::Error;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::TempDir;
 
@@ -48,14 +49,14 @@ fn stage_all_and_commit_first(repo: &Repository, wt: &std::path::Path) {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     commit_worktree(
         repo,
         &CommitRequest::new("first"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 }
@@ -85,14 +86,14 @@ fn init_default_hermetic_commit_reports_missing_identity() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     let err = commit_worktree(
         &repo,
         &CommitRequest::new("first"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(

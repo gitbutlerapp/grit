@@ -48,7 +48,7 @@ use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
     UntrackedCacheMissAction, UntrackedScan,
 };
-use crate::progress::{Cancel, ProgressPhase, ProgressScope, ProgressSink};
+use crate::progress::{CancelToken, ProgressPhase, ProgressScope, ProgressSink};
 use crate::repo::Repository;
 use crate::repo_relpath::{as_utf8_for_matching, storage_bytes};
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
@@ -177,7 +177,7 @@ fn sort_outcome_paths_lexicographic(outcome: &mut StageOutcome) {
 pub fn stage_for_commit(
     repo: &Repository,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<StageOutcome> {
     let config = repo.config()?;
     let opts = StageOptions {
@@ -214,7 +214,7 @@ pub(crate) fn stage_for_commit_on_index(
     repo: &Repository,
     index: &mut Index,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     dry_run: bool,
 ) -> Result<StageOutcome> {
     let config = repo.config()?;
@@ -236,7 +236,7 @@ pub fn stage_on_index(
     index: &mut Index,
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<StageOutcome> {
     stage_on_index_with_pathspec_ignore_exempt(repo, index, opts, progress, cancel, None)
 }
@@ -248,7 +248,7 @@ pub(crate) fn stage_on_index_with_pathspec_ignore_exempt(
     index: &mut Index,
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     ignore_exempt_index: Option<&Index>,
 ) -> Result<StageOutcome> {
     let mut scope = ProgressScope::new(progress, cancel);
@@ -302,7 +302,7 @@ pub fn stage(
     repo: &Repository,
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<StageOutcome> {
     if uses_tracked_scan_fast_path(opts) {
         return stage_with_tracked_scan(repo, opts, progress, cancel);
@@ -564,7 +564,7 @@ fn stage_via_worktree_diff(
     repo: &Repository,
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<StageOutcome> {
     stage_inner(repo, opts, progress, cancel, false)
 }
@@ -573,7 +573,7 @@ fn stage_with_tracked_scan(
     repo: &Repository,
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<StageOutcome> {
     stage_inner(repo, opts, progress, cancel, true)
 }
@@ -591,7 +591,7 @@ fn stage_inner(
     repo: &Repository,
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     tracked_scan: bool,
 ) -> Result<StageOutcome> {
     let mut scope = ProgressScope::new(progress, cancel);
@@ -2326,7 +2326,7 @@ mod tests {
             &fresh,
             &opts,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2358,7 +2358,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.added.len(), 3);
@@ -2397,7 +2397,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.added.len(), expected_count);
@@ -2436,7 +2436,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.added.len(), count);
@@ -2478,7 +2478,7 @@ mod tests {
             &mut index,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(index.entries.len(), 100);
@@ -2514,7 +2514,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.added.len(), 1);
@@ -2541,7 +2541,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.added.len(), 1);
@@ -2559,8 +2559,12 @@ mod tests {
         write_index(&repo, &mut index);
         fs::write(root.join("new.txt"), b"fresh\n").unwrap();
 
-        let outcome =
-            stage_for_commit(&repo, &mut NullProgress, &crate::progress::NeverCancel).unwrap();
+        let outcome = stage_for_commit(
+            &repo,
+            &mut NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert_eq!(outcome.added.len(), 1);
         let index = repo.load_index().unwrap();
         assert!(index.get(b"new.txt", 0).is_some());
@@ -2585,8 +2589,12 @@ mod tests {
         fs::write(root.join("tracked.txt"), b"tracked-modified\n").unwrap();
         fs::write(root.join("secret.env"), b"secret\n").unwrap();
 
-        let outcome =
-            stage_for_commit(&repo, &mut NullProgress, &crate::progress::NeverCancel).unwrap();
+        let outcome = stage_for_commit(
+            &repo,
+            &mut NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert_eq!(outcome.added.len(), 0);
         assert_eq!(outcome.modified.len(), 1);
         let index = repo.load_index().unwrap();
@@ -2611,8 +2619,12 @@ mod tests {
         write_index(&repo, &mut index);
         fs::write(root.join("new.txt"), b"fresh\n").unwrap();
 
-        let outcome =
-            stage_for_commit(&repo, &mut NullProgress, &crate::progress::NeverCancel).unwrap();
+        let outcome = stage_for_commit(
+            &repo,
+            &mut NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert_eq!(outcome.added.len(), 1);
     }
 
@@ -2635,7 +2647,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.modified.len(), 1);
@@ -2669,7 +2681,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.added, vec!["new.txt".to_owned()]);
@@ -2717,7 +2729,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.modified.len(), 4);
@@ -2734,7 +2746,7 @@ mod tests {
                     ..StageOptions::default()
                 },
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap_err();
             assert!(
@@ -2760,7 +2772,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::PathspecIgnored { .. }));
@@ -2783,7 +2795,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         match err {
@@ -2806,7 +2818,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let index = repo.load_index().unwrap();
@@ -2832,7 +2844,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2859,7 +2871,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.modified.len(), 1);
@@ -2893,7 +2905,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2984,7 +2996,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -3020,7 +3032,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         );
         assert!(
             !matches!(
@@ -3053,7 +3065,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -3080,7 +3092,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -3109,7 +3121,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -3146,7 +3158,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -3199,7 +3211,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         let Error::UnmergedConflictMarkers { paths } = err else {
@@ -3245,7 +3257,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.modified.len(), 1);
@@ -3285,7 +3297,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.total(), 1);
@@ -3364,7 +3376,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let index = repo.load_index().unwrap();
@@ -3393,7 +3405,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let index = repo.load_index().unwrap();
@@ -3465,7 +3477,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -3500,7 +3512,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3532,7 +3544,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3558,7 +3570,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3571,7 +3583,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3596,7 +3608,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap()
     }
@@ -3654,7 +3666,7 @@ mod tests {
                     ..StageOptions::default()
                 },
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
             assert_eq!(outcome.added.len(), DIRS as usize, "{specs:?}");
@@ -3723,7 +3735,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.total(), 1);
@@ -3768,7 +3780,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -3812,7 +3824,7 @@ mod tests {
                     ..StageOptions::default()
                 },
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
             assert_eq!(outcome.modified, vec![spec.trim_end_matches('/')]);
@@ -3856,7 +3868,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("foo"), b"new foo\n").unwrap();
@@ -3873,7 +3885,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut modified = outcome.modified;
@@ -3937,7 +3949,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.modified.len(), 1);
@@ -3976,7 +3988,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("tracked.txt"), b"v2\n").unwrap();
@@ -3992,7 +4004,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(!outcome.added.is_empty() || !outcome.modified.is_empty());
@@ -4014,7 +4026,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(count_loose_objects(root), objects_before);
@@ -4045,7 +4057,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.total(), 1, "pathless -u must stage resolved file");
@@ -4081,7 +4093,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         grit_test_support::git(root, &["commit", "-qm", "seed"]);
@@ -4105,7 +4117,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.removed, vec!["f".to_owned()]);
@@ -4190,7 +4202,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(bulk.added.len(), 2);
@@ -4205,7 +4217,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(serial.added, vec!["c.txt".to_owned()]);
@@ -4250,7 +4262,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         grit_test_support::git(root, &["commit", "-qm", "seed"]);
@@ -4264,7 +4276,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(outcome.removed.iter().any(|p| p == "gone.txt"));
@@ -4319,7 +4331,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         grit_test_support::git(root, &["commit", "-qm", "seed"]);
@@ -4334,7 +4346,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.modified, vec!["sub/a.txt".to_owned()]);
@@ -4351,7 +4363,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("f.txt"), b"2\n").unwrap();
@@ -4362,7 +4374,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.modified.len(), 1);
@@ -4379,7 +4391,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("f.txt"), b"2\n").unwrap();
@@ -4391,7 +4403,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(outcome.modified.contains(&"f.txt".to_owned()));
@@ -4417,7 +4429,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.added, vec!["a.log".to_owned()]);
@@ -4457,7 +4469,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4506,7 +4518,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let grit_porcelain = Command::new("git")
@@ -4673,7 +4685,7 @@ mod tests {
                 &repo,
                 &bulk,
                 &mut NullProgress,
-                &crate::progress::NeverCancel
+                &crate::progress::CancelToken::never()
             )
             .unwrap()
             .added
@@ -4688,7 +4700,7 @@ mod tests {
             &repo,
             &bulk,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(restaged.modified.len(), paths.len());

@@ -35,7 +35,7 @@ use std::time::Duration;
 use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::objects::ObjectId;
 use crate::pkt_line;
-use crate::progress::Cancel;
+use crate::progress::CancelToken;
 
 pub mod http;
 pub(crate) mod pending_http;
@@ -78,7 +78,7 @@ pub struct ConnectOptions {
     pub network_trace: bool,
     /// When set, smart-HTTP connect and stateless POST rounds poll this while waiting
     /// on the HTTP stack (discovery GET, upload-pack POST, receive-pack report).
-    pub cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>,
+    pub cancel: Option<std::sync::Arc<crate::progress::CancelToken>>,
     /// Flag mirrored from the stack [`Cancel`] on the owning thread during HTTP waits.
     pub(crate) stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
@@ -107,7 +107,7 @@ impl ConnectOptions {
     }
 
     /// Seed `stack_watch` from a stack-scoped [`Cancel`] before connect/fetch.
-    pub(crate) fn bind_stack_cancel(&mut self, cancel: &dyn Cancel) {
+    pub(crate) fn bind_stack_cancel(&mut self, cancel: &CancelToken) {
         crate::progress::mirror_stack_cancel(cancel, &self.stack_watch);
     }
 }
@@ -161,7 +161,7 @@ pub trait Connection {
 
     /// Mirror a stack-scoped [`Cancel`] into the connection's HTTP wait flag before
     /// writes that may block on smart HTTP (upload-pack POST on flush).
-    fn mirror_http_cancel(&mut self, cancel: &dyn Cancel) {
+    fn mirror_http_cancel(&mut self, cancel: &CancelToken) {
         let _ = cancel;
     }
 
@@ -169,7 +169,7 @@ pub trait Connection {
     ///
     /// Stateless upload-pack POSTs are started on flush and finished here so the
     /// scoped `cancel` borrow can be polled while the HTTP worker blocks.
-    fn drain_pending_http(&mut self, cancel: &dyn Cancel) -> crate::error::Result<()> {
+    fn drain_pending_http(&mut self, cancel: &CancelToken) -> crate::error::Result<()> {
         let _ = cancel;
         Ok(())
     }
@@ -204,7 +204,7 @@ pub trait Connection {
     /// transport error that ended the request.
     fn wait_for_response(
         &mut self,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
     ) -> crate::error::Result<()> {
         let _ = cancel;
         Ok(())
@@ -2087,7 +2087,7 @@ eval "$cmd"
                 conn.as_mut(),
                 &mut fetch,
                 &mut crate::fetch::NoProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .expect_err("git refuses a want for an object it does not have");
             match err {

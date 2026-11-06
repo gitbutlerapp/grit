@@ -37,6 +37,7 @@ use crate::transport_path::{
 };
 use crate::url_rewrite;
 
+use crate::progress::CancelToken;
 #[cfg(feature = "http-ureq")]
 use crate::transport::http::ureq_client::UreqHttpClient;
 
@@ -541,7 +542,7 @@ impl Remote {
         repo: &Repository,
         mut opts: FetchOptions,
         progress: &mut dyn Progress,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> RemoteResult<FetchOutcome> {
         if opts.configured_refspecs.is_empty() {
@@ -609,7 +610,7 @@ impl Remote {
         refs: &[PushRefSpec],
         mut opts: PushOptions,
         progress: &mut dyn Progress,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> RemoteResult<PushOutcome> {
         if opts.tracking_remote.is_none() {
@@ -680,7 +681,7 @@ impl Remote {
         repo: &Repository,
         cache_dir: &Path,
         progress: &mut dyn Progress,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> crate::bundle_uri::BundleSeed {
         use crate::bundle_uri::BundleSeed;
@@ -798,7 +799,7 @@ impl Remote {
         url: &RemoteUrl,
         opts: &mut FetchOptions,
         progress: &mut dyn Progress,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
         connect: ConnectOptions,
     ) -> RemoteResult<FetchOutcome> {
@@ -879,7 +880,7 @@ impl Remote {
         opts: &PushOptions,
         pre_push: Option<&PrePushGate<'_>>,
         progress: &mut dyn Progress,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
         connect: ConnectOptions,
     ) -> RemoteResult<PushOutcome> {
@@ -1062,7 +1063,7 @@ fn ssh_wire_environment(
 fn http_client_for_operation(
     factory: Option<&dyn HttpClientFactory>,
     repo: &Repository,
-    cancel: Option<std::sync::Arc<dyn crate::progress::Cancel + Send + Sync>>,
+    cancel: Option<std::sync::Arc<CancelToken>>,
 ) -> RemoteResult<Arc<dyn HttpClient>> {
     let client = http_client(factory, repo)?;
     client.set_operation_cancel(cancel);
@@ -1073,7 +1074,7 @@ fn http_client_for_operation(
 fn http_client_for_operation(
     factory: Option<&dyn HttpClientFactory>,
     repo: &Repository,
-    _cancel: Option<std::sync::Arc<dyn crate::progress::Cancel + Send + Sync>>,
+    _cancel: Option<std::sync::Arc<CancelToken>>,
 ) -> RemoteResult<Arc<dyn HttpClient>> {
     Ok(Arc::from(http_client(factory, repo)?))
 }

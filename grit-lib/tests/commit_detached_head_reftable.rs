@@ -45,7 +45,7 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
         &repo,
         &commit_req("one"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("first commit");
     let main_tip = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").unwrap();
@@ -65,7 +65,7 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("detach");
 
@@ -74,7 +74,7 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
         &repo,
         &commit_req("detached"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("detached commit");
     assert_eq!(outcome.branch, None);
@@ -109,7 +109,7 @@ fn grit_amend_on_detached_reftable_head() {
         &repo,
         &commit_req("one"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("first");
     let tip = match resolve_head(repo.git_dir()).expect("head before detach") {
@@ -127,7 +127,7 @@ fn grit_amend_on_detached_reftable_head() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("detach");
 
@@ -137,7 +137,7 @@ fn grit_amend_on_detached_reftable_head() {
         &repo,
         &amend,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("amend detached");
     assert_eq!(outcome.branch, None);

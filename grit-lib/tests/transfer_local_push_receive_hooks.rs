@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
-use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_plan::{
     load_push_plan_context, open_push_destination, resolve_push, PushRequest,
@@ -192,7 +191,7 @@ fn grit_push(
         &plan.specs,
         opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
 }
@@ -545,7 +544,7 @@ fn push_local_runs_receive_hooks() {
             ..PushRefSpec::default()
         }],
         &PushOptions::default(),
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("push_local");
     assert_eq!(outcome.results[0].status, PushRefStatus::RemoteRejected);

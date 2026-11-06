@@ -13,7 +13,6 @@ use grit_lib::command_runner::hooks::{run_pre_push_hook, HookError, PrePushRef};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_plan::{
     load_push_plan_context, open_push_destination, resolve_push, PushRequest,
@@ -129,7 +128,7 @@ fn grit_push(
         &plan.specs,
         opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
 }

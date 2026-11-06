@@ -5,7 +5,6 @@ mod unix {
     use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
     use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
     use grit_lib::porcelain::status::{status, StatusOptions};
-    use grit_lib::progress::NeverCancel;
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::git;
@@ -28,7 +27,7 @@ mod unix {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         model.untracked.clone()
@@ -121,7 +120,7 @@ mod unix {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("stage must not hang or fail on fifo");
         assert_eq!(
@@ -160,7 +159,7 @@ mod unix {
             &commit_req("second"),
             CommitScope::AutoStage,
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("auto-stage commit with socket present");
         git(root, &["fsck"]);

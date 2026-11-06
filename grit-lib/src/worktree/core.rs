@@ -23,7 +23,7 @@ use crate::porcelain::checkout_reflog::{
     create_branch_ref_with_reflog, reset_branch_ref_with_reflog,
 };
 use crate::porcelain::status::{status, StatusOptions};
-use crate::progress::{Cancel, NeverCancel, NullProgress};
+use crate::progress::{CancelToken, NullProgress};
 use crate::refs;
 use crate::repo::{common_git_dir_for_config, Repository};
 use crate::rev_parse::resolve_revision;
@@ -600,7 +600,7 @@ pub fn add_linked_worktree(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
 ) -> Result<WorktreeEntry> {
-    add_linked_worktree_with_cancel(repo, opts, &NeverCancel)
+    add_linked_worktree_with_cancel(repo, opts, &CancelToken::never())
 }
 
 /// Register and populate a linked worktree, stopping when `cancel` is set.
@@ -615,7 +615,7 @@ pub fn add_linked_worktree(
 pub fn add_linked_worktree_with_cancel(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<WorktreeEntry> {
     // Like Git, a bare repository can have linked worktrees.
     let common = common_git_dir(repo.git_dir());
@@ -1475,7 +1475,7 @@ fn worktree_has_local_changes(repo: &Repository) -> Result<bool> {
         repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )?;
     Ok(!model.staged.is_empty()
         || !model.unstaged.is_empty()

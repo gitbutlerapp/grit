@@ -113,14 +113,14 @@ fn init_tracked_repo(root: &Path) -> Repository {
         &repo,
         &grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("base"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     repo
@@ -347,14 +347,14 @@ fn collapsed_dir_preserves_ignored_files_like_git() {
         &Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).unwrap(),
         &grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).unwrap(),
         &commit_req("ignore"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     fs::create_dir_all(grit_root.path().join("mixed")).unwrap();
@@ -480,14 +480,14 @@ fn empty_ignored_directory_preserves_collapsed_parent_like_git() {
         &Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).unwrap(),
         &grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).unwrap(),
         &commit_req("ignore cache dir"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     fs::create_dir_all(grit_root.path().join("container")).unwrap();

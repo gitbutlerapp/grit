@@ -119,7 +119,7 @@ fn autostage_commit_skips_hidden_untracked_no() {
         &commit_req("tracked change"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -144,7 +144,7 @@ fn autostage_commit_skips_hidden_untracked_false_synonym() {
         &commit_req("tracked change"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -166,7 +166,7 @@ fn autostage_commit_still_includes_untracked_when_show_normal() {
         &commit_req("everything"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -215,7 +215,7 @@ fn dotfiles_git_dir_worktree_does_not_sweep_home() {
             ..Default::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage bashrc");
 
@@ -224,7 +224,7 @@ fn dotfiles_git_dir_worktree_does_not_sweep_home() {
         &commit_req("dotfiles"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 

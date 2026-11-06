@@ -190,7 +190,7 @@ pub fn stage_tracked_modifications_in_index_with_thresholds(
 ) -> Result<StageTrackedSummary> {
     let mut rules = WorktreeRules::from_repository(repo, index)?;
     let mut progress = crate::progress::NullProgress;
-    let mut scope = ProgressScope::new(&mut progress, &crate::progress::NeverCancel);
+    let mut scope = ProgressScope::new(&mut progress, crate::progress::CancelToken::never_ref());
     stage_tracked_modifications_in_index_with_rules(
         repo, work_tree, index_path, index, &mut rules, thresholds, None, &mut scope,
     )
@@ -2190,7 +2190,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            crate::progress::CancelToken::never_ref(),
         )
         .unwrap();
         assert_eq!(

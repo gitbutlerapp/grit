@@ -81,7 +81,7 @@ pub fn run(
     if args.paths.is_empty() && args.pathspec_from_file.is_none() {
         bail!("you must specify path(s) to remove");
     }
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let path_display = PathDisplayOptions::from_repo(&repo).ok();
     let resolved = args.resolve(&repo)?;
@@ -92,7 +92,7 @@ pub fn run(
         force,
         dry_run,
         ignore_unmatch,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
         path_display.as_ref(),
     )?;
     Ok(RmOutcome {
@@ -110,7 +110,7 @@ fn rm(
     force: bool,
     dry_run: bool,
     ignore_unmatch: bool,
-    cancel: &dyn grit_lib::progress::Cancel,
+    cancel: &grit_lib::progress::CancelToken,
     path_display: Option<&PathDisplayOptions>,
 ) -> Result<RemoveOutcome> {
     let opts = RemoveOptions {

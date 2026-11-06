@@ -51,7 +51,7 @@ fn modify_delete_conflict_materializes_incoming_version_and_resolves_with_add_or
         feat_oid,
         "feat",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Conflicts { paths, details, .. } = outcome else {
@@ -82,7 +82,7 @@ fn modify_delete_conflict_materializes_incoming_version_and_resolves_with_add_or
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("add keep");
     assert_eq!(add_keep.modified.len(), 1);
@@ -104,7 +104,7 @@ fn modify_delete_conflict_resolves_by_accepting_deletion() {
         feat_oid,
         "feat",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -115,7 +115,7 @@ fn modify_delete_conflict_resolves_by_accepting_deletion() {
             pathspecs: vec!["f".into()],
             ..RemoveOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("rm f");
     assert_eq!(rm_out.removed, vec!["f".to_owned()]);
@@ -138,17 +138,16 @@ fn modify_delete_merge_does_not_mark_unrelated_files_modified() {
         feat_oid,
         "feat",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
 
     use grit_lib::porcelain::status::{status, StatusOptions};
-    use grit_lib::progress::NeverCancel;
     let model = status(
         &repo,
         &StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(

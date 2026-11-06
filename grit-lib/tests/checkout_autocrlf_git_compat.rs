@@ -47,7 +47,7 @@ fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let mut index = repo.index_handle().load().expect("index");

@@ -110,7 +110,7 @@ fn init_grit_two_file_conflict_merge(root: &Path) -> Repository {
         topic,
         "topic",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -146,7 +146,7 @@ fn init_grit_conflict_merge(root: &Path) -> Repository {
         side,
         "side",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -166,7 +166,7 @@ fn grit_conflict_then_grit_continue_fsck_clean() {
         &repo,
         &continue_options(None),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("continue");
     assert!(!repo.git_dir().join("MERGE_HEAD").exists());
@@ -206,7 +206,7 @@ fn git_merge_conflict_then_grit_continue() {
         &repo,
         &continue_options(None),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("continue");
 
@@ -260,7 +260,7 @@ fn continue_after_edit_without_add_auto_stages_resolved_paths() {
         &repo,
         &continue_options(None),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("continue");
 
@@ -282,7 +282,7 @@ fn continue_refuses_unmerged_paths() {
         &repo,
         &continue_options(None),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(
@@ -308,7 +308,7 @@ fn continue_without_merge_errors() {
         &repo,
         &continue_options(None),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(err, ContinueMergeError::NoMergeInProgress));
@@ -327,7 +327,7 @@ fn continue_stamps_change_id() {
         &repo,
         &continue_options(None),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("continue");
     let obj = repo.odb().read(&outcome.oid).expect("commit");

@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
-use crate::progress::{Cancel, NeverCancel};
+use crate::progress::CancelToken;
 
 /// Whether `err` means the OS would not execute the file as a program, so it must be run
 /// through a shell (`ENOEXEC` on Unix, `ERROR_BAD_EXE_FORMAT` on Windows).
@@ -987,7 +987,7 @@ fn kill_pid_sigkill(pid: u32, kill_process_group: bool) {
 fn wait_hook_command(
     child: RunningCommand,
     capture: bool,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     output: &mut HookOutput,
 ) -> Result<crate::command_runner::CommandExit, HookError> {
     use crate::command_runner::CommandOutput;
@@ -1129,7 +1129,15 @@ pub fn run_hook_opts(
     config: &ConfigSet,
     opts: RunHookOptions<'_>,
 ) -> Result<HookResult, HookError> {
-    run_hook_opts_with_cancel(repo, hook_name, args, config, opts, &NeverCancel, false)
+    run_hook_opts_with_cancel(
+        repo,
+        hook_name,
+        args,
+        config,
+        opts,
+        &CancelToken::never(),
+        false,
+    )
 }
 
 fn run_hook_opts_with_cancel(
@@ -1138,7 +1146,7 @@ fn run_hook_opts_with_cancel(
     args: &[&str],
     config: &ConfigSet,
     opts: RunHookOptions<'_>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     server_receive_hook: bool,
 ) -> Result<HookResult, HookError> {
     let seq = match repo {
@@ -1353,7 +1361,14 @@ pub fn run_commit_hook(
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
 ) -> Result<HookResult, HookError> {
-    run_commit_hook_with_cancel(repo, hook_name, args, stdin_data, commit_env, &NeverCancel)
+    run_commit_hook_with_cancel(
+        repo,
+        hook_name,
+        args,
+        stdin_data,
+        commit_env,
+        &CancelToken::never(),
+    )
 }
 
 /// Like [`run_commit_hook`] but honours [`Cancel`] while hook subprocesses run.
@@ -1363,7 +1378,7 @@ pub(crate) fn run_commit_hook_with_cancel(
     args: &[&str],
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<HookResult, HookError> {
     let config = repo
         .config()
@@ -1438,8 +1453,15 @@ pub fn run_hook_in_git_dir(
     stdin_data: Option<&[u8]>,
     env_vars: &[(&str, &str)],
 ) -> HookResult {
-    run_hook_in_git_dir_with_cancel(repo, hook_name, args, stdin_data, env_vars, &NeverCancel)
-        .unwrap_or_else(|_| hook_declined())
+    run_hook_in_git_dir_with_cancel(
+        repo,
+        hook_name,
+        args,
+        stdin_data,
+        env_vars,
+        &CancelToken::never(),
+    )
+    .unwrap_or_else(|_| hook_declined())
 }
 
 fn hook_declined() -> HookResult {
@@ -1460,7 +1482,7 @@ pub(crate) fn run_hook_in_git_dir_with_cancel(
     args: &[&str],
     stdin_data: Option<&[u8]>,
     env_vars: &[(&str, &str)],
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<HookResult, HookError> {
     let env_vars: Vec<(&str, &str)> = std::iter::once(("GIT_DIR", "."))
         .chain(env_vars.iter().copied())
@@ -1671,7 +1693,7 @@ impl RefHookContext {
                 stdio: self.hook_stdio,
                 ..RunHookOptions::default()
             },
-            &NeverCancel,
+            &CancelToken::never(),
         )?;
         if phase == ReferenceTransactionPhase::Prepared {
             result.check("reference-transaction")?;
@@ -1770,7 +1792,7 @@ fn run_hook_opts_for_ref_context(
     args: &[&str],
     config: &ConfigSet,
     opts: RunHookOptions<'_>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<HookResult, HookError> {
     let seq = resolve_hook_sequence_for_ref(ctx, hook_name, config)?;
     if seq.is_empty() {

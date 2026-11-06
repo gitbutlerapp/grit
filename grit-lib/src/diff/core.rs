@@ -3693,7 +3693,7 @@ fn poll_tree_diff_cancel(
     index_hint: Option<&DiffTreesWalkHint<'_>>,
     stride: &mut usize,
 ) -> Result<()> {
-    use crate::progress::{poll_watch, CANCEL_POLL_STRIDE};
+    use crate::progress::{poll_watch, CancelToken, CANCEL_POLL_STRIDE};
     *stride = stride.wrapping_add(1);
     if stride.is_multiple_of(CANCEL_POLL_STRIDE) {
         if let Some(watch) = index_hint.and_then(|hint| hint.cancel_watch.as_ref()) {

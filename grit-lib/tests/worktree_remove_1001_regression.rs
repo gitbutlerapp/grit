@@ -206,7 +206,7 @@ fn stale_index_stat_fixture() -> (tempfile::TempDir, PathBuf, Repository, Reposi
         &linked_repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     commit_staged_without_index_stat_refresh(&linked_repo, "no refresh");
@@ -268,7 +268,7 @@ fn create_commit_refreshes_index_stat_for_worktree_remove() {
         &linked_repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     // Bump mtime after staging so write-tree without stat refresh would persist stale stat.
@@ -279,7 +279,7 @@ fn create_commit_refreshes_index_stat_for_worktree_remove() {
         &linked_repo,
         &commit_request("with refresh"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("create_commit");
 

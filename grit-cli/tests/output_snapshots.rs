@@ -5,6 +5,7 @@
 use std::fs;
 use std::path::Path;
 
+use grit_lib::progress::CancelToken;
 use grit_test_support::{CliFixture, SnapshotExitCodes};
 
 fn snapshot_dir() -> &'static Path {
@@ -50,8 +51,12 @@ fn snapshot_fsck_missing_blob() {
 
         let repo = Repository::init(fixture.path(), &InitOptions::default()).expect("init");
         fs::write(repo.work_tree().unwrap().join("orphan.txt"), b"data\n").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &grit_lib::progress::NeverCancel)
-            .expect("stage");
+        stage_for_commit(
+            &repo,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
         let index = Index::load(&repo.git_dir().join("index")).expect("index");
         let oid = index.entries()[0].oid;
         let loose = repo

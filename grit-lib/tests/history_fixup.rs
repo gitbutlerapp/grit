@@ -16,7 +16,6 @@ use grit_lib::porcelain::hunk_select::{
     unstaged_file_diffs, HunkSelectError, HunkSelection, LineRange,
 };
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -291,7 +290,7 @@ fn fixup_preserves_unstaged_deletion_after_partial_staging() {
         &grit,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert_eq!(st.staged.len(), 0, "staging consumed by fixup");
@@ -362,7 +361,7 @@ fn fixup_preserves_unstaged_modification_after_partial_staging() {
         &grit,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert_eq!(st.staged.len(), 0);
@@ -394,7 +393,7 @@ fn fixup_preserves_unstaged_insertion_on_partially_staged_path() {
         &grit,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert_eq!(st.staged.len(), 0);
@@ -450,7 +449,7 @@ fn fixup_preserves_unstaged_changes() {
         &grit,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert_eq!(st.staged.len(), 0);
@@ -726,7 +725,7 @@ fn fixup_hunks_preserves_preexisting_staged_on_same_path() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage first hunk");
     let staged_before = Command::new("git")
@@ -809,7 +808,7 @@ fn fixup_lines_preserves_preexisting_staged_and_consumes_selected_line() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage line-5 hunk");
     let selection = HunkSelection {
@@ -891,7 +890,7 @@ fn fixup_lines_same_structured_hunk_preserves_unselected_and_staged() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage line-18 only");
     let selection = HunkSelection {
@@ -982,7 +981,7 @@ fn fixup_lines_pre_staged_same_hunk_preserves_unselected_and_staged() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage line-5 only");
     let selection = HunkSelection {
@@ -1156,7 +1155,7 @@ fn fixup_lines_insertion_with_pre_staged_restores_shifted_unselected_below() {
         &[],
         grit_lib::diff::DiffOptions::default(),
         false,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage line-3");
     let selection = HunkSelection {

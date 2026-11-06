@@ -9,11 +9,11 @@ use std::process::Command;
 use crate::bundle::{write_bundle, BundleSpec};
 use crate::config::environment::RepositoryOptions;
 use crate::objects::ObjectId;
-use crate::progress::NeverCancel;
 use crate::remote::fetch::NoProgress;
 use crate::repo::Repository;
 
 use super::{make_snapshot, materialize, target_ref, CheckoutInfo, CheckoutMarker, SnapshotRoot};
+use crate::progress::CancelToken;
 
 pub(crate) const ID: &str = "0123456789abcdef0123";
 
@@ -183,7 +183,7 @@ pub(crate) fn check_out(served: &mut Served, at: &Path) -> (PathBuf, Repository)
         &served.url(),
         "work",
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("materialize");
     git(&dest, &["config", "user.name", "T"]);

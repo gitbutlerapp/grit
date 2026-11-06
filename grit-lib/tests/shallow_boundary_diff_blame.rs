@@ -4,7 +4,7 @@ use grit_lib::blame::blame_file;
 use grit_lib::blame::BlameOptions;
 use grit_lib::diff::{commit_diff_files, DiffDetail, DiffMerges, DiffOptions};
 use grit_lib::error::Error;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -38,7 +38,7 @@ fn grit_shallow_clone(source_bare: &Path, dest: &Path, depth: u32) -> grit_lib::
             ..CloneOptions::new(source_bare.to_string_lossy(), dest.to_path_buf())
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("shallow clone")

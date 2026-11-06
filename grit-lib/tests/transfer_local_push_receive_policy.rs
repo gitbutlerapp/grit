@@ -65,7 +65,7 @@ fn push_local_honors_deny_non_fast_forwards() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
 
@@ -122,7 +122,7 @@ fn push_local_honors_deny_deletes() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
 
@@ -169,7 +169,7 @@ fn push_local_honors_deny_current_branch_on_non_bare() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
 
@@ -225,7 +225,7 @@ fn push_local_update_instead_deploys_worktree() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
 
@@ -280,7 +280,7 @@ fn push_local_update_instead_rejects_dirty_unstaged() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
 
@@ -333,7 +333,7 @@ fn push_local_update_instead_rejects_dirty_staged() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
 
@@ -382,7 +382,7 @@ fn push_local_update_instead_refuses_untracked_collision() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
 
@@ -433,7 +433,7 @@ fn push_local_update_instead_ignore_advances_ref_without_checkout() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
 

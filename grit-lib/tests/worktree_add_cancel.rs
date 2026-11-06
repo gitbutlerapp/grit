@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
-use grit_lib::progress::{CancelToken, NeverCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::{
@@ -31,7 +31,7 @@ fn init_wide_repo() -> (tempfile::TempDir, Repository) {
         &grit_test_support::commit_request("wide", IDENT),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     (tmp, repo)

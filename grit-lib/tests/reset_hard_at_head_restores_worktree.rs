@@ -72,7 +72,7 @@ fn hard_reset_at_head(repo: &Repository, head: grit_lib::objects::ObjectId) {
         repo,
         &reset_opts(head, ResetMode::Hard),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("hard reset at HEAD");
 }
@@ -243,7 +243,7 @@ fn reset_hard_preserves_nested_untracked_under_coalesced_deleted_directory() {
             "reset",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit hard reset");
     assert!(

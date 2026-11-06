@@ -11,7 +11,8 @@ use grit_lib::porcelain::replay_sequence::{
     continue_replay_sequence, start_replay_sequence, ReplayEmptyPolicy, ReplayOptions,
     ReplaySequenceRequest, SequenceOutcome,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -107,7 +108,7 @@ fn demo_conflict_sequence(root: &Path) -> Result<()> {
         },
     };
 
-    match start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel)? {
+    match start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never())? {
         SequenceOutcome::Conflicts {
             conflicts,
             current,
@@ -133,10 +134,15 @@ fn demo_conflict_sequence(root: &Path) -> Result<()> {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )?;
 
-    match continue_replay_sequence(&repo, &replay_identity(), &mut NullProgress, &NeverCancel)? {
+    match continue_replay_sequence(
+        &repo,
+        &replay_identity(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )? {
         SequenceOutcome::Completed {
             created, dropped, ..
         } => {
@@ -187,8 +193,12 @@ fn main() -> Result<()> {
             println!("unmerged index — resolve and stage before continue");
             return Ok(());
         }
-        match continue_replay_sequence(&repo, &replay_identity(), &mut NullProgress, &NeverCancel)?
-        {
+        match continue_replay_sequence(
+            &repo,
+            &replay_identity(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )? {
             SequenceOutcome::Completed { created, .. } => {
                 println!("continued; new commits={}", created.len());
             }

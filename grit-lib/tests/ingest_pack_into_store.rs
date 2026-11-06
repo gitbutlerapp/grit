@@ -27,7 +27,7 @@ use grit_lib::objects::unpack_objects::{
     ingest_pack_into, ingest_pack_into_with_progress, pack_is_thin, UnpackOptions,
 };
 use grit_lib::objects::{hash::hash_object, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
-use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
+use grit_lib::progress::{ProgressPhase, ProgressSink, Token};
 use grit_lib::refs::store::MemoryRefStore;
 use grit_lib::repo::{Repository, RepositoryBuilder};
 

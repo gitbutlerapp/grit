@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
@@ -115,7 +115,7 @@ fn fetch(repo: &Repository, remote: &str, opts: FetchOptions) {
     repo.remotes()
         .get(remote)
         .expect("remote")
-        .fetch(repo, opts, &mut NoProgress, &NeverCancel, None)
+        .fetch(repo, opts, &mut NoProgress, &CancelToken::never(), None)
         .expect("fetch");
 }
 
@@ -299,7 +299,7 @@ fn push_updates_tracking_refs_in_the_injected_store() {
             &[spec],
             PushOptions::default(),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("push");
@@ -429,7 +429,7 @@ fn files_backend_fetch_prune_and_push_round_trip_with_git() {
             &[spec],
             PushOptions::default(),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("push");

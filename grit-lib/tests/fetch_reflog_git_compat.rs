@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
@@ -104,7 +104,7 @@ fn grit_clone(tmp: &Path, remote_git: &Path, name: &str) -> PathBuf {
     clone_repo(
         CloneOptions::new(remote_git.to_string_lossy(), dest.clone()),
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("clone");

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use grit_lib::progress::{Cancel, NeverCancel};
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::serve::ReceiveHook;
 
 /// Hooks and cancellation for one upload-pack or receive-pack exchange.
@@ -11,7 +11,7 @@ pub struct ServeSession {
     /// In-process receive-pack checks alongside [`crate::PushGuard`].
     pub receive_hook: Option<Arc<dyn ReceiveHook + Send + Sync>>,
     /// When set, long-running serve work stops without moving refs on push.
-    pub cancel: Option<Arc<dyn Cancel + Send + Sync>>,
+    pub cancel: Option<Arc<grit_lib::progress::CancelToken>>,
 }
 
 impl ServeSession {
@@ -21,10 +21,11 @@ impl ServeSession {
         Self::default()
     }
 
-    pub(crate) fn cancel(&self) -> &dyn Cancel {
-        match self.cancel.as_deref() {
-            Some(c) => c as &dyn Cancel,
-            None => &NeverCancel as &dyn Cancel,
+    pub(crate) fn cancel(&self) -> &CancelToken {
+        if let Some(c) = self.cancel.as_deref() {
+            c
+        } else {
+            CancelToken::never_ref()
         }
     }
 }

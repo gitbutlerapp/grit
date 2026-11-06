@@ -28,7 +28,7 @@ fn multi_source_missing_later_source_rolls_back_earlier_forced_move() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
@@ -42,7 +42,7 @@ fn multi_source_missing_later_source_rolls_back_earlier_forced_move() {
             force: true,
             dry_run: false,
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("missing later source");
 

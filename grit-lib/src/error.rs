@@ -34,7 +34,7 @@ pub struct LockHeldError {
     pub holder: Option<crate::lockfile::LockHolder>,
 }
 
-/// Operation stopped because [`Cancel`](crate::progress::Cancel) fired before completion.
+/// Operation stopped because [`CancelToken`](crate::progress::CancelToken) fired before completion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cancelled;
 
@@ -1036,7 +1036,7 @@ pub enum ApplyError {
         path: String,
     },
 
-    /// The caller's [`crate::progress::Cancel`] or
+    /// The caller's [`crate::progress::CancelToken`] or
     /// Cancellation stopped the apply between files.
     #[error("operation cancelled")]
     Cancelled,

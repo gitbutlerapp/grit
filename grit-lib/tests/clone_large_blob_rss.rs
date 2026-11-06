@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 
@@ -88,7 +88,7 @@ fn local_clone_links_large_loose_blob_in_bounded_memory() {
     clone_repo(
         CloneOptions::new(tiny.to_string_lossy(), dir.path().join("warm-clone")),
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("warm clone");
@@ -98,7 +98,7 @@ fn local_clone_links_large_loose_blob_in_bounded_memory() {
     clone_repo(
         CloneOptions::new(source.to_string_lossy(), dest.clone()),
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("clone");

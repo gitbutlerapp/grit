@@ -130,7 +130,7 @@ fn rebase_feat_onto_main(root: &std::path::Path, repo: &Repository, feat_tip: Ob
             pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("start rebase");
     let RebaseOutcome::Done { .. } = outcome else {
@@ -180,7 +180,7 @@ fn reword_copies_note_to_rewritten_commit() {
         &plan,
         &apply_options(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply reword");
     let feat1_new = plan.replacement(feat1_old).expect("replacement");
@@ -213,7 +213,7 @@ fn squash_concatenates_notes_on_survivor() {
         &plan,
         &apply_options(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply squash");
     let survivor = plan.replacement(feat1_old).expect("survivor");
@@ -233,7 +233,7 @@ fn history_drop_leaves_note_on_dropped_commit() {
         &plan,
         &apply_options(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply drop");
     assert_eq!(
@@ -335,7 +335,7 @@ fn amend_copies_note_when_post_rewrite_runs() {
         &repo,
         &request,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("amend");
     assert!(outcome.hooks_run.contains(&HookName::PostRewrite));

@@ -37,7 +37,7 @@ use crate::path_icase::ScheduledDeletePathLookup;
 use crate::path_population::{validate_tree_walk_entry, validate_worktree_path};
 use crate::path_validate::ProtectOptions;
 use crate::progress::{
-    Cancel, CancelProgress, NeverCancel, NullProgress, ProgressPhase, ProgressSink, ProgressUnit,
+    CancelProgress, CancelToken, NullProgress, ProgressPhase, ProgressSink, ProgressUnit,
 };
 use crate::repo::Repository;
 use crate::sparse_checkout::SparseCheckout;
@@ -72,7 +72,7 @@ fn remove_checkout_files_parallel_cancellable(
     paths: &[String],
     options: ParallelOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     delete_rollback: SharedCheckoutDeleteRollback,
 ) -> Result<(HashSet<String>, Vec<PathBuf>)> {
     let mut parallel_deleted_paths = HashSet::new();
@@ -279,7 +279,7 @@ fn restore_checkout_rollback_chunk(
         }
     }
     let mut delayed = DelayedProcessCheckout::default();
-    let mut progress = CancelProgress::new(progress, &NeverCancel);
+    let mut progress = CancelProgress::new(progress, CancelToken::never_ref());
     let execute_result = execute_write_jobs_unrecorded(
         repo,
         rules,
@@ -294,7 +294,7 @@ fn restore_checkout_rollback_chunk(
         None,
         true,
         &mut progress,
-        &NeverCancel,
+        CancelToken::never_ref(),
     );
     match execute_result {
         Ok(outcomes) => {
@@ -489,7 +489,7 @@ fn remove_wholesale_dirs_parallel_cancellable(
     dirs: &[String],
     options: ParallelOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     journal: &mut CheckoutJournal,
 ) -> Result<Vec<(String, PathBuf)>> {
     let mut removed = Vec::new();
@@ -682,7 +682,7 @@ fn checkout_populated_tree(
     repo: &Repository,
     tree_oid: &ObjectId,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<CheckoutOutcome> {
     let work_tree = repo
         .work_tree()
@@ -719,7 +719,7 @@ fn checkout_populated_tree_journaled(
     repo: &Repository,
     tree_oid: &ObjectId,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     index_mut: &mut Index,
     lock: &mut IndexLock,
     journal: &mut CheckoutJournal,
@@ -831,7 +831,7 @@ pub(crate) fn checkout_between_trees_locked(
     index: Option<&mut Index>,
     index_write: CheckoutIndexWrite<'_>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     let changes = diff_trees(repo.odb(), Some(from), Some(to), "")?;
     let apply = CheckoutApplyOptions {
@@ -874,7 +874,13 @@ pub fn checkout_between_trees(
     from: Option<&ObjectId>,
     to: &ObjectId,
 ) -> Result<()> {
-    checkout_between_trees_with_progress(repo, from, to, &mut NullProgress, &NeverCancel)?;
+    checkout_between_trees_with_progress(
+        repo,
+        from,
+        to,
+        &mut NullProgress,
+        CancelToken::never_ref(),
+    )?;
     Ok(())
 }
 
@@ -898,7 +904,7 @@ pub fn checkout_between_trees_with_progress(
     from: Option<&ObjectId>,
     to: &ObjectId,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<CheckoutOutcome> {
     let Some(from) = from else {
         return checkout_populated_tree(repo, to, progress, cancel);
@@ -947,7 +953,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
     head_tree: &ObjectId,
     target_tree: &ObjectId,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     let work_tree = repo
         .work_tree()
@@ -974,7 +980,7 @@ fn checkout_hard_to_tree_journaled(
     head_tree: &ObjectId,
     target_tree: &ObjectId,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     lock: &mut IndexLock,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
@@ -1704,7 +1710,7 @@ fn hard_reset_apply_tree_diff_checkout(
     repo: &Repository,
     work_tree: &Path,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     index: &mut Index,
     changes: &[DiffEntry],
     precomputed_unrecorded: Option<Vec<String>>,
@@ -2476,7 +2482,7 @@ fn verify_hard_reset_candidates(
 /// Returns [`Error::LockHeld`] without touching the work tree or index when another process
 /// holds `index.lock`, and propagates object, checkout I/O and index write failures.
 pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
-    checkout_tree_changes_reporting(repo, changes, &mut NullProgress, &NeverCancel)
+    checkout_tree_changes_reporting(repo, changes, &mut NullProgress, CancelToken::never_ref())
 }
 
 /// Like [`checkout_tree_changes`], reporting [`ProgressPhase::CheckingOutFiles`] and stopping
@@ -2485,7 +2491,7 @@ pub(crate) fn checkout_tree_changes_reporting(
     repo: &Repository,
     changes: &[DiffEntry],
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     let mut lock = repo.lock_index()?;
     checkout_tree_changes_with_progress(
@@ -2566,7 +2572,7 @@ pub(crate) fn checkout_tree_changes_with_index_opts(
     changes: &[DiffEntry],
     index: &mut Index,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     apply: CheckoutApplyOptions,
     attribute_changes: Option<&[DiffEntry]>,
     index_write: CheckoutIndexWrite<'_>,
@@ -2592,7 +2598,7 @@ pub(crate) fn checkout_tree_changes_with_index_deferred(
     changes: &[DiffEntry],
     index: &mut Index,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     apply: CheckoutApplyOptions,
     attribute_changes: Option<&[DiffEntry]>,
     lock: &IndexLock,
@@ -2768,7 +2774,7 @@ fn checkout_coalesced_subtree_changes(
     work_tree: &Path,
     changes: &[DiffEntry],
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     index_mut: &mut Index,
     apply: CheckoutApplyOptions,
     index_write: CheckoutIndexWrite<'_>,
@@ -3313,7 +3319,7 @@ fn remove_wholesale_directories_cancellable(
     wholesale_index_prefixes: &BTreeSet<String>,
     config: &std::sync::Arc<ConfigSet>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     journal: &mut CheckoutJournal,
 ) -> Result<BTreeSet<String>> {
     if wholesale_index_prefixes.is_empty() {
@@ -3746,7 +3752,7 @@ fn execute_checkout_write_changes_chunk(
     delayed: &mut DelayedProcessCheckout,
     skip_parallel_write_ramp: bool,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     journal: &mut CheckoutJournal,
 ) -> Result<(Vec<DelayedCheckoutTarget>, Vec<IndexEntry>)> {
     if changes.is_empty() {
@@ -3827,7 +3833,7 @@ fn checkout_bulk_added_tree_changes(
     precompose: bool,
     ignorecase: bool,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     index_write: CheckoutIndexWrite<'_>,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
@@ -3915,7 +3921,7 @@ fn checkout_bulk_mod_delete_tree_changes(
     precompose: bool,
     ignorecase: bool,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     index_write: CheckoutIndexWrite<'_>,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
@@ -4091,7 +4097,7 @@ fn checkout_bulk_deleted_tree_changes(
     wholesale_dirs_removed: &BTreeSet<String>,
     deleted_abs_paths: &mut Vec<PathBuf>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     apply: &CheckoutApplyOptions,
     index_write: CheckoutIndexWrite<'_>,
     journal: &mut CheckoutJournal,
@@ -4240,7 +4246,7 @@ fn checkout_tree_changes_with_progress(
     repo: &Repository,
     changes: &[DiffEntry],
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     reuse_index: Option<&mut Index>,
     apply: CheckoutApplyOptions,
     attribute_changes: Option<&[DiffEntry]>,
@@ -4277,7 +4283,7 @@ fn apply_tree_changes_in_chunks(
     repo: &Repository,
     changes: &[DiffEntry],
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     index_mut: &mut Index,
     mut apply: CheckoutApplyOptions,
     attribute_changes: Option<&[DiffEntry]>,
@@ -4424,7 +4430,7 @@ fn apply_tree_changes(
     repo: &Repository,
     changes: &[DiffEntry],
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     index_mut: &mut Index,
     apply: CheckoutApplyOptions,
     attribute_changes: Option<&[DiffEntry]>,
@@ -6613,8 +6619,14 @@ mod tests {
         repo.write_index(&mut index).expect("empty index");
 
         let mut rec = CheckoutProgressRecorder::default();
-        checkout_between_trees_with_progress(&repo, None, &tree, &mut rec, &NeverCancel)
-            .expect("checkout");
+        checkout_between_trees_with_progress(
+            &repo,
+            None,
+            &tree,
+            &mut rec,
+            CancelToken::never_ref(),
+        )
+        .expect("checkout");
 
         let index = repo.load_index().expect("index after");
         assert_eq!(
@@ -6653,8 +6665,14 @@ mod tests {
         let changes = diff_trees(repo.odb(), Some(&head), Some(&to_tree), "").expect("diff");
 
         let mut rec = CheckoutProgressRecorder::default();
-        checkout_between_trees_with_progress(&repo, Some(&head), &to_tree, &mut rec, &NeverCancel)
-            .expect("checkout");
+        checkout_between_trees_with_progress(
+            &repo,
+            Some(&head),
+            &to_tree,
+            &mut rec,
+            CancelToken::never_ref(),
+        )
+        .expect("checkout");
 
         assert_eq!(rec.started.len(), 1);
         assert_eq!(rec.started[0].0, ProgressPhase::CheckingOutFiles);
@@ -6829,7 +6847,7 @@ mod tests {
             &changes,
             &mut index,
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
             CheckoutApplyOptions {
                 parallel_prepare_blobs: true,
                 checkout_parallel_threshold: Some(0),
@@ -6912,7 +6930,7 @@ mod tests {
             &changes,
             &mut index,
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
             CheckoutApplyOptions {
                 parallel_prepare_blobs: true,
                 checkout_parallel_threshold: Some(0),

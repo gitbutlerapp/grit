@@ -164,7 +164,7 @@ fn restore_ours_matches_git_checkout_ours_bytes() {
         &repo,
         &conflict_opts(Some(ConflictSide::Ours), None),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore ours");
     assert_eq!(worktree_bytes(&dir), want);
@@ -183,7 +183,7 @@ fn restore_theirs_matches_git() {
         &repo,
         &conflict_opts(Some(ConflictSide::Theirs), None),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore theirs");
     assert_eq!(worktree_bytes(&dir), want);
@@ -198,7 +198,7 @@ fn restore_ours_leaves_index_unmerged() {
         &repo,
         &conflict_opts(Some(ConflictSide::Ours), None),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore");
     assert_eq!(ls_files_unmerged(&dir), before);
@@ -217,7 +217,7 @@ fn restore_merge_add_add_byte_equal_git() {
         &repo,
         &conflict_opts_path("f.txt", None, Some(ConflictStyle::Merge)),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore merge add/add");
     assert_eq!(worktree_bytes(&dir), want);
@@ -236,7 +236,7 @@ fn restore_merge_binary_byte_equal_git() {
         &repo,
         &conflict_opts_path("f.bin", None, Some(ConflictStyle::Merge)),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore merge binary");
     assert_eq!(worktree_bytes_path(&dir, "f.bin"), want);
@@ -255,7 +255,7 @@ fn restore_merge_recreates_markers_byte_equal_git_checkout_m() {
         &repo,
         &conflict_opts(None, Some(ConflictStyle::Merge)),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore merge");
     assert_eq!(worktree_bytes(&dir), want);
@@ -274,7 +274,7 @@ fn restore_conflict_diff3_byte_equal_git() {
         &repo,
         &conflict_opts(None, Some(ConflictStyle::Diff3)),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore diff3");
     assert_eq!(worktree_bytes(&dir), want);
@@ -293,7 +293,7 @@ fn restore_ours_missing_stage_errors() {
         &repo,
         &conflict_opts(Some(ConflictSide::Ours), None),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(
@@ -318,7 +318,7 @@ fn restore_ours_with_staged_rejected() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(
@@ -344,7 +344,7 @@ fn restore_merge_uses_resolve_undo() {
         &repo,
         &conflict_opts(None, Some(ConflictStyle::Merge)),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore merge after resolve");
     assert_eq!(worktree_bytes(&dir), want);
@@ -382,7 +382,7 @@ fn restore_unmerged_path_from_index_refused_like_git() {
         &repo,
         &plain_restore_opts("f.txt"),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -416,7 +416,7 @@ fn restore_dot_with_unmerged_path_restores_nothing_like_git() {
         &repo,
         &plain_restore_opts("."),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -445,7 +445,7 @@ fn restore_excluding_unmerged_path_still_restores_others() {
         &repo,
         &opts,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore other paths");
     assert_eq!(worktree_bytes_path(&dir, "other.txt"), b"other\n");
@@ -469,7 +469,7 @@ fn restore_staged_unmerged_path_is_refused() {
         &repo,
         &staged_opts,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -507,7 +507,7 @@ fn restore_staged_and_worktree_on_unmerged_path_matches_git() {
         &repo,
         &both_opts,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore --staged --worktree");
     assert_eq!(
@@ -532,7 +532,7 @@ fn restore_unmerged_path_from_tree_source_is_allowed() {
         &repo,
         &opts,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore from tree");
     assert_eq!(worktree_bytes(&dir), b"line1\nmaster\nline3\n");

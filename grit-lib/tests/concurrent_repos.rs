@@ -24,7 +24,6 @@ use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
 use grit_lib::repo::{InitOptions, Repository};
@@ -195,14 +194,14 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         stage(
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("stage");
         let ident = format!("{} <{}@example.com> 1 +0000", fx.author, fx.author);
@@ -219,7 +218,7 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
                 req
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
     }
@@ -409,14 +408,14 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         stage(
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("stage");
         let ident = Signature::new(name, email, repo.identity_now()).expect("signature");
@@ -433,7 +432,7 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
                 req
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("seed commit");
         RepoFixture {

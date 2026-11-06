@@ -242,7 +242,7 @@ fn grit_empty_commit_with_message(worktree: &Path, message: &str) -> ObjectId {
         &repo,
         &grit_test_support::empty_commit_request(message, &ident),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit empty commit");
     outcome.oid

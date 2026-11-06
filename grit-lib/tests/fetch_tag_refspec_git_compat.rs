@@ -196,7 +196,7 @@ fn ssh_fetch(
         conn.as_mut(),
         &mut opts,
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("ssh fetch")
 }

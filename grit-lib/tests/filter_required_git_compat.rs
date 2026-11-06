@@ -11,7 +11,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, FilterError, FilterPhase};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::crlf::{
     convert_to_git_with_opts, convert_to_worktree_with_runner, ConversionConfig, ConvertToGitOpts,
@@ -174,7 +174,7 @@ fn failing_required_clean_filter_fails_stage_and_leaves_index_alone() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect_err("stage must fail when a required clean filter fails");
     assert!(
@@ -209,7 +209,7 @@ fn working_filter_round_trips_with_git_and_status_is_clean() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     assert_eq!(git(root, &["cat-file", "-p", ":y.up"]), "DEF\n");
@@ -229,7 +229,7 @@ fn working_filter_round_trips_with_git_and_status_is_clean() {
         &repo,
         &StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(

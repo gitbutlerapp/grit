@@ -7,7 +7,8 @@ use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 use std::collections::{HashMap, HashSet};
@@ -32,7 +33,7 @@ fn bare_repo_common_failures_use_requires_work_tree() {
             &bare,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .map(|_| ()),
     );
@@ -56,7 +57,8 @@ fn repo_with_one_commit() -> (tempfile::TempDir, Repository, ObjectId) {
     std::fs::write(base.path().join("w/a"), "x\n").expect("write");
     stage_worktree_changes(&repo, &[]).expect("stage");
     let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
-    let outcome = create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+    let outcome =
+        create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
     (base, repo, outcome.oid)
 }
 
@@ -113,7 +115,7 @@ fn deep_parent_navigation_is_revision_out_of_range() {
     std::fs::write(base.path().join("w/a"), "x\n").expect("write");
     stage_worktree_changes(&repo, &[]).expect("stage");
     let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
-    create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+    create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
 
     let err = repo.rev_walk().resolve("main~99").unwrap_err();
     assert!(
@@ -136,10 +138,10 @@ fn empty_commit_message_is_typed() {
     std::fs::write(base.path().join("w/a"), "x\n").expect("write");
     stage_worktree_changes(&repo, &[]).expect("stage");
     let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
-    create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+    create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
 
     let mut empty = CommitRequest::new("");
     empty.allow_empty = true;
-    let err = create_commit(&repo, &empty, &mut NullProgress, &NeverCancel).unwrap_err();
+    let err = create_commit(&repo, &empty, &mut NullProgress, &CancelToken::never()).unwrap_err();
     assert!(matches!(err, Error::EmptyCommitMessage), "got {err:?}");
 }

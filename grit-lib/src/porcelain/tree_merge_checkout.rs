@@ -22,7 +22,7 @@ use crate::porcelain::worktree_guard::{
     collect_untracked_for_tree_changes, ensure_no_untracked_overwrite, load_worktree_snapshot,
     WorktreeSnapshot,
 };
-use crate::progress::{poll_cancel, Cancel, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
 
@@ -68,7 +68,7 @@ pub(crate) fn apply_clean_tree_merge_to_worktree(
     from_tree: &ObjectId,
     merged: &TreeMergeOutput,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     let mut snapshot = load_worktree_snapshot(repo)?;
     apply_clean_tree_merge_to_worktree_with_snapshot(
@@ -88,7 +88,7 @@ pub(crate) fn apply_clean_tree_merge_to_worktree_with_snapshot(
     merged: &TreeMergeOutput,
     snapshot: &mut WorktreeSnapshot,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let tree_changes =
@@ -171,7 +171,7 @@ pub(crate) fn apply_conflict_tree_merge_to_worktree(
     materialized: &ObjectId,
     conflict_paths: &BTreeSet<Vec<u8>>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let prepared =

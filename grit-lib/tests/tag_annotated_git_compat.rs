@@ -7,7 +7,7 @@ use grit_lib::objects::{parse_tag, ObjectKind};
 use grit_lib::porcelain::tag::{
     create_tag, list_tags_with_detail, tag_ref_metadata, CreateTagRequest, TagDetail, TagKind,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::RefQuery;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -104,7 +104,13 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
     let host_repo =
         Repository::discover(Some(host.as_path()), &RepositoryOptions::empty()).expect("discover");
     let fsck_opts = FsckOptions::full_repository(false).with_check_dangling(false);
-    let report = fsck(&host_repo, &fsck_opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
+    let report = fsck(
+        &host_repo,
+        &fsck_opts,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("grit fsck");
     let config = host_repo.config().expect("config");
     assert!(
         report.ok(&config, &fsck_opts),
@@ -127,14 +133,19 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
     clone_repo(
         CloneOptions::new(format!("file://{}", host.display()), clone_dest.clone()),
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("grit clone");
     let cloned = Repository::discover(Some(clone_dest.as_path()), &RepositoryOptions::empty())
         .expect("discover clone");
-    let clone_report =
-        fsck(&cloned, &fsck_opts, &mut NullProgress, &NeverCancel).expect("grit fsck clone");
+    let clone_report = fsck(
+        &cloned,
+        &fsck_opts,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("grit fsck clone");
     let clone_config = cloned.config().expect("config");
     assert!(
         clone_report.ok(&clone_config, &fsck_opts),

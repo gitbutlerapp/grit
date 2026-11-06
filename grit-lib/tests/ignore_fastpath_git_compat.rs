@@ -10,7 +10,6 @@ use grit_lib::index::Index;
 use grit_lib::porcelain::status::{
     collect_untracked_and_ignored, status, IgnoredMode, StatusOptions,
 };
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::unique_tmp;
@@ -54,7 +53,7 @@ fn backslash_escaped_literal_matches_git_check_ignore_and_status() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(

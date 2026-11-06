@@ -9,6 +9,7 @@ use crate::pathspec::{
     has_glob_chars, pathspec_has_attr_magic, pathspec_is_exclude, sorted_paths_match_pathspec,
     PathspecListMatcher, PathspecMatchContext, PathspecMatcher,
 };
+use crate::progress::CancelToken;
 use crate::repo::Repository;
 use crate::state::resolve_head_for_repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
@@ -435,7 +436,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_owned();
@@ -448,7 +449,7 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("commit");
         repo

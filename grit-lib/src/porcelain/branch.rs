@@ -916,9 +916,14 @@ mod tests {
         req.author = Some(sig.clone());
         req.committer = Some(sig);
         req.allow_empty = true;
-        create_commit(repo, &req, &mut NullProgress, &crate::progress::NeverCancel)
-            .expect("commit")
-            .oid
+        create_commit(
+            repo,
+            &req,
+            &mut NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("commit")
+        .oid
     }
 
     fn branch_exists(repo: &Repository, name: &str) -> bool {

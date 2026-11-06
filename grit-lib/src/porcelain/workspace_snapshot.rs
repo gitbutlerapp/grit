@@ -16,7 +16,7 @@ use crate::objects::ObjectId;
 use crate::path_validate::ProtectOptions;
 use crate::porcelain::checkout::checkout_between_trees_with_progress;
 use crate::porcelain::stash::{collect_untracked_paths, flatten_tree_full};
-use crate::progress::{Cancel, ProgressSink};
+use crate::progress::{CancelToken, ProgressSink};
 use crate::refs::prepare_with_lock_wait;
 use crate::refs::store::{Expected, RawRef, RefName, RefTransaction, RefUpdate, RefUpdateFlags};
 use crate::repo::Repository;
@@ -210,7 +210,7 @@ pub fn restore_workspace_snapshot(
     snapshot: &WorkspaceSnapshot,
     options: &WorkspaceRestoreOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     let pre_restore_index = repo.load_index()?;
     let disk_tree = build_pre_restore_disk_tree(repo, &pre_restore_index, &snapshot.worktree_tree)?;
@@ -504,7 +504,7 @@ fn restore_worktree_tree(
     disk_tree: &ObjectId,
     snapshot: &WorkspaceSnapshot,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     checkout_between_trees_with_progress(
         repo,
@@ -590,7 +590,7 @@ mod tests {
     use super::*;
     use crate::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
     use crate::porcelain::switch::{resolve_switch_target, switch_repository, SwitchOptions};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::NullProgress;
     use grit_test_support::{git, git_cmd};
 
     fn setup_merge_conflict() -> (tempfile::TempDir, Repository) {
@@ -629,7 +629,7 @@ mod tests {
             side_oid,
             "side",
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -652,7 +652,7 @@ mod tests {
             &snap,
             &WorkspaceRestoreOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -679,7 +679,7 @@ mod tests {
             ObjectId::from_hex(&side).unwrap(),
             "side",
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let before = fs::read_to_string(root.join("a.txt")).unwrap();
@@ -726,7 +726,7 @@ mod tests {
                 hooks: Default::default(),
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(root.join("d").is_dir());
@@ -737,7 +737,7 @@ mod tests {
             &snap,
             &WorkspaceRestoreOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -779,7 +779,7 @@ mod tests {
             &snap,
             &WorkspaceRestoreOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -820,7 +820,7 @@ mod tests {
             &snap,
             &WorkspaceRestoreOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -859,7 +859,7 @@ mod tests {
             &snap,
             &WorkspaceRestoreOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(crate::state::detect_in_progress(repo.git_dir()).is_empty());
@@ -878,7 +878,7 @@ mod tests {
             ObjectId::from_hex(&side).unwrap(),
             "side",
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         capture_workspace_snapshot(
@@ -926,7 +926,7 @@ mod tests {
             &snap,
             &WorkspaceRestoreOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert_eq!(
@@ -992,7 +992,7 @@ mod tests {
             &snap,
             &WorkspaceRestoreOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 

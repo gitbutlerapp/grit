@@ -8,9 +8,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
-use grit_lib::progress::{
-    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
-};
+use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::repo::Repository;
 
 fn have_python3() -> bool {

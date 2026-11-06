@@ -42,7 +42,6 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::progress::NeverCancel;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
 use grit_lib::remote::push::{push_http, push_remote};
@@ -376,7 +375,7 @@ fn sha256_fetch_over_git_daemon_v2() {
         &mut *conn,
         &mut opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("sha256 v2 fetch_remote over git daemon");
 
@@ -673,7 +672,7 @@ fn sha256_push_over_git_daemon() {
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("sha256 push_remote over git daemon");
     drop(conn);
@@ -749,7 +748,7 @@ fn sha256_push_over_git_daemon() {
         &[nonff],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-ff push_remote completes");
     drop(conn2);
@@ -784,7 +783,7 @@ fn sha256_push_over_git_daemon() {
         &[forced],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push_remote completes");
     drop(conn3);
@@ -909,7 +908,7 @@ fn sha256_push_over_smart_http() {
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("sha256 push_http over grit-http-server");
 
@@ -976,7 +975,7 @@ fn sha256_push_over_smart_http() {
         &[spec_feature],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("sha256 push_http feature over grit-http-server");
     assert_eq!(

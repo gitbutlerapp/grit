@@ -392,7 +392,7 @@ fn list_and_delete_on_reftable_backend() {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()
     .oid;

@@ -71,7 +71,7 @@ fn merge_fast_forward_preserves_dirty_unrelated_path() {
         side_oid,
         "side",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(
@@ -124,7 +124,7 @@ fn merge_refuses_dirty_overlapping_path() {
         side_oid,
         "side",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("merge must refuse overlapping dirty path");
     match err {
@@ -185,7 +185,7 @@ fn merge_refuses_dirty_overlapping_paths_sorted() {
         side_oid,
         "side",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("merge must refuse overlapping dirty paths");
     match err {
@@ -236,7 +236,7 @@ fn merge_fast_forward_allows_worktree_deleted_unrelated_tracked_file() {
         side_oid,
         "side",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(

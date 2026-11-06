@@ -100,7 +100,7 @@ fn stash_push_paths_saves_only_matching_and_keeps_others() {
         .push(
             &stash_opts(false, vec!["a.txt".into()]),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("some");
@@ -130,7 +130,7 @@ fn stash_push_paths_with_untracked() {
         .push(
             &stash_opts(true, vec!["u.txt".into()]),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("some");
@@ -158,7 +158,7 @@ fn stash_push_paths_newly_staged_file_removed_from_index_and_worktree() {
         .push(
             &stash_opts(false, vec!["added".into()]),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("some");
@@ -189,7 +189,7 @@ fn stash_push_untracked_pathspec_no_match_is_typed_error() {
         .push(
             &stash_opts(true, vec!["missing".into()]),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("no match with -u");
     assert!(matches!(err, Error::PathspecNoMatch { .. }));
@@ -209,7 +209,7 @@ fn stash_push_paths_no_match_is_typed_error() {
         .push(
             &stash_opts(false, vec!["missing.txt".into()]),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("no match");
     assert!(matches!(err, Error::PathspecNoMatch { .. }));
@@ -225,7 +225,7 @@ fn grit_path_stash_matches_git_path_stash() {
         .push(
             &stash_opts(false, vec!["a.txt".into()]),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("grit push")
         .expect("oid");
@@ -288,7 +288,7 @@ fn stash_apply_index_restores_staged_state() {
         .push(
             &stash_opts(false, Vec::new()),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("some");
@@ -316,7 +316,7 @@ fn stash_apply_index_restores_staged_state() {
                 ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("apply");
     git_cmd(git_dir.path(), &["stash", "apply", "--index", "stash@{0}"]);
@@ -359,7 +359,7 @@ fn stash_pop_index_conflict_keeps_entry() {
                 ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("index conflict");
     assert!(
@@ -393,7 +393,7 @@ fn git_stash_apply_index_on_grit_stash() {
         .push(
             &stash_opts(false, Vec::new()),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("some");
@@ -441,7 +441,7 @@ fn grit_apply_index_on_git_stash() {
                 ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("apply");
     git_cmd(git_dir.path(), &["stash", "apply", "--index", "stash@{0}"]);
@@ -469,7 +469,7 @@ fn stash_push_attr_pathspec_stashes_only_matching_paths() {
         .push(
             &stash_opts(false, vec![":(attr:vendored)src".into()]),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("stash push attr");
 

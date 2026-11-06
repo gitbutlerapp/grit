@@ -27,7 +27,7 @@ use crate::patch_ids::{compute_patch_id, PatchIdMode};
 use crate::porcelain::checkout_reflog::checkout_reflog_identity;
 use crate::porcelain::pull::{pull, FetchedUpstream, PullMode, PullOptions, PullResult};
 use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use crate::progress::NeverCancel;
+use crate::progress::CancelToken;
 use crate::remote::transfer::FetchOptions;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
@@ -290,7 +290,7 @@ pub fn refresh_branch(
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )?;
         switched = true;
     }
@@ -310,7 +310,7 @@ pub fn refresh_branch(
         },
         ..Default::default()
     };
-    let pulled = pull(repo, &options, &mut NoProgress, &NeverCancel, None);
+    let pulled = pull(repo, &options, &mut NoProgress, &CancelToken::never(), None);
     // A rebase that failed or refused changed nothing, so HEAD goes back
     // where it was, as if the branch had never been switched to.
     let nothing_done = match &pulled {
@@ -385,7 +385,7 @@ fn switch_back(repo: &Repository, head: &HeadState) -> bool {
         repo,
         &options,
         &mut crate::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .is_ok()
 }
@@ -503,7 +503,7 @@ mod tests {
             &info,
             FetchOptions::default(),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("fetch");
@@ -627,7 +627,7 @@ mod tests {
             &newer,
             &options,
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("refresh");

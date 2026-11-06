@@ -4,13 +4,14 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, DEFAULT_ORPHAN_LIMIT};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::resolve_head_for_repository;
 use grit_test_support::git;
 
 use crate::support::{git_ls_files_verbose_map, git_status_porcelain_v2_lines};
+use grit_lib::progress::CancelToken;
 
 fn init_repo() -> (tempfile::TempDir, Repository) {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -101,7 +102,7 @@ fn restore_dot_leaves_skip_worktree_file_and_flag() {
         &repo,
         &restore_opts(&["."]),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("restore");
     assert_config_local_skip_worktree(root);
@@ -116,7 +117,7 @@ fn stash_push_pop_leaves_skip_worktree_untouched() {
     let (dir, repo, _head) = seed_skip_worktree_repo();
     let root = dir.path();
     repo.stash()
-        .push(&stash_push_opts(), &mut NullProgress, &NeverCancel)
+        .push(&stash_push_opts(), &mut NullProgress, &CancelToken::never())
         .expect("stash push")
         .expect("had stash");
     assert_eq!(
@@ -129,7 +130,7 @@ fn stash_push_pop_leaves_skip_worktree_untouched() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("stash pop");
     assert_config_local_skip_worktree(root);
@@ -147,7 +148,7 @@ fn reset_mixed_and_hard_same_tree_keep_skip_worktree() {
         &repo,
         &reset_opts(head, ResetMode::Mixed),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("mixed reset");
     assert_config_local_skip_worktree(root);
@@ -155,7 +156,7 @@ fn reset_mixed_and_hard_same_tree_keep_skip_worktree() {
         &repo,
         &reset_opts(head, ResetMode::Hard),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("hard reset at head");
     assert_config_local_skip_worktree(root);
@@ -177,7 +178,7 @@ fn reset_hard_parent_same_blob_keeps_skip_worktree_edit() {
         &repo,
         &reset_opts(parent, ResetMode::Hard),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("hard reset parent");
     assert_config_local_skip_worktree(root);
@@ -204,7 +205,7 @@ fn reset_mixed_cross_blob_keeps_skip_worktree_flag() {
         &repo,
         &reset_opts(head, ResetMode::Mixed),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("mixed reset to init");
     assert_config_local_skip_worktree(root);
@@ -244,7 +245,7 @@ fn reset_hard_cross_blob_clean_worktree_keeps_skip_worktree() {
         &repo,
         &reset_opts(head, ResetMode::Hard),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("hard reset to init");
     assert_config_local_skip_worktree(root);
@@ -267,7 +268,7 @@ fn reset_hard_aborts_when_skip_worktree_path_removed_in_target() {
         &repo,
         &reset_opts(head, ResetMode::Hard),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -303,7 +304,7 @@ fn reset_hard_aborts_when_skip_worktree_blob_changes_and_worktree_dirty() {
         &repo,
         &reset_opts(head, ResetMode::Hard),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(

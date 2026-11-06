@@ -25,6 +25,7 @@ use crate::error::{Error, Result};
 use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
+use crate::progress::CancelToken;
 use crate::resumable::{resolve_url, ResumableError, TusUpload};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};
 
@@ -271,7 +272,7 @@ pub(crate) fn push(
         &mut body,
         sent_refs,
         sideband,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )?;
     session.remove();
     Ok(raw)

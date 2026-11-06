@@ -9,7 +9,6 @@ use std::fs;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -154,7 +153,7 @@ fn absorb_leaves_ambiguous_hunk_staged() {
         &grit,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert_eq!(st.staged.len(), 1);

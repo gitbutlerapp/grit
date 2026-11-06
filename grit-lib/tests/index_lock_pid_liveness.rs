@@ -196,7 +196,7 @@ fn stage_with_held_index_lock_returns_lock_held_and_git_sees_no_change() {
             &repo,
             &options,
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("index.lock is held");
         let (path, holder) = expect_lock_held(err);
@@ -227,7 +227,7 @@ fn stage_with_held_index_lock_returns_lock_held_and_git_sees_no_change() {
             &repo,
             &options,
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("retry after lock release");
         assert_eq!(git(wt, &["show", ":n"]), "n\n");

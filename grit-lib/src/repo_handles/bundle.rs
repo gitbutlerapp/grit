@@ -9,7 +9,7 @@ use crate::bundle::{
 };
 use crate::list_limit::Limited;
 use crate::objects::ObjectId;
-use crate::progress::{NullProgress, ProgressSink};
+use crate::progress::{CancelToken, NullProgress, ProgressSink};
 use crate::repo::Repository;
 
 /// One ref tip from a bundle header (`git bundle list-heads`).
@@ -104,7 +104,12 @@ impl<'repo> RepositoryBundles<'repo> {
     /// # }
     /// ```
     pub fn create(&self, spec: &BundleSpec, path: &Path) -> std::result::Result<(), BundleError> {
-        self.create_with_progress(spec, path, &mut NullProgress, &crate::progress::NeverCancel)?;
+        self.create_with_progress(
+            spec,
+            path,
+            &mut NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
         Ok(())
     }
 
@@ -120,7 +125,7 @@ impl<'repo> RepositoryBundles<'repo> {
         spec: &BundleSpec,
         path: &Path,
         progress: &mut dyn ProgressSink,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
     ) -> std::result::Result<usize, BundleError> {
         crate::bundle_remote::write_bundle_spec_to_path_with_cancel(
             self.repo, spec, path, progress, cancel,
@@ -137,7 +142,7 @@ impl<'repo> RepositoryBundles<'repo> {
         options: &BundleCreateOptions,
         path: &Path,
         progress: &mut dyn ProgressSink,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
     ) -> std::result::Result<usize, BundleError> {
         let spec = crate::bundle_remote::resolve_bundle_spec(self.repo, options)
             .map_err(lib_error_to_bundle_error)?;
@@ -198,7 +203,7 @@ impl<'repo> RepositoryBundles<'repo> {
         Bundle::open(path)?.unbundle_with_progress(
             self.repo,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
     }
 
@@ -207,7 +212,7 @@ impl<'repo> RepositoryBundles<'repo> {
         &self,
         path: &Path,
         progress: &mut dyn ProgressSink,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
     ) -> std::result::Result<UnbundleOutcome, BundleError> {
         Bundle::open(path)?.unbundle_with_progress(self.repo, progress, cancel)
     }

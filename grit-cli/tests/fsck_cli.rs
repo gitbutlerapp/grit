@@ -9,6 +9,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::stage_for_commit;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{git_hash_object_literally, CliFixture, HashAlgo};
@@ -273,5 +274,10 @@ fn one_commit_with_staged_blob(fixture: &CliFixture) {
     let repo = Repository::discover(Some(fixture.path()), &RepositoryOptions::default())
         .expect("discover");
     fs::write(repo.work_tree().expect("wt").join("missing.txt"), b"x").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &grit_lib::progress::NeverCancel).expect("stage");
+    stage_for_commit(
+        &repo,
+        &mut NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )
+    .expect("stage");
 }

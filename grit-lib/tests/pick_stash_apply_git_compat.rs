@@ -206,7 +206,7 @@ fn grit_stash_apply_at_3k_matches_git_without_index() {
             &stash_oid,
             &Default::default(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("stash apply");
 

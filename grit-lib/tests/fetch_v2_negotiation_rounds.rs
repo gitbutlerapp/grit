@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
@@ -194,7 +194,7 @@ fn fetch_main(git_dir: &Path, srv: &Server) -> Result<(), grit_lib::error::Error
         &mut *conn,
         &mut opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )?;
     Ok(())
 }

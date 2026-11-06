@@ -21,7 +21,7 @@ pub(crate) use trace_span;
 mod tests {
     use crate::environment::RepositoryOptions;
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use crate::repo::{InitOptions, Repository};
     use crate::rev_list::RevListOptions;
     use std::sync::{Arc, Mutex};
@@ -72,7 +72,7 @@ mod tests {
                 &repo,
                 &req,
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .unwrap();
 
@@ -82,7 +82,7 @@ mod tests {
                 &opened,
                 &StatusOptions::default(),
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .unwrap();
             let _ = opened

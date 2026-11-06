@@ -7,7 +7,7 @@
 //!
 //! Single-commit callers should keep using [`crate::porcelain::replay::replay_commit`].
 
-use crate::progress::{Cancel, ProgressSink};
+use crate::progress::{CancelToken, ProgressSink};
 use std::fs;
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -281,7 +281,7 @@ pub fn start_replay_sequence(
     repo: &Repository,
     req: &ReplaySequenceRequest,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<SequenceOutcome> {
     if replay_in_progress(repo.git_dir())? {
         return Err(Error::Message(
@@ -340,7 +340,7 @@ pub fn continue_replay_sequence(
     repo: &Repository,
     identity: &crate::ident::Signature,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<SequenceOutcome> {
     identity.validate().map_err(Error::InvalidSignature)?;
     let committer = identity.header_line();
@@ -535,7 +535,7 @@ pub fn skip_replay_step(
     repo: &Repository,
     identity: &crate::ident::Signature,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<SequenceOutcome> {
     identity.validate().map_err(Error::InvalidSignature)?;
     let committer = identity.header_line();
@@ -804,7 +804,7 @@ fn run_sequence(
     created_records: &mut Vec<ReplayCreated>,
     initial_worktree: Option<WorktreeSnapshot>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<SequenceOutcome> {
     let mut head = head_oid;
     let _ = abort_safety;
@@ -1181,7 +1181,7 @@ fn apply_one_step(
     replay_session: &mut ReplayMergeSession,
     worktree_snapshot: &mut Option<WorktreeSnapshot>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<StepResult> {
     let source_oid = entry.oid;
     if direction == ReplayDirection::Pick && source_oid == *head {
@@ -1342,7 +1342,7 @@ fn apply_clean_merge_worktree(
     merged: &crate::merge_trees::TreeMergeOutput,
     worktree_snapshot: &mut Option<WorktreeSnapshot>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     if worktree_snapshot.is_none() {
         *worktree_snapshot = Some(load_worktree_snapshot(repo)?);
@@ -2034,7 +2034,7 @@ fn reset_index_worktree_to_head(repo: &Repository, head_oid: &ObjectId) -> Resul
         &head_tree,
         &head_tree,
         &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )?;
     Ok(())
 }
@@ -2052,7 +2052,7 @@ fn hard_reset_replay_tip(
         repo,
         &ResetOptions::new(target, ResetMode::Hard, identity, "abort replay"),
         &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )?;
     Ok(())
 }

@@ -16,7 +16,7 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::verify_pack_and_collect;
 use grit_lib::objects::unpack_objects::{unpack_objects, UnpackOptions};
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{
     git_fsck, HashAlgo as FixtureAlgo, ObjectKind as PackKind, PackBuilder, RepoFixture,
@@ -168,7 +168,7 @@ fn fsck_accepts_git_written_shattered_prefix_blob() {
         &repo,
         &FsckOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("fsck");
     assert_no_collision_finding(&report, &oid);

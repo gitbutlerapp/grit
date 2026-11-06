@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use grit_lib::porcelain::commit::create_commit;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::test_support::status::set_before_opportunistic_index_write_hook;
 
 use crate::support::{assert_git_fsck_strict, git, open_grit_repo};
+use grit_lib::progress::CancelToken;
 
 fn git_diff_cached_names(repo_root: &Path) -> String {
     let root = repo_root.to_str().expect("utf-8 path");
@@ -42,7 +43,8 @@ fn status_skips_stale_opportunistic_write_after_concurrent_commit() {
     let hook = Arc::new(move || {
         let repo = open_grit_repo(&hook_dir);
         let req = grit_test_support::commit_request("race", "A <a@b.c> 1 +0000");
-        create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit in hook");
+        create_commit(&repo, &req, &mut NullProgress, &CancelToken::never())
+            .expect("commit in hook");
     });
     set_before_opportunistic_index_write_hook(Some(hook));
 
@@ -50,7 +52,7 @@ fn status_skips_stale_opportunistic_write_after_concurrent_commit() {
     let mut opts = StatusOptions::default();
     opts.untracked = UntrackedMode::No;
     opts.ahead_behind = false;
-    status(&repo, &opts, &mut NullProgress, &NeverCancel).expect("status");
+    status(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("status");
     set_before_opportunistic_index_write_hook(None);
 
     assert!(

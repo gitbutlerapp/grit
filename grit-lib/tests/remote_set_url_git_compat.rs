@@ -287,7 +287,7 @@ fn push_after_set_url_uses_new_pushurl() {
             }],
             grit_lib::remote::transfer::PushOptions::default(),
             &mut grit_lib::remote::fetch::NoProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
             None,
         )
         .expect("push");

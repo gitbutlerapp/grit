@@ -6,7 +6,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::status::{status, IgnoredMode, StatusModel, StatusOptions, UntrackedMode};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -54,8 +54,8 @@ fn run_status_pair(
     fs::write(repo.index_handle().path(), baseline_index).expect("restore index");
     let mut serial_opts = opts.clone();
     serial_opts.stat_parallel_threads = Some(1);
-    let serial =
-        status(repo, &serial_opts, &mut NullProgress, &NeverCancel).expect("serial status");
+    let serial = status(repo, &serial_opts, &mut NullProgress, &CancelToken::never())
+        .expect("serial status");
     let serial_index = fs::read(repo.index_handle().path()).expect("serial index");
 
     fs::write(repo.index_handle().path(), baseline_index).expect("restore index");
@@ -72,7 +72,7 @@ fn run_status_pair(
         &parallel_repo,
         &parallel_opts,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("parallel status");
     let parallel_index = fs::read(parallel_repo.index_handle().path()).expect("parallel index");
@@ -335,7 +335,7 @@ fn large_index_stat_refresh_parallel_matches_serial() {
         &repo,
         &grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     let req = {
@@ -348,8 +348,13 @@ fn large_index_stat_refresh_parallel_matches_serial() {
         req.assume_worktree_synced = false;
         req
     };
-    grit_lib::porcelain::commit::create_commit(&repo, &req, &mut NullProgress, &NeverCancel)
-        .expect("commit");
+    grit_lib::porcelain::commit::create_commit(
+        &repo,
+        &req,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("commit");
     for rel in ["mix/00030.txt", "mix/00040.txt", "mix/00050.txt"] {
         filetime::set_file_mtime(root.join(rel), filetime::FileTime::now()).expect("touch");
     }

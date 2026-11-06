@@ -215,7 +215,7 @@ pub fn run(
         _ => None,
     };
 
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = switch_repository(
         &repo,
         &SwitchOptions {
@@ -224,7 +224,7 @@ pub fn run(
             hooks: PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(|err| match err {
         LibError::OperationInProgress(kind) => {

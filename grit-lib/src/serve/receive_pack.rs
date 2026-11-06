@@ -23,7 +23,7 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::odb::WriteOptions;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
-use crate::progress::{Cancel, CancelSignal, NeverCancel};
+use crate::progress::{CancelSignal, CancelToken};
 use crate::receive_pack::{max_input_size_from_config, should_use_unpack_objects};
 use crate::receive_quarantine::{MigratedPackKeepGuard, ReceiveQuarantine};
 use crate::repo::Repository;
@@ -765,7 +765,15 @@ pub fn receive_pack_with_hook(
     policy: &ReceivePolicy,
     hook: &dyn ReceiveHook,
 ) -> Result<ReceiveOutcome> {
-    receive_pack_with_hook_cancellable(repo, input, output, opts, policy, hook, &NeverCancel)
+    receive_pack_with_hook_cancellable(
+        repo,
+        input,
+        output,
+        opts,
+        policy,
+        hook,
+        &CancelToken::never(),
+    )
 }
 
 /// Serve one push session with a cancel signal, running `hook` alongside hook scripts.
@@ -784,7 +792,7 @@ pub fn receive_pack_with_hook_cancellable(
     opts: &ServeOptions,
     policy: &ReceivePolicy,
     hook: &dyn ReceiveHook,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<ReceiveOutcome> {
     let stop = CancelSignal::new(cancel);
     stop.poll().map_err(|_| ServeError::Cancelled)?;
@@ -1196,7 +1204,7 @@ fn apply_commands_with_hooks(
     shallow: &ShallowPlan,
     mut sideband_out: Option<&mut dyn Write>,
     hook_records: &mut Vec<HookRunRecord>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<AppliedPush> {
     let stop = CancelSignal::new(cancel);
     let lookup_odb = ingest.as_ref().map(|ing| ing.odb());
@@ -1438,7 +1446,7 @@ fn hook_record(name: &str, result: &HookResult) -> HookRunRecord {
 /// variables given to [`Self::new`] (such as `GIT_SHALLOW_FILE`).
 pub(crate) struct ReceiveHookScripts<'a> {
     repo: &'a Repository,
-    cancel: &'a dyn Cancel,
+    cancel: &'a CancelToken,
     /// Push options plus the extra variables, for `pre-receive` and `post-receive`.
     receive_env: Vec<(String, String)>,
     /// The extra variables alone, for `update` and `post-update`.
@@ -1452,7 +1460,7 @@ impl<'a> ReceiveHookScripts<'a> {
         repo: &'a Repository,
         push_options: &[String],
         extra_env: Vec<(String, String)>,
-        cancel: &'a dyn Cancel,
+        cancel: &'a CancelToken,
     ) -> Self {
         let mut receive_env = Vec::with_capacity(push_options.len() + 1 + extra_env.len());
         receive_env.push((

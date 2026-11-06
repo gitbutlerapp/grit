@@ -8,7 +8,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::status::{status, IgnoredMode, StatusOptions, UntrackedMode};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::repo_relpath::storage_bytes;
 use grit_test_support::{forced_parallel_policy, git};
@@ -55,7 +56,7 @@ fn grit_lists(repo: &Repository, mode: UntrackedMode) -> (Vec<Vec<u8>>, Vec<Vec<
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let raw = |paths: &[String]| {

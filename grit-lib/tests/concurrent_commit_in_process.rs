@@ -6,7 +6,8 @@ use std::thread;
 use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::porcelain::commit::create_commit;
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::lock_path_for_ref;
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -25,7 +26,7 @@ fn init_repo() -> Harness {
         grit_test_support::empty_commit_request("root", "Test User <test@example.com> 0 +0000");
     root.author = Some(ident.clone());
     root.committer = Some(ident);
-    create_commit(&repo, &root, &mut NullProgress, &NeverCancel).expect("root commit");
+    create_commit(&repo, &root, &mut NullProgress, &CancelToken::never()).expect("root commit");
     Harness { _dir: dir, repo }
 }
 
@@ -49,7 +50,9 @@ fn concurrent_allow_empty_commits_avoid_permission_errors() {
                     );
                     req.author = Some(ident.clone());
                     req.committer = Some(ident.clone());
-                    if let Err(e) = create_commit(&repo, &req, &mut NullProgress, &NeverCancel) {
+                    if let Err(e) =
+                        create_commit(&repo, &req, &mut NullProgress, &CancelToken::never())
+                    {
                         errors.push(e);
                     }
                 }
@@ -131,7 +134,9 @@ fn concurrent_commit_while_index_and_ref_handles_open() {
                     );
                     req.author = Some(ident.clone());
                     req.committer = Some(ident.clone());
-                    if let Err(e) = create_commit(&repo, &req, &mut NullProgress, &NeverCancel) {
+                    if let Err(e) =
+                        create_commit(&repo, &req, &mut NullProgress, &CancelToken::never())
+                    {
                         errors.push(e);
                     }
                 }

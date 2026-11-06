@@ -64,7 +64,7 @@ fn drop_and_apply(grit: &Repository, commit: grit_lib::objects::ObjectId) {
         &plan,
         &apply_opts("drop"),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply drop");
 }
@@ -117,7 +117,7 @@ fn undo_after_rebase_restores_stacked_branches() {
         &plan,
         &apply_opts("rebase"),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply rebase");
     assert_ne!(
@@ -231,7 +231,7 @@ fn undo_survives_git_gc_with_reflog_updates_disabled() {
         &plan,
         &drop_opts,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply drop");
     assert_ne!(git_rev_parse(wt, "HEAD"), Some(dropped_tip));
@@ -629,7 +629,7 @@ fn grit_status_paths(grit: &Repository) -> (Vec<String>, Vec<String>) {
         grit,
         &grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit status");
     let paths = |entries: &[grit_lib::diff::DiffEntry]| {

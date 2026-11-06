@@ -32,6 +32,7 @@ use crate::index::Index;
 use crate::objects::odb::Odb;
 use crate::objects::{FileMode, ObjectId};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
+use crate::progress::CancelToken;
 use crate::repo::Repository;
 use crate::state::resolve_head_for_repository;
 use crate::worktree::fsmonitor::fsmonitor_enabled;
@@ -881,7 +882,7 @@ mod tests {
             &repo,
             &crate::porcelain::add::StageOptions::default(),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_or_else(|e| panic!("stage: {e}"));
         (dir, repo)

@@ -110,7 +110,7 @@ fn push_set_upstream_writes_same_config_as_git() {
             tracking_remote: Some("origin".into()),
             ..Default::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
     grit_lib::remote::push_plan::apply_set_upstream_after_push(
@@ -179,7 +179,7 @@ fn atomic_push_aborts_all_updates_on_bare_remote() {
         &bare,
         &[good.clone(), bad],
         &atomic,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("atomic push returns outcome");
 
@@ -197,7 +197,7 @@ fn atomic_push_aborts_all_updates_on_bare_remote() {
         &bare,
         &[good, spec(&side_oid, "refs/heads/main")],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-atomic");
     assert!(git_cmd(&["show-ref", "--verify", "refs/heads/atomic-ok"])
@@ -337,7 +337,7 @@ fn follow_tags_custom_dst_matches_git() {
             tracking_remote: Some("grit".into()),
             ..Default::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit push");
 
@@ -435,7 +435,7 @@ fn push_local_push_options_follow_advertise_push_options() {
                 push_options: vec!["ci.skip".into()],
                 ..Default::default()
             },
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         );
         let created = git_cmd(&["show-ref", "--verify", "refs/heads/main"])
             .in_dir(&bare)

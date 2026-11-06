@@ -69,7 +69,7 @@ fn grit_add_honours_gitattributes_with_autocrlf_like_git() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add");
 

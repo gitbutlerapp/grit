@@ -6,7 +6,7 @@ use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::progress::{Cancel, CancelToken, ProgressPhase, ProgressSink};
+use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::refs;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -45,12 +45,6 @@ impl ProgressSink for CancelHardResetOnFiles {
         if prev + units >= self.limit {
             self.flag.cancel();
         }
-    }
-}
-
-impl Cancel for CancelHardResetOnFiles {
-    fn is_cancelled(&self) -> bool {
-        self.flag.is_cancelled()
     }
 }
 
@@ -186,7 +180,7 @@ fn hard_reset_returns_cancelled_and_stops_checkout_early() {
         &repo,
         &ResetOptions::new(first, ResetMode::Hard, reset_identity(), "reset"),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset to first");
 

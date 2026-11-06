@@ -17,7 +17,8 @@ use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 /// Allowed grit / git peak-RSS ratio on the fixture tree (about 1.9x measured, 5.2x before
@@ -186,7 +187,7 @@ fn stage_child() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     assert_eq!(outcome.added.len(), FILES);

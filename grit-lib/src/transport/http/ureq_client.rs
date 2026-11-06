@@ -58,7 +58,7 @@ use crate::config::{self, parse_i64, ConfigSet};
 use crate::credentials::{self, Credential, CredentialProvider};
 use crate::environment::Environment;
 use crate::error::{AuthFailure, Error, RemoteUnreadableReason, Result};
-use crate::progress::Cancel;
+use crate::progress::CancelToken;
 use crate::protocol::client_git_protocol_header_from_config;
 use crate::transport::http::{HttpMethod, HttpRequest, HttpResponse};
 use crate::transport_path::redact_url_for_display;
@@ -137,7 +137,7 @@ pub struct UreqHttpClient {
     /// HTTP read timeouts and low-speed abort thresholds (`http.*` config).
     transport_timeouts: HttpTransportTimeouts,
     /// Per-fetch cancel, checked during timed-out socket reads.
-    operation_cancel: Mutex<Option<std::sync::Arc<dyn Cancel + Send + Sync>>>,
+    operation_cancel: Mutex<Option<std::sync::Arc<crate::progress::CancelToken>>>,
 }
 
 impl UreqHttpClient {
@@ -454,7 +454,7 @@ struct HttpTransportTimeouts {
     global: Option<Duration>,
     low_speed: Option<LowSpeedSettings>,
     /// Checked on timed-out socket reads so library cancel is observed mid-transfer.
-    cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>,
+    cancel: Option<std::sync::Arc<crate::progress::CancelToken>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -533,7 +533,7 @@ struct LowSpeedReader<R> {
     window_start: Instant,
     window_bytes: u64,
     global_deadline: Option<Instant>,
-    cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>,
+    cancel: Option<std::sync::Arc<crate::progress::CancelToken>>,
 }
 
 fn is_per_read_idle_timeout(err: &io::Error) -> bool {
@@ -999,7 +999,7 @@ impl UreqHttpClient {
         timeouts
     }
 
-    fn operation_cancel_ref(&self) -> Option<std::sync::Arc<dyn Cancel + Send + Sync>> {
+    fn operation_cancel_ref(&self) -> Option<std::sync::Arc<crate::progress::CancelToken>> {
         self.operation_cancel.lock().ok().and_then(|g| g.clone())
     }
 
@@ -1297,7 +1297,7 @@ impl HttpClient for UreqHttpClient {
         self.send_with_auth_retry(request)
     }
 
-    fn set_operation_cancel(&self, cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>) {
+    fn set_operation_cancel(&self, cancel: Option<std::sync::Arc<crate::progress::CancelToken>>) {
         if let Ok(mut guard) = self.operation_cancel.lock() {
             *guard = cancel;
         }
@@ -1311,7 +1311,7 @@ const INTERRUPTED_ATTEMPTS: usize = 3;
 /// request is `idempotent`. `EINTR` means "try again", not a transport failure.
 fn retry_interrupted<T>(
     idempotent: bool,
-    cancel: Option<&(dyn Cancel + Send + Sync)>,
+    cancel: Option<&CancelToken>,
     mut send: impl FnMut() -> std::result::Result<T, ureq::Error>,
 ) -> std::result::Result<T, ureq::Error> {
     let attempts = if idempotent { INTERRUPTED_ATTEMPTS } else { 1 };
@@ -1319,7 +1319,7 @@ fn retry_interrupted<T>(
     for _ in 1..attempts {
         match &result {
             Err(ureq::Error::Io(e)) if e.kind() == std::io::ErrorKind::Interrupted => {
-                if cancel.is_some_and(Cancel::is_cancelled) {
+                if cancel.is_some_and(CancelToken::is_cancelled) {
                     break;
                 }
                 result = send();

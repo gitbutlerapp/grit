@@ -170,14 +170,14 @@ fn commit_writes_reverse_hex_change_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("first"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -202,14 +202,14 @@ fn initial_commit_has_change_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("initial"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -228,14 +228,14 @@ fn amend_keeps_change_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("first"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -244,14 +244,14 @@ fn amend_keeps_change_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("second"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let before = change_id_line(&git_out(root, &["cat-file", "-p", "HEAD"])).expect("id");
@@ -262,7 +262,7 @@ fn amend_keeps_change_id() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -298,7 +298,7 @@ fn amend_of_headerless_commit_stores_derived_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let mut req = commit_req("");
@@ -307,7 +307,7 @@ fn amend_of_headerless_commit_stores_derived_id() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -329,7 +329,7 @@ fn merge_conclusion_commit_gets_change_id() {
         &repo,
         &commit_req("merge side"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -348,14 +348,14 @@ fn change_ids_disabled_writes_no_header() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("no id"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -374,14 +374,14 @@ fn testing_content_hash_is_deterministic() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let outcome = create_commit(
         &repo,
         &commit_req("hash me"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let stored = change_id(
@@ -449,7 +449,7 @@ fn merge_commit_gets_change_id() {
         topic_oid,
         "topic",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
@@ -475,14 +475,14 @@ fn pick_copy_gets_new_change_id_not_source() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("base"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -492,14 +492,14 @@ fn pick_copy_gets_new_change_id_not_source() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("topic commit"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let source_oid = ObjectId::from_hex(&git_out(root, &["rev-parse", "HEAD"])).expect("source");
@@ -512,14 +512,14 @@ fn pick_copy_gets_new_change_id_not_source() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("main commit"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -532,7 +532,7 @@ fn pick_copy_gets_new_change_id_not_source() {
             message_override: None,
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("pick");
     let ReplayOutcome::Committed { oid, .. } = outcome else {
@@ -560,14 +560,14 @@ fn revert_gets_new_change_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("add a"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     fs::write(root.join("a.txt"), b"v2\n").unwrap();
@@ -575,14 +575,14 @@ fn revert_gets_new_change_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("change a"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let reverted = ObjectId::from_hex(&git_out(root, &["rev-parse", "HEAD"])).expect("head");
@@ -598,7 +598,7 @@ fn revert_gets_new_change_id() {
             message_override: None,
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("revert");
     let ReplayOutcome::Committed { oid, .. } = outcome else {
@@ -660,14 +660,14 @@ fn signed_commit_with_change_id_verifies() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("signed"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -691,14 +691,14 @@ fn rewritten_commit_records_change_id_on_reword() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("first\n"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     fs::write(root.join("b.txt"), b"b\n").unwrap();
@@ -706,14 +706,14 @@ fn rewritten_commit_records_change_id_on_reword() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("second\n"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let target = ObjectId::from_hex(git_out(&root, &["rev-parse", "HEAD~1"]).trim()).unwrap();
@@ -758,14 +758,14 @@ fn squash_fold_preserves_oldest_change_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("first\n"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let range_base = ObjectId::from_hex(git_out(&root, &["rev-parse", "HEAD"]).trim()).unwrap();
@@ -774,14 +774,14 @@ fn squash_fold_preserves_oldest_change_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("second\n"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let squash_template =
@@ -797,14 +797,14 @@ fn squash_fold_preserves_oldest_change_id() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     create_commit(
         &repo,
         &commit_req("third\n"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let tip = ObjectId::from_hex(git_out(&root, &["rev-parse", "HEAD"]).trim()).unwrap();
@@ -894,7 +894,7 @@ fn reword_preserves_derived_change_id_for_headerless_git_commit() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let new_oid = row.new.expect("new oid");

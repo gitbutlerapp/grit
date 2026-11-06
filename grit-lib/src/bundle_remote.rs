@@ -147,7 +147,12 @@ pub fn write_bundle_with_options(
     path: &Path,
     options: &BundleCreateOptions,
 ) -> Result<usize> {
-    write_bundle_with_options_with_cancel(repo, path, options, &crate::progress::NeverCancel)
+    write_bundle_with_options_with_cancel(
+        repo,
+        path,
+        options,
+        &crate::progress::CancelToken::never(),
+    )
 }
 
 /// Like [`write_bundle_with_options`], but stops while streaming the pack when `cancel` is set.
@@ -159,7 +164,7 @@ pub fn write_bundle_with_options_with_cancel(
     repo: &Repository,
     path: &Path,
     options: &BundleCreateOptions,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<usize> {
     let spec = resolve_bundle_spec(repo, options)?;
     write_bundle_spec_to_path_with_cancel(
@@ -186,7 +191,7 @@ pub fn write_bundle_spec_to_path_with_cancel(
     spec: &BundleSpec,
     path: &Path,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> std::result::Result<usize, BundleError> {
     let temp = path.with_extension("bundle.part");
     if temp.exists() {
@@ -214,7 +219,7 @@ pub(crate) fn write_bundle_with_options_with_progress(
     path: &Path,
     options: &BundleCreateOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<usize> {
     let spec = resolve_bundle_spec(repo, options)?;
     write_bundle_spec_to_path_with_cancel(repo, &spec, path, progress, cancel)
@@ -324,7 +329,7 @@ pub(crate) fn fetch_from_bundle(
         bundle_path,
         opts,
         &mut NoProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
 }
 
@@ -337,7 +342,7 @@ pub fn fetch_from_bundle_with_progress(
     bundle_path: &Path,
     opts: &FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<FetchOutcome> {
     let repo = crate::fetch::open_fetch_target(local_git_dir, opts)?;
     fetch_from_bundle_into(&repo, bundle_path, opts, progress, cancel)
@@ -349,7 +354,7 @@ pub(crate) fn fetch_from_bundle_into(
     bundle_path: &Path,
     opts: &FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<FetchOutcome> {
     crate::progress::poll_cancel(progress, cancel)?;
     let bundle = Bundle::open(bundle_path).map_err(map_bundle_err)?;

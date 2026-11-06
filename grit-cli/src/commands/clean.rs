@@ -112,7 +112,7 @@ pub fn run(
     let dry_run = !force;
 
     let repo = context::discover()?;
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let resolved = args.resolve(&repo)?;
     let pathspecs = resolved.into_specs();
     let lib_outcome = clean_untracked_with_cancel(
@@ -126,7 +126,7 @@ pub fn run(
             dry_run,
         },
         &mut NullProgress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(crate::json_error::map_lib_error)?;
     Ok(CleanOutcome {

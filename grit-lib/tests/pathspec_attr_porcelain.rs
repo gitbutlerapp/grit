@@ -69,7 +69,7 @@ fn restore_attr_pathspec_worktree_and_staged() {
         &repo,
         &restore_opts(":(attr:vendored)src", false, true),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore worktree");
     assert_eq!(fs::read_to_string(root.join("src/a.rs")).unwrap(), "1\n");
@@ -84,7 +84,7 @@ fn restore_attr_pathspec_worktree_and_staged() {
         &repo,
         &restore_opts(":(attr:vendored)src", true, false),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore staged");
     assert!(git(root, &["diff", "--cached", "--name-only"])
@@ -100,7 +100,7 @@ fn restore_attr_pathspec_no_match() {
         &repo,
         &restore_opts(":(attr:no-such)src", false, true),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("no match");
     assert!(matches!(err, Error::PathspecNoMatch { .. }));
@@ -123,7 +123,7 @@ fn stash_push_attr_pathspec() {
                 mode: StashMode::All,
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("stash");
     assert_eq!(fs::read_to_string(root.join("src/a.rs")).unwrap(), "1\n");
@@ -155,7 +155,7 @@ fn objectmode_attr_pathspec_restore_stash_rm() {
         &repo,
         &restore_opts(spec, false, true),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore executable only");
     assert_eq!(
@@ -180,7 +180,7 @@ fn objectmode_attr_pathspec_restore_stash_rm() {
                 mode: StashMode::All,
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("stash executable");
     assert_eq!(
@@ -199,7 +199,7 @@ fn objectmode_attr_pathspec_restore_stash_rm() {
             cached: true,
             ..Default::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("rm --cached executable");
     let ls = git(root, &["ls-files"]);
@@ -220,7 +220,7 @@ fn rm_cached_attr_pathspec() {
             cached: true,
             ..Default::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("rm --cached");
     let ls = git(root, &["ls-files"]);

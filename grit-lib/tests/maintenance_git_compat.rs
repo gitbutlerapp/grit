@@ -21,7 +21,7 @@ use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::test_support::pack::pack_cache_guard;
 use grit_test_support::git_fsck;
@@ -30,8 +30,8 @@ use time::OffsetDateTime;
 
 /// Run grit fsck and report whether it passed under `opts`.
 fn repo_fsck(repo: &Repository, opts: &FsckOptions) -> (FsckReport, bool) {
-    let report =
-        repository_fsck::fsck(repo, opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
+    let report = repository_fsck::fsck(repo, opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit fsck");
     let ok = report.ok(&repo.config().expect("config"), opts);
     (report, ok)
 }
@@ -122,7 +122,7 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
         let idx = start + i;
         let path = wt.join(format!("k_{}.txt", idx % 9));
         std::fs::write(&path, format!("payload-{idx}\n")).expect("write");
-        stage_for_commit(repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         create_commit(
             repo,
             &{
@@ -136,7 +136,7 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
                 req
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
     }
@@ -318,7 +318,7 @@ fn gc_preserves_staged_only_blob() {
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("staged-only.txt"), b"staged payload\n").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let index = Index::load(&repo.git_dir().join("index")).expect("index");
     let staged_oid = index
         .entries()
@@ -346,7 +346,7 @@ fn fsck_skips_object_checks_when_check_objects_disabled() {
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("orphan-index.txt"), b"x").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let index = Index::load(&repo.git_dir().join("index")).expect("index");
     let staged_oid = index
         .entries()
@@ -384,7 +384,7 @@ fn fsck_reports_missing_index_blob_after_corruption() {
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("orphan-index.txt"), b"x").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let index = Index::load(&repo.git_dir().join("index")).expect("index");
     let staged_oid = index
         .entries()
@@ -1801,7 +1801,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let wt = repo.work_tree().expect("worktree");
     std::fs::write(wt.join("base"), b"v1").expect("write base");
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let ident = "Test <t@example.com> 1 +0000".to_string();
     create_commit(
         &repo,
@@ -1816,7 +1816,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             req
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     let mut base_repack = RepackOptions::default();
@@ -1824,7 +1824,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
     repack_all(&repo, &base_repack).expect("repack base");
 
     std::fs::write(wt.join("child"), b"v2").expect("write child");
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage child");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage child");
     create_commit(
         &repo,
         &{
@@ -1838,7 +1838,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             req
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("child commit");
 
@@ -2610,7 +2610,7 @@ fn history_source_repo(n_commits: usize) -> TempDir {
 
 fn grit_commit_all(repo: &Repository, path: &Path, message: &str) {
     std::fs::write(path, format!("{message}\n")).expect("write");
-    stage_for_commit(repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let ident = "Test <t@example.com> 1 +0000".to_string();
     create_commit(
         repo,
@@ -2625,7 +2625,7 @@ fn grit_commit_all(repo: &Repository, path: &Path, message: &str) {
             req
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 }

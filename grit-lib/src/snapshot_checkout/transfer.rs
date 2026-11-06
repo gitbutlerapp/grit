@@ -6,7 +6,7 @@
 
 use crate::fetch::Progress;
 use crate::objects::ObjectId;
-use crate::progress::Cancel;
+use crate::progress::CancelToken;
 use crate::remote::{HttpClientFactory, Remote};
 use crate::repo::Repository;
 use crate::transfer::{
@@ -57,7 +57,7 @@ pub fn push_for_checkin(
     marker: &CheckoutMarker,
     branches: &[(String, ObjectId)],
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<PushOutcome> {
     let specs: Vec<PushRefSpec> = branches
@@ -133,7 +133,7 @@ pub(crate) fn fetch_snapshot(
     info: &CheckoutInfo,
     fetch: FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<FetchedSnapshot> {
     let root = ObjectId::from_hex(&info.root).map_err(|e| CheckoutError::Protocol {
@@ -216,7 +216,7 @@ pub fn fetch_branch(
     info: &BranchInfo,
     fetch: FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<TransferStats> {
     let protocol = |detail: String| CheckoutError::Protocol {

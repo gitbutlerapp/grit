@@ -21,6 +21,7 @@ use super::{
 };
 use crate::history::error::HistoryError;
 use crate::history::types::{ApplyOptions, HeadEffect, PlannedRefUpdate, RewritePlan};
+use crate::progress::CancelToken;
 
 const FORMAT_VERSION: u32 = 2;
 const META: &str = "meta";
@@ -255,7 +256,7 @@ fn finish_checkout_from_journal(
             new_tree,
             Some(index_lock),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
     });
     match checkout {

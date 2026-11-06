@@ -89,14 +89,14 @@ fn grit_first_commit_subdirs_index_sorted_for_git() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("base"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -128,14 +128,14 @@ fn grit_create_commit_initial_validated_by_git() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let outcome = create_commit(
         &repo,
         &commit_req("initial grit"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -172,14 +172,14 @@ fn grit_create_commit_second_validated_by_git() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let outcome = create_commit(
         &repo,
         &commit_req("second grit"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -205,14 +205,14 @@ fn git_commits_readable_by_grit_create_commit_chain() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let outcome = create_commit(
         &repo,
         &commit_req("from grit"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -254,14 +254,14 @@ fn amend_rewrites_tip() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("second"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     let old_second = git_out(root, &["rev-parse", "HEAD"]);
@@ -272,14 +272,14 @@ fn amend_rewrites_tip() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &amend_req("second amended"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("amend");
 
@@ -302,14 +302,14 @@ fn amend_keeps_author_and_message() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("keep me"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     let before_author = author_signature(root);
@@ -318,7 +318,7 @@ fn amend_keeps_author_and_message() {
         &repo,
         &amend_req(""),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("amend");
 
@@ -361,14 +361,14 @@ fn amend_preserves_message_bytes() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("oneline subject"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     let baseline = commit_message_bytes(root);
@@ -385,14 +385,14 @@ fn amend_preserves_message_bytes() {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("stage");
         create_commit(
             &repo,
             &amend_req(""),
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("amend");
         fsck(root);
@@ -416,14 +416,14 @@ fn amend_with_new_message() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("old subject"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     let author_before = author_signature(root);
@@ -432,7 +432,7 @@ fn amend_with_new_message() {
         &repo,
         &amend_req("new subject"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("amend");
 
@@ -454,14 +454,14 @@ fn amend_root_commit() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("root"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     let before_author = author_signature(root);
@@ -471,14 +471,14 @@ fn amend_root_commit() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &amend_req("root plus b"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("amend");
 
@@ -509,14 +509,14 @@ fn grit_allow_empty_commit_round_trips_with_git() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let first = create_commit(
         &repo,
         &commit_req("first"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("first commit");
 
@@ -526,7 +526,7 @@ fn grit_allow_empty_commit_round_trips_with_git() {
         &repo,
         &empty_req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("allow-empty commit");
 
@@ -562,14 +562,14 @@ fn amend_unborn_errors() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let err = create_commit(
         &repo,
         &amend_req("nope"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(err, grit_lib::error::Error::AmendUnborn));

@@ -49,7 +49,7 @@ fn integrate_branch_df_conflict_parks_file_and_keeps_directory() {
         side,
         "side",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Conflicts { paths, .. } = outcome else {
@@ -76,7 +76,7 @@ fn integrate_branch_df_conflict_parks_file_and_keeps_directory() {
         &CommitRequest::new("resolved"),
         CommitScope::Staged,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("staged commit with unmerged paths");
     assert!(matches!(err, Error::IndexUnmerged));

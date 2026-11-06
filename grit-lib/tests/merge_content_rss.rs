@@ -82,7 +82,7 @@ fn content_merge_child() {
                 other,
                 "feat",
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel
+                &grit_lib::progress::CancelToken::never()
             )
             .expect("merge"),
             IntegrateBranchOutcome::Merged { .. }

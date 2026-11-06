@@ -35,6 +35,7 @@ use crate::repo::Repository;
 use super::refs::{log_head_move, swap_ref, Swap};
 use super::tree::{edit, lookup};
 use super::{valid_branch_name, CheckoutError, IntegrateStatus, Result, Slice};
+use crate::progress::CancelToken;
 
 /// Where the slices live on the target branch.
 pub const SLICES_PATH: &str = ".grit/slices.toml";
@@ -313,7 +314,7 @@ fn keep_worktree(repo: &Repository, from: ObjectId, to: ObjectId) -> Result<Opti
         Some(&from),
         &to,
         &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     ) {
         Ok(()) => Ok(None),
         Err(crate::error::Error::WouldOverwrite { paths, .. }) => Ok(Some(paths)),

@@ -74,7 +74,7 @@ fn restore_worktree_from_index() {
         &repo,
         &restore_opts(&["a.txt"], false, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore");
 
@@ -100,7 +100,7 @@ fn restore_staged_and_worktree_drops_staged_new_file() {
         &repo,
         &restore_opts(&["new.txt"], true, true, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore staged and worktree");
 
@@ -127,7 +127,7 @@ fn restore_staged_unstages() {
         &repo,
         &restore_opts(&["b.txt"], true, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore staged");
 
@@ -165,7 +165,7 @@ fn restore_source_head_parent() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore source");
 
@@ -203,7 +203,7 @@ fn restore_source_worktree_only_leaves_index_at_head() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore source worktree");
 
@@ -249,7 +249,7 @@ fn restore_deletion_skips_directory_collision() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore delete attempt");
 
@@ -314,7 +314,7 @@ fn restore_removes_path_missing_in_source() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore removal");
 
@@ -337,7 +337,7 @@ fn restore_directory_pathspec() {
         &repo,
         &restore_opts(&["sub/"], false, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore dir");
 
@@ -389,7 +389,7 @@ fn restore_many_literal_pathspecs_matches_git() {
                 &repo,
                 &restore_opts(&specs, false, false, RestoreSource::Index),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("restore literal pathspecs");
         }
@@ -414,7 +414,7 @@ fn restore_many_literal_pathspecs_matches_git() {
         &repo,
         &restore_opts(&["a.txt", "missing/"], false, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(
@@ -434,7 +434,7 @@ fn restore_pathspec_no_match_errors() {
         &repo,
         &restore_opts(&["missing.txt"], false, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(
@@ -455,7 +455,7 @@ fn restore_worktree_pathspec_no_match_when_only_in_head() {
         &repo,
         &restore_opts(&["f"], false, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(
@@ -499,7 +499,7 @@ fn restore_pathspec_exclude_skips_excluded_paths() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore with exclude");
 
@@ -547,7 +547,7 @@ fn restore_applies_index_gitattributes_without_worktree_copy() {
         &repo,
         &restore_opts(&["data.txt"], false, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore with index attrs");
 
@@ -571,7 +571,7 @@ fn restore_staged_matches_path_only_in_head() {
         &repo,
         &restore_opts(&["f"], true, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore staged from HEAD");
 
@@ -592,7 +592,7 @@ fn restore_leaves_untracked_alone() {
         &repo,
         &restore_opts(&["."], false, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore");
 
@@ -618,7 +618,7 @@ fn restore_symlink_and_executable() {
         &repo,
         &restore_opts(&["run.sh", "link.sh"], false, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore modes");
 
@@ -656,7 +656,7 @@ fn git_staged_then_grit_restore_staged() {
         &repo,
         &restore_opts(&["m.txt"], true, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit restore --staged");
 
@@ -688,7 +688,7 @@ fn restore_attr_pathspec_worktree_matches_git() {
         &repo,
         &restore_opts(&[":(attr:vendored)src"], false, true, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore attr worktree");
     assert_eq!(
@@ -710,7 +710,7 @@ fn restore_staged_attr_pathspec_matches_git() {
         &repo,
         &restore_opts(&[":(attr:vendored)src"], true, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore staged attr");
     let staged = git_cmd(dir.path(), &["diff", "--cached", "--name-only"]);
@@ -729,7 +729,7 @@ fn restore_attr_pathspec_no_match_errors() {
         &repo,
         &restore_opts(&[":(attr:no-such)src"], false, true, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("no match");
     assert!(matches!(
@@ -750,7 +750,7 @@ fn restore_index_readable_by_git_ls_files() {
         &repo,
         &restore_opts(&["i.txt"], false, false, RestoreSource::Index),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore");
 
@@ -813,7 +813,7 @@ fn restore_staged_mixed_paths_from_source_tree_matches_git() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore staged mixed");
 

@@ -14,7 +14,7 @@ use crate::porcelain::stash::remove_empty_dirs;
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
 };
-use crate::progress::{poll_cancel, Cancel, NeverCancel, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
 
@@ -74,7 +74,7 @@ pub fn clean_untracked(
     opts: &CleanOptions,
     progress: &mut dyn ProgressSink,
 ) -> Result<CleanOutcome> {
-    clean_untracked_with_cancel(repo, opts, progress, &NeverCancel)
+    clean_untracked_with_cancel(repo, opts, progress, &CancelToken::never())
 }
 
 /// Like [`clean_untracked`], but stops between path removals when `cancel` is set.
@@ -84,7 +84,7 @@ pub fn clean_untracked_with_cancel(
     repo: &Repository,
     opts: &CleanOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<CleanOutcome> {
     let work_tree = repo
         .work_tree()

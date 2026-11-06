@@ -11,7 +11,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -135,7 +136,7 @@ fn stray_files_in_uninitialized_gitlink_match_git_status_and_commit() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -152,7 +153,7 @@ fn stray_files_in_uninitialized_gitlink_match_git_status_and_commit() {
             req
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(

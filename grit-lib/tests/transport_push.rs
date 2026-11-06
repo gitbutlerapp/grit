@@ -151,7 +151,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
             ..PushOptions::default()
         },
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_remote over git daemon");
     drop(conn);
@@ -243,7 +243,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         &[nonff],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-ff push_remote completes");
     drop(conn2);
@@ -290,7 +290,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         &[forced],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push_remote completes");
     drop(conn3);
@@ -352,7 +352,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         &[mk],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("create scratch ref");
     drop(conn_mk);
@@ -381,7 +381,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         &[del],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("deletion push_remote completes");
     drop(conn_del);
@@ -451,7 +451,12 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     fn grit_commit(repo: &Repository, filename: &str, message: &str) -> ObjectId {
         let wt = repo.work_tree().expect("worktree");
         std::fs::write(wt.join(filename), format!("{message}\n")).unwrap();
-        stage_for_commit(repo, &mut NullProgress, &grit_lib::progress::NeverCancel).expect("stage");
+        stage_for_commit(
+            repo,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
         let ident = "Test <t@example.com> 1 +0000".to_string();
         let out = create_commit(
             repo,
@@ -466,7 +471,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
                 req
             },
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("commit");
         out.oid
@@ -509,7 +514,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
         }],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("clone A advances main");
     drop(conn_a);
@@ -553,7 +558,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
         }],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("clone B pushes new branch without fetch");
     drop(conn_b);
@@ -596,7 +601,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
         }],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced main push without local copy of old tip");
     drop(conn_force);

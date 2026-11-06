@@ -89,7 +89,7 @@ fn references_query_peels_annotated_tags() {
         &repo,
         &grit_test_support::empty_commit_request("c", &ident),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()
     .oid;
@@ -170,7 +170,7 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
         &repo,
         &grit_test_support::empty_commit_request("c", &ident),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()
     .oid;
@@ -214,7 +214,7 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
         &repo,
         &grit_test_support::empty_commit_request("c", &ident),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()
     .oid;
@@ -287,7 +287,7 @@ fn date_sort_keeps_refs_with_missing_objects() {
         &repo,
         &grit_test_support::empty_commit_request("c", &ident),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()
     .oid;

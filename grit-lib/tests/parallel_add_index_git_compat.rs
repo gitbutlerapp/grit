@@ -70,7 +70,7 @@ fn stage_all(repo: &Repository) -> Vec<u8> {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     fs::read(repo.index_handle().path()).expect("read index")

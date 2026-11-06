@@ -28,7 +28,7 @@ fn stage_paths(repo: &Repository, pathspecs: &[&str]) -> grit_lib::error::Result
         repo,
         &opts,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )?;
     Ok(())
 }

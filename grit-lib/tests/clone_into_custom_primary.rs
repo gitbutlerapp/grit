@@ -8,7 +8,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::HashAlgo;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::remote::clone::{clone_into, CloneCheckout, CloneIntoOptions};
@@ -87,7 +87,7 @@ fn clone_into_custom_primary_fetches_and_checks_out() {
         repo,
         CloneIntoOptions::new(url),
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("clone_into with MemoryStore primary");
@@ -118,7 +118,7 @@ fn clone_into_custom_primary_skips_checkout_when_disabled() {
             ..CloneIntoOptions::new(url)
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("clone_into no checkout");
@@ -141,7 +141,7 @@ fn clone_into_memory_store_and_memory_ref_store_checks_out() {
         repo,
         CloneIntoOptions::new(url),
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("clone_into with MemoryStore + MemoryRefStore");

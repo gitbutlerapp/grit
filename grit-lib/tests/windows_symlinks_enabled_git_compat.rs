@@ -9,7 +9,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, grit};
@@ -76,7 +76,7 @@ fn assert_grit_clean(root: &Path) {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit status");
     assert!(
@@ -141,7 +141,7 @@ fn restore_switch_clone_honor_core_symlinks_true() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore");
     assert_worktree_clean(&grit);
@@ -159,7 +159,7 @@ fn restore_switch_clone_honor_core_symlinks_true() {
             ..SwitchOptions::default()
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch main");
     assert_worktree_clean(&grit);
@@ -171,7 +171,7 @@ fn restore_switch_clone_honor_core_symlinks_true() {
     clone(
         &opts,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit clone");
     assert_worktree_clean(&clone_dest);

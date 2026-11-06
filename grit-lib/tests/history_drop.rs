@@ -134,7 +134,7 @@ fn drop_reports_replacements_and_head_change() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(new_c));
@@ -181,7 +181,7 @@ fn drop_moves_branch_at_dropped_commit_to_parent() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let tip = git_rev_parse(wt, "refs/heads/points-at-b").expect("ref");
@@ -352,7 +352,7 @@ fn drop_with_head_scope_leaves_conflicting_sibling_alone() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     assert_eq!(git_rev_parse(wt, "refs/heads/other"), Some(fx.o1));
@@ -379,7 +379,7 @@ fn drop_syncs_worktree_when_head_affected() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     assert!(wt.join("first.t").is_file());
@@ -432,7 +432,7 @@ fn history_drop_matches_git_rebase_drop() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let editor = git_dir.path().join("rebase-drop.sh");
@@ -521,7 +521,7 @@ fn history_drop_matches_git_history_when_available() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let git_out = Command::new("git")

@@ -129,7 +129,7 @@ fn commit_all(repo: &Repository, message: &str) {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     commit_with_scope(
@@ -142,7 +142,7 @@ fn commit_all(repo: &Repository, message: &str) {
         },
         CommitScope::Staged,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 }
@@ -388,7 +388,7 @@ fn layered_stash_push_round_trips_do_not_grow_with_directory_count() {
             .push(
                 &options,
                 &mut NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("stash push")
             .expect("changes to stash");

@@ -86,7 +86,7 @@ fn create_commit_signature_passes_git_fsck_strict() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("create_commit");
 
@@ -140,7 +140,7 @@ fn create_commit_defaults_to_repository_identity() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("create_commit");
 
@@ -179,7 +179,7 @@ fn repository_identity_reports_missing_configuration() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("no identity");
     assert!(matches!(err, Error::Identity(_)), "unexpected error: {err}");
@@ -208,7 +208,7 @@ fn create_commit_rejects_unwritable_signatures() {
         &repo,
         &bad,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("invalid identity");
     assert!(

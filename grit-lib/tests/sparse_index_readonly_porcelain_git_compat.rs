@@ -8,7 +8,8 @@ use grit_lib::diff::{Diff, DiffStatus, RenameDetection};
 use grit_lib::index::Index;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_at_least};
 
@@ -93,7 +94,7 @@ fn readonly_porcelain_keeps_git_sparse_index_shape() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -125,7 +126,7 @@ fn readonly_porcelain_keeps_git_sparse_index_shape() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("add");
     assert_eq!(
@@ -249,7 +250,7 @@ fn dirty_in_cone_file_still_reports_without_expanding_outside_cone() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert_eq!(model.unstaged.len(), 1);

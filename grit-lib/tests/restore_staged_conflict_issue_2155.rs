@@ -14,7 +14,8 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
 
@@ -73,7 +74,7 @@ fn merge_conflict(root: &Path) -> Repository {
         oid(root, "other"),
         "other",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -154,7 +155,7 @@ fn assert_conflict_survives(root: &Path, repo: &Repository) {
             repo,
             &staged_only(pathspec),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -171,7 +172,7 @@ fn assert_conflict_survives(root: &Path, repo: &Repository) {
         &commit_req(),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(err, Error::IndexUnmerged), "{err:?}");
@@ -236,7 +237,7 @@ fn assert_collapsed_markers_refused(root: &Path, repo: &Repository) {
         &commit_req(),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     let Error::UnmergedConflictMarkers { paths } = err else {
@@ -254,7 +255,7 @@ fn assert_collapsed_markers_refused(root: &Path, repo: &Repository) {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -279,7 +280,7 @@ fn commit_refuses_markers_after_git_drops_merge_stages() {
         &commit_req(),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit resolved merge");
     assert_eq!(git(root, &["show", "HEAD:f"]), "resolved\n");
@@ -337,7 +338,7 @@ fn markers_already_committed_do_not_block_commit() {
         &commit_req(),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("markers are already committed");
     assert_eq!(git(root, &["show", "HEAD:f"]), doc);
@@ -382,7 +383,7 @@ fn stale_resolve_undo_with_new_markers_is_refused() {
         &commit_req(),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(

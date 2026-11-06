@@ -31,7 +31,7 @@ use crate::porcelain::stash::{
 };
 use crate::porcelain::switch::checkout_tree_transition_allow_local_reset;
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
-use crate::progress::{Cancel, ProgressSink};
+use crate::progress::{CancelToken, ProgressSink};
 use crate::remote::fetch::Progress;
 use crate::remote::transfer::{resolve_fetch_prune, FetchOptions, TagMode, TransferStats};
 use crate::remote::{HttpClientFactory, RemoteError};
@@ -468,7 +468,7 @@ pub fn pull<P>(
     repo: &Repository,
     options: &PullOptions,
     progress: &mut P,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> std::result::Result<PullOutcome, PullError>
 where
@@ -855,7 +855,7 @@ fn integrate_fetched_upstream(
     integration: PullIntegration,
     stop_on_conflict: bool,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> std::result::Result<PullOutcome, PullError> {
     let Upstream {
         oid: upstream_oid,
@@ -927,7 +927,7 @@ fn rebase_fetched_upstream(
     upstream: Upstream<'_>,
     stop_on_conflict: bool,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> std::result::Result<PullOutcome, PullError> {
     let Upstream {
         oid: upstream_oid,
@@ -1029,7 +1029,7 @@ fn move_landed_branch(
     upstream_oid: ObjectId,
     label: &str,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> std::result::Result<PullOutcome, PullError> {
     ensure_branch_tip(repo, refname, Some(head_oid))?;
     if repo.load_index()?.has_unmerged_entries() {
@@ -1119,7 +1119,6 @@ mod tests {
     use crate::config::environment::RepositoryOptions;
     use crate::config::ConfigSet;
     use crate::environment::Environment;
-    use crate::progress::NeverCancel;
     use crate::remote::fetch::NoProgress;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Output};
@@ -1277,7 +1276,7 @@ mod tests {
             &repo,
             &pull_options(&repo),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect_err("blocked");
@@ -1319,7 +1318,7 @@ mod tests {
             &repo,
             &pull_options(&repo),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull succeeds");
@@ -1348,7 +1347,7 @@ mod tests {
             &repo,
             &pull_options(&repo),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("local pull succeeds");
@@ -1373,7 +1372,7 @@ mod tests {
             &repo,
             &pull_options(&repo),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull succeeds");
@@ -1386,7 +1385,7 @@ mod tests {
             &repo,
             &pull_options(&repo),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("second pull");
@@ -1415,7 +1414,7 @@ mod tests {
             &repo,
             &pull_options(&repo),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull succeeds");
@@ -1446,8 +1445,14 @@ mod tests {
         let repo = open(&local);
         let mut options = pull_options(&repo);
         options.autostash = true;
-        let outcome = pull(&repo, &options, &mut NoProgress, &NeverCancel, None)
-            .expect("pull with --autostash on unborn branch");
+        let outcome = pull(
+            &repo,
+            &options,
+            &mut NoProgress,
+            &CancelToken::never(),
+            None,
+        )
+        .expect("pull with --autostash on unborn branch");
         assert_eq!(outcome.result, PullResult::SetUpstream);
         assert_eq!(outcome.oid, Some(tip));
         assert!(
@@ -1482,7 +1487,7 @@ mod tests {
             &repo,
             &pull_options(&repo),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull with rebase.autoStash on unborn branch");
@@ -1517,8 +1522,14 @@ mod tests {
         let repo = open(&local);
         let mut options = pull_options(&repo);
         options.autostash = true;
-        let err = pull(&repo, &options, &mut NoProgress, &NeverCancel, None)
-            .expect_err("checkout collision");
+        let err = pull(
+            &repo,
+            &options,
+            &mut NoProgress,
+            &CancelToken::never(),
+            None,
+        )
+        .expect_err("checkout collision");
         assert!(
             matches!(
                 &err,
@@ -1560,8 +1571,14 @@ mod tests {
             landed: None,
             copies: Vec::new(),
         });
-        let outcome = pull(&repo, &options, &mut NoProgress, &NeverCancel, None)
-            .expect("pull without a fetch");
+        let outcome = pull(
+            &repo,
+            &options,
+            &mut NoProgress,
+            &CancelToken::never(),
+            None,
+        )
+        .expect("pull without a fetch");
         assert_eq!(outcome.result, PullResult::FastForward);
         assert_eq!(outcome.label, "origin/up");
         assert_eq!(git(&clone, &["rev-parse", "main"]), tip.to_hex());
@@ -1612,7 +1629,7 @@ mod tests {
             &repo,
             &rebase_options(&repo, upstream, false),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull");
@@ -1625,7 +1642,7 @@ mod tests {
             &repo,
             &rebase_options(&repo, upstream, true),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull");
@@ -1662,7 +1679,7 @@ mod tests {
             &repo,
             &rebase_options(&repo, upstream, true),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         );
         assert!(
@@ -1699,7 +1716,7 @@ mod tests {
             &repo,
             &pull_options(&repo),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect_err("pull fails when branch reflog cannot be written");
@@ -1757,7 +1774,7 @@ mod tests {
             &repo,
             &rebase_options(&repo, upstream, false),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull");
@@ -1769,7 +1786,8 @@ mod tests {
         std::fs::write(clone.join("draft.txt"), "not committed\n").expect("write");
         let mut check = landed_options(&repo, upstream, tip, false);
         check.check = true;
-        let predicted = pull(&repo, &check, &mut NoProgress, &NeverCancel, None).expect("check");
+        let predicted =
+            pull(&repo, &check, &mut NoProgress, &CancelToken::never(), None).expect("check");
         assert_eq!(predicted.check.map(|c| c.would), Some(PullResult::Landed));
 
         git(&clone, &["update-ref", "-d", "ORIG_HEAD"]);
@@ -1777,7 +1795,7 @@ mod tests {
             &repo,
             &landed_options(&repo, upstream, tip, true),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull");
@@ -1813,7 +1831,7 @@ mod tests {
             &repo,
             &landed_options(&repo, upstream, tip, true),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect_err("blocked");
@@ -1842,7 +1860,7 @@ mod tests {
             &repo,
             &landed_options(&repo, upstream, landed, true),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull");
@@ -1863,7 +1881,7 @@ mod tests {
             &repo,
             &landed_options(&repo, upstream, landed, true),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("pull");

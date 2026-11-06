@@ -84,7 +84,7 @@ fn pick(repo: &Repository, commit: &str) -> ReplayOutcome {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("pick")
 }

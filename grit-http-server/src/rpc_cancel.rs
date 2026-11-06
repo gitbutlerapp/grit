@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use grit_lib::progress::{Cancel, CancelToken};
+use grit_lib::progress::CancelToken;
 
 /// Tracks [`CancelToken`] handles for in-flight receive/upload RPC work.
 #[derive(Default)]
@@ -17,14 +17,14 @@ struct RpcCancelRegistryInner {
 
 impl RpcCancelRegistry {
     /// Register a cancel flag for one RPC and return it for [`ServeSession`].
-    pub(crate) fn register(&self) -> (Arc<dyn Cancel + Send + Sync>, RpcCancelGuard) {
+    pub(crate) fn register(&self) -> (Arc<grit_lib::progress::CancelToken>, RpcCancelGuard) {
         let cancel = Arc::new(CancelToken::new());
         self.inner
             .active
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(Arc::downgrade(&cancel));
-        let session: Arc<dyn Cancel + Send + Sync> = cancel.clone();
+        let session: Arc<grit_lib::progress::CancelToken> = cancel.clone();
         (
             session,
             RpcCancelGuard {

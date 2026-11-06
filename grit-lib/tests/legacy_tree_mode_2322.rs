@@ -165,7 +165,7 @@ fn legacy_tree_modes_status_and_commit_clean_after_git_checkout() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -185,7 +185,7 @@ fn legacy_tree_modes_status_and_commit_clean_after_git_checkout() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit");
     assert!(
@@ -249,7 +249,7 @@ fn grit_checkout_writes_canonical_index_modes() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status");
     assert!(model.is_clean(), "grit status must be clean");
@@ -281,7 +281,7 @@ fn hard_reset_to_head_keeps_canonical_index_modes() {
             "reset: test",
         ),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("hard reset HEAD");
 
@@ -307,7 +307,7 @@ fn legacy_tree_modes_switch_and_merge_on_clean_tree() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status");
     assert!(model.is_clean(), "grit status must be clean before switch");
@@ -323,7 +323,7 @@ fn legacy_tree_modes_switch_and_merge_on_clean_tree() {
             hooks: PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch to main");
 
@@ -347,7 +347,7 @@ fn legacy_tree_modes_switch_and_merge_on_clean_tree() {
         c2,
         "main",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge main into detached HEAD");
     assert_eq!(
@@ -376,7 +376,7 @@ fn legacy_tree_modes_switch_still_blocks_real_worktree_edit() {
             hooks: PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("switch must refuse dirty worktree");
     assert!(

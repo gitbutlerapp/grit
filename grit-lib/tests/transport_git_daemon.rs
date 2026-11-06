@@ -21,7 +21,6 @@ use std::time::{Duration, Instant};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
-use grit_lib::progress::NeverCancel;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
 use grit_lib::remote::push::push_remote;
@@ -167,7 +166,7 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
         &mut *conn,
         &mut opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("fetch_remote over git daemon");
 
@@ -307,7 +306,7 @@ fn fetch_following_lightweight_tag_at_branch_tip_downloads_branch() {
         &mut *conn,
         &mut opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("fetch with TagMode::Following");
 
@@ -394,7 +393,7 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
         &mut *conn,
         &mut opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("initial fetch");
 
@@ -411,7 +410,7 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
         &mut *conn,
         &mut opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("incremental fetch with new annotated tag");
 
@@ -493,7 +492,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
         &mut *conn,
         &mut fetch_opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("fetch main");
 
@@ -541,7 +540,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
         }],
         &PushOptions::default(),
         &mut NoProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push annotated tag");
 
@@ -622,7 +621,7 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
         &mut *conn,
         &mut seed_opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("seed fetch");
 
@@ -651,7 +650,7 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
         &mut *conn,
         &mut dry_run_opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("dry-run fetch");
 

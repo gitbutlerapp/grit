@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::promisor::DefaultPromisorFetcher;
 use grit_lib::objects::promisor_remote::PromisorRejection;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone, CloneOptions, CloneOutcome};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
@@ -211,7 +211,7 @@ impl Lop {
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
         opts.promisor_fetcher = fetcher();
-        clone(opts, &mut NoProgress, &NeverCancel, None).expect("clone")
+        clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone")
     }
 }
 
@@ -312,7 +312,7 @@ fn auto_filter_uses_the_filter_git_advertises() {
         ("promisor.acceptFromServer".into(), "knownUrl".into()),
     ];
     opts.promisor_fetcher = fetcher();
-    let outcome = clone(opts, &mut NoProgress, &NeverCancel, None).expect("clone");
+    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
     assert_eq!(outcome.filter, Some(ObjectFilterSpec::BlobLimit(5 * 1024)));
     assert_eq!(
         git(&dest, &["config", "remote.origin.partialclonefilter"]).trim(),

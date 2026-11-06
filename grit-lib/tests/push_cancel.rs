@@ -16,7 +16,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, Result};
 use grit_lib::objects::{parse_commit, serialize_tree, ObjectId, ObjectKind, TreeEntry};
-use grit_lib::progress::{Cancel, CancelToken, NeverCancel};
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::pkt_line;
@@ -118,37 +118,15 @@ fn remote_main(git_dir: &Path) -> Option<ObjectId> {
     resolve_ref(git_dir, "refs/heads/main").ok()
 }
 
-/// Fires on its `limit`-th check (counting from zero) and stays fired. Not backed
-/// by a shared flag, so worker threads only see it through the calling thread.
-struct CancelAfter {
-    checks: AtomicUsize,
-    limit: usize,
-}
-
-impl CancelAfter {
-    fn new(limit: usize) -> Self {
-        Self {
-            checks: AtomicUsize::new(0),
-            limit,
-        }
-    }
-
-    fn checks(&self) -> usize {
-        self.checks.load(Ordering::Relaxed)
-    }
-}
-
-impl Cancel for CancelAfter {
-    fn is_cancelled(&self) -> bool {
-        self.checks.fetch_add(1, Ordering::Relaxed) >= self.limit
-    }
+fn cancel_after_checks(limit: usize) -> CancelToken {
+    CancelToken::after_polls(limit.saturating_add(1) as u64)
 }
 
 fn push_file(
     local: &Repository,
     remote_dir: &Path,
     tip: ObjectId,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> std::result::Result<Vec<PushRefStatus>, grit_lib::remote::RemoteError> {
     let remote = Remote::from_url(&format!("file://{}", remote_dir.display())).expect("url");
     remote
@@ -191,7 +169,7 @@ fn local_push_publishes_a_pack_as_readable_as_its_index() {
     let remote_dir = tmp.path().join("remote.git");
     init_bare(&remote_dir);
     assert_eq!(
-        push_file(&local, &remote_dir, tip, &NeverCancel).expect("push"),
+        push_file(&local, &remote_dir, tip, &CancelToken::never()).expect("push"),
         vec![PushRefStatus::Ok]
     );
 
@@ -227,12 +205,12 @@ fn local_push_stops_wherever_the_cancel_lands_and_a_retry_succeeds() {
     // the pack build and the indexing each check many times.
     let probe_dir = tmp.path().join("probe.git");
     init_bare(&probe_dir);
-    let counting = CancelAfter::new(usize::MAX);
+    let (counting, checks) = CancelToken::with_check_counter();
     assert_eq!(
         push_file(&local, &probe_dir, tip, &counting).expect("uncancelled push"),
         vec![PushRefStatus::Ok]
     );
-    let total = counting.checks();
+    let total = checks.load(Ordering::Relaxed);
     let (commits, trees, blobs) = (120, 120, 12 + 119);
     assert!(
         total >= commits + trees + (commits + trees + blobs),
@@ -244,7 +222,7 @@ fn local_push_stops_wherever_the_cancel_lands_and_a_retry_succeeds() {
     init_bare(&remote_dir);
     let before = object_files(&remote_dir);
     for limit in [1, total / 8, total / 4, total / 2] {
-        let cancel = CancelAfter::new(limit);
+        let cancel = cancel_after_checks(limit);
         let err = push_file(&local, &remote_dir, tip, &cancel).expect_err("cancelled");
         assert!(err.is_cancelled(), "cancel at check {limit}: {err:?}");
         assert_eq!(remote_main(&remote_dir), None, "cancel at check {limit}");
@@ -256,7 +234,7 @@ fn local_push_stops_wherever_the_cancel_lands_and_a_retry_succeeds() {
     }
 
     assert_eq!(
-        push_file(&local, &remote_dir, tip, &NeverCancel).expect("retry"),
+        push_file(&local, &remote_dir, tip, &CancelToken::never()).expect("retry"),
         vec![PushRefStatus::Ok]
     );
     assert_eq!(remote_main(&remote_dir), Some(tip));
@@ -449,7 +427,7 @@ fn push_over_http(
     server: Arc<InProcessServer>,
     local_dir: &Path,
     tip: ObjectId,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<Vec<PushRefStatus>> {
     push_http(
         server,
@@ -503,7 +481,7 @@ fn http_push_cancelled_mid_body_abandons_the_request_and_a_retry_lands() {
 
     let retry = Arc::new(InProcessServer::new(&remote_dir));
     assert_eq!(
-        push_over_http(retry, &local_dir, tip, &NeverCancel).expect("retry"),
+        push_over_http(retry, &local_dir, tip, &CancelToken::never()).expect("retry"),
         vec![PushRefStatus::Ok]
     );
     assert_eq!(remote_main(&remote_dir), Some(tip));

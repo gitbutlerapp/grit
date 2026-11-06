@@ -19,7 +19,6 @@ use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
@@ -188,7 +187,8 @@ impl HotPathsFixture {
             ahead_behind: false,
             ..StatusOptions::default()
         };
-        let _ = status(&self.repo, &opts, &mut NullProgress, &NeverCancel).expect("status clean");
+        let _ = status(&self.repo, &opts, &mut NullProgress, &CancelToken::never())
+            .expect("status clean");
     }
 
     pub fn bench_diff_worktree_clean(&self) {
@@ -383,7 +383,7 @@ fn hard_reset_to_main(repo: &Repository, main_head_oid: ObjectId) {
             "bench: reset to main",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("hard reset to main");
 }
@@ -435,7 +435,7 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch wide");
     switch_repository(
@@ -449,7 +449,7 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch main");
 }
@@ -496,7 +496,7 @@ pub fn bench_push_stash(fx: &HotPathsFixture) {
     let _ = fx
         .repo
         .stash()
-        .push(&options, &mut NullProgress, &NeverCancel)
+        .push(&options, &mut NullProgress, &CancelToken::never())
         .expect("push_stash");
 }
 
@@ -508,7 +508,7 @@ pub fn bench_apply_stash(fx: &HotPathsFixture, stash_oid: &ObjectId) {
             stash_oid,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("apply_stash");
 }

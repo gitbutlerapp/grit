@@ -20,7 +20,7 @@ use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -149,7 +149,7 @@ fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -171,7 +171,7 @@ fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
 
     let mut dry = CommitRequest::new("dry-run");
     dry.dry_run = true;
-    let preview = commit_worktree(&repo, &dry, &mut NullProgress, &NeverCancel)
+    let preview = commit_worktree(&repo, &dry, &mut NullProgress, &CancelToken::never())
         .expect("commit dry-run before staging");
     assert!(
         preview
@@ -187,7 +187,7 @@ fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("second status while paths remain untracked");
     if untracked_cache_enabled {
@@ -206,7 +206,7 @@ fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage all untracked");
 
@@ -214,7 +214,7 @@ fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
         &repo,
         &CommitRequest::new("add non-utf8 untracked"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit staged non-utf8 untracked");
 
@@ -254,7 +254,7 @@ fn non_utf8_untracked_directory_component_with_untr() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let collapsed = repo_relpath::directory_marker_stored(&repo_relpath::storage_string(b"\xfe"));
@@ -273,7 +273,7 @@ fn non_utf8_untracked_directory_component_with_untr() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage must not fail on collapsed non-UTF-8 directory path");
 
@@ -294,7 +294,7 @@ fn non_utf8_untracked_directory_component_with_untr() {
         &repo,
         &CommitRequest::new("add non-utf8 dir file"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit staged non-UTF-8 path under directory");
 
@@ -490,7 +490,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let unstaged_paths: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
@@ -524,7 +524,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
             ..CloneOptions::new(r1.to_string_lossy(), clone_dest.clone())
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("grit clone");
@@ -556,7 +556,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
             remerge: None,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("restore worktree from index");
     assert_eq!(
@@ -585,7 +585,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage all");
     let porcelain = git_porcelain(&r1b);
@@ -620,7 +620,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage file whose name looks like hex encoding");
     assert!(
@@ -675,7 +675,7 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
             hooks: PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit switch br on clean tree");
     assert_eq!(
@@ -700,7 +700,7 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
             hooks: PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect_err("switch must refuse real local edit");
     assert!(
@@ -723,7 +723,7 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
         br_oid,
         "br",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect_err("merge must refuse unstaged edit");
     assert!(
@@ -740,7 +740,7 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
         br_oid,
         "br",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit merge br on clean tree");
     let IntegrateBranchOutcome::Merged { .. } = merge_out else {
@@ -774,7 +774,7 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
             remerge: None,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("restore --source br");
     assert_eq!(
@@ -795,7 +795,7 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
         &open_repo(&root),
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit status after restore");
     assert!(

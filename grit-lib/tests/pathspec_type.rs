@@ -4,7 +4,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags, PathspecOptions};
 
@@ -186,7 +187,7 @@ fn status_literal_pathspec_matches_git_for_bracket_filename() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let grit_unstaged: Vec<String> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();

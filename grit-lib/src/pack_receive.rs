@@ -20,7 +20,7 @@ use crate::fetch::Progress;
 use crate::objects::HashAlgo;
 use crate::pack_stream_scan::PackStreamScanner;
 use crate::pkt_line;
-use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressUnit, ReceivedObjects};
+use crate::progress::{poll_cancel, CancelToken, ProgressPhase, ProgressUnit, ReceivedObjects};
 
 /// Where demuxed pack bytes are stored.
 pub enum PackReceiveTarget<'a> {
@@ -246,7 +246,7 @@ pub fn read_sideband_pack_to(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     crate::trace::trace_span!("grit.pack.receive");
     let mut pending = Vec::new();
@@ -282,7 +282,7 @@ fn pkt_line_payload_len(len_buf: &[u8; 4]) -> Result<usize> {
 fn read_interrupted(
     reader: &mut dyn Read,
     buf: &mut [u8],
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<usize> {
     const ATTEMPTS: usize = 3;
     let mut attempt = 0usize;
@@ -306,7 +306,7 @@ fn read_interrupted(
 
 /// Copy `reader` to `writer` with a large buffer (faster than [`io::copy`]'s 8 KiB default).
 pub fn copy_reader_to_writer(reader: &mut dyn Read, writer: &mut dyn Write) -> Result<u64> {
-    copy_reader_to_writer_cancellable(reader, writer, &crate::progress::NeverCancel)
+    copy_reader_to_writer_cancellable(reader, writer, &crate::progress::CancelToken::never())
 }
 
 /// Like [`copy_reader_to_writer`], but stops with [`Error::Cancelled`] when `cancel` is set
@@ -314,7 +314,7 @@ pub fn copy_reader_to_writer(reader: &mut dyn Read, writer: &mut dyn Write) -> R
 pub fn copy_reader_to_writer_cancellable(
     reader: &mut dyn Read,
     writer: &mut dyn Write,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<u64> {
     let mut buf = vec![0u8; 1024 * 1024];
     let mut total = 0u64;
@@ -362,7 +362,7 @@ impl SidebandStreamBuf {
         self.pos = 0;
     }
 
-    fn refill(&mut self, r: &mut dyn Read, cancel: &dyn crate::progress::Cancel) -> Result<bool> {
+    fn refill(&mut self, r: &mut dyn Read, cancel: &crate::progress::CancelToken) -> Result<bool> {
         self.compact();
         if self.end >= self.storage.len() {
             return Ok(false);
@@ -382,7 +382,7 @@ pub fn read_sideband_pack_tail(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     pending: &mut Vec<u8>,
     seen_pack: &mut bool,
     payload_buf: &mut Vec<u8>,
@@ -404,7 +404,7 @@ fn read_sideband_pack_tail_buffered(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     pending: &mut Vec<u8>,
     seen_pack: &mut bool,
     _payload_buf: &mut Vec<u8>,
@@ -791,7 +791,7 @@ impl TempPackReceive {
         &mut self,
         reader: &mut dyn Read,
         progress: &mut dyn Progress,
-        cancel: &dyn Cancel,
+        cancel: &CancelToken,
     ) -> Result<()> {
         let mut target = PackReceiveTarget::File(&mut self.file);
         let mut pending = Vec::new();
@@ -907,7 +907,7 @@ mod tests {
             &mut Cursor::new(stream),
             &mut target,
             &mut rec,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("read");
 
@@ -970,7 +970,7 @@ mod tests {
             &mut Cursor::new(stream),
             &mut opt_target,
             &mut opt_rec,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
             &mut opt_pending,
             &mut opt_seen,
             &mut opt_scratch,
@@ -1037,7 +1037,7 @@ mod tests {
             &mut Cursor::new(wire),
             &mut target,
             &mut rec,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("receive");
         assert_eq!(out, pack);
@@ -1061,7 +1061,7 @@ mod tests {
             &mut Cursor::new(wire),
             &mut target,
             &mut rec,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("receive");
         assert_eq!(out.len(), 12);
@@ -1081,7 +1081,7 @@ mod tests {
             &mut Cursor::new(stream),
             &mut target,
             &mut ReceiveRecorder::default(),
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
             &mut pending,
             &mut seen,
             &mut scratch,
@@ -1165,7 +1165,7 @@ mod tests {
             .read_sideband(
                 &mut Cursor::new(stream),
                 &mut rec,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .expect_err("remote side-band error");
         assert!(

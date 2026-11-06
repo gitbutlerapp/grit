@@ -104,7 +104,7 @@ use crate::objects::{
     parse_commit, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry,
 };
 use crate::odb::Odb;
-use crate::progress::Cancel;
+use crate::progress::CancelToken;
 use crate::repo::{InitOptions, Repository};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};
 use crate::transport_path::redact_url_for_display;
@@ -1598,7 +1598,7 @@ pub fn materialize(
     repo_url: &str,
     work: &str,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<Materialized> {
     if dest.is_dir() && std::fs::read_dir(dest)?.next().is_some() {
         return Err(CheckoutError::DestinationNotEmpty(dest.to_path_buf()));

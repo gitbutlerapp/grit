@@ -14,9 +14,7 @@ use crate::config::ConfigSet;
 use crate::environment::Environment;
 use crate::error::Error;
 use crate::pkt_line::write_line_to_vec;
-use crate::progress::{
-    connect_cancel_arc, mirror_stack_cancel, Cancel, CancelToken, HttpWaitGuard, NeverCancel,
-};
+use crate::progress::{connect_cancel_arc, mirror_stack_cancel, CancelToken, HttpWaitGuard};
 use crate::remote::fetch::NoProgress;
 use crate::remote::transfer::FetchOptions;
 use crate::remote::{DefaultHttpClientFactory, Remote};
@@ -178,7 +176,7 @@ fn discover_cancels_while_info_refs_stalls() {
 
 #[test]
 fn mirror_stack_cancel_reflects_deadline_cancel() {
-    let cancel = DeadlineCancel(Instant::now() + Duration::from_millis(50));
+    let cancel = deadline_cancel_token(Instant::now() + Duration::from_millis(50));
     let watch = std::sync::atomic::AtomicBool::new(false);
     thread::sleep(Duration::from_millis(80));
     mirror_stack_cancel(&cancel, &watch);
@@ -188,13 +186,16 @@ fn mirror_stack_cancel_reflects_deadline_cancel() {
     );
 }
 
-/// Deadline-based [`Cancel`] without [`Cancel::shared_watch`].
-struct DeadlineCancel(Instant);
-
-impl Cancel for DeadlineCancel {
-    fn is_cancelled(&self) -> bool {
-        Instant::now() >= self.0
-    }
+fn deadline_cancel_token(deadline: Instant) -> CancelToken {
+    let token = CancelToken::new();
+    let cancel = token.clone();
+    thread::spawn(move || {
+        while Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        cancel.cancel();
+    });
+    token
 }
 
 #[test]
@@ -229,7 +230,7 @@ fn discover_cancels_with_deadline_cancel_without_shared_watch() {
                 }
             });
 
-            let cancel = DeadlineCancel(Instant::now() + Duration::from_millis(300));
+            let cancel = deadline_cancel_token(Instant::now() + Duration::from_millis(300));
             let url = format!("http://127.0.0.1:{port}/x.git");
             let transport = SmartHttpTransport::new(http_client_arc(UreqHttpClient::new()));
             let (stack_watch, _guard) = HttpWaitGuard::bind(&cancel);
@@ -295,7 +296,7 @@ fn remote_fetch_cancels_during_stalled_discovery_without_shared_watch() {
                 }
             });
 
-            let cancel = DeadlineCancel(Instant::now() + Duration::from_millis(300));
+            let cancel = deadline_cancel_token(Instant::now() + Duration::from_millis(300));
             let tmp = tempfile::tempdir().expect("tempdir");
             let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
             let url = format!("http://127.0.0.1:{port}/x.git");
@@ -424,7 +425,7 @@ fn remote_fetch_cancels_during_stalled_upload_pack_post_without_shared_watch() {
                 }
             });
 
-            let cancel = DeadlineCancel(Instant::now() + Duration::from_millis(300));
+            let cancel = deadline_cancel_token(Instant::now() + Duration::from_millis(300));
             let tmp = tempfile::tempdir().expect("tempdir");
             let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
             let url = format!("http://127.0.0.1:{port}/x.git");
@@ -481,7 +482,7 @@ fn stateless_upload_pack_post_wait_cancels_without_full_fetch() {
                 }
             });
 
-            let cancel = DeadlineCancel(Instant::now() + Duration::from_millis(300));
+            let cancel = deadline_cancel_token(Instant::now() + Duration::from_millis(300));
             let url = format!("http://127.0.0.1:{port}/x.git");
             let transport = SmartHttpTransport::new(http_client_arc(UreqHttpClient::new()));
             let (stack_watch, _guard) = HttpWaitGuard::bind(&cancel);
@@ -632,7 +633,7 @@ fn clone_times_out_on_low_speed_stall_without_cancel() {
                 ..CloneOptions::new(url, dest)
             },
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             Some(&factory),
         )
         .expect_err("low-speed stall must not succeed");
@@ -853,7 +854,7 @@ fn clone_aborts_on_silent_stall_with_low_speed_env_and_bundle_cache() {
                     ..CloneOptions::new(url, dest)
                 },
                 &mut NoProgress,
-                &NeverCancel,
+                &CancelToken::never(),
                 Some(&factory),
             )
             .expect_err("silent clone stall must fail");
@@ -895,7 +896,7 @@ fn remote_fetch_aborts_on_silent_stall_with_low_speed_env() {
                         ..FetchOptions::default()
                     },
                     &mut NoProgress,
-                    &NeverCancel,
+                    &CancelToken::never(),
                     Some(&DefaultHttpClientFactory::with_environment(
                         low_speed_test_env(),
                     )),
@@ -934,7 +935,7 @@ fn remote_fetch_aborts_on_headers_stall_with_low_speed_env() {
                         ..FetchOptions::default()
                     },
                     &mut NoProgress,
-                    &NeverCancel,
+                    &CancelToken::never(),
                     Some(&DefaultHttpClientFactory::with_environment(
                         low_speed_test_env(),
                     )),
@@ -954,7 +955,7 @@ fn remote_fetch_aborts_on_headers_stall_with_low_speed_env() {
 
 #[test]
 fn connect_operation_cancel_watch_observes_mirrored_deadline() {
-    let cancel = DeadlineCancel(Instant::now() - Duration::from_secs(1));
+    let cancel = deadline_cancel_token(Instant::now() - Duration::from_secs(1));
     let (watch, _guard) = HttpWaitGuard::bind(&cancel);
     mirror_stack_cancel(&cancel, watch.as_ref());
     let arc = connect_cancel_arc(&cancel, watch);

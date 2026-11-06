@@ -167,7 +167,7 @@ fn reword_author_only_keeps_message_and_date() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let new_b = plan
@@ -216,7 +216,7 @@ fn reword_author_and_message() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let new_b = plan.replacement(oids["b"]).expect("mapped");
@@ -437,7 +437,7 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
 
@@ -472,7 +472,7 @@ fn apply_reword(grit: &Repository, plan: &grit_lib::revwalk::history::RewritePla
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
 }

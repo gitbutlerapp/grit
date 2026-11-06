@@ -433,7 +433,7 @@ fn issue_2003_split_index_rm_mv_updates_index_for_git() {
             pathspec_sources: vec!["b.txt".into()],
             ..RemoveOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("rm b.txt");
 
@@ -456,7 +456,7 @@ fn issue_2003_split_index_rm_mv_updates_index_for_git() {
         "c.txt",
         "c2.txt",
         false,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("mv c.txt -> c2.txt");
     assert!(
@@ -491,7 +491,7 @@ fn issue_2003_split_index_rm_mv_many_files_status_matches_git() {
             pathspec_sources: vec!["f0030.txt".into()],
             ..RemoveOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("rm one tracked file");
     assert_index_matches_git(root, &repo);
@@ -501,7 +501,7 @@ fn issue_2003_split_index_rm_mv_many_files_status_matches_git() {
         "f0040.txt",
         "f0040-renamed.txt",
         false,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("mv");
     assert_index_matches_git(root, &repo);

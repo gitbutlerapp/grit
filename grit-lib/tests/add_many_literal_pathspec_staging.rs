@@ -76,7 +76,7 @@ fn stage_hundred_literal_paths_only_updates_those_files() {
         &repo,
         &opts,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage subset");
     assert_eq!(

@@ -11,7 +11,8 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest, HookPolicy};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -88,7 +89,7 @@ fn add_streams_big_file_into_a_pack_that_git_reads() {
         &open(root),
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
 
@@ -124,7 +125,7 @@ fn commit_auto_stage_streams_big_files_and_restages_changes() {
         &repo,
         &commit_req("add big"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(
@@ -146,7 +147,7 @@ fn commit_auto_stage_streams_big_files_and_restages_changes() {
         &repo,
         &commit_req("change big"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(pack_files(root).len(), 2);
@@ -173,7 +174,7 @@ fn big_file_with_a_clean_conversion_is_converted_like_git() {
         &open(root),
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
 
@@ -219,7 +220,7 @@ fn big_file_git_streamed_reads_back_clean_in_grit() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(model.unstaged.is_empty(), "{:?}", model.unstaged);
@@ -235,7 +236,8 @@ fn dry_run_hashes_big_file_without_storing_it() {
         dry_run: true,
         ..StageOptions::default()
     };
-    let outcome = stage(&open(root), &opts, &mut NullProgress, &NeverCancel).expect("dry run");
+    let outcome =
+        stage(&open(root), &opts, &mut NullProgress, &CancelToken::never()).expect("dry run");
     assert_eq!(outcome.added, vec!["big.txt".to_owned()]);
     assert!(pack_files(root).is_empty());
     assert_eq!(

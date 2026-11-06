@@ -9,7 +9,7 @@ use grit_lib::porcelain::merge::{
     integrate_branch, predict_merge, IntegrateBranchOutcome, MergePrediction,
     MergePredictionOptions,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -65,7 +65,7 @@ fn issue_2369_repo_merge_and_predict_match_git_merge_file() {
         theirs_oid,
         "theirs",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("integrate");
     assert!(

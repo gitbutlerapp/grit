@@ -188,7 +188,7 @@ mod tests {
     use crate::objects::{HashAlgo, NewCommit, ObjectKind};
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use crate::refs::store::{
         Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
     };
@@ -199,7 +199,7 @@ mod tests {
     use time::OffsetDateTime;
 
     fn commit_all(repo: &Repository, message: &str) {
-        stage_for_commit(repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_string();
         create_commit(
             repo,
@@ -216,7 +216,7 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
     }
@@ -228,7 +228,12 @@ mod tests {
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
         commit_all(&repo, "c");
         std::fs::write(repo.work_tree().unwrap().join("staged-only"), b"y").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &crate::progress::NeverCancel).expect("stage2");
+        stage_for_commit(
+            &repo,
+            &mut NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("stage2");
         let index = repo.load_index().expect("index");
         let staged = index
             .entries()
@@ -265,7 +270,8 @@ mod tests {
         let linked_repo = Repository::discover(Some(&linked_path), &RepositoryOptions::empty())
             .expect("open linked");
         std::fs::write(linked_path.join("linked-only.txt"), b"linked staged").unwrap();
-        stage_for_commit(&linked_repo, &mut NullProgress, &NeverCancel).expect("stage linked");
+        stage_for_commit(&linked_repo, &mut NullProgress, &CancelToken::never())
+            .expect("stage linked");
         let linked_index = linked_repo.load_index().expect("linked index");
         let linked_blob = linked_index
             .entries()
@@ -279,7 +285,7 @@ mod tests {
             b"main staged",
         )
         .unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage main");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage main");
         let main_index = repo.load_index().expect("main index");
         let main_blob = main_index
             .entries()
@@ -322,7 +328,7 @@ mod tests {
         let linked_repo = Repository::discover(Some(&linked_path), &RepositoryOptions::empty())
             .expect("open linked");
         std::fs::write(linked_path.join("s.txt"), b"staged only in linked worktree").unwrap();
-        stage_for_commit(&linked_repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(&linked_repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let blob = linked_repo
             .load_index()
             .expect("index")
@@ -534,7 +540,7 @@ mod tests {
             &repo,
             &FsckOptions::default().with_check_dangling(true),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(

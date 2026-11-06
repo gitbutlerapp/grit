@@ -42,7 +42,7 @@ fn push_local_rejects_moving_existing_lightweight_tag_without_force() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
     assert_eq!(outcome.results.len(), 1);
@@ -76,7 +76,7 @@ fn push_local_force_moves_existing_tag_and_marks_forced() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
@@ -109,7 +109,7 @@ fn push_local_identical_tag_is_up_to_date() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
     assert_eq!(outcome.results[0].status, PushRefStatus::UpToDate);
@@ -148,7 +148,7 @@ fn push_local_rejects_annotated_to_lightweight_on_same_commit_without_force() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
     assert_eq!(
@@ -207,7 +207,7 @@ fn push_local_rejects_diverged_tag_as_already_exists_not_non_ff() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
     assert_eq!(
@@ -241,7 +241,7 @@ fn push_local_branch_fast_forward_unchanged() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
     assert_eq!(outcome.results[0].status, PushRefStatus::UpToDate);

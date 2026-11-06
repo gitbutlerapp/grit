@@ -25,7 +25,7 @@ use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions, TrackMode};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefName;
 use grit_lib::refs::store::{
     Expected, FilesRefStore, FilesRefStoreConfig, MemoryRefStore, RawRef, RefStore, RefStoreError,
@@ -269,7 +269,7 @@ fn stage_and_commit(
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )?;
     let request = grit_test_support::commit_request(content, IDENT_TS);
     commit_with_scope(
@@ -277,7 +277,7 @@ fn stage_and_commit(
         &request,
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )?;
     Ok(())
 }

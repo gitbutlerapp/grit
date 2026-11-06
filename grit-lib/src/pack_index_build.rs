@@ -24,9 +24,7 @@ use crate::pack_delta_walk::{
 };
 use crate::pack_map::{PackData, ResidentBudget};
 use crate::pack_zlib::skip_zlib_at_with_scratch;
-use crate::progress::{
-    cancel_watch_arc, poll_cancel, poll_watch, Cancel, ProgressPhase, ProgressSink,
-};
+use crate::progress::{poll_cancel, poll_watch, CancelToken, ProgressPhase, ProgressSink};
 use crate::unpack_objects::{type_code_to_kind, PackIndexRecord, PackReader};
 use crate::zlib_inflate::ZlibInflateScratch;
 use std::collections::{HashSet, VecDeque};
@@ -39,7 +37,7 @@ const PROGRESS_POLL_EVERY: u64 = 32;
 
 /// Poll cancel handles during index-pack (main thread and worker loops).
 fn poll_index_build_cancel(
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
     progress: Option<&mut dyn ProgressSink>,
     watch: Option<&Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<()> {
@@ -199,7 +197,7 @@ pub(crate) fn build_mapped_pack_index(
     parallelism: Parallelism,
     verify_trailer: bool,
     progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<PackIndexBuild> {
     build_records(
         pack,
@@ -248,7 +246,7 @@ pub fn build_pack_index_records_with_progress(
     parallelism: Parallelism,
     verify_trailer: bool,
     progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<Vec<PackIndexRecord>> {
     build_records(
         pack,
@@ -273,13 +271,13 @@ fn build_records(
     parallelism: Parallelism,
     verify_trailer: bool,
     progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
     chain_limit: usize,
     resident: &ResidentBudget<'_>,
     source: PackBytes<'_>,
 ) -> Result<PackIndexBuild> {
     crate::trace::trace_span!("grit.pack.delta.resolve");
-    let cancel_watch = cancel.map(cancel_watch_arc);
+    let cancel_watch = cancel.map(|c| c.watch_arc());
     poll_index_build_cancel(cancel, None, cancel_watch.as_ref())?;
     let algo = odb.hash_algo();
     let threads = parallelism.threads();
@@ -380,7 +378,7 @@ fn scan_and_hash_wholes_serial(
     algo: HashAlgo,
     verify_trailer: bool,
     mut progress: Option<&mut PackIndexReporter<'_>>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
     cancel_watch: Option<&Arc<AtomicBool>>,
     resident: &ResidentBudget<'_>,
 ) -> Result<()> {
@@ -859,7 +857,7 @@ fn resolve_deltas(
     records: &mut Vec<PackIndexRecord>,
     mut progress: Option<&mut PackIndexReporter<'_>>,
     chain_limit: usize,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
     cancel_watch: Option<&Arc<AtomicBool>>,
 ) -> Result<Vec<ObjectId>> {
     if pending.deltas.is_empty() {

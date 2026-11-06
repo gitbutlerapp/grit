@@ -142,7 +142,7 @@ fn switch(repo: &Repository, mode: SwitchMode) -> grit_lib::porcelain::switch::S
             hooks: PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch")
 }
@@ -420,7 +420,7 @@ fn switch_dry_run_or_skip_runs_no_hook() {
             hooks: PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("dry run");
     assert!(outcome.hooks_run.is_empty());
@@ -433,7 +433,7 @@ fn switch_dry_run_or_skip_runs_no_hook() {
             hooks: PostOperationHooks::Skip,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch without hooks");
     assert!(outcome.hooks_run.is_empty());
@@ -467,7 +467,7 @@ fn merge(
         other,
         options,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge")
 }
@@ -592,7 +592,7 @@ fn amend_runs_post_rewrite_amend_after_post_commit() {
         &repo,
         &commit_request("amended", true),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("amend");
     assert_eq!(
@@ -612,7 +612,7 @@ fn amend_runs_post_rewrite_amend_after_post_commit() {
         &repo,
         &commit_request("next", false),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(outcome.hooks_run, vec![HookName::PostCommit]);
@@ -631,7 +631,7 @@ fn amend_without_post_rewrite_runs_only_post_commit() {
         &repo,
         &request,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("amend");
     assert_eq!(outcome.hooks_run, vec![HookName::PostCommit]);
@@ -686,7 +686,7 @@ fn rebase_runs_post_checkout_then_post_rewrite_with_pairs_in_order() {
         &repo,
         &rebase_onto(main, t2),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("rebase");
     let RebaseOutcome::Done { applied, .. } = outcome else {
@@ -720,7 +720,7 @@ fn fast_forward_rebase_runs_post_checkout_but_no_post_rewrite() {
         &repo,
         &rebase_onto(c2, c1),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("rebase");
     let RebaseOutcome::Done { applied, .. } = outcome else {
@@ -748,7 +748,7 @@ fn conflicted_rebase_runs_post_checkout_on_stop_and_post_rewrite_on_continue() {
         &repo,
         &opts,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("start");
     assert!(matches!(outcome, RebaseOutcome::Stopped(_)), "{outcome:?}");
@@ -760,7 +760,7 @@ fn conflicted_rebase_runs_post_checkout_on_stop_and_post_rewrite_on_continue() {
         &repo,
         &opts,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("continue");
     let RebaseOutcome::Done { applied, .. } = outcome else {
@@ -801,7 +801,7 @@ fn reword_runs_post_rewrite_without_post_checkout() {
         &plan,
         &apply_options(None),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     assert_eq!(applied.hooks_run, vec![HookName::PostRewrite]);
@@ -829,7 +829,7 @@ fn drop_leaves_dropped_commit_out_of_post_rewrite() {
         &plan,
         &apply_options(None),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let new_c3 = fx.oid("main");
@@ -863,7 +863,7 @@ fn skipped_rewrite_hooks_and_undo_run_nothing() {
             ..apply_options(Some("drop"))
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     assert!(applied.hooks_run.is_empty());

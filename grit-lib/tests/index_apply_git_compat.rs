@@ -9,7 +9,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
@@ -202,15 +201,20 @@ fn index_apply_keeps_worktree_dirty_in_status() {
          +index\n",
     );
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
-    apply_patch_to_index_and_write(&repo, &patch, &IndexApplyOptions::default(), &NeverCancel)
-        .unwrap();
+    apply_patch_to_index_and_write(
+        &repo,
+        &patch,
+        &IndexApplyOptions::default(),
+        &CancelToken::never(),
+    )
+    .unwrap();
 
     let mut progress = NullProgress;
     let st = status(
         &repo,
         &StatusOptions::default(),
         &mut progress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -245,8 +249,13 @@ fn index_apply_no_newline_preimage() {
     assert!(patch.contains("No newline"), "{patch}");
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
     let patches = parse(&patch);
-    apply_patch_to_index_and_write(&repo, &patches, &IndexApplyOptions::default(), &NeverCancel)
-        .unwrap();
+    apply_patch_to_index_and_write(
+        &repo,
+        &patches,
+        &IndexApplyOptions::default(),
+        &CancelToken::never(),
+    )
+    .unwrap();
     let entry = repo.index_handle().load().unwrap();
     let e = entry.get(b"f.txt", 0).expect("indexed");
     assert_eq!(repo.odb().read(&e.oid).unwrap().data, b"new\n");
@@ -310,7 +319,7 @@ fn index_apply_sha256_write_tree_roundtrip() {
         &repo,
         &parse(&patch),
         &IndexApplyOptions::default(),
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap();
     let grit_oid = grit_tree(&repo, &repo.index_handle().load().unwrap());
@@ -344,8 +353,13 @@ fn index_apply_git_diff_roundtrip_write_tree() {
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
     let patches = parse(&patch);
-    apply_patch_to_index_and_write(&repo, &patches, &IndexApplyOptions::default(), &NeverCancel)
-        .unwrap();
+    apply_patch_to_index_and_write(
+        &repo,
+        &patches,
+        &IndexApplyOptions::default(),
+        &CancelToken::never(),
+    )
+    .unwrap();
     let grit_oid = grit_tree(&repo, &repo.index_handle().load().unwrap());
 
     git(dir.path(), &["reset", "--hard", "HEAD"]);
@@ -366,7 +380,7 @@ fn index_apply_git_diff_roundtrip_write_tree() {
         &repo,
         &StatusOptions::default(),
         &mut progress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap();
     let git_p = String::from_utf8_lossy(&porcelain.stdout);

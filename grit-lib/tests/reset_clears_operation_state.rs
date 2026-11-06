@@ -19,7 +19,7 @@ use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
 };
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::{primary_in_progress_operation, resolve_head_for_repository};
 
@@ -105,7 +105,7 @@ fn conflicted_merge_repo() -> (tempfile::TempDir, Repository, ObjectId) {
         other,
         "o",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -141,7 +141,7 @@ fn conflicted_pick_repo() -> (tempfile::TempDir, Repository, ObjectId) {
         &repo,
         &pick_req(vec![pick]),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
@@ -169,7 +169,7 @@ fn reset_head(repo: &Repository, head: ObjectId, mode: ResetMode) {
         repo,
         &ResetOptions::new(head, mode, test_ident(), "reset"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset");
 }
@@ -184,7 +184,7 @@ fn hard_reset_to_head_after_conflicted_merge_clears_state() {
         &repo,
         &commit_req("oops"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -217,7 +217,7 @@ fn hard_reset_to_head_after_conflicted_pick_clears_state() {
         &repo,
         &commit_req("oops"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(err, Error::NothingToCommit), "{err}");
@@ -248,7 +248,7 @@ fn grit_reset_matches_git_porcelain_after_conflicted_merge() {
         other,
         "o",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -376,7 +376,7 @@ fn assert_invalid_reset_preserves_operation(root: &Path, repo: &Repository, head
                 repo,
                 &opts,
                 &mut NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .unwrap_err();
             assert!(matches!(err, Error::InvalidSignature(_)), "{err:?}");

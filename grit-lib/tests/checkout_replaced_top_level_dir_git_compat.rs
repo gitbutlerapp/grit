@@ -9,7 +9,8 @@ use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -30,7 +31,7 @@ fn switch_existing(
             hooks: PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch")
 }
@@ -264,7 +265,7 @@ fn switch_detach_replaced_src_tree_matches_git_after_issue_2336_shape() {
             hooks: PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch detach");
 
@@ -333,7 +334,7 @@ fn merge_fast_forward_twenty_dir_to_file_replacements_is_clean() {
         t2_oid,
         "t2",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("ff merge");
     assert!(matches!(
@@ -428,7 +429,7 @@ fn hard_reset_large_mixed_dir_to_file_and_symlink_replacements() {
         &to_tree,
         &from_tree,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("hard reset to main tree");
     assert_index_matches_tree(tmp.path(), &from_tree);

@@ -1,6 +1,7 @@
 // API docs: https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/fn.stage.html
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
@@ -12,7 +13,7 @@ fn main() -> grit_lib::error::Result<()> {
         &repo,
         &opts,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )?;
     println!(
         "staged {} paths ({} new, {} modified, {} removed)",

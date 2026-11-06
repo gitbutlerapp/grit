@@ -6,7 +6,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
@@ -67,7 +67,7 @@ fn handle_stash_roundtrip_with_git() {
                 mode: StashMode::default(),
             },
             &mut grit_lib::progress::NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("push")
         .expect("changes");
@@ -104,7 +104,7 @@ fn git_stash_applies_via_handle() {
                 ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("apply");
     assert!(!conflicts.has_conflicts());
@@ -379,7 +379,7 @@ fn handle_fetch_push_local_bare_remote() {
             }],
             PushOptions::default(),
             &mut progress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("push");
@@ -406,7 +406,13 @@ fn handle_fetch_push_local_bare_remote() {
     fetch_opts.remote_name = Some("origin".into());
     fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
     repo.remotes()
-        .fetch(&remote, fetch_opts, &mut progress, &NeverCancel, None)
+        .fetch(
+            &remote,
+            fetch_opts,
+            &mut progress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("fetch");
 
     let after: ObjectId = git_cmd(consumer.path(), &["rev-parse", "refs/remotes/origin/main"])

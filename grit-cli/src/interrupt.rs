@@ -1,4 +1,4 @@
-//! Cancel signals as a library [`Cancel`] signal.
+//! Cancel signals as a library [`CancelToken`] handle.
 //!
 //! Without handlers, `SIGINT`, `SIGTERM`, and `SIGHUP` on Unix (or `CTRL_C_EVENT` /
 //! `CTRL_BREAK_EVENT` on a Windows console) kill the process mid-write, so library rollbacks
@@ -11,7 +11,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 
-use grit_lib::progress::{Cancel, CancelToken};
+use grit_lib::progress::CancelToken;
 
 static PROCESS_CANCEL: LazyLock<CancelToken> = LazyLock::new(CancelToken::new);
 
@@ -97,7 +97,7 @@ extern "system" fn on_console_ctrl(ctrl_type: u32) -> windows_sys::core::BOOL {
 }
 
 impl InterruptCancel {
-    /// Route the next `SIGINT`, `SIGTERM`, or `SIGHUP` to [`Cancel::is_cancelled`] instead of
+    /// Route the next `SIGINT`, `SIGTERM`, or `SIGHUP` to [`CancelToken::is_cancelled`] instead of
     /// terminating.
     #[cfg(unix)]
     pub fn install() -> Self {
@@ -120,7 +120,7 @@ impl InterruptCancel {
         }
     }
 
-    /// Route the next console Ctrl+C or Ctrl+Break to [`Cancel::is_cancelled`] instead of
+    /// Route the next console Ctrl+C or Ctrl+Break to [`CancelToken::is_cancelled`] instead of
     /// terminating.
     ///
     /// When the process has no console the registration still succeeds and simply never
@@ -141,12 +141,6 @@ impl InterruptCancel {
     #[cfg(not(any(unix, windows)))]
     pub fn install() -> Self {
         Self {}
-    }
-}
-
-impl Cancel for InterruptCancel {
-    fn is_cancelled(&self) -> bool {
-        PROCESS_CANCEL.is_cancelled()
     }
 }
 
@@ -228,18 +222,19 @@ mod tests {
     fn first_signal_cancels_a_duplicate_is_absorbed_and_drop_restores(signal: libc::c_int) {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let before = current_handler(signal);
-        let cancel = InterruptCancel::install();
-        assert!(!cancel.is_cancelled());
+        let _cancel = InterruptCancel::install();
+        let token = process_cancel_token();
+        assert!(!token.is_cancelled());
         // SAFETY: the installed handler only sets atomic flags for these signals.
         unsafe {
             libc::raise(signal);
         }
-        assert!(cancel.is_cancelled());
+        assert!(token.is_cancelled());
         // SAFETY: as above; a duplicate right after the first is absorbed.
         unsafe {
             libc::raise(signal);
         }
-        assert!(cancel.is_cancelled());
+        assert!(token.is_cancelled());
         let ours = on_interrupt as extern "C" fn(libc::c_int) as libc::sighandler_t;
         assert_eq!(
             current_handler(signal),
@@ -276,29 +271,28 @@ mod tests {
         };
 
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-        let cancel = InterruptCancel::install();
-        assert!(!cancel.is_cancelled());
+        let _cancel = InterruptCancel::install();
+        let token = process_cancel_token();
+        assert!(!token.is_cancelled());
         assert_eq!(on_console_ctrl(CTRL_CLOSE_EVENT), 0);
-        assert!(
-            !cancel.is_cancelled(),
-            "closing the console is not a cancel"
-        );
+        assert!(!token.is_cancelled(), "closing the console is not a cancel");
         assert_eq!(on_console_ctrl(CTRL_C_EVENT), 1, "Ctrl+C is handled");
-        assert!(cancel.is_cancelled());
+        assert!(token.is_cancelled());
         assert_eq!(
             on_console_ctrl(CTRL_BREAK_EVENT),
             1,
             "a duplicate is absorbed"
         );
-        drop(cancel);
+        drop(_cancel);
 
-        let cancel = InterruptCancel::install();
-        assert!(!cancel.is_cancelled(), "install starts uncancelled");
+        let _cancel = InterruptCancel::install();
+        let token = process_cancel_token();
+        assert!(!token.is_cancelled(), "install starts uncancelled");
         assert_eq!(
             on_console_ctrl(CTRL_BREAK_EVENT),
             1,
             "Ctrl+Break is handled"
         );
-        assert!(cancel.is_cancelled());
+        assert!(token.is_cancelled());
     }
 }

@@ -3,7 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, DEFAULT_ORPHAN_LIMIT};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::resolve_head_for_repository;
@@ -93,7 +93,7 @@ fn reset_mixed_and_hard_at_head_keep_assume_unchanged() {
         &repo,
         &reset_opts(head, ResetMode::Mixed),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("mixed reset");
     assert_b_assume_unchanged(root);
@@ -101,7 +101,7 @@ fn reset_mixed_and_hard_at_head_keep_assume_unchanged() {
         &repo,
         &reset_opts(head, ResetMode::Hard),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("hard reset at head");
     assert_b_assume_unchanged(root);
@@ -134,7 +134,7 @@ fn reset_hard_parent_same_blob_keeps_assume_unchanged_edit() {
         &repo,
         &reset_opts(init_oid, ResetMode::Hard),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("hard reset to init");
     assert_b_assume_unchanged(root);
@@ -146,7 +146,7 @@ fn reset_hard_parent_same_blob_keeps_assume_unchanged_edit() {
         &repo,
         &reset_opts(init_oid, ResetMode::Mixed),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("mixed reset to init");
     assert_b_assume_unchanged(root);
@@ -167,7 +167,7 @@ fn reset_mixed_cross_blob_drops_assume_unchanged_keeps_skip_worktree() {
         &repo,
         &reset_opts(head, ResetMode::Mixed),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("mixed reset to init");
     let tags = git_ls_files_verbose_map(root);
@@ -197,7 +197,7 @@ fn fast_forward_merge_other_file_keeps_assume_unchanged() {
         other_oid,
         "other",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(
@@ -212,7 +212,7 @@ fn stash_push_pop_unrelated_file_keeps_assume_unchanged() {
     let (dir, repo, _head) = seed_assume_unchanged_repo();
     let root = dir.path();
     repo.stash()
-        .push(&stash_push_opts(), &mut NullProgress, &NeverCancel)
+        .push(&stash_push_opts(), &mut NullProgress, &CancelToken::never())
         .expect("stash push")
         .expect("had stash");
     assert_b_assume_unchanged(root);
@@ -221,7 +221,7 @@ fn stash_push_pop_unrelated_file_keeps_assume_unchanged() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("stash pop");
     assert_b_assume_unchanged(root);

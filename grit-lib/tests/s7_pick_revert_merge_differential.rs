@@ -121,7 +121,7 @@ fn replay_pick(repo: &Repository, commit: ObjectId) -> ReplayOutcome {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("replay pick")
 }
@@ -181,7 +181,7 @@ fn s7_differential_revert_matches_git() {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("revert");
 
@@ -226,7 +226,7 @@ fn s7_differential_merge_matches_git() {
         ObjectId::from_hex(&feature).expect("feature"),
         "feature",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
 
@@ -273,7 +273,7 @@ fn s7_differential_pick_refuses_dirty_worktree() {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("dirty");
     assert!(

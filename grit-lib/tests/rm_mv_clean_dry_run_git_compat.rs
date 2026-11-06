@@ -94,7 +94,7 @@ fn rm_dry_run_reports_same_paths_and_changes_nothing() {
             dry_run: true,
             ..Default::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("dry rm");
 
@@ -125,7 +125,7 @@ fn rm_ignore_unmatch_succeeds_on_missing() {
             ignore_unmatch: true,
             ..Default::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("ignore unmatch");
     assert!(outcome.removed.is_empty());
@@ -151,7 +151,7 @@ fn move_paths_multi_source_requires_existing_directory() {
             force: false,
             dry_run: false,
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("multi-source into missing dir");
     assert!(
@@ -180,7 +180,7 @@ fn move_paths_multi_source_into_dir_git_status_agrees() {
             force: false,
             dry_run: false,
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("mv");
 
@@ -216,7 +216,7 @@ fn move_paths_dry_run_changes_nothing() {
             force: false,
             dry_run: true,
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("dry mv");
     assert_eq!(outcome.moves.len(), 1);
@@ -247,7 +247,7 @@ fn move_paths_validates_all_before_moving() {
             force: false,
             dry_run: false,
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("untracked second source should block the batch");
     assert!(
@@ -406,7 +406,7 @@ fn move_paths_rejects_duplicate_destinations_even_with_force() {
             force: true,
             dry_run: false,
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("duplicate basename targets must fail");
     assert!(

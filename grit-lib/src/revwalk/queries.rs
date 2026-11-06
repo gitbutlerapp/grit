@@ -784,7 +784,7 @@ mod tests {
     fn repo_with_commits(count: usize) -> (tempfile::TempDir, Repository) {
         use crate::ident::Signature;
         use crate::porcelain::commit::{create_commit, CommitRequest};
-        use crate::progress::{NeverCancel, NullProgress};
+        use crate::progress::{CancelToken, NullProgress};
         use crate::repo::{InitOptions, Repository};
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
@@ -795,7 +795,7 @@ mod tests {
                 Some(Signature::new("A", "a@example.com", repo.identity_now()).expect("author"));
             req.committer =
                 Some(Signature::new("C", "c@example.com", repo.identity_now()).expect("committer"));
-            create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+            create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
         }
         (dir, repo)
     }
@@ -827,7 +827,7 @@ mod tests {
     fn commits_stream_keeps_commits_through_their_subjects() {
         use crate::ident::Signature;
         use crate::porcelain::commit::{create_commit, CommitRequest};
-        use crate::progress::{NeverCancel, NullProgress};
+        use crate::progress::NullProgress;
         use crate::repo::InitOptions;
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
@@ -839,7 +839,7 @@ mod tests {
                 Some(Signature::new("A", "a@example.com", repo.identity_now()).expect("author"));
             req.committer =
                 Some(Signature::new("C", "c@example.com", repo.identity_now()).expect("committer"));
-            create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+            create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
         }
         let stream = |extent| -> Vec<(ObjectId, Vec<u8>)> {
             let walk = RevWalkListOptions {

@@ -31,7 +31,7 @@ use crate::porcelain::pathspec_match::{
     positive_spec_matches_any_entries, PathspecMatchEntry, RepositoryPathspecFilter,
 };
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
-use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
 use crate::state::resolve_head_for_repository;
 use crate::worktree_rules::WorktreeRules;
@@ -114,7 +114,7 @@ pub fn restore_paths(
     repo: &Repository,
     opts: &RestoreOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RestoreOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
@@ -139,7 +139,7 @@ pub(crate) fn restore_paths_with_lock(
     lock: &mut IndexLock,
     mut index: Index,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RestoreOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let pathspec_ctx = repo.pathspec_match_context();
@@ -733,7 +733,7 @@ struct WorktreeRestoreContext<'a> {
     outcome: &'a mut RestoreOutcome,
     index_dirty: &'a mut bool,
     progress: &'a mut dyn ProgressSink,
-    cancel: &'a dyn Cancel,
+    cancel: &'a CancelToken,
 }
 
 /// Ignorecase collision cleanup planned once per work-tree restore pass (issue #2522).
@@ -1331,7 +1331,7 @@ mod tests {
     use super::*;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::NullProgress;
     use crate::repo::{init_repository, Repository};
     use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
     use crate::RefStorageFormat;
@@ -1408,7 +1408,7 @@ mod tests {
                 remerge: None,
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("restore");
 
@@ -1424,7 +1424,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert!(st.unstaged.is_empty(), "{st:?}");
@@ -1482,7 +1482,8 @@ mod tests {
     #[test]
     fn restore_from_index_refuses_unmerged_path() {
         let (dir, repo) = conflicted_repo();
-        let err = restore_paths(&repo, &opts("f"), &mut NullProgress, &NeverCancel).unwrap_err();
+        let err =
+            restore_paths(&repo, &opts("f"), &mut NullProgress, &CancelToken::never()).unwrap_err();
         assert!(
             matches!(&err, Error::RestorePathUnmerged { paths } if paths == &["f"]),
             "{err:?}"
@@ -1497,7 +1498,8 @@ mod tests {
     #[test]
     fn restore_dot_with_unmerged_path_writes_nothing() {
         let (dir, repo) = conflicted_repo();
-        let err = restore_paths(&repo, &opts("."), &mut NullProgress, &NeverCancel).unwrap_err();
+        let err =
+            restore_paths(&repo, &opts("."), &mut NullProgress, &CancelToken::never()).unwrap_err();
         assert!(matches!(err, Error::RestorePathUnmerged { .. }), "{err:?}");
         assert_eq!(std::fs::read(dir.path().join("g")).expect("g"), b"edited\n");
     }
@@ -1514,7 +1516,7 @@ mod tests {
                     ..opts(pathspec)
                 },
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .unwrap_err();
             assert!(
@@ -1535,8 +1537,8 @@ mod tests {
     #[test]
     fn restore_merged_path_beside_unmerged_one_succeeds() {
         let (dir, repo) = conflicted_repo();
-        let outcome =
-            restore_paths(&repo, &opts("g"), &mut NullProgress, &NeverCancel).expect("restore g");
+        let outcome = restore_paths(&repo, &opts("g"), &mut NullProgress, &CancelToken::never())
+            .expect("restore g");
         assert_eq!(outcome.restored, vec!["g".to_string()]);
         assert_eq!(std::fs::read(dir.path().join("g")).expect("g"), b"g\n");
     }
@@ -1555,7 +1557,7 @@ mod tests {
                     ..opts("f")
                 },
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("restore side");
             assert_eq!(std::fs::read(dir.path().join("f")).expect("f"), want);
@@ -1567,7 +1569,7 @@ mod tests {
                 ..opts("f")
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("restore --merge");
         let merged = std::fs::read_to_string(dir.path().join("f")).expect("f");
@@ -1664,7 +1666,7 @@ mod tests {
                 ..opts("sub")
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("restore theirs");
 

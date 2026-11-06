@@ -13,7 +13,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diff::stat_matches;
 use grit_lib::index::Index;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
@@ -59,7 +59,7 @@ fn status_trusts_git_refreshed_index_without_rehashing() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status on git-refreshed index");
     assert!(
@@ -81,7 +81,7 @@ fn status_trusts_git_refreshed_index_without_rehashing() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("second status");
     let second_elapsed = second_start.elapsed();
@@ -131,7 +131,7 @@ fn refreshed_index_matches_git_ls_files_debug() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
 
@@ -186,7 +186,8 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
 
     let opts = StatusOptions::default();
     let first_start = Instant::now();
-    let model = status(&grit_repo, &opts, &mut NullProgress, &NeverCancel).expect("first status");
+    let model =
+        status(&grit_repo, &opts, &mut NullProgress, &CancelToken::never()).expect("first status");
     let first_elapsed = first_start.elapsed();
     assert!(
         model.unstaged.is_empty(),
@@ -223,7 +224,7 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
 
     let second_start = Instant::now();
     let _second =
-        status(&grit_repo, &opts, &mut NullProgress, &NeverCancel).expect("second status");
+        status(&grit_repo, &opts, &mut NullProgress, &CancelToken::never()).expect("second status");
     let second_elapsed = second_start.elapsed();
 
     assert!(
@@ -290,7 +291,7 @@ fn status_succeeds_when_index_lock_held_after_touch() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit status must succeed when index.lock blocks refresh write");
 
@@ -363,7 +364,7 @@ fn status_on_racy_git_index_verifies_content_once() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("first status on racy git index");
     let first_elapsed = first_start.elapsed();
@@ -383,7 +384,7 @@ fn status_on_racy_git_index_verifies_content_once() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("second status");
     let second_elapsed = second_start.elapsed();
@@ -461,7 +462,7 @@ fn status_on_git_created_sparse_index_after_touch() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status must succeed on Git sparse index after mtime-only touches");
 
@@ -531,7 +532,8 @@ fn status_deep_linear_tree_timing_oracle_once() {
         .expect("index mtime");
 
     let first_start = Instant::now();
-    let first = status(&grit_repo, &opts, &mut NullProgress, &NeverCancel).expect("first status");
+    let first =
+        status(&grit_repo, &opts, &mut NullProgress, &CancelToken::never()).expect("first status");
     let first_elapsed = first_start.elapsed();
     assert!(first.unstaged.is_empty());
     assert!(first.untracked.is_empty());
@@ -542,7 +544,8 @@ fn status_deep_linear_tree_timing_oracle_once() {
         .expect("index mtime");
 
     let second_start = Instant::now();
-    let second = status(&grit_repo, &opts, &mut NullProgress, &NeverCancel).expect("second status");
+    let second =
+        status(&grit_repo, &opts, &mut NullProgress, &CancelToken::never()).expect("second status");
     let second_elapsed = second_start.elapsed();
     assert!(second.unstaged.is_empty());
 
@@ -694,7 +697,7 @@ fn status_with_git_index_file_stat_refresh_does_not_rewrite_default_index() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
 
@@ -806,7 +809,7 @@ fn status_on_racy_parallel_index_reports_same_size_stat_match_edit() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status on racy parallel index");
     assert!(
@@ -873,7 +876,7 @@ fn status_on_racy_git_index_with_large_blobs_persists_and_warms() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("first status on racy large index");
     let first_elapsed = first_start.elapsed();
@@ -894,7 +897,7 @@ fn status_on_racy_git_index_with_large_blobs_persists_and_warms() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("second status");
     let second_elapsed = second_start.elapsed();

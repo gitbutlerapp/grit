@@ -24,7 +24,7 @@ use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, Obje
 use crate::odb::store::{ObjectStore, WritableObjectStore};
 use crate::odb::{Odb, WriteOptions};
 use crate::pack::{decode_pack_object_size_varint, decode_pack_object_size_varint_from_first};
-use crate::progress::{poll_cancel, Cancel, NullProgress, ProgressPhase, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use crate::zlib_inflate::ZlibInflateScratch;
 use flate2::read::ZlibDecoder;
 use flate2::{Decompress, FlushDecompress, Status};
@@ -513,7 +513,7 @@ pub fn ingest_pack_into_with_progress(
     bases: &dyn ObjectStore,
     opts: &UnpackOptions,
     progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<IngestedObjects> {
     match unpack_into(
         reader,
@@ -541,7 +541,7 @@ pub(crate) fn ingest_pack_into_odb(
     odb: &Odb,
     opts: &UnpackOptions,
     progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<IngestedObjects> {
     match unpack_into(reader, odb, opts, progress, cancel, None) {
         Ok(unpacked) => {
@@ -575,7 +575,7 @@ impl Unpacked {
 
 fn poll_unpack_cancel(
     progress: &mut Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<()> {
     let Some(cancel) = cancel else {
         return Ok(());
@@ -591,7 +591,7 @@ fn unpack_into<S: UnpackSink + ?Sized>(
     sink: &S,
     opts: &UnpackOptions,
     mut progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
     promised: Option<PromisedReference<'_>>,
 ) -> Result<Unpacked> {
     /// Blobs larger than this may stream straight to disk without caching payload bytes.

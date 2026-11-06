@@ -5,7 +5,7 @@ use crate::porcelain::workspace_snapshot::{
     capture_workspace_snapshot, pin_workspace_snapshot, restore_workspace_snapshot,
     unpin_workspace_snapshot, WorkspaceCaptureOptions, WorkspaceRestoreOptions, WorkspaceSnapshot,
 };
-use crate::progress::{Cancel, ProgressSink};
+use crate::progress::{CancelToken, ProgressSink};
 use crate::repo::Repository;
 
 /// Capture and restore full workspace state (index stages, worktree, refs, operation sentinels).
@@ -44,7 +44,7 @@ impl<'repo> RepositoryWorkspaceSnapshot<'repo> {
         snapshot: &WorkspaceSnapshot,
         options: &WorkspaceRestoreOptions,
         progress: &mut dyn ProgressSink,
-        cancel: &dyn Cancel,
+        cancel: &CancelToken,
     ) -> Result<()> {
         restore_workspace_snapshot(self.repo, snapshot, options, progress, cancel)
     }

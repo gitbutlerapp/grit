@@ -180,7 +180,7 @@ pub fn reset_to_commit(
     repo: &Repository,
     opts: &ResetOptions,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<ResetOutcome> {
     let (previous, head, preview) = plan_reset(repo, opts, opts.dry_run)?;
     let ref_label = ref_label_for_head(&head);
@@ -285,7 +285,7 @@ fn apply_reset_worktree(
     opts: &ResetOptions,
     previous: ObjectId,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<()> {
     let target_tree = commit_tree_oid(repo, &opts.target)?;
     match opts.mode {
@@ -445,7 +445,7 @@ mod tests {
     use crate::index::Index;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::NullProgress;
     use crate::repo::{init_repository, Repository};
     use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
     use crate::RefStorageFormat;
@@ -577,7 +577,7 @@ mod tests {
             &repo,
             &reset_opts(resolved, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset to tag");
         assert_eq!(
@@ -601,7 +601,7 @@ mod tests {
             &repo,
             &reset_opts(tree, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("tree");
         assert!(
@@ -626,7 +626,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Mixed),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -669,7 +669,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Mixed),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -677,7 +677,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert!(st.staged.is_empty(), "index should match HEAD tree");
@@ -699,7 +699,7 @@ mod tests {
             &repo,
             &reset_opts(c2, ResetMode::Mixed),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset at HEAD");
 
@@ -710,7 +710,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert!(st.unstaged.is_empty(), "worktree matches HEAD after reset");
@@ -729,7 +729,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Mixed),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset back");
 
@@ -737,7 +737,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         let unstaged: Vec<_> = st.unstaged.iter().map(|e| e.path()).collect();
@@ -760,7 +760,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -784,7 +784,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -797,7 +797,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert!(st.staged.is_empty());
@@ -835,7 +835,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -844,7 +844,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert!(st.staged.is_empty());
@@ -897,7 +897,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -916,7 +916,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert!(st.staged.is_empty());
@@ -1004,7 +1004,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -1017,7 +1017,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert!(st.staged.is_empty());
@@ -1079,7 +1079,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -1165,7 +1165,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -1191,7 +1191,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert!(st.staged.is_empty(), "{st:?}");
@@ -1229,7 +1229,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("bare");
         assert!(matches!(err, Error::PathError(_)));
@@ -1257,7 +1257,7 @@ mod tests {
             &repo,
             &opts,
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("dry-run");
         assert!(outcome.dry_run);
@@ -1322,7 +1322,7 @@ mod tests {
             &repo,
             &opts,
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("keep dry-run");
         assert_eq!(outcome.would_block, ["f", "u"]);
@@ -1379,7 +1379,7 @@ mod tests {
                 &repo,
                 &reset_opts(c1, mode),
                 &mut crate::progress::NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .expect("reset");
             assert_eq!(
@@ -1413,7 +1413,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Soft),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("move main back");
         refs::write_ref(&repo.git_dir(), "HEAD", &c3).expect("detach at c3");
@@ -1470,7 +1470,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Keep),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("keep");
         assert!(matches!(err, Error::IndexUnmerged));
@@ -1509,7 +1509,7 @@ mod tests {
             &repo,
             &opts,
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("bare dry-run hard");
         assert!(matches!(err, Error::PathError(_)));
@@ -1548,7 +1548,7 @@ mod tests {
             &repo,
             &reset_opts(c2, ResetMode::Mixed),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
         assert_eq!(outcome.orphaned_total, 0);
@@ -1659,7 +1659,7 @@ mod tests {
             &repo,
             &reset_opts(target, ResetMode::Soft),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("soft reset");
         assert_eq!(outcome.orphaned_total, 2);
@@ -1801,7 +1801,8 @@ mod tests {
             let mut opts = reset_opts(ObjectId::from_hex(target).expect("oid"), ResetMode::Soft);
             opts.identity = "R <r@r> 1700000000 -0030".parse().expect("identity");
             opts.message = message.to_owned();
-            reset_to_commit(&open(), &opts, &mut NullProgress, &NeverCancel).expect("reset")
+            reset_to_commit(&open(), &opts, &mut NullProgress, &CancelToken::never())
+                .expect("reset")
         };
         let line = |old: &str, new: &str, message: &str| {
             format!("{old} {new} R <r@r> 1700000000 -0030\t{message}\n").into_bytes()
@@ -1999,7 +2000,7 @@ mod tests {
             &repo,
             &reset_opts(older, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset to older");
         let probe_after_first = worktree_metadata_probe_count();
@@ -2007,7 +2008,7 @@ mod tests {
             &repo,
             &reset_opts(newer, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset to newer");
         let probe_count = worktree_metadata_probe_count();
@@ -2089,14 +2090,14 @@ mod tests {
             &repo,
             &reset_opts(older, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset to older");
         reset_to_commit(
             &repo,
             &reset_opts(newer, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset to newer");
         assert_eq!(
@@ -2152,7 +2153,7 @@ mod tests {
             &repo,
             &reset_opts(older, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset to older");
         let index = repo.load_index().expect("index");
@@ -2170,7 +2171,7 @@ mod tests {
             &repo,
             &reset_opts(newer, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset to newer");
         assert_eq!(
@@ -2211,7 +2212,7 @@ mod tests {
             &repo,
             &reset_opts(older, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset");
         assert_eq!(
@@ -2229,7 +2230,7 @@ mod tests {
     #[test]
     fn cancelled_wide_hard_reset_restores_racy_same_size_worktree_bytes() {
         use crate::error::Error;
-        use crate::progress::{Cancel, CancelToken, ProgressPhase, ProgressSink};
+        use crate::progress::{CancelToken, ProgressPhase, ProgressSink};
         use crate::test_support::counters::{
             checkout_spool_probe_count, reset_checkout_spool_probe,
         };
@@ -2256,12 +2257,6 @@ mod tests {
                 if self.seen >= self.limit {
                     self.cancel.cancel();
                 }
-            }
-        }
-
-        impl Cancel for CancelAfterCheckout {
-            fn is_cancelled(&self) -> bool {
-                self.cancel.is_cancelled()
             }
         }
 
@@ -2394,7 +2389,7 @@ mod tests {
             &repo,
             &reset_opts(trimmed, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset");
         let probe_count = worktree_metadata_probe_count();
@@ -2460,7 +2455,7 @@ mod tests {
             &repo,
             &reset_opts(head, ResetMode::Mixed),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("mixed reset");
         metrics.set_blob_counting(false);
@@ -2500,7 +2495,7 @@ mod tests {
             &repo,
             &reset_opts(trimmed, ResetMode::Mixed),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("mixed reset");
 
@@ -2534,7 +2529,7 @@ mod tests {
             &repo,
             &reset_opts(trimmed, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset");
 
@@ -2566,7 +2561,7 @@ mod tests {
             &repo,
             &reset_opts(c1, ResetMode::Mixed),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
 
@@ -2609,7 +2604,7 @@ mod tests {
             &repo,
             &reset_opts(trimmed, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset");
 
@@ -2643,7 +2638,7 @@ mod tests {
             &repo,
             &reset_opts(trimmed, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset");
 
@@ -2724,7 +2719,7 @@ mod tests {
             &repo,
             &reset_opts(head, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset");
 
@@ -2773,7 +2768,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("grit refuses the switch too");
         assert!(
@@ -2803,7 +2798,7 @@ mod tests {
             &repo,
             &reset_opts(trimmed, ResetMode::Hard),
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("hard reset");
 

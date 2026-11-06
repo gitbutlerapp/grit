@@ -1,7 +1,7 @@
 //! Clone honours cancellation during the post-fetch checkout phase.
 
 use grit_lib::error::Error;
-use grit_lib::progress::{Cancel, CancelToken, ProgressPhase, ProgressSink};
+use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::remote::clone::{cleanup_failed_clone, clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::Progress;
 use std::path::Path;

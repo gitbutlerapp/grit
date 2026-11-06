@@ -17,7 +17,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
 use tempfile::TempDir;
@@ -174,7 +175,7 @@ fn stash_push_with_held_index_lock_keeps_edits() {
         repo.stash().push(
             &stash_opts(StashMode::All, false, &[]),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
     });
 
@@ -183,7 +184,7 @@ fn stash_push_with_held_index_lock_keeps_edits() {
         .push(
             &stash_opts(StashMode::All, false, &[]),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("push")
         .expect("something to stash");
@@ -207,7 +208,7 @@ fn stash_push_untracked_with_held_index_lock_keeps_untracked_files() {
         repo.stash().push(
             &stash_opts(StashMode::All, true, &[]),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
     });
 
@@ -215,7 +216,7 @@ fn stash_push_untracked_with_held_index_lock_keeps_untracked_files() {
         .push(
             &stash_opts(StashMode::All, true, &[]),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("push")
         .expect("something to stash");
@@ -245,7 +246,7 @@ fn stash_push_modes_with_held_index_lock_change_nothing() {
             repo.stash().push(
                 &stash_opts(mode, false, pathspecs),
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
         });
 
@@ -253,7 +254,7 @@ fn stash_push_modes_with_held_index_lock_change_nothing() {
             .push(
                 &stash_opts(mode, false, pathspecs),
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("push")
             .expect("something to stash");
@@ -275,7 +276,7 @@ fn stash_apply_with_held_index_lock_changes_nothing() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
     });
 
@@ -284,7 +285,7 @@ fn stash_apply_with_held_index_lock_changes_nothing() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("apply");
     assert_eq!(read(root, "a.txt"), "precious\n");
@@ -302,14 +303,14 @@ fn hard_reset_with_held_index_lock_changes_nothing() {
 
     let opts = ResetOptions::new(head, ResetMode::Hard, identity(), "reset: moving to HEAD");
     assert_refused_by_foreign_lock(root, || {
-        reset_to_commit(&repo, &opts, &mut NullProgress, &NeverCancel)
+        reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never())
     });
     assert_eq!(
         git(root, &["status", "--porcelain"]),
         " M a.txt\nA  n.txt\n"
     );
 
-    reset_to_commit(&repo, &opts, &mut NullProgress, &NeverCancel).expect("reset");
+    reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("reset");
     assert!(!root.join("n.txt").exists());
     assert_eq!(read(root, "a.txt"), "base\n");
     assert_eq!(git(root, &["status", "--porcelain"]), "");
@@ -328,10 +329,10 @@ fn hard_reset_to_other_commit_with_held_index_lock_changes_nothing() {
     );
 
     assert_refused_by_foreign_lock(root, || {
-        reset_to_commit(&repo, &opts, &mut NullProgress, &NeverCancel)
+        reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never())
     });
 
-    reset_to_commit(&repo, &opts, &mut NullProgress, &NeverCancel).expect("reset");
+    reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("reset");
     assert_eq!(rev(root, "HEAD"), target);
     assert_eq!(read(root, "a.txt"), "other\n");
     assert_eq!(git(root, &["status", "--porcelain"]), "");
@@ -350,10 +351,10 @@ fn keep_reset_with_held_index_lock_changes_nothing() {
     );
 
     assert_refused_by_foreign_lock(root, || {
-        reset_to_commit(&repo, &opts, &mut NullProgress, &NeverCancel)
+        reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never())
     });
 
-    reset_to_commit(&repo, &opts, &mut NullProgress, &NeverCancel).expect("reset");
+    reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("reset");
     assert_eq!(read(root, "o.txt"), "only on other\n");
     assert_eq!(git(root, &["status", "--porcelain"]), "");
 }
@@ -376,7 +377,7 @@ fn switch_with_held_index_lock_changes_nothing() {
         };
 
         assert_refused_by_foreign_lock(root, || {
-            switch_repository(&repo, &opts, &mut NullProgress, &NeverCancel)
+            switch_repository(&repo, &opts, &mut NullProgress, &CancelToken::never())
         });
         assert_eq!(read(root, "a.txt"), "base\n");
         assert_eq!(
@@ -384,7 +385,7 @@ fn switch_with_held_index_lock_changes_nothing() {
             "refs/heads/main"
         );
 
-        switch_repository(&repo, &opts, &mut NullProgress, &NeverCancel).expect("switch");
+        switch_repository(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("switch");
         assert_eq!(read(root, "a.txt"), "other\n");
         assert_eq!(
             git(root, &["symbolic-ref", "HEAD"]).trim(),
@@ -420,10 +421,10 @@ fn restore_with_held_index_lock_changes_nothing() {
         };
 
         assert_refused_by_foreign_lock(root, || {
-            restore_paths(&repo, &opts, &mut NullProgress, &NeverCancel)
+            restore_paths(&repo, &opts, &mut NullProgress, &CancelToken::never())
         });
 
-        restore_paths(&repo, &opts, &mut NullProgress, &NeverCancel).expect("restore");
+        restore_paths(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("restore");
         assert_eq!(read(root, "a.txt"), "base\n");
         assert_eq!(git(root, &["status", "--porcelain"]), "");
     }

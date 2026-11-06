@@ -2,45 +2,26 @@
 //! `git`: a cancel leaves the remote as `git` last saw it, and the retry that
 //! follows writes a remote `git fsck --strict` accepts.
 
-use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::{Cancel, NeverCancel};
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::remote::{Remote, RemoteError};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd, git_packed_history, rev_parse};
+use std::path::Path;
 
-/// Fires on its `limit`-th check and stays fired.
-struct CancelAfter {
-    checks: AtomicUsize,
-    limit: usize,
-}
-
-impl CancelAfter {
-    fn new(limit: usize) -> Self {
-        Self {
-            checks: AtomicUsize::new(0),
-            limit,
-        }
-    }
-}
-
-impl Cancel for CancelAfter {
-    fn is_cancelled(&self) -> bool {
-        self.checks.fetch_add(1, Ordering::Relaxed) >= self.limit
-    }
+fn cancel_after_checks(limit: usize) -> CancelToken {
+    CancelToken::after_polls(limit.saturating_add(1) as u64)
 }
 
 fn push(
     local: &Repository,
     remote_dir: &Path,
     tip: ObjectId,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<Vec<PushRefStatus>, RemoteError> {
     let remote = Remote::from_url(&format!("file://{}", remote_dir.display())).expect("url");
     let spec = PushRefSpec {
@@ -63,12 +44,12 @@ fn push(
 /// How many checks a full push of `tip` into a fresh remote makes.
 fn checks_for_full_push(local: &Repository, scratch: &Path, tip: ObjectId) -> usize {
     git(scratch, &["init", "-q", "--bare", "probe.git"]);
-    let counting = CancelAfter::new(usize::MAX);
+    let (counting, checks) = CancelToken::with_check_counter();
     assert_eq!(
         push(local, &scratch.join("probe.git"), tip, &counting).expect("probe push"),
         vec![PushRefStatus::Ok]
     );
-    counting.checks.load(Ordering::Relaxed)
+    checks.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// `refs` listing and loose/packed object counts, as `git` reports them.
@@ -112,13 +93,13 @@ fn cancelled_full_push_leaves_an_empty_remote_and_the_retry_fscks_clean() {
     let dst = tmp.path().join("dst.git");
     let before = git_state(&dst);
     for limit in [total / 4, total / 2, total * 3 / 4] {
-        let err = push(&local, &dst, tip, &CancelAfter::new(limit)).expect_err("cancelled");
+        let err = push(&local, &dst, tip, &cancel_after_checks(limit)).expect_err("cancelled");
         assert!(err.is_cancelled(), "cancel at check {limit}: {err:?}");
         assert_eq!(git_state(&dst), before, "cancel at check {limit}");
     }
 
     assert_eq!(
-        push(&local, &dst, tip, &NeverCancel).expect("retry"),
+        push(&local, &dst, tip, &CancelToken::never()).expect("retry"),
         vec![PushRefStatus::Ok]
     );
     fsck_clean(&dst);
@@ -165,23 +146,23 @@ fn cancelled_incremental_push_onto_a_git_pushed_remote_keeps_its_ref() {
             "main~60:refs/heads/main",
         ],
     );
-    let counting = CancelAfter::new(usize::MAX);
+    let (counting, checks) = CancelToken::with_check_counter();
     assert_eq!(
         push(&local, &probe, tip, &counting).expect("probe push"),
         vec![PushRefStatus::Ok]
     );
-    let total = counting.checks.load(Ordering::Relaxed);
+    let total = checks.load(std::sync::atomic::Ordering::Relaxed);
 
     let before = git_state(&dst);
     for limit in [total / 4, total / 2, total * 3 / 4] {
-        let err = push(&local, &dst, tip, &CancelAfter::new(limit)).expect_err("cancelled");
+        let err = push(&local, &dst, tip, &cancel_after_checks(limit)).expect_err("cancelled");
         assert!(err.is_cancelled(), "cancel at check {limit}: {err:?}");
         assert_eq!(git_state(&dst), before, "cancel at check {limit}");
     }
     assert_eq!(rev_parse(&dst, "refs/heads/main"), old);
 
     assert_eq!(
-        push(&local, &dst, tip, &NeverCancel).expect("retry"),
+        push(&local, &dst, tip, &CancelToken::never()).expect("retry"),
         vec![PushRefStatus::Ok]
     );
     fsck_clean(&dst);

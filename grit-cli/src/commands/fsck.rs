@@ -8,7 +8,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::maintenance::repository_fsck::{
     issue_msg_id, FsckDiagnostic, FsckOptions, FsckReport, FsckSeverity,
 };
-use grit_lib::progress::{NeverCancel, ProgressSink};
+use grit_lib::progress::{CancelToken, ProgressSink};
 use schemars::JsonSchema;
 use serde::{Serialize, Serializer};
 
@@ -229,7 +229,7 @@ pub fn run(options: FsckRunOptions) -> Result<FsckOutcome> {
 
     let progress_enabled = options.mode == OutputMode::Human && stderr_progress_enabled();
     let mut progress = TerminalProgress::new(progress_enabled);
-    let report = repo.fsck(&fsck_opts, &mut progress, &NeverCancel)?;
+    let report = repo.fsck(&fsck_opts, &mut progress, &CancelToken::never())?;
     progress.finish();
 
     Ok(FsckOutcome::from_report(

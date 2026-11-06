@@ -10,7 +10,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, ProgressSink};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::ProgressSink;
 use grit_lib::repo::Repository;
 
 fn git(root: &Path, args: &[&str], input: &[u8]) -> String {
@@ -126,7 +127,7 @@ fn checkout_bounds_medium_blob_buffers_for_serial_and_parallel_preparation() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut SlowProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch with parallel preparation");
     let growth = peak_rss_kib() - before;

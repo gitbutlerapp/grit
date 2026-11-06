@@ -41,13 +41,13 @@ including racy file timestamps. Clean commands restore the original HEAD, index,
 tracked files before the caller applies the updated plan atomically.
 
 ```rust
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::revwalk::history::{apply_rewrite, verify_rebase_with_exec, ExecSpec};
 
 // `plan` comes from `plan_rebase(&repo, &request, &options)`.
 let spec = ExecSpec { commands: vec!["cargo fmt && git commit -qa --amend --no-edit".into()] };
 let report = verify_rebase_with_exec(&repo, &mut plan, &spec, &options.rewrite, runner.as_ref())?;
-apply_rewrite(&repo, &plan, &apply, &mut NullProgress, &NeverCancel)?;
+apply_rewrite(&repo, &plan, &apply, &mut NullProgress, &CancelToken::never())?;
 ```
 
 When replaying a later commit onto an amended one conflicts,

@@ -8,7 +8,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -79,12 +80,12 @@ fn ignorecase_unrelated_commit_preserves_dual_case_dirs_on_sensitive_volume() {
 
     fs::write(root.join("unrelated.txt"), "edit\n").expect("unrelated");
     let repo = open(root);
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     commit_worktree(
         &repo,
         &CommitRequest::new("unrelated"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 
@@ -132,7 +133,7 @@ fn ignorecase_add_stages_hash_collision_dirs_independently() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage must not ENOENT on hash-collision directory names");
 
@@ -175,7 +176,7 @@ fn ignorecase_sensitive_volume_respells_after_uppercase_probe_decoy() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
 
@@ -219,7 +220,7 @@ fn ignorecase_add_folds_new_file_under_index_dir_on_sensitive_volume() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
 
@@ -255,12 +256,12 @@ fn ignorecase_commit_keeps_index_spelling_on_folding_volume() {
     fs::write(root.join("README.txt"), "n\n").expect("readme edit");
 
     let repo = open(root);
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     commit_worktree(
         &repo,
         &CommitRequest::new("two"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 

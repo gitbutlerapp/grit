@@ -86,7 +86,12 @@ fn init_repo(dir: &Path) -> Repository {
 
 fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {
     std::fs::write(dir.join("tracked.txt"), b"payload\n").expect("write");
-    stage_for_commit(repo, &mut NullProgress, &grit_lib::progress::NeverCancel).expect("stage");
+    stage_for_commit(
+        repo,
+        &mut NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )
+    .expect("stage");
     let ident = "User <u@example.com> 1700000000 +0000".to_owned();
     create_commit(
         repo,
@@ -101,7 +106,7 @@ fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("main oid")
@@ -395,13 +400,13 @@ fn porcelain_stash_tag_status_and_worktree() {
             mode: grit_lib::stash::StashMode::default(),
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     );
     let _ = repo.stash().pop(
         0,
         &StashApplyOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     );
     let _ = rerere_forget_path(&repo, "tracked.txt");
 }

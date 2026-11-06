@@ -72,7 +72,7 @@ fn bulk_deferred_untr_replay_after_mass_removal() {
         &grit,
         &stage_opts_with_small_bulk(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add");
 

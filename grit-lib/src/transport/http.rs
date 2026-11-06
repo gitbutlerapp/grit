@@ -36,7 +36,7 @@ use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::pkt_line;
-use crate::progress::{Cancel, NeverCancel};
+use crate::progress::CancelToken;
 use crate::transfer::{FetchOptions, FetchOutcome};
 use crate::transport::pending_http::PendingHttp;
 use crate::transport::stateless_http::StatelessHttpConnection;
@@ -208,12 +208,8 @@ pub trait HttpClient: Send + Sync {
         )))
     }
 
-    /// Wire an operation [`Cancel`] checked during blocking HTTP reads (when supported).
-    fn set_operation_cancel(
-        &self,
-        _cancel: Option<std::sync::Arc<dyn crate::progress::Cancel + Send + Sync>>,
-    ) {
-    }
+    /// Wire an operation [`CancelToken`] checked during blocking HTTP reads (when supported).
+    fn set_operation_cancel(&self, _cancel: Option<std::sync::Arc<CancelToken>>) {}
 
     /// When set, worker-thread HTTP waits abort after this duration with no response
     /// (Git `http.lowSpeedTime` with zero bytes transferred).
@@ -1026,7 +1022,7 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
         refs: &[crate::transfer::PushRefSpec],
         opts: &crate::transfer::PushOptions,
         progress: &mut dyn Progress,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
     ) -> Result<crate::transfer::PushOutcome> {
         use crate::push::push_remote;
         use crate::transport::{ConnectOptions, Transport};
@@ -1052,8 +1048,8 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
         repo_url: &str,
         service: Service,
         git_protocol: Option<&str>,
-        cancel: &dyn Cancel,
-        owner: &dyn Cancel,
+        cancel: &CancelToken,
+        owner: &CancelToken,
         stack_watch: &std::sync::atomic::AtomicBool,
     ) -> Result<(String, Discovery)> {
         let info_url = info_refs_url_for_service(repo_url, service);
@@ -1081,18 +1077,16 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
     }
 }
 
-fn connect_cancel(opts: &ConnectOptions) -> &dyn Cancel {
-    opts.cancel
-        .as_deref()
-        .map_or(&NeverCancel as &dyn Cancel, |c| c as &dyn Cancel)
+fn connect_cancel<'a>(opts: &'a ConnectOptions) -> &'a CancelToken {
+    opts.cancel.as_deref().unwrap_or(CancelToken::never_ref())
 }
 
 fn get_interruptible<C: HttpClient + Clone + 'static>(
     client: &C,
     url: &str,
     git_protocol: Option<&str>,
-    cancel: &dyn Cancel,
-    owner: &dyn Cancel,
+    cancel: &CancelToken,
+    owner: &CancelToken,
     stack_watch: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<u8>> {
     get_with_final_url_interruptible(client, url, git_protocol, cancel, owner, stack_watch)
@@ -1103,8 +1097,8 @@ fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
     client: &C,
     url: &str,
     git_protocol: Option<&str>,
-    cancel: &dyn Cancel,
-    owner: &dyn Cancel,
+    cancel: &CancelToken,
+    owner: &CancelToken,
     stack_watch: &std::sync::atomic::AtomicBool,
 ) -> Result<(Vec<u8>, Option<String>)> {
     let client = client.clone();
@@ -1143,7 +1137,7 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
         url: &str,
         service: Service,
         opts: &ConnectOptions,
-        owner: &dyn Cancel,
+        owner: &CancelToken,
     ) -> Result<Box<dyn Connection>> {
         crate::net_trace::net_trace!(
             opts.network_trace,
@@ -1246,7 +1240,7 @@ pub fn http_fetch(
         &mut *conn,
         opts,
         progress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
 }
 

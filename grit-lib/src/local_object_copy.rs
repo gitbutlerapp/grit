@@ -16,6 +16,7 @@ use crate::fs_publish::hard_link_or_copy;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::{BoundedRead, Odb};
 use crate::pack;
+use crate::progress::CancelToken;
 
 fn pack_entry_name_ok(name: &str) -> bool {
     if name.starts_with("tmp_") || name.starts_with(".") {
@@ -79,7 +80,7 @@ pub(crate) fn link_remote_pack_files(
     remote_objects: &Path,
     local_objects: &Path,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
     total_hint: usize,
 ) -> Result<LinkRemotePacksOutcome> {
     let remote_pack = remote_objects.join("pack");
@@ -128,7 +129,7 @@ pub(crate) fn link_loose_objects(
     remote_objects: &Path,
     local_objects: &Path,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<usize> {
     let mut copied = 0usize;
     for entry in fs::read_dir(remote_objects).map_err(Error::Io)? {
@@ -169,7 +170,7 @@ pub(crate) fn loose_reachable_from_roots(
     odb: &Odb,
     roots: &[ObjectId],
     shallow_grafts: &HashSet<ObjectId>,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<HashSet<ObjectId>> {
     let mut visited: HashSet<ObjectId> = HashSet::new();
     let mut reachable: HashSet<ObjectId> = HashSet::new();
@@ -277,7 +278,7 @@ pub(crate) fn link_packs_within(
     send: &[ObjectId],
     dest_has: &dyn Fn(&ObjectId) -> bool,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
     mut on_index_scan: Option<&mut dyn FnMut(u64)>,
 ) -> Result<usize> {
     let source_pack = source_objects.join("pack");
@@ -365,7 +366,7 @@ pub(crate) fn link_loose_objects_for_oids(
     dest_objects: &Path,
     oids: &[ObjectId],
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<usize> {
     let mut linked = 0usize;
     for (i, oid) in oids.iter().enumerate() {
@@ -448,7 +449,7 @@ mod tests {
             &src.join(".git/objects"),
             &dst_objects,
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
             0,
         )
         .expect("link");
@@ -517,7 +518,7 @@ mod tests {
                             &s,
                             &d,
                             &mut crate::progress::NullProgress,
-                            &crate::progress::NeverCancel,
+                            &crate::progress::CancelToken::never(),
                             0,
                         )
                     })

@@ -6,6 +6,7 @@ use crate::error::{ApplyError, Error};
 use crate::index::{Index, IndexEntry, MODE_REGULAR};
 use crate::merge_diff::read_blob_at_path;
 use crate::objects::{ObjectId, ObjectKind};
+use crate::progress::CancelToken;
 use crate::repo::Repository;
 use std::collections::BTreeMap;
 
@@ -131,7 +132,7 @@ pub fn apply_patch_to_index_and_write(
     repo: &Repository,
     patches: &[FilePatch],
     opts: &IndexApplyOptions,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> std::result::Result<IndexApplyOutcome, ApplyError> {
     let handle = repo.index_handle();
     let mut lock = handle.begin_update().map_err(|e| library_err_path("", e))?;

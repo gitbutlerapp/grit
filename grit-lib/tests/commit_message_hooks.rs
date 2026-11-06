@@ -21,7 +21,7 @@ use grit_lib::porcelain::merge::{
     continue_merge, integrate_branch_with, ContinueOptions, IntegrateBranchOutcome,
     MergeCommitMode, MergeOptions,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     plan_rebase_with_hook, start_rebase, ApplyOptions, EmptyPolicy, HistoryError, PreRebase,
@@ -154,7 +154,7 @@ fn request(message: &str) -> CommitRequest {
 }
 
 fn commit(repo: &Repository, req: &CommitRequest) -> grit_lib::error::Result<CommitOutcome> {
-    create_commit(repo, req, &mut NullProgress, &NeverCancel)
+    create_commit(repo, req, &mut NullProgress, &CancelToken::never())
 }
 
 fn hook_failed(err: &Error) -> Option<&str> {
@@ -187,7 +187,7 @@ fn merge(
         "side",
         options,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
 }
 
@@ -342,7 +342,7 @@ fn finishing_a_squash_or_merge_names_squash_or_merge() {
             committer: None,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("continue");
     assert!(fx
@@ -644,7 +644,7 @@ fn rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
-    start_rebase(repo, opts, &mut NullProgress, &NeverCancel)
+    start_rebase(repo, opts, &mut NullProgress, &CancelToken::never())
 }
 
 fn history_hook_failed(err: &HistoryError) -> Option<&str> {

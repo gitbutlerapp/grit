@@ -81,7 +81,7 @@ fn create_commit_ssh_signs_when_gpgsign_true() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
@@ -99,7 +99,7 @@ fn create_commit_ssh_signs_when_gpgsign_true() {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("create_commit");
 
@@ -175,7 +175,7 @@ fn amend_unsigned_drops_signed_tip_signature() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
@@ -193,7 +193,7 @@ fn amend_unsigned_drops_signed_tip_signature() {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("signed create");
 
@@ -213,7 +213,7 @@ fn amend_unsigned_drops_signed_tip_signature() {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("unsigned amend");
 
@@ -275,7 +275,7 @@ fn amend_resigns_with_single_fresh_signature() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
@@ -293,7 +293,7 @@ fn amend_resigns_with_single_fresh_signature() {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("signed create");
 
@@ -302,7 +302,7 @@ fn amend_resigns_with_single_fresh_signature() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
@@ -318,7 +318,7 @@ fn amend_resigns_with_single_fresh_signature() {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("signed amend");
 

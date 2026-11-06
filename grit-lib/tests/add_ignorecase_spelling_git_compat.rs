@@ -52,7 +52,7 @@ fn stage_with(root: &Path, mode: StageMode, dry_run: bool) -> StageOutcome {
         &open(root),
         &opts,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage")
 }

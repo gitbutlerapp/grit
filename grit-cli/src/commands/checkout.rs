@@ -243,13 +243,13 @@ pub fn run(
         ResumableDownloadDest::Shared { dest, lock } => (dest, Some(lock)),
         ResumableDownloadDest::Private(dest) => (dest, None),
     };
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let downloaded = download_resumable(
         http.as_ref(),
         &client.bundle_url(&info.id),
         &bundle,
         &mut progress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )?;
 
     let existed = dest.exists();
@@ -260,7 +260,7 @@ pub fn run(
         &client.url().repo_url,
         &work,
         &mut progress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     );
     if let Err(e) = made {
         if !existed {

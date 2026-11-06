@@ -22,7 +22,7 @@ use grit_lib::objects::pack::{clear_pack_cache, read_pack_index, read_packed_del
 use grit_lib::objects::pack_objects::{build_pack_from_send_list, PackBuildOptions};
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -177,7 +177,7 @@ impl Fixture {
         let mut opts = CloneOptions::new(format!("file://{}", server_dir.display()), dest);
         opts.filter = Some(ObjectFilterSpec::BlobLimit(LIMIT));
         opts.checkout = false;
-        let outcome = clone(opts, &mut NoProgress, &NeverCancel, None).expect("clone");
+        let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
         let git_dir = outcome.repo.git_dir().to_path_buf();
         drop(outcome);
         clear_pack_cache();
@@ -340,7 +340,7 @@ fn old_versions_go_and_the_checked_out_one_stays() {
         &repo,
         &FsckOptions::full_repository(false),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("fsck");
     let config = repo.config().unwrap();

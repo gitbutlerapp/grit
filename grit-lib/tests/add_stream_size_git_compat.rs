@@ -45,7 +45,7 @@ fn size_changed_stream_round_trips_with_system_git() {
                 &repo,
                 &StageOptions::default(),
                 &mut NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("stage");
             let expected = git(root, &["hash-object", "large.bin"]);

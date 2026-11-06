@@ -21,6 +21,7 @@ use crate::pack_bitmap::BitmapIndex;
 use crate::pack_name_hash::{pack_name_hash, pack_name_hash_child};
 use crate::pack_tree_read_ahead::{ReadAheadEntry, TreeReadAhead};
 use crate::progress::CancelSignal;
+use crate::progress::CancelToken;
 use crate::repo::Repository;
 use crate::rev_list::{MissingAction, ObjectFilter};
 

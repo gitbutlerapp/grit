@@ -18,7 +18,6 @@ use grit_lib::index::untracked_cache::{
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
@@ -41,7 +40,7 @@ fn grit_untracked_paths(repo: &Repository) -> Vec<String> {
         untracked: UntrackedMode::All,
         ..StatusOptions::default()
     };
-    let model = status(repo, &opts, &mut NullProgress, &NeverCancel).expect("status");
+    let model = status(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("status");
     model.untracked
 }
 
@@ -50,7 +49,7 @@ fn grit_untracked_paths_normal(repo: &Repository) -> Vec<String> {
         untracked: UntrackedMode::Normal,
         ..StatusOptions::default()
     };
-    let model = status(repo, &opts, &mut NullProgress, &NeverCancel).expect("status");
+    let model = status(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("status");
     model.untracked
 }
 
@@ -159,7 +158,7 @@ fn issue_1227_new_file_in_git_warmed_check_only_collapsed_dir() {
         "normal untracked mode must match git for check_only collapsed UNTR"
     );
 
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage for commit");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage for commit");
     let staged: BTreeSet<String> = repo
         .index_handle()
         .load()
@@ -240,8 +239,8 @@ fn issue_1227_new_file_in_git_warmed_cached_dir() {
         "normal untracked mode must see new file under git-warmed UNTR dir"
     );
 
-    let outcome =
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage for commit");
+    let outcome = stage_for_commit(&repo, &mut NullProgress, &CancelToken::never())
+        .expect("stage for commit");
     assert!(
         outcome.added.len() >= 1,
         "commit staging must include new untracked file, got {outcome:?}"
@@ -288,10 +287,10 @@ fn grit_auto_untr_shell_accepted_by_git_status_without_warning() {
     }
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let mut req = grit_test_support::commit_request("fill", "Test <t@example.com> 1 +0000");
     req = grit_lib::test_support::knobs::commit_skip_pre_commit_tree_match(req, true);
-    create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+    create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
 
     let index_bytes = fs::read(root.join(".git/index")).expect("read index");
     assert!(

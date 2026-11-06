@@ -146,7 +146,7 @@ fn paths_commit_matches_git_only() {
         &commit_req("file only"),
         CommitScope::Paths(paths),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit paths commit");
     git(
@@ -185,7 +185,7 @@ fn paths_commit_force_added_ignored_file_matches_git() {
         &commit_req("one"),
         CommitScope::Paths(paths.clone()),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit paths commit force-added ignored");
     git(
@@ -206,7 +206,7 @@ fn paths_commit_force_added_ignored_file_matches_git() {
         &commit_req("two"),
         CommitScope::Paths(paths),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit paths commit modified ignored tracked");
     git(
@@ -250,7 +250,7 @@ fn paths_commit_tracked_ignored_after_initial_commit_matches_git() {
         &commit_req("path only"),
         CommitScope::Paths(paths),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit paths commit tracked ignored");
     git(
@@ -287,7 +287,7 @@ fn paths_commit_directory_pathspec_on_ignored_tree_matches_git() {
         &commit_req("one"),
         CommitScope::Paths(paths),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit commit with directory pathspec on ignored tree");
     git(git_root, &["commit", "-m", "one", "--only", "--", "build"]);
@@ -328,7 +328,7 @@ fn paths_commit_exclude_pathspec_matches_git() {
         &commit_req("scoped"),
         CommitScope::Paths(paths),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit paths commit with exclude");
     git(
@@ -371,7 +371,7 @@ fn staged_commit_matches_git_without_auto_stage() {
         &commit_req("staged"),
         CommitScope::Staged,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit staged");
     git(git_root, &["commit", "-m", "staged"]);

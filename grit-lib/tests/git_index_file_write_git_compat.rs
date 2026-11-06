@@ -8,7 +8,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope, HookPolicy};
 use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -95,7 +95,7 @@ fn commit_staged_with_git_index_file_leaves_default_index_unchanged() {
         &commit_req("from temp index"),
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit staged");
 
@@ -123,7 +123,7 @@ fn commit_auto_stage_with_git_index_file_leaves_default_index_unchanged() {
         &commit_req("auto stage temp"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit auto stage");
 
@@ -158,7 +158,7 @@ fn reset_mixed_with_git_index_file_rewrites_temp_index_only() {
             "reset",
         ),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("reset mixed");
 
@@ -187,7 +187,7 @@ fn remove_cached_with_git_index_file_edits_temp_index_only() {
             cached: true,
             ..Default::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("rm cached");
 
@@ -230,7 +230,7 @@ fn pre_commit_hook_sees_git_index_file_not_default_index() {
         &hook_req,
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit with hook");
 

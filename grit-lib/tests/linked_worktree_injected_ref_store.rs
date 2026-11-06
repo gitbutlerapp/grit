@@ -16,7 +16,8 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::repo::{Repository, RepositoryBuilder};
 use grit_lib::state::{resolve_head_for_repository, HeadState};
@@ -78,7 +79,7 @@ fn commit_change(repo: &Repository, file: &Path, message: &str) -> ObjectId {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     commit_with_scope(
@@ -86,7 +87,7 @@ fn commit_change(repo: &Repository, file: &Path, message: &str) -> ObjectId {
         &grit_test_support::commit_request(message, IDENT_TS),
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -274,7 +275,7 @@ fn switch(repo: &Repository, mode: SwitchMode) {
             hooks: PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch");
 }

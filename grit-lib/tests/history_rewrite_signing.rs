@@ -111,7 +111,7 @@ fn signed_tip_via_grit(root: &Path, gpgsign: bool) -> ObjectId {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let ident = "T <t@example.com> 1700000001 +0000".to_owned();
@@ -128,7 +128,7 @@ fn signed_tip_via_grit(root: &Path, gpgsign: bool) -> ObjectId {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("create_commit")
     .oid
@@ -190,7 +190,7 @@ fn history_rewrite_resigns_when_gpgsign() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
 

@@ -61,7 +61,7 @@ fn apply_stash_without_index_matches_git_when_head_unchanged() {
             &stash_oid,
             &StashApplyOptions::default(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("apply");
 
@@ -121,7 +121,7 @@ fn apply_stash_with_index_matches_git_staged_porcelain() {
                 ..Default::default()
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("apply");
 
@@ -207,7 +207,7 @@ fn wide_sparse_apply_preserves_index_and_untouched_changes_like_git() {
                         ..Default::default()
                     },
                     &mut grit_lib::progress::NullProgress,
-                    &grit_lib::progress::NeverCancel,
+                    &grit_lib::progress::CancelToken::never(),
                 )
                 .expect("apply");
             assert!(!outcome.has_conflicts());
@@ -325,7 +325,7 @@ mod raw_stash_paths {
                     0,
                     &StashApplyOptions::default(),
                     &mut grit_lib::progress::NullProgress,
-                    &grit_lib::progress::NeverCancel
+                    &grit_lib::progress::CancelToken::never()
                 ),
                 Err(grit_lib::error::Error::StashWouldOverwriteLocalChanges { .. })
             ));
@@ -387,14 +387,14 @@ mod raw_stash_paths {
                     0,
                     &options,
                     &mut grit_lib::progress::NullProgress,
-                    &grit_lib::progress::NeverCancel,
+                    &grit_lib::progress::CancelToken::never(),
                 )
             } else {
                 repo.stash().apply(
                     0,
                     &options,
                     &mut grit_lib::progress::NullProgress,
-                    &grit_lib::progress::NeverCancel,
+                    &grit_lib::progress::CancelToken::never(),
                 )
             }
             .unwrap();
@@ -471,7 +471,7 @@ mod raw_stash_paths {
                     0,
                     &StashApplyOptions::default(),
                     &mut grit_lib::progress::NullProgress,
-                    &grit_lib::progress::NeverCancel,
+                    &grit_lib::progress::CancelToken::never(),
                 )
                 .unwrap();
             assert!(!outcome.has_conflicts());
@@ -504,7 +504,7 @@ mod raw_stash_paths {
                         ..Default::default()
                     },
                     &mut grit_lib::progress::NullProgress,
-                    &grit_lib::progress::NeverCancel,
+                    &grit_lib::progress::CancelToken::never(),
                 )
                 .unwrap();
             assert!(!outcome.has_conflicts());
@@ -545,7 +545,7 @@ mod raw_stash_paths {
                     mode: StashMode::default(),
                 },
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .unwrap()
             .expect("stash changes");
@@ -561,7 +561,7 @@ mod raw_stash_paths {
                 0,
                 &StashApplyOptions::default(),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .unwrap();
 
@@ -611,7 +611,7 @@ mod raw_stash_paths {
                     mode: StashMode::default(),
                 },
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .unwrap()
             .expect("stash changes");
@@ -622,7 +622,7 @@ mod raw_stash_paths {
                 0,
                 &StashApplyOptions::default(),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .unwrap();
 
@@ -717,7 +717,7 @@ mod grit_stash_push_non_utf8 {
             .push(
                 &stash_push_opts(false),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("push")
             .expect("stash oid");
@@ -748,7 +748,7 @@ mod grit_stash_push_non_utf8 {
                 0,
                 &StashApplyOptions::default(),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("pop");
 
@@ -781,7 +781,7 @@ mod grit_stash_push_non_utf8 {
             .push(
                 &stash_push_opts(true),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("push")
             .expect("stash");
@@ -803,7 +803,7 @@ mod grit_stash_push_non_utf8 {
                 0,
                 &StashApplyOptions::default(),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("pop");
 
@@ -826,7 +826,7 @@ mod grit_stash_push_non_utf8 {
             .push(
                 &stash_push_opts(false),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("push")
             .expect("stash");
@@ -840,7 +840,7 @@ mod grit_stash_push_non_utf8 {
                 0,
                 &StashApplyOptions::default(),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("pop");
         assert_eq!(std::fs::read(root.path().join(&literal)).unwrap(), b"ab");
@@ -864,7 +864,7 @@ mod grit_stash_push_non_utf8 {
             .push(
                 &stash_push_opts(true),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("push")
             .expect("stash");
@@ -878,7 +878,7 @@ mod grit_stash_push_non_utf8 {
                 0,
                 &StashApplyOptions::default(),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect_err("must reject before mutating tracked files");
         assert!(matches!(
@@ -916,7 +916,7 @@ mod grit_stash_push_non_utf8 {
                 0,
                 &StashApplyOptions::default(),
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("grit pop of git stash");
         assert_eq!(std::fs::read(root.path().join(&non_utf8)).unwrap(), b"ab");

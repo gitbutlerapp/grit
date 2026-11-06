@@ -8,7 +8,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -40,7 +40,7 @@ fn status_and_add_see_interior_untracked_on_indexed_chain() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -58,7 +58,7 @@ fn status_and_add_see_interior_untracked_on_indexed_chain() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("add all");
     assert!(outcome.total() >= 1, "add must stage untracked sibling");
@@ -103,7 +103,7 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit add all");
 
@@ -129,7 +129,7 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
         "grit staged blob must match system git index for same worktree"
     );
 
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("grit commit staging");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("grit commit staging");
     let ident = "Test <t@example.com> 1 +0000".to_string();
     create_commit(
         &repo,
@@ -144,7 +144,7 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
             req
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit commit");
 }

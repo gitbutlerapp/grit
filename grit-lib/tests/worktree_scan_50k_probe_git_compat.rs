@@ -94,7 +94,7 @@ fn noop_add_metadata_probe_budget_dense_leaf_50k() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("add");
     assert_eq!(outcome.total(), 0);

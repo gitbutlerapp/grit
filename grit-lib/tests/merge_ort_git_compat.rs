@@ -780,7 +780,7 @@ fn assert_integrate_matches_git_merge(
         theirs,
         theirs_branch,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate_branch");
     drop(repo);
@@ -854,7 +854,7 @@ fn criss_cross_conflicting_resolutions_integrate_matches_git_merge() {
             theirs_oid,
             theirs,
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("integrate_branch");
         let stage1 = git(root, &["show", ":1:f"]);
@@ -896,7 +896,7 @@ fn criss_cross_integrate_with_favor_matches_git_merge_tree() {
                 ..MergeOptions::default()
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("integrate_branch_with");
         let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {

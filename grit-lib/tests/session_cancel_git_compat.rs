@@ -13,9 +13,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::integrate_branch;
-use grit_lib::progress::{
-    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
-};
+use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::revwalk::history::{
     start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope,
     RewriteOptions, StartRebaseOptions,
@@ -134,7 +132,7 @@ fn cancelled_auto_stage_commit_leaves_git_view_unchanged() {
         &commit_req("change"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(rev(root, "HEAD~1"), head);
@@ -171,7 +169,7 @@ fn cancelled_stash_push_leaves_no_entry_and_git_pops_a_finished_one() {
     assert_git_fsck_strict(root);
 
     repo.stash()
-        .push(&opts, &mut NullProgress, &NeverCancel)
+        .push(&opts, &mut NullProgress, &CancelToken::never())
         .expect("push")
         .expect("stashed");
     assert_eq!(git(root, &["stash", "list"]).lines().count(), 1);
@@ -254,7 +252,7 @@ fn cancelled_merge_and_rebase_keep_branches_where_git_left_them() {
     assert!(!root.join(".git/rebase-merge").exists());
     assert_git_fsck_strict(root);
 
-    start_rebase(&repo, &start, &mut NullProgress, &NeverCancel).expect("rebase");
+    start_rebase(&repo, &start, &mut NullProgress, &CancelToken::never()).expect("rebase");
     assert_eq!(rev(root, "topic~1"), side.to_hex());
     assert_eq!(status(root), "");
     assert_git_fsck_strict(root);

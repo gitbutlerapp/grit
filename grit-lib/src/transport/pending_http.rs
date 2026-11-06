@@ -6,7 +6,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use crate::error::{Error, Result};
-use crate::progress::{mirror_stack_cancel, Cancel, CancelSignal};
+use crate::progress::{mirror_stack_cancel, CancelSignal, CancelToken};
 
 /// How often a wait for an HTTP worker checks for cancellation.
 pub(crate) const HTTP_CANCEL_POLL: Duration = Duration::from_millis(20);
@@ -23,7 +23,7 @@ pub(crate) fn is_low_speed_transport_message(msg: &str) -> bool {
 /// Run blocking HTTP work on a worker thread while polling `cancel` on the caller.
 pub(crate) fn run_interruptible<T, F>(
     thread_name: &str,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     low_speed_window: Option<Duration>,
     work: F,
 ) -> Result<T>
@@ -54,7 +54,7 @@ impl<T: Send + 'static> PendingHttp<T> {
 
     /// The result, or [`Error::Cancelled`] once `cancel` fires first. A cancelled
     /// request is left to finish on its own thread.
-    pub(crate) fn wait(&self, cancel: &dyn Cancel) -> Result<T> {
+    pub(crate) fn wait(&self, cancel: &CancelToken) -> Result<T> {
         self.wait_with_watch(cancel, None, None, None)
     }
 
@@ -68,8 +68,8 @@ impl<T: Send + 'static> PendingHttp<T> {
     /// low-speed is enforced on bytes, not wall clock alone.
     pub(crate) fn wait_with_watch(
         &self,
-        cancel: &dyn Cancel,
-        owner: Option<&dyn Cancel>,
+        cancel: &CancelToken,
+        owner: Option<&CancelToken>,
         stack_watch: Option<&std::sync::atomic::AtomicBool>,
         low_speed_window: Option<Duration>,
     ) -> Result<T> {
@@ -103,14 +103,12 @@ mod tests {
     use std::sync::mpsc::{Receiver, RecvTimeoutError};
     use std::time::Instant;
 
-    use crate::progress::NeverCancel;
-
     /// Regression helper: the faulty #2469 follow-up treated `http.lowSpeedTime` as a
     /// whole-request deadline on the wait loop (see `started.elapsed() >= window`).
     fn wall_clock_low_speed_wait<T>(
         rx: &Receiver<Result<T>>,
         low_speed_window: Duration,
-        cancel: &dyn Cancel,
+        cancel: &CancelToken,
     ) -> Result<T> {
         cancel.poll_before_wait();
         let signal = CancelSignal::new(cancel);
@@ -137,7 +135,7 @@ mod tests {
             let _ = tx.send(Ok(()));
         });
         let started = Instant::now();
-        let err = wall_clock_low_speed_wait(&rx, Duration::from_secs(1), &NeverCancel)
+        let err = wall_clock_low_speed_wait(&rx, Duration::from_secs(1), &CancelToken::never())
             .expect_err("wall-clock low-speed must abort before the worker finishes");
         assert!(
             matches!(&err, Error::Message(msg) if msg == LOW_SPEED_STALL_MSG),
@@ -158,7 +156,7 @@ mod tests {
         })
         .expect("spawn");
         let started = Instant::now();
-        assert_eq!(pending.wait(&NeverCancel).expect("wait"), 42);
+        assert_eq!(pending.wait(&CancelToken::never()).expect("wait"), 42);
         assert!(
             started.elapsed() >= Duration::from_millis(1500),
             "expected ~1.9s worker, got {:?}",

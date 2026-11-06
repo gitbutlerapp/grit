@@ -6,7 +6,6 @@ use grit_lib::change_id::{change_id, resolved_change_id, ChangeIdPolicy};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions, PullResult};
-use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
@@ -94,7 +93,7 @@ fn pull_rebase_grit(repo: &Repository) -> grit_lib::porcelain::pull::PullOutcome
             ..PullOptions::default()
         },
         &mut progress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("grit pull --rebase")
@@ -495,7 +494,7 @@ fn pull_rebase_conflict_stops_like_git_and_continues() {
         &open(&grit_dir),
         &resume,
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("continue");
     assert!(matches!(done, RebaseOutcome::Done { .. }), "{done:?}");
@@ -557,7 +556,7 @@ fn pull_rebase_conflict_keeps_autostash_on_stash_ref() {
             ..PullOptions::default()
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("pull");
@@ -595,7 +594,7 @@ fn pull_rebase_conflict_with_local_changes_refuses_and_keeps_them() {
             ..PullOptions::default()
         },
         &mut progress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect_err("stopping would discard the local change");
@@ -633,7 +632,7 @@ fn pull_rebase_check_predicts_conflicts_without_changes() {
             ..PullOptions::default()
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("pull --check");
@@ -658,7 +657,7 @@ fn pull_rebase_check_predicts_conflicts_without_changes() {
             ..PullOptions::default()
         },
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
         None,
     )
     .expect("pull --check");

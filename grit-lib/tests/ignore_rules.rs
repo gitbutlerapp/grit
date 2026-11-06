@@ -828,7 +828,7 @@ fn negated_directory_reincludes_dir_matched_by_plain_pattern() {
 fn negated_directory_reincluded_files_are_listed_and_staged_like_git() {
     use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
     use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-    use grit_lib::progress::{NeverCancel, NullProgress};
+    use grit_lib::progress::NullProgress;
 
     let (home, root) = ignore_layout(
         "2168-linux-shapes",
@@ -855,7 +855,7 @@ fn negated_directory_reincluded_files_are_listed_and_staged_like_git() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let grit_untracked: std::collections::BTreeSet<String> = model.untracked.into_iter().collect();
@@ -874,7 +874,7 @@ fn negated_directory_reincluded_files_are_listed_and_staged_like_git() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage all");
     let tracked = git_lines(&home, &root, &["ls-files"]);
@@ -967,7 +967,7 @@ fn assert_ignore_check_matches_git(home: &Path, root: &Path) {
 
 fn assert_status_untracked_matches_git(home: &Path, root: &Path) {
     use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-    use grit_lib::progress::{NeverCancel, NullProgress};
+    use grit_lib::progress::NullProgress;
     let repo = open_at(root);
     let model = status(
         &repo,
@@ -976,7 +976,7 @@ fn assert_status_untracked_matches_git(home: &Path, root: &Path) {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let grit: std::collections::BTreeSet<String> = model.untracked.into_iter().collect();
@@ -1058,7 +1058,7 @@ fn ignorecase_stage_all_skips_ignored_and_git_agrees() {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("stage all");
         let tracked = git_lines(&home, &root, &["ls-files"]);
@@ -1084,7 +1084,7 @@ fn ignorecase_auto_stage_commit_skips_ignored_and_fscks() {
                 req
             },
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("commit");
         let committed = git_lines(&home, &root, &["ls-tree", "-r", "--name-only", "HEAD"]);
@@ -1132,7 +1132,7 @@ fn ignorecase_case_renamed_tracked_fixture(name: &str) -> (PathBuf, PathBuf) {
 fn ignorecase_case_renamed_tracked_paths_are_not_ignored_like_git() {
     use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
     use grit_lib::porcelain::status::{status, IgnoredMode, StatusOptions};
-    use grit_lib::progress::{NeverCancel, NullProgress};
+    use grit_lib::progress::NullProgress;
     use std::collections::BTreeSet;
 
     let (home, root) = ignorecase_case_renamed_tracked_fixture("1912-tracked-case");
@@ -1145,7 +1145,7 @@ fn ignorecase_case_renamed_tracked_paths_are_not_ignored_like_git() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let mut git_untracked = BTreeSet::new();
@@ -1188,7 +1188,7 @@ fn ignorecase_case_renamed_tracked_paths_are_not_ignored_like_git() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage foo.log");
     assert!(hermetic_git(&home, &root, &["add", "--dry-run", "foo.log"])
@@ -1204,7 +1204,7 @@ fn ignorecase_case_renamed_tracked_paths_are_not_ignored_like_git() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect_err("build/t is under an ignored directory");
     match err {

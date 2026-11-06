@@ -104,7 +104,7 @@ fn packed_annotated_tags_push_is_up_to_date_and_preserves_remote_tag() {
         &bare,
         &specs,
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push --tags");
     assert_eq!(outcome.results.len(), 1);

@@ -8,7 +8,7 @@ use std::io::Cursor;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use grit_lib::objects::pack_receive::{read_sideband_pack_to, PackReceiveTarget};
 
-use grit_lib::progress::NeverCancel;
+use crate::progress::CancelToken;
 use grit_lib::remote::fetch::NoProgress;
 
 fn sideband_band1_stream(pack_bytes: usize) -> Vec<u8> {
@@ -52,7 +52,7 @@ fn bench_sideband_demux(c: &mut Criterion) {
                     &mut Cursor::new(stream.as_slice()),
                     &mut target,
                     &mut progress,
-                    &NeverCancel,
+                    &CancelToken::never(),
                 )
                 .expect("demux");
                 black_box(target_buf.len())

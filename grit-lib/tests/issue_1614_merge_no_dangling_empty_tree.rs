@@ -82,7 +82,7 @@ fn merge_diverged_branches_leaves_no_dangling_empty_tree() {
         side,
         "side",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Merged { .. }));
@@ -151,7 +151,7 @@ fn sha256_merge_directory_add_without_materializing_empty_tree() {
         side,
         "side",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Merged { .. }));

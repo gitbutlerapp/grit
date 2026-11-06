@@ -16,7 +16,7 @@ mod unix {
     use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
     use grit_lib::porcelain::status::{status, StatusOptions};
     use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-    use grit_lib::progress::{NeverCancel, NullProgress};
+    use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::{forced_parallel_policy, git};
 
@@ -111,7 +111,7 @@ mod unix {
             stat_parallel_threads: Some(threads),
             ..StatusOptions::default()
         };
-        let model = status(repo, &opts, &mut NullProgress, &NeverCancel)
+        let model = status(repo, &opts, &mut NullProgress, &CancelToken::never())
             .expect("status succeeds with an unreadable tracked file");
 
         assert!(model.staged.is_empty(), "staged: {:?}", model.staged);
@@ -158,7 +158,7 @@ mod unix {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status while locked");
         set_mode(&fx.root().join("a.txt"), 0o644);
@@ -167,7 +167,7 @@ mod unix {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status after unlock");
         let paths: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
@@ -178,7 +178,7 @@ mod unix {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status after restore");
         assert!(model.unstaged.is_empty(), "unstaged: {:?}", model.unstaged);
@@ -200,7 +200,7 @@ mod unix {
                 hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("switch must refuse to overwrite the unreadable path");
         match err {
@@ -225,7 +225,7 @@ mod unix {
             mode: StageMode::All,
             ..StageOptions::default()
         };
-        stage(repo, &opts, &mut NullProgress, &NeverCancel).map(|_| ())
+        stage(repo, &opts, &mut NullProgress, &CancelToken::never()).map(|_| ())
     }
 
     #[test]

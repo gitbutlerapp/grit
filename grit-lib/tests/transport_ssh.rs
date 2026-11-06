@@ -26,7 +26,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::odb::Odb;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
 use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
@@ -117,7 +117,7 @@ fn run_fetch_and_assert(transport: &SshTransport, url: &str, source: &Path, loca
         &mut *conn,
         &mut opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("fetch_remote over ssh");
 
@@ -272,7 +272,7 @@ fn fetch_over_ssh_v2_lands_refs_and_objects() {
         &mut *conn,
         &mut opts,
         &mut NoProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("v2 fetch over ssh");
 

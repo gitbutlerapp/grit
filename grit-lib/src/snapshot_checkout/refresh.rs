@@ -19,7 +19,7 @@ use crate::porcelain::checkout_reflog::checkout_reflog_identity;
 use crate::porcelain::pull::{
     pull, FetchedUpstream, PullError, PullMode, PullOptions, PullOutcome,
 };
-use crate::progress::Cancel;
+use crate::progress::CancelToken;
 use crate::remote::HttpClientFactory;
 use crate::repo::Repository;
 use crate::state::{detect_in_progress, resolve_head_for_repository, HeadState};
@@ -168,7 +168,7 @@ pub fn refresh<P: Progress>(
     info: &CheckoutInfo,
     options: &PullOptions,
     progress: &mut P,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<RefreshOutcome> {
     ensure_refreshable(repo)?;
@@ -415,7 +415,6 @@ fn snapshot_changes(
 mod tests {
     use super::*;
     use crate::porcelain::pull::PullResult;
-    use crate::progress::NeverCancel;
     use crate::remote::fetch::NoProgress;
     use crate::snapshot_checkout::landing::{move_off_landed_branch, record_landed, MovedOff};
     use crate::snapshot_checkout::testing::*;
@@ -432,7 +431,7 @@ mod tests {
             info,
             &PullOptions::default(),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
     }
@@ -504,7 +503,7 @@ mod tests {
             &marker(&repo),
             &[("work".to_owned(), tip)],
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("push");

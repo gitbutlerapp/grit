@@ -29,7 +29,7 @@ use crate::error::{Error, Result};
 use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::pkt_line::{self, Packet};
-use crate::progress::{Cancel, ProgressPhase, ProgressSink, ProgressUnit};
+use crate::progress::{CancelToken, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::protocol_v2::{cap_lines_for_command_request, server_advertises_bundle_uri};
 use crate::repo::Repository;
 use crate::resumable::{
@@ -190,7 +190,7 @@ impl BundleList {
 pub(crate) fn fetch_bundle_list(
     client: Arc<dyn HttpClient>,
     repo_url: &str,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<Option<BundleList>> {
     if cancel.is_cancelled() {
         return Err(Error::Cancelled);
@@ -313,7 +313,7 @@ pub(crate) fn seed_from_bundle_uri(
     repo_url: &str,
     cache_dir: &Path,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> BundleSeed {
     if cancel.is_cancelled() {
         return BundleSeed::Failed {
@@ -356,7 +356,7 @@ fn seed_from(
     uri: &str,
     cache_dir: &Path,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<SeededBundle> {
     let shared_dest = bundle_cache_path(cache_dir, uri);
     let slot = claim_resumable_download(cache_dir, &shared_dest)?;
@@ -549,7 +549,6 @@ mod tests {
 
         use crate::config::environment::RepositoryOptions;
         use crate::fetch::NoProgress;
-        use crate::progress::NeverCancel;
         use crate::repo::{InitOptions, Repository};
         use crate::transport::http::{HttpClient, HttpRequest, HttpResponse};
 
@@ -610,8 +609,15 @@ mod tests {
             data,
         };
         let mut progress = NoProgress;
-        let seeded = seed_from(&repo, &client, &url, &cache, &mut progress, &NeverCancel)
-            .expect("seed_from");
+        let seeded = seed_from(
+            &repo,
+            &client,
+            &url,
+            &cache,
+            &mut progress,
+            &CancelToken::never(),
+        )
+        .expect("seed_from");
         assert!(!seeded.refs.is_empty(), "bundle seed should record tips");
         eprintln!("grit-bundle-cache-probe-seeded");
     }

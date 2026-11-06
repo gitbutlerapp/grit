@@ -122,7 +122,7 @@ fn incoming_directory_rename_does_not_duplicate_merged_index() {
         main_oid,
         "main",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(
@@ -144,7 +144,7 @@ fn incoming_directory_rename_does_not_duplicate_merged_index() {
         &repo,
         &commit_req("next"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("follow-up commit");
     assert_git_fsck_no_duplicate_entries(root);
@@ -198,7 +198,7 @@ fn incoming_single_file_rename_does_not_duplicate_merged_index() {
         main_oid,
         "main",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(
@@ -245,7 +245,7 @@ fn incoming_rename_destination_conflicts_with_independent_ours_add() {
         main_oid,
         "main",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Conflicts { paths, .. } = outcome else {

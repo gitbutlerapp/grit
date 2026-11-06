@@ -287,7 +287,7 @@ fn apply_rewrite_updates_refs_atomically_files_backend() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     assert_eq!(applied.ref_updates.len(), 1);
@@ -316,7 +316,7 @@ fn apply_rewrite_updates_refs_atomically_reftable_backend() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     git_fsck_strict(wt);
@@ -366,7 +366,7 @@ fn apply_rewrite_refuses_when_head_moved_since_plan() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("head moved");
     assert!(matches!(
@@ -395,7 +395,7 @@ fn apply_rewrite_cas_mismatch_changes_nothing() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("stale plan");
     assert!(matches!(
@@ -419,7 +419,7 @@ fn apply_rewrite_refuses_when_local_changes_would_be_overwritten() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("blocked");
     match err {
@@ -447,7 +447,7 @@ fn apply_rewrite_preserves_unrelated_staged_and_unstaged_changes() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     assert_eq!(
@@ -518,7 +518,7 @@ fn apply_rewrite_bare_repository() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply bare");
 }
@@ -535,7 +535,7 @@ fn apply_rewrite_writes_reflog_entries() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
@@ -580,7 +580,7 @@ fn apply_rewrite_checked_out_branch_reflog_single_entry_per_update() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let new_tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main tip");
@@ -639,7 +639,7 @@ fn apply_rewrite_head_reflog_matches_git_update_ref_on_checked_out_branch() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
@@ -674,7 +674,7 @@ fn apply_rewrite_head_reflog_reftable_backend() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     let head_log = read_reflog(grit.git_dir(), "HEAD").expect("head log");
@@ -777,7 +777,7 @@ fn apply_rewrite_failed_checkout_restores_refs_and_preserves_dirty_worktree() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("injected checkout failure");
     grit_lib::test_support::inject::set_test_inject_index_write_fail(false);
@@ -823,7 +823,7 @@ fn interrupted_rewrite_apply_recovers_and_blocks_commit_until_finished() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("injected abort after refs");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
@@ -915,7 +915,7 @@ fn interrupted_partial_checkout() -> (HistoryRepo, grit_lib::revwalk::history::R
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("injected abort after refs");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
@@ -979,7 +979,7 @@ fn status_finishes_interrupted_rewrite_apply_and_reports_it() {
         &grit,
         &grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status must not fail on an interrupted rewrite");
     assert_eq!(
@@ -991,7 +991,7 @@ fn status_finishes_interrupted_rewrite_apply_and_reports_it() {
         &grit,
         &grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("second status");
     assert_eq!(again.interrupted_rewrite, None);
@@ -1090,7 +1090,7 @@ fn interrupted_rewrite_apply_waits_for_index_lock_holder() {
         &grit,
         &grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status reads while another process holds the index lock");
     assert_eq!(
@@ -1139,7 +1139,7 @@ fn interrupted_rewrite_apply_abort_keeps_racily_clean_edit_visible() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("injected abort");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
@@ -1198,7 +1198,7 @@ fn apply_rewrite_journal_accepts_git_path_with_double_dot_in_name() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply with a..b present");
     assert!(wt.join("a..b").is_file());
@@ -1280,7 +1280,7 @@ fn interrupted_rewrite_apply_abort_restores_empty_tracked_file() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("injected abort");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
@@ -1312,7 +1312,7 @@ fn interrupted_rewrite_apply_abort_restores_newline_filename() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("injected abort");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);

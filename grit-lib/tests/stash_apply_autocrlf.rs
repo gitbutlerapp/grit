@@ -146,7 +146,7 @@ fn apply_stash_succeeds_on_clean_tree_with_autocrlf() {
         .push(
             &stash_options(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("had changes");
@@ -174,7 +174,7 @@ fn apply_stash_succeeds_on_clean_tree_with_autocrlf() {
             &stash_oid,
             &StashApplyOptions::default(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("apply must not treat CRLF smudge as local changes");
 
@@ -218,7 +218,7 @@ fn pop_stash_succeeds_on_clean_tree_with_autocrlf() {
         .push(
             &stash_options(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("had changes");
@@ -230,7 +230,7 @@ fn pop_stash_succeeds_on_clean_tree_with_autocrlf() {
             0,
             &StashApplyOptions::default(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("pop");
 
@@ -263,7 +263,7 @@ fn apply_stash_succeeds_with_system_inherited_autocrlf_only() {
         .push(
             &stash_options(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("had changes");
@@ -276,7 +276,7 @@ fn apply_stash_succeeds_with_system_inherited_autocrlf_only() {
             &stash_oid,
             &StashApplyOptions::default(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("apply must honor inherited system autocrlf when comparing worktree to index");
 
@@ -304,7 +304,7 @@ fn pop_stash_succeeds_with_system_inherited_autocrlf_only() {
         .push(
             &stash_options(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("had changes");
@@ -316,7 +316,7 @@ fn pop_stash_succeeds_with_system_inherited_autocrlf_only() {
             0,
             &StashApplyOptions::default(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("pop must honor inherited system autocrlf when comparing worktree to index");
 
@@ -343,7 +343,7 @@ fn pop_stash_writes_crlf_worktree_bytes_for_tracked_and_untracked() {
         .push(
             &stash_options_untracked(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("had changes");
@@ -355,7 +355,7 @@ fn pop_stash_writes_crlf_worktree_bytes_for_tracked_and_untracked() {
             0,
             &StashApplyOptions::default(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("pop");
 
@@ -384,7 +384,7 @@ fn apply_stash_writes_crlf_worktree_bytes_matching_git_stash_apply() {
         .push(
             &stash_options_untracked(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
         .expect("had changes");
@@ -412,7 +412,7 @@ fn apply_stash_writes_crlf_worktree_bytes_matching_git_stash_apply() {
             &stash_oid,
             &StashApplyOptions::default(),
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("apply");
 

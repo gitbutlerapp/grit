@@ -7,7 +7,7 @@ use grit_lib::operation::ConflictKind;
 use grit_lib::porcelain::status::{
     status, ConflictGroup, StatusAction, StatusGuidance, StatusModel, StatusOptions,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::branch_tracking::{BranchStanding, StandingOptions};
 use grit_lib::repo::Repository;
 use grit_lib::state::{InProgressOperation, NextStep};
@@ -34,7 +34,7 @@ fn model_and_standing(repo: &Repository) -> (StatusModel, BranchStanding) {
         repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let standing = BranchStanding::compute(

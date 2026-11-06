@@ -59,7 +59,7 @@ impl<'repo> RevWalk<'repo> {
     /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.allow_empty = true;
-    /// let _ = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::NeverCancel)?;
+    /// let _ = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?;
     /// let _ = repo.rev_walk().resolve("refs/heads/main")?;
     /// # Ok(())
     /// # }
@@ -203,7 +203,7 @@ mod commit_iter_tests {
     use super::*;
     use crate::ident::Signature;
     use crate::porcelain::commit::{create_commit, CommitRequest};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use crate::repo::{InitOptions, Repository};
 
     fn init_repo_with_commits(count: usize) -> (tempfile::TempDir, Repository) {
@@ -219,7 +219,7 @@ mod commit_iter_tests {
                     .expect("committer"),
             );
             req.allow_empty = true;
-            create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+            create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
         }
         (dir, repo)
     }

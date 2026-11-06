@@ -5,6 +5,7 @@ use crate::config::ident_resolve::IdentRole;
 use crate::error::{Error, Result};
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
+use crate::progress::CancelToken;
 use crate::reflog::ReflogEntry;
 use crate::refs::listing::{query_refs, RefListing, RefQuery, RefQueryError, RefQueryOptions};
 use crate::refs::on_store::reflog_wanted;
@@ -66,7 +67,7 @@ impl<'repo> References<'repo> {
     /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.allow_empty = true;
-    /// let _ = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::NeverCancel)?;
+    /// let _ = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?;
     /// let main = RefName::try_from("refs/heads/main").expect("valid ref");
     /// let head = repo.references().resolve(&main)?;
     /// assert!(!head.to_hex().is_empty());
@@ -196,7 +197,7 @@ impl<'repo> References<'repo> {
     /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.allow_empty = true;
-    /// let commit = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::NeverCancel)?.oid;
+    /// let commit = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?.oid;
     /// let name = RefName::try_from("refs/heads/handle-demo").expect("valid ref");
     /// repo.references().update(&name, &commit)?;
     /// assert_eq!(repo.references().resolve(&name)?, commit);
