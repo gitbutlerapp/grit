@@ -1586,7 +1586,7 @@ impl Repository {
         options
             .globals
             .validate()
-            .map_err(|msg| crate::pathspec::PathspecResolveError::InvalidGlobals(msg))?;
+            .map_err(crate::pathspec::PathspecResolveError::InvalidGlobals)?;
         let argv: Vec<String> = items.into_iter().map(|s| s.as_ref().to_owned()).collect();
         let cwd = options
             .cwd_prefix

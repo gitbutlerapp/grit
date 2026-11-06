@@ -702,6 +702,7 @@ fn poll_untracked_cancel(watch: Option<&std::sync::atomic::AtomicBool>) -> Resul
 }
 
 /// Shared implementation of the untracked/ignored walk.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn collect_untracked_and_ignored_inner(
     repo: &Repository,
     index: &mut Index,
