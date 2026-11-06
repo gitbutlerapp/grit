@@ -796,6 +796,7 @@ mod tests {
     use crate::pack::read_pack_index;
     use crate::unpack_objects::pack_index_records_with_threads;
     use std::process::Command;
+    use std::sync::Arc;
 
     fn git_index_pack(pack: &[u8]) -> (tempfile::TempDir, Vec<u8>) {
         let dir = tempfile::tempdir().expect("tempdir");

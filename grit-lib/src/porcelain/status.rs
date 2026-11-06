@@ -215,7 +215,21 @@ fn parse_status_renames_config_value(raw: &str) -> Option<RenameDetection> {
     })
 }
 
-/// Whether a diff entry matches a pathspec (pre-rename-detection filter).
+/// Whether a diff entry's primary path matches a pathspec list (pre-rename-detection filter).
+#[must_use]
+pub fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String]) -> bool {
+    if pathspecs.is_empty() {
+        return true;
+    }
+    status_path_matches(entry.path(), pathspecs)
+}
+
+/// Whether a diff entry matches `pathspec` using typed pathspec evaluation (rename-aware).
+///
+/// # Errors
+///
+/// Same as [`Pathspec::matches_change`](crate::pathspec::Pathspec::matches_change) (pathspec
+/// matcher construction or attribute resolution can fail).
 pub fn status_diff_entry_matches_pathspec_typed(
     repo: &Repository,
     entry: &DiffEntry,

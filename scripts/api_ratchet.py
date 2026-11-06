@@ -38,6 +38,7 @@ METRIC_KEYS = (
     "pub_fn_result_string_err",
     "pub_free_fn_repository_first",
     "pub_free_fn_git_dir_path_first",
+    "pub_free_fn_config_write",
     "pub_items_multiple_paths",
     "pub_libc_types",
     "pub_unsafe_fn",
@@ -78,7 +79,34 @@ RESOLVED_PATHSPECS_STRING_FIELDS = frozenset({"sources", "specs"})
 REFNAME_VALIDATOR_MODULE_PREFIX = "grit_lib::refs::"
 
 GIT_DIR_PARAM_NAMES = frozenset(
-    {"git_dir", "gitdir", "repo_git_dir", "common_dir"},
+    {"git_dir", "gitdir", "git_directory", "repo_git_dir", "common_dir"},
+)
+
+# Legacy free functions that wrote a repo config file via `git_dir: Option<&Path>` (may be empty
+# after consolidation onto [`ConfigEditor`](grit_lib::config::ConfigEditor)).
+CONFIG_WRITE_FREE_FN_NAMES = frozenset(
+    {
+        "set_config_value",
+        "add_config_value",
+        "unset_config_value",
+        "unset_all_config_values",
+        "rename_config_section",
+        "remove_config_section",
+    },
+)
+
+CONFIG_WRITE_GIT_DIR_PARAM_NAMES = frozenset({"git_dir", "git_directory"})
+
+# Config file mutation helpers on [`ConfigEditor`](grit_lib::config::ConfigEditor) (current path).
+CONFIG_EDITOR_WRITE_METHODS = frozenset(
+    {
+        "set",
+        "add_value",
+        "unset",
+        "unset_all",
+        "rename_section",
+        "remove_section",
+    },
 )
 
 TOO_MANY_ARGS_RE = re.compile(r"allow\s*\(\s*clippy::too_many_arguments\s*\)")
@@ -1164,6 +1192,7 @@ def compute_metrics(
     result_string: list[str] = []
     repo_first: list[str] = []
     git_dir_first: list[str] = []
+    config_write_surface: list[str] = []
     unsafe_fns: list[str] = []
     libc_offenders: list[str] = []
     associated_fn_ids = build_associated_function_ids(index)
@@ -1270,9 +1299,23 @@ def compute_metrics(
             if is_exact_repository_ref(param_ty):
                 repo_first.append(f"{path} :: {name}")
             if is_exact_path_ref(param_ty) and (
-                param_name in GIT_DIR_PARAM_NAMES or param_name.endswith("_git_dir")
+                param_name in GIT_DIR_PARAM_NAMES
+                or param_name.endswith("_git_dir")
+                or param_name.endswith("_git_directory")
             ):
                 git_dir_first.append(f"{path} :: {name}")
+            if (
+                is_free_fn
+                and path.startswith("grit_lib::config::")
+                and name in CONFIG_WRITE_FREE_FN_NAMES
+                and len(inputs) >= 3
+            ):
+                gd_name, gd_ty = inputs[2]
+                if (
+                    gd_name in CONFIG_WRITE_GIT_DIR_PARAM_NAMES
+                    and type_display(resolve_type_node(gd_ty, index)).startswith("Option")
+                ):
+                    config_write_surface.append(f"{path} :: {name}")
 
         for param_name, param_ty in inputs:
             if is_dyn_cancel_type(param_ty, index):
@@ -1331,6 +1374,31 @@ def compute_metrics(
         if "impl" not in inner:
             continue
         for_path = impl_for_type_path(item)
+        if for_path not in {
+            "grit_lib::config::ConfigEditor",
+            "ConfigEditor",
+        } and not for_path.endswith("::config::ConfigEditor"):
+            continue
+        for member_id in inner["impl"].get("items") or []:
+            member = index_entry(index, member_id)
+            if member is None or member.get("visibility") != "public":
+                continue
+            member_inner = member.get("inner") or {}
+            if "function" not in member_inner:
+                continue
+            fname = member.get("name") or "?"
+            if fname not in CONFIG_EDITOR_WRITE_METHODS:
+                continue
+            mpath = public_path_for_item(index, paths_map, str(member_id))
+            config_write_surface.append(f"{mpath} :: {fname}")
+
+    for item_id, item in index.items():
+        if item.get("crate_id") != 0:
+            continue
+        inner = item.get("inner") or {}
+        if "impl" not in inner:
+            continue
+        for_path = impl_for_type_path(item)
         if not for_path or (
             "RepositoryLocation" not in for_path and not for_path.endswith("::RepositoryLocation")
         ):
@@ -1379,6 +1447,10 @@ def compute_metrics(
         "pub_fn_result_string_err": MetricResult(len(result_string), result_string),
         "pub_free_fn_repository_first": MetricResult(len(repo_first), repo_first),
         "pub_free_fn_git_dir_path_first": MetricResult(len(git_dir_first), git_dir_first),
+        "pub_free_fn_config_write": MetricResult(
+            len(config_write_surface),
+            config_write_surface,
+        ),
         "pub_items_multiple_paths": MetricResult(len(multi_paths), multi_paths),
         "pub_libc_types": MetricResult(len(sorted(set(libc_offenders))), sorted(set(libc_offenders))),
         "pub_unsafe_fn": MetricResult(len(unsafe_fns), unsafe_fns),

@@ -14355,6 +14355,7 @@ pub fn grit_lib::porcelain::status::format_porcelain_v2(&grit_lib::porcelain::st
 pub fn grit_lib::porcelain::status::normalize_status_conflicts(&mut alloc::vec::Vec<grit_lib::diff::DiffEntry>, &mut alloc::vec::Vec<grit_lib::diff::DiffEntry>, &[alloc::string::String])
 pub fn grit_lib::porcelain::status::short_status_lines(&grit_lib::porcelain::status::StatusModel) -> alloc::vec::Vec<grit_lib::porcelain::status::StatusShortLine>
 pub fn grit_lib::porcelain::status::status(&grit_lib::repo::Repository, &grit_lib::porcelain::status::StatusOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::status::StatusModel>
+pub fn grit_lib::porcelain::status::status_diff_entry_matches_pathspec(&grit_lib::diff::DiffEntry, &[alloc::string::String]) -> bool
 pub fn grit_lib::porcelain::status::status_diff_entry_matches_pathspec_typed(&grit_lib::repo::Repository, &grit_lib::diff::DiffEntry, &grit_lib::worktree::pathspec::Pathspec) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::status::status_options_from_config(&grit_lib::config::ConfigSet) -> core::result::Result<grit_lib::porcelain::status::StatusOptions, grit_lib::error::ConfigError>
 pub fn grit_lib::porcelain::status::status_renames_from_config(&grit_lib::config::ConfigSet) -> core::option::Option<grit_lib::porcelain::status::RenameDetection>
