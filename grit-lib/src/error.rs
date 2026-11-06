@@ -1271,6 +1271,74 @@ pub(crate) fn restore_unmerged_message(paths: &[String]) -> String {
     }
 }
 
+/// Failure decoding object bytes from loose storage or a pack entry, without nesting the umbrella [`enum@Error`].
+///
+/// Used as the `source` of [`Error::CorruptLooseObject`] and [`Error::CorruptPackedObject`] so
+/// object-read layers do not store a recursive `Box<Error>` (which counted against API quality
+/// ratchet metrics).
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ObjectReadFailure {
+    /// Filesystem read failed while loading object bytes.
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    /// zlib inflate/deflate failure on object payload bytes.
+    #[error("zlib error: {0}")]
+    Zlib(String),
+    /// Object header or payload failed structural checks (see [`Error::CorruptObject`]).
+    #[error("corrupt object: {0}")]
+    CorruptObject(String),
+    /// Declared size did not match bytes read from a stream.
+    #[error("object stream ended after {actual} of {expected} bytes")]
+    ObjectStreamTruncated {
+        /// Payload size the reader expected.
+        expected: u64,
+        /// Bytes read before EOF.
+        actual: u64,
+    },
+    /// Object type token in a header was not recognized.
+    #[error("unknown object type '{0}'")]
+    UnknownObjectType(String),
+    /// Loose object header type field exceeds Git's limit.
+    #[error("header for {oid} too long, exceeds 32 bytes")]
+    ObjectHeaderTooLong {
+        /// Object id (hex) of the loose object with an oversized header.
+        oid: String,
+    },
+    /// Delta chain exceeded the read-side depth limit.
+    #[error("delta chain too deep (limit {limit})")]
+    DeltaChainTooDeep {
+        /// Configured maximum chain depth.
+        limit: usize,
+    },
+    /// Payload failed the same checks used when refusing writes (`git fsck` rules).
+    #[error("refusing to write invalid {kind} object: {}", .check.report_line())]
+    InvalidObject {
+        /// Kind the bytes were parsed as.
+        kind: crate::objects::ObjectKind,
+        /// First broken rule.
+        check: crate::fsck_standalone::FsckError,
+    },
+}
+
+impl From<Error> for ObjectReadFailure {
+    fn from(err: Error) -> Self {
+        match err {
+            Error::Io(e) => Self::Io(e),
+            Error::Zlib(s) => Self::Zlib(s),
+            Error::CorruptObject(s) => Self::CorruptObject(s),
+            Error::ObjectStreamTruncated { expected, actual } => {
+                Self::ObjectStreamTruncated { expected, actual }
+            }
+            Error::UnknownObjectType(s) => Self::UnknownObjectType(s),
+            Error::ObjectHeaderTooLong { oid } => Self::ObjectHeaderTooLong { oid },
+            Error::DeltaChainTooDeep { limit } => Self::DeltaChainTooDeep { limit },
+            Error::InvalidObject { kind, check } => Self::InvalidObject { kind, check },
+            other => Self::CorruptObject(other.to_string()),
+        }
+    }
+}
+
 /// The top-level error type for all grit-lib operations.
 ///
 /// # Examples
@@ -1457,7 +1525,7 @@ pub enum Error {
         path: std::path::PathBuf,
         /// Underlying zlib, header, or I/O failure.
         #[source]
-        source: Box<Error>,
+        source: Box<ObjectReadFailure>,
     },
 
     /// A pack entry names the object but its stored bytes could not be decoded.
@@ -1475,7 +1543,7 @@ pub enum Error {
         offset: u64,
         /// Underlying zlib, header, or I/O failure.
         #[source]
-        source: Box<Error>,
+        source: Box<ObjectReadFailure>,
     },
 
     /// Loose object bytes hash to a different OID than the file path implies (`git fsck` / `read_loose_object`).
@@ -2571,7 +2639,7 @@ impl Error {
             Self::CorruptLooseObject {
                 oid,
                 path,
-                source: Box::new(err),
+                source: Box::new(ObjectReadFailure::from(err)),
             }
         } else {
             err
@@ -2594,7 +2662,7 @@ impl Error {
                 oid,
                 pack,
                 offset,
-                source: Box::new(err),
+                source: Box::new(ObjectReadFailure::from(err)),
             }
         } else {
             err

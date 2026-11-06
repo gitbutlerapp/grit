@@ -7,7 +7,7 @@ use std::time::Duration;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::config::environment::Environment;
-use grit_lib::error::Error;
+use grit_lib::error::{Error, ObjectReadFailure};
 use grit_lib::objects::odb::store::read_loose_object_info;
 use grit_lib::objects::odb::{
     hash_algo_for_git_dir, hash_algo_for_objects_dir, Odb, WriteOptions, BULK_NEW_LOOSE_WRITE,
@@ -306,7 +306,10 @@ fn t1060_loose_empty_file_returns_corrupt_loose_with_io_source() {
     match err {
         Error::CorruptLooseObject { source, .. } => {
             assert!(
-                matches!(*source, Error::Io(_) | Error::Zlib(_)),
+                matches!(
+                    *source,
+                    ObjectReadFailure::Io(_) | ObjectReadFailure::Zlib(_)
+                ),
                 "{source:?}"
             );
         }
@@ -370,7 +373,10 @@ fn t1060_packed_zlib_bit_flip_names_pack_and_offset() {
             assert_eq!(pack, pack_path);
             assert!(offset > 0);
             assert!(
-                matches!(*source, Error::Zlib(_) | Error::CorruptObject(_)),
+                matches!(
+                    *source,
+                    ObjectReadFailure::Zlib(_) | ObjectReadFailure::CorruptObject(_)
+                ),
                 "{source:?}"
             );
         }

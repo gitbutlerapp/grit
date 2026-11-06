@@ -5418,13 +5418,13 @@ pub grit_lib::error::Error::Config(grit_lib::error::ConfigError)
 #[non_exhaustive] pub grit_lib::error::Error::CorruptLooseObject
 pub grit_lib::error::Error::CorruptLooseObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::CorruptLooseObject::path: std::path::PathBuf
-pub grit_lib::error::Error::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::error::Error>
+pub grit_lib::error::Error::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::error::ObjectReadFailure>
 pub grit_lib::error::Error::CorruptObject(alloc::string::String)
 #[non_exhaustive] pub grit_lib::error::Error::CorruptPackedObject
 pub grit_lib::error::Error::CorruptPackedObject::offset: u64
 pub grit_lib::error::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::CorruptPackedObject::pack: std::path::PathBuf
-pub grit_lib::error::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::Error>
+pub grit_lib::error::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::ObjectReadFailure>
 pub grit_lib::error::Error::DeltaChainTooDeep
 pub grit_lib::error::Error::DeltaChainTooDeep::limit: usize
 pub grit_lib::error::Error::DetachedHead
@@ -5685,6 +5685,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::command_runner::h
 pub fn grit_lib::command_runner::hooks::HookError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::error::ObjectReadFailure
+pub fn grit_lib::error::ObjectReadFailure::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError
@@ -5985,6 +5987,38 @@ impl core::marker::Unpin for grit_lib::error::NotARepositoryReason
 impl core::marker::UnsafeUnpin for grit_lib::error::NotARepositoryReason
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::NotARepositoryReason
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::error::NotARepositoryReason
+#[non_exhaustive] pub enum grit_lib::error::ObjectReadFailure
+pub grit_lib::error::ObjectReadFailure::CorruptObject(alloc::string::String)
+pub grit_lib::error::ObjectReadFailure::DeltaChainTooDeep
+pub grit_lib::error::ObjectReadFailure::DeltaChainTooDeep::limit: usize
+pub grit_lib::error::ObjectReadFailure::InvalidObject
+pub grit_lib::error::ObjectReadFailure::InvalidObject::check: grit_lib::maintenance::fsck::FsckError
+pub grit_lib::error::ObjectReadFailure::InvalidObject::kind: grit_lib::objects::ObjectKind
+pub grit_lib::error::ObjectReadFailure::Io(core::io::error::Error)
+pub grit_lib::error::ObjectReadFailure::ObjectHeaderTooLong
+pub grit_lib::error::ObjectReadFailure::ObjectHeaderTooLong::oid: alloc::string::String
+pub grit_lib::error::ObjectReadFailure::ObjectStreamTruncated
+pub grit_lib::error::ObjectReadFailure::ObjectStreamTruncated::actual: u64
+pub grit_lib::error::ObjectReadFailure::ObjectStreamTruncated::expected: u64
+pub grit_lib::error::ObjectReadFailure::UnknownObjectType(alloc::string::String)
+pub grit_lib::error::ObjectReadFailure::Zlib(alloc::string::String)
+impl core::convert::From<core::io::error::Error> for grit_lib::error::ObjectReadFailure
+pub fn grit_lib::error::ObjectReadFailure::from(core::io::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::error::ObjectReadFailure
+pub fn grit_lib::error::ObjectReadFailure::from(grit_lib::error::Error) -> Self
+impl core::error::Error for grit_lib::error::ObjectReadFailure
+pub fn grit_lib::error::ObjectReadFailure::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::error::ObjectReadFailure
+pub fn grit_lib::error::ObjectReadFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::ObjectReadFailure
+pub fn grit_lib::error::ObjectReadFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::error::ObjectReadFailure
+impl core::marker::Send for grit_lib::error::ObjectReadFailure
+impl core::marker::Sync for grit_lib::error::ObjectReadFailure
+impl core::marker::Unpin for grit_lib::error::ObjectReadFailure
+impl core::marker::UnsafeUnpin for grit_lib::error::ObjectReadFailure
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::ObjectReadFailure
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::error::ObjectReadFailure
 pub enum grit_lib::error::OverwriteReason
 pub grit_lib::error::OverwriteReason::LocalChanges
 pub grit_lib::error::OverwriteReason::Untracked
@@ -14831,13 +14865,13 @@ pub grit_lib::prelude::Error::Config(grit_lib::error::ConfigError)
 #[non_exhaustive] pub grit_lib::prelude::Error::CorruptLooseObject
 pub grit_lib::prelude::Error::CorruptLooseObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::CorruptLooseObject::path: std::path::PathBuf
-pub grit_lib::prelude::Error::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::error::Error>
+pub grit_lib::prelude::Error::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::error::ObjectReadFailure>
 pub grit_lib::prelude::Error::CorruptObject(alloc::string::String)
 #[non_exhaustive] pub grit_lib::prelude::Error::CorruptPackedObject
 pub grit_lib::prelude::Error::CorruptPackedObject::offset: u64
 pub grit_lib::prelude::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::CorruptPackedObject::pack: std::path::PathBuf
-pub grit_lib::prelude::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::Error>
+pub grit_lib::prelude::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::ObjectReadFailure>
 pub grit_lib::prelude::Error::DeltaChainTooDeep
 pub grit_lib::prelude::Error::DeltaChainTooDeep::limit: usize
 pub grit_lib::prelude::Error::DetachedHead
@@ -15098,6 +15132,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::command_runner::h
 pub fn grit_lib::command_runner::hooks::HookError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::error::ObjectReadFailure
+pub fn grit_lib::error::ObjectReadFailure::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError

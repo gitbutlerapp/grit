@@ -8,7 +8,8 @@ Grit-lib returns **structured errors**, not strings. Each functional area gets i
 - No catch-all `Message(String)` on area enums; no `Result<_, String>` in the public API.
 - Named fields only: `PathBuf`, object ids, ref names, reason enums. A bare `String` field is allowed only for **external data** (for example a remote's error line) and must be a **named** field, not a tuple variant.
 - Use [`PathIoError`](rustdoc:grit_lib::error::PathIoError) for path-related I/O; do not add bare `#[from] io::Error` on area enums.
-- Cross-area failures wrap the lower area's enum. Temporary `Nested(Box<Error>)` on the umbrella is allowed until the final collapse step.
+- Cross-area failures wrap the lower area's enum. Corrupt loose/packed reads use [`ObjectReadFailure`](rustdoc:grit_lib::error::ObjectReadFailure) (not a nested umbrella value) as the `source` of [`Error::CorruptLooseObject`](rustdoc:grit_lib::error::Error::CorruptLooseObject) / [`Error::CorruptPackedObject`](rustdoc:grit_lib::error::Error::CorruptPackedObject).
+- Temporary [`RemoteError::Nested`](rustdoc:grit_lib::remote::RemoteError::Nested) (`Box<Error>`) is allowed on [`RemoteError`](rustdoc:grit_lib::remote::RemoteError) until the final collapse step.
 - Public functions return `Result<T, AreaError>`, not per-area type aliases.
 
 ## Shared leaf types
@@ -18,6 +19,7 @@ Grit-lib returns **structured errors**, not strings. Each functional area gets i
 | [`LockHeldError`](rustdoc:grit_lib::error::LockHeldError) | Lock file exists; optional [`LockHolder`](rustdoc:grit_lib::lockfile::LockHolder) from the pid sidecar |
 | [`PathIoError`](rustdoc:grit_lib::error::PathIoError) | Worktree or git-dir path I/O with [`PathIoOperation`](rustdoc:grit_lib::error::PathIoOperation) |
 | [`Cancelled`](rustdoc:grit_lib::error::Cancelled) | Operation stopped via [`CancelToken`](rustdoc:grit_lib::progress::CancelToken) |
+| [`ObjectReadFailure`](rustdoc:grit_lib::error::ObjectReadFailure) | Non-recursive decode failure for corrupt loose/packed object reads |
 
 ## Area map (target)
 
