@@ -2,7 +2,6 @@
 
 #![allow(clippy::unwrap_used)]
 
-use grit_lib::error::Error;
 use grit_lib::refs::branch_tracking::{
     list_branches, upstream_status, BranchDetail, BranchListQuery, BranchScope,
 };
@@ -30,7 +29,7 @@ fn branch_inventory_public_api_smoke() {
     )
     .unwrap();
 
-    let err = list_branches(
+    let date_sorted_names = list_branches(
         &repo,
         &BranchListQuery {
             scope: BranchScope::Local,
@@ -44,6 +43,6 @@ fn branch_inventory_public_api_smoke() {
         },
         BranchDetail::Names,
     )
-    .unwrap_err();
-    assert!(matches!(err, Error::BranchListNamesDateSort));
+    .unwrap();
+    assert!(date_sorted_names.is_empty());
 }
