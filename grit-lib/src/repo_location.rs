@@ -251,7 +251,15 @@ mod tests {
         let foreign = {
             use crate::ownership_check::ForeignOwnershipCheck;
             use std::sync::Arc;
-            options_at(tmp.path(), &[]).with_ownership_check(Arc::new(ForeignOwnershipCheck))
+            // Host config (e.g. a runner's `safe.directory = *`) must not vouch for the repo.
+            options_at(
+                tmp.path(),
+                &[
+                    ("GIT_CONFIG_NOSYSTEM", "1"),
+                    ("GIT_CONFIG_GLOBAL", "/dev/null"),
+                ],
+            )
+            .with_ownership_check(Arc::new(ForeignOwnershipCheck))
         };
         let err = Repository::discover(None, &foreign).unwrap_err();
         assert!(matches!(
