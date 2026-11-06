@@ -29,7 +29,10 @@ use crate::repo::{common_git_dir_for_config, Repository};
 use crate::rev_parse::resolve_revision;
 use crate::state::{resolve_head, resolve_linked_worktree_head, HeadState};
 
-use super::error::{LinkedWorktreeError, LinkedWorktreeOperation, WorktreeError};
+use super::error::{LinkedWorktreeError, LinkedWorktreeOperation};
+
+#[cfg(test)]
+use super::error::WorktreeError;
 
 /// Why Git marks a linked worktree as `prunable` in `worktree list --porcelain`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

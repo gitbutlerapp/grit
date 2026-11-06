@@ -2,10 +2,6 @@
 
 pub use super::linked_worktree_error::{LinkedWorktreeError, LinkedWorktreeOperation};
 
-/// Deprecated alias for [`LinkedWorktreeOperation`]; use the linked-specific name in new code.
-#[deprecated(note = "use LinkedWorktreeOperation")]
-pub type WorktreeOperation = LinkedWorktreeOperation;
-
 use crate::error::{
     AttrPathspecError, Error, FilterError, OverwriteReason, PathOutsideRepoError,
     PathspecFromFileParseError, SubmoduleError, WorktreeOperation as DirtyWorktreeOperation,
@@ -324,47 +320,6 @@ impl WorktreeError {
             Self::UnmergedConflictMarkers { .. } => "unmerged_conflict_markers",
             Self::Filter(_) => "filter",
             Self::Submodule(_) => "submodule",
-        }
-    }
-
-    /// Build [`WorktreeError::WouldOverwrite`] for switch and similar tree transitions.
-    #[must_use]
-    pub fn would_overwrite(reason: OverwriteReason, mut paths: Vec<String>) -> Self {
-        paths.sort();
-        paths.dedup();
-        let message = match reason {
-            OverwriteReason::LocalChanges => {
-                "you have uncommitted changes — commit them before switching".into()
-            }
-            OverwriteReason::Untracked => {
-                let first = paths.first().map(String::as_str).unwrap_or("<path>");
-                format!("untracked file '{first}' would be overwritten — move or remove it first")
-            }
-        };
-        Self::WouldOverwrite {
-            reason,
-            paths,
-            message,
-        }
-    }
-
-    /// Build [`WorktreeError::DirtyWorktree`], sorting and deduplicating `paths`.
-    #[must_use]
-    pub fn dirty_worktree(operation: DirtyWorktreeOperation, mut paths: Vec<String>) -> Self {
-        paths.sort();
-        paths.dedup();
-        Self::DirtyWorktree { operation, paths }
-    }
-
-    /// Build [`WorktreeError::InvalidPathComponent`].
-    #[must_use]
-    pub fn invalid_path_component(
-        path: impl Into<String>,
-        reason: crate::path_validate::PathComponentError,
-    ) -> Self {
-        Self::InvalidPathComponent {
-            path: path.into(),
-            reason,
         }
     }
 }
