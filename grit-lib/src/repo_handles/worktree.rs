@@ -95,9 +95,9 @@ impl<'repo> RepositoryWorktrees<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`WorktreeError::NotRegistered`](crate::worktree::WorktreeError::NotRegistered),
-    /// [`WorktreeError::MainWorktree`](crate::worktree::WorktreeError::MainWorktree) or
-    /// [`WorktreeError::AlreadyLocked`](crate::worktree::WorktreeError::AlreadyLocked), or an
+    /// Returns [`LinkedWorktreeError::NotRegistered`](crate::worktree::LinkedWorktreeError::NotRegistered),
+    /// [`LinkedWorktreeError::MainWorktree`](crate::worktree::LinkedWorktreeError::MainWorktree) or
+    /// [`LinkedWorktreeError::AlreadyLocked`](crate::worktree::LinkedWorktreeError::AlreadyLocked), or an
     /// I/O error writing the file.
     ///
     /// # Examples
@@ -123,9 +123,9 @@ impl<'repo> RepositoryWorktrees<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`WorktreeError::NotRegistered`](crate::worktree::WorktreeError::NotRegistered),
-    /// [`WorktreeError::MainWorktree`](crate::worktree::WorktreeError::MainWorktree) or
-    /// [`WorktreeError::NotLocked`](crate::worktree::WorktreeError::NotLocked), or an I/O error
+    /// Returns [`LinkedWorktreeError::NotRegistered`](crate::worktree::LinkedWorktreeError::NotRegistered),
+    /// [`LinkedWorktreeError::MainWorktree`](crate::worktree::LinkedWorktreeError::MainWorktree) or
+    /// [`LinkedWorktreeError::NotLocked`](crate::worktree::LinkedWorktreeError::NotLocked), or an I/O error
     /// removing the file.
     pub fn unlock(&self, path: &Path) -> Result<()> {
         unlock_linked_worktree(self.repo, path)

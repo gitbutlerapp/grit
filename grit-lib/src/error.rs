@@ -122,6 +122,18 @@ impl PathIoError {
     }
 }
 
+impl std::fmt::Display for PathIoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+impl std::error::Error for PathIoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 /// Why a Git config numeric value was rejected (`git config int` strict parsing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BadNumericSource {
@@ -1194,7 +1206,7 @@ fn maintenance_running_message(holder: &crate::maintenance::GcLockHolder) -> Str
     }
 }
 
-fn restore_unmerged_message(paths: &[String]) -> String {
+pub(crate) fn restore_unmerged_message(paths: &[String]) -> String {
     match paths {
         [path] => format!("path '{path}' is unmerged"),
         _ => format!(
@@ -2876,6 +2888,12 @@ impl From<crate::refs::store::RefStoreError> for Error {
 impl From<Cancelled> for Error {
     fn from(_: Cancelled) -> Self {
         Self::Cancelled
+    }
+}
+
+impl From<crate::worktree::LinkedWorktreeError> for Error {
+    fn from(value: crate::worktree::LinkedWorktreeError) -> Self {
+        Self::Worktree(value.into())
     }
 }
 
