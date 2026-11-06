@@ -26163,7 +26163,7 @@ pub grit_lib::revwalk::rev_list::RevListResult::bitmap_object_format: bool
 pub grit_lib::revwalk::rev_list::RevListResult::boundary_commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::rev_list::RevListResult::cherry_equivalent: std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::rev_list::RevListResult::cherry_matches: alloc::vec::Vec<grit_lib::revwalk::rev_list::CherryMatch>
-pub grit_lib::revwalk::rev_list::RevListResult::commit_data: grit_lib::objects::OidHashMap<grit_lib::objects::CommitData>
+pub grit_lib::revwalk::rev_list::RevListResult::commit_data: grit_lib::revwalk::log_walk::WalkedCommits
 pub grit_lib::revwalk::rev_list::RevListResult::commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::rev_list::RevListResult::left_right_map: std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, bool>
 pub grit_lib::revwalk::rev_list::RevListResult::log_graph_linkage: core::option::Option<grit_lib::revwalk::rev_list::LogGraphLinkage>

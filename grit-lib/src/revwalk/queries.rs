@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 use crate::pathspec::{Pathspec, PathspecGlobalFlags};
 use crate::rev_list::{
-    empty_rev_list_result, open_commit_stream, rev_list, split_revision_token, CommitExtent,
-    CommitStream, CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
+    empty_rev_list_result, open_commit_stream, rev_list_with_context, split_revision_token,
+    CommitExtent, CommitStream, CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
+    RevListWalkContext,
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
@@ -88,7 +89,7 @@ pub struct RevWalkCommitIterOptions {
 /// [`RevWalk::rev_list_result`], or [`RevWalk::count`] together with revision tokens
 /// (`main`, `^v1.0`, `A..B`, `A...B`). Ref selections ([`Self::refs`]) and path limits
 /// ([`Self::pathspec`]) live here rather than in the tokens. The low-level engine options are
-/// [`RevListOptions`], used by [`rev_list`] and [`RevWalk::walk`] (one spec string).
+/// [`RevListOptions`], used by [`crate::rev_list::rev_list`] and [`RevWalk::walk`] (one spec string).
 #[derive(Debug, Clone)]
 pub struct RevWalkListOptions {
     /// Maximum number of commits to return (matches `rev-list --max-count` / `-n`).
@@ -164,7 +165,7 @@ impl Default for RevWalkListOptions {
 
 /// Positive and negative revision specs produced by [`parse_rev_walk_tokens`].
 ///
-/// Feed `positive` / `negative` to [`rev_list`] and copy `symmetric_left` / `symmetric_right`
+/// Feed `positive` / `negative` to [`crate::rev_list::rev_list`] and copy `symmetric_left` / `symmetric_right`
 /// into the matching [`RevListOptions`] fields. [`RevWalk::commits`] and [`RevWalk::walk`] do
 /// this for you.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -179,7 +180,7 @@ pub struct RevWalkParsedSpecs {
     pub symmetric_right: Option<ObjectId>,
 }
 
-/// Parse user revision tokens into positive/negative specs for [`rev_list`].
+/// Parse user revision tokens into positive/negative specs for [`crate::rev_list::rev_list`].
 ///
 /// Supports plain tips, `A..B`, `A...B`, and `^X` exclusions across multiple tokens. An empty
 /// side of a range defaults to `HEAD`. `A...B` expands to both tips as positive specs and all
@@ -305,14 +306,14 @@ pub(crate) fn rev_list_options_from_walk(
     parsed: &RevWalkParsedSpecs,
     all_refs: bool,
     count: bool,
-) -> Result<RevListOptions> {
+) -> Result<(RevListOptions, RevListWalkContext)> {
     if walk.follow {
         validate_follow_pathspecs(walk.pathspec.specs())?;
     }
     let paths = repo.resolve_rev_walk_pathspecs(&walk.pathspec)?;
     let (min_parents, max_parents) = merge_filter_to_parent_bounds(walk.merges);
     let graph = walk.graph;
-    Ok(RevListOptions {
+    let opts = RevListOptions {
         first_parent: walk.first_parent,
         max_count: walk.limit,
         skip: walk.skip,
@@ -345,7 +346,11 @@ pub(crate) fn rev_list_options_from_walk(
         follow: walk.follow,
         full_history: walk.full_history,
         ..RevListOptions::default()
-    })
+    };
+    let context = RevListWalkContext {
+        retained_commit_extent: walk.retained_commit_extent,
+    };
+    Ok((opts, context))
 }
 
 /// Parse a user date string into a Unix committer cutoff (Git `--since` / `--until`).
@@ -399,9 +404,9 @@ pub fn rev_list_commits_for_author_group(
         return Ok(Vec::new());
     }
     let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, walk)?;
-    let mut opts = rev_list_options_from_walk(repo, walk, &parsed, all_refs, false)?;
+    let (mut opts, context) = rev_list_options_from_walk(repo, walk, &parsed, all_refs, false)?;
     opts.use_bitmap_index = true;
-    let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
+    let result = rev_list_with_context(repo, &positive, &parsed.negative, &opts, context)?;
     Ok(result.commits)
 }
 
@@ -496,6 +501,9 @@ fn try_single_positive_bounded_page(
             commit_tip,
             max_fetch,
             walk.retain_commit_data,
+            RevListWalkContext {
+                retained_commit_extent: walk.retained_commit_extent,
+            },
         )?,
     ))
 }
@@ -638,8 +646,8 @@ impl<'repo> RevWalk<'repo> {
         if sides {
             single_symmetric_range(tokens, &parsed)?;
         }
-        let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, false)?;
-        rev_list(repo, &positive, &parsed.negative, &opts)
+        let (opts, context) = rev_list_options_from_walk(repo, options, &parsed, all_refs, false)?;
+        rev_list_with_context(repo, &positive, &parsed.negative, &opts, context)
     }
 
     /// Count reachable commits without collecting them, using the commit-graph when loaded.
@@ -713,8 +721,8 @@ impl<'repo> RevWalk<'repo> {
                 repo, &include, &exclude, filter,
             );
         }
-        let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
-        let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
+        let (opts, context) = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
+        let result = rev_list_with_context(repo, &positive, &parsed.negative, &opts, context)?;
         commit_count_from_result(result)
     }
 
@@ -782,7 +790,7 @@ impl<'repo> RevWalk<'repo> {
             });
         }
 
-        let mut opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
+        let (mut opts, ctx) = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
         // `--count` must not apply `-n`/`--max-count` per side; Git counts the full
         // left and right sets even when a list limit is also set.
         opts.max_count = None;
@@ -790,11 +798,14 @@ impl<'repo> RevWalk<'repo> {
         let left_count = {
             let mut left_opts = opts.clone();
             left_opts.left_only = true;
-            rev_list(repo, &positive, &parsed.negative, &left_opts)?.commit_count()
+            rev_list_with_context(repo, &positive, &parsed.negative, &left_opts, ctx)?
+                .commit_count()
         };
         let mut right_opts = opts;
         right_opts.right_only = true;
-        let right_count = rev_list(repo, &positive, &parsed.negative, &right_opts)?.commit_count();
+        let right_count =
+            rev_list_with_context(repo, &positive, &parsed.negative, &right_opts, ctx)?
+                .commit_count();
         Ok(LeftRightCounts {
             left: left_count,
             right: right_count,

@@ -104,6 +104,15 @@ impl CommitFilter {
         i.author.is_some() || i.committer.is_some() || !i.grep.is_empty()
     }
 
+    /// Whether matching may inspect bytes beyond the first subject line (for example `--grep`).
+    ///
+    /// Walks that keep only a through-subject prefix for traversal must still load whole
+    /// objects when this is true so [`Self::matches_bytes`] can search the full message body.
+    #[must_use]
+    pub(crate) fn needs_full_commit_bytes(&self) -> bool {
+        !self.inner.grep.is_empty()
+    }
+
     /// Test whether `oid` satisfies this filter (author/committer/grep/mailmap rules).
     ///
     /// # Errors

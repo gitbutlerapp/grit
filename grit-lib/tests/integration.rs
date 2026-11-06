@@ -9,14 +9,14 @@
 //! Modules marked `full-tests` start the system `git` or build heavy fixtures;
 //! they build only with `--features full-tests` (`make test-full`).
 
-// Integration modules refer to `crate::config` for load options and types.
-pub use grit_lib::config;
-
 // Helpers the test modules share, compiled once.
 mod midx_support;
 mod pack_delta_scenarios;
 mod support;
 mod switch_overwrite_git_helpers;
+
+// Integration modules refer to `crate::config` for load options and types.
+pub use grit_lib::config;
 
 #[cfg(feature = "full-tests")]
 #[path = "abbreviate_default_lookup_prefix_issue_1736.rs"]
@@ -492,6 +492,7 @@ mod config_parameters_coverage;
 mod config_parse;
 #[path = "config_repo_load_coverage.rs"]
 mod config_repo_load_coverage;
+#[cfg(feature = "full-tests")]
 #[path = "config_roundtrip.rs"]
 mod config_roundtrip;
 #[path = "config_set_getters_coverage.rs"]
@@ -1337,6 +1338,7 @@ mod pathspec_from_file_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_git_compat.rs"]
 mod pathspec_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "pathspec_type.rs"]
 mod pathspec_type;
 #[cfg(feature = "full-tests")]
@@ -1534,6 +1536,9 @@ mod refs_query_reachability_git_compat;
 #[path = "refs_refname_git_roundtrip.rs"]
 mod refs_refname_git_roundtrip;
 #[cfg(feature = "full-tests")]
+#[path = "refs_refname_git_roundtrip.rs"]
+mod refs_refname_git_roundtrip;
+#[cfg(feature = "full-tests")]
 #[path = "refs_transactions.rs"]
 mod refs_transactions;
 #[path = "refs_verify_batch_coverage.rs"]
@@ -1592,6 +1597,9 @@ mod release_unused_heap;
 #[cfg(feature = "full-tests")]
 #[path = "remote_config_git_compat.rs"]
 mod remote_config_git_compat;
+#[path = "remote_error_variants.rs"]
+mod remote_error_variants;
+#[cfg(feature = "full-tests")]
 #[path = "remote_error_variants.rs"]
 mod remote_error_variants;
 #[cfg(feature = "full-tests")]
@@ -1815,6 +1823,9 @@ mod revision_label_git_compat;
 #[path = "revwalk_coverage_floor.rs"]
 mod revwalk_coverage_floor;
 #[cfg(feature = "full-tests")]
+#[path = "revwalk_grep_body_subject_retention.rs"]
+mod revwalk_grep_body_subject_retention;
+#[cfg(feature = "full-tests")]
 #[path = "revwalk_injected_ref_store.rs"]
 mod revwalk_injected_ref_store;
 #[cfg(feature = "full-tests")]
@@ -1950,6 +1961,7 @@ mod stash_apply_outcome_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "stash_diff_stat_git_compat.rs"]
 mod stash_diff_stat_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "stash_error_variants.rs"]
 mod stash_error_variants;
 #[cfg(feature = "full-tests")]
