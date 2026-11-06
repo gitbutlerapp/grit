@@ -65,7 +65,7 @@ fn log_pathspec_literal_matches_git() {
     let git_oids = git_rev_list(wt, &["HEAD", "--", path]);
     let repo = open_grit_repo(wt);
     let grit_oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
@@ -86,7 +86,7 @@ fn log_pathspec_glob_matches_git() {
     let git_oids = git_rev_list(wt, &["HEAD", "--", pattern]);
     let repo = open_grit_repo(wt);
     let grit_oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
@@ -107,7 +107,7 @@ fn log_pathspec_exclude_matches_git() {
     let git_oids = git_rev_list(wt, &["HEAD", "--", spec]);
     let repo = open_grit_repo(wt);
     let grit_oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
@@ -128,7 +128,7 @@ fn log_pathspec_icase_matches_git() {
     let git_oids = git_rev_list(wt, &["HEAD", "--", spec]);
     let repo = open_grit_repo(wt);
     let grit_oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
@@ -149,7 +149,7 @@ fn log_pathspec_after_rename_matches_git() {
     let git_oids = git_rev_list(wt, &["HEAD", "--", path]);
     let repo = open_grit_repo(wt);
     let grit_oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
@@ -170,7 +170,7 @@ fn log_pathspec_rename_follow_matches_git() {
     let git_oids = git_rev_list(wt, &["--follow", "HEAD", "--", path]);
     let repo = open_grit_repo(wt);
     let grit_oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {

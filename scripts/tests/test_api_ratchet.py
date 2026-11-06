@@ -5,6 +5,7 @@ import json
 import sys
 import tempfile
 import textwrap
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -48,7 +49,9 @@ class ErrorRatchetMetricTests(unittest.TestCase):
     def test_error_message_construction_sites(self) -> None:
         """Spot-check that the migration ratchet still runs; baseline is the source of truth."""
         count = ar.count_error_message_construction_sites()
-        self.assertGreaterEqual(count, 200)
+        baseline = tomllib.loads(ar.BASELINE_PATH.read_text(encoding="utf-8"))
+        expected = int(baseline["counts"]["error_message_construction_sites"])
+        self.assertEqual(count, expected)
 
     def test_collect_error_ratchet_keys(self) -> None:
         snap = ar.compute_metrics(public_api_text="", payload={"index": {}, "paths": {}})

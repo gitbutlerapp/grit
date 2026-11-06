@@ -1097,21 +1097,21 @@ impl FilesRefStore {
             }
             if !storage_ok(update.name.as_str()) {
                 return Err(RefStoreError::InvalidRefName {
-                    name: update.name.clone(),
+                    name: update.name.as_str().to_owned(),
                 });
             }
         }
         for rename in txn.reflog_renames() {
             if !storage_ok(rename.to.as_str()) {
                 return Err(RefStoreError::InvalidRefName {
-                    name: rename.to.clone(),
+                    name: rename.to.as_str().to_owned(),
                 });
             }
         }
         for rename in txn.case_only_renames() {
             if !storage_ok(rename.to.as_str()) {
                 return Err(RefStoreError::InvalidRefName {
-                    name: rename.to.clone(),
+                    name: rename.to.as_str().to_owned(),
                 });
             }
         }

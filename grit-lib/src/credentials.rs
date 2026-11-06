@@ -1196,8 +1196,8 @@ pub mod windows_store {
         CRED_TYPE_GENERIC,
     };
 
-    use super::Credential;
-    use crate::error::{Error, Result};
+    use super::{credential_err, Credential};
+    use crate::error::Result;
 
     /// The Credential Manager target name a credential is stored under.
     fn target_name(cred: &Credential) -> Result<String> {

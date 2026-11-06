@@ -63,7 +63,7 @@ METRIC_KEYS = (
 ERROR_CATCH_ALL_VARIANTS = frozenset({"Message", "Other", "Generic", "Custom", "Msg"})
 UMBRELLA_ERROR_PATH = "grit_lib::error::Error"
 
-CANCEL_FAMILY_NAMES = frozenset({"CancelToken"})
+CANCEL_FAMILY_NAMES = frozenset({"Cancel", "CancelToken"})
 
 REFNAME_PARAM_NAMES = frozenset({"name", "refname", "ref_name", "target_ref"})
 REFNAME_FN_NAME_RE = re.compile(r"refname|ref_name|ref_format", re.IGNORECASE)
@@ -478,13 +478,38 @@ def _cancel_trait_path_tail(trait_node: Any) -> str:
     return disp
 
 
+def _trait_entry_is_cancel_trait(trait: Any, _index: dict[str, Any]) -> bool:
+    """True when a rustdoc-json dyn_trait entry refers to the ``Cancel`` trait."""
+    if not isinstance(trait, dict):
+        return False
+    # Newer rustdoc-json sometimes encodes the trait as ``resolved_path`` at the trait-object slot
+    # instead of wrapping it in ``{"trait": {...}}``.
+    if "resolved_path" in trait:
+        path = str(trait["resolved_path"].get("path", ""))
+        if path == "Cancel" or path.endswith("::Cancel"):
+            return True
+    if "trait" in trait:
+        inner = trait["trait"]
+        if isinstance(inner, dict):
+            path = str(inner.get("path", ""))
+            if path == "Cancel" or path.endswith("::Cancel"):
+                return True
+            # Some rustdoc encodings nest another ``trait`` dict with the path.
+            nested = inner.get("trait")
+            if isinstance(nested, dict):
+                np = str(nested.get("path", ""))
+                if np == "Cancel" or np.endswith("::Cancel"):
+                    return True
+    return _cancel_trait_path_tail(trait) == "Cancel"
+
+
 def is_cancel_surface_type(type_node: Any, index: dict[str, Any]) -> bool:
     """True for cancellation in the public API: dyn cancel traits or CancelToken/CancelSignal handles."""
     resolved = resolve_type_node(type_node, index)
     if isinstance(resolved, dict) and "dyn_trait" in resolved:
         traits = resolved["dyn_trait"].get("traits") or []
         for trait in traits:
-            if "Cancel" in type_display(trait):
+            if _trait_entry_is_cancel_trait(trait, index):
                 return True
             tail = _cancel_trait_path_tail(trait)
             if tail in ("Cancel", "CancelToken", "CancelSignal"):
@@ -732,12 +757,17 @@ def is_bare_bool(type_node: Any) -> bool:
 
 
 def function_inputs(fn: dict[str, Any]) -> list[tuple[str, Any]]:
+    """Parameter list from rustdoc JSON (``function.sig.inputs`` or top-level ``function.inputs``)."""
     sig = fn.get("sig") or {}
-    raw = sig.get("inputs") or []
+    raw: Any = sig.get("inputs")
+    if raw is None:
+        raw = fn.get("inputs") or []
     out: list[tuple[str, Any]] = []
     for entry in raw:
         if isinstance(entry, (list, tuple)) and len(entry) == 2:
             out.append((str(entry[0]), entry[1]))
+        elif isinstance(entry, dict) and "name" in entry and "type" in entry:
+            out.append((str(entry["name"]), entry["type"]))
     return out
 
 

@@ -1046,13 +1046,6 @@ impl Repository {
         &self.refs_backend
     }
 
-    /// Legacy alias for [`Self::ref_store`].
-    #[deprecated(note = "use `ref_store` (or `references().store()` for the same trait object)")]
-    #[must_use]
-    pub fn refs(&self) -> &dyn crate::refs::store::RefStore {
-        self.ref_store()
-    }
-
     /// Whether [`Self::ref_store`] is an on-disk files or reftable backend, so `HEAD` and refs can
     /// also be read from the git directory. False for injected stores such as
     /// [`crate::refs::store::MemoryRefStore`].
@@ -1086,27 +1079,11 @@ impl Repository {
         crate::index::IndexFile::new(self)
     }
 
-    /// Legacy alias for [`Self::index`].
-    #[deprecated(note = "use `index`")]
-    #[inline]
-    #[must_use]
-    pub fn index_handle(&self) -> crate::index::IndexFile<'_> {
-        self.index()
-    }
-
     /// Revision parse and rev-list handle.
     #[inline]
     #[must_use]
     pub fn revwalk(&self) -> crate::revwalk::RevWalk<'_> {
         crate::revwalk::RevWalk::new(self)
-    }
-
-    /// Legacy alias for [`Self::revwalk`].
-    #[deprecated(note = "use `revwalk`")]
-    #[inline]
-    #[must_use]
-    pub fn rev_walk(&self) -> crate::revwalk::RevWalk<'_> {
-        self.revwalk()
     }
 
     /// Tree, index, and worktree diff handle.

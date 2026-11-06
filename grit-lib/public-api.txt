@@ -15977,7 +15977,6 @@ pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::Repos
 pub fn grit_lib::repo::Repository::identity(&self, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> grit_lib::error::Result<grit_lib::ident::Signature>
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index(&self) -> grit_lib::index::IndexFile<'_>
-pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::IndexFile<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
@@ -15996,13 +15995,11 @@ pub fn grit_lib::repo::Repository::ref_store(&self) -> &dyn grit_lib::refs::stor
 pub fn grit_lib::repo::Repository::reference_unix_time(&self) -> i64
 pub fn grit_lib::repo::Repository::references(&self) -> grit_lib::refs::References<'_>
 pub fn grit_lib::repo::Repository::reflogs(&self) -> grit_lib::repo_handles::RepositoryReflogs<'_>
-pub fn grit_lib::repo::Repository::refs(&self) -> &dyn grit_lib::refs::store::RefStore
 pub fn grit_lib::repo::Repository::reload_config(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::remotes(&self) -> grit_lib::repo_handles::RepositoryRemotes<'_>
 pub fn grit_lib::repo::Repository::repack(&self, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackReport>
 pub fn grit_lib::repo::Repository::resolve_rev_walk_pathspecs(&self, &grit_lib::worktree::pathspec::Pathspec) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::repo::Repository::resolve_worktree_pathspec(&self, &str, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::error::PathspecResolveError>
-pub fn grit_lib::repo::Repository::rev_walk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
 pub fn grit_lib::repo::Repository::revwalk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
 pub fn grit_lib::repo::Repository::set_diagnostics(&mut self, grit_lib::diagnostics::DiagnosticsHandle)
 pub fn grit_lib::repo::Repository::set_network_trace(&mut self, bool)
@@ -23604,7 +23601,6 @@ pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::Repos
 pub fn grit_lib::repo::Repository::identity(&self, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> grit_lib::error::Result<grit_lib::ident::Signature>
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index(&self) -> grit_lib::index::IndexFile<'_>
-pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::IndexFile<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
@@ -23623,13 +23619,11 @@ pub fn grit_lib::repo::Repository::ref_store(&self) -> &dyn grit_lib::refs::stor
 pub fn grit_lib::repo::Repository::reference_unix_time(&self) -> i64
 pub fn grit_lib::repo::Repository::references(&self) -> grit_lib::refs::References<'_>
 pub fn grit_lib::repo::Repository::reflogs(&self) -> grit_lib::repo_handles::RepositoryReflogs<'_>
-pub fn grit_lib::repo::Repository::refs(&self) -> &dyn grit_lib::refs::store::RefStore
 pub fn grit_lib::repo::Repository::reload_config(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::remotes(&self) -> grit_lib::repo_handles::RepositoryRemotes<'_>
 pub fn grit_lib::repo::Repository::repack(&self, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackReport>
 pub fn grit_lib::repo::Repository::resolve_rev_walk_pathspecs(&self, &grit_lib::worktree::pathspec::Pathspec) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::repo::Repository::resolve_worktree_pathspec(&self, &str, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::error::PathspecResolveError>
-pub fn grit_lib::repo::Repository::rev_walk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
 pub fn grit_lib::repo::Repository::revwalk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
 pub fn grit_lib::repo::Repository::set_diagnostics(&mut self, grit_lib::diagnostics::DiagnosticsHandle)
 pub fn grit_lib::repo::Repository::set_network_trace(&mut self, bool)

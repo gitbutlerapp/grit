@@ -628,7 +628,7 @@ impl HookSpawnContext<'_> {
         }
         let direct = self.spec(argv0.to_path_buf(), None, args);
         match self.spawn(&direct, hook_name) {
-            Err(HookError::Spawn { source, path, .. }) if is_not_an_executable(&source) => {
+            Err(HookError::Spawn { source, .. }) if is_not_an_executable(&source) => {
                 self.spawn(&via_shell(hook_shell(self.env)), hook_name)
             }
             other => other,

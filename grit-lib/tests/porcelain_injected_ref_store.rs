@@ -402,10 +402,7 @@ fn porcelain_battery_keeps_refs_head_and_reflogs_in_injected_store() {
             .expect("stash"),
         None
     );
-    assert_eq!(
-        repo.rev_walk().resolve("HEAD").expect("HEAD"),
-        result.merged
-    );
+    assert_eq!(repo.revwalk().resolve("HEAD").expect("HEAD"), result.merged);
 
     let main_log = reflog(store.as_ref(), "refs/heads/main");
     assert_eq!(
