@@ -15,6 +15,7 @@ use grit_lib::config::mailmap::{
     table_from_entries,
 };
 use grit_lib::config::ConfigSet;
+use grit_lib::error::Error;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::tempdir;
@@ -52,6 +53,6 @@ fn gitmodules_mailmap_path_and_signing_helpers() -> grit_lib::error::Result<()> 
         format!("tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\nm\n");
     let cfg = ConfigSet::new();
     let gpg = GpgConfig::from_config(&cfg)?;
-    let _ = verify_commit(&gpg, commit.as_bytes())?;
+    let _ = verify_commit(&gpg, commit.as_bytes()).map_err(Error::from)?;
     Ok(())
 }

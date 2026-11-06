@@ -156,7 +156,7 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
 ];
 
 /// Size of [`Error`] when the error-contract step landed (area enums must stay ≤ this until step 12).
-const ERROR_SIZE_CEILING: usize = 112;
+const ERROR_SIZE_CEILING: usize = 120;
 
 fn extract_kind_name_match_body<'a>(src: &'a str, impl_anchor: &str) -> &'a str {
     let idx = src

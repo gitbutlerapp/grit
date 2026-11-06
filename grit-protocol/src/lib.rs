@@ -36,7 +36,7 @@ pub enum Error {
     Serve(#[from] serve::ServeError),
     /// Opening or reading repository state failed.
     #[error(transparent)]
-    Repository(#[from] grit_lib::error::Error),
+    Repository(Box<grit_lib::error::Error>),
     /// Buffered I/O failed while collecting the response.
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -64,6 +64,12 @@ impl Error {
             Self::Serve(serve::ServeError::Io(e)) => Some(e),
             _ => None,
         }
+    }
+}
+
+impl From<grit_lib::error::Error> for Error {
+    fn from(value: grit_lib::error::Error) -> Self {
+        Self::Repository(Box::new(value))
     }
 }
 

@@ -231,7 +231,8 @@ mod tests {
             ),
             "{err:?}"
         );
-        let session = || -> Result<ObjectId, RebaseSessionError> { Ok(commit_tree(&repo, blob)?) };
+        let session =
+            || -> Result<ObjectId, RebaseSessionError> { Ok(repo.odb().commit_tree(&blob)?) };
         let err = session().unwrap_err();
         assert!(
             matches!(

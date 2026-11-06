@@ -2075,6 +2075,7 @@ pub fn prepare_commit_bytes(
         None,
         repo.odb().hash_algo(),
     )
+    .map_err(Error::from)
 }
 
 /// Write a commit object to the ODB, honoring `commit.gpgsign` and `sign_override`.

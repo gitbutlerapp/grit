@@ -11,6 +11,8 @@ use crate::error::{
 use crate::git_dir::GitDirPathOperation;
 use crate::worktree::io_error::WorktreePathOperation;
 
+use super::PlanningError;
+
 fn promisor_fetch_failed_engine_message(
     missing: &crate::objects::ObjectId,
     failures: &[(String, HistoryEngineError)],
@@ -26,10 +28,7 @@ fn promisor_fetch_failed_engine_message(
 /// Convert a top-level library error into the history engine mirror.
 pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
     match err {
-        crate::error::Error::History(h) => match h {
-            super::HistoryError::Engine(e) => e,
-            other => panic!("HistoryEngineError: nested history error is not Engine: {other:?}"),
-        },
+        crate::error::Error::History(h) => *super::error::history_error_to_engine_box(h),
         crate::error::Error::NotARepository(v) => HistoryEngineError::NotARepository(v),
         crate::error::Error::ForbiddenBareRepository(v) => {
             HistoryEngineError::ForbiddenBareRepository(v)
@@ -270,7 +269,7 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
             HistoryEngineError::DirtyWorktree { operation, paths }
         }
         crate::error::Error::Cancelled => HistoryEngineError::Cancelled,
-        crate::error::Error::Message(v) => HistoryEngineError::Message(v),
+        crate::error::Error::Message(v) => HistoryEngineError::UmbrellaMessage(v),
         crate::error::Error::DetachedHead => HistoryEngineError::DetachedHead,
         crate::error::Error::UnbornHead => HistoryEngineError::UnbornHead,
         crate::error::Error::InvalidHead => HistoryEngineError::InvalidHead,
@@ -1180,11 +1179,13 @@ pub enum HistoryEngineError {
         unrestored: Vec<String>,
     },
 
-    /// User-facing message that should be printed verbatim (no extra prefix).
-    ///
-    /// Used for revision errors that must match Git's `fatal:` lines exactly.
+    /// Planning input was invalid for history rewrite (mirrors [`super::PlanningError`]).
+    #[error(transparent)]
+    Planning(#[from] PlanningError),
+
+    /// Catch-all text from the umbrella [`crate::error::Error::Message`] (no `Error::History` recursion).
     #[error("{0}")]
-    Message(String),
+    UmbrellaMessage(String),
 
     /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
     #[error("HEAD is detached")]

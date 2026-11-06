@@ -1549,7 +1549,7 @@ pub grit_lib::commit::signing::GpgConfig::ssh_revocation_file: core::option::Opt
 pub grit_lib::commit::signing::GpgConfig::x509_program: core::option::Option<alloc::string::String>
 impl grit_lib::commit::signing::GpgConfig
 pub fn grit_lib::commit::signing::GpgConfig::from_config(&grit_lib::config::ConfigSet) -> grit_lib::error::Result<grit_lib::commit::signing::GpgConfig>
-pub fn grit_lib::commit::signing::GpgConfig::resolve_program_path(&self) -> grit_lib::error::Result<std::path::PathBuf>
+pub fn grit_lib::commit::signing::GpgConfig::resolve_program_path(&self) -> grit_lib::commit::signing::SigningResult<std::path::PathBuf>
 pub fn grit_lib::commit::signing::GpgConfig::resolve_signing_key(&self, core::option::Option<&str>, &str) -> alloc::string::String
 pub fn grit_lib::commit::signing::GpgConfig::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 impl core::clone::Clone for grit_lib::commit::signing::GpgConfig
@@ -1603,11 +1603,12 @@ pub fn grit_lib::commit::signing::extract_signed_payload(&[u8]) -> core::option:
 pub fn grit_lib::commit::signing::parse_signed_buffer(&[u8]) -> core::option::Option<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)>
 pub fn grit_lib::commit::signing::should_sign_commit(&grit_lib::config::ConfigSet, core::option::Option<bool>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::commit::signing::should_sign_tag(&grit_lib::config::ConfigSet, core::option::Option<bool>) -> grit_lib::error::Result<bool>
-pub fn grit_lib::commit::signing::sign_buffer(&grit_lib::commit::signing::GpgConfig, &[u8], &str) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
-pub fn grit_lib::commit::signing::sign_serialized_commit(&grit_lib::commit::signing::GpgConfig, &[u8], &str, core::option::Option<&str>, grit_lib::objects::HashAlgo) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
-pub fn grit_lib::commit::signing::sign_serialized_tag(&grit_lib::commit::signing::GpgConfig, &[u8], &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
-pub fn grit_lib::commit::signing::verify_commit(&grit_lib::commit::signing::GpgConfig, &[u8]) -> grit_lib::error::Result<grit_lib::commit::signing::SignatureCheck>
-pub fn grit_lib::commit::signing::verify_tag(&grit_lib::commit::signing::GpgConfig, &[u8]) -> grit_lib::error::Result<grit_lib::commit::signing::SignatureCheck>
+pub fn grit_lib::commit::signing::sign_buffer(&grit_lib::commit::signing::GpgConfig, &[u8], &str) -> grit_lib::commit::signing::SigningResult<alloc::vec::Vec<u8>>
+pub fn grit_lib::commit::signing::sign_serialized_commit(&grit_lib::commit::signing::GpgConfig, &[u8], &str, core::option::Option<&str>, grit_lib::objects::HashAlgo) -> grit_lib::commit::signing::SigningResult<alloc::vec::Vec<u8>>
+pub fn grit_lib::commit::signing::sign_serialized_tag(&grit_lib::commit::signing::GpgConfig, &[u8], &str, core::option::Option<&str>) -> grit_lib::commit::signing::SigningResult<alloc::vec::Vec<u8>>
+pub fn grit_lib::commit::signing::verify_commit(&grit_lib::commit::signing::GpgConfig, &[u8]) -> grit_lib::commit::signing::SigningResult<grit_lib::commit::signing::SignatureCheck>
+pub fn grit_lib::commit::signing::verify_tag(&grit_lib::commit::signing::GpgConfig, &[u8]) -> grit_lib::commit::signing::SigningResult<grit_lib::commit::signing::SignatureCheck>
+pub type grit_lib::commit::signing::SigningResult<T> = core::result::Result<T, grit_lib::porcelain::CommitError>
 pub mod grit_lib::commit::trailers
 pub mod grit_lib::commit::trailers::interpret
 pub enum grit_lib::commit::trailers::interpret::TrailerIfExists
@@ -4957,7 +4958,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Did
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Did
 pub enum grit_lib::divergence::ReplayOntoOutcome
 pub grit_lib::divergence::ReplayOntoOutcome::Conflict
-pub grit_lib::divergence::ReplayOntoOutcome::Conflict::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::divergence::ReplayOntoOutcome::Conflict::paths: alloc::vec::Vec<crate::repo_relpath::StoredRelPath>
 pub grit_lib::divergence::ReplayOntoOutcome::Ok
 pub grit_lib::divergence::ReplayOntoOutcome::Ok::tip: grit_lib::objects::ObjectId
 impl core::clone::Clone for grit_lib::divergence::ReplayOntoOutcome
@@ -5055,7 +5056,7 @@ impl core::marker::UnsafeUnpin for grit_lib::divergence::Change
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Change
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Change
 pub struct grit_lib::divergence::Combined
-pub grit_lib::divergence::Combined::conflicts: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::divergence::Combined::conflicts: alloc::vec::Vec<crate::repo_relpath::StoredRelPath>
 pub grit_lib::divergence::Combined::head: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::divergence::Combined::stopped_at: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::divergence::Combined
@@ -5076,7 +5077,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Combined
 pub struct grit_lib::divergence::Divergence
 pub grit_lib::divergence::Divergence::base: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::divergence::Divergence::changes: alloc::vec::Vec<grit_lib::divergence::Change>
-pub grit_lib::divergence::Divergence::conflicts: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::divergence::Divergence::conflicts: alloc::vec::Vec<crate::repo_relpath::StoredRelPath>
 pub grit_lib::divergence::Divergence::matched_without_ids: bool
 pub grit_lib::divergence::Divergence::scenario: grit_lib::divergence::Scenario
 pub grit_lib::divergence::Divergence::scenarios: alloc::vec::Vec<grit_lib::divergence::Scenario>
@@ -5768,6 +5769,7 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
+<<<<<<< New base: fix(cli): peel error chains through porcelain Library wrappers
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::porcelain::pull::PullError
@@ -5782,6 +5784,11 @@ impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib
 pub fn grit_lib::remote::push_plan::PushPlanError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::stash::StashError
 pub fn grit_lib::stash::StashError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
+||||||| Common ancestor
+=======
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
+>>>>>>> Current commit: fix(lib): history and commit error mapping plus boxed pull errors
 impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
@@ -13744,7 +13751,7 @@ pub grit_lib::porcelain::pull::PullError::InvalidHead
 pub grit_lib::porcelain::pull::PullError::Nested(alloc::boxed::Box<grit_lib::error::Error>)
 pub grit_lib::porcelain::pull::PullError::NoUpstream
 pub grit_lib::porcelain::pull::PullError::NoUpstream::branch: alloc::string::String
-pub grit_lib::porcelain::pull::PullError::Rebase(grit_lib::revwalk::history::RebaseSessionError)
+pub grit_lib::porcelain::pull::PullError::Rebase(alloc::boxed::Box<grit_lib::revwalk::history::RebaseSessionError>)
 pub grit_lib::porcelain::pull::PullError::RebaseInteractive
 pub grit_lib::porcelain::pull::PullError::Remote(grit_lib::remote::RemoteError)
 impl grit_lib::porcelain::pull::PullError
@@ -15546,6 +15553,7 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
+<<<<<<< New base: fix(cli): peel error chains through porcelain Library wrappers
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::porcelain::pull::PullError
@@ -15560,6 +15568,11 @@ impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib
 pub fn grit_lib::remote::push_plan::PushPlanError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::stash::StashError
 pub fn grit_lib::stash::StashError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
+||||||| Common ancestor
+=======
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
+>>>>>>> Current commit: fix(lib): history and commit error mapping plus boxed pull errors
 impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
@@ -25301,7 +25314,6 @@ pub grit_lib::revwalk::history::HistoryEngineError::LooseObjectWrite::source: co
 pub grit_lib::revwalk::history::HistoryEngineError::MaintenanceRunning
 pub grit_lib::revwalk::history::HistoryEngineError::MaintenanceRunning::holder: grit_lib::maintenance::GcLockHolder
 pub grit_lib::revwalk::history::HistoryEngineError::Merge(grit_lib::porcelain::MergeError)
-pub grit_lib::revwalk::history::HistoryEngineError::Message(alloc::string::String)
 pub grit_lib::revwalk::history::HistoryEngineError::Midx(grit_lib::prelude::MidxError)
 pub grit_lib::revwalk::history::HistoryEngineError::MoveBadSource
 pub grit_lib::revwalk::history::HistoryEngineError::MoveBadSource::destination: alloc::string::String
@@ -25375,6 +25387,7 @@ pub grit_lib::revwalk::history::HistoryEngineError::PathspecIgnored
 pub grit_lib::revwalk::history::HistoryEngineError::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::revwalk::history::HistoryEngineError::PathspecNoMatch
 pub grit_lib::revwalk::history::HistoryEngineError::PathspecNoMatch::spec: alloc::string::String
+pub grit_lib::revwalk::history::HistoryEngineError::Planning(grit_lib::revwalk::history::PlanningError)
 pub grit_lib::revwalk::history::HistoryEngineError::PreciousObjectsRepository
 pub grit_lib::revwalk::history::HistoryEngineError::PreciousObjectsRepository::operation: &'static str
 pub grit_lib::revwalk::history::HistoryEngineError::PromisedObjectMissing(grit_lib::objects::ObjectId)
@@ -25449,6 +25462,7 @@ pub grit_lib::revwalk::history::HistoryEngineError::TreeSha256InvalidRevision
 pub grit_lib::revwalk::history::HistoryEngineError::TreeSha256InvalidRevision::found: grit_lib::objects::ObjectKind
 pub grit_lib::revwalk::history::HistoryEngineError::TreeSha256MissingSubmodules(alloc::vec::Vec<grit_lib::tree_sha256::MissingSubmodule>)
 pub grit_lib::revwalk::history::HistoryEngineError::TreeSha256RequiresSigning
+pub grit_lib::revwalk::history::HistoryEngineError::UmbrellaMessage(alloc::string::String)
 pub grit_lib::revwalk::history::HistoryEngineError::UnbornHead
 pub grit_lib::revwalk::history::HistoryEngineError::UnexpectedObjectKind
 pub grit_lib::revwalk::history::HistoryEngineError::UnexpectedObjectKind::actual: grit_lib::objects::ObjectKind
@@ -25522,6 +25536,8 @@ impl core::convert::From<grit_lib::revwalk::history::HistoryEngineError> for gri
 pub fn grit_lib::error::Error::from(grit_lib::revwalk::history::HistoryEngineError) -> Self
 impl core::convert::From<grit_lib::revwalk::history::HistoryEngineError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::revwalk::history::HistoryEngineError) -> Self
+impl core::convert::From<grit_lib::revwalk::history::PlanningError> for grit_lib::revwalk::history::HistoryEngineError
+pub fn grit_lib::revwalk::history::HistoryEngineError::from(grit_lib::revwalk::history::PlanningError) -> Self
 impl core::convert::From<grit_lib::revwalk::rev_list_error::RevListError> for grit_lib::revwalk::history::HistoryEngineError
 pub fn grit_lib::revwalk::history::HistoryEngineError::from(grit_lib::revwalk::rev_list_error::RevListError) -> Self
 impl core::convert::From<grit_lib::revwalk::rev_parse_error::RevParseError> for grit_lib::revwalk::history::HistoryEngineError
@@ -25600,6 +25616,7 @@ pub grit_lib::revwalk::history::HistoryError::MergeCommitInReplay::commit: grit_
 pub grit_lib::revwalk::history::HistoryError::MoveTargetNotInHistory
 pub grit_lib::revwalk::history::HistoryError::MoveTargetNotInHistory::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::MultipleTips
+pub grit_lib::revwalk::history::HistoryError::Nested(alloc::boxed::Box<grit_lib::error::Error>)
 pub grit_lib::revwalk::history::HistoryError::NoOp
 pub grit_lib::revwalk::history::HistoryError::NoOp::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::NoUndoRecord
@@ -25635,6 +25652,8 @@ pub grit_lib::revwalk::history::HistoryError::WorktreeApply
 pub grit_lib::revwalk::history::HistoryError::WorktreeApply::source: alloc::boxed::Box<grit_lib::revwalk::history::HistoryEngineError>
 impl grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::is_cancelled(&self) -> bool
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<grit_lib::change_id::ChangeIdError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::change_id::ChangeIdError) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::revwalk::history::HistoryError
@@ -25733,6 +25752,8 @@ pub fn grit_lib::revwalk::history::PlanningError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::history::PlanningError
 impl core::cmp::PartialEq for grit_lib::revwalk::history::PlanningError
 pub fn grit_lib::revwalk::history::PlanningError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::revwalk::history::PlanningError> for grit_lib::revwalk::history::HistoryEngineError
+pub fn grit_lib::revwalk::history::HistoryEngineError::from(grit_lib::revwalk::history::PlanningError) -> Self
 impl core::convert::From<grit_lib::revwalk::history::PlanningError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::revwalk::history::PlanningError) -> Self
 impl core::error::Error for grit_lib::revwalk::history::PlanningError

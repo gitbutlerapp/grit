@@ -148,3 +148,13 @@ impl From<Error> for CommitError {
         }
     }
 }
+
+impl From<CommitError> for crate::error::Error {
+    /// Unwraps [`CommitError::Library`]; every other variant stays as [`crate::error::Error::Commit`].
+    fn from(err: CommitError) -> Self {
+        match err {
+            CommitError::Library(boxed) => *boxed,
+            other => Self::Commit(other),
+        }
+    }
+}
