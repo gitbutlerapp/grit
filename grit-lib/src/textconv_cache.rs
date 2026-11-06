@@ -170,7 +170,10 @@ fn write_notes_ref(
     let config = ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .unwrap_or_default();
     let now = time::OffsetDateTime::now_utc();
@@ -206,11 +209,11 @@ fn write_notes_ref(
 fn grit_ident(config: &ConfigSet, now: time::OffsetDateTime) -> String {
     let name = crate::environment::Environment::empty()
         .var("GIT_COMMITTER_NAME")
-        .or_else(|| config.get("user.name"))
+        .or_else(|| config.value("user.name"))
         .unwrap_or_else(|| "grit".to_owned());
     let email = crate::environment::Environment::empty()
         .var("GIT_COMMITTER_EMAIL")
-        .or_else(|| config.get("user.email"))
+        .or_else(|| config.value("user.email"))
         .unwrap_or_default();
     let epoch = now.unix_timestamp();
     let offset = now.offset();

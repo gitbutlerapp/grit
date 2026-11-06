@@ -33,14 +33,14 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("missing repository path"))?;
     let repo = open_repo(&root)?;
 
-    repo.config_handle()
+    repo.config()
         .set_local("user.name", "Library Guide Config")?;
 
-    let name = repo.config_handle().get("user.name")?.unwrap_or_default();
+    let name = repo.config().get("user.name")?.unwrap_or_default();
     println!("user.name={name}");
 
     let format = repo
-        .config_handle()
+        .config()
         .get("core.repositoryformatversion")?
         .unwrap_or_default();
     println!("core.repositoryformatversion={format}");

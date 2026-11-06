@@ -427,7 +427,10 @@ fn diff_side_must_read_large_blob(odb: &Odb, path: &str) -> Result<bool> {
     let config = crate::config::ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )?;
     if diff_textconv_active(git_dir, &config, path) {
         return Ok(true);
@@ -569,7 +572,7 @@ mod tests {
             .expect("tree b");
         let raw = diff_trees(odb, Some(&tree_a), Some(&tree_b), "").expect("diff");
         assert_eq!(raw.len(), 2);
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let serial = tree_diff_contents_parallel(
             odb,
             raw.clone(),
@@ -702,7 +705,7 @@ mod tests {
             odb.write(ObjectKind::Tree, &serialize_tree(&entries))
                 .expect("tree")
         };
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         for files in [PER_ENTRY_POOL_MIN_ITEMS - 1, PER_ENTRY_POOL_MIN_ITEMS + 1] {
             let (old, new) = (tree_of("old", files), tree_of("new", files));
             let entries = diff_trees(odb, Some(&old), Some(&new), "").expect("entries");
@@ -810,7 +813,7 @@ mod tests {
         let metrics = odb.hot_path_metrics();
         metrics.set_blob_counting(true);
         metrics.reset_blob_content_reads();
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let _ = tree_diff_stat_parallel(
             odb,
             entries,
@@ -856,7 +859,7 @@ mod tests {
         let metrics = odb.hot_path_metrics();
         metrics.set_blob_counting(true);
         metrics.reset_blob_content_reads();
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let _ = tree_diff_stat_parallel(
             odb,
             entries,
@@ -902,7 +905,7 @@ mod tests {
         let metrics = odb.hot_path_metrics();
         metrics.set_blob_counting(true);
         metrics.reset_blob_content_reads();
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let _ = tree_diff_stat_parallel(
             odb,
             entries,
@@ -937,7 +940,7 @@ mod tests {
         let (old, new) = (tree(a), tree(b));
         let entries = diff_trees(odb, Some(&old), Some(&new), "").expect("entries");
         assert_eq!(entries.len(), 1);
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let run = |threads| {
             tree_diff_structured_parallel(
                 odb,

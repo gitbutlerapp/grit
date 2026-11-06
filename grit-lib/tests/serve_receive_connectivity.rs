@@ -88,7 +88,7 @@ fn serve_push(repo_dir: &Path, body: &[u8]) -> (ReceiveOutcome, String) {
         agent: "grit-test".to_owned(),
         ..ServeOptions::default()
     };
-    let policy = ReceivePolicy::from_config(&repo.config().unwrap());
+    let policy = ReceivePolicy::from_config(&repo.config().snapshot().unwrap());
     let mut output = Vec::new();
     let outcome = receive_pack(
         &repo,

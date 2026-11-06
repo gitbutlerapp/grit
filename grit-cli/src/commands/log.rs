@@ -1058,7 +1058,7 @@ pub(crate) fn load_commits_with_format_for_oids(
 
     let pathspecs = resolve_commit_diff_pathspecs(repo, path_args)?;
     let many_results = if let Some(detail) = format.detail_for_log() {
-        let config = repo.config().context("could not load config")?;
+        let config = repo.config().snapshot().context("could not load config")?;
         let thread_policy = repo.thread_policy();
         let mut diff_options = DiffOptions::from_config(config.as_ref());
         format.apply_context(&mut diff_options);
@@ -1326,7 +1326,7 @@ fn commit_line_counts(
     path_args: &[String],
 ) -> Result<Vec<Option<ui::LineCounts>>> {
     let pathspecs = resolve_commit_diff_pathspecs(repo, path_args)?;
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let totals = repo
         .diff()
         .commit_line_totals(

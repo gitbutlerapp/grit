@@ -54,7 +54,7 @@ pub fn approximate_object_count(odb: &Odb) -> Result<usize> {
 ///
 /// Propagates ODB object-count errors.
 pub fn resolve_core_abbrev_len(config: &ConfigSet, odb: &Odb) -> Result<usize> {
-    if let Some(v) = config.get("core.abbrev") {
+    if let Some(v) = config.value("core.abbrev") {
         if v.eq_ignore_ascii_case("auto") {
             let count = approximate_object_count(odb)?;
             return Ok(auto_abbrev_len_for_object_count(count));
@@ -178,7 +178,7 @@ mod resolve_core_abbrev_tests {
     fn resolve_core_abbrev_default_matches_auto_for_empty_repo() -> crate::error::Result<()> {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
-        let config = repo.config()?.clone();
+        let config = repo.config().snapshot()?.clone();
         let len = resolve_core_abbrev_len(&config, repo.odb())?;
         assert_eq!(len, auto_abbrev_len_for_object_count(0));
         Ok(())

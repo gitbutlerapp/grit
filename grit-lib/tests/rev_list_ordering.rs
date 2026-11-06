@@ -813,7 +813,6 @@ fn assert_replace_graft_history_matches_git(
         DiffDetail::NameOnly,
         &DiffOptions::default(),
         &[],
-        &config,
         &thread_policy,
     )
     .expect("commit diff");

@@ -78,7 +78,12 @@ fn fetch_ingest_sees_git_config_count_pack_threads() {
         ],
         dir.path().to_path_buf(),
     );
-    let cfg = ConfigSet::load(&env, Some(dir.path()), true).expect("load config");
+    let cfg = ConfigSet::load(
+        &env,
+        Some(dir.path()),
+        &crate::config::LoadConfigOptions::standard(&env, Some(dir.path())),
+    )
+    .expect("load config");
     let opts = ThreadPolicy::default()
         .try_resolve(ParallelOp::IndexPack, &cfg)
         .expect("resolve pack threads from GIT_CONFIG_COUNT");

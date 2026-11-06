@@ -1571,10 +1571,15 @@ mod tests {
         env.push_config_override(&override_of("user.name=Second"));
         env.push_config_override(&override_of("core.bare"));
 
-        let config = crate::config::ConfigSet::load(&env, Some(&git_dir), false).unwrap();
-        assert_eq!(config.get("user.name").as_deref(), Some("Second"));
-        assert_eq!(config.get("user.email").as_deref(), Some("repo@x.y"));
-        assert_eq!(config.get_bool("core.bare"), Some(Ok(true)));
+        let config = crate::config::ConfigSet::load(
+            &env,
+            Some(&git_dir),
+            &crate::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
+        )
+        .unwrap();
+        assert_eq!(config.value("user.name").as_deref(), Some("Second"));
+        assert_eq!(config.value("user.email").as_deref(), Some("repo@x.y"));
+        assert_eq!(config.get_bool("core.bare").unwrap(), Some(true));
     }
 
     #[test]

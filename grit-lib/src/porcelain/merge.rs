@@ -103,7 +103,7 @@ pub fn tree_to_index_entries(
     oid: &ObjectId,
     prefix: &str,
 ) -> Result<Vec<IndexEntry>> {
-    let protect = ProtectOptions::from_config(&*repo.config()?);
+    let protect = ProtectOptions::from_config(&*repo.config().snapshot()?);
     let prefix_bytes = crate::repo_relpath::storage_bytes(prefix);
     tree_to_index_entries_with_protect(repo, oid, &prefix_bytes, protect)
 }
@@ -1234,7 +1234,7 @@ fn integrate_at_tip_without_hooks(
     repo.odb().persist_mem_overlay()?;
 
     let commit_preflight = if matches!(options.commit, MergeCommitMode::Commit) {
-        let config = repo.config()?;
+        let config = repo.config().snapshot()?;
         Some(MergeCommitPreflight {
             author: strict_commit_identity(repo, IdentRole::Author)?,
             committer: strict_commit_identity(repo, IdentRole::Committer)?,
@@ -1572,7 +1572,10 @@ pub fn continue_merge(
         return Err(ContinueMergeError::NoMergeInProgress);
     }
 
-    let config = repo.config().map_err(ContinueMergeError::Repository)?;
+    let config = repo
+        .config()
+        .snapshot()
+        .map_err(ContinueMergeError::Repository)?;
     let auto_stage = default_commit_scope_from_config(config.as_ref()) == CommitScope::AutoStage;
 
     let mut index = repo.load_index().map_err(ContinueMergeError::Repository)?;
@@ -2100,7 +2103,7 @@ fn advance_integrate_tip(
 }
 
 fn move_detached_head(repo: &Repository, old: ObjectId, new: ObjectId, reason: &str) -> Result<()> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let identity =
         resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
     update_detached_head_for_commit_on_store(
@@ -2153,7 +2156,7 @@ pub(crate) fn update_checked_out_branch(
     new: ObjectId,
     reason: &str,
 ) -> Result<()> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let identity =
         resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
     update_branch_for_commit_on_store(

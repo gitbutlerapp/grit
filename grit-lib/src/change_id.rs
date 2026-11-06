@@ -225,9 +225,9 @@ impl ChangeIdPolicy {
     /// Load `grit.changeIds` (default true) and `grit.testing.changeId`.
     #[must_use]
     pub fn from_config(config: &ConfigSet) -> Self {
-        let enabled = config.bool_or("grit.changeIds", true);
+        let enabled = config.bool_with_default("grit.changeIds", true);
         let testing = config
-            .get("grit.testing.changeId")
+            .value("grit.testing.changeId")
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty())
             .map(|value| {
@@ -349,7 +349,7 @@ pub(crate) fn logical_change_id_for_commit(
     if let Some(id) = change_id(&data) {
         return Ok(Some(id));
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     Ok(ChangeIdPolicy::from_config(&config)
         .enabled()
         .then(|| ChangeId::derived_from_commit_id(&oid)))
@@ -645,7 +645,7 @@ fn find_stored_change_id_prefix_matches(
     if oids.is_empty() {
         return Ok(Vec::new());
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let mut par_opts = repo
         .thread_policy()
         .resolve(ParallelOp::DiffContent, config.as_ref());

@@ -3482,7 +3482,10 @@ pub fn read_log_refs_config(git_dir: &Path) -> LogRefsConfig {
     ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .map(|cfg| cfg.log_refs_config())
     .unwrap_or(LogRefsConfig::Unset)
@@ -3495,7 +3498,10 @@ pub fn effective_log_refs_config(git_dir: &Path) -> LogRefsConfig {
     ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .map(|cfg| cfg.effective_log_refs_config())
     .unwrap_or(LogRefsConfig::Normal)
@@ -3836,7 +3842,7 @@ pub(crate) fn pack_refs_for_repository(
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return pack_refs_reftable(git_dir, dry_run);
     }
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     pack_refs_files(git_dir, repo.odb(), config.as_deref(), all, dry_run)
 }
 
@@ -4513,7 +4519,10 @@ pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'
     let config = ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .unwrap_or_default();
     update_branch_for_commit_with_config(git_dir, update, &config)
@@ -4638,7 +4647,10 @@ pub(crate) fn pack_imported_refs_for_clone(git_dir: &Path, remote: Option<&str>)
     let config = crate::config::ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .ok();
     odb.with_pack_read_context(|| {
@@ -4941,7 +4953,10 @@ pub fn collect_alternate_ref_oids(receiving_git_dir: &Path) -> Result<Vec<Object
     let config = ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(receiving_git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(receiving_git_dir),
+        ),
     )?;
     let objects_dir = receiving_git_dir.join("objects");
     let alternates = pack::read_alternates_recursive(&objects_dir).unwrap_or_default();
@@ -4954,7 +4969,7 @@ pub fn collect_alternate_ref_oids(receiving_git_dir: &Path) -> Result<Vec<Object
         if !alt_git_dir.join("refs").is_dir() {
             continue;
         }
-        if let Some(prefixes) = config.get("core.alternateRefsPrefixes") {
+        if let Some(prefixes) = config.value("core.alternateRefsPrefixes") {
             for part in prefixes.split_whitespace() {
                 if let Ok(oid) = resolve_ref(&alt_git_dir, part) {
                     if seen.insert(oid) {
@@ -7271,7 +7286,10 @@ mod pack_refs_tests {
         let config = crate::config::ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(&git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(&git_dir),
+            ),
         )
         .expect("config");
 

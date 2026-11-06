@@ -389,7 +389,7 @@ fn testing_content_hash_is_deterministic() {
     )
     .expect("stored");
 
-    let policy = ChangeIdPolicy::from_config(repo.config().expect("config").as_ref());
+    let policy = ChangeIdPolicy::from_config(repo.config().snapshot().expect("config").as_ref());
     let data = parse_commit(&repo.odb().read(&outcome.oid).expect("read").data).expect("parse");
     let expected_once = policy
         .id_for_new_commit(

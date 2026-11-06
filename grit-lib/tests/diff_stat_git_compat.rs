@@ -15,7 +15,7 @@ fn diffstat(repo: &Repository, detail: DiffDetail, options: DiffOptions) -> Diff
         .diff()
         .tree_to_tree(Some(&old), Some(&new))
         .expect("tree diff");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let out = build_file_diffs(
         repo.odb(),
         entries,
@@ -227,7 +227,7 @@ fn diffstat_honors_rename_detection_like_git() {
         "rename pairing should not inflate line totals vs delete+add"
     );
 
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let via_files = repo
         .diff()
         .files(

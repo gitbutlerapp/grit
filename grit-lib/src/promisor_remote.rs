@@ -216,7 +216,7 @@ impl PromisorAcceptPolicy {
     #[must_use]
     pub fn from_config(cfg: &ConfigSet) -> (Self, Vec<PromisorConfigWarning>) {
         let mut warnings = Vec::new();
-        let accept = match cfg.get("promisor.acceptFromServer") {
+        let accept = match cfg.value("promisor.acceptFromServer") {
             None => AcceptFromServer::None,
             Some(raw) => AcceptFromServer::parse(&raw).unwrap_or_else(|| {
                 warnings.push(PromisorConfigWarning::UnknownAcceptValue(raw));
@@ -224,7 +224,7 @@ impl PromisorAcceptPolicy {
             }),
         };
         let mut fields = |key: &'static str| {
-            let (known, unknown) = PromisorField::parse_list(&cfg.get(key).unwrap_or_default());
+            let (known, unknown) = PromisorField::parse_list(&cfg.value(key).unwrap_or_default());
             warnings.extend(
                 unknown
                     .into_iter()
@@ -325,12 +325,12 @@ impl PromisorAdvertisement {
     /// `None` when `promisor.advertise` is not true or there is no remote to advertise.
     #[must_use]
     pub fn from_server_config(cfg: &ConfigSet) -> Option<Self> {
-        let advertise = cfg.bool_or("promisor.advertise", false);
+        let advertise = cfg.bool_with_default("promisor.advertise", false);
         if !advertise {
             return None;
         }
         let (fields, _unknown) =
-            PromisorField::parse_list(&cfg.get("promisor.sendFields").unwrap_or_default());
+            PromisorField::parse_list(&cfg.value("promisor.sendFields").unwrap_or_default());
         let remotes = configured_promisor_remotes(cfg, &fields);
         (!remotes.is_empty()).then_some(Self { remotes })
     }
@@ -470,7 +470,10 @@ fn promisor_remote_names(cfg: &ConfigSet) -> Vec<String> {
             }
         }
     }
-    if let Some(pc) = cfg.get("extensions.partialclone").filter(|s| !s.is_empty()) {
+    if let Some(pc) = cfg
+        .value("extensions.partialclone")
+        .filter(|s| !s.is_empty())
+    {
         names.retain(|n| *n != pc);
         names.push(pc);
     }
@@ -496,7 +499,7 @@ pub(crate) fn request_filter_omits_promised_blobs(cfg: &ConfigSet, request: &Obj
     let mut floor = u64::MAX;
     for name in names {
         let filter = cfg
-            .get(&format!("remote.{name}.partialclonefilter"))
+            .value(&format!("remote.{name}.partialclonefilter"))
             .and_then(|spec| ObjectFilter::parse(&spec).ok());
         match filter {
             Some(ObjectFilter::BlobNone) => floor = 0,
@@ -539,7 +542,7 @@ pub fn configured_promisor_remotes(cfg: &ConfigSet, fields: &[PromisorField]) ->
         .into_iter()
         .filter_map(|name| {
             let url = cfg
-                .get(&format!("remote.{name}.url"))
+                .value(&format!("remote.{name}.url"))
                 .filter(|u| !u.is_empty())?;
             let mut info = PromisorInfo {
                 name,
@@ -548,7 +551,7 @@ pub fn configured_promisor_remotes(cfg: &ConfigSet, fields: &[PromisorField]) ->
             };
             for &field in fields {
                 if let Some(v) = cfg
-                    .get(&format!("remote.{}.{}", info.name, field.config_key()))
+                    .value(&format!("remote.{}.{}", info.name, field.config_key()))
                     .filter(|v| !v.is_empty())
                 {
                     field.set_on(&mut info, v);
@@ -1071,6 +1074,7 @@ pub fn promisor_remote_reply(cfg: &ConfigSet, info: &str) -> PromisorReply {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::environment::Environment;
 
     fn cfg(pairs: &[(&str, &str)]) -> ConfigSet {
         let mut c = ConfigSet::default();
@@ -1662,7 +1666,7 @@ mod tests {
         assert_eq!(h.stored.len(), 1);
         assert_eq!(
             load(dir.path())
-                .get("remote.lop.partialclonefilter")
+                .value("remote.lop.partialclonefilter")
                 .as_deref(),
             Some("blob:none")
         );
@@ -1675,7 +1679,12 @@ mod tests {
     }
 
     fn load(dir: &Path) -> ConfigSet {
-        ConfigSet::load_repo_local_only(dir).unwrap()
+        ConfigSet::load(
+            &Environment::empty(),
+            Some(dir),
+            &crate::config::LoadConfigOptions::repo_local_only(dir),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1716,12 +1725,15 @@ mod tests {
         );
         let after = load(dir.path());
         assert_eq!(
-            after.get("remote.lop.partialclonefilter").as_deref(),
+            after.value("remote.lop.partialclonefilter").as_deref(),
             Some("blob:limit=5k")
         );
-        assert_eq!(after.get("remote.lop.token").as_deref(), Some("new"));
-        assert_eq!(after.get("remote.lop.url").as_deref(), Some("file:///lop"));
-        assert_eq!(after.get("remote.unknown.url"), None);
+        assert_eq!(after.value("remote.lop.token").as_deref(), Some("new"));
+        assert_eq!(
+            after.value("remote.lop.url").as_deref(),
+            Some("file:///lop")
+        );
+        assert_eq!(after.value("remote.unknown.url"), None);
 
         // Unchanged values are a no-op.
         let (stored, _) = store_advertised_fields(dir.path(), &policy, &after, &d).unwrap();
@@ -1746,7 +1758,7 @@ mod tests {
         assert!(stored.is_empty());
         assert_eq!(warnings.len(), 2);
         let after = load(dir.path());
-        assert_eq!(after.get("remote.lop.token"), None);
-        assert_eq!(after.get("remote.lop.partialclonefilter"), None);
+        assert_eq!(after.value("remote.lop.token"), None);
+        assert_eq!(after.value("remote.lop.partialclonefilter"), None);
     }
 }

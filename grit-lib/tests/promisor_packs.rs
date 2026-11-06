@@ -113,7 +113,10 @@ fn promisor_partial_clone_pack_markers_and_config() {
     let cfg = ConfigSet::load(
         &grit_lib::config::environment::Environment::capture_process(),
         Some(&git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::capture_process(),
+            Some(&git_dir),
+        ),
     )
     .expect("config");
 
@@ -203,7 +206,10 @@ fn promisor_remote_dot_promisor_config_enables_treatment() {
     let cfg = ConfigSet::load(
         &grit_lib::config::environment::Environment::capture_process(),
         Some(&git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::capture_process(),
+            Some(&git_dir),
+        ),
     )
     .expect("load");
     assert!(repo_treats_promisor_packs(&git_dir, &cfg));

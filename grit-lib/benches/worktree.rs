@@ -30,7 +30,12 @@ fn ieot_bench_config() -> ConfigSet {
         "[index]\n\tthreads = 4\n\trecordOffsetTable = true\n\trecordEndOfIndexEntries = true\n",
     )
     .expect("config");
-    ConfigSet::load(&Environment::empty(), Some(dir.path()), true).expect("load config")
+    ConfigSet::load(
+        &Environment::empty(),
+        Some(dir.path()),
+        &LoadConfigOptions::standard(&Environment::empty(), Some(dir.path())),
+    )
+    .expect("load config")
 }
 
 fn bench_index_read(c: &mut Criterion) {

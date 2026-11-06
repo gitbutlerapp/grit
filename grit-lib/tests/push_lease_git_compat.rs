@@ -64,7 +64,12 @@ fn open_repo(work: &Path) -> Repository {
 }
 
 fn load_config(repo: &Repository) -> ConfigSet {
-    ConfigSet::load(&Environment::empty(), Some(repo.git_dir()), true).expect("config")
+    ConfigSet::load(
+        &Environment::empty(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(repo.git_dir())),
+    )
+    .expect("config")
 }
 
 fn push_plan_context(bare: &Path) -> PushPlanContext {
@@ -150,7 +155,7 @@ fn grit_push_request(work: &Path, bare: &Path, request: PushRequest) -> PushOutc
     let repo = open_repo(work);
     let config = load_config(&repo);
     let ctx = push_plan_context(bare);
-    let plan = resolve_push(&repo, &config, &request, &ctx).expect("plan");
+    let plan = resolve_push(&repo, &request, &ctx).expect("plan");
     Remote::from_config(&config, "origin")
         .expect("remote")
         .push(

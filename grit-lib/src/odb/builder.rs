@@ -271,11 +271,14 @@ impl Odb {
         let config = ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(git_dir),
+            ),
         )
         .unwrap_or_default();
         let skip = crate::maintenance::CommitGraphSkipReason::detect(git_dir, || {
-            let enabled = config.bool_or("core.useReplaceRefs", true);
+            let enabled = config.bool_with_default("core.useReplaceRefs", true);
             Ok(enabled && !crate::refs::list_refs(git_dir, "refs/replace/")?.is_empty())
         })?;
         if skip.is_some() {

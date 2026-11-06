@@ -152,9 +152,9 @@ fn create_commit_openpgp_uses_committer_default_without_signingkey() {
         .read(&head_hex.parse::<ObjectId>().expect("oid"))
         .expect("read")
         .data;
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     assert!(
-        config.as_ref().get("user.signingkey").is_none(),
+        config.as_ref().get("user.signingkey").unwrap().is_none(),
         "test must not set user.signingkey"
     );
     let gpg_cfg = GpgConfig::from_config(config.as_ref())

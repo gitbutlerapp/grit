@@ -31,10 +31,10 @@ fn repository_config_load_and_reload_hits_cache() {
         &RepositoryOptions::empty().with_work_tree(dir.path()),
     )
     .expect("open");
-    let cfg = repo.config().expect("config");
-    assert_eq!(cfg.get("repo.k").as_deref(), Some("v1"));
-    assert_eq!(cfg.get("extra.k").as_deref(), Some("inc"));
+    let cfg = repo.config().snapshot().expect("config");
+    assert_eq!(cfg.get("repo.k").unwrap().as_deref(), Some("v1"));
+    assert_eq!(cfg.get("extra.k").unwrap().as_deref(), Some("inc"));
     repo.reload_config().expect("reload");
-    let cfg2 = repo.config().expect("config again");
-    assert_eq!(cfg2.get("extra.k").as_deref(), Some("inc"));
+    let cfg2 = repo.config().snapshot().expect("config again");
+    assert_eq!(cfg2.get("extra.k").unwrap().as_deref(), Some("inc"));
 }

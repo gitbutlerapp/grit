@@ -84,7 +84,7 @@ fn blame_crlf_apply_and_pathspec_deep_sweep() -> grit_lib::error::Result<()> {
     )
     .map_err(grit_lib::error::Error::Io)?;
     repo.reload_config()?;
-    let cfg_blob = (*repo.config()?).clone();
+    let cfg_blob = (*repo.config().snapshot()?).clone();
     let crlf = ConversionConfig::from_config(&cfg_blob);
     let attrs = FileAttrs::default();
     let samples: &[&[u8]] = &[b"a\r\nb\r\n", b"a\nb\n", b"\x00bin", b"all\nlf\n"];

@@ -303,8 +303,15 @@ pub(crate) fn run_one_in(
     mode: OutputMode,
 ) -> Result<FetchOutcome> {
     let interrupt = crate::interrupt::InterruptCancel::install();
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &crate::context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &crate::context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
     let head = resolve_head_for_repository(repo).ok();
     let invocation = resolve_fetch_invocation(
         &config,
@@ -333,7 +340,7 @@ pub(crate) fn run_one_in(
     if args.deepen.is_some() && fetch_depth.is_none() {
         return Err(anyhow::anyhow!("--deepen requires a positive integer"));
     }
-    let url = config.get(&format!("remote.{remote_name}.url"));
+    let url = crate::context::config_string(&config, &format!("remote.{remote_name}.url"));
     if progress.is_drawing() {
         eprintln!(
             "{}",
@@ -422,8 +429,15 @@ fn shallow_json(
 fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
     let interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &crate::context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &crate::context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
     let factory = crate::context::http_client_factory();
     let mut progress = args.quiet.progress(mode);
     let mut base = FetchOptions::new();

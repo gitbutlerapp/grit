@@ -199,7 +199,7 @@ fn grit_fsck_ignores_tag_extra_headers() {
 
     let opts = FsckOptions::full_repository(false).with_check_dangling(false);
     let report = fsck(&repo, &opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     assert!(
         report.ok(&config, &opts),
         "expected fsck ok; issues: {:?}",

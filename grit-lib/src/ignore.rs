@@ -269,7 +269,7 @@ impl IgnoreMatcher {
     /// Returns [`Error::Io`] if configured pattern files cannot be read, or a config error if
     /// the repository configuration cannot be loaded.
     pub fn from_repository(repo: &Repository) -> Result<Self> {
-        let ignore_case = repo.config()?.ignore_case();
+        let ignore_case = repo.config().snapshot()?.ignore_case();
         Ok(Self {
             global_rules: load_global_excludes(repo)?,
             info_rules: load_info_excludes(repo)?,
@@ -656,9 +656,9 @@ impl IgnoreMatcher {
 }
 
 fn load_global_excludes(repo: &Repository) -> Result<Vec<IgnoreRule>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let env = repo.environment();
-    let (resolved, display_path) = if let Some(raw_path) = config.get("core.excludesfile") {
+    let (resolved, display_path) = if let Some(raw_path) = config.value("core.excludesfile") {
         let expanded = parse_path(env, &raw_path);
         let resolved = if Path::new(&expanded).is_absolute() {
             PathBuf::from(&expanded)

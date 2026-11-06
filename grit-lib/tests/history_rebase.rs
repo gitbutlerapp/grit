@@ -544,7 +544,12 @@ fn rebase_onto_defaults_upstream_from_tracking_config() {
     );
     write_ref(wt.join(".git").as_path(), "refs/heads/upstream", &oids["u"]).expect("upstream ref");
     let grit = open_grit(wt);
-    let config = ConfigSet::load(grit.environment(), Some(grit.git_dir()), true).expect("config");
+    let config = ConfigSet::load(
+        grit.environment(),
+        Some(grit.git_dir()),
+        &crate::config::LoadConfigOptions::standard(grit.environment(), Some(grit.git_dir())),
+    )
+    .expect("config");
     let merge = config
         .get("branch.feature.merge")
         .expect("branch.feature.merge");

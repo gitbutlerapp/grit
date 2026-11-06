@@ -320,7 +320,12 @@ fn serve_error_client_message(err: &ServeError) -> String {
 }
 
 fn repo_config(repo: &Repository) -> ConfigSet {
-    ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default()
+    ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )
+    .unwrap_or_default()
 }
 
 fn upload_policy(repo: &Repository) -> UploadPackPolicy {
@@ -1384,7 +1389,7 @@ fn prepare_response_pack(input: &ResponsePackInput<'_>) -> Result<PreparedPack> 
     } else {
         Vec::new()
     };
-    let cfg = input.repo.config().ok();
+    let cfg = input.repo.config().snapshot().ok();
     let pack_opts = PackBuildOptions::for_serve(
         cfg.as_deref(),
         input.caps.contains("thin-pack") && !input.common.is_empty(),

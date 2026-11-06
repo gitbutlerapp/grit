@@ -398,7 +398,7 @@ fn fetch_all_succeeds_with_custom_primary() {
     repo.remotes()
         .add("origin", upstream.path().to_str().expect("utf8"))
         .expect("add remote");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
 
     let results = repo
         .remotes()
@@ -493,7 +493,7 @@ fn fsck_on_custom_primary_validates_the_store() {
         .expect("fsck reads objects through the custom primary");
     assert!(report.objects_checked > 0);
     assert!(report.issues.is_empty(), "{:?}", report.issues);
-    assert!(report.ok(&repo.config().expect("config"), &options));
+    assert!(report.ok(&repo.config().snapshot().expect("config"), &options));
 }
 
 #[test]

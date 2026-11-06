@@ -242,7 +242,7 @@ enum IndexThreadsSetting {
 
 #[must_use]
 fn index_threads_setting(config: &ConfigSet) -> IndexThreadsSetting {
-    if let Some(Ok(n)) = config.get_i64("index.threads") {
+    if let Ok(Some(n)) = config.get_i64("index.threads") {
         return match n {
             0 => IndexThreadsSetting::Auto,
             1 => IndexThreadsSetting::Serial,
@@ -250,14 +250,17 @@ fn index_threads_setting(config: &ConfigSet) -> IndexThreadsSetting {
             _ => IndexThreadsSetting::Serial,
         };
     }
-    if config.get("index.threads").is_some_and(|v| v.trim() == "0") {
+    if config
+        .value("index.threads")
+        .is_some_and(|v| v.trim() == "0")
+    {
         return IndexThreadsSetting::Auto;
     }
-    if let Some(result) = config.get_bool("index.threads") {
-        return match result {
-            Ok(true) => IndexThreadsSetting::Auto,
-            Ok(false) => IndexThreadsSetting::Serial,
-            Err(_) => IndexThreadsSetting::UnsetAuto,
+    if let Ok(Some(b)) = config.get_bool("index.threads") {
+        return if b {
+            IndexThreadsSetting::Auto
+        } else {
+            IndexThreadsSetting::Serial
         };
     }
     IndexThreadsSetting::UnsetAuto
@@ -280,18 +283,18 @@ fn resolve_index_threads(config: &ConfigSet, override_threads: Option<usize>) ->
 /// Git `pack.threads` parsing (`None` = unset → auto at resolve time).
 fn parse_pack_threads(config: &ConfigSet) -> Result<Option<usize>, ConfigError> {
     const KEY: &str = "pack.threads";
-    let Some(raw) = config.get(KEY) else {
+    let Some(raw) = config.value(KEY) else {
         return Ok(None);
     };
     let trimmed = raw.trim();
     match config.get_i64(KEY) {
-        Some(Ok(n)) if n < 0 => Err(ConfigError::InvalidThreadCount {
+        Ok(Some(n)) if n < 0 => Err(ConfigError::InvalidThreadCount {
             key: KEY.into(),
             value: n,
         }),
-        Some(Ok(0)) => Ok(None),
-        Some(Ok(n)) => Ok(Some(usize::try_from(n).unwrap_or(1))),
-        Some(Err(_)) | None => Err(ConfigError::BadNumericValue {
+        Ok(Some(0)) => Ok(None),
+        Ok(Some(n)) => Ok(Some(usize::try_from(n).unwrap_or(1))),
+        Err(_) | Ok(None) => Err(ConfigError::BadNumericValue {
             key: KEY.into(),
             value: trimmed.into(),
             reason: BadNumericSource::InvalidUnit,
@@ -323,9 +326,9 @@ enum CheckoutWorkersSetting {
 #[must_use]
 fn checkout_workers_setting(config: &ConfigSet) -> CheckoutWorkersSetting {
     match config.get_i64("checkout.workers") {
-        None | Some(Err(_)) => CheckoutWorkersSetting::Unset,
-        Some(Ok(n)) if n < 1 => CheckoutWorkersSetting::Auto,
-        Some(Ok(n)) => CheckoutWorkersSetting::Count(n as usize),
+        Ok(None) | Err(_) => CheckoutWorkersSetting::Unset,
+        Ok(Some(n)) if n < 1 => CheckoutWorkersSetting::Auto,
+        Ok(Some(n)) => CheckoutWorkersSetting::Count(n as usize),
     }
 }
 
@@ -363,9 +366,8 @@ fn resolve_checkout_workers(config: &ConfigSet, override_threads: Option<usize>)
 #[must_use]
 fn checkout_parallelism_threshold(config: &ConfigSet) -> i64 {
     match config.get_i64("checkout.thresholdForParallelism") {
-        None => 100,
-        Some(Ok(n)) => n,
-        Some(Err(_)) => 100,
+        Ok(None) | Err(_) => 100,
+        Ok(Some(n)) => n,
     }
 }
 

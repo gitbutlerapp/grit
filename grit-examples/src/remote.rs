@@ -71,7 +71,11 @@ fn default_remote_name(config: &ConfigSet, git_dir: &Path, explicit: Option<&str
     }
     if let Ok(Some(head)) = grit_lib::refs::read_symbolic_ref(git_dir, "HEAD") {
         if let Some(branch) = head.strip_prefix("refs/heads/") {
-            if let Some(remote) = config.get(&format!("branch.{branch}.remote")) {
+            if let Some(remote) = config
+                .get(&format!("branch.{branch}.remote"))
+                .ok()
+                .flatten()
+            {
                 if !remote.trim().is_empty() {
                     return remote;
                 }
@@ -135,7 +139,7 @@ fn http_credential_helpers(config: &ConfigSet, url: &str) -> Vec<String> {
             helpers.push(val);
         }
     };
-    for val in config.get_all("credential.helper") {
+    for val in config.get_all("credential.helper").unwrap_or_default() {
         push(&val, &mut helpers);
     }
     for (var, val, _scope) in

@@ -115,15 +115,15 @@ fn grit_push(
     delete: &[&str],
     opts: PushOptions,
 ) -> Result<PushOutcome, RemoteError> {
-    let config = repo.config().expect("config");
-    let ctx = load_push_plan_context(repo, &config, Some(remote), None).expect("plan context");
+    let config = repo.config().snapshot().expect("config");
+    let ctx = load_push_plan_context(repo, Some(remote), None).expect("plan context");
     let request = PushRequest {
         remote: Some(remote.to_owned()),
         refspecs: refspecs.iter().map(|s| (*s).to_owned()).collect(),
         delete: delete.iter().map(|s| (*s).to_owned()).collect(),
         ..PushRequest::default()
     };
-    let plan = resolve_push(repo, &config, &request, &ctx).expect("resolve push");
+    let plan = resolve_push(repo, &request, &ctx).expect("resolve push");
     open_push_destination(&config, &plan.remote)?.push(
         repo,
         &plan.specs,
@@ -389,15 +389,15 @@ fn run_pre_push_hook_without_a_hook_is_ok() {
 fn head_refspec_keeps_resolved_src_ref_and_names_head_for_the_hook() {
     let fx = Fixture::new();
     let repo = fx.open(&[]);
-    let config = repo.config().expect("config");
-    let ctx = load_push_plan_context(&repo, &config, Some("origin"), None).expect("context");
+    let config = repo.config().snapshot().expect("config");
+    let ctx = load_push_plan_context(&repo, Some("origin"), None).expect("context");
     let plan_for = |refspec: &str| {
         let request = PushRequest {
             remote: Some("origin".to_owned()),
             refspecs: vec![refspec.to_owned()],
             ..PushRequest::default()
         };
-        resolve_push(&repo, &config, &request, &ctx)
+        resolve_push(&repo, &request, &ctx)
             .expect("resolve push")
             .specs
             .remove(0)

@@ -255,7 +255,7 @@ pub(crate) fn ensure_space(
     config: &ConfigSet,
     remote: &str,
 ) -> Result<Option<SpaceSetup>> {
-    let Some(url) = config.get(&format!("remote.{remote}.url")) else {
+    let Some(url) = crate::context::config_string(config, &format!("remote.{remote}.url")) else {
         return Ok(None);
     };
     let Some((server, project)) = hosted_project(&url) else {
@@ -271,7 +271,7 @@ pub(crate) fn ensure_space(
         remote.to_owned()
     } else {
         let remotes = repo.remotes();
-        match config.get(&format!("remote.{SPACE_REMOTE}.url")) {
+        match crate::context::config_string(config, &format!("remote.{SPACE_REMOTE}.url")) {
             Some(existing) if existing == space.url => {}
             Some(_) => {
                 remotes
@@ -286,7 +286,9 @@ pub(crate) fn ensure_space(
                 configured = true;
             }
         }
-        if config.get(&format!("remote.{remote}.pushurl")).as_deref() != Some(space.url.as_str()) {
+        if crate::context::config_string(config, &format!("remote.{remote}.pushurl")).as_deref()
+            != Some(space.url.as_str())
+        {
             remotes
                 .set_url(remote, &space.url, RemoteUrlKind::Push, false)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -355,12 +357,17 @@ pub(crate) fn fetch_in(repo: &Repository, remote: &str, mode: OutputMode) -> Res
     };
     crate::commands::fetch::run_one_in(repo, &args, mode)
         .with_context(|| format!("fetching {remote}"))?;
-    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
     let refspec = shared_refspec(remote);
-    if config
-        .get_all(&format!("remote.{remote}.fetch"))
-        .contains(&refspec)
+    if crate::context::config_strings(&config, &format!("remote.{remote}.fetch")).contains(&refspec)
     {
         fetch_shared_heads(repo, remote, mode)?;
     }
@@ -415,12 +422,18 @@ pub(crate) fn configure_shared(
     base: Option<&str>,
 ) -> Result<bool> {
     let env = context::environment();
-    let config =
-        ConfigSet::load(&env, Some(repo.git_dir()), true).context("could not load config")?;
+    let config = ConfigSet::load(
+        &env,
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(&env, Some(repo.git_dir())),
+    )
+    .context("could not load config")?;
     let mut changed = false;
     let refspec = shared_refspec(remote);
     let fetch_key = format!("remote.{remote}.fetch");
-    if !branches.is_empty() && !config.get_all(&fetch_key).contains(&refspec) {
+    if !branches.is_empty()
+        && !crate::context::config_strings(&config, &fetch_key).contains(&refspec)
+    {
         add_config_value(
             ConfigLocation::Local,
             &env,
@@ -435,7 +448,7 @@ pub(crate) fn configure_shared(
     for branch in branches {
         if let Some(base) = base {
             let key = format!("branch.{branch}.sharedBase");
-            if config.get(&key).as_deref() != Some(base) {
+            if crate::context::config_string(&config, &key).as_deref() != Some(base) {
                 set_config_value(
                     ConfigLocation::Local,
                     &env,
@@ -449,7 +462,7 @@ pub(crate) fn configure_shared(
             }
         }
         let key = format!("branch.{branch}.shared");
-        if config.get(&key).as_deref() != Some("true") {
+        if crate::context::config_string(&config, &key).as_deref() != Some("true") {
             set_config_value(
                 ConfigLocation::Local,
                 &env,
@@ -468,10 +481,14 @@ pub(crate) fn configure_shared(
 /// Mark `branch` no longer shared here.
 pub(crate) fn unmark_shared(repo: &Repository, branch: &str) -> Result<()> {
     let env = context::environment();
-    let config =
-        ConfigSet::load(&env, Some(repo.git_dir()), true).context("could not load config")?;
+    let config = ConfigSet::load(
+        &env,
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(&env, Some(repo.git_dir())),
+    )
+    .context("could not load config")?;
     let key = format!("branch.{branch}.shared");
-    if config.get(&key).is_some() {
+    if crate::context::config_string(&config, &key).is_some() {
         unset_config_value(
             ConfigLocation::Local,
             &env,
@@ -486,7 +503,8 @@ pub(crate) fn unmark_shared(repo: &Repository, branch: &str) -> Result<()> {
 
 /// Whether `branch` is marked shared in `config`.
 pub(crate) fn is_shared(config: &ConfigSet, branch: &str) -> bool {
-    config.get(&format!("branch.{branch}.shared")).as_deref() == Some("true")
+    crate::context::config_string(config, &format!("branch.{branch}.shared")).as_deref()
+        == Some("true")
 }
 
 /// The branch `HEAD` is on, if any.
@@ -642,8 +660,15 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
     if crate::commands::checkout::open_checkout_here()?.is_some() {
         bail!("this is a snapshot checkout: send your branches with `grit checkin` and update with `grit pull`");
     }
-    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
     let Some(setup) = ensure_space(&repo, &config, "origin")? else {
         bail!("origin is not a project on a grit hosting server; sync needs a clone of one, such as `grit clone https://grithub.dev/<owner>/<project>`");
     };

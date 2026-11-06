@@ -246,7 +246,7 @@ fn midx_git_verify_clean() {
         report_fsck.issues
     );
     assert!(
-        report_fsck.ok(&repo.config().expect("config"), &fsck_opts),
+        report_fsck.ok(&repo.config().snapshot().expect("config"), &fsck_opts),
         "{:?}",
         report_fsck.issues
     );

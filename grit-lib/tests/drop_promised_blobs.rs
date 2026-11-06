@@ -343,7 +343,7 @@ fn old_versions_go_and_the_checked_out_one_stays() {
         &NeverCancel,
     )
     .expect("fsck");
-    let config = repo.config().unwrap();
+    let config = repo.config().snapshot().unwrap();
     assert!(
         fsck_report.ok(&config, &FsckOptions::full_repository(false)),
         "{:?}",

@@ -63,8 +63,12 @@ impl PathDisplayContext {
 /// Grit's modern CLI defaults to `false` (UTF-8 names print literally). An explicit
 /// `core.quotePath` setting is still honored.
 fn quote_path_fully_for_modern_cli(repo: &Repository) -> Result<bool> {
-    let config = repo.config()?;
-    Ok(config.bool_or("core.quotePath", false))
+    let config = repo.config().snapshot()?;
+    Ok(crate::context::config_bool_default(
+        config.as_ref(),
+        "core.quotePath",
+        false,
+    ))
 }
 
 /// Cwd-relative path display and `core.quotepath` quoting for human / Markdown output.

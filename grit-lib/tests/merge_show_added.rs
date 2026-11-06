@@ -55,7 +55,6 @@ fn combined_merge_show_includes_added_file() {
         DiffDetail::Patch,
         &DiffOptions::default(),
         &[],
-        repo.config().unwrap().as_ref(),
         &repo.thread_policy(),
     )
     .unwrap();
@@ -85,7 +84,6 @@ fn combined_merge_binary_addition_is_binary_not_text() {
         DiffDetail::Patch,
         &DiffOptions::default(),
         &[],
-        repo.config().unwrap().as_ref(),
         &repo.thread_policy(),
     )
     .unwrap();

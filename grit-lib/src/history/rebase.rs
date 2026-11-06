@@ -177,7 +177,7 @@ pub fn rebase_run_request(
             branch_tip,
         });
     }
-    let config = repo.config().map_err(history_repo_err)?;
+    let config = repo.config().snapshot().map_err(history_repo_err)?;
     let fork_enabled =
         resolve_rebase_use_fork_point(config.as_ref(), upstream_spec, use_fork_point);
     if fork_enabled {

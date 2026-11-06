@@ -332,7 +332,7 @@ fn resolve_pull_integration(
             allow_fast_forward: true,
         });
     }
-    if let Some(raw) = config.get("pull.ff") {
+    if let Some(raw) = config.value("pull.ff") {
         let value = raw.trim();
         if value.eq_ignore_ascii_case("only") {
             return Ok(PullIntegration {
@@ -347,7 +347,7 @@ fn resolve_pull_integration(
             allow_fast_forward: true,
         });
     }
-    if let Some(raw) = config.get("pull.ff") {
+    if let Some(raw) = config.value("pull.ff") {
         let value = raw.trim();
         if parse_git_config_maybe_bool(value) == Some(false) {
             return Ok(PullIntegration {
@@ -384,7 +384,7 @@ impl PullOptions {
             HeadState::Detached { .. } => return Err(PullError::DetachedHead),
             HeadState::Invalid => return Err(PullError::InvalidHead),
         };
-        let config = repo.config().map_err(PullError::Repository)?;
+        let config = repo.config().snapshot().map_err(PullError::Repository)?;
         let remote_name = configured_remote_for_pull(config.as_ref(), Some(&short_name));
         let prune = resolve_fetch_prune(config.as_ref(), &remote_name, None)
             .map_err(PullError::Repository)?;
@@ -416,11 +416,11 @@ fn pull_rebase_enabled(
     branch: Option<&str>,
 ) -> std::result::Result<bool, PullError> {
     if let Some(name) = branch {
-        if let Some(raw) = config.get(&format!("branch.{name}.rebase")) {
+        if let Some(raw) = config.value(&format!("branch.{name}.rebase")) {
             return parse_pull_rebase_config(raw.as_str());
         }
     }
-    if let Some(raw) = config.get("pull.rebase") {
+    if let Some(raw) = config.value("pull.rebase") {
         return parse_pull_rebase_config(raw.as_str());
     }
     Ok(false)
@@ -437,7 +437,7 @@ pub fn resolve_pull_autostash(config: &ConfigSet, mode: PullMode, cli_autostash:
         PullMode::FfOnly | PullMode::Merge => "merge.autoStash",
     };
     config
-        .get(key)
+        .value(key)
         .and_then(|raw| parse_git_config_maybe_bool(raw.trim()))
         .unwrap_or(false)
 }
@@ -487,7 +487,7 @@ where
         HeadState::Invalid => return Err(PullError::InvalidHead),
     };
 
-    let config = repo.config().map_err(PullError::Repository)?;
+    let config = repo.config().snapshot().map_err(PullError::Repository)?;
     let remote_name = options
         .remote
         .clone()

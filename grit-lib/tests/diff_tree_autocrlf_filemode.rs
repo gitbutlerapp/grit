@@ -49,7 +49,10 @@ fn diff_tree_to_worktree_empty_with_autocrlf_and_filemode_false() {
     let cfg = ConfigSet::load(
         &grit_lib::config::environment::Environment::empty(),
         Some(&root.path().join(".git")),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::empty(),
+            Some(&root.path().join(".git")),
+        ),
     )
     .expect("config");
 
@@ -81,7 +84,10 @@ fn diff_tree_to_worktree_empty_when_stat_cache_stale() {
     let cfg = ConfigSet::load(
         &grit_lib::config::environment::Environment::empty(),
         Some(&root.path().join(".git")),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::empty(),
+            Some(&root.path().join(".git")),
+        ),
     )
     .expect("config");
 
@@ -135,7 +141,10 @@ fn explicit_index_chmod_reported_when_filemode_false() {
     let cfg = ConfigSet::load(
         &grit_lib::config::environment::Environment::empty(),
         Some(&git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::empty(),
+            Some(&git_dir),
+        ),
     )
     .expect("config");
 

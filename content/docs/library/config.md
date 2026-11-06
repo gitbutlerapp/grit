@@ -1,19 +1,19 @@
 ---
 title: Config
-summary: Merged config reads and repository-local writes through ConfigHandle.
+summary: Merged config reads and repository-local writes through Repository::config().
 ---
 
-Configuration in grit-lib follows Git’s cascade (system, global, local, worktree, and environment overrides). Prefer `Repository::config_handle` for hot paths: it returns `ConfigHandle`, which reads the same merged snapshot as `Repository::config` and can update the repository-local file.
+Configuration in grit-lib follows Git’s cascade (system, global, local, worktree, and environment overrides). Use [`Repository::config`](rustdoc:grit_lib::repo::Repository::config) for hot paths: it returns [`Config`](rustdoc:grit_lib::config::Config), which reads the merged snapshot via [`Config::snapshot`](rustdoc:grit_lib::config::Config::snapshot) and can update the repository-local file.
 
 ## Loading outside a handle
 
-[`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet) parses the cascade from disk given an [`Environment`](rustdoc:grit_lib::config::environment::Environment) and optional git directory. The library does not read `std::env` during load — embedders pass variables explicitly (see [Embedding](../embedding/) and [Repository](../repository/)).
+[`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet::load) parses the cascade from disk given an [`Environment`](rustdoc:grit_lib::config::environment::Environment), an optional git directory, and [`LoadConfigOptions`](rustdoc:grit_lib::config::LoadConfigOptions). Helpers such as [`LoadConfigOptions::standard`](rustdoc:grit_lib::config::LoadConfigOptions::standard), [`LoadConfigOptions::repo_local_only`](rustdoc:grit_lib::config::LoadConfigOptions::repo_local_only), and [`LoadConfigOptions::protected`](rustdoc:grit_lib::config::LoadConfigOptions::protected) select Git’s usual scopes. The library does not read `std::env` during load — embedders pass variables explicitly (see [Embedding](../embedding/) and [Repository](../repository/)).
 
 ## Typed values
 
-[`ConfigSet::get_bool`](rustdoc:grit_lib::config::ConfigSet::get_bool) and [`ConfigSet::get_i64`](rustdoc:grit_lib::config::ConfigSet::get_i64) return `None` for an unset key. A value of the wrong type is a [`ConfigError::InvalidValue`](rustdoc:grit_lib::error::ConfigError) carrying the key and a [`ConfigValueError`](rustdoc:grit_lib::error::ConfigValueError) that says what was wrong: not a boolean, an empty or malformed integer, an integer that overflows `i64` once its `k`/`m`/`g` suffix is applied, or a bad color. `get_bool(key).transpose()?` reads an optional boolean and propagates a bad value as `grit_lib::error::Error::Config`. The key-less parsers [`parse_bool`](rustdoc:grit_lib::config::parse_bool), [`parse_i64`](rustdoc:grit_lib::config::parse_i64) and [`parse_color`](rustdoc:grit_lib::config::parse_color) return the bare `ConfigValueError`; call `for_key` on it to attach the key.
+On both [`Config`](rustdoc:grit_lib::config::Config) and [`ConfigSet`](rustdoc:grit_lib::config::ConfigSet), typed getters share one shape: `get`, `get_all`, `get_bool`, `get_i64`, `get_path`, `get_color`, and `entries_with_prefix` return `Result<Option<T>, ConfigError>` (or `Result<Vec<_>, ConfigError>` for `get_all`). An unset key is `Ok(None)`; a malformed key or value is `Err(ConfigError::…)`.
 
-Most boolean settings fall back to Git's default when the key is unset or not a boolean. [`ConfigSet::bool_or`](rustdoc:grit_lib::config::ConfigSet::bool_or) reads them in one call: `config.bool_or("commit.autoStage", true)`. The `core` booleans that many operations consult have accessors carrying Git's default: [`ignore_case`](rustdoc:grit_lib::config::ConfigSet::ignore_case) and [`precompose_unicode`](rustdoc:grit_lib::config::ConfigSet::precompose_unicode) (both `false`), and [`preload_index`](rustdoc:grit_lib::config::ConfigSet::preload_index) and [`file_mode`](rustdoc:grit_lib::config::ConfigSet::file_mode) (both `true`).
+Most boolean settings fall back to Git's default when the key is unset or not a boolean. Domain accessors on `ConfigSet` (for example [`ignore_case`](rustdoc:grit_lib::config::ConfigSet::ignore_case) and [`file_mode`](rustdoc:grit_lib::config::ConfigSet::file_mode)) encode those defaults.
 
 ## Errors
 
@@ -21,7 +21,7 @@ Every config failure is a specific [`ConfigError`](rustdoc:grit_lib::error::Conf
 
 ## Local writes
 
-`ConfigHandle::set_local` writes one key to the repository-local config (or `commondir/config` for linked worktrees without a per-worktree config file), then reloads the in-memory snapshot on the open `Repository`.
+[`Config::set_local`](rustdoc:grit_lib::config::Config::set_local) writes one key to the repository-local config (or `commondir/config` for linked worktrees without a per-worktree config file), then reloads the in-memory snapshot on the open `Repository`.
 
 Without an open `Repository`, find the git directory with [`RepositoryLocation::discover`](rustdoc:grit_lib::repo::RepositoryLocation) and pass it to [`set_config_value`](rustdoc:grit_lib::config::set_config_value) with `ConfigLocation::Local`. Discovery applies the same format and ownership checks as `Repository::discover` and resolves the same work tree. It reads the config cascade once, because `core.bare` and `core.worktree` from any scope affect the layout, but it does not open the object database or the refs. Then only the target file is rewritten. To read config next, call [`RepositoryLocation::discover_with_config`](rustdoc:grit_lib::repo::RepositoryLocation::discover_with_config), which also returns the merged `ConfigSet`. `grit config` uses this path.
 

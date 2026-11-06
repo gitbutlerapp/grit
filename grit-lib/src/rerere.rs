@@ -78,7 +78,7 @@ fn rr_root(git_dir: &Path) -> PathBuf {
 
 /// Rerere enabled.
 pub fn rerere_enabled(config: &ConfigSet, git_dir: &Path) -> bool {
-    if let Some(val) = config.get("rerere.enabled") {
+    if let Some(val) = config.value("rerere.enabled") {
         let v = val.to_ascii_lowercase();
         if matches!(v.as_str(), "false" | "0" | "no" | "off") {
             return false;
@@ -95,7 +95,7 @@ fn autoupdate_flag(config: &ConfigSet, o: RerereAutoupdate) -> bool {
         RerereAutoupdate::Yes => true,
         RerereAutoupdate::No => false,
         RerereAutoupdate::FromConfig => config
-            .get("rerere.autoupdate")
+            .value("rerere.autoupdate")
             .map(|v| {
                 let l = v.to_ascii_lowercase();
                 matches!(l.as_str(), "true" | "1" | "yes" | "on")
@@ -799,7 +799,7 @@ fn stage_resolved_path(repo: &Repository, index: &mut Index, path: &str) -> Resu
 
 /// Invoked after mergy operations with conflicts (`merge`, `rebase`, …).
 pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<Vec<RerereEvent>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(Vec::new());
     }
@@ -1019,7 +1019,7 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<Ve
 
 /// After successful commit: record postimages, clear `MERGE_RR` entries.
 pub fn rerere_post_commit(repo: &Repository) -> Result<Vec<RerereEvent>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(Vec::new());
     }
@@ -1111,7 +1111,7 @@ pub fn rerere_clear(git_dir: &Path) -> Result<()> {
 }
 
 fn parse_expiry_days_now(config: &ConfigSet, key: &str, now: i64) -> Option<i64> {
-    let s = config.get(key)?;
+    let s = config.value(key)?;
     if let Ok(days) = s.parse::<i64>() {
         return Some(now - days * 86400);
     }
@@ -1144,7 +1144,11 @@ fn parse_expiry_days_now(config: &ConfigSet, key: &str, now: i64) -> Option<i64>
 
 /// `git rerere gc`
 pub fn rerere_gc(env: &crate::environment::Environment, git_dir: &Path, now: i64) -> Result<()> {
-    let config = ConfigSet::load(env, Some(git_dir), true)?;
+    let config = ConfigSet::load(
+        env,
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::standard(env, Some(git_dir)),
+    )?;
     if !rerere_enabled(&config, git_dir) {
         return Ok(());
     }
@@ -1224,7 +1228,7 @@ pub fn rerere_gc(env: &crate::environment::Environment, git_dir: &Path, now: i64
 
 /// Lines for `git rerere status` (paths listed in `MERGE_RR`).
 pub fn rerere_status_lines(repo: &Repository) -> Result<Vec<String>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(Vec::new());
     }
@@ -1234,7 +1238,7 @@ pub fn rerere_status_lines(repo: &Repository) -> Result<Vec<String>> {
 
 /// Unified diff: recorded preimage vs working tree (Git/xdiff style header).
 pub fn rerere_diff_for_path(repo: &Repository, path: &str) -> Result<Option<String>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(None);
     }
@@ -1276,7 +1280,7 @@ pub fn rerere_diff_for_path(repo: &Repository, path: &str) -> Result<Option<Stri
 /// rename/rename) is inserted into the list. Finally emit every MERGE_RR entry
 /// that was not marked resolved.
 pub fn rerere_remaining_lines(repo: &Repository) -> Result<Vec<String>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(Vec::new());
     }
@@ -1332,7 +1336,7 @@ pub fn rerere_remaining_lines(repo: &Repository) -> Result<Vec<String>> {
 /// Drop recorded resolution for `path` (working tree must show conflict markers).
 pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEvent>> {
     let mut events = Vec::new();
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(events);
     }

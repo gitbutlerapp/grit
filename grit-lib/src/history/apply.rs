@@ -1445,7 +1445,7 @@ fn commit_planned_ref_updates(
 ) -> Result<(), HistoryError> {
     let store = repo.refs();
     let git_dir = repo.git_dir();
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     let head_target =
         read_symbolic_ref_for_repository(repo, "HEAD").map_err(|e| HistoryError::RefApply {
             message: e.to_string(),
@@ -1529,7 +1529,7 @@ pub(super) fn log_head_move(
     branch: &PlannedRefUpdate,
     opts: &ApplyOptions,
 ) -> Result<(), HistoryError> {
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     let Some(update) = head_log_update(
         config.as_ref().map(|c| c.as_ref()),
         repo.git_dir(),
@@ -2037,7 +2037,7 @@ fn restore_worktree_path_from_old_tree(
                 return materialize_gitlink_worktree(work_tree, path, &mut LeadingDirCache::new());
             }
             let index = repo.load_index()?;
-            let config = repo.config()?;
+            let config = repo.config().snapshot()?;
             let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
             let rules =
                 WorktreeRules::from_parts_index_attributes_only(repo, &index, Arc::clone(&config))?;

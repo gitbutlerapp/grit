@@ -345,7 +345,7 @@ fn count_authors_at_pack_rows(
         return Ok(AuthorCounter::new());
     }
 
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let threads = repo
         .thread_policy()
         .resolve(crate::parallel::ParallelOp::DiffContent, config.as_ref())

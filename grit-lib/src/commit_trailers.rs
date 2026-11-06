@@ -377,10 +377,10 @@ pub fn finalize_cherry_pick_message(
 ) -> String {
     let mut msg = original_message.to_owned();
 
-    let explicit_cleanup = config.get("commit.cleanup").is_some();
+    let explicit_cleanup = config.value("commit.cleanup").is_some();
     let cleanup_space = append_source && !explicit_cleanup;
     let cleanup_strip_comments =
-        explicit_cleanup && matches!(config.get("commit.cleanup").as_deref(), Some("strip"));
+        explicit_cleanup && matches!(config.value("commit.cleanup").as_deref(), Some("strip"));
 
     if cleanup_space {
         let processed =

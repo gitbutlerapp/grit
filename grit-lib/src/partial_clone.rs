@@ -179,7 +179,7 @@ pub const AUTO_FILTER_VALUE: &str = "auto";
 #[must_use]
 pub(crate) fn stored_remote_filter_is_auto(config: &ConfigSet, remote: &str) -> bool {
     config
-        .get(&format!("remote.{remote}.partialclonefilter"))
+        .value(&format!("remote.{remote}.partialclonefilter"))
         .is_some_and(|s| s.trim().eq_ignore_ascii_case(AUTO_FILTER_VALUE))
 }
 
@@ -187,7 +187,7 @@ pub(crate) fn stored_remote_filter_is_auto(config: &ConfigSet, remote: &str) -> 
 #[must_use]
 pub fn stored_remote_filter(config: &ConfigSet, remote: &str) -> Option<ObjectFilterSpec> {
     config
-        .get(&format!("remote.{remote}.partialclonefilter"))
+        .value(&format!("remote.{remote}.partialclonefilter"))
         .and_then(|s| ObjectFilterSpec::parse(&s).ok())
 }
 
@@ -195,10 +195,10 @@ pub fn stored_remote_filter(config: &ConfigSet, remote: &str) -> Option<ObjectFi
 #[must_use]
 pub(crate) fn remote_is_promisor(config: &ConfigSet, remote: &str) -> bool {
     config
-        .get(&format!("remote.{remote}.promisor"))
+        .value(&format!("remote.{remote}.promisor"))
         .is_some_and(|v| v.eq_ignore_ascii_case("true"))
         || config
-            .get(&format!("remote.{remote}.partialclonefilter"))
+            .value(&format!("remote.{remote}.partialclonefilter"))
             .is_some()
 }
 
@@ -248,6 +248,7 @@ pub(crate) fn fetch_requires_upload_pack(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::environment::Environment;
 
     #[test]
     fn from_blobs_cli_rejects_overflowing_suffix() {
@@ -285,13 +286,18 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("config"), "[core]\n\tbare = true\n").expect("config");
         PartialCloneConfig::write_auto(dir.path(), "origin").expect("write");
-        let cfg = ConfigSet::load_repo_local_only(dir.path()).expect("load");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(dir.path()),
+            &crate::config::LoadConfigOptions::repo_local_only(dir.path()),
+        )
+        .expect("load");
         assert!(stored_remote_filter_is_auto(&cfg, "origin"));
         assert!(!stored_remote_filter_is_auto(&cfg, "other"));
         assert_eq!(stored_remote_filter(&cfg, "origin"), None);
         assert!(remote_is_promisor(&cfg, "origin"));
         assert_eq!(
-            cfg.get("extensions.partialclone").as_deref(),
+            cfg.value("extensions.partialclone").as_deref(),
             Some("origin")
         );
     }

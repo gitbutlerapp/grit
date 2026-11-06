@@ -219,7 +219,7 @@ impl LopReadiness {
     }
 
     fn from_config(config: &ConfigSet) -> Self {
-        let flag = |key: &str| config.bool_or(key, false);
+        let flag = |key: &str| config.bool_with_default(key, false);
         Self {
             allow_filter: flag("uploadpack.allowfilter"),
             allow_any_sha1_in_want: flag("uploadpack.allowanysha1inwant"),
@@ -375,10 +375,10 @@ impl OffloadPack {
 pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
     let odb = repo.odb();
     odb.require_files_primary("offload")?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let remote = opts.remote.as_str();
     let url = config
-        .get(&format!("remote.{remote}.url"))
+        .value(&format!("remote.{remote}.url"))
         .filter(|u| !u.trim().is_empty())
         .ok_or_else(|| OffloadError::RemoteNotConfigured {
             remote: remote.to_owned(),
@@ -433,7 +433,7 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
         main_bytes_after: main_bytes_before,
         config_changes: Vec::new(),
         lop_ready: LopReadiness::from_config(&lop_config(&lop)?),
-        advertised: config.bool_or("promisor.advertise", false),
+        advertised: config.bool_with_default("promisor.advertise", false),
     };
     if opts.dry_run {
         return Ok(report);
@@ -457,18 +457,18 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
 
     let mut wanted: Vec<(String, String)> = Vec::new();
     let promisor_key = format!("remote.{remote}.promisor");
-    if !config.bool_or(&promisor_key, false) {
+    if !config.bool_with_default(&promisor_key, false) {
         wanted.push((promisor_key, "true".to_owned()));
     }
     let filter_key = format!("remote.{remote}.partialCloneFilter");
-    if opts.filter.is_some() && config.get(&filter_key).is_none() {
+    if opts.filter.is_some() && config.value(&filter_key).is_none() {
         wanted.push((filter_key, filter.to_config_value()));
     }
     // No pack or multi-pack-index holds the offloaded blobs, so no bitmap can have
     // full closure; once a push lands outside the promisor pack, Git's `gc` fails
     // trying (bitmaps are on by default in bare repositories).
     let bitmaps_key = "repack.writeBitmaps";
-    if config.bool_or(bitmaps_key, true) {
+    if config.bool_with_default(bitmaps_key, true) {
         wanted.push((bitmaps_key.to_owned(), "false".to_owned()));
     }
     // The promisor pack is about to hold blobs the LOP does not have; record where
@@ -476,7 +476,7 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
     let mut added: Vec<(String, String)> = Vec::new();
     let lop_dir = lop_dir_value(lop.git_dir());
     if !config
-        .get_all(LOP_GIT_DIR_KEY)
+        .values_all(LOP_GIT_DIR_KEY)
         .iter()
         .any(|v| same_dir(Path::new(v), lop.git_dir()))
     {
@@ -588,7 +588,11 @@ fn open_lop(repo: &Repository, opts: &OffloadOptions, url: &str) -> Result<Repos
 
 /// The LOP's own config (system and global included, as its upload-pack sees it).
 fn lop_config(lop: &Repository) -> Result<ConfigSet> {
-    ConfigSet::load(lop.environment(), Some(lop.git_dir()), true)
+    ConfigSet::load(
+        lop.environment(),
+        Some(lop.git_dir()),
+        &crate::config::LoadConfigOptions::standard(lop.environment(), Some(lop.git_dir())),
+    )
 }
 
 /// Blobs chosen by [`select_candidates`], with their sizes.
@@ -815,7 +819,7 @@ fn copy_to_lop(
     blobs: &[ObjectId],
     opts: &OffloadOptions,
 ) -> Result<Option<(PathBuf, usize)>> {
-    let cfg = repo.config().ok();
+    let cfg = repo.config().snapshot().ok();
     let pack_opts = PackBuildOptions {
         delta: false,
         window: 0,
@@ -1174,14 +1178,14 @@ mod tests {
         );
         assert!(report.lop_ready.is_ready());
         assert!(!report.advertised);
-        let config = fx.main().config().unwrap();
-        assert_eq!(config.get("remote.lop.promisor").as_deref(), Some("true"));
-        assert!(config.get("extensions.partialclone").is_none());
+        let config = fx.main().config().snapshot().unwrap();
+        assert_eq!(config.value("remote.lop.promisor").as_deref(), Some("true"));
+        assert!(config.value("extensions.partialclone").is_none());
         assert_eq!(
             crate::partial_clone::stored_remote_filter(&config, "lop"),
             Some(ObjectFilterSpec::BlobLimit(1024))
         );
-        assert_eq!(config.get_all(LOP_GIT_DIR_KEY), [lop_dir.clone()]);
+        assert_eq!(config.values_all(LOP_GIT_DIR_KEY), [lop_dir.clone()]);
 
         // The LOP is recorded once, however often offload runs.
         let again = offload_blobs(&fx.main(), &opts).unwrap();
@@ -1191,8 +1195,13 @@ mod tests {
             again.config_changes
         );
         assert_eq!(
-            fx.main().config().unwrap().get_all(LOP_GIT_DIR_KEY),
-            [lop_dir]
+            fx.main()
+                .config()
+                .snapshot()
+                .unwrap()
+                .get_all(LOP_GIT_DIR_KEY)
+                .unwrap(),
+            vec![lop_dir]
         );
     }
 

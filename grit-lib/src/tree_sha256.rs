@@ -391,7 +391,7 @@ impl ComputeCtx<'_> {
             return Repository::open(&git_dir, &RepositoryOptions::empty().with_work_tree(sub_wt))
                 .map(Some);
         }
-        let cfg = self.repo.config()?;
+        let cfg = self.repo.config().snapshot()?;
         let rel_str = path_bytes_to_string(rel_path);
         let name = submodule_name_for_path(&cfg, &rel_str).unwrap_or(rel_str);
         let git_dir = resolve_submodule_git_dir(wt, self.repo.common_git_dir(), &cfg, &name)?;
@@ -405,7 +405,7 @@ impl ComputeCtx<'_> {
         if self.blob_jobs.is_empty() {
             return Ok(());
         }
-        let cfg = self.repo.config()?;
+        let cfg = self.repo.config().snapshot()?;
         // Blob SHA-256 is CPU-bound; use `pack.threads` (defaults to all CPUs), not
         // `DiffContent` (serial unless `core.preloadIndex` is enabled).
         let threads = self
@@ -541,7 +541,7 @@ fn resolve_submodule_git_dir(
 ) -> Result<PathBuf> {
     if submodule_path_config_enabled(super_git_dir) {
         let key = format!("submodule.{submodule_name}.gitdir");
-        let value = cfg.get(&key).ok_or_else(|| {
+        let value = cfg.value(&key).ok_or_else(|| {
             Error::Submodule(SubmoduleError::GitDirNotConfigured {
                 name: submodule_name.to_owned(),
             })

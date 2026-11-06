@@ -249,7 +249,11 @@ pub fn log_patch(repo: &Repository, limit: usize) -> Result<()> {
         };
         let result =
             rev_list(repo, &["HEAD".to_owned()], &[], &opts).context("rev-list for log")?;
-        let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+        let config = repo
+            .config()
+            .snapshot()
+            .map(|c| (*c).clone())
+            .unwrap_or_default();
         let mut patch_opts = LogPatchOptions::git_default(&config);
         if std::env::var_os("GRIT_BENCH_LOG_PATCH_PERCENT_H").is_some() {
             patch_opts.commit_header = LogPatchCommitHeader::FormatPercentH;
@@ -651,6 +655,7 @@ pub fn index_pack_records(
         Some(n) => Parallelism::resolve(Some(n)),
         None => repo
             .config()
+            .snapshot()
             .map(|cfg| cfg.pack_index_parallelism())
             .unwrap_or_else(|_| Parallelism::resolve(None)),
     };
@@ -711,7 +716,7 @@ pub fn diff_rename_m(
         Some(&new_commit.tree),
         "",
     )?;
-    let config = repo.config().unwrap_or_default();
+    let config = repo.config().snapshot().unwrap_or_default();
     let entries = detect_renames_with_policy(
         repo.odb(),
         None,

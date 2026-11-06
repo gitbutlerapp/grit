@@ -299,7 +299,7 @@ pub fn grit_get(file: &ConfigFile, key: &str) -> Option<String> {
 pub fn grit_get_all(file: &ConfigFile, key: &str) -> Vec<String> {
     let mut set = ConfigSet::new();
     set.merge(file);
-    set.get_all(key)
+    set.get_all(key).unwrap_or_default()
 }
 
 pub fn isolated_env(home: &Path) -> Environment {
@@ -322,7 +322,12 @@ pub fn load_grit_cascade(
     git_dir: Option<&Path>,
     opts: &LoadConfigOptions,
 ) -> ConfigSet {
-    ConfigSet::load_with_options(env, git_dir, opts).expect("grit load config")
+    ConfigSet::load(env, git_dir, opts).expect("grit load config")
+}
+
+/// Lenient boolean read for integration tests (`ConfigSet::bool_with_default` is crate-private).
+pub fn config_bool_with_default(set: &ConfigSet, key: &str, default: bool) -> bool {
+    set.get_bool(key).ok().flatten().unwrap_or(default)
 }
 
 pub fn grit_list_lines(set: &ConfigSet) -> Vec<GitConfigLine> {

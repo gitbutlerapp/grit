@@ -215,7 +215,7 @@ impl MarkdownRender for FsckOutcome {
 
 pub fn run(options: FsckRunOptions) -> Result<FsckOutcome> {
     let repo = context::discover()?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let mut fsck_opts = if options.connectivity_only {
         FsckOptions::connectivity_and_refs(options.strict)
     } else {

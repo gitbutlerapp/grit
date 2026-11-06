@@ -124,8 +124,8 @@ fn resolve_diff_context_rejects_bad_values() {
 #[test]
 fn config_set_typed_getters_and_regexp() {
     let set = set_from_snippet("[core]\n\tbare = true\n\tquotepath = false\n[test]\n\ti = 42\n");
-    assert_eq!(set.get_bool("core.bare"), Some(Ok(true)));
-    assert_eq!(set.get_i64("test.i"), Some(Ok(42)));
+    assert_eq!(set.get_bool("core.bare").unwrap(), Some(true));
+    assert_eq!(set.get_i64("test.i").unwrap(), Some(42));
     assert!(!set.quote_path_fully());
     let hits = set.get_regexp("core").expect("regexp");
     assert!(hits.iter().any(|e| e.key == "core.bare"));
@@ -161,8 +161,8 @@ fn parse_bool_i64_and_git_config_count_env() {
         include_ctx: Default::default(),
         ..Default::default()
     };
-    let set = ConfigSet::load_with_options(&env, None, &opts).expect("load");
-    assert_eq!(set.get("env.key").as_deref(), Some("v"));
+    let set = ConfigSet::load(&env, None, &opts).expect("load");
+    assert_eq!(set.get("env.key").unwrap().as_deref(), Some("v"));
     let paths = global_config_paths_pub(&env);
     assert_eq!(parse_path(&env, "/x"), "/x");
     let _ = paths;
@@ -173,7 +173,10 @@ fn add_command_override_roundtrip() {
     let mut set = ConfigSet::new();
     set.add_command_override("override.key", "from-cmd")
         .expect("override");
-    assert_eq!(set.get("override.key").as_deref(), Some("from-cmd"));
+    assert_eq!(
+        set.get("override.key").unwrap().as_deref(),
+        Some("from-cmd")
+    );
 }
 
 #[test]
@@ -189,7 +192,7 @@ fn scope_display_debug_canonical_errors_and_escape_roundtrip() {
         write!(buf, "{scope}").expect("display");
         assert!(!buf.is_empty());
     }
-    let _ = format!("{:?}", LoadConfigOptions::default());
+    let _ = format!("{:?}", crate::config::LoadConfigOptions::default());
 
     assert!(canonical_key("bad\nkey").is_err());
     assert!(canonical_key("!.bad.name").is_err());

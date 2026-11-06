@@ -15,7 +15,7 @@ The `grit` CLI builds an environment from the process in `grit-cli` and passes i
 
 Create new repositories with [`Repository::init`](rustdoc:grit_lib::repo::Repository) and [`InitOptions`](rustdoc:grit_lib::repo::InitOptions). When you set [`InitOptions::environment`](rustdoc:grit_lib::repo::InitOptions), that environment is kept on the returned handle (same as passing it through [`RepositoryOptions::with_environment`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_environment) on open). The default [`InitOptions`](rustdoc:grit_lib::repo::InitOptions) leaves the handle hermetic. Custom ODB backends use [`RepositoryBuilder`](rustdoc:grit_lib::repo::RepositoryBuilder).
 
-[`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet) takes `&Environment` as its first argument and always parses the cascade from disk (no process-global cache). Repository-scoped memoization lives on each open handle: [`Repository::config`](rustdoc:grit_lib::repo::Repository) returns `Arc<ConfigSet>` backed by [`RepoCaches`](rustdoc:grit_lib::repo::caches::RepoCaches) (config cascade, gitattributes stacks, filter-process drivers, precompose flags, and related state).
+[`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet) takes `&Environment` as its first argument and always parses the cascade from disk (no process-global cache). Repository-scoped memoization lives on each open handle: [`Repository::config`](rustdoc:grit_lib::repo::Repository) returns a [`Config`](rustdoc:grit_lib::config::Config) handle backed by [`RepoCaches`](rustdoc:grit_lib::repo::caches::RepoCaches) (config cascade, gitattributes stacks, filter-process drivers, precompose flags, and related state). Call [`Config::snapshot`](rustdoc:grit_lib::config::Config::snapshot) when you need an `Arc<ConfigSet>`.
 
 ## Command runner
 
@@ -47,7 +47,7 @@ Core engine areas use thin handles on `Repository` (no duplicated logic):
 | [`references`](rustdoc:grit_lib::repo::Repository) | [`References`](rustdoc:grit_lib::refs::References) | resolve, list, update refs; read reflog |
 | [`reflogs`](rustdoc:grit_lib::repo::Repository) | [`RepositoryReflogs`](rustdoc:grit_lib::repo_handles::RepositoryReflogs) | list reflog refs, show/delete/expire entries |
 | [`index_handle`](rustdoc:grit_lib::repo::Repository) | [`IndexHandle`](rustdoc:grit_lib::index::IndexHandle) | load/write the index |
-| [`config_handle`](rustdoc:grit_lib::repo::Repository) | [`ConfigHandle`](rustdoc:grit_lib::config::ConfigHandle) | merged get; local set + reload |
+| [`config`](rustdoc:grit_lib::repo::Repository::config) | [`Config`](rustdoc:grit_lib::config::Config) | merged get; local set + reload |
 | [`rev_walk`](rustdoc:grit_lib::repo::Repository) | [`RevWalk`](rustdoc:grit_lib::revwalk::RevWalk) | rev-parse specs; rev-list walks |
 | [`diff`](rustdoc:grit_lib::repo::Repository) | [`Diff`](rustdoc:grit_lib::diff::Diff) | tree↔tree, index↔tree, worktree↔index |
 

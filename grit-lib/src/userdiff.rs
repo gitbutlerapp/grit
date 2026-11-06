@@ -250,10 +250,10 @@ pub fn matcher_for_driver(
     config: &ConfigSet,
     driver: &str,
 ) -> Result<Option<FuncnameMatcher>, String> {
-    if let Some(pattern) = config.get(&format!("diff.{driver}.xfuncname")) {
+    if let Some(pattern) = config.value(&format!("diff.{driver}.xfuncname")) {
         return compile_matcher(&pattern, true, false).map(Some);
     }
-    if let Some(pattern) = config.get(&format!("diff.{driver}.funcname")) {
+    if let Some(pattern) = config.value(&format!("diff.{driver}.funcname")) {
         return compile_matcher(&pattern, false, false).map(Some);
     }
     if let Some(matcher) = cached_builtin_matcher(driver) {

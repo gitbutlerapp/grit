@@ -11,7 +11,7 @@
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! let repo = Repository::init(dir.path(), &InitOptions::default())?;
-//! let config = repo.config()?;
+//! let config = repo.config().snapshot()?;
 //! let report = fsck(
 //!     &repo,
 //!     &FsckOptions::connectivity_and_refs(false),
@@ -264,7 +264,11 @@ pub fn issue_msg_id(issue: &FsckIssue) -> &'static str {
 
 fn severity_from_config(config: &ConfigSet, msg_id: &str) -> Option<FsckSeverity> {
     let key = format!("fsck.{msg_id}");
-    match config.get(&key).map(|s| s.to_ascii_lowercase()).as_deref() {
+    match config
+        .value(&key)
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
         Some("ignore") => Some(FsckSeverity::Warning),
         Some("warn") => Some(FsckSeverity::Warning),
         Some("error") => Some(FsckSeverity::Error),
@@ -460,7 +464,7 @@ pub fn fsck(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<FsckReport> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let odb = repo.odb();
     if !options.connectivity_only {
         odb.invalidate_packs();
@@ -489,7 +493,7 @@ pub fn fsck(
 
     verify_midx_and_commit_graph(repo, &mut issues)?;
 
-    for rissue in refs_fsck(repo, odb, &config, options.strict)? {
+    for rissue in refs_fsck(repo, odb, options.strict)? {
         if should_emit(&config, options.strict, rissue.msg_id) {
             issues.push(FsckIssue::BadRef(rissue));
         }
@@ -582,7 +586,7 @@ pub fn fsck(
 
 fn should_emit(config: &ConfigSet, _strict: bool, msg_id: &str) -> bool {
     let key = format!("fsck.{msg_id}");
-    let level = config.get(&key).map(|s| s.to_ascii_lowercase());
+    let level = config.value(&key).map(|s| s.to_ascii_lowercase());
     !matches!(level.as_deref(), Some("ignore"))
 }
 
@@ -2282,7 +2286,7 @@ mod tests {
             &NeverCancel,
         )
         .expect("commit");
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let report = fsck(
             &repo,
             &FsckOptions::full_repository(true),

@@ -155,7 +155,7 @@ pub fn try_protocol_version_from_config_value(raw: &str) -> Result<u8, Error> {
 /// [`Error::Config`].
 pub fn try_effective_client_protocol_version_from_config(config: &ConfigSet) -> Result<u8, Error> {
     config
-        .get("protocol.version")
+        .value("protocol.version")
         .map_or(Ok(2), |v| try_protocol_version_from_config_value(&v))
 }
 

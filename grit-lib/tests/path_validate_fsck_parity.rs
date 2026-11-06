@@ -124,7 +124,7 @@ fn grit_repo_fsck_rejects(body: &[u8]) -> bool {
     .expect("write tree");
     let opts = FsckOptions::full_repository(true).with_check_dangling(false);
     let report = fsck(&repo, &opts, &mut NullProgress, &NeverCancel).expect("fsck");
-    !report.ok(&repo.config().expect("config"), &opts)
+    !report.ok(&repo.config().snapshot().expect("config"), &opts)
         && report.issues.iter().any(|i| {
             PATH_FSCK_IDS
                 .iter()

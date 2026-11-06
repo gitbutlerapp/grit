@@ -9,7 +9,7 @@ use crate::ident_resolve::IdentityEnv;
 pub(crate) fn ident_default_name(config: &ConfigSet, env: &impl IdentityEnv) -> String {
     if config.get_last_entry("user.name").is_some() {
         config
-            .get("user.name")
+            .value("user.name")
             .map(|s| s.trim().to_owned())
             .unwrap_or_default()
     } else {

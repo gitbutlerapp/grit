@@ -512,7 +512,7 @@ fn pickaxe_matches_commit_pairs_renames_per_policy() {
     let matches = |oid: &str, paths: &[&str], renames: RenameDetection| {
         let paths: Vec<String> = paths.iter().map(|p| (*p).to_owned()).collect();
         pickaxe
-            .matches_commit(&grit, oid.parse().expect("oid"), &paths, renames, &config)
+            .matches_commit(&grit, oid.parse().expect("oid"), &paths, renames)
             .expect("pickaxe")
     };
     let on = RenameDetection::default();

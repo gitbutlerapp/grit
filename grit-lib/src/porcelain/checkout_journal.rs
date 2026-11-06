@@ -397,6 +397,7 @@ impl CheckoutJournal {
         let mut restore_paths = HashSet::new();
         let mut dir_cache = repo
             .config()
+            .snapshot()
             .map(|config| LeadingDirCache::for_config(config.as_ref()))
             .unwrap_or_else(|_| LeadingDirCache::new());
         for entry in replaced.iter().rev() {

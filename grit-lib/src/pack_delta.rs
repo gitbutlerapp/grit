@@ -101,7 +101,11 @@ pub(crate) fn pack_config(odb: &Odb) -> Result<ConfigSet> {
     Ok(match odb.config_git_dir() {
         Some(git_dir) => {
             let env = crate::environment::Environment::empty();
-            ConfigSet::load(&env, Some(git_dir), true)?
+            ConfigSet::load(
+                &env,
+                Some(git_dir),
+                &crate::config::LoadConfigOptions::standard(&env, Some(git_dir)),
+            )?
         }
         None => ConfigSet::new(),
     })

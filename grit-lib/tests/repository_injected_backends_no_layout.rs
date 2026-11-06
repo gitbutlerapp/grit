@@ -110,8 +110,11 @@ fn reads_repository_config_when_present() {
     fs::create_dir(&git_dir).expect("mkdir");
     fs::write(git_dir.join("config"), "[user]\n\tname = Injected\n").expect("config");
     let (repo, _refs) = open_injected(&git_dir).expect("open");
-    let config = repo.config().expect("config");
-    assert_eq!(config.get("user.name").as_deref(), Some("Injected"));
+    let config = repo.config().snapshot().expect("config");
+    assert_eq!(
+        config.get("user.name").unwrap().as_deref(),
+        Some("Injected")
+    );
 }
 
 #[test]

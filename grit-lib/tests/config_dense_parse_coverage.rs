@@ -68,10 +68,15 @@ fn load_includes_system_global_and_local_layers() {
     env.git_config_global = Some(home.join(".gitconfig").display().to_string());
     env.cwd = repo.clone();
 
-    let set = ConfigSet::load(&env, Some(&git_dir), true).expect("full load");
-    assert_eq!(set.get("loc.k").as_deref(), Some("3"));
-    assert!(set.get("usr.k").is_some());
-    assert!(set.get("sys.k").is_some());
+    let set = ConfigSet::load(
+        &env,
+        Some(&git_dir),
+        &crate::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
+    )
+    .expect("full load");
+    assert_eq!(set.get("loc.k").unwrap().as_deref(), Some("3"));
+    assert!(set.get("usr.k").unwrap().is_some());
+    assert!(set.get("sys.k").unwrap().is_some());
 
     let early = ConfigSet::read_early_config(&env, Some(&git_dir), "loc.k").expect("early");
     assert!(!early.is_empty());
@@ -99,9 +104,9 @@ fn command_parameters_merged_when_includes_enabled() {
         },
         ..Default::default()
     };
-    let set = ConfigSet::load_with_options(&env, None, &opts).expect("load");
-    assert_eq!(set.get("top.key").as_deref(), Some("override"));
-    assert_eq!(set.get("fromparam.k").as_deref(), Some("yes"));
+    let set = ConfigSet::load(&env, None, &opts).expect("load");
+    assert_eq!(set.get("top.key").unwrap().as_deref(), Some("override"));
+    assert_eq!(set.get("fromparam.k").unwrap().as_deref(), Some("yes"));
 }
 
 #[test]
@@ -148,7 +153,7 @@ fn includeif_onbranch_misses_when_branch_differs() {
     .expect("cfg");
     std::fs::write(git_dir.join("miss.conf"), "[miss]\n\tk = 1\n").expect("miss");
     let env = Environment::empty();
-    let set = ConfigSet::load_with_options(
+    let set = ConfigSet::load(
         &env,
         Some(&git_dir),
         &grit_lib::config::LoadConfigOptions {
@@ -163,5 +168,5 @@ fn includeif_onbranch_misses_when_branch_differs() {
         },
     )
     .expect("load");
-    assert!(set.get("miss.k").is_none());
+    assert!(set.get("miss.k").unwrap().is_none());
 }

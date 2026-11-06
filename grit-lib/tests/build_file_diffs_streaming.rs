@@ -43,7 +43,7 @@ fn streaming_patch_rows_match_build_file_diffs() {
     let old_tree = tree_with_files(&repo, "old");
     let new_tree = tree_with_files(&repo, "new");
     let entries = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "").expect("diff");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let thread_policy = ThreadPolicy::default();
     let opts = DiffOptions::default();
 
@@ -85,7 +85,7 @@ fn streaming_propagates_callback_errors() {
     let old_tree = tree_with_files(&repo, "a");
     let new_tree = tree_with_files(&repo, "b");
     let entries = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "").expect("diff");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let thread_policy = ThreadPolicy::default();
     let err = build_file_diffs_streaming(
         repo.odb(),

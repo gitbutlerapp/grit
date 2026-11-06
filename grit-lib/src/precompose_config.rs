@@ -206,9 +206,16 @@ pub(crate) fn effective_core_precomposeunicode_with_config(
     let Some(gd) = git_dir else {
         return false;
     };
-    crate::config::ConfigSet::load(&crate::environment::Environment::empty(), Some(gd), true)
-        .ok()
-        .is_some_and(|cfg| cfg.precompose_unicode())
+    crate::config::ConfigSet::load(
+        &crate::environment::Environment::empty(),
+        Some(gd),
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(gd),
+        ),
+    )
+    .ok()
+    .is_some_and(|cfg| cfg.precompose_unicode())
 }
 
 /// True when the filesystem aliases NFD and NFC spellings for the same path (macOS / HFS+ style).

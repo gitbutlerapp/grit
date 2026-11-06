@@ -179,14 +179,14 @@ fn grit_push(
     refspecs: &[&str],
     opts: PushOptions,
 ) -> Result<PushOutcome, RemoteError> {
-    let config = repo.config().expect("config");
-    let ctx = load_push_plan_context(repo, &config, Some(remote), None).expect("plan context");
+    let config = repo.config().snapshot().expect("config");
+    let ctx = load_push_plan_context(repo, Some(remote), None).expect("plan context");
     let request = PushRequest {
         remote: Some(remote.to_owned()),
         refspecs: refspecs.iter().map(|s| (*s).to_owned()).collect(),
         ..PushRequest::default()
     };
-    let plan = resolve_push(repo, &config, &request, &ctx).expect("resolve push");
+    let plan = resolve_push(repo, &request, &ctx).expect("resolve push");
     open_push_destination(&config, &plan.remote)?.push(
         repo,
         &plan.specs,

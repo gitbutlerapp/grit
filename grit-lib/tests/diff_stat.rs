@@ -32,7 +32,7 @@ fn listed(
         .diff()
         .tree_to_tree(Some(old), Some(new))
         .expect("tree diff");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     build_file_diffs(
         repo.odb(),
         entries,

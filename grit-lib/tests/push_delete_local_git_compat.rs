@@ -69,9 +69,9 @@ fn delete_request(remote: &str, names: &[&str]) -> PushRequest {
 fn delete_push_removes_every_named_ref_like_git() {
     let (_tmp, work) = two_remote_fixture();
     let repo = open_repo(&work);
-    let config = repo.config().expect("config");
-    let ctx = load_push_plan_context(&repo, &config, Some("grit"), None).expect("context");
-    let plan = resolve_push(&repo, &config, &delete_request("grit", &["a", "b"]), &ctx)
+    let config = repo.config().snapshot().expect("config");
+    let ctx = load_push_plan_context(&repo, Some("grit"), None).expect("context");
+    let plan = resolve_push(&repo, &delete_request("grit", &["a", "b"]), &ctx)
         .expect("resolve delete push");
     assert_eq!(plan.kind, PushPlanKind::Delete);
     let outcome = open_push_destination(&config, &plan.remote)
@@ -109,12 +109,11 @@ fn delete_push_removes_every_named_ref_like_git() {
 fn delete_push_with_refspec_leaves_remote_unchanged_like_git() {
     let (_tmp, work) = two_remote_fixture();
     let repo = open_repo(&work);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let before = remote_refs(&work, "grit");
-    let ctx = load_push_plan_context(&repo, &config, Some("grit"), None).expect("context");
+    let ctx = load_push_plan_context(&repo, Some("grit"), None).expect("context");
     let err = resolve_push(
         &repo,
-        &config,
         &delete_request("grit", &["HEAD:refs/heads/release", "b"]),
         &ctx,
     )

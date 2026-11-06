@@ -105,7 +105,7 @@ impl DeltaIslands {
 
 /// Compile the left-anchored island regexes from `pack.island` config (in load order).
 fn load_island_regexes(cfg: &ConfigSet) -> Vec<regex::Regex> {
-    cfg.get_all("pack.island")
+    cfg.values_all("pack.island")
         .into_iter()
         .filter_map(|v| {
             let pat = if v.starts_with('^') {
@@ -147,10 +147,12 @@ fn island_name_for_ref(regexes: &[regex::Regex], ref_name: &str) -> Option<Strin
 /// [`DeltaIslands`] when no `pack.island` regex matches any ref.
 pub fn load_delta_islands(
     repo: &Repository,
-    cfg: &ConfigSet,
     packed: &std::collections::HashSet<ObjectId>,
 ) -> DeltaIslands {
-    let regexes = load_island_regexes(cfg);
+    let Ok(cfg) = repo.config().snapshot() else {
+        return DeltaIslands::default();
+    };
+    let regexes = load_island_regexes(cfg.as_ref());
     if regexes.is_empty() {
         return DeltaIslands::default();
     }

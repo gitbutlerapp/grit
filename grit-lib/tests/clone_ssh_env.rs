@@ -185,7 +185,7 @@ fn fetch_with_default_options_uses_repository_git_ssh_command() {
     )
     .unwrap();
 
-    let remote = Remote::from_config(&repo.config().unwrap(), "origin").unwrap();
+    let remote = Remote::from_config(&repo.config().snapshot().unwrap(), "origin").unwrap();
     remote
         .fetch(
             &repo,
@@ -237,7 +237,7 @@ fn fetch_honors_core_ssh_command_when_env_unset() {
     )
     .unwrap();
 
-    let remote = Remote::from_config(&repo.config().unwrap(), "origin").unwrap();
+    let remote = Remote::from_config(&repo.config().snapshot().unwrap(), "origin").unwrap();
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     fetch_opts.tags = TagMode::Following;

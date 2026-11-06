@@ -10,7 +10,7 @@ pub(crate) use crate::pack_index::parse_pack_index_bytes;
 pub use crate::pack_index::{PackIndex, PackIndexEntryRef};
 
 #[cfg(test)]
-use crate::pack_index::{compute_fanout_from_oid_slices, parse_pack_index_bytes};
+use crate::pack_index::compute_fanout_from_oid_slices;
 
 use crate::error::{Error, Result};
 use crate::git_path::CanonicalizeExt;
@@ -1238,7 +1238,7 @@ pub(crate) mod pack_cache {
         cfg: Option<&crate::config::ConfigSet>,
     ) {
         let bytes = cfg
-            .and_then(|config| config.get("core.deltaBaseCacheLimit"))
+            .and_then(|config| config.value("core.deltaBaseCacheLimit"))
             .as_ref()
             .and_then(|value| crate::config::parse_i64(value).ok())
             .and_then(|value| usize::try_from(value).ok())
@@ -2370,7 +2370,7 @@ pub fn clear_pack_delta_base_cache() {
 /// Apply `core.deltaBaseCacheLimit` from repository config to the process-wide delta-base LRU.
 pub fn configure_delta_base_cache_from_config(cfg: Option<&crate::config::ConfigSet>) {
     let bytes = cfg
-        .and_then(|c| c.get("core.deltaBaseCacheLimit"))
+        .and_then(|c| c.value("core.deltaBaseCacheLimit"))
         .as_ref()
         .and_then(|v| crate::config::parse_i64(v).ok())
         .and_then(|n| usize::try_from(n).ok())
@@ -9208,6 +9208,7 @@ mod tests {
 #[cfg(test)]
 mod cached_lookup_tests {
     use super::*;
+    use crate::pack_index::parse_pack_index_bytes;
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;

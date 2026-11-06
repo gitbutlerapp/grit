@@ -85,7 +85,7 @@ struct FetchRefspecs {
 impl FetchRefspecs {
     fn load(config: &ConfigSet, remote_name: &str) -> Self {
         let (negative, mut positive): (Vec<RefspecItem>, Vec<RefspecItem>) = config
-            .get_all(&format!("remote.{remote_name}.fetch"))
+            .values_all(&format!("remote.{remote_name}.fetch"))
             .iter()
             .filter_map(|spec| parse_fetch_refspec(spec).ok())
             .partition(|item| item.negative);
@@ -113,7 +113,7 @@ pub fn inspect_remote(
     options: &InspectOptions,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> std::result::Result<RemoteSummary, RemoteError> {
-    let config = repo.config().map_err(RemoteError::Library)?;
+    let config = repo.config().snapshot().map_err(RemoteError::Library)?;
     if !has_remote_section(config.as_ref(), name) {
         return Err(RemoteError::UnknownRemote(name.to_owned()));
     }
@@ -404,7 +404,7 @@ fn collect_pull_branches(config: &ConfigSet, remote_name: &str) -> Vec<RemotePul
             continue;
         }
         let merge = config
-            .get(&format!("branch.{branch}.merge"))
+            .value(&format!("branch.{branch}.merge"))
             .unwrap_or_default();
         by_branch.insert(
             branch.to_owned(),

@@ -44,10 +44,14 @@ impl IgnoreRevs {
     /// object name, or a `--ignore-rev` spec does not resolve to a commit.
     pub fn load(repo: &Repository, sources: &IgnoreRevsSources) -> Result<Self> {
         let mut revs = HashSet::new();
-        let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+        let config = repo
+            .config()
+            .snapshot()
+            .map(|c| (*c).clone())
+            .unwrap_or_default();
 
         if sources.use_config {
-            for path in config.get_all("blame.ignorerevsfile") {
+            for path in config.values_all("blame.ignorerevsfile") {
                 if path.is_empty() {
                     revs.clear();
                 } else {

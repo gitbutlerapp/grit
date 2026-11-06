@@ -58,7 +58,7 @@ impl<'repo> RepositoryRemotes<'repo> {
             return Err(RemoteError::InvalidRemoteName(new.to_owned()));
         }
         let repo = self.repository();
-        let config = repo.config().map_err(RemoteError::Library)?;
+        let config = repo.config().snapshot().map_err(RemoteError::Library)?;
         if !has_local_remote_section(config.as_ref(), old) {
             return Err(RemoteError::UnknownRemote(old.to_owned()));
         }
@@ -78,7 +78,7 @@ impl<'repo> RepositoryRemotes<'repo> {
 
         let refspec_marker = format!(":refs/remotes/{old}/");
         let refspecs_need_update = config
-            .get_all(&format!("remote.{old}.fetch"))
+            .values_all(&format!("remote.{old}.fetch"))
             .iter()
             .any(|spec| spec.contains(&refspec_marker));
 
@@ -228,7 +228,7 @@ fn plan_config_updates(
     let refspec_marker = format!(":refs/remotes/{old}/");
     let mut refspecs_updated = Vec::new();
     if refspecs_need_update {
-        for spec in config.get_all(&format!("remote.{old}.fetch")) {
+        for spec in config.values_all(&format!("remote.{old}.fetch")) {
             if spec.contains(&refspec_marker) {
                 refspecs_updated.push(update_fetch_refspec(&spec, old, new));
             }
@@ -296,16 +296,16 @@ fn apply_remote_rename_config(
 
     for branch in branches_updated {
         let remote_key = format!("branch.{branch}.remote");
-        if merged.get(&remote_key).as_deref() == Some(old) {
+        if merged.value(&remote_key).as_deref() == Some(old) {
             file.set(&remote_key, new)?;
         }
         let push_key = format!("branch.{branch}.pushRemote");
-        if merged.get(&push_key).as_deref() == Some(old) {
+        if merged.value(&push_key).as_deref() == Some(old) {
             file.set(&push_key, new)?;
         }
     }
 
-    if merged.get("remote.pushDefault").as_deref() == Some(old) {
+    if merged.value("remote.pushDefault").as_deref() == Some(old) {
         file.set("remote.pushDefault", new)?;
     }
 

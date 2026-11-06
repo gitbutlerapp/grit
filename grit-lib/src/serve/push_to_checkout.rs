@@ -96,7 +96,10 @@ fn run_push_to_checkout_hook(
     entry: &WorktreeEntry,
     new_hex: &str,
 ) -> Result<HookResult> {
-    let config = repo.config().map_err(super::ServeError::Repository)?;
+    let config = repo
+        .config()
+        .snapshot()
+        .map_err(super::ServeError::Repository)?;
     let git_dir = std::path::absolute(repo.git_dir()).map_err(super::ServeError::Io)?;
     let work_tree = std::path::absolute(&entry.path).map_err(super::ServeError::Io)?;
     let env = [
@@ -156,7 +159,7 @@ fn push_to_deploy_builtin(
             simplify_gitlinks: true,
             refresh_fsmonitor: false,
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            config: repo.config().ok(),
+            config: repo.config().snapshot().ok(),
             command_runner: Some(repo.command_runner()),
             ..DiffIndexToWorktreeOptions::default()
         },

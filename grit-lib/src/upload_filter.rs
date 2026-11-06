@@ -43,7 +43,7 @@ pub fn validate_upload_filter_request(
 
 fn tree_max_depth(config: &ConfigSet) -> Result<Option<u64>, UploadFilterError> {
     config
-        .get("uploadpackfilter.tree.maxdepth")
+        .value("uploadpackfilter.tree.maxdepth")
         .map(|value| {
             value
                 .trim()
@@ -87,8 +87,8 @@ fn ensure_filter_allowed(
     display_kind: &str,
 ) -> Result<(), UploadFilterError> {
     let key = format!("uploadpackfilter.{config_kind}.allow");
-    if let Some(value) = config.get_bool(&key) {
-        if value.unwrap_or(false) {
+    if let Ok(Some(value)) = config.get_bool(&key) {
+        if value {
             return Ok(());
         }
         return Err(UploadFilterError::UnsupportedFilter(
@@ -98,7 +98,8 @@ fn ensure_filter_allowed(
 
     if config
         .get_bool("uploadpackfilter.allow")
-        .map(|value| value.unwrap_or(false))
+        .ok()
+        .flatten()
         .unwrap_or(true)
     {
         Ok(())

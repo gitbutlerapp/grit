@@ -198,12 +198,12 @@ fn resolve_ingest_pack_publish_policy(
         Some(crate::config::ConfigSet::load(
             &opts.environment,
             Some(git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(&opts.environment, Some(git_dir)),
         )?)
     } else {
         None
     };
-    let shared_raw = cfg.as_ref().and_then(|c| c.get("core.sharedRepository"));
+    let shared_raw = cfg.as_ref().and_then(|c| c.value("core.sharedRepository"));
     let shared_repo =
         crate::shared_repo::shared_repository_from_config_value(shared_raw.as_deref())
             .map_err(|msg| Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg)))?;
@@ -228,7 +228,11 @@ impl IngestPackOptions {
                 .map_err(Error::Config);
         }
         if let Some(git_dir) = odb.config_git_dir() {
-            let cfg = crate::config::ConfigSet::load(&self.environment, Some(git_dir), true)?;
+            let cfg = crate::config::ConfigSet::load(
+                &self.environment,
+                Some(git_dir),
+                &crate::config::LoadConfigOptions::standard(&self.environment, Some(git_dir)),
+            )?;
             return crate::parallel::ThreadPolicy::default()
                 .try_resolve(crate::parallel::ParallelOp::IndexPack, &cfg)
                 .map(|o| o.parallelism())

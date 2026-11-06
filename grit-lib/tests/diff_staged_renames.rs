@@ -57,7 +57,7 @@ fn diff_index_to_tree_with_renames_reports_staged_mv() {
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
     let index = repo.index_handle().load().expect("index");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let policy = repo.thread_policy();
 
     let entries = diff_index_to_tree_with_renames(
@@ -108,7 +108,7 @@ fn apply_rename_detection_matches_git_cached_name_status() {
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
     let index = repo.index_handle().load().expect("index");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let policy = repo.thread_policy();
     let raw = grit_lib::diff::diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false)
         .expect("raw");
@@ -151,7 +151,7 @@ fn worktree_rename_detection_with_small_unstaged_edit() {
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
     let index = repo.index_handle().load().expect("index");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let policy = repo.thread_policy();
     let work_tree = repo.work_tree().expect("worktree");
 
@@ -233,7 +233,7 @@ fn plain_filesystem_mv_pairs_via_untracked_worktree_candidate() {
         work_tree,
         grit_lib::diff::DiffIndexToWorktreeOptions {
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            config: repo.config().ok(),
+            config: repo.config().snapshot().ok(),
             worktree_rules: Some(std::sync::Arc::new(std::sync::Mutex::new(rules))),
             ..grit_lib::diff::DiffIndexToWorktreeOptions::default()
         },
@@ -302,7 +302,7 @@ fn unrelated_untracked_not_listed_when_tracked_file_deleted() {
         work_tree,
         grit_lib::diff::DiffIndexToWorktreeOptions {
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            config: repo.config().ok(),
+            config: repo.config().snapshot().ok(),
             worktree_rules: Some(std::sync::Arc::new(std::sync::Mutex::new(rules))),
             ..grit_lib::diff::DiffIndexToWorktreeOptions::default()
         },

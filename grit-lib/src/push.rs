@@ -785,7 +785,10 @@ impl PushPack {
         let local_cfg = crate::config::ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(local.git_dir()),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(local.git_dir()),
+            ),
         )
         .ok();
         let mut opts = if haves.is_empty() {

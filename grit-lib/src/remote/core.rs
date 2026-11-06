@@ -469,18 +469,18 @@ impl Remote {
     /// Returns [`RemoteError::NoUrl`] when the remote has no URL.
     pub fn from_config(config: &ConfigSet, name: &str) -> RemoteResult<Self> {
         let raw_url = config
-            .get(&format!("remote.{name}.url"))
+            .value(&format!("remote.{name}.url"))
             .filter(|u| !u.trim().is_empty())
             .ok_or_else(|| RemoteError::NoUrl {
                 remote: Some(name.to_owned()),
             })?;
         let fetch_url = url_rewrite::rewrite_fetch_url(config, &raw_url);
         let push_source = config
-            .get(&format!("remote.{name}.pushurl"))
+            .value(&format!("remote.{name}.pushurl"))
             .filter(|u| !u.trim().is_empty())
             .unwrap_or_else(|| raw_url.clone());
         let push_url = url_rewrite::rewrite_push_url(config, push_source.as_str());
-        let mut fetch_refspecs = config.get_all(&format!("remote.{name}.fetch"));
+        let mut fetch_refspecs = config.values_all(&format!("remote.{name}.fetch"));
         fetch_refspecs.retain(|s| !s.trim().is_empty());
         if fetch_refspecs.is_empty() {
             fetch_refspecs = vec![format!("+refs/heads/*:refs/remotes/{name}/*")];
@@ -618,8 +618,9 @@ impl Remote {
         if opts.resumable_threshold.is_none() {
             opts.resumable_threshold = repo
                 .config()
+                .snapshot()
                 .ok()
-                .and_then(|c| c.get_i64("push.bundleThreshold").and_then(|r| r.ok()))
+                .and_then(|c| c.get_i64("push.bundleThreshold").ok().flatten())
                 .and_then(|v| u64::try_from(v).ok());
         }
         let url = pre_push_hook_url(self.push_url());
@@ -689,8 +690,9 @@ impl Remote {
         };
         let enabled = repo
             .config()
+            .snapshot()
             .ok()
-            .is_none_or(|c| c.bool_or("transfer.bundleURI", true));
+            .is_none_or(|c| c.bool_with_default("transfer.bundleURI", true));
         if !enabled {
             return BundleSeed::NotOffered;
         }
@@ -808,8 +810,15 @@ impl Remote {
             )?),
             RemoteUrl::Local(_) | RemoteUrl::File(_) => {
                 let remote_git = local_git_dir_from_url(url, repo.git_dir(), repo.work_tree())?;
-                let cfg = ConfigSet::load(&opts.environment, Some(repo.git_dir()), true)
-                    .map_err(RemoteError::Library)?;
+                let cfg = ConfigSet::load(
+                    &opts.environment,
+                    Some(repo.git_dir()),
+                    &crate::config::LoadConfigOptions::standard(
+                        &opts.environment,
+                        Some(repo.git_dir()),
+                    ),
+                )
+                .map_err(RemoteError::Library)?;
                 if opts.filter.is_none() {
                     if let Some(name) = opts.remote_name.as_deref().or(self.name.as_deref()) {
                         opts.filter = crate::partial_clone::stored_remote_filter(&cfg, name);
@@ -990,7 +999,10 @@ fn upload_pack_protocol_version(explicit: Option<u8>, repo: &Repository) -> Remo
         return Ok(v);
     }
     crate::protocol::try_effective_client_protocol_version_from_config(
-        repo.config().map_err(RemoteError::Library)?.as_ref(),
+        repo.config()
+            .snapshot()
+            .map_err(RemoteError::Library)?
+            .as_ref(),
     )
     .map_err(RemoteError::Library)
 }
@@ -1008,8 +1020,12 @@ fn list_refs_protocol_version(explicit: Option<u8>, repo: Option<&Repository>) -
 /// Whether the local repository at `git_dir` has promisor remotes of its own
 /// (only its own config counts, as for any served repository's partial state).
 fn local_source_has_promisor_remotes(git_dir: &Path) -> bool {
-    ConfigSet::load_repo_local_only(git_dir)
-        .is_ok_and(|cfg| crate::promisor::repo_treats_promisor_packs(git_dir, &cfg))
+    ConfigSet::load(
+        &crate::environment::Environment::empty(),
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::repo_local_only(git_dir),
+    )
+    .is_ok_and(|cfg| crate::promisor::repo_treats_promisor_packs(git_dir, &cfg))
 }
 
 fn local_git_dir_from_url(
@@ -1034,10 +1050,14 @@ fn ssh_transport(
     let env = ssh_wire_environment(repo, fetch_env);
     transport = transport.with_ssh_environment(std::sync::Arc::new(env.clone()));
     if let Some(r) = repo {
-        if let Ok(config) = r.config() {
+        if let Ok(config) = r.config().snapshot() {
             transport = transport.with_ssh_config(config);
         }
-    } else if let Ok(config) = ConfigSet::load(&env, None, true) {
+    } else if let Ok(config) = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::standard(&env, None),
+    ) {
         transport = transport.with_ssh_config(Arc::new(config));
     }
     transport
@@ -1082,7 +1102,7 @@ fn http_client(
     factory: Option<&dyn HttpClientFactory>,
     repo: &Repository,
 ) -> RemoteResult<Box<dyn HttpClient>> {
-    let config = repo.config().map_err(RemoteError::Library)?;
+    let config = repo.config().snapshot().map_err(RemoteError::Library)?;
     if let Some(f) = factory {
         return f.create(config.as_ref());
     }
@@ -1107,7 +1127,7 @@ fn list_refs_http(
     repo: Option<&Repository>,
 ) -> RemoteResult<Vec<RemoteRef>> {
     let config: Arc<ConfigSet> = if let Some(r) = repo {
-        r.config().map_err(RemoteError::Library)?
+        r.config().snapshot().map_err(RemoteError::Library)?
     } else {
         Arc::new(ConfigSet::new())
     };

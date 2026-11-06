@@ -204,7 +204,7 @@ pub fn resolve_create_tracking(
         }
         return Ok(None);
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if track == TrackMode::Auto
         && !branch_auto_setup_merge_allows(&config, branch_short, &tracking_ref)
     {
@@ -345,7 +345,7 @@ pub fn delete_branch(
 
     repo.references().delete_verified(&branch_ref, &existing)?;
     let section = branch_config_section(name);
-    repo.config_handle().remove_local_section(&section)?;
+    repo.config().remove_local_section(&section)?;
     Ok(DeletedBranch {
         name: name.to_owned(),
         oid,
@@ -698,10 +698,10 @@ fn validate_unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
             name: branch.to_owned(),
         }));
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let remote_key = format!("branch.{branch}.remote");
     let merge_key = format!("branch.{branch}.merge");
-    if config.get(&remote_key).is_none() && config.get(&merge_key).is_none() {
+    if config.value(&remote_key).is_none() && config.value(&merge_key).is_none() {
         return Err(Error::Branch(BranchError::NoUpstream {
             name: branch.to_owned(),
         }));
@@ -719,7 +719,7 @@ pub fn unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
     validate_unset_upstream(repo, branch)?;
     let remote_key = format!("branch.{branch}.remote");
     let merge_key = format!("branch.{branch}.merge");
-    let handle = repo.config_handle();
+    let handle = repo.config();
     handle.unset_local(&remote_key)?;
     handle.unset_local(&merge_key)?;
     Ok(())
@@ -817,7 +817,7 @@ fn branch_auto_setup_merge_allows(
     branch_short: &str,
     tracking_ref: &str,
 ) -> bool {
-    let auto_setup = config.get("branch.autoSetupMerge");
+    let auto_setup = config.value("branch.autoSetupMerge");
     let raw = auto_setup.as_deref();
     match raw {
         None | Some("true") | Some("default") => true,

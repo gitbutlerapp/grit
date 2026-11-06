@@ -162,8 +162,6 @@ impl Pickaxe {
     /// - `paths` — repository-relative pathspecs limiting the diff; empty means the whole tree.
     /// - `renames` — rename pairing; callers following Git use
     ///   [`renames_from_config`] (`diff.renames`).
-    /// - `config` — supplies `diff.renameLimit` and rename-scoring thread settings.
-    ///
     /// # Errors
     ///
     /// Propagates object read and diff errors.
@@ -173,8 +171,8 @@ impl Pickaxe {
         commit_oid: ObjectId,
         paths: &[String],
         renames: RenameDetection,
-        config: &ConfigSet,
     ) -> Result<bool> {
+        let config = repo.config().snapshot()?;
         let data = repo.odb().read(&commit_oid)?.data;
         let commit = parse_commit(&data)?;
         let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
@@ -192,7 +190,7 @@ impl Pickaxe {
         } else {
             None
         };
-        let renames = PickaxeRenames::new(renames, config);
+        let renames = PickaxeRenames::new(renames, config.as_ref());
         self.matches_trees(
             repo,
             parent_tree.as_ref(),

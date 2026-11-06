@@ -310,8 +310,12 @@ pub(crate) fn run_upload_pack_with_session(
         .with_promisor_fetcher(None)
         .for_serving();
     let repo = Repository::open(repo_path, &without_fetcher)?;
-    let config =
-        ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )
+    .unwrap_or_default();
     let hidden_refs = grit_lib::refs::hide_refs::hide_ref_patterns_uploadpack(&config);
     let mut opts = ServeOptions {
         protocol: protocol_version_from_header(protocol_version),
@@ -326,7 +330,7 @@ pub(crate) fn run_upload_pack_with_session(
     };
     // The promisor fetcher in `repository_options` is used only when this request may
     // fetch missing promised objects; otherwise the served repository fetches nothing.
-    opts.attach_promisor_fetcher(&repo, &config, repository_options.promisor_fetcher.clone());
+    opts.attach_promisor_fetcher(&repo, repository_options.promisor_fetcher.clone());
     serve::upload_pack_cancellable(&repo, input, output, &mut opts, session.cancel())
         .map_err(Error::from)
 }
@@ -390,8 +394,12 @@ pub(crate) fn run_receive_pack_with_session(
         .with_promisor_fetcher(None)
         .for_serving();
     let repo = Repository::open(repo_path, &options)?;
-    let config =
-        ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )
+    .unwrap_or_default();
     let hidden_refs = grit_lib::refs::hide_refs::hide_ref_patterns_receive(&config);
     let opts = ServeOptions {
         protocol: ProtocolVersion::V0,

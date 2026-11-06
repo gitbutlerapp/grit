@@ -58,14 +58,14 @@ pub(crate) fn effective_merge_driver_name(attrs: &FileAttrs, config: &ConfigSet)
     match &attrs.merge {
         MergeAttr::Unset => None,
         MergeAttr::Driver(name) => Some(name.clone()),
-        MergeAttr::Unspecified => config.get("merge.default"),
+        MergeAttr::Unspecified => config.value("merge.default"),
     }
 }
 
 /// Resolve a driver name to built-in behaviour or an external command.
 #[must_use]
 pub(crate) fn resolve_merge_driver(config: &ConfigSet, driver_name: &str) -> MergeDriverKind {
-    if let Some(cmdline) = config.get(&format!("merge.{driver_name}.driver")) {
+    if let Some(cmdline) = config.value(&format!("merge.{driver_name}.driver")) {
         return MergeDriverKind::External {
             name: driver_name.to_owned(),
             cmdline,
@@ -296,7 +296,7 @@ pub(crate) fn try_merge_driver(
     ignore_cr_at_eol: bool,
     labels: MergeDriverLabels<'_>,
 ) -> Result<Option<(MergeDriverOutcome, Vec<u8>)>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let Some(driver_name) = effective_merge_driver_name(attrs, config.as_ref()) else {
         return Ok(None);
     };

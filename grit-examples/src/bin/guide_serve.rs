@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         "receive-pack" => {
-            let policy = ReceivePolicy::from_config(&*repo.config()?);
+            let policy = ReceivePolicy::from_config(&*repo.config().snapshot()?);
             let outcome = serve::receive_pack_with_hook(
                 &repo,
                 &mut input,

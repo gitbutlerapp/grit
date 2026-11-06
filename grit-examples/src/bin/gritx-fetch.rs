@@ -50,10 +50,11 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let git_dir = repo.git_dir().to_path_buf();
+    let env = grit_lib::config::environment::Environment::capture_process();
     let config = ConfigSet::load(
-        &grit_lib::config::environment::Environment::capture_process(),
+        &env,
         Some(&git_dir),
-        true,
+        &grit_lib::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
     )?;
 
     let r = remote::resolve_remote(&config, &git_dir, cli.remote.as_deref(), false)?;

@@ -68,7 +68,7 @@ fn shallow_boundary_commit_diff_is_against_empty_tree() {
     let tip = resolve_ref(repo.git_dir(), "HEAD").unwrap();
     assert!(repo.git_dir().join("shallow").exists());
 
-    let config = repo.config().unwrap().clone();
+    let config = repo.config().snapshot().unwrap().clone();
     let thread = repo.thread_policy();
     let out = commit_diff_files(
         &repo,
@@ -77,7 +77,6 @@ fn shallow_boundary_commit_diff_is_against_empty_tree() {
         DiffDetail::NameStatus,
         &DiffOptions::default(),
         &[],
-        &config,
         &thread,
     )
     .unwrap();
@@ -136,7 +135,7 @@ fn depth_two_child_still_diffs_against_parent() {
     let repo = grit_shallow_clone(&bare, &clone_dir, 2);
     let tip = resolve_ref(repo.git_dir(), "HEAD").unwrap();
     let parent = resolve_revision(&repo, "HEAD~1").expect("parent exists at depth 2");
-    let config = repo.config().unwrap().clone();
+    let config = repo.config().snapshot().unwrap().clone();
     let thread = repo.thread_policy();
     let out = commit_diff_files(
         &repo,
@@ -145,7 +144,6 @@ fn depth_two_child_still_diffs_against_parent() {
         DiffDetail::NameStatus,
         &DiffOptions::default(),
         &[],
-        &config,
         &thread,
     )
     .unwrap();
@@ -165,7 +163,6 @@ fn depth_two_child_still_diffs_against_parent() {
         DiffDetail::NameStatus,
         &DiffOptions::default(),
         &[],
-        &config,
         &thread,
     )
     .unwrap();

@@ -178,7 +178,7 @@ fn assert_repo_matches_git(grit_dir: &Path, git_dir: &Path) {
 fn stored_change_id(repo: &Repository, oid: ObjectId) -> Option<String> {
     let obj = repo.odb().read(&oid).ok()?;
     let data = parse_commit(&obj.data).ok()?;
-    let config = repo.config().ok()?;
+    let config = repo.config().snapshot().ok()?;
     if ChangeIdPolicy::from_config(config.as_ref()).enabled() {
         Some(resolved_change_id(&oid, &data).id.as_str().to_owned())
     } else {

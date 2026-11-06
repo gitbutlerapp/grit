@@ -70,7 +70,7 @@ fn serial_structured_diff_peak_stays_bounded() {
     let new_tree = tree_with_version(&repo, 1);
     let entries = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "").expect("diff trees");
     assert_eq!(entries.len(), FILES);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let thread_policy = ThreadPolicy::default();
     let diff_options = DiffOptions::default();
 

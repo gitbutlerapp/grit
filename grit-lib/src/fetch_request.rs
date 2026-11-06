@@ -167,7 +167,7 @@ pub fn resolve_remote_argument(
 /// `branch.<branch>.remote`, trimmed; `None` when unset, blank, or `branch` is `None`.
 fn branch_remote(config: &ConfigSet, branch: Option<&str>) -> Option<String> {
     branch
-        .and_then(|name| config.get(&format!("branch.{name}.remote")))
+        .and_then(|name| config.value(&format!("branch.{name}.remote")))
         .map(|remote| remote.trim().to_owned())
         .filter(|remote| !remote.is_empty())
 }

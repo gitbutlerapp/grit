@@ -43,7 +43,10 @@ fn fetch_all_aborts_when_cancelled_on_only_remote() {
     let config = ConfigSet::load(
         &grit_lib::config::environment::Environment::empty(),
         Some(repo.git_dir()),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::empty(),
+            Some(repo.git_dir()),
+        ),
     )
     .expect("config");
     let cancel = CancelToken::new();
@@ -82,7 +85,10 @@ fn fetch_all_aborts_when_only_remote_returns_cancelled() {
     let config = ConfigSet::load(
         &grit_lib::config::environment::Environment::empty(),
         Some(repo.git_dir()),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::empty(),
+            Some(repo.git_dir()),
+        ),
     )
     .expect("config");
     let cancel = CancelToken::new();

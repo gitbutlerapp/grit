@@ -220,7 +220,7 @@ fn clean_repo_has_no_issues_and_git_agrees() {
     one_commit(&repo);
     let git_out = git_fsck(dir.path(), true);
     assert!(git_out.msg_ids.is_empty(), "{:?}", git_out.msg_ids);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let report = grit_fsck(&repo, &FsckOptions::full_repository(true));
     assert!(report.ok(&config, &FsckOptions::full_repository(true)));
     assert!(report.issues.is_empty());
@@ -275,7 +275,7 @@ fn legacy_tree_mode_100664_blob_still_reachable_like_git() {
         "git fsck --full should accept legacy 100664 trees"
     );
 
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let opts = FsckOptions::full_repository(false);
     let report = grit_fsck(&repo, &opts);
     assert!(
@@ -354,7 +354,7 @@ fn legacy_tree_mode_100664_in_pack_still_reachable() {
         "legacy tree must exist only in pack"
     );
 
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let opts = FsckOptions::full_repository(false);
     let report = grit_fsck(&repo, &opts);
     assert!(
@@ -413,7 +413,7 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
         "git fsck must pass on deltified pack: {:?}",
         git_out.msg_ids
     );
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let opts = FsckOptions::full_repository(false);
     let report = grit_fsck(&repo, &opts);
     assert!(
@@ -523,7 +523,7 @@ fn nested_annotated_tags_pass_fsck_with_cached_links() {
     let git_out = git_fsck(dir.path(), false);
     assert!(git_out.msg_ids.is_empty(), "{:?}", git_out.msg_ids);
     let opts = FsckOptions::full_repository(false).with_check_dangling(false);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let report = grit_fsck(&repo, &opts);
     assert!(
         report.ok(&config, &opts),
@@ -656,7 +656,7 @@ fn gitmodules_invalid_path_matches_git() {
         "{:?}",
         git_out.msg_ids
     );
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
     assert!(has_msg_id(&report, "gitmodulesPath"), "{:?}", report.issues);
     assert!(!report.ok(&config, &FsckOptions::full_repository(false)));
@@ -1071,7 +1071,7 @@ fn malformed_reachable_commit_bad_parent_does_not_panic() {
     let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
     assert!(
         !report.ok(
-            &repo.config().expect("config"),
+            &repo.config().snapshot().expect("config"),
             &FsckOptions::full_repository(false)
         ),
         "fsck must not pass with bad parent commit"
@@ -1909,7 +1909,7 @@ fn fsck_resolves_deep_ofs_chain_and_in_pack_ref_delta() {
         "git fsck: {:?}",
         git_out.msg_ids
     );
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let opts = FsckOptions::full_repository(true);
     let report = grit_fsck(&repo, &opts);
     assert!(report.issues.is_empty(), "{:?}", report.issues);
@@ -1999,7 +1999,7 @@ fn diagnostic_summary_matches_git_for_grit_objects_and_git_tag() {
     let tag = git_hash_object_literally(dir.path(), FixtureAlgo::Sha1, "tag", tag_body.as_bytes())
         .expect("Git writes tag without tagger");
     git(dir.path(), &["update-ref", "refs/tags/summary-probe", &tag]);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     for strict in [false, true] {
         let options = FsckOptions::full_repository(strict);
         let report = grit_fsck(&repo, &options);
@@ -2031,7 +2031,7 @@ fn diagnostic_summary_matches_git_for_grit_objects_and_git_tag() {
     }
 
     git(dir.path(), &["config", "fsck.missingTaggerEntry", "error"]);
-    let config = repo.config().expect("updated config");
+    let config = repo.config().snapshot().expect("updated config");
     let options = FsckOptions::full_repository(false);
     let report = grit_fsck(&repo, &options);
     let summary = report.summary(&config, &options, false);

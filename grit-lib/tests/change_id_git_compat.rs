@@ -101,7 +101,7 @@ fn change_id_header_passes_git_and_grit_fsck() {
 
     let opts = FsckOptions::full_repository(true).with_check_dangling(false);
     let report = fsck(&repo, &opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     assert!(report.ok(&config, &opts), "{:?}", report.issues);
     let parsed = parse_commit(&repo.odb().read(&oid).expect("read").data).expect("parse");
     assert!(grit_lib::change_id::change_id(&parsed).is_some());
@@ -164,8 +164,8 @@ fn signed_commit_keeps_change_id_before_gpgsig() {
         extra_headers: Vec::new(),
     };
     set_change_id(&mut data, &ChangeId::from_bytes(&[0x11; 16]));
-    let config = repo.config().expect("config");
-    let signed = prepare_commit_bytes(&repo, config.as_ref(), &data, None).expect("sign");
+    let config = repo.config().snapshot().expect("config");
+    let signed = prepare_commit_bytes(&repo, &data, None).expect("sign");
     let oid = repo
         .odb()
         .write(ObjectKind::Commit, &signed)

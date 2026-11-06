@@ -54,7 +54,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # }
     /// ```
     pub fn list(&self) -> Result<Vec<String>> {
-        let config = self.repo.config()?;
+        let config = self.repo.config().snapshot()?;
         Ok(configured_remote_names(config.as_ref()))
     }
 
@@ -67,7 +67,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     ///
     /// Propagates [`Repository::config`] failures.
     pub fn configured(&self) -> Result<Vec<ConfiguredRemote>> {
-        let config = self.repo.config()?;
+        let config = self.repo.config().snapshot()?;
         Ok(configured_remotes(config.as_ref()))
     }
 
@@ -88,14 +88,18 @@ impl<'repo> RepositoryRemotes<'repo> {
         kind: RemoteUrlKind,
         dry_run: bool,
     ) -> std::result::Result<UrlChange, RemoteError> {
-        let config = self.repo.config().map_err(RemoteError::Library)?;
+        let config = self
+            .repo
+            .config()
+            .snapshot()
+            .map_err(RemoteError::Library)?;
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
         let old = match kind {
-            RemoteUrlKind::Fetch => config.get(&format!("remote.{name}.url")),
+            RemoteUrlKind::Fetch => config.value(&format!("remote.{name}.url")),
             RemoteUrlKind::Push => config
-                .get(&format!("remote.{name}.pushurl"))
+                .value(&format!("remote.{name}.pushurl"))
                 .filter(|u| !u.trim().is_empty()),
         };
         let change = UrlChange {
@@ -145,7 +149,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         if !crate::remote::is_valid_remote_name(name) {
             return Err(RemoteError::InvalidRemoteName(name.to_owned()));
         }
-        if has_remote_section(self.repo.config()?.as_ref(), name) {
+        if has_remote_section(self.repo.config().snapshot()?.as_ref(), name) {
             return Err(RemoteError::RemoteExists(name.to_owned()));
         }
         // Git keeps remotes in the common config even when a worktree admin dir has its own.
@@ -174,7 +178,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     ///
     /// Same as [`Self::add`].
     pub fn add_origin_if_none(&self, url: &str) -> std::result::Result<bool, RemoteError> {
-        if !configured_remotes(self.repo.config()?.as_ref()).is_empty() {
+        if !configured_remotes(self.repo.config().snapshot()?.as_ref()).is_empty() {
             return Ok(false);
         }
         self.add(DEFAULT_REMOTE, url)?;
@@ -201,7 +205,11 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # }
     /// ```
     pub fn get(&self, name: &str) -> std::result::Result<Remote, RemoteError> {
-        let config = self.repo.config().map_err(RemoteError::Library)?;
+        let config = self
+            .repo
+            .config()
+            .snapshot()
+            .map_err(RemoteError::Library)?;
         Remote::from_config(config.as_ref(), name)
     }
 
@@ -422,7 +430,11 @@ impl<'repo> RepositoryRemotes<'repo> {
         dry_run: bool,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> std::result::Result<Vec<String>, RemoteError> {
-        let config = self.repo.config().map_err(RemoteError::Library)?;
+        let config = self
+            .repo
+            .config()
+            .snapshot()
+            .map_err(RemoteError::Library)?;
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
@@ -485,7 +497,11 @@ impl<'repo> RepositoryRemotes<'repo> {
         dry_run: bool,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> std::result::Result<SetHeadOutcome, RemoteError> {
-        let config = self.repo.config().map_err(RemoteError::Library)?;
+        let config = self
+            .repo
+            .config()
+            .snapshot()
+            .map_err(RemoteError::Library)?;
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
@@ -569,7 +585,11 @@ impl<'repo> RepositoryRemotes<'repo> {
         name: &str,
         options: RemoveOptions,
     ) -> std::result::Result<RemoteRemoval, RemoteError> {
-        let config = self.repo.config().map_err(RemoteError::Library)?;
+        let config = self
+            .repo
+            .config()
+            .snapshot()
+            .map_err(RemoteError::Library)?;
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
@@ -582,7 +602,7 @@ impl<'repo> RepositoryRemotes<'repo> {
                 config_keys_removed.push(format!("branch.{branch}.pushRemote"));
             }
         }
-        if config.get("remote.pushDefault").as_deref() == Some(name) {
+        if config.value("remote.pushDefault").as_deref() == Some(name) {
             config_keys_removed.push("remote.pushDefault".to_owned());
         }
         for entry in config.entries() {
@@ -618,7 +638,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         for branch in branches_with_push_remote(config.as_ref(), name) {
             file.unset(&format!("branch.{branch}.pushRemote"))?;
         }
-        if config.get("remote.pushDefault").as_deref() == Some(name) {
+        if config.value("remote.pushDefault").as_deref() == Some(name) {
             file.unset("remote.pushDefault")?;
         }
 
@@ -767,7 +787,7 @@ fn load_remote_fetch_specs(
     remote: &str,
 ) -> std::result::Result<Vec<RefspecItem>, RemoteError> {
     let had_fetch_keys = remote_has_fetch_keys(config, remote);
-    let mut raw = config.get_all(&format!("remote.{remote}.fetch"));
+    let mut raw = config.values_all(&format!("remote.{remote}.fetch"));
     raw.retain(|s| !s.trim().is_empty());
     let mut specs = Vec::new();
     for line in raw {
@@ -825,7 +845,7 @@ fn refs_to_delete_for_remote(
 /// Whether `remote.<name>.skipFetchAll` disables [`RepositoryRemotes::fetch_all`].
 #[must_use]
 pub fn remote_skip_fetch_all(config: &ConfigSet, remote: &str) -> bool {
-    config.bool_or(&format!("remote.{remote}.skipFetchAll"), false)
+    config.bool_with_default(&format!("remote.{remote}.skipFetchAll"), false)
 }
 
 /// Remote names in merged config load order (first `remote.<name>.url` wins ordering).
@@ -885,11 +905,11 @@ pub struct ConfiguredRemote {
 }
 
 fn configured_remote_from_config(config: &ConfigSet, name: String) -> ConfiguredRemote {
-    let url = config.get(&format!("remote.{name}.url"));
-    let mut fetch_refspecs = config.get_all(&format!("remote.{name}.fetch"));
+    let url = config.value(&format!("remote.{name}.url"));
+    let mut fetch_refspecs = config.values_all(&format!("remote.{name}.fetch"));
     fetch_refspecs.retain(|s| !s.trim().is_empty());
     let push_urls: Vec<String> = config
-        .get_all(&format!("remote.{name}.pushurl"))
+        .values_all(&format!("remote.{name}.pushurl"))
         .into_iter()
         .filter(|s| !s.trim().is_empty())
         .collect();
@@ -901,7 +921,7 @@ fn configured_remote_from_config(config: &ConfigSet, name: String) -> Configured
         Some(raw) => {
             let effective_fetch_url = url_rewrite::rewrite_fetch_url(config, raw);
             let push_source = config
-                .get(&format!("remote.{name}.pushurl"))
+                .value(&format!("remote.{name}.pushurl"))
                 .filter(|u| !u.trim().is_empty())
                 .unwrap_or_else(|| raw.to_owned());
             let effective_push_url = url_rewrite::rewrite_push_url(config, push_source.as_str());
@@ -1076,13 +1096,13 @@ mod tests {
         repo.remotes()
             .add("upstream", "https://example.com/r.git")
             .expect("add");
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         assert_eq!(
-            config.get("remote.upstream.url").as_deref(),
+            config.value("remote.upstream.url").as_deref(),
             Some("https://example.com/r.git")
         );
         assert_eq!(
-            config.get_all("remote.upstream.fetch"),
+            config.values_all("remote.upstream.fetch"),
             vec!["+refs/heads/*:refs/remotes/upstream/*".to_owned()]
         );
         assert_eq!(repo.remotes().list().expect("list"), vec!["upstream"]);
@@ -1103,8 +1123,10 @@ mod tests {
         ));
         assert_eq!(
             repo.config()
+                .snapshot()
                 .expect("config")
                 .get("remote.origin.url")
+                .unwrap()
                 .as_deref(),
             Some("/tmp/a.git")
         );
@@ -1124,8 +1146,10 @@ mod tests {
             .expect("second"));
         assert_eq!(
             repo.config()
+                .snapshot()
                 .expect("config")
                 .get("remote.origin.url")
+                .unwrap()
                 .as_deref(),
             Some("https://h/me/a.git")
         );

@@ -178,7 +178,7 @@ pub fn replay_commit(
         return Ok(ReplayOutcome::AlreadyApplied);
     }
 
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let message = commit_message(req, &source)?;
     let committer_line = req.committer.header_line();
     let author = match req.direction {

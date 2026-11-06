@@ -178,7 +178,7 @@ impl Fixture {
     }
 
     fn config_policy(&self) -> ReceivePolicy {
-        ReceivePolicy::from_config(&self.server().config().expect("config"))
+        ReceivePolicy::from_config(&self.server().config().snapshot().expect("config"))
     }
 
     /// A commit on `base` whose author line has no email (`missingEmail`).

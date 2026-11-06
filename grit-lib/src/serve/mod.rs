@@ -318,7 +318,8 @@ impl ServeOptions {
         self.lazy_fetch.unwrap_or_else(|| {
             config
                 .get_bool("uploadpack.lazyfetch")
-                .and_then(|v| v.ok())
+                .ok()
+                .flatten()
                 .unwrap_or(false)
         })
     }
@@ -335,7 +336,6 @@ impl ServeOptions {
     /// # Parameters
     ///
     /// - `repo`: the served repository.
-    /// - `config`: its configuration.
     /// - `fetcher`: the fetcher to use when lazy fetch is on.
     ///
     /// # Returns
@@ -344,10 +344,14 @@ impl ServeOptions {
     pub fn attach_promisor_fetcher(
         &self,
         repo: &Repository,
-        config: &crate::config::ConfigSet,
         fetcher: Option<std::sync::Arc<dyn crate::promisor_fetch::PromisorFetcher>>,
     ) -> bool {
-        let fetcher = fetcher.filter(|_| self.lazy_fetch_enabled(config));
+        let lazy = repo
+            .config()
+            .snapshot()
+            .map(|c| self.lazy_fetch_enabled(c.as_ref()))
+            .unwrap_or(false);
+        let fetcher = fetcher.filter(|_| lazy);
         let attached = fetcher.is_some();
         repo.caches().set_promisor_fetcher(fetcher);
         attached

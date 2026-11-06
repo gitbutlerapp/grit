@@ -72,10 +72,10 @@ fn symref_target_resolves(repo: &Repository, start: &str) -> Result<bool> {
 /// Read `core.warnAmbiguousRefs` (default **true** / strict shortening).
 #[must_use]
 pub fn warn_ambiguous_refs_from_config(repo: &Repository) -> bool {
-    let Ok(config) = repo.config() else {
+    let Ok(config) = repo.config().snapshot() else {
         return true;
     };
-    config.bool_or("core.warnAmbiguousRefs", true)
+    config.bool_with_default("core.warnAmbiguousRefs", true)
 }
 
 /// Expand `spec` with Git `expand_ref` / `repo_dwim_ref` rules.

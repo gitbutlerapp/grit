@@ -73,8 +73,11 @@ PY"#;
         .expect("walk");
     commits.sort_by_key(|o| o.to_hex());
 
-    let min_len = resolve_core_abbrev_len(&repo.config().expect("config").clone(), repo.odb())
-        .expect("abbrev len");
+    let min_len = resolve_core_abbrev_len(
+        &repo.config().snapshot().expect("config").clone(),
+        repo.odb(),
+    )
+    .expect("abbrev len");
     let mut batch = OidAbbrevBatch::new(min_len);
     let mut git_lines: Vec<String> = git(dir, &["log", "--format=%h %s"])
         .lines()
@@ -144,8 +147,11 @@ PY"#;
 
     let repo = Repository::discover(Some(&dir), &RepositoryOptions::empty()).expect("open");
     assert!(repo.odb().count_loose_objects().expect("count") > 1 << 14);
-    let min_len = resolve_core_abbrev_len(&repo.config().expect("config").clone(), repo.odb())
-        .expect("abbrev len");
+    let min_len = resolve_core_abbrev_len(
+        &repo.config().snapshot().expect("config").clone(),
+        repo.odb(),
+    )
+    .expect("abbrev len");
     assert_eq!(min_len, git_short.len());
     let oid = head.parse().expect("oid");
     let abbrev = OidAbbrevBatch::new(min_len)

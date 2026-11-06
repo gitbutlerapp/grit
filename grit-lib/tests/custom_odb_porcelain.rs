@@ -46,13 +46,13 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
         )
         .open(&git_dir, Some(&root))
         .expect("open");
-    repo.config_handle()
+    repo.config()
         .set_local("user.name", "A U Thor")
         .expect("user.name");
-    repo.config_handle()
+    repo.config()
         .set_local("user.email", "author@example.com")
         .expect("user.email");
-    repo.config_handle()
+    repo.config()
         .set_local("grit.changeIds", "false")
         .expect("changeIds");
     (dir, repo, store)
@@ -371,7 +371,7 @@ fn fsck_is_clean_on_healthy_custom_primary_repo() {
     let report = repo
         .fsck(&options, &mut NullProgress, &NeverCancel)
         .expect("fsck on custom primary");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     assert!(report.ok(&config, &options), "{:?}", report.issues);
     assert!(report.issues.is_empty(), "{:?}", report.issues);
     assert_eq!(report.objects_checked, 4, "two blobs, a tree and a commit");
@@ -399,7 +399,7 @@ fn fsck_reports_bad_object_in_custom_primary() {
         "{:?}",
         report.issues
     );
-    assert!(!report.ok(&repo.config().expect("config"), &options));
+    assert!(!report.ok(&repo.config().snapshot().expect("config"), &options));
 }
 
 #[test]

@@ -852,8 +852,12 @@ fn clone_after_claim(
         )],
     )?;
 
-    let config = ConfigSet::load(&opts.environment, Some(repo.git_dir()), true)
-        .map_err(CloneError::Library)?;
+    let config = ConfigSet::load(
+        &opts.environment,
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(&opts.environment, Some(repo.git_dir())),
+    )
+    .map_err(CloneError::Library)?;
     let mut remote = Remote::from_config(&config, &opts.remote_name)?;
     if bare {
         // Bare clones have no `remote.*.fetch` refspec; avoid synthesizing tracking refspecs
@@ -1068,7 +1072,7 @@ fn perform_clone_checkout(
         repo, None, &tree, progress, cancel,
     )?;
     let index = repo.index_handle().load()?;
-    let ignorecase = repo.config()?.ignore_case();
+    let ignorecase = repo.config().snapshot()?.ignore_case();
     let (files, worktree_bytes) =
         crate::path_icase::icase_worktree_file_stats(&index, repo.work_tree(), ignorecase);
     let (submodule_paths, bare_gitlink_paths) =
@@ -1283,7 +1287,7 @@ fn append_clone_reflog_on_store(
     identity.validate().map_err(Error::InvalidSignature)?;
     let formatted =
         refs::store::format_reflog_identity(&identity.reflog_name_email(), identity.time);
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     refs::append_reflog_on_store(
         repo.refs(),
         refname,

@@ -289,10 +289,11 @@ fn stage_tracked_modifications_in_index_body(
     let index_mtime = index_file_mtime(index_path);
     let precompose_unicode = effective_core_precomposeunicode_with_config(
         Some(repo.git_dir()),
-        repo.config().ok().as_deref(),
+        repo.config().snapshot().ok().as_deref(),
     );
     let mode_policy = repo
         .config()
+        .snapshot()
         .map(|cfg| WorktreeModePolicy::from_config(&cfg))
         .unwrap_or_default();
 
@@ -314,7 +315,11 @@ fn stage_tracked_modifications_in_index_body(
         untracked_invalidation_deferred: bulk_untr_defer,
         ..StageTrackedSummary::default()
     };
-    let ignorecase = repo.config().ok().is_some_and(|cfg| cfg.ignore_case());
+    let ignorecase = repo
+        .config()
+        .snapshot()
+        .ok()
+        .is_some_and(|cfg| cfg.ignore_case());
     let icase_collisions = if ignorecase {
         Some(crate::path_icase::IcaseCheckoutCollisionMap::from_index(
             work_tree, index, true,
@@ -361,10 +366,11 @@ fn stage_tracked_modifications_in_index_body(
 
     let rules_config = repo
         .config()
+        .snapshot()
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
     let mut honor_fsmonitor = false;
     let mut fsmonitor_valid_updated = false;
-    if let Ok(cfg) = repo.config() {
+    if let Ok(cfg) = repo.config().snapshot() {
         let default_runner = crate::command_runner::system_command_runner();
         let boundary = crate::fsmonitor::FsmonitorQueryBoundary(
             crate::environment::wall_clock_unix_timestamp_nanos(),

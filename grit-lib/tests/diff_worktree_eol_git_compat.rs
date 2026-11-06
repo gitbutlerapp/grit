@@ -87,8 +87,15 @@ fn diff_index_to_worktree_eol_crlf_single_line_change() {
     let work_tree = grit_repo.work_tree().expect("wt");
     let mut index = grit_repo.index_handle().load().expect("index");
     let rules = WorktreeRules::from_repository(&grit_repo, &index).expect("rules");
-    let cfg =
-        ConfigSet::load(&Environment::empty(), Some(grit_repo.git_dir()), true).expect("config");
+    let cfg = ConfigSet::load(
+        &Environment::empty(),
+        Some(grit_repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(
+            &Environment::empty(),
+            Some(grit_repo.git_dir()),
+        ),
+    )
+    .expect("config");
     let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(
         WorktreeRules::from_repository(&grit_repo, &index).expect("rules arc"),
     ));

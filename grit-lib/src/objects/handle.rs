@@ -286,7 +286,7 @@ impl<'repo> Objects<'repo> {
         match commit.change_id() {
             Some(id) => set_change_id(&mut data, id),
             None => {
-                let policy = ChangeIdPolicy::from_config(self.repo.config()?.as_ref());
+                let policy = ChangeIdPolicy::from_config(self.repo.config().snapshot()?.as_ref());
                 stamp_change_id_on_new_commit(self.repo, &policy, &mut data)?;
             }
         }

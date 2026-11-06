@@ -302,7 +302,7 @@ fn rename_detection_prefetch_batched_past_rename_limit() {
 
     let objects = repo.git_dir().join("objects");
     let packs_before = pack_file_count(&objects);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let thread_policy = ThreadPolicy::default();
     let entries = diff_commits_with_renames_and_policy(
         repo.odb(),
@@ -347,7 +347,7 @@ fn tree_diff_prefetch_batched_past_rename_limit() {
 
     let objects = repo.git_dir().join("objects");
     let packs_before = pack_file_count(&objects);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let thread_policy = ThreadPolicy::default();
     let entries = diff_commits_with_renames_and_policy(
         repo.odb(),
@@ -404,7 +404,7 @@ fn tree_diff_prefetch_uses_single_request() {
     let packs_before = pack_file_count(&objects);
     let entries = tree_diff_entries_between_commits(&repo, "HEAD~1", "HEAD");
     assert_eq!(entries.len(), file_count);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let thread_policy = ThreadPolicy::default();
 
     build_file_diffs(

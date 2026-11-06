@@ -1119,7 +1119,7 @@ pub fn resolve_effective_ssh_command(
         return SshCommand::ShellCommand(c);
     }
     if let Some(cfg) = config {
-        if let Some(cmd) = cfg.get("core.sshCommand").filter(|s| !s.is_empty()) {
+        if let Some(cmd) = cfg.value("core.sshCommand").filter(|s| !s.is_empty()) {
             return SshCommand::ShellCommand(OsString::from(cmd));
         }
     }
@@ -1240,9 +1240,15 @@ pub(crate) fn connect_local_upload_pack(
                     &crate::environment::RepositoryOptions::with_environment(served_env)
                         .for_serving(),
                 )?;
-                let config =
-                    crate::config::ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
-                        .unwrap_or_default();
+                let config = crate::config::ConfigSet::load(
+                    repo.environment(),
+                    Some(repo.git_dir()),
+                    &crate::config::LoadConfigOptions::standard(
+                        repo.environment(),
+                        Some(repo.git_dir()),
+                    ),
+                )
+                .unwrap_or_default();
                 let mut serve = ServeOptions {
                     protocol,
                     agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
@@ -1250,7 +1256,7 @@ pub(crate) fn connect_local_upload_pack(
                     lazy_fetch,
                     ..ServeOptions::default()
                 };
-                serve.attach_promisor_fetcher(&repo, &config, promisor_fetcher);
+                serve.attach_promisor_fetcher(&repo, promisor_fetcher);
                 crate::serve::upload_pack(&repo, &mut server_input, &mut server_output, &mut serve)
                     .map(|_| ())
             },

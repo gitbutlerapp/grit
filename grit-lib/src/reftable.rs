@@ -1975,11 +1975,14 @@ fn reftable_hash_size_for_git_dir(git_dir: &Path) -> usize {
     let cfg = crate::config::ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .unwrap_or_default();
     match cfg
-        .get("extensions.objectformat")
+        .value("extensions.objectformat")
         .and_then(|v| crate::objects::HashAlgo::from_name(&v))
     {
         Some(crate::objects::HashAlgo::Sha256) => 32,
@@ -3451,7 +3454,10 @@ impl ReftableStack {
         let config = ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(git_dir),
+            ),
         )
         .unwrap_or_else(|_| ConfigSet::new());
         let wait = LockWait::reftable_tables_list(Some(&config));
@@ -3899,21 +3905,25 @@ pub(crate) fn read_write_options_with_environment(
         ..Default::default()
     };
 
-    let config = ConfigSet::load(env, Some(git_dir), true)
-        .unwrap_or_else(|_| local_config_best_effort(git_dir));
-    if let Some(Ok(v)) = config.get("reftable.blockSize").map(|v| v.parse::<u32>()) {
+    let config = ConfigSet::load(
+        env,
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::standard(env, Some(git_dir)),
+    )
+    .unwrap_or_else(|_| local_config_best_effort(git_dir));
+    if let Some(Ok(v)) = config.value("reftable.blockSize").map(|v| v.parse::<u32>()) {
         opts.block_size = v;
     }
     if let Some(Ok(v)) = config
-        .get("reftable.restartInterval")
+        .value("reftable.restartInterval")
         .map(|v| v.parse::<usize>())
     {
         opts.restart_interval = v;
     }
-    if !config.bool_or("reftable.indexObjects", true) {
+    if !config.bool_with_default("reftable.indexObjects", true) {
         opts.skip_index_objects = true;
     }
-    if let Some(value) = config.get("reftable.geometricFactor") {
+    if let Some(value) = config.value("reftable.geometricFactor") {
         apply_geometric_factor_from_config(&mut opts, &value);
     }
     if config.log_refs_config() == crate::refs::LogRefsConfig::None {

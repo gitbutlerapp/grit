@@ -47,7 +47,7 @@ pub(crate) fn refresh_stage0_index_stats_from_worktree(
         index,
         work_tree,
         index_mtime,
-        repo.config().ok().as_deref(),
+        repo.config().snapshot().ok().as_deref(),
         None,
         rules_arc.as_ref(),
     )?;
@@ -94,7 +94,7 @@ pub(crate) fn refresh_stage0_index_stats_for_paths(
         &mut subset,
         work_tree,
         index_mtime,
-        repo.config().ok().as_deref(),
+        repo.config().snapshot().ok().as_deref(),
         None,
         rules_arc.as_ref(),
     )?;
@@ -295,7 +295,7 @@ pub(crate) fn index_from_tree_reusing_cache_tree(
     let seed_root = seed.cache_tree.as_ref();
     let mut walk = TreeIndexWalk {
         repo,
-        protect: ProtectOptions::from_config(&*repo.config()?),
+        protect: ProtectOptions::from_config(&*repo.config().snapshot()?),
         seed: &seed.entries,
         entries: Vec::with_capacity(seed.entries.len()),
     };
@@ -374,7 +374,7 @@ fn prepare_sparse_rows(
     index: &mut Index,
     retarget: SparseRetarget<'_>,
 ) -> Result<()> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !index.has_sparse_directory_placeholders() {
         repo.clear_present_skip_worktree(index, config.as_ref());
         return Ok(());
@@ -382,7 +382,7 @@ fn prepare_sparse_rows(
     let protect = ProtectOptions::from_config(config.as_ref());
     let sparse = SparseCheckout::load(repo)?;
     let worktree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let index_sparse = config.bool_or("index.sparse", false);
+    let index_sparse = config.bool_with_default("index.sparse", false);
     let mut candidates = std::collections::BTreeMap::new();
     for row in &index.entries {
         if row.is_sparse_directory_placeholder()
@@ -533,7 +533,7 @@ pub(crate) fn expand_sparse_for_pathspecs(
         .collect();
     index.expand_sparse_directories_matching(
         repo.odb(),
-        ProtectOptions::from_config(&*repo.config()?),
+        ProtectOptions::from_config(&*repo.config().snapshot()?),
         |row| sparse_row_touched_by_paths(row, &paths),
     )
 }
@@ -570,7 +570,7 @@ pub(crate) fn expand_sparse_for_tree_changes(
         .collect();
     index.expand_sparse_directories_matching(
         repo.odb(),
-        ProtectOptions::from_config(&*repo.config()?),
+        ProtectOptions::from_config(&*repo.config().snapshot()?),
         |row| sparse_row_touched_by_paths(row, &paths),
     )
 }

@@ -179,7 +179,7 @@ pub fn stage_for_commit(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<StageOutcome> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let opts = StageOptions {
         mode: stage_mode_for_commit(config.as_ref())?,
         ..StageOptions::default()
@@ -217,7 +217,7 @@ pub(crate) fn stage_for_commit_on_index(
     cancel: &dyn Cancel,
     dry_run: bool,
 ) -> Result<StageOutcome> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let opts = StageOptions {
         mode: stage_mode_for_commit(config.as_ref())?,
         dry_run,
@@ -604,7 +604,7 @@ fn stage_inner(
                 &opts.pathspecs,
             )?;
         }
-        if let Ok(cfg) = repo.config() {
+        if let Ok(cfg) = repo.config().snapshot() {
             repo.clear_present_skip_worktree(&mut index, cfg.as_ref());
         }
         return stage_inner_on_index(
@@ -626,7 +626,7 @@ fn stage_inner(
             &opts.pathspecs,
         )?;
     }
-    if let Ok(cfg) = repo.config() {
+    if let Ok(cfg) = repo.config().snapshot() {
         repo.clear_present_skip_worktree(&mut index, cfg.as_ref());
     }
     stage_inner_on_index(

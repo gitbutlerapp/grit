@@ -113,7 +113,7 @@ fn create_tag_ssh_signed_verifies_with_git_verify_tag() {
     git_out(root, &["tag", "-v", "v1"]);
 
     let raw = repo.odb().read(&outcome.oid).expect("read tag").data;
-    let gpg = GpgConfig::from_config(repo.config().expect("config").as_ref())
+    let gpg = GpgConfig::from_config(repo.config().snapshot().expect("config").as_ref())
         .expect("gpg config")
         .with_command_runner(repo.command_runner());
     let check = verify_tag(&gpg, &raw).expect("verify_tag");
@@ -207,7 +207,7 @@ fn grit_verify_tag_accepts_git_signed_tag() {
         .parse()
         .expect("parse oid");
     let raw = repo.odb().read(&tag_oid).expect("read").data;
-    let gpg = GpgConfig::from_config(repo.config().expect("config").as_ref())
+    let gpg = GpgConfig::from_config(repo.config().snapshot().expect("config").as_ref())
         .expect("gpg config")
         .with_command_runner(repo.command_runner());
     let check = verify_tag(&gpg, &raw).expect("verify_tag");

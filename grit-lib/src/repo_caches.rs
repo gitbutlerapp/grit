@@ -223,7 +223,7 @@ impl RepoCaches {
     ) -> Result<Arc<ConfigSet>> {
         let opts = LoadConfigOptions {
             include_system,
-            ..LoadConfigOptions::default()
+            ..crate::config::LoadConfigOptions::default()
         };
         self.load_config_with_options(env, git_dir, &opts)
     }

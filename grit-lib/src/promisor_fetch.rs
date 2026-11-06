@@ -68,7 +68,7 @@ pub fn promisor_lazy_fetch_enabled(config: &ConfigSet, env: &Environment) -> boo
     if lazy_fetch_disabled_by_env(env) {
         return false;
     }
-    config.bool_or(PROMISOR_LAZY_FETCH_CONFIG, true)
+    config.bool_with_default(PROMISOR_LAZY_FETCH_CONFIG, true)
 }
 
 fn lazy_fetch_disabled_by_env(env: &Environment) -> bool {
@@ -118,7 +118,7 @@ pub fn fetch_promisor_objects(
         return Ok(());
     }
 
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let order = lazy_fetch_order(config.as_ref(), &[]);
     if order.is_empty() {
         return Err(Error::Message(

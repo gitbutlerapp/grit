@@ -394,7 +394,7 @@ pub enum CommitPatchError {
 ///
 /// Propagates config read failures from [`Repository::config`].
 pub fn default_commit_scope(repo: &Repository) -> Result<CommitScope> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     Ok(default_commit_scope_from_config(config.as_ref()))
 }
 
@@ -403,7 +403,8 @@ pub fn default_commit_scope(repo: &Repository) -> Result<CommitScope> {
 pub fn default_commit_scope_from_config(config: &ConfigSet) -> CommitScope {
     let auto_stage = config
         .get_bool("commit.autoStage")
-        .and_then(|r| r.ok())
+        .ok()
+        .flatten()
         .unwrap_or(true);
     if auto_stage {
         CommitScope::AutoStage
@@ -1298,7 +1299,7 @@ fn finish_commit_dry_run(
     if !message.ends_with('\n') {
         message.push('\n');
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let now = repo.identity_now();
     let committer = commit_identity_line(repo, req.committer.as_ref(), IdentRole::Committer, now)?;
     let message_with_trailers = enrich_commit_message(
@@ -1730,7 +1731,7 @@ fn create_commit_with_index(
     if !message.ends_with('\n') {
         message.push('\n');
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let now = repo.identity_now();
     let committer = commit_identity_line(repo, req.committer.as_ref(), IdentRole::Committer, now)?;
     message = enrich_commit_message(
@@ -1833,7 +1834,7 @@ fn create_commit_with_index(
             stamp_change_id_on_new_commit(repo, &policy, &mut commit_data)?;
         }
     }
-    let bytes = prepare_commit_bytes(repo, config.as_ref(), &commit_data, req.sign_override)?;
+    let bytes = prepare_commit_bytes(repo, &commit_data, req.sign_override)?;
     fsck_commit_idents(&bytes, repo.odb().hash_algo())
         .map_err(|detail| Error::CorruptObject(format!("commit would fail fsck: {detail}")))?;
     poll_cancel(progress, cancel)?;
@@ -2057,15 +2058,15 @@ pub(crate) fn stamp_change_id_on_new_commit(
 /// [`sign_serialized_commit`].
 pub fn prepare_commit_bytes(
     repo: &Repository,
-    config: &ConfigSet,
     data: &CommitData,
     sign_override: Option<bool>,
 ) -> Result<Vec<u8>> {
+    let config = repo.config().snapshot()?;
     let unsigned = serialize_commit(data);
-    if !should_sign_commit(config, sign_override)? {
+    if !should_sign_commit(config.as_ref(), sign_override)? {
         return Ok(unsigned);
     }
-    let gpg = GpgConfig::from_config(config)?.with_command_runner(repo.command_runner());
+    let gpg = GpgConfig::from_config(config.as_ref())?.with_command_runner(repo.command_runner());
     sign_serialized_commit(
         &gpg,
         &unsigned,
@@ -2087,8 +2088,7 @@ pub fn write_commit_object(
     data: &CommitData,
     sign_override: Option<bool>,
 ) -> Result<ObjectId> {
-    let config = repo.config()?;
-    let bytes = prepare_commit_bytes(repo, config.as_ref(), data, sign_override)?;
+    let bytes = prepare_commit_bytes(repo, data, sign_override)?;
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
     repo.odb().flush_for_publish()?;
     Ok(oid)
@@ -4854,7 +4854,7 @@ mod tests {
         let repo =
             Repository::open(&git, &RepositoryOptions::empty().with_work_tree(root)).unwrap();
         assert_eq!(
-            default_commit_scope_from_config(&repo.config().unwrap()),
+            default_commit_scope_from_config(&repo.config().snapshot().unwrap()),
             CommitScope::Staged
         );
     }

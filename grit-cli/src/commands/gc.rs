@@ -1218,7 +1218,7 @@ pub fn run_auto_after_command(mode: OutputMode, now: OffsetDateTime) {
     let Ok(repo) = context::discover() else {
         return;
     };
-    let Ok(config) = repo.config() else {
+    let Ok(config) = repo.config().snapshot() else {
         return;
     };
     if !config.maintenance_auto() {
@@ -1482,7 +1482,10 @@ pub fn run_drop_large_blobs(
     now: OffsetDateTime,
 ) -> Result<GcOutcome> {
     let repo = context::discover()?;
-    let config = repo.config().map_err(crate::json_error::map_lib_error)?;
+    let config = repo
+        .config()
+        .snapshot()
+        .map_err(crate::json_error::map_lib_error)?;
     let min_size = min_size
         .map(|size| {
             ObjectFilterSpec::from_blobs_cli(size)

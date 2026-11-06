@@ -172,7 +172,7 @@ fn switch_path_collisions_on_disk(repo: &Repository) -> Result<Vec<String>> {
 }
 
 fn ignores_case(repo: &Repository) -> Result<bool> {
-    Ok(repo.config()?.ignore_case())
+    Ok(repo.config().snapshot()?.ignore_case())
 }
 
 pub(crate) struct PreparedSwitch {
@@ -892,8 +892,8 @@ fn plan_allow_local_tree_transition_core(
     } else if snapshot.index.has_sparse_directory_placeholders() {
         // Only switch keeps sparse-directory rows here, and its preparation leaves each one
         // recording the target subtree, so nothing inside them changes.
-        let config = repo.config()?;
-        let index_sparse = config.bool_or("index.sparse", false);
+        let config = repo.config().snapshot()?;
+        let index_sparse = config.bool_with_default("index.sparse", false);
         let sparse = crate::sparse_checkout::SparseCheckout::load(repo)?;
         crate::diff::diff_trees_outside_sparse_directories(
             repo.odb(),
@@ -948,7 +948,11 @@ fn plan_allow_local_tree_transition_core(
             Ok(preserve) => (Vec::new(), preserve),
             Err(blocked) => (blocked, HashSet::new()),
         };
-    let ignorecase = repo.config().ok().is_some_and(|c| c.ignore_case());
+    let ignorecase = repo
+        .config()
+        .snapshot()
+        .ok()
+        .is_some_and(|c| c.ignore_case());
     let delete_paths_set: HashSet<String> = tree_changes
         .iter()
         .filter(|c| c.status == DiffStatus::Deleted)
@@ -1926,10 +1930,13 @@ mod tests {
             &crate::progress::NeverCancel,
         )
         .expect("switch");
-        let config = repo.config().expect("config");
-        assert_eq!(config.get("branch.work.remote").as_deref(), Some("origin"));
+        let config = repo.config().snapshot().expect("config");
         assert_eq!(
-            config.get("branch.work.merge").as_deref(),
+            config.value("branch.work.remote").as_deref(),
+            Some("origin")
+        );
+        assert_eq!(
+            config.value("branch.work.merge").as_deref(),
             Some("refs/heads/main")
         );
     }
@@ -1939,7 +1946,7 @@ mod tests {
         let (_dir, repo) = init_repo();
         let tip = commit_on_branch(&repo, "main", "f", "1\n", None);
         refs::write_ref(repo.git_dir(), "refs/remotes/origin/main", &tip).expect("remote");
-        repo.config_handle()
+        repo.config()
             .set_local("branch.autoSetupMerge", "false")
             .expect("config");
 
@@ -2004,10 +2011,13 @@ mod tests {
             &crate::progress::NeverCancel,
         )
         .expect("switch");
-        let config = repo.config().expect("config");
-        assert_eq!(config.get("branch.topic.remote").as_deref(), Some("origin"));
+        let config = repo.config().snapshot().expect("config");
         assert_eq!(
-            config.get("branch.topic.merge").as_deref(),
+            config.value("branch.topic.remote").as_deref(),
+            Some("origin")
+        );
+        assert_eq!(
+            config.value("branch.topic.merge").as_deref(),
             Some("refs/heads/topic")
         );
     }

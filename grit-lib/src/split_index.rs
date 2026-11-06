@@ -381,7 +381,7 @@ pub(crate) enum SplitIndexConfig {
 }
 
 pub(crate) fn split_index_config(cfg: &ConfigSet) -> SplitIndexConfig {
-    match cfg.get("core.splitIndex") {
+    match cfg.value("core.splitIndex") {
         None => SplitIndexConfig::Unset,
         Some(v) => {
             let t = v.trim();
@@ -397,7 +397,7 @@ pub(crate) fn split_index_config(cfg: &ConfigSet) -> SplitIndexConfig {
 }
 
 pub(crate) fn max_percent_split_change(cfg: &ConfigSet) -> i32 {
-    match cfg.get("splitIndex.maxPercentChange") {
+    match cfg.value("splitIndex.maxPercentChange") {
         None => -1,
         Some(v) => v.trim().parse::<i32>().unwrap_or(-1),
     }
@@ -430,7 +430,7 @@ pub(crate) fn should_rebuild_shared_index(index: &Index, cfg: &ConfigSet) -> boo
 
 pub(crate) fn shared_index_expire_threshold(cfg: &ConfigSet) -> u64 {
     let raw = cfg
-        .get("splitIndex.sharedIndexExpire")
+        .value("splitIndex.sharedIndexExpire")
         .map(|s| s.trim().to_owned());
     let spec = raw
         .as_deref()
@@ -598,7 +598,7 @@ pub(crate) fn write_index_file_split(
 
     let want_split = request.want_write_split(cfg, index);
 
-    let shared_repo = parse_shared_repository_perm(cfg.get("core.sharedRepository").as_deref());
+    let shared_repo = parse_shared_repository_perm(cfg.value("core.sharedRepository").as_deref());
 
     if !want_split {
         index.split_link = None;
@@ -1125,14 +1125,24 @@ mod tests {
             "[splitIndex]\n\tmaxPercentChange = 20\n",
         )
         .expect("write config");
-        let cfg = ConfigSet::load(&Environment::empty(), Some(dir.path()), true).expect("load");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(dir.path()),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(dir.path())),
+        )
+        .expect("load");
         assert!(should_rebuild_shared_index(&idx, &cfg));
         fs::write(
             dir.path().join("config"),
             "[splitIndex]\n\tmaxPercentChange = 100\n",
         )
         .expect("write config");
-        let cfg = ConfigSet::load(&Environment::empty(), Some(dir.path()), true).expect("load");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(dir.path()),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(dir.path())),
+        )
+        .expect("load");
         assert!(!should_rebuild_shared_index(&idx, &cfg));
     }
 
@@ -1182,13 +1192,18 @@ mod tests {
             "[core]\n\tsplitIndex = true\n\tsharedRepository = group\n",
         )
         .expect("write");
-        let cfg = ConfigSet::load(&Environment::empty(), Some(dir.path()), true).expect("load");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(dir.path()),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(dir.path())),
+        )
+        .expect("load");
         assert!(matches!(
             split_index_config(&cfg),
             SplitIndexConfig::Enabled
         ));
         assert_eq!(
-            parse_shared_repository_perm(cfg.get("core.sharedRepository").as_deref()),
+            parse_shared_repository_perm(cfg.value("core.sharedRepository").as_deref()),
             0o660
         );
         let _ = max_percent_split_change(&cfg);
@@ -1241,7 +1256,12 @@ mod tests {
             "[splitIndex]\n\tsharedIndexExpire = never\n",
         )
         .expect("write");
-        let cfg = ConfigSet::load(&Environment::empty(), Some(dir.path()), true).expect("load");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(dir.path()),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(dir.path())),
+        )
+        .expect("load");
         assert_eq!(shared_index_expire_threshold(&cfg), 0);
 
         fs::write(
@@ -1249,7 +1269,12 @@ mod tests {
             "[splitIndex]\n\tsharedIndexExpire = now\n",
         )
         .expect("write");
-        let cfg = ConfigSet::load(&Environment::empty(), Some(dir.path()), true).expect("load");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(dir.path()),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(dir.path())),
+        )
+        .expect("load");
         assert!(shared_index_expire_threshold(&cfg) > 0);
     }
 
@@ -1472,7 +1497,12 @@ mod tests {
             "[splitIndex]\n\tsharedIndexExpire = now\n",
         )
         .expect("write config");
-        let cfg = ConfigSet::load(&Environment::empty(), Some(dir.path()), true).expect("load");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(dir.path()),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(dir.path())),
+        )
+        .expect("load");
         let stale = git_dir.join("sharedindex.deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
         fs::write(&stale, b"stale").expect("write stale");
         #[cfg(unix)]

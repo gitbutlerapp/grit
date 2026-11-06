@@ -36,7 +36,7 @@ pub(crate) fn remote_tracking_ref_is_mapped(repo: &Repository, tracking_ref: &st
     let Some((remote, branch)) = rest.split_once('/') else {
         return Ok(false);
     };
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let refspecs = FetchRefspecs::load(&config, remote);
     let remote_ref = format!("refs/heads/{branch}");
     Ok(refspecs.tracking_ref(remote, &remote_ref).as_deref() == Some(tracking_ref))
@@ -70,7 +70,7 @@ pub(crate) fn remote_tracking_ref_for_remote_ref(
 impl FetchRefspecs {
     fn load(config: &ConfigSet, remote_name: &str) -> Self {
         let (negative, positive) = config
-            .get_all(&format!("remote.{remote_name}.fetch"))
+            .values_all(&format!("remote.{remote_name}.fetch"))
             .iter()
             .filter_map(|spec| parse_fetch_refspec(spec).ok())
             .partition(|item| item.negative);
@@ -103,7 +103,7 @@ pub(crate) fn write_branch_upstream_config(
     remote: &str,
     merge_ref: &str,
 ) -> Result<()> {
-    let handle = repo.config_handle();
+    let handle = repo.config();
     handle.set_local(&format!("branch.{branch_short}.remote"), remote)?;
     handle.set_local(&format!("branch.{branch_short}.merge"), merge_ref)?;
     Ok(())
@@ -170,7 +170,11 @@ pub fn apply_push_remote_tracking_updates(
     if !tracks_pushes_to(remote_name) {
         return Ok(());
     }
-    let Ok(config) = ConfigSet::load(&Environment::empty(), Some(git_dir), true) else {
+    let Ok(config) = ConfigSet::load(
+        &Environment::empty(),
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+    ) else {
         return Ok(());
     };
     let store = refs::store::open_ref_store(git_dir)?;
@@ -192,7 +196,7 @@ pub(crate) fn apply_push_remote_tracking_updates_in(
     if !tracks_pushes_to(remote_name) {
         return Ok(());
     }
-    let Ok(config) = repo.config() else {
+    let Ok(config) = repo.config().snapshot() else {
         return Ok(());
     };
     commit_push_tracking_updates(repo.refs(), &config, remote_name, results)
@@ -242,17 +246,17 @@ fn commit_push_tracking_updates(
 /// `refs/remotes/<remote>/<branch>`). `None` when the refspecs do not store it locally.
 #[must_use]
 pub fn upstream_tracking_full_ref(repo: &Repository, branch_short: &str) -> Option<String> {
-    let config = repo.config().ok()?;
-    let remote = config.get(&format!("branch.{branch_short}.remote"))?;
-    let merge = config.get(&format!("branch.{branch_short}.merge"))?;
+    let config = repo.config().snapshot().ok()?;
+    let remote = config.value(&format!("branch.{branch_short}.remote"))?;
+    let merge = config.value(&format!("branch.{branch_short}.merge"))?;
     upstream_ref_for_merge(&config, remote.trim(), &merge)
 }
 
 /// Same as [`upstream_tracking_full_ref`] with an already-loaded config (branch inventory).
 #[must_use]
 pub(crate) fn branch_upstream_full_ref(config: &ConfigSet, branch_short: &str) -> Option<String> {
-    let remote = config.get(&format!("branch.{branch_short}.remote"))?;
-    let merge = config.get(&format!("branch.{branch_short}.merge"))?;
+    let remote = config.value(&format!("branch.{branch_short}.remote"))?;
+    let merge = config.value(&format!("branch.{branch_short}.merge"))?;
     upstream_ref_for_merge(config, remote.trim(), &merge)
 }
 
@@ -392,9 +396,9 @@ fn try_resolve_target_candidate(
 }
 
 fn discover_target_branch(repo: &Repository) -> Result<Option<ComparisonBase>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let configured = config
-        .get("target.branch")
+        .value("target.branch")
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty());
     if let Some(candidate) = configured {
@@ -630,9 +634,9 @@ pub(crate) fn pull_upstream_branch(
     branch_short: &str,
     remote_name: &str,
 ) -> Option<ComparisonBase> {
-    let config = repo.config().ok()?;
+    let config = repo.config().snapshot().ok()?;
     let merge_key = format!("branch.{branch_short}.merge");
-    if config.get(&merge_key).is_some() {
+    if config.value(&merge_key).is_some() {
         let full_ref = upstream_tracking_full_ref(repo, branch_short)?;
         return comparison_base_from_full_ref(repo, &full_ref, BaseSource::Upstream);
     }
@@ -862,7 +866,7 @@ pub fn status_integration_hint(
     let cmp = integration_comparison_behind_only(standing)?;
     let action = match pull_context {
         Some((repo, branch_short)) => {
-            let config = repo.config().ok()?;
+            let config = repo.config().snapshot().ok()?;
             let remote =
                 crate::fetch_request::configured_remote_for_pull(&config, Some(branch_short));
             match resolve_pull_integration_base(repo, branch_short, &remote, false) {
@@ -1088,7 +1092,7 @@ fn tracked_comparison(
 /// Whether status should compute ahead/behind counts (`status.aheadBehind`, default true).
 #[must_use]
 pub fn status_ahead_behind_enabled(config: &ConfigSet) -> bool {
-    let raw = config.get("status.aheadBehind");
+    let raw = config.value("status.aheadBehind");
     match raw {
         None => true,
         Some(value) => parse_git_config_maybe_bool(&value).unwrap_or(true),

@@ -94,7 +94,7 @@ fn merge_diff_and_textconv_matrix_on_merge_commit() -> grit_lib::error::Result<(
     let _ =
         combined_merge_parent_blob_paths(repo.odb(), "file.txt", &parsed.parents, &parsed.tree, 50);
 
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let sides = [
         CombinedParentSide {
             mode: 0o100644,

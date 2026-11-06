@@ -130,7 +130,7 @@ pub(crate) fn remove_created_checkout_paths(
         }
         return (removed_abs, failed);
     }
-    let Ok(config) = repo.config() else {
+    let Ok(config) = repo.config().snapshot() else {
         for rel in paths {
             match remove_one(rel) {
                 Ok(abs) => removed_abs.push(abs),
@@ -169,7 +169,7 @@ pub(crate) fn restore_checkout_rollback_paths(
     if targets.is_empty() {
         return Vec::new();
     }
-    let Ok(config) = repo.config() else {
+    let Ok(config) = repo.config().snapshot() else {
         return targets.iter().map(|t| t.path.clone()).collect();
     };
     let config = Arc::new(config);
@@ -727,7 +727,7 @@ fn checkout_populated_tree_journaled(
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let protect = ProtectOptions::from_config(config.as_ref());
     let ignorecase = config.ignore_case();
     let precompose = repo.pathspec_precompose_enabled();
@@ -739,7 +739,7 @@ fn checkout_populated_tree_journaled(
                 prospective.add_or_replace(entry);
             }
             prospective.sort();
-            WorktreeRules::from_checkout_prospective_index(repo, &prospective, config.clone())?
+            WorktreeRules::from_checkout_prospective_index(repo, &prospective)?
         } else {
             checkout_worktree_rules(repo, index_mut, &[], config.clone())?
         },
@@ -987,8 +987,8 @@ fn checkout_hard_to_tree_journaled(
         .collect();
     let assume_unchanged_snapshot = hard_reset_assume_unchanged_snapshot(&index);
     let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&index, None);
-    let config = repo.config()?;
-    let index_sparse = config.bool_or("index.sparse", false);
+    let config = repo.config().snapshot()?;
+    let index_sparse = config.bool_with_default("index.sparse", false);
     let sparse = SparseCheckout::load(repo)?;
     let trees_differ = head_tree != target_tree;
     // Sparse-directory rows left by the load already record the target subtree.
@@ -1226,7 +1226,7 @@ fn checkout_hard_to_tree_journaled(
         index.sort();
         index.sparse_directories = index.has_sparse_directory_placeholders();
         hard_reset_finish_cache_tree(repo, &mut index, target_tree);
-        if let Ok(config) = repo.config() {
+        if let Ok(config) = repo.config().snapshot() {
             let _ = crate::path_icase::smudge_ignorecase_collision_stat_mismatches(
                 repo.odb(),
                 work_tree,
@@ -1417,7 +1417,7 @@ fn checkout_hard_to_tree_journaled(
     let mut rules = actions
         .iter()
         .any(|action| matches!(action, HardResetEntryAction::Verify))
-        .then(|| WorktreeRules::from_parts(repo, &index, config.clone()))
+        .then(|| WorktreeRules::from_parts_with_config(repo, &index, config.clone()))
         .transpose()?;
     if let Some(rules) = &rules {
         verify_hard_reset_candidates(
@@ -1504,7 +1504,11 @@ fn checkout_hard_to_tree_journaled(
 
         let rules = match &mut rules {
             Some(rules) => rules,
-            empty => empty.insert(WorktreeRules::from_parts(repo, &index, config.clone())?),
+            empty => empty.insert(WorktreeRules::from_parts_with_config(
+                repo,
+                &index,
+                config.clone(),
+            )?),
         };
         let rel = crate::repo_relpath::storage_string(path);
         journal.preserve_before_write(&rel)?;
@@ -1579,7 +1583,7 @@ fn checkout_hard_to_tree_journaled(
     index.sort();
     index.sparse_directories = index.has_sparse_directory_placeholders();
     hard_reset_finish_cache_tree(repo, &mut index, target_tree);
-    if let Ok(config) = repo.config() {
+    if let Ok(config) = repo.config().snapshot() {
         let _ = crate::path_icase::smudge_ignorecase_collision_stat_mismatches(
             repo.odb(),
             work_tree,
@@ -1725,7 +1729,7 @@ fn hard_reset_apply_tree_diff_checkout(
                 repo,
                 work_tree,
                 index,
-                &repo.config()?,
+                &repo.config().snapshot()?,
                 changes,
                 sparse,
                 stat_check,
@@ -2105,7 +2109,7 @@ fn hard_reset_abort_if_skip_worktree_dirty(
     config: &Arc<ConfigSet>,
 ) -> Result<()> {
     use crate::error::OverwriteReason;
-    let rules = WorktreeRules::from_parts(repo, index, Arc::clone(config))?;
+    let rules = WorktreeRules::from_parts_with_config(repo, index, Arc::clone(config))?;
     let mut blocked = Vec::new();
     for (path, &index_oid) in snapshot {
         if sparse.is_some_and(|s| !s.includes_index_path(path)) {
@@ -2287,7 +2291,7 @@ fn hard_reset_unrecorded_tree_diff_paths(
         unrecorded.extend(racy.iter().map(|(_, path, _, _)| path.clone()));
         return Ok(unrecorded);
     }
-    let rules = WorktreeRules::from_parts(repo, index, config.clone())?;
+    let rules = WorktreeRules::from_parts_with_config(repo, index, config.clone())?;
     let attrs: Vec<crlf::FileAttrs> = racy
         .iter()
         .map(|(_, path, _, _)| rules.file_attrs(path, false))
@@ -2410,7 +2414,7 @@ fn verify_hard_reset_candidates(
     if candidates.is_empty() {
         return Ok(());
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let mut options = repo
         .thread_policy()
         .resolve(ParallelOp::IndexRefresh, config.as_ref());
@@ -2787,7 +2791,7 @@ fn checkout_coalesced_subtree_changes(
         return Ok(leaf);
     }
 
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let protect = ProtectOptions::from_config(config.as_ref());
     let ignorecase = config.ignore_case();
     let precompose = repo.pathspec_precompose_enabled();
@@ -3154,7 +3158,7 @@ pub(crate) fn precompute_wholesale_safe_directories(
     let delete_set: HashSet<String> = delete_paths.iter().cloned().collect();
     let needs_walk: Vec<String> = candidates.into_iter().collect();
     let default_cfg = ConfigSet::new();
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     let cfg = config.as_deref().unwrap_or(&default_cfg);
     let options = repo.thread_policy().resolve(ParallelOp::Checkout, cfg);
     let safe: BTreeSet<String> = if needs_walk.len() >= 2 && options.threads.get() > 1 {
@@ -3228,7 +3232,7 @@ fn wholesale_deleted_directories_on_disk(
     if needs_walk.is_empty() {
         return trusted;
     }
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     let default_cfg = ConfigSet::new();
     let cfg = config.as_deref().unwrap_or(&default_cfg);
     let options = repo.thread_policy().resolve(ParallelOp::Checkout, cfg);
@@ -3401,7 +3405,7 @@ fn checkout_commit_index_update(
         attach_checkout_result_cache_tree(repo, index_mut, &tree)?;
     }
     index_mut.defer_untracked_cache_invalidation = false;
-    if let (Some(work_tree), Ok(config)) = (repo.work_tree(), repo.config()) {
+    if let (Some(work_tree), Ok(config)) = (repo.work_tree(), repo.config().snapshot()) {
         let _ = crate::path_icase::smudge_ignorecase_collision_stat_mismatches(
             repo.odb(),
             work_tree,
@@ -4115,7 +4119,7 @@ fn checkout_bulk_deleted_tree_changes(
         per_file_deletes.push(path.clone());
     }
     if per_file_deletes.len() >= PARALLEL_PER_FILE_DELETE_MIN {
-        let config = repo.config()?;
+        let config = repo.config().snapshot()?;
         let policy = repo.thread_policy();
         let options = policy.resolve(ParallelOp::Checkout, config.as_ref());
         let (parallel_set, abs_paths) = remove_checkout_files_parallel_cancellable(
@@ -4303,7 +4307,7 @@ fn apply_tree_changes_in_chunks(
         );
     }
 
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let attr_source = attribute_changes.unwrap_or(changes);
     if apply.precomputed_worktree_rules.is_none() {
         prefetch_promisor_blobs_before_checkout_rules(repo, index_mut, changes, &mut apply)?;
@@ -4436,7 +4440,7 @@ fn apply_tree_changes(
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
     let delete_rollback = journal.shared();
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let protect = ProtectOptions::from_config(config.as_ref());
     validate_diff_changes_for_worktree(changes, protect)?;
     let mut apply = apply;
@@ -4929,7 +4933,7 @@ fn checkout_worktree_rules(
 ) -> Result<WorktreeRules> {
     if tree_changes_touch_gitattributes(attr_changes) {
         let prospective_index = prospective_index_for_checkout(index, attr_changes);
-        WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config)
+        WorktreeRules::from_checkout_prospective_index(repo, &prospective_index)
     } else {
         WorktreeRules::from_parts_index_attributes_only(repo, index, config)
     }
@@ -6235,7 +6239,7 @@ mod tests {
             crate::RefStorageFormat::Files,
         )
         .expect("init");
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let index = repo.load_index().expect("index");
         let rules = WorktreeRules::from_parts_index_attributes_only(&repo, &index, config.clone())
             .expect("rules");
@@ -6278,7 +6282,7 @@ mod tests {
             crate::RefStorageFormat::Files,
         )
         .expect("init");
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let index = repo.load_index().expect("index");
         let rules = WorktreeRules::from_parts_index_attributes_only(&repo, &index, config.clone())
             .expect("rules");
@@ -7177,7 +7181,7 @@ mod tests {
             assert_eq!(a.oid, b.oid);
             assert_eq!(a.mode, b.mode);
         }
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         checkout_worktree_rules(&repo, &index, &changes, config).expect("rules with attrs");
     }
 }
@@ -7336,7 +7340,7 @@ mod checkout_rollback_delay_filter_tests {
         let rules = WorktreeRules::from_parts_index_attributes_only(
             &repo,
             &index,
-            repo.config().expect("config"),
+            repo.config().snapshot().expect("config"),
         )
         .expect("rules");
         let key = crate::repo_relpath::storage_bytes("a.txt");

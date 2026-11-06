@@ -79,9 +79,9 @@ fn repository_config_access(c: &mut Criterion) {
     let mut local = std::fs::read_to_string(&config_path).expect("read config");
     local.push_str(GLOBAL_CONFIG);
     std::fs::write(&config_path, local).expect("write config");
-    repo.config().expect("first load");
+    repo.config().snapshot().expect("first load");
     c.bench_function("repository_config/revalidate", |b| {
-        b.iter(|| black_box(repo.config().expect("config")));
+        b.iter(|| black_box(repo.config().snapshot().expect("config")));
     });
 }
 

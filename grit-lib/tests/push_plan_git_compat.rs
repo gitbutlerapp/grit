@@ -56,7 +56,12 @@ fn open_repo(path: &Path) -> Repository {
 }
 
 fn load_config(repo: &Repository) -> ConfigSet {
-    ConfigSet::load(&Environment::empty(), Some(repo.git_dir()), true).expect("config")
+    ConfigSet::load(
+        &Environment::empty(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(repo.git_dir())),
+    )
+    .expect("config")
 }
 
 fn git_porcelain_dry_run(cwd: &Path, args: &[&str]) -> Vec<PorcelainLine> {
@@ -98,7 +103,7 @@ fn plan_specs(
     request: PushRequest,
     ctx: &PushPlanContext,
 ) -> Vec<PushRefSpec> {
-    resolve_push(repo, config, &request, ctx)
+    resolve_push(repo, &request, ctx)
         .expect("resolve_push")
         .specs
 }
@@ -151,7 +156,7 @@ fn literal_path_remote_context_guesses_short_dst_like_git() {
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
     let bare = fx.bare.to_str().expect("utf-8 path").to_owned();
-    let ctx = load_push_plan_context(&repo, &config, Some(&bare), None).expect("context");
+    let ctx = load_push_plan_context(&repo, Some(&bare), None).expect("context");
     let mut advertised = ctx.remote_ref_names.clone();
     advertised.remove("HEAD");
     assert_eq!(advertised, push_plan_context(&fx.bare).remote_ref_names);
@@ -225,7 +230,7 @@ fn plan_context_lists_pushurl_not_fetch_url() {
     );
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let ctx = load_push_plan_context(&repo, &config, Some("origin"), None).expect("context");
+    let ctx = load_push_plan_context(&repo, Some("origin"), None).expect("context");
     assert_eq!(
         ctx.remote_ref_names,
         push_plan_context(&push_bare).remote_ref_names
@@ -245,7 +250,7 @@ fn push_with_planning_tips_sends_missing_objects_to_literal_remote() {
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
     let bare = fx.bare.to_str().expect("utf-8 path").to_owned();
-    let ctx = load_push_plan_context(&repo, &config, Some(&bare), None).expect("context");
+    let ctx = load_push_plan_context(&repo, Some(&bare), None).expect("context");
     let main_tip = git_cmd(&["rev-parse", "main"]).in_dir(&fx.local).exec();
     let main_tip = ObjectId::from_hex(main_tip.stdout.trim()).expect("main oid");
     assert!(ctx
@@ -254,7 +259,6 @@ fn push_with_planning_tips_sends_missing_objects_to_literal_remote() {
         .is_some_and(|t| t.contains(&main_tip)));
     let plan = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             remote: Some(bare.clone()),
             refspecs: vec!["feature".into()],
@@ -532,13 +536,8 @@ fn push_remote_precedence() {
     git(&fx.local, &["checkout", "-q", "feature"]);
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let resolved = resolve_push(
-        &repo,
-        &config,
-        &PushRequest::default(),
-        &PushPlanContext::default(),
-    )
-    .expect("plan");
+    let resolved =
+        resolve_push(&repo, &PushRequest::default(), &PushPlanContext::default()).expect("plan");
     assert_eq!(resolved.remote, "upstream");
 }
 
@@ -568,13 +567,8 @@ fn detached_head_without_refspec_errors() {
     git(&fx.local, &["checkout", "-q", "--detach", "HEAD"]);
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let err = resolve_push(
-        &repo,
-        &config,
-        &PushRequest::default(),
-        &PushPlanContext::default(),
-    )
-    .unwrap_err();
+    let err =
+        resolve_push(&repo, &PushRequest::default(), &PushPlanContext::default()).unwrap_err();
     assert!(err.to_string().contains("detached"));
 }
 
@@ -659,7 +653,7 @@ fn loaded_plan_context_matches_git_for_each_ref() {
     );
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let mut ctx = load_push_plan_context(&repo, &config, None, None).expect("context");
+    let mut ctx = load_push_plan_context(&repo, None, None).expect("context");
     ctx.remote_ref_names.remove("HEAD");
     let expected = push_plan_context(&fx.bare);
     assert_eq!(ctx.remote_ref_names, expected.remote_ref_names);
@@ -674,11 +668,9 @@ fn push_from_positionals_is_readable_by_git() {
     let positionals = vec!["origin".to_owned(), "feature".to_owned()];
     let invocation = resolve_push_invocation(&config, None, &positionals).expect("invocation");
     assert_eq!(invocation.remote.as_deref(), Some("origin"));
-    let ctx = load_push_plan_context(&repo, &config, invocation.remote.as_deref(), None)
-        .expect("context");
+    let ctx = load_push_plan_context(&repo, invocation.remote.as_deref(), None).expect("context");
     let plan = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             remote: invocation.remote,
             refspecs: invocation.refspecs,
@@ -725,7 +717,6 @@ fn push_to_literal_path_remote_is_readable_by_git() {
     assert_eq!(remote.name, None);
     let plan = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             remote: invocation.remote,
             refspecs: invocation.refspecs,
@@ -773,7 +764,6 @@ fn push_to_relative_path_remote_is_readable_by_git() {
     let remote = open_push_destination(&config, &remote_path).expect("literal remote");
     let plan = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             remote: invocation.remote,
             refspecs: invocation.refspecs,
@@ -916,7 +906,6 @@ fn wildcard_zero_match_errors() {
     let config = load_config(&repo);
     let err = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             refspecs: vec!["refs/heads/nope/*:refs/heads/nope/*".into()],
             remote: Some("origin".into()),

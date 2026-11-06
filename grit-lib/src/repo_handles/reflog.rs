@@ -211,7 +211,7 @@ impl<'repo> RepositoryReflogs<'repo> {
     ///
     /// Propagates config load failures, invalid expiry strings, and reflog rewrite errors.
     pub fn expire(&self, options: &ExpireOptions) -> Result<ReflogExpireOutcome> {
-        let cfg = self.repo.config()?;
+        let cfg = self.repo.config().snapshot()?;
         let gc = load_gc_reflog_expire_config(&cfg, options.now);
         let explicit_total = options
             .expire

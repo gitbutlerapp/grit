@@ -255,7 +255,10 @@ fn attrs_for_repo_path(git_dir: &Path, path: &str) -> FileAttrs {
     let config = ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .unwrap_or_default();
     crate::crlf::file_attrs_from_gitattributes(&parsed.rules, &parsed.macros, path, false, &config)
@@ -275,7 +278,7 @@ pub fn is_binary_for_diff(git_dir: &Path, path: &str, blob: &[u8]) -> bool {
 fn diff_driver_binary_config(config: &ConfigSet, driver: &str) -> bool {
     let key = format!("diff.{driver}.binary");
     config
-        .get(&key)
+        .value(&key)
         .is_some_and(|v| parse_bool(v.as_str()).unwrap_or(false))
 }
 
@@ -290,7 +293,7 @@ pub fn diff_driver_forces_text(git_dir: &Path, config: &ConfigSet, path: &str) -
         return false;
     };
     let key = format!("diff.{driver}.binary");
-    config.get(&key).and_then(|v| parse_bool(v.as_str()).ok()) == Some(false)
+    config.value(&key).and_then(|v| parse_bool(v.as_str()).ok()) == Some(false)
 }
 
 /// Force `Binary files ... differ` when the path's diff driver sets `binary`, except for symlinks.
@@ -362,7 +365,7 @@ pub fn run_textconv_raw(
     driver: &str,
     input: &[u8],
 ) -> Option<Vec<u8>> {
-    let mut cmd_line = config.get(&format!("diff.{driver}.textconv"))?;
+    let mut cmd_line = config.value(&format!("diff.{driver}.textconv"))?;
     cmd_line = cmd_line.trim_end().to_string();
     let stdin_mode = if cmd_line.ends_with('<') {
         let t = cmd_line.trim_end_matches('<').trim_end();
@@ -443,7 +446,7 @@ pub fn run_textconv(
 
 /// `diff_textconv_cmd_line` function.
 pub fn diff_textconv_cmd_line(config: &ConfigSet, driver: &str) -> Option<String> {
-    let mut cmd_line = config.get(&format!("diff.{driver}.textconv"))?;
+    let mut cmd_line = config.value(&format!("diff.{driver}.textconv"))?;
     cmd_line = cmd_line.trim_end().to_string();
     if cmd_line.ends_with('<') {
         let t = cmd_line.trim_end_matches('<').trim_end();
@@ -455,7 +458,7 @@ pub fn diff_textconv_cmd_line(config: &ConfigSet, driver: &str) -> Option<String
 /// `diff_cachetextconv_enabled` function.
 pub fn diff_cachetextconv_enabled(config: &ConfigSet, driver: &str) -> bool {
     config
-        .get(&format!("diff.{driver}.cachetextconv"))
+        .value(&format!("diff.{driver}.cachetextconv"))
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "yes" | "1" | "on"))
         .unwrap_or(false)
 }
@@ -506,12 +509,12 @@ pub fn diff_attr_external_driver(
     let DiffAttr::Driver(ref driver) = fa.diff_attr else {
         return None;
     };
-    let cmd = config.get(&format!("diff.{driver}.command"))?;
+    let cmd = config.value(&format!("diff.{driver}.command"))?;
     if cmd.trim().is_empty() {
         return None;
     }
     let trust = config
-        .get(&format!("diff.{driver}.trustExitCode"))
+        .value(&format!("diff.{driver}.trustExitCode"))
         .and_then(|v| parse_bool(v.as_str()).ok())
         .unwrap_or(false);
     Some((cmd, trust))
@@ -604,7 +607,10 @@ pub fn convert_blob_to_worktree_for_path(
     let config = ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .unwrap_or_default();
     let conv = crate::crlf::ConversionConfig::from_config(&config);

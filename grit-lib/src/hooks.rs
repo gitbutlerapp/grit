@@ -351,11 +351,11 @@ enum ResolvedHook {
 /// Never carries a Windows `\\?\` prefix, so the path can be shown to users and handed to
 /// hook interpreters such as Git for Windows' `sh`.
 pub fn resolve_hooks_dir(repo: &Repository) -> PathBuf {
-    resolve_hooks_dir_for_config(repo, repo.config().ok().as_deref())
+    resolve_hooks_dir_for_config(repo, repo.config().snapshot().ok().as_deref())
 }
 
 fn resolve_hooks_dir_for_config(repo: &Repository, config: Option<&ConfigSet>) -> PathBuf {
-    let dir = match config.and_then(|cfg| cfg.get("core.hooksPath")) {
+    let dir = match config.and_then(|cfg| cfg.value("core.hooksPath")) {
         Some(hooks_path) => {
             let p = PathBuf::from(parse_path(repo.environment(), &hooks_path));
             if p.is_absolute() {
@@ -423,10 +423,10 @@ fn traditional_hook_candidate(
     let meta = fs::metadata(&path).ok()?;
     #[cfg(unix)]
     if meta.permissions().mode() & 0o111 == 0 {
-        let config = repo.config().ok();
+        let config = repo.config().snapshot().ok();
         let show_warning = config
             .as_deref()
-            .and_then(|c| c.get("advice.ignoredHook"))
+            .and_then(|c| c.value("advice.ignoredHook"))
             .map(|v| !matches!(v.to_lowercase().as_str(), "false" | "no" | "off" | "0"))
             .unwrap_or(true);
         if show_warning {
@@ -1367,6 +1367,7 @@ pub(crate) fn run_commit_hook_with_cancel(
 ) -> Result<HookResult, HookError> {
     let config = repo
         .config()
+        .snapshot()
         .map_err(|e| HookError::Internal(e.to_string()))?;
     run_hook_opts_with_cancel(
         Some(repo),
@@ -1410,6 +1411,7 @@ pub fn run_hook(
 ) -> Result<HookResult, HookError> {
     let config = repo
         .config()
+        .snapshot()
         .map_err(|e| HookError::Internal(e.to_string()))?;
     run_hook_opts(
         Some(repo),
@@ -1467,6 +1469,7 @@ pub(crate) fn run_hook_in_git_dir_with_cancel(
         .collect();
     let config = repo
         .config()
+        .snapshot()
         .map_err(|e| HookError::Internal(e.to_string()))?;
     run_hook_opts_with_cancel(
         Some(repo),
@@ -1546,6 +1549,7 @@ pub fn run_pre_push_hook(
 ) -> Result<HookOutput, HookError> {
     let config = repo
         .config()
+        .snapshot()
         .map_err(|e| HookError::Internal(e.to_string()))?;
     let algo = repo.odb().hash_algo();
     let stdin: String = refs.iter().map(|r| r.stdin_line(algo)).collect();
@@ -1642,9 +1646,13 @@ impl RefHookContext {
     }
 
     fn load_config(&self) -> Result<Arc<crate::config::ConfigSet>, HookError> {
-        crate::config::ConfigSet::load(&self.environment, Some(&self.git_dir), true)
-            .map(Arc::new)
-            .map_err(|e| HookError::Internal(e.to_string()))
+        crate::config::ConfigSet::load(
+            &self.environment,
+            Some(&self.git_dir),
+            &crate::config::LoadConfigOptions::standard(&self.environment, Some(&self.git_dir)),
+        )
+        .map(Arc::new)
+        .map_err(|e| HookError::Internal(e.to_string()))
     }
 
     /// Run the `reference-transaction` hook for one phase and stdin payload.
@@ -1681,7 +1689,7 @@ impl RefHookContext {
 }
 
 fn resolve_hooks_dir_for_ref(ctx: &RefHookContext, config: &ConfigSet) -> PathBuf {
-    let dir = match config.get("core.hooksPath") {
+    let dir = match config.value("core.hooksPath") {
         Some(hooks_path) => {
             let p = PathBuf::from(parse_path(ctx.environment.as_ref(), &hooks_path));
             if p.is_absolute() {
@@ -1749,7 +1757,7 @@ fn traditional_hook_candidate_for_ref(
         let show_warning = ctx
             .load_config()
             .ok()
-            .and_then(|c| c.get("advice.ignoredHook"))
+            .and_then(|c| c.value("advice.ignoredHook"))
             .map(|v| !matches!(v.to_lowercase().as_str(), "false" | "no" | "off" | "0"))
             .unwrap_or(true);
         if show_warning {

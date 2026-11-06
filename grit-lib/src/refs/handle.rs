@@ -261,7 +261,7 @@ impl<'repo> References<'repo> {
         let refname = name.as_str();
         ensure_refname_safe_for_storage(refname)?;
         let store = self.repo.refs();
-        let config = self.repo.config()?;
+        let config = self.repo.config().snapshot()?;
         let signature = match self
             .repo
             .identity(IdentRole::Committer, self.repo.identity_now())

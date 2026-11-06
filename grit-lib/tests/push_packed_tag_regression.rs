@@ -21,7 +21,12 @@ fn open_repo(path: &Path) -> Repository {
 }
 
 fn load_config(repo: &Repository) -> ConfigSet {
-    ConfigSet::load(&Environment::empty(), Some(repo.git_dir()), true).expect("config")
+    ConfigSet::load(
+        &Environment::empty(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(repo.git_dir())),
+    )
+    .expect("config")
 }
 
 fn ctx_from_bare(bare: &Path) -> PushPlanContext {
@@ -83,7 +88,6 @@ fn packed_annotated_tags_push_is_up_to_date_and_preserves_remote_tag() {
     let ctx = ctx_from_bare(&bare);
     let specs = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             tags: true,
             remote: Some("origin".into()),

@@ -513,8 +513,8 @@ PY"#;
         let expected_abbrev = expected.split_whitespace().next().expect("git log abbrev");
 
         let repo = Repository::discover(Some(clone), &RepositoryOptions::empty()).expect("open");
-        let min_len =
-            resolve_core_abbrev_len(&repo.config()?.clone(), repo.odb()).expect("abbrev len");
+        let min_len = resolve_core_abbrev_len(&repo.config().snapshot()?.clone(), repo.odb())
+            .expect("abbrev len");
         assert_eq!(min_len, 4, "fixture must use core.abbrev=4");
         let grit_abbrev = OidAbbrevBatch::new(min_len).abbrev_known(&repo, commit_oid)?;
         assert_eq!(

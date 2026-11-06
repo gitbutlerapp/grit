@@ -119,9 +119,17 @@ fn grit_reads_overrides_git_exported() {
     env.git_config_parameters = Some(String::from_utf8(out.stdout).unwrap());
     env.push_config_override(&"user.name=From Grit".parse().unwrap());
 
-    let config = ConfigSet::load(&env, None, false).unwrap();
-    assert_eq!(config.get("user.name").as_deref(), Some("From Grit"));
-    assert_eq!(config.get_bool("core.bare"), Some(Ok(true)));
+    let config = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::standard(&env, None),
+    )
+    .unwrap();
+    assert_eq!(
+        config.get("user.name").unwrap().as_deref(),
+        Some("From Grit")
+    );
+    assert_eq!(config.get_bool("core.bare").unwrap(), Some(true));
 }
 
 #[test]

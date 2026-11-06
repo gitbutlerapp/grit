@@ -65,12 +65,15 @@ fn load_cascade_system_global_xdg_local_and_git_config_override() {
         include_system: true,
         ..default_load_opts(&git_dir, &env)
     };
-    let set = ConfigSet::load_with_options(&env, Some(&git_dir), &opts).expect("load");
-    assert_eq!(set.get("override.k").as_deref(), Some("from-override"));
-    assert_eq!(set.get("local.k").as_deref(), Some("from-local"));
-    assert_eq!(set.get("layer.home").as_deref(), Some("1"));
-    assert!(set.get("system.k").is_some());
-    assert!(set.get("xdg.k").is_some());
+    let set = ConfigSet::load(&env, Some(&git_dir), &opts).expect("load");
+    assert_eq!(
+        set.get("override.k").unwrap().as_deref(),
+        Some("from-override")
+    );
+    assert_eq!(set.get("local.k").unwrap().as_deref(), Some("from-local"));
+    assert_eq!(set.get("layer.home").unwrap().as_deref(), Some("1"));
+    assert!(set.get("system.k").unwrap().is_some());
+    assert!(set.get("xdg.k").unwrap().is_some());
 }
 
 #[test]
@@ -86,11 +89,16 @@ fn load_protected_and_command_parameters() {
     env.git_config_pairs = vec![("cmd.a".into(), "1".into()), ("cmd.b".into(), "2".into())];
     env.git_config_parameters = Some("'cmd.c=3' 'cmd.a=override'".into());
 
-    let set = ConfigSet::load_protected(&env, false).expect("protected");
-    assert_eq!(set.get("cmd.a").as_deref(), Some("override"));
-    assert_eq!(set.get("cmd.b").as_deref(), Some("2"));
-    assert_eq!(set.get("cmd.c").as_deref(), Some("3"));
-    assert_eq!(set.get("protected.k").as_deref(), Some("global"));
+    let set = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::protected(&env, false),
+    )
+    .expect("protected");
+    assert_eq!(set.get("cmd.a").unwrap().as_deref(), Some("override"));
+    assert_eq!(set.get("cmd.b").unwrap().as_deref(), Some("2"));
+    assert_eq!(set.get("cmd.c").unwrap().as_deref(), Some("3"));
+    assert_eq!(set.get("protected.k").unwrap().as_deref(), Some("global"));
 }
 
 #[test]
@@ -142,10 +150,9 @@ fn worktree_config_layer_when_extension_enabled() {
 
     let env = Environment::empty();
     let set =
-        ConfigSet::load_with_options(&env, Some(&git_dir), &default_load_opts(&git_dir, &env))
-            .expect("load");
-    assert_eq!(set.get("wt.k").as_deref(), Some("worktree"));
-    assert_eq!(set.get("common.k").as_deref(), Some("base"));
+        ConfigSet::load(&env, Some(&git_dir), &default_load_opts(&git_dir, &env)).expect("load");
+    assert_eq!(set.get("wt.k").unwrap().as_deref(), Some("worktree"));
+    assert_eq!(set.get("common.k").unwrap().as_deref(), Some("base"));
 }
 
 #[test]
@@ -166,8 +173,8 @@ fn load_with_command_includes_and_no_process_includes() {
         command_includes: true,
         ..Default::default()
     };
-    let without = ConfigSet::load_with_options(&env, None, &opts).expect("load");
-    assert!(without.get("frominc.k").is_none());
+    let without = ConfigSet::load(&env, None, &opts).expect("load");
+    assert!(without.get("frominc.k").unwrap().is_none());
 
     let opts_proc = LoadConfigOptions {
         process_includes: true,
@@ -180,8 +187,8 @@ fn load_with_command_includes_and_no_process_includes() {
         },
         ..Default::default()
     };
-    let with = ConfigSet::load_with_options(&env, None, &opts_proc).expect("load proc");
-    assert_eq!(with.get("frominc.k").as_deref(), Some("yes"));
+    let with = ConfigSet::load(&env, None, &opts_proc).expect("load proc");
+    assert_eq!(with.get("frominc.k").unwrap().as_deref(), Some("yes"));
 }
 
 #[test]
@@ -205,8 +212,13 @@ fn read_early_config_and_load_repo_local_only() {
     let early = ConfigSet::read_early_config(&env, Some(&git_dir), "early.k").expect("early");
     assert!(early.iter().any(|v| v == "local-only"));
 
-    let local = ConfigSet::load_repo_local_only(&git_dir).expect("local only");
-    assert_eq!(local.get("early.k").as_deref(), Some("local-only"));
+    let local = ConfigSet::load(
+        &Environment::empty(),
+        Some(&git_dir),
+        &crate::config::LoadConfigOptions::repo_local_only(&git_dir),
+    )
+    .expect("local only");
+    assert_eq!(local.get("early.k").unwrap().as_deref(), Some("local-only"));
 }
 
 #[test]
@@ -222,8 +234,8 @@ fn diagnostics_on_ignored_git_dir() {
         diagnostics: Some(sink.clone()),
         ..Default::default()
     };
-    let set = ConfigSet::load_with_options(&env, Some(&fake_git), &opts).expect("load");
-    assert!(set.get("core.bare").is_none());
+    let set = ConfigSet::load(&env, Some(&fake_git), &opts).expect("load");
+    assert!(set.get("core.bare").unwrap().is_none());
     let _warnings = sink.warnings();
 }
 
@@ -234,7 +246,12 @@ fn load_surfaces_invalid_system_config() {
     fs::write(&bad, "[broken\n").expect("write");
     let mut env = Environment::empty();
     env.git_config_system = Some(bad.display().to_string());
-    let err = ConfigSet::load(&env, None, true).expect_err("bad system");
+    let err = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::standard(&env, None),
+    )
+    .expect_err("bad system");
     assert!(matches!(err, Error::Config(_) | Error::Message(_)));
 }
 
@@ -246,8 +263,13 @@ fn load_skips_system_when_nosystem_set() {
     let mut env = Environment::empty();
     env.git_config_system = Some(system.display().to_string());
     env.git_config_nosystem = Some("true".into());
-    let set = ConfigSet::load(&env, None, true).expect("load");
-    assert!(set.get("sys.k").is_none());
+    let set = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::standard(&env, None),
+    )
+    .expect("load");
+    assert!(set.get("sys.k").unwrap().is_none());
 }
 
 #[test]
@@ -263,7 +285,12 @@ fn load_errors_on_invalid_repository_config() {
     let git_dir = dir.path().join(".git");
     fs::write(git_dir.join("config"), "[bad\n").expect("bad");
     let env = Environment::empty();
-    assert!(ConfigSet::load(&env, Some(&git_dir), false).is_err());
+    assert!(ConfigSet::load(
+        &env,
+        Some(&git_dir),
+        &crate::config::LoadConfigOptions::standard(&env, Some(&git_dir))
+    )
+    .is_err());
 }
 
 #[test]
@@ -274,7 +301,12 @@ fn load_errors_on_invalid_git_config_override_file() {
     let mut env = Environment::empty();
     env.git_config = Some(bad.display().to_string());
     env.cwd = dir.path().to_path_buf();
-    let err = ConfigSet::load(&env, None, false).expect_err("bad override");
+    let err = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::standard(&env, None),
+    )
+    .expect_err("bad override");
     assert!(matches!(err, Error::Config(_) | Error::Message(_)));
 }
 
@@ -292,9 +324,8 @@ fn worktree_config_not_loaded_without_extension() {
     fs::write(git_dir.join("config.worktree"), "[wt]\n\tk = 1\n").expect("wt");
     let env = Environment::empty();
     let set =
-        ConfigSet::load_with_options(&env, Some(&git_dir), &default_load_opts(&git_dir, &env))
-            .expect("load");
-    assert!(set.get("wt.k").is_none());
+        ConfigSet::load(&env, Some(&git_dir), &default_load_opts(&git_dir, &env)).expect("load");
+    assert!(set.get("wt.k").unwrap().is_none());
 }
 
 #[test]
@@ -317,7 +348,7 @@ fn command_relative_include_errors_when_configured() {
         },
         ..Default::default()
     };
-    let err = ConfigSet::load_with_options(&env, None, &opts).expect_err("relative cmd include");
+    let err = ConfigSet::load(&env, None, &opts).expect_err("relative cmd include");
     assert!(matches!(err, Error::Config(_)));
 }
 
@@ -357,13 +388,23 @@ fn kitchen_sink_config_load_exercises_cascade_branches() {
     env.git_config_parameters = Some("'param.k=p'".into());
     env.cwd = repo.clone();
 
-    let set = ConfigSet::load(&env, Some(&git_dir), true).expect("kitchen");
-    assert_eq!(set.get("branch.k").as_deref(), Some("hit"));
-    assert_eq!(set.get("wt.k").as_deref(), Some("wt"));
-    assert_eq!(set.get("param.k").as_deref(), Some("p"));
-    assert_eq!(set.get("pair.k").as_deref(), Some("v"));
+    let set = ConfigSet::load(
+        &env,
+        Some(&git_dir),
+        &crate::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
+    )
+    .expect("kitchen");
+    assert_eq!(set.get("branch.k").unwrap().as_deref(), Some("hit"));
+    assert_eq!(set.get("wt.k").unwrap().as_deref(), Some("wt"));
+    assert_eq!(set.get("param.k").unwrap().as_deref(), Some("p"));
+    assert_eq!(set.get("pair.k").unwrap().as_deref(), Some("v"));
     let _early = ConfigSet::read_early_config(&env, Some(&git_dir), "branch.k").expect("early");
-    let _protected = ConfigSet::load_protected(&env, false).expect("protected");
+    let _protected = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::protected(&env, false),
+    )
+    .expect("protected");
 }
 
 #[test]
@@ -392,13 +433,18 @@ fn optional_includeif_and_git_config_override_file() {
         },
     )
     .expect("optional include");
-    assert_eq!(set.get("set.x").as_deref(), Some("1"));
+    assert_eq!(set.get("set.x").unwrap().as_deref(), Some("1"));
 
     let good = dir.path().join("override.conf");
     fs::write(&good, "[override]\n\tk = ok\n").expect("good");
     env.git_config = Some(good.display().to_string());
-    let loaded = ConfigSet::load(&env, None, false).expect("override load");
-    assert_eq!(loaded.get("override.k").as_deref(), Some("ok"));
+    let loaded = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::standard(&env, None),
+    )
+    .expect("override load");
+    assert_eq!(loaded.get("override.k").unwrap().as_deref(), Some("ok"));
 }
 
 #[test]

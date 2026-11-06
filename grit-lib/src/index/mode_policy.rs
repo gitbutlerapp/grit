@@ -36,7 +36,7 @@ impl WorktreeModePolicy {
     /// unset or not a boolean.
     #[must_use]
     pub fn from_config(config: &ConfigSet) -> Self {
-        let flag = |key: &str| config.bool_or(key, true);
+        let flag = |key: &str| config.bool_with_default(key, true);
         Self {
             trust_filemode: flag("core.filemode"),
             has_symlinks: flag("core.symlinks"),

@@ -243,8 +243,12 @@ pub fn run(
         .map_err(|err| map_reset_committish_error(err, &spec))?;
 
     let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
+    let config = ConfigSet::load(
+        env,
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(env, Some(repo.git_dir())),
+    )
+    .context("could not load config")?;
     let now = context::wall_clock_now(env);
     let identity = context::committer_reflog_signature(&repo, &config, now)?;
 

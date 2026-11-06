@@ -157,7 +157,7 @@ impl FileChange {
 ///
 /// Returns config load failures and object read errors.
 pub fn load_object_changes(repo: &Repository, entries: &[DiffEntry]) -> Result<Vec<FileChange>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let par_opts = repo
         .thread_policy()
         .resolve(ParallelOp::DiffContent, config.as_ref());
@@ -351,7 +351,7 @@ pub(crate) fn staged_entries_in(
     restrict_to_paths: Option<&BTreeSet<String>>,
 ) -> Result<Vec<DiffEntry>> {
     let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let mut entries = match restrict_to_paths.filter(|paths| !paths.is_empty()) {
         Some(paths) => diff_index_to_tree_for_paths(repo, index, head_tree.as_ref(), paths)?,
         None => diff_index_to_tree_with_renames(
@@ -447,7 +447,7 @@ pub(crate) fn worktree_entries_in(
             restrict_to_paths,
         );
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let raw = {
         let rules = rules.lock().unwrap_or_else(|e| e.into_inner());
         diff_tree_to_worktree_with_git_dir_and_rules_extras(

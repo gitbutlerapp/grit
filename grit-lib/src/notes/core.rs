@@ -886,7 +886,7 @@ fn update_notes_ref(
     new: ObjectId,
     commit: &NotesCommit<'_>,
 ) -> Result<()> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let log = should_autocreate_reflog_with_config(config.as_ref(), repo.git_dir(), notes_ref)
         || repo.refs().reflog_exists(notes_ref)?;
     let reflog = log.then(|| ReflogUpdate {
@@ -998,7 +998,7 @@ pub fn remove_note_entry(entries: &mut Vec<NotesTreeEntry>, object_hex: &str) ->
 
 /// Author and committer lines for notes commits written without explicit identities.
 fn wall_clock_notes_idents(repo: &Repository) -> Result<(String, String)> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let now = repo.identity_now();
     Ok((
         notes_ident(repo.environment(), config.as_ref(), IdentRole::Author, now),
@@ -1035,11 +1035,11 @@ fn notes_ident<E: IdentityEnv>(
 
     let name = non_blank(name_key)
         .or_else(|| author_fallback("GIT_AUTHOR_NAME"))
-        .or_else(|| config.get("user.name"))
+        .or_else(|| config.value("user.name"))
         .unwrap_or_else(|| "Unknown".to_owned());
     let email = non_blank(email_key)
         .or_else(|| author_fallback("GIT_AUTHOR_EMAIL"))
-        .or_else(|| config.get("user.email"))
+        .or_else(|| config.value("user.email"))
         .unwrap_or_default();
     assemble_identity(&name, &email, non_blank(date_key).as_deref(), now)
 }
@@ -1156,7 +1156,7 @@ pub fn resolve_configured_notes_ref<E: IdentityEnv>(
     if let Some(value) = env.var("GIT_NOTES_REF") {
         return NotesRef::from_full(&value);
     }
-    if let Some(value) = config.get("core.notesRef") {
+    if let Some(value) = config.value("core.notesRef") {
         return NotesRef::from_full(&value);
     }
     Ok(NotesRef::commits())
@@ -1786,7 +1786,7 @@ fn notes_rewrite_command_enabled(config: &ConfigSet, command: NotesRewriteComman
         NotesRewriteCommand::Rebase => "notes.rewrite.rebase",
         NotesRewriteCommand::Amend => "notes.rewrite.amend",
     };
-    config.bool_or(key, true)
+    config.bool_with_default(key, true)
 }
 
 fn resolve_notes_rewrite_mode<E: IdentityEnv>(
@@ -1796,7 +1796,7 @@ fn resolve_notes_rewrite_mode<E: IdentityEnv>(
     if let Some(value) = env.var("GIT_NOTES_REWRITE_MODE") {
         return NotesRewriteMode::parse(value.trim());
     }
-    if let Some(value) = config.get("notes.rewriteMode") {
+    if let Some(value) = config.value("notes.rewriteMode") {
         return NotesRewriteMode::parse(value.trim());
     }
     Ok(NotesRewriteMode::Concatenate)
@@ -1821,7 +1821,7 @@ fn resolve_notes_rewrite_refs<E: IdentityEnv>(
             .map(str::to_owned)
             .collect()
     } else {
-        config.get_all("notes.rewriteRef")
+        config.values_all("notes.rewriteRef")
     };
     if patterns.is_empty() {
         return Ok(Vec::new());
@@ -1949,7 +1949,7 @@ pub fn prepare_notes_for_rewrite(
     if pairs.is_empty() {
         return Ok(None);
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let notes_refs = resolve_notes_rewrite_refs(repo, config.as_ref(), repo.environment())?;
     if notes_refs.is_empty() {
         return Ok(None);

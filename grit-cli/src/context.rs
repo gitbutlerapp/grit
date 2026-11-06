@@ -300,3 +300,18 @@ pub fn committer_reflog_signature(
         Err(other) => Err(other.into()),
     }
 }
+
+/// Lenient merged config string lookup (invalid keys and parse errors → `None`).
+pub fn config_string(config: &ConfigSet, key: &str) -> Option<String> {
+    config.get(key).ok().flatten()
+}
+
+/// All values for `key` in load order; load/parse failures → empty list.
+pub fn config_strings(config: &ConfigSet, key: &str) -> Vec<String> {
+    config.get_all(key).unwrap_or_default()
+}
+
+/// Boolean config with a fallback when the key is unset or unparsable.
+pub fn config_bool_default(config: &ConfigSet, key: &str, default: bool) -> bool {
+    config.get_bool(key).ok().flatten().unwrap_or(default)
+}

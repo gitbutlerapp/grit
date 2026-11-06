@@ -702,7 +702,7 @@ pub fn rebase_boundary_from_fork_point(
 #[must_use]
 pub fn rebase_fork_point_enabled(config: &crate::config::ConfigSet) -> bool {
     config
-        .get("rebase.forkPoint")
+        .value("rebase.forkPoint")
         .and_then(|raw| crate::config::parse_git_config_maybe_bool(raw.trim()))
         .unwrap_or(true)
 }
@@ -3353,7 +3353,7 @@ impl<'r> CommitGraphCache<'r> {
 
     /// `use_commit_graph: false` leaves [`Self::graph`] empty so every lookup parses the commit.
     pub(crate) fn with_commit_graph(repo: &'r Repository, use_commit_graph: bool) -> Self {
-        let cfg = repo.config().unwrap_or_default();
+        let cfg = repo.config().snapshot().unwrap_or_default();
         // Stop ancestry traversal only at genuinely-missing promisor objects, not
         // at every member of a promisor pack. The clone base commit lives in a
         // promisor pack but is fully present locally; treating it as a stop point

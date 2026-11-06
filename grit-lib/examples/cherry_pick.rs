@@ -7,7 +7,8 @@
 //! Run: `cargo run -p grit-lib --example cherry_pick`
 
 use grit_lib::commit::trailers;
-use grit_lib::config::ConfigSet;
+use grit_lib::config::environment::Environment;
+use grit_lib::config::{ConfigSet, LoadConfigOptions};
 use grit_lib::diff::merge_file::MergeFavor;
 use grit_lib::diff::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, WhitespaceMergeOptions,
@@ -169,7 +170,11 @@ fn main() -> grit_lib::error::Result<()> {
     }
 
     let new_tree = merged.result_tree;
-    let config = ConfigSet::load_repo_local_only(repo.git_dir())?;
+    let config = ConfigSet::load(
+        &Environment::empty(),
+        Some(repo.git_dir()),
+        &LoadConfigOptions::repo_local_only(repo.git_dir()),
+    )?;
     let msg = trailers::finalize_cherry_pick_message(
         &picked_data.message,
         true,

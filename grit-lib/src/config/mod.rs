@@ -7,7 +7,7 @@
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! let _repo = Repository::init(dir.path(), &InitOptions::default())?;
-//! let _cfg = _repo.config()?;
+//! let _cfg = _repo.config();
 //!
 //! # Ok(())
 //! # }
@@ -18,7 +18,7 @@ mod location;
 mod typed;
 
 pub use core::*;
-pub use handle::ConfigHandle;
+pub use handle::Config;
 pub use location::{
     add_config_value, global_config_write_path, remove_config_section, rename_config_section,
     set_config_value, unset_all_config_values, unset_config_value, ConfigLocation,

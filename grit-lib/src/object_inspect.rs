@@ -573,7 +573,7 @@ mod tree_entry_cat_file_type_tests {
 /// Abbreviate `oid` for human output using repository uniqueness rules.
 pub fn abbreviate_for_display(repo: &Repository, oid: ObjectId, short: bool) -> Result<String> {
     if short {
-        let config = repo.config()?.clone();
+        let config = repo.config().snapshot()?.clone();
         let min_len = crate::commit_pretty::resolve_core_abbrev_len(&config, repo.odb())?;
         abbreviate_object_id(repo, oid, min_len)
     } else {

@@ -387,11 +387,11 @@ fn t1300_edit_matches_git_byte_for_byte() {
                 Op::SetWithComment(k, v, _)
                 | Op::ReplaceAllWithComment(k, v, _)
                 | Op::ReplaceAllPatternWithComment(k, v, _, _) => {
-                    assert_eq!(set.get_all(k).last().map(|s| s.as_str()), Some(v));
+                    assert_eq!(set.get_all(k).unwrap().last().map(|s| s.as_str()), Some(v));
                     assert_git_get_matches(&path, k, v, case.name);
                 }
                 Op::AddValueWithComment(k, v, _) => {
-                    assert!(set.get_all(k).iter().any(|x| x == v));
+                    assert!(set.get_all(k).unwrap().iter().any(|x| x == v));
                     assert_git_get_matches(&path, k, v, case.name);
                 }
                 _ => {}
@@ -434,8 +434,8 @@ fn comment_rejects_multiline_and_normalizes_leading_whitespace() {
         .unwrap();
     let mut set = ConfigSet::new();
     set.merge(&reloaded);
-    assert_eq!(set.get("a.x").as_deref(), Some("2"));
-    assert!(set.get("a.b").is_none());
+    assert_eq!(set.get("a.x").unwrap().as_deref(), Some("2"));
+    assert!(set.get("a.b").unwrap().is_none());
     assert_git_get_matches(&path, "a.x", "2", "comment_normalization");
 }
 
@@ -456,7 +456,7 @@ fn multivar_set_is_typed_error_and_unset_last_removes_last_value() {
     // `unset_last` removes only the last value of a multi-valued key.
     assert_eq!(cfg.unset_last("remote.origin.url").expect("unset last"), 1);
     assert_eq!(cfg.count("remote.origin.url").expect("count"), 1);
-    assert_eq!(cfg.get("remote.origin.url").as_deref(), Some("a"));
+    assert_eq!(cfg.get("remote.origin.url").unwrap().as_deref(), Some("a"));
     cfg.write().expect("write");
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
@@ -541,5 +541,8 @@ fn grit_edited_repo_config_git_status_and_reread() {
         .expect("exists");
     let mut set = ConfigSet::new();
     set.merge(&reread);
-    assert_eq!(set.get("user.email").as_deref(), Some("writer@example.com"));
+    assert_eq!(
+        set.get("user.email").unwrap().as_deref(),
+        Some("writer@example.com")
+    );
 }

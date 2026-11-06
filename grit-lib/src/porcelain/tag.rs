@@ -258,7 +258,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
     let target_kind = repo.odb().read_info(&req.target)?.kind;
     let peeled = repo.odb().peel_to_commit(req.target).ok().flatten();
 
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let tree_opts = req.tree_sha256.clone();
     if tree_opts.is_some() && req.sign == Some(false) {
         return Err(Error::TreeSha256RequiresSigning);
@@ -429,7 +429,7 @@ pub fn list_tags_with_detail(
             ))
         }
         TagDetail::Annotation => {
-            let config = repo.config()?;
+            let config = repo.config().snapshot()?;
             let par = repo
                 .thread_policy()
                 .resolve(ParallelOp::DiffContent, config.as_ref());

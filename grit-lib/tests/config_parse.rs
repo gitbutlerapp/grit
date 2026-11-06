@@ -297,8 +297,8 @@ fn multivar_has_key_and_last_entry() {
     let mut set = ConfigSet::new();
     set.merge(&file);
     assert!(set.has_key("r.url"));
-    assert_eq!(set.get("r.url").as_deref(), Some("b"));
-    assert_eq!(set.get_all("r.url"), vec!["a", "b"]);
+    assert_eq!(set.get("r.url").unwrap().as_deref(), Some("b"));
+    assert_eq!(set.get_all("r.url").unwrap(), vec!["a", "b"]);
     assert_eq!(
         set.get_all_raw("r.url"),
         vec![Some("a".into()), Some("b".into())]
@@ -332,12 +332,18 @@ fn t1308_config_set_precedence_matches_git() {
     let env = support::env_with_global(&home, &home.join(".gitconfig"));
     let opts = support::default_load_opts(&git_dir, &env);
     let set = support::load_grit_cascade(&env, Some(&git_dir), &opts);
-    assert_eq!(set.get("user.name").as_deref(), Some(git_name.as_str()));
+    assert_eq!(
+        set.get("user.name").unwrap().as_deref(),
+        Some(git_name.as_str())
+    );
 
     let mut set2 = set.clone();
     set2.add_command_override("user.email", "cmd@example.com")
         .expect("override");
-    assert_eq!(set2.get("user.email").as_deref(), Some("cmd@example.com"));
+    assert_eq!(
+        set2.get("user.email").unwrap().as_deref(),
+        Some("cmd@example.com")
+    );
 }
 
 #[test]
@@ -354,8 +360,8 @@ fn git_config_parameters_and_command_override() {
         .expect("from params");
     let mut set = ConfigSet::new();
     set.merge(&file);
-    assert_eq!(set.get("core.bare").as_deref(), Some("true"));
-    assert_eq!(set.get("user.name").as_deref(), Some("Test"));
+    assert_eq!(set.get("core.bare").unwrap().as_deref(), Some("true"));
+    assert_eq!(set.get("user.name").unwrap().as_deref(), Some("Test"));
 }
 
 #[test]
@@ -432,7 +438,7 @@ fn config_file_set_roundtrip_preserves_get() {
     let reread = ConfigFile::from_path(&path, ConfigScope::Local)
         .expect("read2")
         .expect("exists2");
-    assert_eq!(reread.get("s.new").as_deref(), Some("2"));
+    assert_eq!(reread.get("s.new").unwrap().as_deref(), Some("2"));
 }
 
 #[test]
@@ -464,6 +470,6 @@ fn load_with_includes_disabled() {
     };
     set.merge_file_with_includes(&file, false, &ctx)
         .expect("merge no includes");
-    assert!(set.get("u.name").is_none());
-    assert!(set.get("include.path").is_some());
+    assert!(set.get("u.name").unwrap().is_none());
+    assert!(set.get("include.path").unwrap().is_some());
 }

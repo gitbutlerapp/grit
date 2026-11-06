@@ -628,7 +628,7 @@ fn t0003_gitattributes_blob_literal_backslash_n_not_invented_from_index() {
     let index = Index::load(&wt.join(".git/index")).expect("index");
     let parsed = load_gitattributes_from_index(&index, repo.odb(), wt).expect("from index");
     let map = collect_attrs_for_path(&parsed.rules, &parsed.macros, "file", false);
-    assert!(map.get("text").is_none());
+    assert!(map.get("text").unwrap().is_none());
     assert_attrs_match(wt, &repo, &parsed, "text", &["file"], &["--cached"]);
 }
 

@@ -453,10 +453,10 @@ fn reset_reflog_identity_includes_signature_timestamp_and_git_reads_it() {
             .with_ref_storage(RefStorageFormat::Files),
     )
     .expect("init");
-    repo.config_handle()
+    repo.config()
         .set_local("user.name", "Solo Dev")
         .expect("name");
-    repo.config_handle()
+    repo.config()
         .set_local("user.email", "solo@example.com")
         .expect("email");
     let repo = Repository::open(

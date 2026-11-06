@@ -70,7 +70,7 @@ fn repository_open_discover_and_index_roundtrip() -> crate::error::Result<()> {
     let _ = repo.reference_unix_time();
     let _ = repo.wall_clock_epoch();
     let _ = repo.command_runner();
-    let _ = repo.config()?;
+    let _ = repo.config().snapshot()?;
     let _ = repo.refs();
     let _ = repo.is_bare();
     let _ = repo.index_path();

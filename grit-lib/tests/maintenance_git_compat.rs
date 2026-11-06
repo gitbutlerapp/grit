@@ -32,7 +32,7 @@ use time::OffsetDateTime;
 fn repo_fsck(repo: &Repository, opts: &FsckOptions) -> (FsckReport, bool) {
     let report =
         repository_fsck::fsck(repo, opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
-    let ok = report.ok(&repo.config().expect("config"), opts);
+    let ok = report.ok(&repo.config().snapshot().expect("config"), opts);
     (report, ok)
 }
 

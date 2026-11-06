@@ -538,7 +538,7 @@ pub fn run_show(
             patch: Some(patch),
         });
     }
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let stat = repo
         .stash()
         .diff_stat(n, &stash_options, DiffOptions::from_config(&config))

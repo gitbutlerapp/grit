@@ -102,7 +102,7 @@ pub fn upstream_status(repo: &Repository, branch: &str) -> Result<Option<Upstrea
     let tip = repo
         .references()
         .resolve_if_exists(&format!("refs/heads/{branch}"))?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     build_upstream_status(repo, &config, branch, tip, BranchDetail::Full)
 }
 
@@ -127,7 +127,7 @@ pub fn list_branches(
     if detail == BranchDetail::Names && matches!(query.refs.sort.key, SortKey::Date) {
         return Err(Error::BranchListNamesDateSort);
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let listings = query_refs_peeling(
         repo,
         &ref_query_for_branch_list(query),
@@ -214,7 +214,7 @@ fn ref_query_for_branch_list(query: &BranchListQuery) -> RefQuery {
 fn ref_query_options(config: &ConfigSet) -> RefQueryOptions {
     RefQueryOptions {
         versionsort_suffixes: config
-            .get_all("versionsort.suffix")
+            .values_all("versionsort.suffix")
             .iter()
             .map(|s| s.to_owned())
             .collect(),
@@ -257,9 +257,9 @@ fn build_upstream_status(
     else {
         return Ok(None);
     };
-    let remote = config.get(&remote_key).unwrap_or_else(|| ".".to_owned());
+    let remote = config.value(&remote_key).unwrap_or_else(|| ".".to_owned());
     let merge = config
-        .get(&merge_key)
+        .value(&merge_key)
         .unwrap_or_else(|| format!("refs/heads/{branch_short}"));
     let resolved = repo.references().resolve_if_exists(&full_ref)?;
     let gone = resolved.is_none();
@@ -295,7 +295,7 @@ fn load_commit_metadata(
     if oids.is_empty() {
         return Ok(Vec::new());
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let par_opts = repo
         .thread_policy()
         .resolve(ParallelOp::DiffContent, &config);

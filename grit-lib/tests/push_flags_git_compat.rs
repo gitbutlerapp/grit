@@ -33,7 +33,12 @@ fn open_repo(path: &Path) -> Repository {
 }
 
 fn load_config(repo: &Repository) -> ConfigSet {
-    ConfigSet::load(&Environment::empty(), Some(repo.git_dir()), true).expect("config")
+    ConfigSet::load(
+        &Environment::empty(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(repo.git_dir())),
+    )
+    .expect("config")
 }
 
 fn ctx_from_bare(bare: &Path) -> PushPlanContext {
@@ -90,7 +95,6 @@ fn push_set_upstream_writes_same_config_as_git() {
     let ctx = ctx_from_bare(&bare);
     let plan = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             set_upstream: true,
             ..PushRequest {
@@ -234,7 +238,6 @@ fn follow_tags_matches_git_push_follow_tags() {
     let ctx = ctx_from_bare(&bare);
     let branch_specs = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             remote: Some("origin".into()),
             refspecs: vec!["main".into()],
@@ -318,7 +321,6 @@ fn follow_tags_custom_dst_matches_git() {
     let ctx = ctx_from_bare(&bare_grit);
     let branch_specs = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             remote: Some("grit".into()),
             refspecs: vec!["main:refs/custom/main".into()],
@@ -373,7 +375,6 @@ fn follow_tags_on_up_to_date_branch_includes_older_annotated_tag() {
     let ctx = ctx_from_bare(&bare);
     let branch_specs = resolve_push(
         &repo,
-        &config,
         &PushRequest {
             remote: Some("origin".into()),
             refspecs: vec!["main".into()],

@@ -75,7 +75,10 @@ fn fetch_all_remotes_matches_git_fetch_all() {
     let config = ConfigSet::load(
         &grit_lib::config::environment::Environment::empty(),
         Some(repo.git_dir()),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::empty(),
+            Some(repo.git_dir()),
+        ),
     )
     .expect("config");
     let mut progress = NoProgress;

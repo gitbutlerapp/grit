@@ -77,7 +77,7 @@ pub(crate) fn askpass_program(env: &Environment, config: &ConfigSet) -> Option<P
         .var_os("GIT_ASKPASS")
         .or_else(|| {
             config
-                .get("core.askPass")
+                .value("core.askPass")
                 .map(|value| parse_path(env, &value).into())
         })
         .or_else(|| env.var_os("SSH_ASKPASS"))?;
@@ -488,7 +488,7 @@ impl HelperCredentialProvider {
     /// False when `credential.interactive` is `false` or `never`.
     fn prompts_allowed(&self) -> bool {
         self.config
-            .get("credential.interactive")
+            .value("credential.interactive")
             .is_none_or(|value| value != "never" && parse_bool(&value).unwrap_or(true))
     }
 

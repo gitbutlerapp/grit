@@ -107,7 +107,7 @@ fn config_set_pack_and_log_helpers() {
         set.effective_log_refs_config(),
         grit_lib::refs::LogRefsConfig::Always
     );
-    assert!(!set.quote_path_fully() || set.get_bool("core.quotepath").is_none());
+    assert!(!set.quote_path_fully() || set.get_bool("core.quotepath").unwrap().is_none());
 }
 
 #[test]

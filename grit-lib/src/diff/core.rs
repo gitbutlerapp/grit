@@ -1645,7 +1645,7 @@ where
 /// `diff.indentHeuristic` from config (Git defaults to true when unset).
 #[must_use]
 pub(crate) fn indent_heuristic_from_config(config: &ConfigSet) -> bool {
-    config.bool_or("diff.indentHeuristic", true)
+    config.bool_with_default("diff.indentHeuristic", true)
 }
 
 /// Resolve indent heuristic: `--no-indent-heuristic` and `--indent-heuristic` override config.
@@ -4139,7 +4139,7 @@ pub fn diff_index_to_worktree_with_renames(
     options: DiffIndexToWorktreeOptions,
     rename_threshold: u32,
 ) -> Result<(Vec<DiffEntry>, bool)> {
-    let config = repo.config()?.as_ref().clone();
+    let config = repo.config().snapshot()?.as_ref().clone();
     let thread_policy = repo.thread_policy();
     let odb = repo.odb();
     let (entries, changed) = diff_index_to_worktree_with_options(odb, index, work_tree, options)?;
@@ -6384,7 +6384,10 @@ fn diff_index_to_worktree_inner(
         ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(repository_git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(repository_git_dir),
+            ),
         )
         .unwrap_or_else(|_| ConfigSet::new())
     };
@@ -7262,7 +7265,10 @@ pub(crate) fn smudge_racily_clean_entries(
         ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(git_dir),
+            ),
         )
         .unwrap_or_default()
     });
@@ -7364,11 +7370,14 @@ impl<'a> WorktreeEntryComparer<'a> {
             ConfigSet::load(
                 &crate::environment::Environment::empty(),
                 Some(repository_git_dir),
-                true,
+                &crate::config::LoadConfigOptions::standard(
+                    &crate::environment::Environment::empty(),
+                    Some(repository_git_dir),
+                ),
             )
             .unwrap_or_else(|_| ConfigSet::new())
         });
-        let flag = |key: &str, default: bool| config.bool_or(key, default);
+        let flag = |key: &str, default: bool| config.bool_with_default(key, default);
         Self {
             work_tree,
             mode_policy: crate::index::WorktreeModePolicy::from_config(&config),
@@ -7802,7 +7811,10 @@ pub(crate) fn refresh_index_stat_content_verified_with_rules(
                 ConfigSet::load(
                     &crate::environment::Environment::empty(),
                     Some(git_dir),
-                    true,
+                    &crate::config::LoadConfigOptions::standard(
+                        &crate::environment::Environment::empty(),
+                        Some(git_dir),
+                    ),
                 )
                 .unwrap_or_default()
             })
@@ -8306,7 +8318,10 @@ pub(crate) fn path_checkout_skip_blob_write_when_up_to_date_with_config(
             owned_config = ConfigSet::load(
                 &crate::environment::Environment::empty(),
                 Some(git_dir),
-                true,
+                &crate::config::LoadConfigOptions::standard(
+                    &crate::environment::Environment::empty(),
+                    Some(git_dir),
+                ),
             )
             .unwrap_or_default();
             &owned_config
@@ -9024,7 +9039,10 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                 ConfigSet::load(
                     &crate::environment::Environment::empty(),
                     Some(repository_git_dir),
-                    true,
+                    &crate::config::LoadConfigOptions::standard(
+                        &crate::environment::Environment::empty(),
+                        Some(repository_git_dir),
+                    ),
                 )
                 .unwrap_or_else(|_| ConfigSet::new())
             })

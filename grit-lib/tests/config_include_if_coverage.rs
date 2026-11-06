@@ -39,13 +39,13 @@ fn includeif_onbranch_matches_current_branch() {
     fs::write(git_dir.join("branch.conf"), "[hit]\n\tk = yes\n").expect("branch");
 
     let env = Environment::empty();
-    let set = ConfigSet::load_with_options(
+    let set = ConfigSet::load(
         &env,
         Some(&git_dir),
         &support::default_load_opts(&git_dir, &env),
     )
     .expect("load");
-    assert_eq!(set.get("hit.k").as_deref(), Some("yes"));
+    assert_eq!(set.get("hit.k").unwrap().as_deref(), Some("yes"));
 }
 
 #[test]
@@ -68,13 +68,13 @@ fn includeif_hasconfig_remote_url() {
     fs::write(git_dir.join("remote.conf"), "[fromremote]\n\tk = 1\n").expect("remote inc");
 
     let env = Environment::empty();
-    let set = ConfigSet::load_with_options(
+    let set = ConfigSet::load(
         &env,
         Some(&git_dir),
         &support::default_load_opts(&git_dir, &env),
     )
     .expect("load");
-    assert_eq!(set.get("fromremote.k").as_deref(), Some("1"));
+    assert_eq!(set.get("fromremote.k").unwrap().as_deref(), Some("1"));
 }
 
 #[test]
@@ -175,7 +175,7 @@ impl HasconfigFixture {
     }
 
     fn grit_load(&self, env: &Environment) -> grit_lib::error::Result<ConfigSet> {
-        ConfigSet::load_with_options(
+        ConfigSet::load(
             env,
             Some(&self.git_dir),
             &support::default_load_opts(&self.git_dir, env),
@@ -216,7 +216,7 @@ impl HasconfigFixture {
         assert_eq!(git.as_deref(), Some(expected), "system git user.email");
         let set = self.grit_load(env).expect("grit load");
         assert_eq!(
-            set.get("user.email").as_deref(),
+            set.get("user.email").unwrap().as_deref(),
             Some(expected),
             "grit user.email"
         );
@@ -371,7 +371,10 @@ fn hasconfig_single_file_merge_scans_only_that_file() {
     let env = fx.env();
     set.merge_file_with_includes(&file, true, &ctx(&fx.git_dir, &env))
         .expect("merge");
-    assert_eq!(set.get("user.email").as_deref(), Some(PERSONAL_EMAIL));
+    assert_eq!(
+        set.get("user.email").unwrap().as_deref(),
+        Some(PERSONAL_EMAIL)
+    );
 }
 
 #[test]
@@ -383,14 +386,30 @@ fn hasconfig_early_and_protected_config_scan_their_own_layers() {
     let early = ConfigSet::read_early_config(&env, Some(&fx.git_dir), "user.email").expect("early");
     assert_eq!(early.last().map(String::as_str), Some(WORK_EMAIL));
 
-    let protected = ConfigSet::load_protected(&env, false).expect("protected");
-    assert_eq!(protected.get("user.email").as_deref(), Some(PERSONAL_EMAIL));
+    let protected = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::protected(&env, false),
+    )
+    .expect("protected");
+    assert_eq!(
+        protected.get("user.email").unwrap().as_deref(),
+        Some(PERSONAL_EMAIL)
+    );
 
     let mut env = env;
     env.git_config_parameters =
         Some("'remote.cli.url'='https://github.com/work-org/cli.git'".into());
-    let protected = ConfigSet::load_protected(&env, false).expect("protected with -c");
-    assert_eq!(protected.get("user.email").as_deref(), Some(WORK_EMAIL));
+    let protected = ConfigSet::load(
+        &env,
+        None,
+        &crate::config::LoadConfigOptions::protected(&env, false),
+    )
+    .expect("protected with -c");
+    assert_eq!(
+        protected.get("user.email").unwrap().as_deref(),
+        Some(WORK_EMAIL)
+    );
 }
 
 #[test]
@@ -438,7 +457,7 @@ fn parse_rejects_bad_lines_and_negotiation_algorithm() {
         ConfigScope::Local,
     )
     .expect("inline section key");
-    assert_eq!(file.get("inline.sub.inside").as_deref(), Some("1"));
+    assert_eq!(file.get("inline.sub.inside").unwrap().as_deref(), Some("1"));
 }
 
 #[test]
@@ -464,11 +483,11 @@ fn includeif_gitdir_icase_matches() {
     let mut env = isolated_env(&home);
     env.cwd = repo.clone();
     env.pwd = Some(repo.display().to_string());
-    let set = ConfigSet::load_with_options(
+    let set = ConfigSet::load(
         &env,
         Some(&git_dir),
         &support::default_load_opts(&git_dir, &env),
     )
     .expect("load");
-    assert_eq!(set.get("icase.k").as_deref(), Some("1"));
+    assert_eq!(set.get("icase.k").unwrap().as_deref(), Some("1"));
 }

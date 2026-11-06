@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, Result};
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
@@ -167,15 +167,20 @@ fn contains_reports_primary_failure_even_when_extra_source_has_object() {
 fn refs_fsck_reports_backend_failure_not_missing_object() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (repo, flaky, _commit) = flaky_repo(dir.path());
-    let config = ConfigSet::load_repo_local_only(repo.git_dir()).expect("config");
-    let issues = refs_fsck(&repo, repo.odb(), &config, false).expect("healthy fsck");
+    let config = ConfigSet::load(
+        &Environment::empty(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::repo_local_only(repo.git_dir()),
+    )
+    .expect("config");
+    let issues = refs_fsck(&repo, repo.odb(), false).expect("healthy fsck");
     assert!(
         issues.iter().all(|i| i.msg_id != "missingObject"),
         "{issues:?}"
     );
 
     flaky.fail.store(true, Ordering::Relaxed);
-    let err = refs_fsck(&repo, repo.odb(), &config, false).unwrap_err();
+    let err = refs_fsck(&repo, repo.odb(), false).unwrap_err();
     assert!(is_backend_down(&err), "{err:?}");
 }
 

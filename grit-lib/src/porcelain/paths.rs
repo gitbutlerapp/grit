@@ -324,7 +324,11 @@ pub fn move_paths(
         });
     }
 
-    let ignorecase = repo.config().ok().is_some_and(|cfg| cfg.ignore_case());
+    let ignorecase = repo
+        .config()
+        .snapshot()
+        .ok()
+        .is_some_and(|cfg| cfg.ignore_case());
 
     let mut index = repo.load_index()?;
     let dst_had_trailing_slash = destination_had_trailing_separator(&opts.destination);
@@ -1055,7 +1059,7 @@ fn paths_differing_from_worktree(
         index_mtime,
         repository_git_dir: Some(repo.git_dir().to_path_buf()),
         refresh_index_stat_in_pass: true,
-        config: repo.config().ok(),
+        config: repo.config().snapshot().ok(),
         worktree_rules: Some(Arc::clone(&rules_arc)),
         command_runner: Some(repo.command_runner()),
         restrict_to_paths: Some(Arc::new(paths)),
@@ -1268,7 +1272,7 @@ fn normalize_and_validate_repo_relative(
     if rel.is_empty() {
         return Err(Error::InvalidPath("empty path".into()));
     }
-    let opts = ProtectOptions::from_config(&*repo.config()?);
+    let opts = ProtectOptions::from_config(&*repo.config().snapshot()?);
     validate_path(
         rel.as_bytes(),
         EntryMode::new(0o100644),
