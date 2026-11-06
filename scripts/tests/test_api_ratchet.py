@@ -820,50 +820,211 @@ class ApiRatchetMetricTests(unittest.TestCase):
         snap = ar.compute_metrics(public_api_text="", payload=payload)
         self.assertEqual(snap.metrics["pub_fn_refname_str"].count, 1)
 
-    def test_pub_fn_pathspec_strings(self) -> None:
-        payload = _minimal_rustdoc(
-            {
-                "name": "filter_paths",
-                "inner": {
-                    "function": {
-                        "sig": {
-                            "inputs": [
-                                [
-                                    "paths",
-                                    {
-                                        "borrowed_ref": {
-                                            "is_mutable": False,
-                                            "type": {
-                                                "resolved_path": {
-                                                    "path": "Vec",
-                                                    "args": {
-                                                        "angle_bracketed": {
-                                                            "args": [
-                                                                {
-                                                                    "type": {
-                                                                        "resolved_path": {
-                                                                            "path": "String"
-                                                                        }
-                                                                    }
-                                                                }
-                                                            ]
-                                                        }
-                                                    },
-                                                }
-                                            },
-                                        }
-                                    },
-                                ]
-                            ],
-                            "output": None,
-                        },
-                        "header": {},
-                    }
+    def test_pub_fn_refname_str_public_trait_default_method(self) -> None:
+        payload = {
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [1, 2]}},
                 },
-            }
-        )
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "RefStore",
+                    "visibility": "public",
+                    "inner": {"trait": {"items": [2], "bounds": []}},
+                },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "name": "read_raw",
+                    "visibility": "default",
+                    "inner": {
+                        "function": {
+                            "sig": {
+                                "inputs": [
+                                    [
+                                        "self",
+                                        {
+                                            "borrowed_ref": {
+                                                "is_mutable": False,
+                                                "type": {"generic": "Self"},
+                                            }
+                                        },
+                                    ],
+                                    [
+                                        "name",
+                                        {
+                                            "borrowed_ref": {
+                                                "is_mutable": False,
+                                                "type": {"primitive": "str"},
+                                            }
+                                        },
+                                    ],
+                                ],
+                                "output": None,
+                            },
+                            "header": {},
+                        }
+                    },
+                },
+            },
+            "paths": {
+                "0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"},
+                "1": {
+                    "crate_id": 0,
+                    "path": ["grit_lib", "refs", "store", "RefStore"],
+                    "kind": "trait",
+                },
+            },
+        }
         snap = ar.compute_metrics(public_api_text="", payload=payload)
-        self.assertEqual(snap.metrics["pub_fn_pathspec_strings"].count, 1)
+        self.assertEqual(snap.metrics["pub_fn_refname_str"].count, 1)
+        self.assertIn("RefStore::read_raw", snap.metrics["pub_fn_refname_str"].offenders[0])
+
+    def test_pub_fn_pathspec_strings_resolved_pathspecs_fields(self) -> None:
+        vec_string_field = {
+            "struct_field": {
+                "resolved_path": {
+                    "path": "Vec",
+                    "id": 85,
+                    "args": {
+                        "angle_bracketed": {
+                            "args": [
+                                {
+                                    "type": {
+                                        "resolved_path": {
+                                            "path": "String",
+                                            "id": 86,
+                                            "args": None,
+                                        }
+                                    }
+                                }
+                            ],
+                            "constraints": [],
+                        }
+                    },
+                }
+            }
+        }
+        payload = {
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [1, 2, 3]}},
+                },
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "ResolvedPathspecs",
+                    "visibility": "public",
+                    "inner": {
+                        "struct": {
+                            "kind": {"plain": {"fields": [2, 3], "has_stripped_fields": False}},
+                            "generics": {"params": [], "where_predicates": []},
+                        }
+                    },
+                },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "name": "specs",
+                    "visibility": "public",
+                    "inner": vec_string_field,
+                },
+                "3": {
+                    "id": 3,
+                    "crate_id": 0,
+                    "name": "sources",
+                    "visibility": "public",
+                    "inner": vec_string_field,
+                },
+            },
+            "paths": {
+                "0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"},
+                "1": {
+                    "crate_id": 0,
+                    "path": ["grit_lib", "worktree", "pathspec", "ResolvedPathspecs"],
+                    "kind": "struct",
+                },
+            },
+        }
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_fn_pathspec_strings"].count, 2)
+
+    def test_pub_cancel_types_tuple_struct_field(self) -> None:
+        payload = {
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [1, 2]}},
+                },
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "FlagCancel",
+                    "visibility": "public",
+                    "inner": {
+                        "struct": {
+                            "kind": {"tuple": [2]},
+                            "generics": {"params": [], "where_predicates": []},
+                        }
+                    },
+                },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "name": "0",
+                    "visibility": "public",
+                    "inner": {
+                        "struct_field": {
+                            "resolved_path": {
+                                "path": "std::sync::Arc",
+                                "id": 1,
+                                "args": {
+                                    "angle_bracketed": {
+                                        "args": [
+                                            {
+                                                "type": {
+                                                    "resolved_path": {
+                                                        "path": "std::sync::atomic::AtomicBool",
+                                                        "id": 2,
+                                                        "args": None,
+                                                    }
+                                                }
+                                            }
+                                        ],
+                                        "constraints": [],
+                                    }
+                                },
+                            }
+                        }
+                    },
+                },
+            },
+            "paths": {
+                "0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"},
+                "1": {
+                    "crate_id": 0,
+                    "path": ["grit_lib", "progress", "FlagCancel"],
+                    "kind": "struct",
+                },
+            },
+        }
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertGreaterEqual(snap.metrics["pub_cancel_types"].count, 2)
+        self.assertTrue(
+            any("FlagCancel" in line and "field" in line for line in snap.metrics["pub_cancel_types"].offenders),
+        )
 
     def test_pub_fn_configset_with_repo(self) -> None:
         repo_ref = {

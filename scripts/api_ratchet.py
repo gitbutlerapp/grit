@@ -759,6 +759,86 @@ def iter_public_functions(index: dict[str, Any]) -> Iterable[tuple[str, dict[str
         yield str(item_id), item, inner["function"]
 
 
+def iter_public_trait_methods(
+    index: dict[str, Any],
+    paths_map: dict[str, Any],
+) -> Iterable[tuple[str, dict[str, Any], dict[str, Any], str]]:
+    """Trait methods on public traits (rustdoc marks them ``default``, not ``public``)."""
+    for trait_id, trait_item in index.items():
+        if trait_item.get("crate_id") != 0 or trait_item.get("visibility") != "public":
+            continue
+        trait_inner = (trait_item.get("inner") or {}).get("trait")
+        if not trait_inner:
+            continue
+        trait_path = public_path_for_item(index, paths_map, str(trait_id))
+        for member_id in trait_inner.get("items") or []:
+            member = index_entry(index, member_id)
+            if member is None:
+                continue
+            if member.get("visibility") not in {"public", "default"}:
+                continue
+            member_inner = member.get("inner") or {}
+            if "function" not in member_inner:
+                continue
+            member_name = member.get("name") or "?"
+            if trait_path and not trait_path.startswith("id:"):
+                method_path = f"{trait_path}::{member_name}"
+            else:
+                method_path = public_path_for_item(index, paths_map, str(member_id))
+            yield str(member_id), member, member_inner["function"], method_path
+
+
+def struct_field_member_ids(struct_inner: dict[str, Any]) -> list[str]:
+    """Field item ids from rustdoc ``inner.struct.kind`` (plain or tuple struct)."""
+    kind = struct_inner.get("kind")
+    if not isinstance(kind, dict):
+        return []
+    ids: list[str] = []
+    plain = kind.get("plain")
+    if isinstance(plain, dict):
+        ids.extend(str(i) for i in plain.get("fields") or [])
+    tuple_fields = kind.get("tuple")
+    if isinstance(tuple_fields, list):
+        ids.extend(str(i) for i in tuple_fields)
+    return ids
+
+
+def type_node_from_struct_field(field_inner: dict[str, Any]) -> Any | None:
+    """Turn ``inner.struct_field`` into a type node for ``type_display`` / matchers."""
+    sf = field_inner.get("struct_field")
+    if not isinstance(sf, dict):
+        return None
+    if any(key in sf for key in ("resolved_path", "primitive", "borrowed_ref", "generic", "dyn_trait")):
+        return sf
+    if "type" in sf:
+        return sf["type"]
+    return sf
+
+
+def iter_public_struct_fields(
+    index: dict[str, Any],
+) -> Iterable[tuple[str, str, str, Any]]:
+    """Yield ``(struct_path, field_name, field_id, type_node)`` for public fields."""
+    for struct_id, struct_item in index.items():
+        if struct_item.get("crate_id") != 0 or struct_item.get("visibility") != "public":
+            continue
+        struct_inner = (struct_item.get("inner") or {}).get("struct")
+        if not struct_inner:
+            continue
+        struct_name = struct_item.get("name") or "?"
+        for field_id in struct_field_member_ids(struct_inner):
+            field_item = index_entry(index, field_id)
+            if field_item is None or field_item.get("visibility") != "public":
+                continue
+            field_name = field_item.get("name")
+            if field_name is None:
+                field_name = field_id
+            field_type = type_node_from_struct_field(field_item.get("inner") or {})
+            if field_type is None:
+                continue
+            yield struct_id, struct_name, str(field_name), field_type
+
+
 def public_path_for_item(
     index: dict[str, Any],
     paths_map: dict[str, Any],
@@ -947,28 +1027,34 @@ def compute_metrics(
         if "struct" in inner and name.endswith("Progress"):
             progress_offenders.append(f"{path} :: struct {name}")
 
-        if "struct" in inner:
-            fields_raw = inner["struct"].get("fields")
-            fields: list[dict[str, Any]] = []
-            if isinstance(fields_raw, dict):
-                fields = fields_raw.get("fields") or []
-            elif isinstance(fields_raw, list):
-                fields = fields_raw
-            is_resolved_pathspecs = path.endswith("::ResolvedPathspecs")
-            for field in fields:
-                field_name = field.get("name")
-                field_ty = field.get("type")
-                if field_ty and is_dyn_cancel_type(field_ty, index):
-                    cancel_offenders.append(f"{path} :: field {field_name}")
-                if field_ty and is_atomic_bool_watch_type(field_ty, index):
-                    cancel_offenders.append(f"{path} :: field {field_name}")
-                if (
-                    is_resolved_pathspecs
-                    and field_name in RESOLVED_PATHSPECS_STRING_FIELDS
-                    and field_ty
-                    and is_pathspec_string_collection(field_ty)
-                ):
-                    pathspec_str_offenders.append(f"{path} :: field {field_name}")
+    for struct_id, struct_name, field_name, field_ty in iter_public_struct_fields(index):
+        struct_path = public_path_for_item(index, paths_map, str(struct_id))
+        if is_dyn_cancel_type(field_ty, index):
+            cancel_offenders.append(f"{struct_path} :: field {field_name}")
+        if is_atomic_bool_watch_type(field_ty, index):
+            cancel_offenders.append(f"{struct_path} :: field {field_name}")
+        if (
+            struct_path.endswith("::ResolvedPathspecs")
+            and field_name in RESOLVED_PATHSPECS_STRING_FIELDS
+            and is_pathspec_string_collection(field_ty)
+        ):
+            pathspec_str_offenders.append(f"{struct_path} :: field {field_name}")
+
+    def record_refname_str_params(
+        item_id: str,
+        item: dict[str, Any],
+        fn: dict[str, Any],
+        *,
+        path: str | None = None,
+    ) -> None:
+        item_path = path or public_path_for_item(index, paths_map, item_id)
+        if not path_in_refname_str_modules(item_id, item_path):
+            return
+        for param_name, param_ty in function_inputs(fn):
+            if param_name in REFNAME_PARAM_NAMES and is_str_or_string_type(param_ty):
+                refname_str_offenders.append(
+                    f"{item_path} :: {item.get('name', '?')}({param_name})",
+                )
 
     for item_id, item, fn in iter_public_functions(index):
         path = public_path_for_item(index, paths_map, item_id)
@@ -1030,10 +1116,7 @@ def compute_metrics(
         ):
             refname_validator_offenders.append(f"{path} :: {name}")
 
-        if path_in_refname_str_modules(item_id, path):
-            for param_name, param_ty in inputs:
-                if param_name in REFNAME_PARAM_NAMES and is_str_or_string_type(param_ty):
-                    refname_str_offenders.append(f"{path} :: {name}({param_name})")
+        record_refname_str_params(item_id, item, fn)
 
         if has_configset_param(inputs, index):
             method = is_method(fn)
@@ -1056,6 +1139,9 @@ def compute_metrics(
             repo_constructor_offenders.append(f"{path} :: {name}")
         if "rev_parse" in path and path.endswith("::discover_optional"):
             repo_constructor_offenders.append(f"{path} :: {name}")
+
+    for item_id, item, fn, method_path in iter_public_trait_methods(index, paths_map):
+        record_refname_str_params(item_id, item, fn, path=method_path)
 
     for item_id, item in index.items():
         if item.get("crate_id") != 0:
