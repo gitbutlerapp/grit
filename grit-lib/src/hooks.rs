@@ -115,28 +115,42 @@ pub enum HookError {
         /// under [`HookStdio::Inherit`].
         output: HookOutput,
     },
-    /// Configuration or internal error while resolving hooks.
-    #[error("{0}")]
-    Internal(String),
+    /// Repository or config could not be loaded for the hook run.
+    #[error(transparent)]
+    Repository(Arc<crate::error::Error>),
+
+    /// A configured hook event references `hook.<name>` without `hook.<name>.command`.
+    #[error(
+        "'hook.{hook_name}.command' must be configured or 'hook.{hook_name}.event' must be removed; aborting."
+    )]
+    MissingHookCommand {
+        /// Configured hook name (`hook.<name>.*`).
+        hook_name: String,
+    },
     /// The hook subprocess was stopped because the operation was cancelled.
     #[error("hook run cancelled")]
     Cancelled,
 }
 
 impl HookError {
-    /// Hook output captured before the failure, or `None` for [`HookError::Internal`].
+    /// Hook output captured before the failure, or `None` for configuration and repository errors.
     #[must_use]
     pub fn output(&self) -> Option<&HookOutput> {
         match self {
             HookError::Failed { output, .. } | HookError::Spawn { output, .. } => Some(output),
-            HookError::Internal(_) | HookError::Cancelled => None,
+            HookError::Repository(_)
+            | HookError::MissingHookCommand { .. }
+            | HookError::Cancelled => None,
         }
     }
 }
 
-impl From<String> for HookError {
-    fn from(value: String) -> Self {
-        Self::Internal(value)
+impl From<crate::error::Error> for HookError {
+    fn from(value: crate::error::Error) -> Self {
+        match value {
+            crate::error::Error::Hook(hook) => hook,
+            other => HookError::Repository(Arc::new(other)),
+        }
     }
 }
 
@@ -315,7 +329,7 @@ impl HookConfigTables {
     /// Configured hooks for `event`, in order, excluding disabled entries without a command.
     ///
     /// Returns `Err` if a non-disabled hook lacks `hook.<name>.command` (Git dies here).
-    fn hooks_for_event(&self, event: &str) -> Result<Vec<(String, String)>, String> {
+    fn hooks_for_event(&self, event: &str) -> Result<Vec<(String, String)>, HookError> {
         let Some(names) = self.event_hooks.get(event) else {
             return Ok(Vec::new());
         };
@@ -325,9 +339,9 @@ impl HookConfigTables {
                 continue;
             }
             let Some(cmd) = self.commands.get(name) else {
-                return Err(format!(
-                    "'hook.{name}.command' must be configured or 'hook.{name}.event' must be removed; aborting."
-                ));
+                return Err(HookError::MissingHookCommand {
+                    hook_name: name.clone(),
+                });
             };
             out.push((name.clone(), cmd.clone()));
         }
@@ -444,7 +458,7 @@ fn traditional_hook_candidate(
 fn resolve_configured_hooks_only(
     hook_name: &str,
     config: &ConfigSet,
-) -> Result<Vec<ResolvedHook>, String> {
+) -> Result<Vec<ResolvedHook>, HookError> {
     let tables = HookConfigTables::from_config(config);
     let mut seq = Vec::new();
     for (_friendly, command) in tables.hooks_for_event(hook_name)? {
@@ -458,7 +472,7 @@ fn resolve_hook_sequence(
     repo: &Repository,
     hook_name: &str,
     config: &ConfigSet,
-) -> Result<Vec<ResolvedHook>, String> {
+) -> Result<Vec<ResolvedHook>, HookError> {
     let tables = HookConfigTables::from_config(config);
     let mut seq = Vec::new();
     for (_friendly, command) in tables.hooks_for_event(hook_name)? {
@@ -821,7 +835,8 @@ pub fn run_post_merge(repo: &Repository, squash: bool) -> bool {
 /// # Errors
 ///
 /// [`HookError::Failed`] when the hook exits non-zero, which refuses the rebase;
-/// [`HookError::Spawn`] / [`HookError::Internal`] as for [`run_hook`].
+/// [`HookError::Spawn`], [`HookError::Repository`], or [`HookError::MissingHookCommand`] as for
+/// [`run_hook`].
 pub fn run_pre_rebase(repo: &Repository, upstream: Option<&str>) -> Result<bool, HookError> {
     let configured;
     let upstream_arg = match upstream {
@@ -1120,8 +1135,9 @@ fn finish_hook_wait(
 /// # Errors
 ///
 /// [`HookError::Spawn`] when a hook (or the shell that runs it) cannot be started, carrying the
-/// output earlier hooks for the event already wrote, and [`HookError::Internal`] for invalid
-/// `hook.*` configuration. A hook that runs and exits non-zero is `Ok(HookResult::Failed { .. })`.
+/// output earlier hooks for the event already wrote, and [`HookError::MissingHookCommand`] for an
+/// incomplete `hook.*` configuration. A hook that runs and exits non-zero is
+/// `Ok(HookResult::Failed { .. })`.
 pub fn run_hook_opts(
     repo: Option<&Repository>,
     hook_name: &str,
@@ -1352,8 +1368,9 @@ pub fn run_commit_hook_checked(
 ///
 /// # Errors
 ///
-/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Internal`] when the
-/// repository config cannot be loaded or `hook.*` entries are invalid.
+/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Repository`] when repository
+/// config cannot be loaded, or [`HookError::MissingHookCommand`] when a configured hook has no
+/// command.
 pub fn run_commit_hook(
     repo: &Repository,
     hook_name: &str,
@@ -1383,7 +1400,7 @@ pub(crate) fn run_commit_hook_with_cancel(
     let config = repo
         .config()
         .snapshot()
-        .map_err(|e| HookError::Internal(e.to_string()))?;
+        .map_err(HookError::from)?;
     run_hook_opts_with_cancel(
         Some(repo),
         hook_name,
@@ -1416,8 +1433,9 @@ fn repo_hook_options<'a>(repo: &Repository, hook_name: &str) -> RunHookOptions<'
 ///
 /// # Errors
 ///
-/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Internal`] when the
-/// repository config cannot be loaded or `hook.*` entries are invalid.
+/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Repository`] when repository
+/// config cannot be loaded, or [`HookError::MissingHookCommand`] when a configured hook has no
+/// command.
 pub fn run_hook(
     repo: &Repository,
     hook_name: &str,
@@ -1427,7 +1445,7 @@ pub fn run_hook(
     let config = repo
         .config()
         .snapshot()
-        .map_err(|e| HookError::Internal(e.to_string()))?;
+        .map_err(HookError::from)?;
     run_hook_opts(
         Some(repo),
         hook_name,
@@ -1492,7 +1510,7 @@ pub(crate) fn run_hook_in_git_dir_with_cancel(
     let config = repo
         .config()
         .snapshot()
-        .map_err(|e| HookError::Internal(e.to_string()))?;
+        .map_err(HookError::from)?;
     run_hook_opts_with_cancel(
         Some(repo),
         hook_name,
@@ -1561,8 +1579,8 @@ impl PrePushRef {
 /// # Errors
 ///
 /// [`HookError::Failed`] when the hook exits non-zero (the push must not proceed),
-/// [`HookError::Spawn`] when it cannot be started, and [`HookError::Internal`] when the
-/// configuration cannot be loaded or `hook.*` entries are invalid.
+/// [`HookError::Spawn`] when it cannot be started, [`HookError::Repository`] when configuration
+/// cannot be loaded, and [`HookError::MissingHookCommand`] when a configured hook has no command.
 pub fn run_pre_push_hook(
     repo: &Repository,
     remote: &str,
@@ -1572,7 +1590,7 @@ pub fn run_pre_push_hook(
     let config = repo
         .config()
         .snapshot()
-        .map_err(|e| HookError::Internal(e.to_string()))?;
+        .map_err(HookError::from)?;
     let algo = repo.odb().hash_algo();
     let stdin: String = refs.iter().map(|r| r.stdin_line(algo)).collect();
     let result = run_hook_opts(
@@ -1674,7 +1692,7 @@ impl RefHookContext {
             &crate::config::LoadConfigOptions::standard(&self.environment, Some(&self.git_dir)),
         )
         .map(Arc::new)
-        .map_err(|e| HookError::Internal(e.to_string()))
+        .map_err(HookError::from)
     }
 
     /// Run the `reference-transaction` hook for one phase and stdin payload.
@@ -1749,7 +1767,7 @@ fn resolve_hook_sequence_for_ref(
     ctx: &RefHookContext,
     hook_name: &str,
     config: &ConfigSet,
-) -> Result<Vec<ResolvedHook>, String> {
+) -> Result<Vec<ResolvedHook>, HookError> {
     let tables = HookConfigTables::from_config(config);
     let mut seq = Vec::new();
     for (_friendly, command) in tables.hooks_for_event(hook_name)? {
@@ -1981,7 +1999,13 @@ mod tests {
         };
         assert!(!output.is_empty());
         assert!(HookOutput::default().is_empty());
-        assert_eq!(HookError::Internal("bad".into()).output(), None);
+        assert_eq!(
+            HookError::MissingHookCommand {
+                hook_name: "x".into()
+            }
+            .output(),
+            None
+        );
         assert_eq!(
             format!("{output:?}"),
             r#"HookOutput { stdout: "out", stderr: "err" }"#

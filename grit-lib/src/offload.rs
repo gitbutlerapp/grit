@@ -40,7 +40,6 @@ use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
 use crate::partial_clone::{stored_remote_filter, ObjectFilterSpec};
 use crate::repo::Repository;
-use crate::repo::RepositoryError;
 
 /// Message written into the `.keep` marker of every pack offload adds to a LOP.
 pub const LOP_KEEP_MESSAGE: &str = "grit offload: large-object promisor pack";

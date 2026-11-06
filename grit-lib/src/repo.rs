@@ -1577,12 +1577,10 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Message`] when no fetcher is installed, or transport failures from the fetcher.
+    /// Returns [`RepositoryError::PromisorFetcherMissing`] when no fetcher is installed, or transport failures from the fetcher.
     pub fn prefetch_promised(&self, oids: &[ObjectId]) -> Result<()> {
         let Some(fetcher) = self.caches().promisor_fetcher() else {
-            return Err(Error::Message(
-                "promisor prefetch requires a PromisorFetcher on RepositoryOptions".into(),
-            ));
+            return Err(RepositoryError::PromisorFetcherMissing.into());
         };
         fetcher.fetch_missing(self, oids)
     }
@@ -3164,8 +3162,8 @@ pub(crate) fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Re
         crate::ref_storage::RefStorageFormat::validate_config_extension(raw)?;
     }
 
-    if let Some(msg) = parsed.format_error_message() {
-        return Err(Error::Message(msg));
+    if let Some(err) = parsed.repository_extension_error() {
+        return Err(err.into());
     }
 
     Ok(())
@@ -3228,20 +3226,19 @@ impl RepositoryFormat {
     /// This does not cover the `core.repositoryformatversion > 1` case; callers that
     /// need the version message handle it separately via
     /// [`repository_format_warning`].
-    fn format_error_message(&self) -> Option<String> {
+    /// Typed extension validation failure, if any (Git `verify_repository_format` rules).
+    fn repository_extension_error(&self) -> Option<RepositoryError> {
         // Mirror git/setup.c `check_repo_format` / `verify_repository_format`. Extensions
         // split into:
         //   * v0-compatible (`handle_extension_v0`): respected even in a v0 repository.
         //   * v1-only (`handle_extension`): legal only when `core.repositoryformatversion >= 1`.
         // A v0 repository that declares any v1-only extension is rejected (t0001 #60, #62);
         // an unknown extension is rejected only in a v1 repository.
-        let mut v1_only_found: Vec<&str> = Vec::new();
-        let mut unknown_found: Vec<&str> = Vec::new();
+        let mut v1_only_found: Vec<String> = Vec::new();
+        let mut unknown_found: Vec<String> = Vec::new();
         for extension in &self.extensions {
             match extension.as_str() {
-                // v0-compatible extensions — always allowed.
                 "noop" | "preciousobjects" | "partialclone" | "worktreeconfig" => {}
-                // v1-only extensions — only valid with repository format version >= 1.
                 "noop-v1"
                 | "objectformat"
                 | "compatobjectformat"
@@ -3249,43 +3246,38 @@ impl RepositoryFormat {
                 | "relativeworktrees"
                 | "submodulepathconfig" => {
                     if self.repo_version == 0 {
-                        v1_only_found.push(extension);
+                        v1_only_found.push(extension.clone());
                     }
                 }
-                // Unknown extension — rejected only in a v1 repository.
                 _ => {
                     if self.repo_version >= 1 {
-                        unknown_found.push(extension);
+                        unknown_found.push(extension.clone());
                     }
                 }
             }
         }
 
         if !unknown_found.is_empty() {
-            let mut msg = if unknown_found.len() == 1 {
-                "unknown repository extension found:".to_owned()
-            } else {
-                "unknown repository extensions found:".to_owned()
-            };
-            for ext in &unknown_found {
-                msg.push_str(&format!("\n\t{ext}"));
-            }
-            return Some(msg);
+            return Some(RepositoryError::UnknownRepositoryExtensions(
+                error::UnknownRepositoryExtensions {
+                    extensions: unknown_found,
+                },
+            ));
         }
 
         if !v1_only_found.is_empty() {
-            let mut msg = if v1_only_found.len() == 1 {
-                "repo version is 0, but v1-only extension found:".to_owned()
-            } else {
-                "repo version is 0, but v1-only extensions found:".to_owned()
-            };
-            for ext in &v1_only_found {
-                msg.push_str(&format!("\n\t{ext}"));
-            }
-            return Some(msg);
+            return Some(RepositoryError::V1OnlyExtensionsInFormatZero(
+                error::V1OnlyExtensionsInFormatZero {
+                    extensions: v1_only_found,
+                },
+            ));
         }
 
         None
+    }
+
+    fn format_error_message(&self) -> Option<String> {
+        self.repository_extension_error().map(|err| err.to_string())
     }
 }
 
@@ -3545,7 +3537,7 @@ fn try_open_at(options: &RepositoryOptions, dir: &Path) -> Result<Option<Discove
                 if let Some(val) = cfg.value("safe.bareRepository") {
                     if val.eq_ignore_ascii_case("explicit") {
                         return Err(RepositoryError::ForbiddenBareRepository {
-                            path: path_for_error_message(dir.into()),
+                            path: path_for_error_message(dir),
                         }
                         .into());
                     }
@@ -3609,7 +3601,7 @@ fn ensure_safe_directory_allows(
         return Ok(());
     }
     Err(RepositoryError::DubiousOwnership {
-        path: path_for_error_message(checked.into()),
+        path: path_for_error_message(checked),
         owner_uid: None,
         effective_uid: None,
     }
@@ -4641,7 +4633,9 @@ fn test_inject_index_write_fail() -> Result<()> {
 
 #[path = "repo/repository_error.rs"]
 pub mod error;
-pub use error::{RepositoryError, RepositoryResult};
+pub use error::{
+    RepositoryError, RepositoryResult, UnknownRepositoryExtensions, V1OnlyExtensionsInFormatZero,
+};
 
 #[path = "repo_location.rs"]
 mod location;

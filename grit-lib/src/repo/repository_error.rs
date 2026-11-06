@@ -4,7 +4,53 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use std::fmt;
+
 use crate::error::{NotARepositoryReason, PathIoError};
+
+/// One or more unknown `extensions.*` keys (repository format version ≥ 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownRepositoryExtensions {
+    /// Extension names from the config file, in sorted order.
+    pub extensions: Vec<String>,
+}
+
+impl fmt::Display for UnknownRepositoryExtensions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let lead = if self.extensions.len() == 1 {
+            "unknown repository extension found:"
+        } else {
+            "unknown repository extensions found:"
+        };
+        write!(f, "{lead}")?;
+        for ext in &self.extensions {
+            write!(f, "\n\t{ext}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Format version 0 with `extensions.*` keys that require format version 1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V1OnlyExtensionsInFormatZero {
+    /// Extension names from the config file, in sorted order.
+    pub extensions: Vec<String>,
+}
+
+impl fmt::Display for V1OnlyExtensionsInFormatZero {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let lead = if self.extensions.len() == 1 {
+            "repo version is 0, but v1-only extension found:"
+        } else {
+            "repo version is 0, but v1-only extensions found:"
+        };
+        write!(f, "{lead}")?;
+        for ext in &self.extensions {
+            write!(f, "\n\t{ext}")?;
+        }
+        Ok(())
+    }
+}
 use crate::git_dir::GitDirPathOperation;
 use crate::objects::HashAlgo;
 
@@ -59,6 +105,18 @@ pub enum RepositoryError {
     /// Command requires a working tree but the repository is bare.
     #[error("this operation needs a working tree")]
     RequiresWorkTree,
+
+    /// [`super::Repository::prefetch_promised`] was called without a promisor fetcher on the handle.
+    #[error("promisor prefetch requires a PromisorFetcher on RepositoryOptions")]
+    PromisorFetcherMissing,
+
+    /// Repository format version 1+ declares an extension this implementation does not recognize.
+    #[error("{0}")]
+    UnknownRepositoryExtensions(UnknownRepositoryExtensions),
+
+    /// Format version 0 declares an extension that requires format version 1 or newer.
+    #[error("{0}")]
+    V1OnlyExtensionsInFormatZero(V1OnlyExtensionsInFormatZero),
 
     /// Filesystem I/O failed on a path under the repository git directory.
     #[error("{0}")]
@@ -120,6 +178,10 @@ impl RepositoryError {
             Self::InitObjectFormatChange => "init_object_format_change",
             Self::InitBareWithSeparateGitDir => "init_bare_with_separate_git_dir",
             Self::RequiresWorkTree => "requires_work_tree",
+            Self::PromisorFetcherMissing => "message",
+            Self::UnknownRepositoryExtensions(_) | Self::V1OnlyExtensionsInFormatZero(_) => {
+                "message"
+            }
             Self::GitDirPathIo(io) => match io.operation {
                 crate::error::PathIoOperation::GitDir(_) => "git_dir_path_io",
                 crate::error::PathIoOperation::Worktree(_) => "worktree_path_io",

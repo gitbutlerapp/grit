@@ -976,7 +976,9 @@ pub grit_lib::command_runner::hooks::HookError::Failed
 pub grit_lib::command_runner::hooks::HookError::Failed::hook_name: alloc::string::String
 pub grit_lib::command_runner::hooks::HookError::Failed::output: grit_lib::command_runner::hooks::HookOutput
 pub grit_lib::command_runner::hooks::HookError::Failed::status: i32
-pub grit_lib::command_runner::hooks::HookError::Internal(alloc::string::String)
+pub grit_lib::command_runner::hooks::HookError::MissingHookCommand
+pub grit_lib::command_runner::hooks::HookError::MissingHookCommand::hook_name: alloc::string::String
+pub grit_lib::command_runner::hooks::HookError::Repository(alloc::boxed::Box<grit_lib::error::Error>)
 pub grit_lib::command_runner::hooks::HookError::Spawn
 pub grit_lib::command_runner::hooks::HookError::Spawn::hook_name: alloc::string::String
 pub grit_lib::command_runner::hooks::HookError::Spawn::output: grit_lib::command_runner::hooks::HookOutput
@@ -984,10 +986,10 @@ pub grit_lib::command_runner::hooks::HookError::Spawn::path: std::path::PathBuf
 pub grit_lib::command_runner::hooks::HookError::Spawn::source: core::io::error::Error
 impl grit_lib::command_runner::hooks::HookError
 pub fn grit_lib::command_runner::hooks::HookError::output(&self) -> core::option::Option<&grit_lib::command_runner::hooks::HookOutput>
-impl core::convert::From<alloc::string::String> for grit_lib::command_runner::hooks::HookError
-pub fn grit_lib::command_runner::hooks::HookError::from(alloc::string::String) -> Self
 impl core::convert::From<grit_lib::command_runner::hooks::HookError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::command_runner::hooks::HookError) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::command_runner::hooks::HookError
+pub fn grit_lib::command_runner::hooks::HookError::from(grit_lib::error::Error) -> Self
 impl core::error::Error for grit_lib::command_runner::hooks::HookError
 pub fn grit_lib::command_runner::hooks::HookError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::command_runner::hooks::HookError
@@ -5270,8 +5272,11 @@ pub grit_lib::error::ConfigError::BadNumericValueInFile::file: alloc::string::St
 pub grit_lib::error::ConfigError::BadNumericValueInFile::key: alloc::string::String
 pub grit_lib::error::ConfigError::BadNumericValueInFile::reason: grit_lib::error::BadNumericSource
 pub grit_lib::error::ConfigError::BadNumericValueInFile::value: alloc::string::String
+pub grit_lib::error::ConfigError::ConfigCacheLockPoisoned
 pub grit_lib::error::ConfigError::ConfigFileLocked
 pub grit_lib::error::ConfigError::ConfigFileLocked::path: alloc::string::String
+pub grit_lib::error::ConfigError::ConfigSessionLockPoisoned
+pub grit_lib::error::ConfigError::ConfigSessionMissingAfterRefresh
 pub grit_lib::error::ConfigError::IncludeDepthExceeded
 pub grit_lib::error::ConfigError::IncludeDepthExceeded::depth: usize
 pub grit_lib::error::ConfigError::IncludeDepthExceeded::limit: usize
@@ -5287,6 +5292,9 @@ pub grit_lib::error::ConfigError::InvalidKey::key: alloc::string::String
 pub grit_lib::error::ConfigError::InvalidKey::reason: grit_lib::error::InvalidKeyReason
 pub grit_lib::error::ConfigError::InvalidListPrefix
 pub grit_lib::error::ConfigError::InvalidListPrefix::prefix: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidPattern
+pub grit_lib::error::ConfigError::InvalidPattern::pattern: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidPattern::source: regex::error::Error
 pub grit_lib::error::ConfigError::InvalidSectionName
 pub grit_lib::error::ConfigError::InvalidSectionName::section: alloc::string::String
 pub grit_lib::error::ConfigError::InvalidThreadCount
@@ -5321,12 +5329,13 @@ pub grit_lib::error::ConfigError::UnableToParseFromCommandLine::key: alloc::stri
 pub grit_lib::error::ConfigError::UnknownValue
 pub grit_lib::error::ConfigError::UnknownValue::key: alloc::string::String
 pub grit_lib::error::ConfigError::UnknownValue::value: alloc::string::String
+pub grit_lib::error::ConfigError::UnsupportedRepositoryFormatVersion
+pub grit_lib::error::ConfigError::UnsupportedRepositoryFormatVersion::version: u32
 pub grit_lib::error::ConfigError::WorktreeConfigNotEnabled
 impl grit_lib::error::ConfigError
 pub fn grit_lib::error::ConfigError::message_body(&self) -> alloc::string::String
 impl core::clone::Clone for grit_lib::error::ConfigError
 pub fn grit_lib::error::ConfigError::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::error::ConfigError
 impl core::cmp::PartialEq for grit_lib::error::ConfigError
 pub fn grit_lib::error::ConfigError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
@@ -5422,16 +5431,10 @@ pub grit_lib::error::Error::DetachedHead
 pub grit_lib::error::Error::DirtyWorktree
 pub grit_lib::error::Error::DirtyWorktree::operation: grit_lib::error::WorktreeOperation
 pub grit_lib::error::Error::DirtyWorktree::paths: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::error::Error::DubiousOwnership(alloc::string::String)
 pub grit_lib::error::Error::EmbeddedRepoWithoutCommit
 pub grit_lib::error::Error::EmbeddedRepoWithoutCommit::path: alloc::string::String
 pub grit_lib::error::Error::EmptyCommitMessage
 pub grit_lib::error::Error::Filter(grit_lib::error::FilterError)
-pub grit_lib::error::Error::ForbiddenBareRepository(alloc::string::String)
-pub grit_lib::error::Error::GitDirPathIo
-pub grit_lib::error::Error::GitDirPathIo::operation: grit_lib::error::GitDirPathOperation
-pub grit_lib::error::Error::GitDirPathIo::path: alloc::string::String
-pub grit_lib::error::Error::GitDirPathIo::source: core::io::error::Error
 pub grit_lib::error::Error::HashCollision
 pub grit_lib::error::Error::HashCollision::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::History(grit_lib::revwalk::history::HistoryError)
@@ -5447,8 +5450,6 @@ pub grit_lib::error::Error::IndexPathPrefixConflict
 pub grit_lib::error::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::error::Error::IndexPathPrefixConflict::file: std::path::PathBuf
 pub grit_lib::error::Error::IndexUnmerged
-pub grit_lib::error::Error::InitBareWithSeparateGitDir
-pub grit_lib::error::Error::InitObjectFormatChange
 pub grit_lib::error::Error::InvalidAttrPathspec
 pub grit_lib::error::Error::InvalidAttrPathspec::reason: grit_lib::error::AttrPathspecError
 pub grit_lib::error::Error::InvalidAttrPathspec::spec: alloc::string::String
@@ -5464,8 +5465,6 @@ pub grit_lib::error::Error::InvalidPathComponent
 pub grit_lib::error::Error::InvalidPathComponent::path: alloc::string::String
 pub grit_lib::error::Error::InvalidPathComponent::reason: grit_lib::path_validate::PathComponentError
 pub grit_lib::error::Error::InvalidRef(alloc::string::String)
-pub grit_lib::error::Error::InvalidRefStorageFormat
-pub grit_lib::error::Error::InvalidRefStorageFormat::value: alloc::string::String
 pub grit_lib::error::Error::InvalidSignature(grit_lib::ident::SignatureError)
 pub grit_lib::error::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
 pub grit_lib::error::Error::Io(core::io::error::Error)
@@ -5508,7 +5507,6 @@ pub grit_lib::error::Error::NoMergeInProgress
 pub grit_lib::error::Error::NoPromisorRemote
 pub grit_lib::error::Error::NoPromisorRemote::operation: &'static str
 pub grit_lib::error::Error::NoReplayInProgress
-pub grit_lib::error::Error::NotARepository(grit_lib::error::NotARepositoryReason)
 pub grit_lib::error::Error::NotFastForward
 pub grit_lib::error::Error::NotRemovingRecursively(alloc::string::String)
 pub grit_lib::error::Error::NoteAlreadyExists
@@ -5530,18 +5528,12 @@ pub grit_lib::error::Error::NothingStagedToCommit
 pub grit_lib::error::Error::NothingStagedToCommit::unstaged: usize
 pub grit_lib::error::Error::NothingStagedToCommit::untracked: usize
 pub grit_lib::error::Error::NothingToCommit
-#[non_exhaustive] pub grit_lib::error::Error::ObjectFormatMismatch
-pub grit_lib::error::Error::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
-pub grit_lib::error::Error::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
 pub grit_lib::error::Error::ObjectHeaderTooLong
 pub grit_lib::error::Error::ObjectHeaderTooLong::oid: alloc::string::String
 pub grit_lib::error::Error::ObjectNotFound(alloc::string::String)
 pub grit_lib::error::Error::ObjectStreamTruncated
 pub grit_lib::error::Error::ObjectStreamTruncated::actual: u64
 pub grit_lib::error::Error::ObjectStreamTruncated::expected: u64
-pub grit_lib::error::Error::OdbObjectsDirMismatch
-pub grit_lib::error::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
-pub grit_lib::error::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::error::Error::Offload(grit_lib::maintenance::OffloadError)
 pub grit_lib::error::Error::OperationInProgress(grit_lib::state::InProgressOperation)
 pub grit_lib::error::Error::PackDeltaBaseNotWritten
@@ -5564,8 +5556,6 @@ pub grit_lib::error::Error::PathspecIgnored
 pub grit_lib::error::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::PathspecNoMatch
 pub grit_lib::error::Error::PathspecNoMatch::spec: alloc::string::String
-pub grit_lib::error::Error::PreciousObjectsRepository
-pub grit_lib::error::Error::PreciousObjectsRepository::operation: &'static str
 pub grit_lib::error::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
 pub grit_lib::error::Error::PromisorFetchFailed
 pub grit_lib::error::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
@@ -5591,7 +5581,7 @@ pub grit_lib::error::Error::ReplayContinueDirtyIndex
 pub grit_lib::error::Error::ReplayContinueUnmerged
 pub grit_lib::error::Error::ReplaySkipAlreadyCommitted
 pub grit_lib::error::Error::ReplaySourceAtHead
-pub grit_lib::error::Error::RequiresWorkTree
+pub grit_lib::error::Error::Repository(grit_lib::repo::error::RepositoryError)
 pub grit_lib::error::Error::RestoreConflictMissingOurs
 pub grit_lib::error::Error::RestoreConflictMissingOurs::path: alloc::string::String
 pub grit_lib::error::Error::RestoreConflictMissingTheirs
@@ -5634,9 +5624,6 @@ pub grit_lib::error::Error::UnrelatedHistories::ours: grit_lib::objects::ObjectI
 pub grit_lib::error::Error::UnrelatedHistories::theirs: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::UnresolvedDeltas
 pub grit_lib::error::Error::UnresolvedDeltas::count: u64
-pub grit_lib::error::Error::UnsupportedObjectStore
-pub grit_lib::error::Error::UnsupportedObjectStore::operation: &'static str
-pub grit_lib::error::Error::UnsupportedRepositoryFormatVersion(u32)
 pub grit_lib::error::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::error::Error::WorktreeFileChanged
 pub grit_lib::error::Error::WorktreeFileChanged::path: alloc::string::String
@@ -5694,6 +5681,8 @@ impl core::convert::From<grit_lib::error::Cancelled> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::Cancelled) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::command_runner::hooks::HookError
+pub fn grit_lib::command_runner::hooks::HookError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
@@ -5774,6 +5763,8 @@ impl core::convert::From<grit_lib::remote::RemoteError> for grit_lib::error::Err
 pub fn grit_lib::error::Error::from(grit_lib::remote::RemoteError) -> Self
 impl core::convert::From<grit_lib::remote::fetch_request::FetchRefspecError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::remote::fetch_request::FetchRefspecError) -> Self
+impl core::convert::From<grit_lib::repo::error::RepositoryError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::repo::error::RepositoryError) -> Self
 impl core::convert::From<grit_lib::revwalk::PickaxeError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::revwalk::PickaxeError) -> Self
 impl core::convert::From<grit_lib::revwalk::history::HistoryError> for grit_lib::error::Error
@@ -6190,6 +6181,54 @@ impl core::marker::Unpin for grit_lib::error::RemoteUnreadableReason
 impl core::marker::UnsafeUnpin for grit_lib::error::RemoteUnreadableReason
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::RemoteUnreadableReason
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::RemoteUnreadableReason
+#[non_exhaustive] pub enum grit_lib::error::RepositoryError
+pub grit_lib::error::RepositoryError::DubiousOwnership
+pub grit_lib::error::RepositoryError::DubiousOwnership::effective_uid: core::option::Option<u32>
+pub grit_lib::error::RepositoryError::DubiousOwnership::owner_uid: core::option::Option<u32>
+pub grit_lib::error::RepositoryError::DubiousOwnership::path: alloc::string::String
+pub grit_lib::error::RepositoryError::ForbiddenBareRepository
+pub grit_lib::error::RepositoryError::ForbiddenBareRepository::path: alloc::string::String
+pub grit_lib::error::RepositoryError::GitDirPathIo(grit_lib::error::PathIoError)
+pub grit_lib::error::RepositoryError::InitBareWithSeparateGitDir
+pub grit_lib::error::RepositoryError::InitObjectFormatChange
+pub grit_lib::error::RepositoryError::InvalidRefStorageFormat
+pub grit_lib::error::RepositoryError::InvalidRefStorageFormat::value: alloc::string::String
+pub grit_lib::error::RepositoryError::NotARepository(grit_lib::error::NotARepositoryReason)
+pub grit_lib::error::RepositoryError::ObjectFormatMismatch
+pub grit_lib::error::RepositoryError::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
+pub grit_lib::error::RepositoryError::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
+pub grit_lib::error::RepositoryError::OdbObjectsDirMismatch
+pub grit_lib::error::RepositoryError::OdbObjectsDirMismatch::builder: std::path::PathBuf
+pub grit_lib::error::RepositoryError::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::error::RepositoryError::PreciousObjectsRepository
+pub grit_lib::error::RepositoryError::PreciousObjectsRepository::operation: &'static str
+pub grit_lib::error::RepositoryError::PromisorFetcherMissing
+pub grit_lib::error::RepositoryError::RequiresWorkTree
+pub grit_lib::error::RepositoryError::UnknownRepositoryExtensions(grit_lib::repo::error::UnknownRepositoryExtensions)
+pub grit_lib::error::RepositoryError::UnsupportedObjectStore
+pub grit_lib::error::RepositoryError::UnsupportedObjectStore::operation: &'static str
+pub grit_lib::error::RepositoryError::UnsupportedRepositoryFormatVersion
+pub grit_lib::error::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
+pub grit_lib::error::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)
+impl grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::git_dir_path_io(impl core::convert::Into<alloc::string::String>, grit_lib::error::GitDirPathOperation, core::io::error::Error) -> Self
+pub fn grit_lib::repo::error::RepositoryError::kind_name(&self) -> &'static str
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::from(grit_lib::error::PathIoError) -> Self
+impl core::convert::From<grit_lib::repo::error::RepositoryError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::repo::error::RepositoryError) -> Self
+impl core::error::Error for grit_lib::repo::error::RepositoryError
+impl core::fmt::Debug for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::repo::error::RepositoryError
+impl core::marker::Send for grit_lib::repo::error::RepositoryError
+impl core::marker::Sync for grit_lib::repo::error::RepositoryError
+impl core::marker::Unpin for grit_lib::repo::error::RepositoryError
+impl core::marker::UnsafeUnpin for grit_lib::repo::error::RepositoryError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::error::RepositoryError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::error::RepositoryError
 pub enum grit_lib::error::SparseCheckoutWarning
 pub grit_lib::error::SparseCheckoutWarning::DisablingConePatternMatching
 pub grit_lib::error::SparseCheckoutWarning::RepeatedPattern
@@ -14803,16 +14842,10 @@ pub grit_lib::prelude::Error::DetachedHead
 pub grit_lib::prelude::Error::DirtyWorktree
 pub grit_lib::prelude::Error::DirtyWorktree::operation: grit_lib::error::WorktreeOperation
 pub grit_lib::prelude::Error::DirtyWorktree::paths: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::prelude::Error::DubiousOwnership(alloc::string::String)
 pub grit_lib::prelude::Error::EmbeddedRepoWithoutCommit
 pub grit_lib::prelude::Error::EmbeddedRepoWithoutCommit::path: alloc::string::String
 pub grit_lib::prelude::Error::EmptyCommitMessage
 pub grit_lib::prelude::Error::Filter(grit_lib::error::FilterError)
-pub grit_lib::prelude::Error::ForbiddenBareRepository(alloc::string::String)
-pub grit_lib::prelude::Error::GitDirPathIo
-pub grit_lib::prelude::Error::GitDirPathIo::operation: grit_lib::error::GitDirPathOperation
-pub grit_lib::prelude::Error::GitDirPathIo::path: alloc::string::String
-pub grit_lib::prelude::Error::GitDirPathIo::source: core::io::error::Error
 pub grit_lib::prelude::Error::HashCollision
 pub grit_lib::prelude::Error::HashCollision::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::History(grit_lib::revwalk::history::HistoryError)
@@ -14828,8 +14861,6 @@ pub grit_lib::prelude::Error::IndexPathPrefixConflict
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::file: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexUnmerged
-pub grit_lib::prelude::Error::InitBareWithSeparateGitDir
-pub grit_lib::prelude::Error::InitObjectFormatChange
 pub grit_lib::prelude::Error::InvalidAttrPathspec
 pub grit_lib::prelude::Error::InvalidAttrPathspec::reason: grit_lib::error::AttrPathspecError
 pub grit_lib::prelude::Error::InvalidAttrPathspec::spec: alloc::string::String
@@ -14845,8 +14876,6 @@ pub grit_lib::prelude::Error::InvalidPathComponent
 pub grit_lib::prelude::Error::InvalidPathComponent::path: alloc::string::String
 pub grit_lib::prelude::Error::InvalidPathComponent::reason: grit_lib::path_validate::PathComponentError
 pub grit_lib::prelude::Error::InvalidRef(alloc::string::String)
-pub grit_lib::prelude::Error::InvalidRefStorageFormat
-pub grit_lib::prelude::Error::InvalidRefStorageFormat::value: alloc::string::String
 pub grit_lib::prelude::Error::InvalidSignature(grit_lib::ident::SignatureError)
 pub grit_lib::prelude::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
 pub grit_lib::prelude::Error::Io(core::io::error::Error)
@@ -14889,7 +14918,6 @@ pub grit_lib::prelude::Error::NoMergeInProgress
 pub grit_lib::prelude::Error::NoPromisorRemote
 pub grit_lib::prelude::Error::NoPromisorRemote::operation: &'static str
 pub grit_lib::prelude::Error::NoReplayInProgress
-pub grit_lib::prelude::Error::NotARepository(grit_lib::error::NotARepositoryReason)
 pub grit_lib::prelude::Error::NotFastForward
 pub grit_lib::prelude::Error::NotRemovingRecursively(alloc::string::String)
 pub grit_lib::prelude::Error::NoteAlreadyExists
@@ -14911,18 +14939,12 @@ pub grit_lib::prelude::Error::NothingStagedToCommit
 pub grit_lib::prelude::Error::NothingStagedToCommit::unstaged: usize
 pub grit_lib::prelude::Error::NothingStagedToCommit::untracked: usize
 pub grit_lib::prelude::Error::NothingToCommit
-#[non_exhaustive] pub grit_lib::prelude::Error::ObjectFormatMismatch
-pub grit_lib::prelude::Error::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
-pub grit_lib::prelude::Error::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
 pub grit_lib::prelude::Error::ObjectHeaderTooLong
 pub grit_lib::prelude::Error::ObjectHeaderTooLong::oid: alloc::string::String
 pub grit_lib::prelude::Error::ObjectNotFound(alloc::string::String)
 pub grit_lib::prelude::Error::ObjectStreamTruncated
 pub grit_lib::prelude::Error::ObjectStreamTruncated::actual: u64
 pub grit_lib::prelude::Error::ObjectStreamTruncated::expected: u64
-pub grit_lib::prelude::Error::OdbObjectsDirMismatch
-pub grit_lib::prelude::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
-pub grit_lib::prelude::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::prelude::Error::Offload(grit_lib::maintenance::OffloadError)
 pub grit_lib::prelude::Error::OperationInProgress(grit_lib::state::InProgressOperation)
 pub grit_lib::prelude::Error::PackDeltaBaseNotWritten
@@ -14945,8 +14967,6 @@ pub grit_lib::prelude::Error::PathspecIgnored
 pub grit_lib::prelude::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::PathspecNoMatch
 pub grit_lib::prelude::Error::PathspecNoMatch::spec: alloc::string::String
-pub grit_lib::prelude::Error::PreciousObjectsRepository
-pub grit_lib::prelude::Error::PreciousObjectsRepository::operation: &'static str
 pub grit_lib::prelude::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
 pub grit_lib::prelude::Error::PromisorFetchFailed
 pub grit_lib::prelude::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
@@ -14972,7 +14992,7 @@ pub grit_lib::prelude::Error::ReplayContinueDirtyIndex
 pub grit_lib::prelude::Error::ReplayContinueUnmerged
 pub grit_lib::prelude::Error::ReplaySkipAlreadyCommitted
 pub grit_lib::prelude::Error::ReplaySourceAtHead
-pub grit_lib::prelude::Error::RequiresWorkTree
+pub grit_lib::prelude::Error::Repository(grit_lib::repo::error::RepositoryError)
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs::path: alloc::string::String
 pub grit_lib::prelude::Error::RestoreConflictMissingTheirs
@@ -15015,9 +15035,6 @@ pub grit_lib::prelude::Error::UnrelatedHistories::ours: grit_lib::objects::Objec
 pub grit_lib::prelude::Error::UnrelatedHistories::theirs: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::UnresolvedDeltas
 pub grit_lib::prelude::Error::UnresolvedDeltas::count: u64
-pub grit_lib::prelude::Error::UnsupportedObjectStore
-pub grit_lib::prelude::Error::UnsupportedObjectStore::operation: &'static str
-pub grit_lib::prelude::Error::UnsupportedRepositoryFormatVersion(u32)
 pub grit_lib::prelude::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::prelude::Error::WorktreeFileChanged
 pub grit_lib::prelude::Error::WorktreeFileChanged::path: alloc::string::String
@@ -15075,6 +15092,8 @@ impl core::convert::From<grit_lib::error::Cancelled> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::Cancelled) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::command_runner::hooks::HookError
+pub fn grit_lib::command_runner::hooks::HookError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
@@ -15155,6 +15174,8 @@ impl core::convert::From<grit_lib::remote::RemoteError> for grit_lib::error::Err
 pub fn grit_lib::error::Error::from(grit_lib::remote::RemoteError) -> Self
 impl core::convert::From<grit_lib::remote::fetch_request::FetchRefspecError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::remote::fetch_request::FetchRefspecError) -> Self
+impl core::convert::From<grit_lib::repo::error::RepositoryError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::repo::error::RepositoryError) -> Self
 impl core::convert::From<grit_lib::revwalk::PickaxeError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::revwalk::PickaxeError) -> Self
 impl core::convert::From<grit_lib::revwalk::history::HistoryError> for grit_lib::error::Error
@@ -23350,6 +23371,142 @@ impl core::marker::Unpin for grit_lib::repo::caches::RepoCaches
 impl core::marker::UnsafeUnpin for grit_lib::repo::caches::RepoCaches
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::caches::RepoCaches
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::caches::RepoCaches
+pub mod grit_lib::repo::error
+#[non_exhaustive] pub enum grit_lib::repo::error::RepositoryError
+pub grit_lib::repo::error::RepositoryError::DubiousOwnership
+pub grit_lib::repo::error::RepositoryError::DubiousOwnership::effective_uid: core::option::Option<u32>
+pub grit_lib::repo::error::RepositoryError::DubiousOwnership::owner_uid: core::option::Option<u32>
+pub grit_lib::repo::error::RepositoryError::DubiousOwnership::path: alloc::string::String
+pub grit_lib::repo::error::RepositoryError::ForbiddenBareRepository
+pub grit_lib::repo::error::RepositoryError::ForbiddenBareRepository::path: alloc::string::String
+pub grit_lib::repo::error::RepositoryError::GitDirPathIo(grit_lib::error::PathIoError)
+pub grit_lib::repo::error::RepositoryError::InitBareWithSeparateGitDir
+pub grit_lib::repo::error::RepositoryError::InitObjectFormatChange
+pub grit_lib::repo::error::RepositoryError::InvalidRefStorageFormat
+pub grit_lib::repo::error::RepositoryError::InvalidRefStorageFormat::value: alloc::string::String
+pub grit_lib::repo::error::RepositoryError::NotARepository(grit_lib::error::NotARepositoryReason)
+pub grit_lib::repo::error::RepositoryError::ObjectFormatMismatch
+pub grit_lib::repo::error::RepositoryError::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
+pub grit_lib::repo::error::RepositoryError::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
+pub grit_lib::repo::error::RepositoryError::OdbObjectsDirMismatch
+pub grit_lib::repo::error::RepositoryError::OdbObjectsDirMismatch::builder: std::path::PathBuf
+pub grit_lib::repo::error::RepositoryError::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::repo::error::RepositoryError::PreciousObjectsRepository
+pub grit_lib::repo::error::RepositoryError::PreciousObjectsRepository::operation: &'static str
+pub grit_lib::repo::error::RepositoryError::PromisorFetcherMissing
+pub grit_lib::repo::error::RepositoryError::RequiresWorkTree
+pub grit_lib::repo::error::RepositoryError::UnknownRepositoryExtensions(grit_lib::repo::error::UnknownRepositoryExtensions)
+pub grit_lib::repo::error::RepositoryError::UnsupportedObjectStore
+pub grit_lib::repo::error::RepositoryError::UnsupportedObjectStore::operation: &'static str
+pub grit_lib::repo::error::RepositoryError::UnsupportedRepositoryFormatVersion
+pub grit_lib::repo::error::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
+pub grit_lib::repo::error::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)
+impl grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::git_dir_path_io(impl core::convert::Into<alloc::string::String>, grit_lib::error::GitDirPathOperation, core::io::error::Error) -> Self
+pub fn grit_lib::repo::error::RepositoryError::kind_name(&self) -> &'static str
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::from(grit_lib::error::PathIoError) -> Self
+impl core::convert::From<grit_lib::repo::error::RepositoryError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::repo::error::RepositoryError) -> Self
+impl core::error::Error for grit_lib::repo::error::RepositoryError
+impl core::fmt::Debug for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::repo::error::RepositoryError
+impl core::marker::Send for grit_lib::repo::error::RepositoryError
+impl core::marker::Sync for grit_lib::repo::error::RepositoryError
+impl core::marker::Unpin for grit_lib::repo::error::RepositoryError
+impl core::marker::UnsafeUnpin for grit_lib::repo::error::RepositoryError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::error::RepositoryError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::error::RepositoryError
+pub struct grit_lib::repo::error::UnknownRepositoryExtensions
+pub grit_lib::repo::error::UnknownRepositoryExtensions::extensions: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::repo::error::UnknownRepositoryExtensions
+pub fn grit_lib::repo::error::UnknownRepositoryExtensions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::cmp::PartialEq for grit_lib::repo::error::UnknownRepositoryExtensions
+pub fn grit_lib::repo::error::UnknownRepositoryExtensions::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo::error::UnknownRepositoryExtensions
+pub fn grit_lib::repo::error::UnknownRepositoryExtensions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::repo::error::UnknownRepositoryExtensions
+pub fn grit_lib::repo::error::UnknownRepositoryExtensions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::Freeze for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::Send for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::Sync for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::Unpin for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::UnsafeUnpin for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::error::UnknownRepositoryExtensions
+pub struct grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub grit_lib::repo::error::V1OnlyExtensionsInFormatZero::extensions: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub fn grit_lib::repo::error::V1OnlyExtensionsInFormatZero::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::cmp::PartialEq for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub fn grit_lib::repo::error::V1OnlyExtensionsInFormatZero::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub fn grit_lib::repo::error::V1OnlyExtensionsInFormatZero::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub fn grit_lib::repo::error::V1OnlyExtensionsInFormatZero::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::Freeze for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::Send for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::Sync for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::Unpin for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::UnsafeUnpin for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub type grit_lib::repo::error::RepositoryResult<T> = core::result::Result<T, grit_lib::repo::error::RepositoryError>
+#[non_exhaustive] pub enum grit_lib::repo::RepositoryError
+pub grit_lib::repo::RepositoryError::DubiousOwnership
+pub grit_lib::repo::RepositoryError::DubiousOwnership::effective_uid: core::option::Option<u32>
+pub grit_lib::repo::RepositoryError::DubiousOwnership::owner_uid: core::option::Option<u32>
+pub grit_lib::repo::RepositoryError::DubiousOwnership::path: alloc::string::String
+pub grit_lib::repo::RepositoryError::ForbiddenBareRepository
+pub grit_lib::repo::RepositoryError::ForbiddenBareRepository::path: alloc::string::String
+pub grit_lib::repo::RepositoryError::GitDirPathIo(grit_lib::error::PathIoError)
+pub grit_lib::repo::RepositoryError::InitBareWithSeparateGitDir
+pub grit_lib::repo::RepositoryError::InitObjectFormatChange
+pub grit_lib::repo::RepositoryError::InvalidRefStorageFormat
+pub grit_lib::repo::RepositoryError::InvalidRefStorageFormat::value: alloc::string::String
+pub grit_lib::repo::RepositoryError::NotARepository(grit_lib::error::NotARepositoryReason)
+pub grit_lib::repo::RepositoryError::ObjectFormatMismatch
+pub grit_lib::repo::RepositoryError::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
+pub grit_lib::repo::RepositoryError::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
+pub grit_lib::repo::RepositoryError::OdbObjectsDirMismatch
+pub grit_lib::repo::RepositoryError::OdbObjectsDirMismatch::builder: std::path::PathBuf
+pub grit_lib::repo::RepositoryError::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::repo::RepositoryError::PreciousObjectsRepository
+pub grit_lib::repo::RepositoryError::PreciousObjectsRepository::operation: &'static str
+pub grit_lib::repo::RepositoryError::PromisorFetcherMissing
+pub grit_lib::repo::RepositoryError::RequiresWorkTree
+pub grit_lib::repo::RepositoryError::UnknownRepositoryExtensions(grit_lib::repo::error::UnknownRepositoryExtensions)
+pub grit_lib::repo::RepositoryError::UnsupportedObjectStore
+pub grit_lib::repo::RepositoryError::UnsupportedObjectStore::operation: &'static str
+pub grit_lib::repo::RepositoryError::UnsupportedRepositoryFormatVersion
+pub grit_lib::repo::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
+pub grit_lib::repo::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)
+impl grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::git_dir_path_io(impl core::convert::Into<alloc::string::String>, grit_lib::error::GitDirPathOperation, core::io::error::Error) -> Self
+pub fn grit_lib::repo::error::RepositoryError::kind_name(&self) -> &'static str
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::from(grit_lib::error::PathIoError) -> Self
+impl core::convert::From<grit_lib::repo::error::RepositoryError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::repo::error::RepositoryError) -> Self
+impl core::error::Error for grit_lib::repo::error::RepositoryError
+impl core::fmt::Debug for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::repo::error::RepositoryError
+impl core::marker::Send for grit_lib::repo::error::RepositoryError
+impl core::marker::Sync for grit_lib::repo::error::RepositoryError
+impl core::marker::Unpin for grit_lib::repo::error::RepositoryError
+impl core::marker::UnsafeUnpin for grit_lib::repo::error::RepositoryError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::error::RepositoryError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::error::RepositoryError
 pub struct grit_lib::repo::DiscoveryInfo
 pub grit_lib::repo::DiscoveryInfo::discovery_root: core::option::Option<std::path::PathBuf>
 pub grit_lib::repo::DiscoveryInfo::discovery_via_gitfile: bool
@@ -23537,6 +23694,44 @@ impl core::marker::Unpin for grit_lib::repo::RepositoryLocation
 impl core::marker::UnsafeUnpin for grit_lib::repo::RepositoryLocation
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::RepositoryLocation
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::RepositoryLocation
+pub struct grit_lib::repo::UnknownRepositoryExtensions
+pub grit_lib::repo::UnknownRepositoryExtensions::extensions: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::repo::error::UnknownRepositoryExtensions
+pub fn grit_lib::repo::error::UnknownRepositoryExtensions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::cmp::PartialEq for grit_lib::repo::error::UnknownRepositoryExtensions
+pub fn grit_lib::repo::error::UnknownRepositoryExtensions::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo::error::UnknownRepositoryExtensions
+pub fn grit_lib::repo::error::UnknownRepositoryExtensions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::repo::error::UnknownRepositoryExtensions
+pub fn grit_lib::repo::error::UnknownRepositoryExtensions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::Freeze for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::Send for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::Sync for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::Unpin for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::marker::UnsafeUnpin for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::error::UnknownRepositoryExtensions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::error::UnknownRepositoryExtensions
+pub struct grit_lib::repo::V1OnlyExtensionsInFormatZero
+pub grit_lib::repo::V1OnlyExtensionsInFormatZero::extensions: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub fn grit_lib::repo::error::V1OnlyExtensionsInFormatZero::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::cmp::PartialEq for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub fn grit_lib::repo::error::V1OnlyExtensionsInFormatZero::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub fn grit_lib::repo::error::V1OnlyExtensionsInFormatZero::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+pub fn grit_lib::repo::error::V1OnlyExtensionsInFormatZero::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::Freeze for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::Send for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::Sync for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::Unpin for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::marker::UnsafeUnpin for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::error::V1OnlyExtensionsInFormatZero
 pub fn grit_lib::repo::common_git_dir_for_config(&std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::repo::early_config_ignore_repo_reason(&std::path::Path) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::repo::early_config_ignore_repo_reason_for_text(core::option::Option<&str>) -> core::option::Option<alloc::string::String>
@@ -23551,6 +23746,7 @@ pub fn grit_lib::repo::validate_repo_config(&str) -> core::result::Result<(), gr
 pub fn grit_lib::repo::validate_repo_format(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::worktree_config_enabled(&std::path::Path) -> bool
 pub fn grit_lib::repo::worktree_config_enabled_for_text(core::option::Option<&str>) -> bool
+pub type grit_lib::repo::RepositoryResult<T> = core::result::Result<T, grit_lib::repo::error::RepositoryError>
 pub mod grit_lib::repo_handles
 pub enum grit_lib::repo_handles::HookSource
 pub grit_lib::repo_handles::HookSource::CoreHooksPath

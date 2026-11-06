@@ -2165,11 +2165,12 @@ impl Odb {
     /// Propagates the primary store failure. Only valid when [`Self::uses_files_primary`]
     /// is false.
     pub(crate) fn missing_materialized_many(&self, oids: &[ObjectId]) -> Result<Vec<ObjectId>> {
-        let primary = self.custom_primary.as_ref().ok_or_else(|| {
-            RepositoryError::UnsupportedObjectStore {
-                operation: "missing_materialized_many",
-            }
-        })?;
+        let primary =
+            self.custom_primary
+                .as_ref()
+                .ok_or(RepositoryError::UnsupportedObjectStore {
+                    operation: "missing_materialized_many",
+                })?;
         if oids.is_empty() {
             return Ok(Vec::new());
         }

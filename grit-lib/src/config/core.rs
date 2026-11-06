@@ -2557,7 +2557,7 @@ impl ConfigSet {
     pub fn get_regexp(&self, pattern: &str) -> std::result::Result<Vec<&ConfigEntry>, ConfigError> {
         let re = regex::Regex::new(pattern).map_err(|source| ConfigError::InvalidPattern {
             pattern: pattern.to_owned(),
-            reason: source.to_string(),
+            source,
         })?;
         Ok(self
             .entries

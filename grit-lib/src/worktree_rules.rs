@@ -22,7 +22,7 @@ use crate::config::parse_path;
 use crate::config::ConfigSet;
 use crate::crlf::{self, AttrRule, ConversionConfig, FileAttrs};
 use crate::environment::Environment;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::filter_process::FilterProcessState;
 use crate::ignore::IgnoreMatcher;
 use crate::index::Index;

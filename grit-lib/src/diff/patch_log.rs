@@ -10,7 +10,7 @@ use crate::attributes::load_gitattributes_for_check_attr_source;
 use crate::commit_pretty::{abbrev_hex, resolve_core_abbrev_len};
 use crate::config::ConfigSet;
 use crate::diff::options::DiffOptions;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::index::Index;
 use crate::merge_file;
 use crate::objects::CommitData;

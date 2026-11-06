@@ -232,8 +232,13 @@ impl ReferenceTransactionHookErr {
                 source: std::io::Error::new(source.kind(), source.to_string()),
                 output: output.clone(),
             },
-            crate::hooks::HookError::Internal(msg) => {
-                crate::hooks::HookError::Internal(msg.clone())
+            crate::hooks::HookError::MissingHookCommand { hook_name } => {
+                crate::hooks::HookError::MissingHookCommand {
+                    hook_name: hook_name.clone(),
+                }
+            }
+            crate::hooks::HookError::Repository(err) => {
+                crate::hooks::HookError::Repository(Arc::clone(err))
             }
             crate::hooks::HookError::Cancelled => crate::hooks::HookError::Cancelled,
         })

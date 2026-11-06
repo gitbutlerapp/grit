@@ -24,7 +24,6 @@ use crate::git_date::tm::{local_tzoffset_with_tz, TzHhmm};
 use crate::ident_resolve::IdentityEnv;
 use crate::ownership_check::{default_ownership_check, is_default_ownership_check, OwnershipCheck};
 use crate::reftable::ReftableWriteOptions;
-use crate::repo::RepositoryError;
 
 /// Discovery and config variables that affect repository open/discover and `ConfigSet` loading.
 ///
