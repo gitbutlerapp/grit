@@ -102,7 +102,10 @@ fn detect_rejects_v0_reftable_extension() {
     )
     .unwrap();
     let err = RefStorageFormat::detect(&git_dir).unwrap_err();
-    assert!(matches!(err, Error::Message(_)));
+    assert!(matches!(
+        err,
+        Error::Repository(RepositoryError::V1OnlyExtensionsInFormatZero { .. })
+    ));
     assert!(validate_repo_format(&git_dir).is_err());
 }
 
