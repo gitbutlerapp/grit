@@ -179,7 +179,7 @@ pub fn fetch(
             repo,
             opts.clone(),
             &mut NoProgress,
-            &CancelToken::never(),
+            &grit_lib::progress::CancelToken::never(),
             Some(&factory),
         )
         .map_err(|e| anyhow::Error::msg(e.to_string()))
@@ -200,7 +200,7 @@ pub fn push(
             refs,
             opts.clone(),
             &mut NoProgress,
-            &CancelToken::never(),
+            &grit_lib::progress::CancelToken::never(),
             Some(&factory),
         )
         .map_err(|e| anyhow::Error::msg(e.to_string()))

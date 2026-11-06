@@ -47,7 +47,7 @@ fn main() -> Result<()> {
             mode: StashMode::default(),
         },
         &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
+        &grit_lib::progress::CancelToken::never(),
     )?;
     println!("stash_pushed={}", pushed.is_some());
 

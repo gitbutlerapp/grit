@@ -69,7 +69,7 @@ fn main() -> Result<()> {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
+        &grit_lib::progress::CancelToken::never(),
     )?;
 
     println!("head={}", applied.head.to_hex());
