@@ -2671,7 +2671,7 @@ mod index_lock_transaction_tests {
         assert!(matches!(
             err,
             crate::error::Error::Io(_)
-                | crate::error::Error::GitDirPathIo { .. }
+                | crate::error::Error::Repository(crate::repo::RepositoryError::GitDirPathIo(_))
                 | crate::error::Error::Index(_)
         ));
         assert!(root.join("a.txt").is_file());
@@ -2704,7 +2704,7 @@ mod index_lock_transaction_tests {
         assert!(matches!(
             err,
             crate::error::Error::Io(_)
-                | crate::error::Error::GitDirPathIo { .. }
+                | crate::error::Error::Repository(crate::repo::RepositoryError::GitDirPathIo(_))
                 | crate::error::Error::Index(_)
         ));
         assert!(root.join("a.txt").is_file());
