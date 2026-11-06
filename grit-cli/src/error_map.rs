@@ -172,7 +172,7 @@ pub fn stage_conflict_markers_human(paths: &[String]) -> String {
     msg
 }
 
-/// Map library errors from [`crate::commands::add::stage_paths`] to structured CLI errors.
+/// Map library errors from [`grit_lib::porcelain::add::stage`] (via `grit add`) to structured CLI errors.
 #[must_use]
 pub fn map_stage_lib_error(err: LibError) -> Error {
     match err {
