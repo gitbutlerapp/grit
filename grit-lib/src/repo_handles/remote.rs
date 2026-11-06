@@ -90,11 +90,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         kind: RemoteUrlKind,
         dry_run: bool,
     ) -> std::result::Result<UrlChange, RemoteError> {
-        let config = self
-            .repo
-            .config()
-            .snapshot()
-            .map_err(RemoteError::from)?
+        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
@@ -207,11 +203,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # }
     /// ```
     pub fn get(&self, name: &str) -> std::result::Result<Remote, RemoteError> {
-        let config = self
-            .repo
-            .config()
-            .snapshot()
-            .map_err(RemoteError::from)?
+        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
         Remote::from_config(config.as_ref(), name)
     }
 
@@ -429,11 +421,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         dry_run: bool,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> std::result::Result<Vec<String>, RemoteError> {
-        let config = self
-            .repo
-            .config()
-            .snapshot()
-            .map_err(RemoteError::from)?
+        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
@@ -496,11 +484,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         dry_run: bool,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> std::result::Result<SetHeadOutcome, RemoteError> {
-        let config = self
-            .repo
-            .config()
-            .snapshot()
-            .map_err(RemoteError::from)?
+        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
@@ -584,11 +568,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         name: &str,
         options: RemoveOptions,
     ) -> std::result::Result<RemoteRemoval, RemoteError> {
-        let config = self
-            .repo
-            .config()
-            .snapshot()
-            .map_err(RemoteError::from)?
+        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }

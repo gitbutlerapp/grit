@@ -259,10 +259,7 @@ pub fn resolve_push(
     request: &PushRequest,
     ctx: &PushPlanContext,
 ) -> PlanResult<ResolvedPush> {
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(|e| PushPlanError::Message(e.to_string()))?;
+    let config = repo.config().snapshot().map_err(PushPlanError::from)?;
     if request.delete_refs || !request.delete.is_empty() {
         return resolve_delete_push(repo, config.as_ref(), request, ctx);
     }
@@ -1083,10 +1080,7 @@ pub fn load_push_plan_context(
     remote_override: Option<&str>,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> PlanResult<PushPlanContext> {
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(|e| PushPlanError::Message(e.to_string()))?;
+    let config = repo.config().snapshot().map_err(PushPlanError::from)?;
     let remote = configured_remote_for_push(repo, config.as_ref(), remote_override)?;
     let Ok(handle) = open_push_destination(config.as_ref(), &remote) else {
         return Ok(PushPlanContext::default());

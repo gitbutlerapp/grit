@@ -339,7 +339,9 @@ pub fn map_pull_repository_error(repo: &grit_lib::repo::Repository, err: PullErr
     match err {
         PullError::Remote(remote) => map_remote_error(remote),
         PullError::Nested(boxed) => match *boxed {
-            LibError::OperationInProgress(kind) => operation_in_progress_for_repo(repo, "pull", kind),
+            LibError::OperationInProgress(kind) => {
+                operation_in_progress_for_repo(repo, "pull", kind)
+            }
             hook @ LibError::Hook(_) => {
                 if repo.git_dir().join("MERGE_HEAD").is_file() {
                     crate::json_error::hook_failed_with_hint(
@@ -1341,7 +1343,6 @@ mod tests {
 
     use super::*;
     use crate::json_error::structured_json_payload;
-    use grit_lib::error::LockHeldError;
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
@@ -1656,9 +1657,9 @@ mod tests {
     fn library_object_not_found_keeps_remote_display() {
         use grit_lib::remote::RemoteError;
 
-        let err = super::map_remote_error(RemoteError::Library(LibError::ObjectNotFound(
+        let err = super::map_remote_error(RemoteError::Nested(Box::new(LibError::ObjectNotFound(
             "deadbeef".into(),
-        )));
+        ))));
         assert!(err.downcast_ref::<LibError>().is_none());
         assert_eq!(
             crate::cli_messages::human_error_message(&err),
@@ -1673,7 +1674,9 @@ mod tests {
         use grit_lib::remote::RemoteError;
 
         let oid = ObjectId::from_hex("f92d74e3874587aaf443d1db961d4e26dde13e9c").expect("oid");
-        let err = super::map_remote_error(RemoteError::Library(LibError::HashCollision { oid }));
+        let err = super::map_remote_error(RemoteError::Nested(Box::new(LibError::HashCollision {
+            oid,
+        })));
         let payload = crate::json_error::structured_json_payload(&err).expect("structured payload");
         assert_eq!(payload.kind, ErrorKind::HashCollision);
         assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));

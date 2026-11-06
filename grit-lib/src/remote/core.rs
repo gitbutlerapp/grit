@@ -936,8 +936,7 @@ fn upload_pack_protocol_version(explicit: Option<u8>, repo: &Repository) -> Remo
         return Ok(v);
     }
     crate::protocol::try_effective_client_protocol_version_from_config(
-        repo
-            .config()
+        repo.config()
             .snapshot()
             .map_err(RemoteError::from)?
             .as_ref(),
