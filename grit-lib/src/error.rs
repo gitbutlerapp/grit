@@ -1181,7 +1181,7 @@ pub enum NotARepositoryReason {
     },
 }
 
-fn maintenance_running_message(holder: &crate::maintenance::GcLockHolder) -> String {
+pub(crate) fn maintenance_running_message(holder: &crate::maintenance::GcLockHolder) -> String {
     match (holder.pid, holder.host.as_deref()) {
         (Some(pid), Some(host)) => {
             format!("repository maintenance is already running (process {pid} on {host})")
@@ -1248,6 +1248,10 @@ pub enum Error {
     /// [`crate::repo::Repository::init_with_outcome`] with incompatible `--bare` and separate git dir.
     #[error("cannot combine bare repository with separate git directory")]
     InitBareWithSeparateGitDir,
+
+    /// Object database, pack, MIDX, commit-graph, or fsck failure.
+    #[error(transparent)]
+    Object(crate::objects::ObjectError),
 
     /// A supplied object ID string was not valid hex or the wrong length.
     #[error("invalid object id '{0}'")]
@@ -2444,6 +2448,7 @@ impl Error {
             Self::InvalidRefStorageFormat { .. } => "invalid_ref_storage_format",
             Self::InitObjectFormatChange => "init_object_format_change",
             Self::InitBareWithSeparateGitDir => "init_bare_with_separate_git_dir",
+            Self::Object(e) => e.kind_name(),
             Self::InvalidObjectId(..) => "invalid_object_id",
             Self::HashCollision { .. } => "hash_collision",
             Self::ObjectNotFound(..) => "object_not_found",

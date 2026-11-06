@@ -1138,6 +1138,8 @@ mod notes_rewrite;
 #[cfg(feature = "full-tests")]
 #[path = "notes_roundtrip.rs"]
 mod notes_roundtrip;
+#[path = "object_error_variants.rs"]
+mod object_error_variants;
 #[cfg(feature = "full-tests")]
 #[path = "objects_parse_roundtrip.rs"]
 mod objects_parse_roundtrip;
@@ -1152,6 +1154,8 @@ mod odb_alternate_corrupt_first;
 #[cfg(feature = "full-tests")]
 #[path = "odb_alternates.rs"]
 mod odb_alternates;
+#[path = "odb_backend_error_propagates.rs"]
+mod odb_backend_error_propagates;
 #[path = "odb_compose_alternates.rs"]
 mod odb_compose_alternates;
 #[cfg(feature = "full-tests")]

@@ -12,7 +12,7 @@ By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-back
 | [`ObjectStore`](rustdoc:grit_lib::objects::odb::store::ObjectStore) | Read, metadata, streaming, enumeration |
 | [`WritableObjectStore`](rustdoc:grit_lib::objects::odb::store::WritableObjectStore) | Insert objects (idempotent writes) |
 
-Built-in backends live under [`grit_lib::objects::odb::store`](rustdoc:grit_lib::objects::odb::store) (`LooseStore`, `FilesSource`, `MemoryStore`, `CompositeStore`, and others).
+Built-in backends live under [`grit_lib::objects::odb::store`](rustdoc:grit_lib::objects::odb::store) (`LooseStore`, `FilesSource`, `MemoryStore`, `CompositeStore`, and others). Trait methods surface [`ObjectError`](rustdoc:grit_lib::objects::error::ObjectError); embedders should return [`ObjectError::Backend`](rustdoc:grit_lib::objects::error::ObjectError::Backend) for backend-specific failures instead of a catch-all string.
 
 ## Lookup order
 

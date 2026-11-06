@@ -1834,8 +1834,10 @@ fn create_commit_with_index(
         }
     }
     let bytes = prepare_commit_bytes(repo, config.as_ref(), &commit_data, req.sign_override)?;
-    fsck_commit_idents(&bytes, repo.odb().hash_algo())
-        .map_err(|detail| Error::CorruptObject(format!("commit would fail fsck: {detail}")))?;
+    fsck_commit_idents(&bytes, repo.odb().hash_algo()).map_err(|check| Error::InvalidObject {
+        kind: crate::objects::ObjectKind::Commit,
+        check,
+    })?;
     poll_cancel(progress, cancel)?;
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
     repo.odb().flush_for_publish()?;

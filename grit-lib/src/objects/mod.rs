@@ -18,6 +18,7 @@
 
 mod commit_ref;
 mod core;
+pub mod error;
 mod extra_headers;
 pub(crate) mod handle;
 mod oid_hashtable;
@@ -26,6 +27,7 @@ mod write;
 pub(crate) use commit_ref::commit_author_and_message_lenient;
 pub use commit_ref::CommitRef;
 pub use core::*;
+pub use error::{CorruptObjectReason, ObjectError, ObjectResult};
 pub use extra_headers::{
     extra_header_values, insert_header_before_signature, iter_extra_headers, next_header_block,
     remove_header_lines, set_extra_header, ExtraHeaderIter,

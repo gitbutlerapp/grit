@@ -487,13 +487,15 @@ pub fn timestamp_for_at_ct(ts: SignatureTimestamp) -> Option<i64> {
 /// First fsck error for commit headers (tree/parents/author/committer), or `Ok`.
 ///
 /// Returns a [`crate::fsck_standalone::FsckError::report_line`] string (`msg-id: detail`); compare msg-ids to Git, not detail text.
-pub fn fsck_commit_idents(data: &[u8], hash_algo: HashAlgo) -> Result<(), String> {
+pub fn fsck_commit_idents(
+    data: &[u8],
+    hash_algo: HashAlgo,
+) -> Result<(), crate::fsck_standalone::FsckError> {
     crate::fsck_standalone::fsck_object(
         ObjectKind::Commit,
         data,
         crate::fsck_standalone::FsckObjectOptions::new(hash_algo),
     )
-    .map_err(|e| e.report_line())
 }
 
 /// Committer seconds for ordering (`rev-list --date-order`, etc.): unknown/corrupt → `0`.
