@@ -3,16 +3,16 @@
 
 [meta]
 updated = "2026-11-06"
-semver_baseline = "e4012b4f82cd9ac40cbd136db983d5e15d58991c"
+semver_baseline = "da73c0551cd4a1efff00662345d7528b7d04da8b"
 
 [counts]
-public_api_lines = 27940
+public_api_lines = 28228
 pub_fn_impl_suffix = 0
-pub_fn_with_in_name = 113
+pub_fn_with_in_name = 116
 pub_fn_too_many_arguments_allow = 22
 pub_fn_two_plus_bare_bool = 26
 pub_fn_result_string_err = 12
-pub_free_fn_repository_first = 385
+pub_free_fn_repository_first = 387
 pub_free_fn_git_dir_path_first = 109
 pub_items_multiple_paths = 19
 pub_libc_types = 0
@@ -26,7 +26,7 @@ pub_fn_configset_with_repo = 8
 pub_repo_constructors = 10
 umbrella_error_variants = 181
 pub_error_catch_all_variants = 5
-pub_error_string_tuple_variants = 54
-pub_error_enum_not_non_exhaustive = 39
+pub_error_string_tuple_variants = 56
+pub_error_enum_not_non_exhaustive = 38
 pub_area_error_wraps_umbrella = 31
 error_message_construction_sites = 328
