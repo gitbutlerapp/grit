@@ -381,7 +381,8 @@ impl CancelToken {
         #[cfg(not(feature = "test-support"))]
         let _ = ();
         // Read the flag directly so we do not run `is_cancelled()` here: that would double-apply
-        // `tick_poll_budget_only` together with this `poll` in the same boundary.
+        // `tick_poll_budget_only` in non-test builds and advance `polls_until_cancel` against
+        // `CancelToken::after_polls` budgets in the same boundary as this `poll`.
         if self.flag.load(std::sync::atomic::Ordering::Relaxed) {
             Err(Cancelled)
         } else {

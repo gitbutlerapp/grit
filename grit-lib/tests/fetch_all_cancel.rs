@@ -3,8 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::{NullProgress, Token};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::repo::Repository;
 use grit_test_support::git;

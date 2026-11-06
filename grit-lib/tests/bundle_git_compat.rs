@@ -1291,7 +1291,7 @@ fn bundles_create_replaces_existing_destination_on_success() {
 
 #[test]
 fn bundles_create_cancelled_preserves_destination_and_removes_part_file() {
-    use grit_lib::progress::{NullProgress, Token};
+    use grit_lib::progress::{CancelToken, NullProgress};
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let src = tmp.path();

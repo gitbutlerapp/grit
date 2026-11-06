@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """API quality ratchet for grit-lib: counts that may only go down.
 
-Compares rustdoc JSON (pinned nightly, ``http-ureq`` feature) and
-``grit-lib/public-api.txt`` against ``grit-lib/api-ratchet.toml``.
+Compares rustdoc JSON (pinned nightly, ``http-ureq`` feature; JSON at
+``target/api-ratchet-doc/grit_lib.json``) and ``grit-lib/public-api.txt``
+against ``grit-lib/api-ratchet.toml``.
 """
 
 from __future__ import annotations
@@ -25,7 +26,10 @@ ROOT = Path(__file__).resolve().parents[1]
 GRIT_LIB = ROOT / "grit-lib"
 PUBLIC_API_TXT = GRIT_LIB / "public-api.txt"
 BASELINE_PATH = GRIT_LIB / "api-ratchet.toml"
-DEFAULT_RUSTDOC_JSON = ROOT / "target" / "doc" / "grit_lib.json"
+# Isolated from `target/doc/grit_lib.json` (coverage, other tools) and from the
+# hidden-items rustdoc used by `public_api.py` check-test-items so timestamp
+# freshness cannot latch the wrong feature set or RUSTDOCFLAGS.
+DEFAULT_RUSTDOC_JSON = ROOT / "target" / "api-ratchet-doc" / "grit_lib.json"
 
 METRIC_KEYS = (
     "pub_repo_constructors",
@@ -458,16 +462,38 @@ def returns_bool_or_unit_result(type_node: Any, index: dict[str, Any]) -> bool:
     return _type_node_is_unit(ok_inner)
 
 
-def is_dyn_cancel_type(type_node: Any, index: dict[str, Any]) -> bool:
+def _cancel_trait_path_tail(trait_node: Any) -> str:
+    """Return the last path segment for a dyn-trait entry (rustdoc shape varies)."""
+    if not isinstance(trait_node, dict):
+        return ""
+    inner = trait_node.get("trait")
+    if isinstance(inner, dict) and "path" in inner:
+        return str(inner["path"]).split("::")[-1]
+    rp = trait_node.get("resolved_path")
+    if isinstance(rp, dict) and "path" in rp:
+        return str(rp["path"]).split("::")[-1]
+    disp = type_display(trait_node)
+    if "::" in disp:
+        return disp.split("::")[-1]
+    return disp
+
+
+def is_cancel_surface_type(type_node: Any, index: dict[str, Any]) -> bool:
+    """True for cancellation in the public API: dyn cancel traits or CancelToken/CancelSignal handles."""
     resolved = resolve_type_node(type_node, index)
     if isinstance(resolved, dict) and "dyn_trait" in resolved:
         traits = resolved["dyn_trait"].get("traits") or []
         for trait in traits:
             if "Cancel" in type_display(trait):
                 return True
+            tail = _cancel_trait_path_tail(trait)
+            if tail in ("Cancel", "CancelToken", "CancelSignal"):
+                return True
     if isinstance(resolved, dict) and "borrowed_ref" in resolved:
-        return is_dyn_cancel_type(resolved["borrowed_ref"].get("type"), index)
+        return is_cancel_surface_type(resolved["borrowed_ref"].get("type"), index)
     display = type_display(resolved)
+    if "CancelToken" in display or "CancelSignal" in display:
+        return True
     return "dyn" in display and "Cancel" in display
 
 
@@ -1239,7 +1265,7 @@ def compute_metrics(
 
     for struct_id, struct_name, field_name, field_ty in iter_public_struct_fields(index):
         struct_path = public_path_for_item(index, paths_map, str(struct_id))
-        if is_dyn_cancel_type(field_ty, index):
+        if is_cancel_surface_type(field_ty, index):
             cancel_offenders.append(f"{struct_path} :: field {field_name}")
         if is_atomic_bool_watch_type(field_ty, index):
             cancel_offenders.append(f"{struct_path} :: field {field_name}")
@@ -1318,7 +1344,7 @@ def compute_metrics(
                     config_write_surface.append(f"{path} :: {name}")
 
         for param_name, param_ty in inputs:
-            if is_dyn_cancel_type(param_ty, index):
+            if is_cancel_surface_type(param_ty, index):
                 cancel_offenders.append(f"{path} :: {name}({param_name})")
             if is_atomic_bool_watch_type(param_ty, index):
                 cancel_offenders.append(f"{path} :: {name}({param_name})")

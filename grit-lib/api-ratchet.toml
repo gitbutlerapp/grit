@@ -3,7 +3,7 @@
 
 [meta]
 updated = "2026-11-06"
-semver_baseline = "3c0c2e28bef3fec8d2d3599681b0799624aefab5"
+semver_baseline = "83cd0e08fd03fb17d43cc02e371d4821b19a0e63"
 
 [counts]
 pub_repo_constructors = 3
@@ -20,7 +20,7 @@ pub_free_fn_config_write = 12
 pub_items_multiple_paths = 26
 pub_libc_types = 0
 pub_unsafe_fn = 0
-pub_cancel_types = 1
+pub_cancel_types = 90
 pub_progress_interfaces = 4
 pub_refname_validators = 0
 pub_fn_refname_str = 8

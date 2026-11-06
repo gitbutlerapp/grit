@@ -361,7 +361,7 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 
 Every **public** function and method in `grit-lib` must be executed at least once by the combined **`--lib`**, integration **`--tests`**, and **`--doc`** runs that feed `make coverage`. The gate is [`scripts/public_fn_coverage.py`](scripts/public_fn_coverage.py):
 
-- Public paths come from **rustdoc JSON** (`target/doc/grit_lib.json`), built with the same pinned nightly as [`scripts/public-api.sh`](scripts/public-api.sh) (see the **public-api** CI job).
+- Public paths come from **rustdoc JSON** (`target/doc/grit_lib.json`), built with the same pinned nightly as [`scripts/public-api.sh`](scripts/public-api.sh) (see the **public-api** CI job). The **api-ratchet** gate uses a separate file (`target/api-ratchet-doc/grit_lib.json`, `http-ureq` only) and **check-test-items** uses `target/public-api-test-items-doc/grit_lib.json` (`--document-hidden-items`) so gates do not share one stale `grit_lib.json`.
 - Execution counts come from **`cargo llvm-cov --json`** function records (demangled with **`rustfilt`**), merged across `target/llvm-cov/summary.json` and `target/llvm-cov/functions-doc.json`.
 - Paths with zero executions must appear in [`grit-lib/public-fn-untested.txt`](grit-lib/public-fn-untested.txt). That allowlist **may only shrink**: the gate fails if an allowlisted path gains coverage (remove it in the same change as the new test) or if a public path is missing from both tests and the allowlist.
 

@@ -961,6 +961,17 @@ fn remote_fetch_aborts_on_headers_stall_with_low_speed_env() {
 #[test]
 fn connect_operation_cancel_watch_observes_mirrored_deadline() {
     let cancel = deadline_cancel_token(Instant::now() - Duration::from_secs(1));
+    // `deadline_cancel_token` cancels on a spawned thread; wait so the flag is visible.
+    for _ in 0..200 {
+        if cancel.is_cancelled() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        cancel.is_cancelled(),
+        "deadline_cancel_token should cancel immediately when the deadline is in the past"
+    );
     let (watch, _guard) = HttpWaitGuard::bind(&cancel);
     let deadline = Instant::now() + TEST_HARD_TIMEOUT;
     while !cancel.is_cancelled() && Instant::now() < deadline {

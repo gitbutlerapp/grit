@@ -118,9 +118,10 @@ check)
 	;;
 check-test-items)
 	ensure_toolchain
-	# `check` runs cargo-public-api first, which writes target/doc/grit_lib.json
-	# without --document-hidden-items. Drop it so check-test-items rebuilds correctly.
-	rm -f "${REPO}/target/doc/grit_lib.json"
+	# `check` runs cargo-public-api first, which writes target/doc/grit_lib.json.
+	# check-test-items uses its own JSON under target/public-api-test-items-doc/;
+	# remove it so hidden-item rustdoc is always rebuilt after a snapshot check.
+	rm -f "${REPO}/target/public-api-test-items-doc/grit_lib.json"
 	if python3 "${REPO}/scripts/public_api.py" check-test-items; then
 		echo "public-api test-item ratchet passed (zero offenders)."
 	else

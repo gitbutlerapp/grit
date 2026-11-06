@@ -13,7 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_API_SCRIPT = Path(__file__).resolve().parent / "public-api.sh"
 SNAPSHOT_PATH = ROOT / "grit-lib" / "public-api.txt"
 HIDDEN_OFFENDERS_PATH = ROOT / "grit-lib" / "public-api-test-items.hidden-offenders"
-DEFAULT_RUSTDOC_JSON = ROOT / "target" / "doc" / "grit_lib.json"
+# Isolated from `target/doc/grit_lib.json` (e.g. llvm-cov / public-fn coverage)
+# and from `target/api-ratchet-doc/grit_lib.json` (api quality ratchet) so each
+# gate always rebuilds from its own pinned RUSTDOCFLAGS + features.
+DEFAULT_RUSTDOC_JSON = (
+    ROOT / "target" / "public-api-test-items-doc" / "grit_lib.json"
+)
 
 TEST_ITEM_FORBIDDEN_WORDS = frozenset(
     {

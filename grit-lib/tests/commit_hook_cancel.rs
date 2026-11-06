@@ -1,4 +1,4 @@
-//! Pre-commit hooks honour [`Cancel`] and release index locks (issue #2412).
+//! Pre-commit hooks honour [`CancelToken`] and release index locks (issue #2412).
 
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]

@@ -2,8 +2,7 @@
 
 use grit_lib::bundle::Bundle;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::{ProgressPhase, ProgressSink, ProgressUnit, Token};
+use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink, ProgressUnit};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 use std::sync::atomic::{AtomicBool, Ordering};

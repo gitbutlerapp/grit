@@ -46,6 +46,7 @@ def _minimal_rustdoc(*extra_index: dict) -> dict:
 
 class ErrorRatchetMetricTests(unittest.TestCase):
     def test_error_message_construction_sites(self) -> None:
+        """Spot-check that the migration ratchet still runs; baseline is the source of truth."""
         count = ar.count_error_message_construction_sites()
         self.assertGreaterEqual(count, 200)
 
@@ -846,50 +847,122 @@ class ApiRatchetMetricTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any("pub_unsafe_fn" in line for line in failures))
 
-    def test_pub_cancel_types_dyn_cancel_param(self) -> None:
-        cancel_trait = {
-            "name": "Cancel",
-            "inner": {"trait": {"items": [], "bounds": []}},
+    def test_is_cancel_surface_type_recognizes_dyn_cancel_trait(self) -> None:
+        index = {
+            "9": {
+                "id": 9,
+                "name": "Cancel",
+                "visibility": "public",
+                "inner": {"trait": {"items": [], "bounds": []}},
+            }
         }
-        payload = _minimal_rustdoc(
-            cancel_trait,
-            {
-                "name": "run",
-                "inner": {
-                    "function": {
-                        "sig": {
-                            "inputs": [
-                                [
-                                    "cancel",
-                                    {
-                                        "borrowed_ref": {
-                                            "is_mutable": False,
-                                            "type": {
-                                                "dyn_trait": {
-                                                    "traits": [
-                                                        {
-                                                            "trait": {
-                                                                "path": "Cancel",
-                                                                "id": 99,
-                                                                "args": None,
-                                                            }
-                                                        }
-                                                    ]
-                                                }
-                                            },
-                                        }
-                                    },
-                                ]
-                            ],
-                            "output": None,
-                        },
-                        "header": {},
+        param_ty = {
+            "borrowed_ref": {
+                "is_mutable": False,
+                "type": {
+                    "dyn_trait": {
+                        "traits": [{"trait": {"path": "Cancel", "id": 9, "args": None}}],
                     }
                 },
+            }
+        }
+        self.assertTrue(ar.is_cancel_surface_type(param_ty, index))
+
+    def test_is_cancel_surface_type_recognizes_cancel_token_ref(self) -> None:
+        index = {
+            "9": {
+                "id": 9,
+                "name": "CancelToken",
+                "visibility": "public",
+                "inner": {
+                    "struct": {
+                        "kind": "unit",
+                        "generics": {"params": [], "where_predicates": []},
+                    }
+                },
+            }
+        }
+        param_ty = {
+            "borrowed_ref": {
+                "is_mutable": False,
+                "type": {"resolved_path": {"path": "CancelToken", "id": 9, "args": None}},
+            }
+        }
+        self.assertTrue(ar.is_cancel_surface_type(param_ty, index))
+
+    def test_pub_cancel_types_cancel_token_param(self) -> None:
+        payload = {
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"is_stripped": False, "items": [1, 2]}},
+                },
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "CancelToken",
+                    "visibility": "public",
+                    "inner": {
+                        "struct": {
+                            "kind": "unit",
+                            "generics": {"params": [], "where_predicates": []},
+                        }
+                    },
+                },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "name": "run",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {
+                                "inputs": [
+                                    [
+                                        "cancel",
+                                        {
+                                            "borrowed_ref": {
+                                                "is_mutable": False,
+                                                "type": {
+                                                    "resolved_path": {
+                                                        "path": "CancelToken",
+                                                        "id": 1,
+                                                        "args": None,
+                                                    }
+                                                },
+                                            }
+                                        },
+                                    ]
+                                ],
+                                "output": None,
+                            },
+                            "header": {},
+                        }
+                    },
+                },
             },
-        )
+            "paths": {
+                "0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"},
+                "1": {
+                    "crate_id": 0,
+                    "path": ["grit_lib", "progress", "CancelToken"],
+                    "kind": "struct",
+                },
+                "2": {
+                    "crate_id": 0,
+                    "path": ["grit_lib", "run"],
+                    "kind": "function",
+                },
+            },
+        }
         snap = ar.compute_metrics(public_api_text="", payload=payload)
         self.assertGreaterEqual(snap.metrics["pub_cancel_types"].count, 2)
+        offenders = snap.metrics["pub_cancel_types"].offenders
+        self.assertTrue(any("CancelToken" in line for line in offenders))
+        self.assertTrue(any("run(cancel)" in line for line in offenders))
 
     def test_pub_progress_interfaces_trait_and_fnmut(self) -> None:
         payload = _minimal_rustdoc(
@@ -1192,7 +1265,13 @@ class ApiRatchetMetricTests(unittest.TestCase):
         snap = ar.compute_metrics(public_api_text="", payload=payload)
         self.assertEqual(snap.metrics["pub_fn_pathspec_strings"].count, 2)
 
-    def test_pub_cancel_types_tuple_struct_field(self) -> None:
+    def test_pub_cancel_types_cancel_token_struct_field(self) -> None:
+        cancel_token_ref = {
+            "borrowed_ref": {
+                "is_mutable": False,
+                "type": {"resolved_path": {"path": "CancelToken", "id": 1, "args": None}},
+            }
+        }
         payload = {
             "index": {
                 "0": {
@@ -1200,19 +1279,12 @@ class ApiRatchetMetricTests(unittest.TestCase):
                     "crate_id": 0,
                     "name": "grit_lib",
                     "visibility": "public",
-                    "inner": {"module": {"items": [1, 2, 3]}},
+                    "inner": {"module": {"items": [2, 3, 4]}},
                 },
                 "1": {
                     "id": 1,
                     "crate_id": 0,
-                    "name": "Cancel",
-                    "visibility": "public",
-                    "inner": {"trait": {"items": [], "generics": {"params": [], "where_predicates": []}}},
-                },
-                "2": {
-                    "id": 2,
-                    "crate_id": 0,
-                    "name": "NeverCancel",
+                    "name": "CancelToken",
                     "visibility": "public",
                     "inner": {
                         "struct": {
@@ -1221,39 +1293,34 @@ class ApiRatchetMetricTests(unittest.TestCase):
                         }
                     },
                 },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "name": "RunOptions",
+                    "visibility": "public",
+                    "inner": {
+                        "struct": {
+                            "kind": {"plain": {"fields": [3], "has_stripped_fields": False}},
+                            "generics": {"params": [], "where_predicates": []},
+                        }
+                    },
+                },
                 "3": {
                     "id": 3,
+                    "crate_id": 0,
+                    "name": "cancel",
+                    "visibility": "public",
+                    "inner": {"struct_field": cancel_token_ref},
+                },
+                "4": {
+                    "id": 4,
                     "crate_id": 0,
                     "name": "run",
                     "visibility": "public",
                     "inner": {
                         "function": {
-                            "generics": {"params": [], "where_predicates": []},
-                            "inputs": [
-                                {
-                                    "name": "stop",
-                                    "type": {
-                                        "borrowed_ref": {
-                                            "is_mutable": False,
-                                            "type": {
-                                                "dyn_trait": {
-                                                    "traits": [
-                                                        {
-                                                            "resolved_path": {
-                                                                "path": "Cancel",
-                                                                "id": 1,
-                                                                "args": None,
-                                                            }
-                                                        }
-                                                    ],
-                                                    "lifetime": None,
-                                                }
-                                            },
-                                        }
-                                    },
-                                }
-                            ],
-                            "output": {"type": {"resolved_path": {"path": "()", "id": 0, "args": None}}},
+                            "sig": {"inputs": [], "output": None},
+                            "header": {},
                         }
                     },
                 },
@@ -1262,21 +1329,27 @@ class ApiRatchetMetricTests(unittest.TestCase):
                 "0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"},
                 "1": {
                     "crate_id": 0,
-                    "path": ["grit_lib", "progress", "Cancel"],
-                    "kind": "trait",
+                    "path": ["grit_lib", "progress", "CancelToken"],
+                    "kind": "struct",
                 },
                 "2": {
                     "crate_id": 0,
-                    "path": ["grit_lib", "progress", "NeverCancel"],
+                    "path": ["grit_lib", "RunOptions"],
                     "kind": "struct",
                 },
+                "3": {
+                    "crate_id": 0,
+                    "path": ["grit_lib", "RunOptions", "cancel"],
+                    "kind": "structfield",
+                },
+                "4": {"crate_id": 0, "path": ["grit_lib", "run"], "kind": "function"},
             },
         }
         snap = ar.compute_metrics(public_api_text="", payload=payload)
         self.assertGreaterEqual(snap.metrics["pub_cancel_types"].count, 2)
         offenders = snap.metrics["pub_cancel_types"].offenders
-        self.assertTrue(any("NeverCancel" in line for line in offenders))
-        self.assertTrue(any("Cancel" in line for line in offenders))
+        self.assertTrue(any("CancelToken" in line for line in offenders))
+        self.assertTrue(any("field cancel" in line for line in offenders))
 
     def test_pub_fn_configset_with_repo(self) -> None:
         repo_ref = {

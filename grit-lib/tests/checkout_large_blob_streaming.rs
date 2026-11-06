@@ -23,7 +23,7 @@ const BIG: usize = 3 * 1024 * 1024 + 123;
 #[test]
 fn streamed_files_keep_cancellation_bounded_after_checkout_chunks_grow() {
     use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
-    use grit_lib::progress::{ProgressSink, Token};
+    use grit_lib::progress::{CancelToken, ProgressSink};
 
     /// Cancels on the ninth file and records how many files were on disk at that moment (the
     /// checkout rolls them back before it returns).
