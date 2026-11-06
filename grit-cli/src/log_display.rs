@@ -90,7 +90,8 @@ pub fn decorate_commit_row(row: &str, refs: &[CommitRefJson], head_branch: Optio
     out
 }
 
-/// Like [`render_oneline_from_summary`] but reuses prefix-uniqueness memoization across a page.
+/// One `--oneline` line from a known object id and subject, using a shared [`OidAbbrevBatch`]
+/// so abbreviation stays consistent and fast across many commits (see [`render_oneline_line`]).
 pub fn render_oneline_oid_subject(
     repo: &Repository,
     oid: ObjectId,

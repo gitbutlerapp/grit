@@ -361,7 +361,7 @@ pub fn map_pull_repository_error(repo: &grit_lib::repo::Repository, err: PullErr
     }
 }
 
-/// Map errors while building [`grit_lib::porcelain::pull::PullOptions`] for `grit pull`.
+/// Map errors while building [`PullOptions`](grit_lib::porcelain::pull::PullOptions) for `grit pull`.
 #[must_use]
 pub fn map_pull_options_error(repo: &grit_lib::repo::Repository, err: PullError) -> Error {
     match err {
