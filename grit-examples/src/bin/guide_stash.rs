@@ -4,7 +4,6 @@
 
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashMode, StashPushOptions};
 use std::path::{Path, PathBuf};

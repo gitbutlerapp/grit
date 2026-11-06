@@ -5,7 +5,6 @@
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     apply_rewrite, reword, ApplyOptions, EmptyPolicy, RefScope, RewriteOptions,

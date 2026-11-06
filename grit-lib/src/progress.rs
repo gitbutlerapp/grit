@@ -337,7 +337,8 @@ impl CancelToken {
         self.flag.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Poll hook before blocking waits (counts toward [`Self::after_polls`] in tests).
+    /// Poll hook before blocking waits (in tests, counts toward the poll budget from
+    /// `CancelToken::after_polls`).
     pub fn poll_before_wait(&self) {
         let _ = self.is_cancelled();
     }

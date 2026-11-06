@@ -142,7 +142,7 @@ pub enum StashError {
     #[error(transparent)]
     InvalidSignature(#[from] crate::ident::SignatureError),
 
-    /// Operation stopped via [`Cancel`](crate::progress::Cancel).
+    /// Operation stopped via [`CancelToken`](crate::progress::CancelToken).
     #[error("operation cancelled")]
     Cancelled,
 

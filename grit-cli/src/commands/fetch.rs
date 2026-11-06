@@ -303,8 +303,15 @@ pub(crate) fn run_one_in(
     mode: OutputMode,
 ) -> Result<FetchOutcome> {
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &crate::context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &crate::context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
     let head = resolve_head_for_repository(repo).ok();
     let invocation = resolve_fetch_invocation(
         &config,

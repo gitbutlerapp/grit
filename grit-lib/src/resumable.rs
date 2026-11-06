@@ -143,7 +143,7 @@ pub enum ResumableError {
     /// Reading or writing the local file failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// [`Cancel`] asked the download to stop. The partial file is kept, so
+    /// [`CancelToken`](crate::progress::CancelToken) asked the download to stop. The partial file is kept, so
     /// the next call resumes it.
     #[error("operation cancelled")]
     Cancelled,

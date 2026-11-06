@@ -39,7 +39,6 @@ use crate::operation_output::{
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
 use crate::ui::path_display_for_discovered_repo;
-use grit_lib::progress::CancelToken;
 
 /// Which local refs a history rewrite may move.
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]

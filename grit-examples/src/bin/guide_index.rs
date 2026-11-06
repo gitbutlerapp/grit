@@ -5,7 +5,6 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use std::fs;

@@ -118,7 +118,7 @@ pub enum RemoteError {
         /// Short branch name under `refs/heads/`.
         branch: String,
     },
-    /// Operation stopped via [`Cancel`](crate::progress::Cancel).
+    /// Operation stopped via [`CancelToken`](crate::progress::CancelToken).
     #[error("operation cancelled")]
     Cancelled,
     /// Protocol allow/deny policy blocked the transport.
