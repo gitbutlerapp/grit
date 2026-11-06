@@ -35,7 +35,7 @@ fn stash_error_variants_git_created_stash_round_trip() {
 #[test]
 fn stash_not_found_when_index_out_of_range() {
     let dir = tempdir().unwrap();
-    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let err = repo
         .stash()
         .drop(5)
