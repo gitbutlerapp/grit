@@ -9,7 +9,6 @@ use std::path::Path;
 use anyhow::Context as _;
 use anyhow::Result;
 use grit_lib::config::ConfigSet;
-use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::transfer::FetchOutcome;

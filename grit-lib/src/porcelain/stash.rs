@@ -1924,7 +1924,7 @@ fn reset_after_stash_push(
                 index_from_tree_with_seeded_worktree_stats(repo, &head_tree, &checked_out)?;
             drop(checked_out);
             repo.write_index_with_lock(lock, &mut head_index, true)
-                .map_err(StashError::library)
+                .map_err(|e| StashError::library(e.into()))
         }
     }
 }
@@ -3349,14 +3349,8 @@ fn apply_stash_commit(
     drop(current_head_loaded);
     repo.write_index_with_lock(&mut lock, &mut new_index, false)
         .map_err(|err| match err {
-            Error::GitDirPathIo {
-                path,
-                operation,
-                source,
-            } => StashError::IndexWrite {
-                source: crate::error::PathIoError::git_dir(path, operation, source),
-            },
-            other => StashError::library(other),
+            crate::index::IndexError::PathIo(source) => StashError::IndexWrite { source },
+            other => StashError::library(other.into()),
         })?;
 
     // Apply untracked files if present (3rd parent)

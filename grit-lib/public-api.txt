@@ -5391,7 +5391,6 @@ pub grit_lib::error::Error::BranchCheckedOutInWorktree::worktree_path: alloc::st
 pub grit_lib::error::Error::BranchListNamesDateSort
 pub grit_lib::error::Error::BranchNotFound
 pub grit_lib::error::Error::BranchNotFound::branch: alloc::string::String
-pub grit_lib::error::Error::BundleMissingPrerequisites
 pub grit_lib::error::Error::CacheTreeCorrupt
 pub grit_lib::error::Error::Cancelled
 pub grit_lib::error::Error::CheckoutRollbackIncomplete
@@ -6847,6 +6846,8 @@ impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwa
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwalk::history::RebaseSessionError
 pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::stash::StashError
+pub fn grit_lib::stash::StashError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::lockfile::LockError) -> Self
 impl core::error::Error for grit_lib::index::error::IndexError
@@ -7282,6 +7283,8 @@ impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwa
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwalk::history::RebaseSessionError
 pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::stash::StashError
+pub fn grit_lib::stash::StashError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::lockfile::LockError) -> Self
 impl core::error::Error for grit_lib::index::error::IndexError
@@ -14777,7 +14780,6 @@ pub grit_lib::prelude::Error::BranchCheckedOutInWorktree::worktree_path: alloc::
 pub grit_lib::prelude::Error::BranchListNamesDateSort
 pub grit_lib::prelude::Error::BranchNotFound
 pub grit_lib::prelude::Error::BranchNotFound::branch: alloc::string::String
-pub grit_lib::prelude::Error::BundleMissingPrerequisites
 pub grit_lib::prelude::Error::CacheTreeCorrupt
 pub grit_lib::prelude::Error::Cancelled
 pub grit_lib::prelude::Error::CheckoutRollbackIncomplete
@@ -26752,6 +26754,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::stash::StashError
 pub fn grit_lib::stash::StashError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::stash::StashError
 pub fn grit_lib::stash::StashError::from(grit_lib::ident::SignatureError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::stash::StashError
+pub fn grit_lib::stash::StashError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch::BranchError> for grit_lib::stash::StashError
 pub fn grit_lib::stash::StashError::from(grit_lib::porcelain::branch::BranchError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::stash::StashError

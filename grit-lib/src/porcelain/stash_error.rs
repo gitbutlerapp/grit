@@ -201,6 +201,12 @@ impl From<crate::error::Error> for StashError {
     }
 }
 
+impl From<crate::index::IndexError> for StashError {
+    fn from(err: crate::index::IndexError) -> Self {
+        Self::library(crate::error::Error::from(err))
+    }
+}
+
 impl From<StashError> for crate::error::Error {
     fn from(err: StashError) -> Self {
         err.into_error()

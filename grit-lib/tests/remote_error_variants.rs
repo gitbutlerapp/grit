@@ -91,7 +91,13 @@ fn remote_error_variants() {
                 let src_url = format!("file://{}", src.display());
                 let remote = Remote::from_url(&src_url).expect("url");
                 let unshallow_err = remote
-                    .fetch(&wt_repo, fetch_opts, &mut NoProgress, &CancelToken::never(), None)
+                    .fetch(
+                        &wt_repo,
+                        fetch_opts,
+                        &mut NoProgress,
+                        &CancelToken::never(),
+                        None,
+                    )
                     .expect_err("unshallow on complete repo");
                 assert!(matches!(
                     unshallow_err,

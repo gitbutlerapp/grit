@@ -1080,7 +1080,7 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
     }
 }
 
-fn connect_cancel<'a>(opts: &'a ConnectOptions) -> &'a CancelToken {
+fn connect_cancel(opts: &ConnectOptions) -> &CancelToken {
     opts.cancel.as_deref().unwrap_or(CancelToken::never_ref())
 }
 

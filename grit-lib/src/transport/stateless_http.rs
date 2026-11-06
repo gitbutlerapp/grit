@@ -317,7 +317,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         self.cancel.clone()
     }
 
-    fn cancel_ref<'a>(cancel: &'a Option<Arc<CancelToken>>) -> &'a CancelToken {
+    fn cancel_ref(cancel: &Option<Arc<CancelToken>>) -> &CancelToken {
         cancel.as_deref().unwrap_or(CancelToken::never_ref())
     }
 

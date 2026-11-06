@@ -1032,7 +1032,7 @@ fn move_landed_branch(
 ) -> std::result::Result<PullOutcome, PullError> {
     ensure_branch_tip(repo, refname, Some(head_oid))?;
     if repo.load_index()?.has_unmerged_entries() {
-        return Err(PullError::Repository(IndexError::unmerged().into()));
+        return Err(IndexError::unmerged().into());
     }
     let from = repo.odb().commit_tree(&head_oid)?;
     let to = repo.odb().commit_tree(&upstream_oid)?;

@@ -3,11 +3,11 @@
 
 [meta]
 updated = "2026-11-06"
-semver_baseline = "7dcbd77142c0da657b7bce20bdc190abc19b21fa"
+semver_baseline = "3c0c2e28bef3fec8d2d3599681b0799624aefab5"
 
 [counts]
 pub_repo_constructors = 4
-public_api_lines = 28771
+public_api_lines = 28938
 pub_fn_impl_suffix = 0
 pub_fn_with_in_name = 115
 pub_fn_too_many_arguments_allow = 22
@@ -24,9 +24,9 @@ pub_refname_validators = 0
 pub_fn_refname_str = 40
 pub_fn_pathspec_strings = 5
 pub_fn_configset_with_repo = 0
-umbrella_error_variants = 182
-pub_error_catch_all_variants = 5
-pub_error_string_tuple_variants = 56
-pub_error_enum_not_non_exhaustive = 38
-pub_area_error_wraps_umbrella = 32
-error_message_construction_sites = 320
+umbrella_error_variants = 155
+pub_error_catch_all_variants = 4
+pub_error_string_tuple_variants = 57
+pub_error_enum_not_non_exhaustive = 37
+pub_area_error_wraps_umbrella = 34
+error_message_construction_sites = 192

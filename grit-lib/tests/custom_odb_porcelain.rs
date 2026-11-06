@@ -277,8 +277,8 @@ fn stage_many_untracked_paths_uses_parallel_batch_on_custom_primary() {
         .expect("write");
     }
 
-    let outcome =
-        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage_for_commit");
+    let outcome = stage_for_commit(&repo, &mut NullProgress, &CancelToken::never())
+        .expect("stage_for_commit");
 
     assert_eq!(outcome.added.len(), count);
     for i in 0..count {
@@ -505,7 +505,8 @@ fn start_replay_sequence_pick_on_custom_primary() {
         committer: IDENT.parse().expect("committer"),
         options: ReplayOptions::default(),
     };
-    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
+    let out =
+        start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
     let SequenceOutcome::Completed { created, .. } = out else {
         panic!("expected completed pick, got {out:?}");
     };
@@ -533,7 +534,8 @@ fn start_replay_sequence_revert_on_custom_primary() {
         committer: IDENT.parse().expect("committer"),
         options: ReplayOptions::default(),
     };
-    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("revert");
+    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never())
+        .expect("revert");
     let SequenceOutcome::Completed { created, .. } = out else {
         panic!("expected completed revert, got {out:?}");
     };
