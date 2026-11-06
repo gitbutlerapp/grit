@@ -24,7 +24,6 @@ use grit_lib::revwalk::history::{
     SplitOptions, SquashMessage, SquashOptions, StartRebaseOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
-use grit_lib::revwalk::rev_parse_error::RevParseError;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -1673,16 +1672,11 @@ fn resolve_rebase_upstream(repo: &Repository, upstream: Option<&str>) -> Result<
         anyhow::bail!("cannot rebase detached HEAD without an upstream argument");
     }
     let spec = upstream.unwrap_or("@{upstream}");
-    match resolve_revision_as_commit(repo, spec) {
-        Ok(oid) => Ok(oid),
-        Err(LibError::RevParse(RevParseError::NoUpstream { branch })) if upstream.is_none() => {
-            anyhow::bail!(
-                "no upstream configured for branch '{branch}'\n\
-                 Set one with `grit branch -u <remote>/<branch>`"
-            )
-        }
-        Err(other) => Err(other).with_context(|| format!("could not resolve upstream '{spec}'")),
-    }
+    crate::error_map::resolve_rebase_upstream_revision(
+        spec,
+        upstream.is_none(),
+        resolve_revision_as_commit(repo, spec),
+    )
 }
 
 /// Restore refs (and the worktree when needed) from the last recorded history rewrite.

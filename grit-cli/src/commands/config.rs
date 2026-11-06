@@ -12,7 +12,6 @@ use grit_lib::config::{
     ConfigEntry as LibConfigEntry, ConfigLocation, ConfigScope, ConfigSet, ConfigValueType,
     ConfigWritePreview,
 };
-use grit_lib::error::ConfigError;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -559,10 +558,7 @@ fn hot_unset_in_repo(key: &str, dry_run: bool) -> Result<ConfigOutcome> {
             dry_run,
             preview: preview_text(&preview),
         }),
-        Err(grit_lib::error::Error::Config(ConfigError::KeyNotSet { .. })) => {
-            bail!("key '{key}' is not set");
-        }
-        Err(e) => Err(e.into()),
+        Err(e) => Err(crate::error_map::map_config_unset_error(key, e)),
     }
 }
 
@@ -837,10 +833,7 @@ fn unset_value(
             dry_run,
             preview: preview_text(&preview),
         }),
-        Err(grit_lib::error::Error::Config(ConfigError::KeyNotSet { .. })) => {
-            bail!("key '{key}' is not set");
-        }
-        Err(e) => Err(e.into()),
+        Err(e) => Err(crate::error_map::map_config_unset_error(key, e)),
     }
 }
 
@@ -861,10 +854,7 @@ fn unset_all_cmd(
             dry_run,
             preview: preview_text(&preview),
         }),
-        Err(grit_lib::error::Error::Config(ConfigError::KeyNotSet { .. })) => {
-            bail!("key '{key}' is not set");
-        }
-        Err(e) => Err(e.into()),
+        Err(e) => Err(crate::error_map::map_config_unset_error(key, e)),
     }
 }
 
