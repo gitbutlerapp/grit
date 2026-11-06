@@ -8,7 +8,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::objects::ObjectId;
@@ -668,7 +668,7 @@ fn check_ref_file_name(
     }
     if check_refname_format(
         check_path,
-        &RefNameOptions {
+        &RefFormatOptions {
             allow_onelevel: false,
             refspec_pattern: false,
             normalize: false,
@@ -753,7 +753,7 @@ fn refs_fsck_symref(
 
     if check_refname_format(
         target,
-        &RefNameOptions {
+        &RefFormatOptions {
             allow_onelevel: false,
             refspec_pattern: false,
             normalize: false,
@@ -971,7 +971,7 @@ fn fsck_packed_refs(
 
         if check_refname_format(
             refname,
-            &RefNameOptions {
+            &RefFormatOptions {
                 allow_onelevel: false,
                 refspec_pattern: false,
                 normalize: false,

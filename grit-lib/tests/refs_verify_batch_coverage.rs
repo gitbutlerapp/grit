@@ -12,8 +12,7 @@ use grit_lib::refs::gc::{update_refs, RefTransactionItem};
 use grit_lib::refs::resolve_ref;
 use grit_lib::refs::write_ref;
 use grit_lib::refs::{
-    verify_ref_transaction_batch, verify_refname_available_for_create, RefBatchItem,
-    RefnameUnavailable,
+    verify_ref_available_for_create, verify_ref_transaction_batch, RefBatchItem, RefnameUnavailable,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::tempdir;
@@ -69,14 +68,12 @@ fn verify_refname_blocks_loose_directory_and_packed_descendant() {
     )
     .expect("child file");
 
-    let err = verify_refname_available_for_create(&git_dir, "refs/heads/blocker", &extras, &skip)
+    let err = verify_ref_available_for_create(&git_dir, "refs/heads/blocker", &extras, &skip)
         .unwrap_err();
     assert!(matches!(err, RefnameUnavailable::DescendantExists { .. }));
 
     write_ref(&git_dir, "refs/heads/ok", &oid(5)).expect("write");
-    assert!(
-        verify_refname_available_for_create(&git_dir, "refs/heads/ok-new", &extras, &skip).is_ok()
-    );
+    assert!(verify_ref_available_for_create(&git_dir, "refs/heads/ok-new", &extras, &skip).is_ok());
 }
 
 #[test]
@@ -102,9 +99,8 @@ fn verify_refname_blocks_packed_descendant_without_loose_children() {
     )
     .expect("packed-refs");
 
-    let err =
-        verify_refname_available_for_create(&git_dir, "refs/heads/packed-parent", &extras, &skip)
-            .unwrap_err();
+    let err = verify_ref_available_for_create(&git_dir, "refs/heads/packed-parent", &extras, &skip)
+        .unwrap_err();
     assert!(matches!(err, RefnameUnavailable::DescendantExists { .. }));
 }
 

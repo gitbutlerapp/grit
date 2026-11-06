@@ -7,7 +7,7 @@ use crate::branch_tracking::{
     remote_tracking_ref_is_mapped, upstream_branch, upstream_config_for_branch_ref,
     write_branch_upstream_config,
 };
-use crate::check_ref_format::validate_branch_short_name;
+use crate::check_ref_format::RefName;
 use crate::config::{parse_git_config_maybe_bool, ConfigFile, ConfigScope, ConfigSet};
 use crate::error::{Error, Result};
 use crate::git_path::path_for_error_message;
@@ -119,7 +119,7 @@ pub struct CreateBranchOutcome {
 /// conflicts, and upstream tracking failures.
 pub fn create_branch(repo: &Repository, opts: &CreateBranchOptions) -> Result<CreateBranchOutcome> {
     let name = &opts.name;
-    validate_branch_short_name(name).map_err(|reason| {
+    RefName::branch(name).map_err(|reason| {
         Error::Branch(BranchError::InvalidName {
             name: name.clone(),
             reason: reason.to_string(),
@@ -302,7 +302,7 @@ pub fn delete_branch(
     mode: DeleteMode,
     dry_run: bool,
 ) -> Result<DeletedBranch> {
-    validate_branch_short_name(name).map_err(|reason| {
+    RefName::branch(name).map_err(|reason| {
         Error::Branch(BranchError::InvalidName {
             name: name.to_owned(),
             reason: reason.to_string(),
@@ -367,13 +367,13 @@ pub fn delete_branch(
 ///   checked out in another worktree.
 /// - Ref store, config, and I/O errors are propagated.
 pub fn rename_branch(repo: &Repository, opts: &RenameBranchOptions) -> Result<RenameBranchOutcome> {
-    validate_branch_short_name(&opts.old).map_err(|e| {
+    RefName::branch(&opts.old).map_err(|e| {
         Error::Branch(BranchError::InvalidName {
             name: opts.old.clone(),
             reason: e.to_string(),
         })
     })?;
-    validate_branch_short_name(&opts.new).map_err(|e| {
+    RefName::branch(&opts.new).map_err(|e| {
         Error::Branch(BranchError::InvalidName {
             name: opts.new.clone(),
             reason: e.to_string(),
@@ -646,7 +646,7 @@ fn resolve_set_upstream(
     branch: &str,
     upstream: &str,
 ) -> Result<(String, String, String)> {
-    validate_branch_short_name(branch).map_err(|reason| {
+    RefName::branch(branch).map_err(|reason| {
         Error::Branch(BranchError::InvalidName {
             name: branch.to_owned(),
             reason: reason.to_string(),
@@ -686,7 +686,7 @@ pub fn set_upstream(repo: &Repository, branch: &str, upstream: &str) -> Result<(
 }
 
 fn validate_unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
-    validate_branch_short_name(branch).map_err(|reason| {
+    RefName::branch(branch).map_err(|reason| {
         Error::Branch(BranchError::InvalidName {
             name: branch.to_owned(),
             reason: reason.to_string(),

@@ -15,7 +15,7 @@ use grit_lib::porcelain::tag::{
     create_tag, delete_tag, list_tags_with_detail, verify_tag_by_name, CreateTagRequest,
     TagAnnotation, TagDetail, TagError, TagKind, TagList, TagSummary,
 };
-use grit_lib::refs::check_ref_format::validate_tag_short_name;
+use grit_lib::refs::check_ref_format::RefName;
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
@@ -682,7 +682,7 @@ fn annotation_entry(a: TagAnnotation) -> TagAnnotationEntry {
 }
 
 fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutcome> {
-    if let Err(err) = validate_tag_short_name(name) {
+    if let Err(err) = RefName::tag(name).map(|_| ()) {
         bail!(tag_short_name_error_message(name, &err));
     }
 

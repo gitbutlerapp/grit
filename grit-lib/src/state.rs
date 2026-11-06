@@ -28,7 +28,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::reflog;
@@ -559,7 +559,7 @@ fn symbolic_head_state(
     refname: String,
     resolve_named: impl Fn(&str) -> Result<Option<ObjectId>>,
 ) -> Result<HeadState> {
-    if check_refname_format(&refname, &RefNameOptions::default()).is_err() {
+    if check_refname_format(&refname, &RefFormatOptions::default()).is_err() {
         return Ok(HeadState::Invalid);
     }
     let oid = match resolve_named(&refname)? {

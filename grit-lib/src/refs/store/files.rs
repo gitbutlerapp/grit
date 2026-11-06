@@ -456,7 +456,7 @@ impl FilesRefStore {
     }
 
     /// Whether `name` can be created next to the refs on disk and the other names of its batch
-    /// (`extras`), under the rules of [`crate::refs::verify_refname_available_for_create`].
+    /// (`extras`), under the rules of [`crate::refs::verify_ref_available_for_create`].
     ///
     /// Lookups go through this store's packed-refs cache, which revalidates against the file's
     /// size and mtime, instead of re-reading `packed-refs` for every ancestor. Any file under
@@ -3353,13 +3353,8 @@ mod tests {
             let extras_ref: BTreeSet<&str> = extras.iter().map(String::as_str).collect();
             assert_eq!(
                 refs.verify_create_available(name, &extras_ref, None),
-                crate::refs::verify_refname_available_for_create(
-                    path,
-                    name,
-                    &extras,
-                    &HashSet::new()
-                )
-                .map_err(RefStoreError::from),
+                crate::refs::verify_ref_available_for_create(path, name, &extras, &HashSet::new())
+                    .map_err(RefStoreError::from),
                 "{name}"
             );
         }

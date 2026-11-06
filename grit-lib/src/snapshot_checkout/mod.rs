@@ -292,7 +292,7 @@ pub fn target_ref(id: &str) -> String {
 pub fn valid_branch_name(name: &str) -> bool {
     crate::check_ref_format::check_refname_format(
         &format!("refs/heads/{name}"),
-        &crate::check_ref_format::RefNameOptions::default(),
+        &crate::check_ref_format::RefFormatOptions::default(),
     )
     .is_ok()
 }

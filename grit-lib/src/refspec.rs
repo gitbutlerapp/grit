@@ -13,7 +13,7 @@
 //! `remote.<name>.push` config) can use [`valid_fetch_refspec`] and
 //! [`valid_push_refspec`].
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 
 /// A parsed refspec item.
 ///
@@ -68,7 +68,7 @@ fn is_exact_sha1_hex(s: &str) -> bool {
 ///
 /// Returns `true` when the name is well-formed.
 fn refname_ok(name: &str, is_glob: bool) -> bool {
-    let opts = RefNameOptions {
+    let opts = RefFormatOptions {
         allow_onelevel: true,
         refspec_pattern: is_glob,
         normalize: false,

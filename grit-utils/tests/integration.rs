@@ -117,7 +117,7 @@ fn every_test_file_is_compiled() {
     for item in std::fs::read_dir(&dir).expect("read tests/") {
         let name = item.expect("tests/ entry").file_name();
         let Some(name) = name.to_str() else { continue };
-        if !name.ends_with(".rs") || name == "integration.rs" {
+        if !name.ends_with(".rs") || name == "integration.rs" || name.ends_with("_data.rs") {
             continue;
         }
         let module = format!("#[path = \"{name}\"]");

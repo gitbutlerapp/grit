@@ -6,9 +6,9 @@ use crate::support;
 
 use std::fs;
 
+use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy, RefNameRef};
 use grit_lib::refs::{
-    append_reflog, delete_ref_cas, effective_log_refs_config, is_valid_fetch_advertised_ref,
-    is_valid_ls_refs_advertised_name, is_valid_storable_ref_name, list_refs, list_refs_glob,
+    append_reflog, delete_ref_cas, effective_log_refs_config, list_refs, list_refs_glob,
     lock_path_for_ref, pack_remote_tracking_refs_for_clone, packed_refs_entry_exists, read_head,
     read_log_refs_config, read_raw_ref, resolve_at_n_branch, resolve_ref_cached, resolve_ref_dwim,
     should_autocreate_reflog, write_ref, write_ref_cached, write_ref_cas, write_symbolic_ref,
@@ -19,10 +19,10 @@ use tempfile::tempdir;
 
 #[test]
 fn ref_name_validation_and_dwim_helpers() {
-    assert!(is_valid_storable_ref_name("refs/heads/main"));
-    assert!(!is_valid_storable_ref_name("bad name"));
-    assert!(is_valid_fetch_advertised_ref("refs/heads/x"));
-    assert!(is_valid_ls_refs_advertised_name("HEAD"));
+    assert!(RefName::parse("refs/heads/main", &RefNamePolicy::default().storable()).is_ok());
+    assert!(RefName::parse("bad name", &RefNamePolicy::default().storable()).is_err());
+    assert!(RefName::parse("refs/heads/x", &RefNamePolicy::default().advertised_fetch()).is_ok());
+    assert!(RefNameRef::parse("HEAD", &RefNamePolicy::default().storable()).is_ok());
 }
 
 #[test]

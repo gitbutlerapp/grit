@@ -3,7 +3,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::branch_tracking::write_branch_upstream_config;
-use crate::check_ref_format::validate_branch_short_name;
+use crate::check_ref_format::RefName;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, OverwriteReason, Result};
 use crate::hooks::{run_post_checkout, HookName, PostOperationHooks};
@@ -240,7 +240,7 @@ pub fn resolve_create_branch(
     start_point: Option<&str>,
     track: TrackMode,
 ) -> Result<SwitchMode> {
-    validate_branch_short_name(branch).map_err(|reason| {
+    RefName::branch(branch).map_err(|reason| {
         Error::Branch(BranchError::InvalidName {
             name: branch.to_owned(),
             reason: reason.to_string(),
@@ -301,7 +301,7 @@ pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode
     ] {
         if let Ok(oid) = repo.resolve_ref_oid(&candidate) {
             let short = spec.strip_prefix("origin/").unwrap_or(spec).to_owned();
-            validate_branch_short_name(&short).map_err(|reason| {
+            RefName::branch(&short).map_err(|reason| {
                 Error::Branch(BranchError::InvalidName {
                     name: short.clone(),
                     reason: reason.to_string(),

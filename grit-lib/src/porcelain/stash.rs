@@ -30,7 +30,7 @@ use crate::objects::FileMode;
 use crate::worktree::{map_worktree_io, WorktreePathOperation};
 // `MODE_EXECUTABLE` only drives the Unix executable-bit application below.
 use crate::apply::{apply_patch_to_index, IndexApplyOptions};
-use crate::check_ref_format::validate_branch_short_name;
+use crate::check_ref_format::RefName;
 use crate::diff::HunkId;
 use crate::ident::Signature;
 #[cfg(unix)]
@@ -2090,7 +2090,7 @@ fn append_stash_untracked_show_entries(
 /// Returns [`BranchError::AlreadyExists`] when the branch name is taken,
 /// [`Error::StashNotFound`] when `n` is out of range, and apply/switch failures otherwise.
 pub(crate) fn stash_branch(repo: &Repository, name: &str, n: usize) -> Result<StashBranchOutcome> {
-    validate_branch_short_name(name)
+    RefName::branch(name)
         .map_err(|e| Error::Message(format!("invalid branch name '{name}': {e}")))?;
     let branch_ref = format!("refs/heads/{name}");
     if repo.resolve_ref_oid(&branch_ref).is_ok() {
@@ -2153,7 +2153,7 @@ fn stash_branch_from_commit(
     name: &str,
     stash_oid: ObjectId,
 ) -> Result<StashBranchOutcome> {
-    validate_branch_short_name(name)
+    RefName::branch(name)
         .map_err(|e| Error::Message(format!("invalid branch name '{name}': {e}")))?;
     let branch_ref = format!("refs/heads/{name}");
     if repo.resolve_ref_oid(&branch_ref).is_ok() {

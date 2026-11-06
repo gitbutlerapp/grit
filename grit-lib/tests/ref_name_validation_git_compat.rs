@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::check_ref_format::{validate_branch_short_name, validate_tag_short_name};
+use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy};
 use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::tempdir;
@@ -91,7 +91,7 @@ fn branch_short_names_match_git_check_ref_format() {
         "a*b",
     ];
     for name in samples {
-        let grit_ok = validate_branch_short_name(name).is_ok();
+        let grit_ok = RefName::branch(name).is_ok();
         let git_ok = git_check_ref_format_branch(name);
         assert_eq!(
             grit_ok, git_ok,
@@ -112,7 +112,7 @@ fn tag_short_names_match_git_check_ref_format() {
         "HEAD",
     ];
     for name in samples {
-        let grit_ok = validate_tag_short_name(name).is_ok();
+        let grit_ok = RefName::tag(name).is_ok();
         let git_ok = git_check_ref_format_tag(name);
         assert_eq!(
             grit_ok, git_ok,

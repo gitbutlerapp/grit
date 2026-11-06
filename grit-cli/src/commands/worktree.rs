@@ -5,7 +5,7 @@ use grit_lib::config::git_path::{
     absolute_path_for_gitfile_stored_path, path_for_disk_compare, path_lexical_for_disk_compare,
     user_display_path,
 };
-use grit_lib::refs::check_ref_format::validate_branch_short_name;
+use grit_lib::refs::check_ref_format::RefName;
 use grit_lib::repo_handles::LockWorktreeOptions;
 use grit_lib::state::HeadState;
 use grit_lib::worktree::{
@@ -208,7 +208,7 @@ pub fn run_add(
         bail!("use only one of `-b`, `-B`, or `--detach`");
     }
     if let Some(b) = branch.as_deref().or(force_branch.as_deref()) {
-        if let Err(err) = validate_branch_short_name(b) {
+        if let Err(err) = RefName::branch(b).map(|_| ()) {
             bail!(branch_short_name_error_message(b, &err));
         }
     }

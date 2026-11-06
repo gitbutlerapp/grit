@@ -21,7 +21,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, NotARepositoryReason, Result};
 use crate::objects::{parse_commit, parse_tag, parse_tree, CommitRef, ObjectId, ObjectKind};
@@ -1305,7 +1305,7 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
 
     let mut count = 0usize;
     let mut first = None;
-    let refname_opts = RefNameOptions::default();
+    let refname_opts = RefFormatOptions::default();
     for rule in RULES {
         let candidate = rule.replace("{0}", spec);
         // One raw read decides missing and direct candidates; only symrefs need resolving.

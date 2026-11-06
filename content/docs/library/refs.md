@@ -242,6 +242,12 @@ fn my_store_conforms() {
 
 To open a repository on your store, pass it to [`RepositoryBuilder::ref_store`](rustdoc:grit_lib::repo::RepositoryBuilder::ref_store). The git directory then needs no `HEAD` or `refs/`, and [`RepositoryBuilder::initial_branch`](rustdoc:grit_lib::repo::RepositoryBuilder::initial_branch) points `HEAD` at an unborn branch when the store has none. See [Object stores](object-stores.md) for opening with no git directory at all.
 
+## Ref names (`RefName` / `RefNamePolicy`)
+
+Parse human-facing ref strings with [`RefName::parse`](rustdoc:grit_lib::refs::check_ref_format::RefName::parse) and a [`RefNamePolicy`](rustdoc:grit_lib::refs::check_ref_format::RefNamePolicy). The default policy matches `git check-ref-format` with no flags. Setters such as [`allow_onelevel`](rustdoc:grit_lib::refs::check_ref_format::RefNamePolicy::allow_onelevel), [`refspec_pattern`](rustdoc:grit_lib::refs::check_ref_format::RefNamePolicy::refspec_pattern), [`normalize`](rustdoc:grit_lib::refs::check_ref_format::RefNamePolicy::normalize), [`storable`](rustdoc:grit_lib::refs::check_ref_format::RefNamePolicy::storable), [`advertised_fetch`](rustdoc:grit_lib::refs::check_ref_format::RefNamePolicy::advertised_fetch), and [`receive_pack`](rustdoc:grit_lib::refs::check_ref_format::RefNamePolicy::receive_pack) mirror the free validators removed from the public API.
+
+Branch and tag short names use [`RefName::branch`](rustdoc:grit_lib::refs::check_ref_format::RefName::branch) and [`RefName::tag`](rustdoc:grit_lib::refs::check_ref_format::RefName::tag). When normalization may allocate, parse into an owned [`RefName`](rustdoc:grit_lib::refs::check_ref_format::RefName); when the input is already canonical, [`RefNameRef::parse`](rustdoc:grit_lib::refs::check_ref_format::RefNameRef::parse) validates in place. Names loaded from the ref store skip re-validation when the library already trusts the on-disk source.
+
 ## Examples
 
 **Library guide** — resolve HEAD, list branches and tags, update a demo branch (included on this page):

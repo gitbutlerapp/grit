@@ -16632,7 +16632,7 @@ pub fn grit_lib::refs::listing::compare_version_names(&str, &str, &[alloc::strin
 pub fn grit_lib::refs::listing::creator_date(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<i64>
 pub fn grit_lib::refs::listing::creator_date_from_bytes(grit_lib::objects::ObjectKind, &[u8]) -> i64
 pub fn grit_lib::refs::listing::epoch_from_identity(&str) -> i64
-pub fn grit_lib::refs::listing::pattern_matches_ls_remote_refname(&str, &str) -> bool
+pub fn grit_lib::refs::listing::pattern_matches_ls_remote_pattern(&str, &str) -> bool
 pub fn grit_lib::refs::listing::pattern_matches_short_name(&str, &str, bool) -> bool
 pub fn grit_lib::refs::listing::patterns_match_ls_remote(&str, &[alloc::string::String]) -> bool
 pub fn grit_lib::refs::listing::query_listings_from_pairs<I>(I, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions, core::option::Option<&grit_lib::prelude::Odb>) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError> where I: core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, grit_lib::objects::ObjectId, core::option::Option<grit_lib::objects::ObjectId>)>
@@ -17970,7 +17970,7 @@ pub fn grit_lib::refs::update_branch_for_commit_on_store(&dyn grit_lib::refs::st
 pub fn grit_lib::refs::update_direct_ref_on_store(&dyn grit_lib::refs::store::RefStore, &std::path::Path, &str, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::verify_branch_commit_cas(core::option::Option<grit_lib::objects::ObjectId>, core::option::Option<grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::verify_ref_transaction_batch(&std::path::Path, &[grit_lib::refs::RefBatchItem]) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
-pub fn grit_lib::refs::verify_refname_available_for_create(&std::path::Path, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>, &std::collections::hash::set::HashSet<alloc::string::String>) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
+pub fn grit_lib::refs::verify_ref_available_for_create(&std::path::Path, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>, &std::collections::hash::set::HashSet<alloc::string::String>) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub fn grit_lib::refs::warn_ambiguous_refs_from_config(&grit_lib::repo::Repository) -> bool
 pub fn grit_lib::refs::write_packed_refs_file(&std::path::Path, &[grit_lib::refs::PackedRefRecord]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::write_ref(&std::path::Path, &str, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>

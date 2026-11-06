@@ -1,6 +1,6 @@
 //! Unambiguous ref shortening (`refs_shorten_unambiguous_ref` semantics).
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::diagnostics::Warning;
 use crate::error::{Error, Result};
 use crate::refs::store::RawRef;
@@ -43,7 +43,7 @@ fn ref_exists(repo: &Repository, name: &str) -> Result<bool> {
 
 /// Follow symbolic refs from `start` to the terminal ref name Git uses for DWIM output.
 pub fn peel_symref_to_terminal_ref(repo: &Repository, start: &str) -> Result<String> {
-    let refname_opts = RefNameOptions::default();
+    let refname_opts = RefFormatOptions::default();
     let mut name = start.to_owned();
     for _ in 0..SYMREF_MAXDEPTH {
         let Some(raw) = repo.refs().read_raw(&name)? else {

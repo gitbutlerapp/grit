@@ -10,8 +10,8 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::refs::{
-    delete_ref, delete_ref_cas, lock_path_for_ref, read_raw_ref,
-    verify_refname_available_for_create, write_ref, RawRefLookup,
+    delete_ref, delete_ref_cas, lock_path_for_ref, read_raw_ref, verify_ref_available_for_create,
+    write_ref, RawRefLookup,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use std::collections::{BTreeSet, HashSet};
@@ -125,7 +125,5 @@ fn delete_ref_cas_and_directory_in_the_way() {
     delete_ref(&git_dir, "refs/heads/parent/leaf").expect("cleanup");
     let extras = BTreeSet::new();
     let skip = HashSet::new();
-    assert!(
-        verify_refname_available_for_create(&git_dir, "refs/heads/new", &extras, &skip).is_ok()
-    );
+    assert!(verify_ref_available_for_create(&git_dir, "refs/heads/new", &extras, &skip).is_ok());
 }

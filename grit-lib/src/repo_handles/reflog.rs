@@ -111,7 +111,7 @@ impl<'repo> RepositoryReflogs<'repo> {
     pub fn refs(&self) -> Result<Vec<RefName>> {
         Ok(reflog_refs_on_store(self.store())?
             .iter()
-            .filter_map(|name| RefName::try_from(name.as_str()).ok())
+            .map(RefName::from_trusted)
             .collect())
     }
 

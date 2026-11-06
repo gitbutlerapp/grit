@@ -6,6 +6,7 @@ use crate::support;
 
 use std::fs;
 
+use grit_lib::refs::check_ref_format::{RefName, RefNameError, RefNamePolicy, RefNameRef};
 use grit_lib::refs::{collect_alternate_ref_oids, list_refs_glob, ref_matches_glob, write_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::tempdir;
@@ -123,54 +124,46 @@ fn collect_alternate_ref_oids_honors_prefix_config() {
 }
 
 #[test]
-fn check_ref_format_edge_cases_for_coverage() {
-    use grit_lib::refs::check_ref_format::{
-        check_refname_format, collapse_slashes, is_valid_advertised_symref_target,
-        is_valid_fetch_advertised_ref, receive_pack_refname_ok, refname_is_safe,
-        validate_branch_short_name, validate_tag_short_name, RefNameError, RefNameOptions,
-    };
+fn ref_name_policy_edge_cases_for_coverage() {
+    let format = RefNamePolicy::default();
+    let storable = RefNamePolicy::default().storable();
+    let safe = RefNamePolicy::default().safe_for_fs();
+    let fetch_ad = RefNamePolicy::default().advertised_fetch();
+    let receive = RefNamePolicy::default().receive_pack(false);
+    let symref = RefNamePolicy::new().allow_onelevel();
 
     assert!(matches!(
-        check_refname_format("", &RefNameOptions::default()),
+        RefName::parse("", &format),
         Err(RefNameError::Empty)
     ));
-    assert!(!refname_is_safe("refs/"));
-    assert!(!refname_is_safe("refs/heads/../escape"));
-    assert!(!refname_is_safe("not_upper"));
-    assert!(receive_pack_refname_ok("refs/heads/main", false));
-    assert!(!receive_pack_refname_ok("heads/main", false));
+    assert!(RefName::parse("refs/heads/../escape", &safe).is_err());
+    assert!(RefName::parse("not_upper", &safe).is_err());
+    assert!(RefName::parse("refs/heads/main", &receive).is_ok());
+    assert!(RefName::parse("heads/main", &receive).is_err());
+    assert!(matches!(RefName::branch(""), Err(RefNameError::Empty)));
     assert!(matches!(
-        validate_branch_short_name(""),
-        Err(RefNameError::Empty)
-    ));
-    assert!(matches!(
-        validate_branch_short_name("-bad"),
+        RefName::branch("-bad"),
         Err(RefNameError::BranchStartsWithDash)
     ));
+    assert!(matches!(RefName::tag(""), Err(RefNameError::Empty)));
+    assert!(RefName::tag("v1.0").is_ok());
+    assert!(RefName::parse("refs/heads/main", &fetch_ad).is_ok());
+    assert!(RefName::parse("HEAD", &fetch_ad).is_err());
+    assert!(RefNameRef::parse("HEAD", &symref).is_ok());
+    assert!(RefNameRef::parse("@", &symref).is_err());
+    assert_eq!(
+        RefName::parse("refs//heads///x", &RefNamePolicy::default().normalize())
+            .expect("normalize")
+            .as_str(),
+        "refs/heads/x"
+    );
     assert!(matches!(
-        validate_tag_short_name(""),
-        Err(RefNameError::Empty)
-    ));
-    assert!(validate_tag_short_name("v1.0").is_ok());
-    assert!(is_valid_fetch_advertised_ref("refs/heads/main"));
-    assert!(!is_valid_fetch_advertised_ref("HEAD"));
-    assert!(is_valid_advertised_symref_target("HEAD"));
-    assert!(!is_valid_advertised_symref_target("@"));
-    assert_eq!(collapse_slashes("refs//heads///x"), "refs/heads/x");
-    assert!(check_refname_format(
-        "refs/heads/x",
-        &RefNameOptions {
-            normalize: true,
-            ..Default::default()
-        },
-    )
-    .is_ok());
-    assert!(matches!(
-        check_refname_format("@", &RefNameOptions::default()),
+        RefName::parse("@", &format),
         Err(RefNameError::LoneAt)
     ));
     assert!(matches!(
-        validate_branch_short_name("HEAD"),
+        RefName::branch("HEAD"),
         Err(RefNameError::ReservedBranchName)
     ));
+    assert!(RefName::parse("HEAD", &storable).is_ok());
 }

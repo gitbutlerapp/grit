@@ -56,11 +56,11 @@ pub const DEFAULT_REMOTE: &str = "origin";
 /// Whether `name` can name a remote: its tracking refs `refs/remotes/<name>/…` must be valid.
 #[must_use]
 pub(crate) fn is_valid_remote_name(name: &str) -> bool {
-    use crate::check_ref_format::{check_refname_format, RefNameOptions};
+    use crate::check_ref_format::{check_refname_format, RefFormatOptions};
     !name.is_empty()
         && check_refname_format(
             &format!("refs/remotes/{name}/test"),
-            &RefNameOptions::default(),
+            &RefFormatOptions::default(),
         )
         .is_ok()
 }

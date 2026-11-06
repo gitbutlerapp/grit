@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::branch_tracking::write_branch_upstream_config;
-use crate::check_ref_format::validate_branch_short_name;
+use crate::check_ref_format::RefName;
 use crate::config::ConfigSet;
 #[cfg(test)]
 use crate::environment::RepositoryOptions;
@@ -986,7 +986,7 @@ fn prepare_existing_branch(
 }
 
 fn validate_branch_name(name: &str) -> Result<()> {
-    validate_branch_short_name(name).map_err(|reason| {
+    RefName::branch(name).map(|_| ()).map_err(|reason| {
         BranchError::InvalidName {
             name: name.to_owned(),
             reason: reason.to_string(),

@@ -8,15 +8,15 @@ use std::path::Path;
 
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::is_valid_storable_ref_name;
+use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy};
 use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::store::{open_ref_store, RefStoreError};
 use grit_lib::refs::{
     append_reflog, delete_ref, list_refs, list_refs_glob, list_refs_physical,
     packed_refs_entry_exists, read_head, read_log_refs_config, read_raw_ref, read_ref_file,
     read_symbolic_ref, resolve_ref, resolve_ref_cached, resolve_ref_dwim, should_autocreate_reflog,
-    verify_refname_available_for_create, write_ref, write_ref_cached, write_symbolic_ref,
-    PackedRefs, RawRefLookup, Ref, RefnameUnavailable, SYMREF_MAXDEPTH,
+    verify_ref_available_for_create, write_ref, write_ref_cached, write_symbolic_ref, PackedRefs,
+    RawRefLookup, Ref, RefnameUnavailable, SYMREF_MAXDEPTH,
 };
 
 use support::{
@@ -581,14 +581,13 @@ fn t1405_verify_refname_df_prefix_single_ref() {
 
         let extras = BTreeSet::new();
         let skip = HashSet::new();
-        let err =
-            verify_refname_available_for_create(&git_dir, "refs/df/parent/child", &extras, &skip)
-                .unwrap_err();
+        let err = verify_ref_available_for_create(&git_dir, "refs/df/parent/child", &extras, &skip)
+            .unwrap_err();
         assert!(matches!(err, RefnameUnavailable::AncestorExists { .. }));
 
         delete_ref(&git_dir, "refs/df/parent").expect("remove parent");
         write_ref(&git_dir, "refs/df/parent/child", &oid).expect("child ref");
-        let err = verify_refname_available_for_create(&git_dir, "refs/df/parent", &extras, &skip)
+        let err = verify_ref_available_for_create(&git_dir, "refs/df/parent", &extras, &skip)
             .unwrap_err();
         assert!(matches!(err, RefnameUnavailable::DescendantExists { .. }));
         eprintln!("ok t1405_verify_df ({})", backend_label(backend));
@@ -619,7 +618,7 @@ fn t1430_invalid_names_match_git_check_ref_format() {
         names.push(format!("refs/heads/{short}"));
     }
     for name in names {
-        let grit_ok = is_valid_storable_ref_name(&name);
+        let grit_ok = RefName::parse(&name, &RefNamePolicy::default().storable()).is_ok();
         let git_ok = git_check_ref_format(&name);
         assert_eq!(grit_ok, git_ok, "refname {name:?}");
     }

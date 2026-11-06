@@ -33,7 +33,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::change_id::ChangeIdGenerator;
-use crate::check_ref_format::validate_branch_short_name;
+use crate::check_ref_format::RefName;
 use crate::command_runner::CommandRunner;
 use crate::config::{
     config_file_stamps, stamp_for_path, ConfigCacheKey, ConfigFile, ConfigScope, ConfigSet,
@@ -372,7 +372,7 @@ impl RepositoryBuilder {
 fn seed_unborn_head(store: &dyn crate::refs::store::RefStore, branch: &str) -> Result<()> {
     use crate::refs::store::{Expected, RawRef, RefStoreError, RefTransaction, RefUpdate};
 
-    validate_branch_short_name(branch).map_err(|e| Error::InvalidRef(e.to_string()))?;
+    RefName::branch(branch).map_err(|e| Error::InvalidRef(e.to_string()))?;
     if store.read_raw("HEAD")?.is_some() {
         return Ok(());
     }
@@ -4193,7 +4193,7 @@ pub fn resolve_initial_branch(env: &Environment, explicit: Option<&str>) -> Resu
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "main".to_owned()),
     };
-    validate_branch_short_name(&name).map_err(|e| Error::InvalidRef(e.to_string()))?;
+    RefName::branch(&name).map_err(|e| Error::InvalidRef(e.to_string()))?;
     Ok(name)
 }
 

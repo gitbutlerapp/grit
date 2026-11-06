@@ -7,7 +7,7 @@ use grit_lib::{
     objects::odb::store::MemoryStore,
     objects::{bitmap::BitmapIndex, hash::ObjectHasher, odb::Odb},
     parallel::ThreadPolicy,
-    refs::{check_ref_format::RefNameOptions, reflog::ReflogEntry},
+    refs::{check_ref_format::RefNamePolicy, reflog::ReflogEntry},
     remote::credentials::Credential,
     repo::Repository,
     revwalk::rev_list::RevListOptions,
@@ -26,7 +26,7 @@ fn canonical_paths_cover_external_uses() {
     let _ = std::any::type_name::<ObjectHasher>();
     let _ = std::any::type_name::<ThreadPolicy>();
     let _ = std::any::type_name::<ReflogEntry>();
-    let _ = std::any::type_name::<RefNameOptions>();
+    let _ = std::any::type_name::<RefNamePolicy>();
     let _ = std::any::type_name::<MemoryStore>();
     let _ = std::any::type_name::<Credential>();
     let _ = std::any::type_name::<RevListOptions>();

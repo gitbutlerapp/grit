@@ -76,7 +76,7 @@ use store::{
     RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 
-use crate::check_ref_format::{check_refname_format_borrowed, RefNameOptions};
+use crate::check_ref_format::{check_refname_format_borrowed, RefFormatOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, RefLockError, Result};
 use crate::lockfile::LockWait;
@@ -124,7 +124,7 @@ fn files_legacy_write_precheck(git_dir: &Path, refname: &str) -> Result<()> {
 /// A directory that holds no ref (stray files or lock files only) is
 /// [`RefLockError::DirectoryInTheWay`].
 fn directory_in_the_way(git_dir: &Path, refname: &str, path: &Path) -> Error {
-    match verify_refname_available_for_create(git_dir, refname, &BTreeSet::new(), &HashSet::new()) {
+    match verify_ref_available_for_create(git_dir, refname, &BTreeSet::new(), &HashSet::new()) {
         Err(reason) => Error::RefStore(store::RefStoreError::NameUnavailable { reason }),
         Ok(()) => RefLockError::DirectoryInTheWay {
             refname: refname.to_owned(),
@@ -1052,28 +1052,19 @@ fn find_descendant_in_sorted_extras(
 ///
 /// Delegates to [`crate::check_ref_format::is_valid_fetch_advertised_ref`].
 #[must_use]
-pub fn is_valid_fetch_advertised_ref(name: &str) -> bool {
+pub(crate) fn is_valid_fetch_advertised_ref(name: &str) -> bool {
     crate::check_ref_format::is_valid_fetch_advertised_ref(name)
-}
-
-/// Whether a name from a protocol-v2 `ls-refs` response should be kept.
-///
-/// `HEAD` is valid without a `refs/` prefix; every other name must pass
-/// [`is_valid_fetch_advertised_ref`].
-#[must_use]
-pub fn is_valid_ls_refs_advertised_name(name: &str) -> bool {
-    name == "HEAD" || is_valid_fetch_advertised_ref(name)
 }
 
 /// Whether a ref name is safe to store under the ref backend (post-refspec mapping).
 #[must_use]
-pub fn is_valid_storable_ref_name(name: &str) -> bool {
-    is_valid_fetch_advertised_ref(name)
+pub(crate) fn is_valid_storable_ref_name(name: &str) -> bool {
+    crate::check_ref_format::is_storable_ref_name(name)
 }
 
 /// Whether a symref target from a ref advertisement is safe to record.
 #[must_use]
-pub fn is_valid_advertised_symref_target(name: &str) -> bool {
+pub(crate) fn is_valid_advertised_symref_target(name: &str) -> bool {
     crate::check_ref_format::is_valid_advertised_symref_target(name)
 }
 
@@ -1089,7 +1080,7 @@ pub fn is_valid_advertised_symref_target(name: &str) -> bool {
 /// - `refname` — full ref name to create.
 /// - `extras` — other refnames touched in the same stdin batch / transaction (sorted set).
 /// - `skip` — refnames that may be deleted or updated away in the same batch.
-pub fn verify_refname_available_for_create(
+pub fn verify_ref_available_for_create(
     git_dir: &Path,
     refname: &str,
     extras: &BTreeSet<String>,
@@ -1279,7 +1270,7 @@ pub fn verify_ref_transaction_batch(
         if resolve_ref(git_dir, &item.name).is_ok() {
             continue;
         }
-        verify_refname_available_for_create(git_dir, &item.name, &extras, &empty_skip)?;
+        verify_ref_available_for_create(git_dir, &item.name, &extras, &empty_skip)?;
     }
     Ok(())
 }
@@ -1362,7 +1353,7 @@ fn packed_ref_data_line_refname(line: &str) -> Option<&str> {
 fn parse_packed_ref_data_line(
     path: &Path,
     line: &str,
-    ref_opts: &RefNameOptions,
+    ref_opts: &RefFormatOptions,
 ) -> Result<(String, ObjectId)> {
     let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, ref_opts)?;
     Ok((refname.to_owned(), oid))
@@ -1371,7 +1362,7 @@ fn parse_packed_ref_data_line(
 fn parse_packed_ref_data_line_borrowed<'a>(
     path: &Path,
     line: &'a str,
-    ref_opts: &RefNameOptions,
+    ref_opts: &RefFormatOptions,
 ) -> Result<(&'a str, ObjectId)> {
     let Some((hex_len, oid)) = packed_line_oid(line) else {
         return Err(packed_refs_unexpected_line(path, line));
@@ -1582,7 +1573,7 @@ impl PackedRefsFileView {
         path: &Path,
         refname: &str,
     ) -> Result<Option<(ObjectId, Option<ObjectId>)>> {
-        let ref_opts = RefNameOptions {
+        let ref_opts = RefFormatOptions {
             allow_onelevel: false,
             refspec_pattern: false,
             normalize: false,
@@ -1795,7 +1786,7 @@ impl PackedRefsFileView {
         } else {
             None
         };
-        let ref_opts = RefNameOptions {
+        let ref_opts = RefFormatOptions {
             allow_onelevel: false,
             refspec_pattern: false,
             normalize: false,
@@ -2006,7 +1997,7 @@ fn parse_packed_refs_region<C: Default + Extend<(String, ObjectId)>>(
     keep: Option<PackedRecordFilter<'_>>,
     peel_trait: PackedPeelTrait,
 ) -> Result<(C, bool)> {
-    let ref_opts = RefNameOptions {
+    let ref_opts = RefFormatOptions {
         allow_onelevel: false,
         refspec_pattern: false,
         normalize: false,
@@ -2119,7 +2110,7 @@ fn parse_packed_line_at(
     path: &Path,
     data: &[u8],
     line_start: usize,
-    ref_opts: &RefNameOptions,
+    ref_opts: &RefFormatOptions,
 ) -> Result<(String, ObjectId)> {
     let line = packed_line_as_str(data, line_start);
     parse_packed_ref_data_line(path, line, ref_opts)
@@ -2250,7 +2241,7 @@ fn scan_packed_refs<'a>(
     let text = std::str::from_utf8(data)
         .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
 
-    let ref_opts = RefNameOptions {
+    let ref_opts = RefFormatOptions {
         allow_onelevel: false,
         refspec_pattern: false,
         normalize: false,
@@ -5415,8 +5406,8 @@ mod refname_available_tests {
             "refs/1l/d".to_string(),
         ]);
         let skip = HashSet::new();
-        let err = verify_refname_available_for_create(git_dir, "refs/1l/c/x", &extras, &skip)
-            .unwrap_err();
+        let err =
+            verify_ref_available_for_create(git_dir, "refs/1l/c/x", &extras, &skip).unwrap_err();
         assert!(matches!(
             err,
             RefnameUnavailable::AncestorExists { ref blocking, .. } if blocking == "refs/1l/c"
@@ -5435,8 +5426,8 @@ mod refname_available_tests {
         .unwrap();
         let skip = HashSet::new();
         let extras = BTreeSet::new();
-        let err = verify_refname_available_for_create(&git_dir, "refs/1l/c/x", &extras, &skip)
-            .unwrap_err();
+        let err =
+            verify_ref_available_for_create(&git_dir, "refs/1l/c/x", &extras, &skip).unwrap_err();
         assert!(matches!(
             err,
             RefnameUnavailable::AncestorExists { ref blocking, .. } if blocking == "refs/1l/c"
@@ -5521,7 +5512,7 @@ mod refname_available_tests {
         let extras = BTreeSet::from(["refs/ns/p".to_string()]);
         let skip = HashSet::new();
         let err =
-            verify_refname_available_for_create(git_dir, "refs/ns/p", &extras, &skip).unwrap_err();
+            verify_ref_available_for_create(git_dir, "refs/ns/p", &extras, &skip).unwrap_err();
         assert!(matches!(
             err,
             RefnameUnavailable::DescendantExists { ref blocking, .. }
@@ -5542,7 +5533,7 @@ mod refname_available_tests {
              67bf698f3ab735e92fb011a99cff3497c44d30c1 refs/ns/q/x\n",
         )
         .unwrap();
-        let err = verify_refname_available_for_create(
+        let err = verify_ref_available_for_create(
             git_dir,
             "refs/ns/q",
             &BTreeSet::new(),
@@ -5568,7 +5559,7 @@ mod refname_available_tests {
             )
             .unwrap();
         }
-        verify_refname_available_for_create(
+        verify_ref_available_for_create(
             git_dir,
             "refs/tags/v1.0",
             &BTreeSet::new(),
@@ -5590,7 +5581,7 @@ mod refname_available_tests {
         let extras = BTreeSet::from(["refs/3l/c".to_string()]);
         let skip = HashSet::new();
         let err =
-            verify_refname_available_for_create(git_dir, "refs/3l/c", &extras, &skip).unwrap_err();
+            verify_ref_available_for_create(git_dir, "refs/3l/c", &extras, &skip).unwrap_err();
         assert!(matches!(
             err,
             RefnameUnavailable::DescendantExists { ref blocking, .. }
@@ -5614,7 +5605,7 @@ mod refname_available_tests {
         );
         let extras = BTreeSet::from(["refs/ns/newchild".to_string()]);
         let skip = HashSet::new();
-        verify_refname_available_for_create(git_dir, "refs/ns/newchild", &extras, &skip).unwrap();
+        verify_ref_available_for_create(git_dir, "refs/ns/newchild", &extras, &skip).unwrap();
     }
 }
 

@@ -3,7 +3,7 @@
 //!
 //! Matches `get_git_namespace()` in Git's `environment.c`.
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::environment::Environment;
 
 /// Raw value of `GIT_NAMESPACE` (may contain `/`-separated components).
@@ -36,7 +36,7 @@ pub(crate) fn ref_storage_prefix(env: &Environment) -> Option<String> {
         buf.pop();
     }
     if !buf.is_empty() {
-        let opts = RefNameOptions::default();
+        let opts = RefFormatOptions::default();
         if check_refname_format(&buf, &opts).is_err() {
             return None;
         }

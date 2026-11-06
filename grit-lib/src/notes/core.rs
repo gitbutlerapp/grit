@@ -1112,8 +1112,8 @@ impl NotesRef {
         if !full.starts_with("refs/notes/") {
             return Err(Error::InvalidNotesRef(full.to_owned()));
         }
-        use crate::check_ref_format::{check_refname_format, RefNameOptions};
-        if check_refname_format(full, &RefNameOptions::default()).is_err() {
+        use crate::check_ref_format::{check_refname_format, RefFormatOptions};
+        if check_refname_format(full, &RefFormatOptions::default()).is_err() {
             return Err(Error::InvalidNotesRef(full.to_owned()));
         }
         Ok(Self(full.to_owned()))

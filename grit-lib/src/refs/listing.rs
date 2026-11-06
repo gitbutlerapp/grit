@@ -6,7 +6,7 @@
 //! - **Local lists** (`query_refs`, `query_listings_from_pairs`): patterns follow
 //!   `git for-each-ref` / `git branch --list` on the **short** ref name (suffix after
 //!   `refs/heads/`, `refs/tags/`, etc.), and a trailing `/` selects a directory prefix.
-//! - **Remote advertisements** ([`pattern_matches_ls_remote_refname`]): patterns follow
+//! - **Remote advertisements** ([`pattern_matches_ls_remote_pattern`]): patterns follow
 //!   `git ls-remote` tail-match rules on the **full** ref name (`main` matches
 //!   `refs/heads/main`; `refs/tags/v1*` also matches `refs/tags/v1^{}`).
 //!
@@ -212,7 +212,7 @@ pub fn short_name_in_namespace(full_name: &str, namespace: &RefNamespace) -> Str
 
 /// Whether `refname` matches `pattern` using `git ls-remote` tail-match rules.
 #[must_use]
-pub fn pattern_matches_ls_remote_refname(refname: &str, pattern: &str) -> bool {
+pub fn pattern_matches_ls_remote_pattern(refname: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
         return false;
     }
@@ -232,7 +232,7 @@ pub fn patterns_match_ls_remote(refname: &str, patterns: &[String]) -> bool {
     }
     patterns
         .iter()
-        .any(|p| pattern_matches_ls_remote_refname(refname, p))
+        .any(|p| pattern_matches_ls_remote_pattern(refname, p))
 }
 
 fn ls_remote_glob_match(pattern: &str, text: &str) -> bool {
@@ -883,7 +883,7 @@ mod tests {
 
     #[test]
     fn ls_remote_empty_string_pattern_matches_nothing() {
-        assert!(!pattern_matches_ls_remote_refname("refs/heads/main", ""));
+        assert!(!pattern_matches_ls_remote_pattern("refs/heads/main", ""));
         assert!(!patterns_match_ls_remote(
             "refs/heads/main",
             &[String::new()]
@@ -893,16 +893,16 @@ mod tests {
 
     #[test]
     fn ls_remote_pattern_tail_component() {
-        assert!(pattern_matches_ls_remote_refname("refs/heads/main", "main"));
-        assert!(!pattern_matches_ls_remote_refname(
+        assert!(pattern_matches_ls_remote_pattern("refs/heads/main", "main"));
+        assert!(!pattern_matches_ls_remote_pattern(
             "refs/heads/topic",
             "main"
         ));
-        assert!(pattern_matches_ls_remote_refname(
+        assert!(pattern_matches_ls_remote_pattern(
             "refs/tags/v1^{}",
             "refs/tags/v1*"
         ));
-        assert!(!pattern_matches_ls_remote_refname("refs/tags/v1^{}", "v1"));
+        assert!(!pattern_matches_ls_remote_pattern("refs/tags/v1^{}", "v1"));
     }
 
     #[test]

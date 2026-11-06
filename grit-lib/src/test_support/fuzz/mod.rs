@@ -9,7 +9,7 @@
 use std::io::Cursor;
 use std::path::Path;
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::config::{ConfigFile, ConfigScope};
 use crate::fetch::{
     parse_v2_ls_refs_response, read_v2_fetch_pack_response, NoProgress, ShallowUpdate,
@@ -133,7 +133,7 @@ pub fn ref_name_check(data: &[u8]) {
     let name = String::from_utf8_lossy(data)
         .trim_end_matches(['\r', '\n'])
         .to_owned();
-    let opts = RefNameOptions::default();
+    let opts = RefFormatOptions::default();
     let _ = check_refname_format(&name, &opts);
 }
 

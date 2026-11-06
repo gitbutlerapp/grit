@@ -22,14 +22,19 @@
 //! 12. Must have at least two slash-separated components (unless
 //!     `--allow-onelevel`)
 
+mod ref_name;
+
+pub use ref_name::{RefName, RefNamePolicy, RefNameRef};
+
 use std::borrow::Cow;
 
 use crate::git_path::normalize_path_copy;
 
 use thiserror::Error;
 
-/// Errors returned by `check_refname_format`.
+/// Errors returned by ref-name validation and [`RefName::parse`].
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RefNameError {
     /// The ref name is empty.
     #[error("ref name is empty")]
@@ -78,18 +83,28 @@ pub enum RefNameError {
     /// cannot be normalized away.
     #[error("ref name contains consecutive slashes")]
     ConsecutiveSlashes,
+    /// [`RefNameRef::parse`] was called with normalization that would change the input.
+    #[error("ref name requires normalization; use RefName::parse")]
+    NormalizationRequired,
+    /// The name is not safe to store as a ref.
+    #[error("ref name is not storable")]
+    NotStorable,
+    /// The name is not safe to map under ref storage.
+    #[error("ref name is not safe for the filesystem")]
+    UnsafeForFilesystem,
+    /// The name is not valid on a fetch/upload-pack advertisement.
+    #[error("ref name is not a valid advertised ref")]
+    NotAdvertisedFetchRef,
+    /// The name would be rejected by receive-pack.
+    #[error("ref name is not valid for receive-pack")]
+    ReceivePackRefused,
 }
 
-/// Options controlling validation.
+/// Low-level format flags (`git check-ref-format` options).
 #[derive(Debug, Clone, Default)]
-pub struct RefNameOptions {
-    /// Allow a single-level refname (no `/` separator required).
+pub(crate) struct RefFormatOptions {
     pub allow_onelevel: bool,
-    /// Allow exactly one `*` wildcard anywhere in the name.
     pub refspec_pattern: bool,
-    /// Before validating, collapse consecutive slashes and strip a leading
-    /// slash.  When the resulting name is valid, [`check_refname_format`]
-    /// returns it.
     pub normalize: bool,
 }
 
@@ -101,7 +116,10 @@ pub struct RefNameOptions {
 ///   collapsed when `opts.normalize` is `true`.
 ///
 /// Returns `Err` when the ref name is invalid.
-pub fn check_refname_format(refname: &str, opts: &RefNameOptions) -> Result<String, RefNameError> {
+pub(crate) fn check_refname_format(
+    refname: &str,
+    opts: &RefFormatOptions,
+) -> Result<String, RefNameError> {
     check_refname_format_borrowed(refname, opts).map(Cow::into_owned)
 }
 
@@ -111,7 +129,7 @@ pub fn check_refname_format(refname: &str, opts: &RefNameOptions) -> Result<Stri
 /// [`check_refname_format`] for the supplied `opts`.
 pub(crate) fn check_refname_format_borrowed<'a>(
     refname: &'a str,
-    opts: &RefNameOptions,
+    opts: &RefFormatOptions,
 ) -> Result<Cow<'a, str>, RefNameError> {
     if refname.is_empty() {
         return Err(RefNameError::Empty);
@@ -235,7 +253,7 @@ pub(crate) fn check_refname_format_borrowed<'a>(
 fn validate_component(
     comp: &[u8],
     _wildcard_used: &mut bool,
-    _opts: &RefNameOptions,
+    _opts: &RefFormatOptions,
 ) -> Result<(), RefNameError> {
     if comp.is_empty() {
         return Err(RefNameError::ConsecutiveSlashes);
@@ -261,7 +279,7 @@ fn validate_component(
 /// escape that prefix via `.` / `..` components; root-style names must be
 /// uppercase ASCII letters and underscores only (e.g. `HEAD`).
 #[must_use]
-pub fn refname_is_safe(refname: &str) -> bool {
+pub(crate) fn refname_is_safe(refname: &str) -> bool {
     if let Some(rest) = refname.strip_prefix("refs/") {
         if rest.is_empty() || rest.starts_with('/') || rest.ends_with('/') {
             return false;
@@ -277,24 +295,7 @@ pub fn refname_is_safe(refname: &str) -> bool {
     refname.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
 }
 
-/// Validate a ref name sent on the receive-pack wire before applying updates.
-///
-/// Mirrors the check in Git's `receive-pack` `update()`: only `refs/…` names,
-/// with the suffix validated via [`check_refname_format`].
-#[must_use]
-pub fn receive_pack_refname_ok(refname: &str, is_delete: bool) -> bool {
-    if !refname.starts_with("refs/") {
-        return false;
-    }
-    check_refname_format(
-        &refname[5..],
-        &RefNameOptions {
-            allow_onelevel: is_delete,
-            ..Default::default()
-        },
-    )
-    .is_ok()
-}
+pub(crate) use ref_name::{is_storable_ref_name, is_valid_fetch_advertised_ref};
 
 /// Strip a leading `/` and collapse consecutive interior slashes to one.
 ///
@@ -316,68 +317,8 @@ pub fn collapse_slashes(refname: &str) -> String {
     result
 }
 
-/// Validate a branch short name (`refs/heads/<name>`) the way `git check-ref-format
-/// --branch` does (Git's `check_branch_ref` in `refs.c`).
-///
-/// # Errors
-///
-/// Returns [`RefNameError`] when the name is empty, reserved, or fails ref-name rules.
-pub fn validate_branch_short_name(name: &str) -> Result<(), RefNameError> {
-    if name.is_empty() {
-        return Err(RefNameError::Empty);
-    }
-    if name.starts_with('-') {
-        return Err(RefNameError::BranchStartsWithDash);
-    }
-    if name == "HEAD" {
-        return Err(RefNameError::ReservedBranchName);
-    }
-    let full = format!("refs/heads/{name}");
-    check_refname_format(&full, &RefNameOptions::default()).map(|_| ())
-}
-
-/// Validate a tag short name (`refs/tags/<name>`) the way `git check-ref-format
-/// refs/tags/<name>` does.
-///
-/// # Errors
-///
-/// Returns [`RefNameError`] when the full tag ref would be invalid.
-pub fn validate_tag_short_name(name: &str) -> Result<(), RefNameError> {
-    if name.is_empty() {
-        return Err(RefNameError::Empty);
-    }
-    let full = format!("refs/tags/{name}");
-    check_refname_format(&full, &RefNameOptions::default()).map(|_| ())
-}
-
-/// Whether a ref name from a fetch or upload-pack advertisement should be kept.
-///
-/// Matches Git's `check_ref()` in `connect.c` with `REF_NORMAL`: the name must
-/// begin with `refs/` and pass `check_refname_format` without
-/// `--allow-onelevel` (rejecting `..`, illegal characters, and other malformed
-/// paths). Peeled `^{}` carriers are handled separately by callers.
-#[must_use]
-pub fn is_valid_fetch_advertised_ref(name: &str) -> bool {
-    if !name.starts_with("refs/") {
-        return false;
-    }
-    check_refname_format(name, &RefNameOptions::default()).is_ok()
-}
-
-/// Whether a `symref=HEAD:<target>` (or v2 `symref-target:`) value is safe to record.
-///
-/// Matches Git's `parse_symref_capability` in `connect.c`, which validates both
-/// sides with [`RefNameOptions::allow_onelevel`].
-#[must_use]
-pub fn is_valid_advertised_symref_target(name: &str) -> bool {
-    check_refname_format(
-        name,
-        &RefNameOptions {
-            allow_onelevel: true,
-            ..Default::default()
-        },
-    )
-    .is_ok()
+pub(crate) fn is_valid_advertised_symref_target(name: &str) -> bool {
+    RefNameRef::parse(name, &RefNamePolicy::symref_target()).is_ok()
 }
 
 #[cfg(test)]
@@ -386,10 +327,10 @@ mod tests {
     fn validation_borrows_names_when_normalization_is_disabled() {
         let name = "refs/heads/topic";
         assert!(matches!(
-            super::check_refname_format_borrowed(name, &super::RefNameOptions::default()),
+            super::check_refname_format_borrowed(name, &super::RefFormatOptions::default()),
             Ok(std::borrow::Cow::Borrowed(value)) if value == name
         ));
-        let opts = super::RefNameOptions {
+        let opts = super::RefFormatOptions {
             normalize: true,
             ..Default::default()
         };
@@ -401,39 +342,39 @@ mod tests {
 
     use super::*;
 
-    fn opts_default() -> RefNameOptions {
-        RefNameOptions::default()
+    fn opts_default() -> RefFormatOptions {
+        RefFormatOptions::default()
     }
 
-    fn opts_onelevel() -> RefNameOptions {
-        RefNameOptions {
+    fn opts_onelevel() -> RefFormatOptions {
+        RefFormatOptions {
             allow_onelevel: true,
             ..Default::default()
         }
     }
 
-    fn opts_refspec() -> RefNameOptions {
-        RefNameOptions {
+    fn opts_refspec() -> RefFormatOptions {
+        RefFormatOptions {
             refspec_pattern: true,
             ..Default::default()
         }
     }
 
-    fn opts_normalize() -> RefNameOptions {
-        RefNameOptions {
+    fn opts_normalize() -> RefFormatOptions {
+        RefFormatOptions {
             normalize: true,
             ..Default::default()
         }
     }
 
-    fn valid(refname: &str, opts: &RefNameOptions) {
+    fn valid(refname: &str, opts: &RefFormatOptions) {
         assert!(
             check_refname_format(refname, opts).is_ok(),
             "expected '{refname}' to be valid with opts={opts:?}"
         );
     }
 
-    fn invalid(refname: &str, opts: &RefNameOptions) {
+    fn invalid(refname: &str, opts: &RefFormatOptions) {
         assert!(
             check_refname_format(refname, opts).is_err(),
             "expected '{refname}' to be invalid with opts={opts:?}"
@@ -498,7 +439,7 @@ mod tests {
         invalid("foo/*", &opts_default());
         valid(
             "foo/*",
-            &RefNameOptions {
+            &RefFormatOptions {
                 refspec_pattern: true,
                 allow_onelevel: false,
                 normalize: false,
@@ -571,6 +512,7 @@ mod tests {
 
     #[test]
     fn receive_pack_refname_ok_rejects_funny_refs() {
+        use super::ref_name::receive_pack_refname_ok;
         assert!(!receive_pack_refname_ok("refs/heads/../../config", true));
         assert!(!receive_pack_refname_ok("refs/heads/../../config", false));
         assert!(!receive_pack_refname_ok("heads/main", false));
@@ -600,15 +542,15 @@ mod tests {
         let invalid = ["bad name", "x..y", "a~b", "a.lock", "HEAD", "a:b", "a*b"];
         for name in invalid {
             assert!(
-                validate_branch_short_name(name).is_err(),
+                RefName::branch(name).is_err(),
                 "expected branch name {name:?} to be rejected"
             );
         }
-        assert!(validate_branch_short_name("main").is_ok());
-        assert!(validate_branch_short_name("feature/foo").is_ok());
-        assert!(validate_branch_short_name("@").is_ok());
-        assert!(validate_branch_short_name("-").is_err());
-        assert!(validate_branch_short_name("-topic").is_err());
+        assert!(RefName::branch("main").is_ok());
+        assert!(RefName::branch("feature/foo").is_ok());
+        assert!(RefName::branch("@").is_ok());
+        assert!(RefName::branch("-").is_err());
+        assert!(RefName::branch("-topic").is_err());
     }
 
     #[test]
@@ -616,12 +558,12 @@ mod tests {
         let invalid = ["bad name", "a..b", "x.lock"];
         for name in invalid {
             assert!(
-                validate_tag_short_name(name).is_err(),
+                RefName::tag(name).is_err(),
                 "expected tag name {name:?} to be rejected"
             );
         }
-        assert!(validate_tag_short_name("v1.0").is_ok());
-        assert!(validate_tag_short_name("@").is_ok());
-        assert!(validate_tag_short_name("HEAD").is_ok());
+        assert!(RefName::tag("v1.0").is_ok());
+        assert!(RefName::tag("@").is_ok());
+        assert!(RefName::tag("HEAD").is_ok());
     }
 }

@@ -21,7 +21,7 @@
 use std::cell::OnceCell;
 use std::sync::Arc;
 
-use crate::check_ref_format::validate_tag_short_name;
+use crate::check_ref_format::RefName;
 use crate::commit_graph_file::CommitGraphChain;
 use crate::commit_pretty::message_subject;
 use crate::diff_rename_parallel::parallel_map_indices;
@@ -229,7 +229,7 @@ pub struct CreateTagOutcome {
 /// Returns [`TagError`] when the name is invalid, the tag exists without `force`,
 /// or the message is empty after cleanup. Propagates object-store and signing errors.
 pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTagOutcome> {
-    validate_tag_short_name(&req.name).map_err(|e| {
+    RefName::tag(&req.name).map_err(|e| {
         Error::Tag(TagError::InvalidName {
             detail: e.to_string(),
         })
@@ -716,7 +716,7 @@ pub fn verify_tag_by_name(
     name: &str,
     options: &TagVerifyOptions,
 ) -> Result<VerifiedTag> {
-    validate_tag_short_name(name).map_err(|e| {
+    RefName::tag(name).map_err(|e| {
         Error::Tag(TagError::InvalidName {
             detail: e.to_string(),
         })

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::Result;
 use crate::fetch::Progress;
@@ -974,7 +974,7 @@ pub(crate) fn is_valid_remote_name(name: &str) -> bool {
     !name.is_empty()
         && check_refname_format(
             &format!("refs/remotes/{name}/test"),
-            &RefNameOptions::default(),
+            &RefFormatOptions::default(),
         )
         .is_ok()
 }

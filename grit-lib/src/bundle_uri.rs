@@ -398,7 +398,7 @@ fn seed_from(
         let name = format!("{BUNDLE_REFS_PREFIX}{rest}");
         if crate::check_ref_format::check_refname_format(
             &name,
-            &crate::check_ref_format::RefNameOptions::default(),
+            &crate::check_ref_format::RefFormatOptions::default(),
         )
         .is_err()
         {

@@ -58,6 +58,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "clean_dir_mode_clean_tree_perf_git_compat"),
     ("grit-lib", "commit_show_untracked_no_2523"),
     ("grit-cli", "clone_url_redaction"),
+    ("grit-lib", "refname_policy"),
 }
 MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {
     ("grit-cli", "rebase_exec_interrupt"): "unix",
@@ -76,7 +77,7 @@ fn every_test_file_is_compiled() {
     for item in std::fs::read_dir(&dir).expect("read tests/") {
         let name = item.expect("tests/ entry").file_name();
         let Some(name) = name.to_str() else { continue };
-        if !name.ends_with(".rs") || name == "integration.rs" {
+        if !name.ends_with(".rs") || name == "integration.rs" || name.ends_with("_data.rs") {
             continue;
         }
         let module = format!("#[path = \\"{name}\\"]");
@@ -170,7 +171,11 @@ def sync(crate: str, shared: set[str]) -> bool:
     full_separate = {n for n in separate if classify_tests.file_is_full(tests / n, shared)}
     new_manifest = require_full_tests(manifest, full_separate)
     files = sorted(
-        p for p in tests.glob("*.rs") if p.name != ENTRY and p.name not in separate
+        p
+        for p in tests.glob("*.rs")
+        if p.name != ENTRY
+        and p.name not in separate
+        and not p.name.endswith("_data.rs")
     )
     modules = [(p.stem, classify_tests.file_is_full(p, shared) is not None) for p in files]
     text = render(crate, modules, hoisted_helpers(tests, files))

@@ -3,7 +3,7 @@
 //! Checks mirror Git's buffer fsck rules; [`FsckError::id`] values are the
 //! documented camelCase fsck config keys. Detail strings are Grit-owned prose.
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
+use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::git_date::tm::date_overflows;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::path_validate::{audit_tree_entry_name, ProtectOptions};
@@ -503,7 +503,7 @@ fn fsck_tag(
         ))?,
         Ok(tag_name) => {
             let refname = format!("refs/tags/{tag_name}");
-            if check_refname_format(&refname, &RefNameOptions::default()).is_err() {
+            if check_refname_format(&refname, &RefFormatOptions::default()).is_err() {
                 r.issue(FsckError::new(
                     "badTagName",
                     format!("annotated tag name is not a valid ref name: {tag_name}"),
