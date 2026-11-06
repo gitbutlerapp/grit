@@ -760,8 +760,8 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// [`Error::Commit`](crate::error::Error::Commit)([`CommitError::Identity`](crate::porcelain::CommitError::Identity)) when no usable name, email, or date is configured, and config load
-    /// failures.
+    /// [`CommitError::Identity`](crate::porcelain::CommitError::Identity) when no usable name, email, or date
+    /// is configured (wrapped in [`Error::Commit`]), and config load failures.
     ///
     /// # Examples
     ///
