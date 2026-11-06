@@ -11,6 +11,7 @@ use grit_lib::bundle::{read_header, write_bundle, Bundle, BundleError, BundleSpe
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 use grit_lib::repo::Repository;
 

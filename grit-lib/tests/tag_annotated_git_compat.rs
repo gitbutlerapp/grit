@@ -7,7 +7,7 @@ use grit_lib::objects::{parse_tag, ObjectKind};
 use grit_lib::porcelain::tag::{
     create_tag, list_tags_with_detail, tag_ref_metadata, CreateTagRequest, TagDetail, TagKind,
 };
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::listing::RefQuery;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::repo::Repository;
@@ -110,7 +110,7 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
         &CancelToken::never(),
     )
     .expect("grit fsck");
-    let config = host_repo.config().expect("config");
+    let config = host_repo.config().snapshot().expect("config");
     assert!(
         report.ok(&config, &fsck_opts),
         "grit fsck failed: {:?}",
@@ -145,7 +145,7 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
         &CancelToken::never(),
     )
     .expect("grit fsck clone");
-    let clone_config = cloned.config().expect("config");
+    let clone_config = cloned.config().snapshot().expect("config");
     assert!(
         clone_report.ok(&clone_config, &fsck_opts),
         "clone fsck: {:?}",

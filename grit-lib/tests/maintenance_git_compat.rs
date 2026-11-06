@@ -20,7 +20,7 @@ use grit_lib::objects::commit_graph::{build_commit_graph_bytes, CommitGraphChain
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_lib::test_support::pack::pack_cache_guard;
@@ -32,7 +32,7 @@ use time::OffsetDateTime;
 fn repo_fsck(repo: &Repository, opts: &FsckOptions) -> (FsckReport, bool) {
     let report = repository_fsck::fsck(repo, opts, &mut NullProgress, &CancelToken::never())
         .expect("grit fsck");
-    let ok = report.ok(&repo.config().expect("config"), opts);
+    let ok = report.ok(&repo.config().snapshot().expect("config"), opts);
     (report, ok)
 }
 

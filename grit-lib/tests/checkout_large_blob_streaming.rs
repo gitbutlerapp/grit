@@ -14,6 +14,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 
 /// Above the library's 1 MiB streaming limit.

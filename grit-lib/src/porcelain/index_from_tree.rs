@@ -761,7 +761,7 @@ mod tests {
     use crate::objects::ObjectKind;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::porcelain::commit::{create_commit, CommitRequest};
-    use crate::progress::NullProgress;
+    use crate::progress::{CancelToken, NullProgress};
     use crate::state::resolve_head_for_repository;
     use crate::write_tree::cache_tree_fully_valid;
     use std::fs;

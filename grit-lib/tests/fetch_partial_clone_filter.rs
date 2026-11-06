@@ -320,7 +320,7 @@ fn refetch_reapplies_stored_filter() {
 fn grit_fsck(repo: &Repository) -> (FsckReport, bool) {
     let opts = FsckOptions::full_repository(false).with_check_dangling(false);
     let report = fsck(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck");
-    let ok = report.ok(&repo.config().expect("config"), &opts);
+    let ok = report.ok(&repo.config().snapshot().expect("config"), &opts);
     (report, ok)
 }
 

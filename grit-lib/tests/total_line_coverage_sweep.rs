@@ -70,7 +70,7 @@ fn pathspec_public_api_matrix() {
 #[test]
 fn repo_init_and_crlf_helpers() -> grit_lib::error::Result<()> {
     let dir = tempdir().map_err(Error::Io)?;
-    let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     let _ = resolve_dot_git(dir.path())?;
     let common = common_git_dir_for_config(repo.git_dir());
     let _ = worktree_config_enabled(&common);

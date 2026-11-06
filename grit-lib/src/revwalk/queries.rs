@@ -914,7 +914,7 @@ mod tests {
     fn commits_stream_keeps_commits_through_their_subjects() {
         use crate::ident::Signature;
         use crate::porcelain::commit::{create_commit, CommitRequest};
-        use crate::progress::NullProgress;
+        use crate::progress::{CancelToken, NullProgress};
         use crate::repo::InitOptions;
         let dir = tempfile::tempdir().expect("tempdir");
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");

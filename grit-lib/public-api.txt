@@ -16360,6 +16360,7 @@ pub fn &mut T::set(&mut self, u64)
 pub fn &mut T::start(&mut self, grit_lib::progress::ProgressPhase, core::option::Option<u64>)
 pub fn &mut T::start_with_unit(&mut self, grit_lib::progress::ProgressPhase, grit_lib::progress::ProgressUnit, core::option::Option<u64>)
 pub fn grit_lib::progress::poll_cancel(&mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<()>
+pub type grit_lib::progress::Token = grit_lib::progress::CancelToken
 pub mod grit_lib::refs
 pub mod grit_lib::refs::branch_tracking
 pub enum grit_lib::refs::branch_tracking::BaseSource

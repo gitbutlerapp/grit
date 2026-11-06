@@ -767,6 +767,7 @@ mod tests {
     use super::*;
     use crate::fetch::NoProgress;
     use crate::progress::CancelToken;
+    use crate::remote::RemoteError;
     use std::collections::VecDeque;
     use std::sync::Mutex;
 

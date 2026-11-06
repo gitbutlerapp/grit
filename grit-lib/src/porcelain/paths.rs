@@ -1786,7 +1786,7 @@ mod collect_removal_paths_tests {
     use std::fs;
 
     use crate::porcelain::add::{stage, StageOptions};
-    use crate::progress::NullProgress;
+    use crate::progress::{CancelToken, NullProgress};
     use crate::repo::{init_repository, Repository};
 
     use crate::index::Index;

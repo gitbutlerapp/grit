@@ -102,7 +102,7 @@ fn change_id_header_passes_git_and_grit_fsck() {
 
     let opts = FsckOptions::full_repository(true).with_check_dangling(false);
     let report = fsck(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     assert!(report.ok(&config, &opts), "{:?}", report.issues);
     let parsed = parse_commit(&repo.odb().read(&oid).expect("read").data).expect("parse");
     assert!(grit_lib::change_id::change_id(&parsed).is_some());

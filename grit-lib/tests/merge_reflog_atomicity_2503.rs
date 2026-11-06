@@ -17,7 +17,7 @@ use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{integrate_branch_with, IntegrateBranchOutcome, MergeOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
     BackendError, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefName, RefNameRef,

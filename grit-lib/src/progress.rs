@@ -251,6 +251,9 @@ pub(crate) fn report_object_progress_stride(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cancelled;
 
+/// Historical type alias for [`CancelToken`] retained for older examples and tests.
+pub type Token = CancelToken;
+
 /// Cooperative cancellation handle shared across threads (`Clone` shares the same flag).
 #[derive(Debug, Clone)]
 pub struct CancelToken {
@@ -359,7 +362,9 @@ impl CancelToken {
                 self.cancel();
             }
         }
-        if self.is_cancelled() {
+        // Read the flag directly: `is_cancelled()` also advances `after_polls` countdown and would
+        // double-count when both paths run (e.g. `poll` then status check).
+        if self.flag.load(std::sync::atomic::Ordering::Relaxed) {
             Err(Cancelled)
         } else {
             Ok(())
@@ -374,6 +379,14 @@ impl CancelToken {
     #[allow(dead_code)]
     pub(crate) fn as_atomic(&self) -> &std::sync::atomic::AtomicBool {
         &self.flag
+    }
+
+    /// Whether cancellation was requested, reading only the shared flag (no `after_polls`
+    /// countdown, no check counter). Used when mirroring into stack watches without consuming a
+    /// poll budget.
+    #[inline]
+    pub(crate) fn is_cancelled_raw(&self) -> bool {
+        self.flag.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Cancels on the `n`th call to [`Self::poll`] (for deterministic tests).
@@ -397,7 +410,7 @@ impl Default for CancelToken {
 /// Copy a stack [`CancelToken`] into `watch` for worker threads (call on the owning thread).
 #[inline]
 pub(crate) fn mirror_stack_cancel(cancel: &CancelToken, watch: &std::sync::atomic::AtomicBool) {
-    if cancel.is_cancelled() {
+    if cancel.is_cancelled_raw() {
         watch.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }

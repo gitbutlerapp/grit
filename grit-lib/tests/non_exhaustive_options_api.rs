@@ -139,7 +139,7 @@ fn maintenance_constructors_run_on_empty_repo() {
     let (repo, _) = Repository::init(tmp.path(), &InitOptions::new()).expect("init");
     let opts = FsckOptions::full_repository(false);
     let report = fsck(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("fsck");
-    assert!(report.ok(&repo.config().expect("config"), &opts));
+    assert!(report.ok(&repo.config().snapshot().expect("config"), &opts));
     let stats = repack_all(&repo, &RepackOptions::with_dry_run(true)).expect("repack dry-run");
     assert!(stats.objects_packed.is_none());
 }

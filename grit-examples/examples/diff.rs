@@ -8,6 +8,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = resolve_diff_request(&repo, None, &DiffRequest::default())?;
     assert!(matches!(args.target, DiffTarget::WorktreeVsHead));
     let opts = DiffOptions::default();
-    let _files = repo.diff().files(&args.target, &args.pathspecs, &opts)?;
+    let _files = repo.diff().files(&args.target, &args.pathspec, &opts)?;
     Ok(())
 }

@@ -9,7 +9,7 @@ use grit_lib::porcelain::merge::{
     integrate_branch, predict_merge, IntegrateBranchOutcome, MergePrediction,
     MergePredictionOptions,
 };
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 

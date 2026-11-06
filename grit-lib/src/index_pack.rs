@@ -932,7 +932,7 @@ mod tests {
 
     #[test]
     fn install_pack_cancelled_during_indexing_cleans_stage() {
-        use crate::progress::{ProgressPhase, ProgressSink, ProgressUnit, Token};
+        use crate::progress::{CancelToken, ProgressPhase, ProgressSink, ProgressUnit};
         use grit_test_support::objects::{HashAlgo, ObjectKind as PK, PackBuilder};
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
@@ -1528,6 +1528,7 @@ mod tests {
     #[test]
     fn cancel_once_pack_published_never_strands_a_peer_install() {
         use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
         use std::thread;
         use std::time::Duration;
 
@@ -1539,12 +1540,12 @@ mod tests {
         let objects = repo.path().join(".git/objects");
         let pack_dir = objects.join("pack");
         let cancel = CancelToken::new();
-        let peer_ran = AtomicBool::new(false);
+        let peer_ran = Arc::new(AtomicBool::new(false));
         let watch_cancel = cancel.clone();
         let watch_pack_dir = pack_dir.clone();
         let watch_objects = objects.clone();
         let watch_pack = pack.clone();
-        let watch_peer = peer_ran.clone();
+        let watch_peer = Arc::clone(&peer_ran);
         thread::spawn(move || {
             while !watch_cancel.is_cancelled() {
                 if published_files(&watch_pack_dir, "pack") > 0 {
