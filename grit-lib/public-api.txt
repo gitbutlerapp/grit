@@ -978,7 +978,7 @@ pub grit_lib::command_runner::hooks::HookError::Failed::output: grit_lib::comman
 pub grit_lib::command_runner::hooks::HookError::Failed::status: i32
 pub grit_lib::command_runner::hooks::HookError::MissingHookCommand
 pub grit_lib::command_runner::hooks::HookError::MissingHookCommand::hook_name: alloc::string::String
-pub grit_lib::command_runner::hooks::HookError::Repository(alloc::boxed::Box<grit_lib::error::Error>)
+pub grit_lib::command_runner::hooks::HookError::Repository(alloc::rcs::arc::Arc<grit_lib::error::Error>)
 pub grit_lib::command_runner::hooks::HookError::Spawn
 pub grit_lib::command_runner::hooks::HookError::Spawn::hook_name: alloc::string::String
 pub grit_lib::command_runner::hooks::HookError::Spawn::output: grit_lib::command_runner::hooks::HookOutput

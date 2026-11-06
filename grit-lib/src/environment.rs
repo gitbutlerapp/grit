@@ -65,7 +65,7 @@ pub struct Environment {
     /// When set, a [`Repository`](crate::repo::Repository) opened with this environment reads
     /// and writes objects in this directory instead of `<git-dir>/objects` (a relative path
     /// resolves against [`Self::cwd`]). The directory must exist, or opening fails with
-    /// [`RepositoryError::NotARepository`](RepositoryError::NotARepository); an empty value fails
+    /// [`RepositoryError::NotARepository`](crate::repo::RepositoryError::NotARepository); an empty value fails
     /// the same way, as in Git. `<git-dir>/objects` is not consulted unless it is listed in
     /// [`Self::git_alternate_object_directories`] or in this directory's `info/alternates`.
     pub git_object_directory: Option<String>,

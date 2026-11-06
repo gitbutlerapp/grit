@@ -218,7 +218,7 @@ mod tests {
 
     use super::*;
     use crate::config::environment::RepositoryOptions;
-    use crate::repo::{InitOptions, Repository};
+    use crate::repo::{InitOptions, Repository, RepositoryError};
 
     #[test]
     fn default_ownership_check_is_shared() {
