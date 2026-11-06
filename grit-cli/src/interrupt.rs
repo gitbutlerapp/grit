@@ -101,7 +101,7 @@ impl InterruptCancel {
     /// terminating.
     #[cfg(unix)]
     pub fn install() -> Self {
-        PROCESS_CANCEL.reset();
+        process_cancel_token().reset();
         FIRST_INTERRUPT_NS.store(0, Ordering::Relaxed);
         // SAFETY: the handler only touches atomics and async-signal-safe libc calls, and
         // both `sigaction` structs are fully initialized before the call.
@@ -127,7 +127,7 @@ impl InterruptCancel {
     /// fires.
     #[cfg(windows)]
     pub fn install() -> Self {
-        PROCESS_CANCEL.reset();
+        process_cancel_token().reset();
         FIRST_INTERRUPT_NS.store(0, Ordering::Relaxed);
         monotonic_ns();
         // SAFETY: registers a handler that only touches atomics; it is removed in `drop`.
