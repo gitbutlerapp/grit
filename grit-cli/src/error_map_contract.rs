@@ -1157,7 +1157,10 @@ fn visit_rs_sources(manifest: &Path, dir: &Path) {
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        if rel == "src/error_map.rs" || rel == "src/error_map_contract.rs" {
+        if rel == "src/error_map.rs"
+            || rel == "src/error_map_contract.rs"
+            || rel == "src/cli_messages.rs"
+        {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
