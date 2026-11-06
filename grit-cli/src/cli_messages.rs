@@ -1,45 +1,21 @@
 //! Map library and structured errors to short CLI messages.
 
 use anyhow::Error;
-use grit_lib::error::Error as LibError;
-use grit_lib::refs::store::RefStoreError;
-
-use crate::json_error::StructuredCliError;
-use crate::revision_errors::map_lib_revision_error;
-
 /// Human-readable (and JSON `error` string) message for a command failure.
 pub fn human_error_message(err: &Error) -> String {
-    if err.downcast_ref::<StructuredCliError>().is_some() {
-        return crate::error_map::classify(err).human;
-    }
-    for cause in err.chain() {
-        if cause.downcast_ref::<StructuredCliError>().is_some() {
-            return crate::error_map::classify(err).human;
-        }
-    }
-    let classified = crate::error_map::classify(err);
-    if classified.payload.is_some() {
-        return classified.human;
-    }
-    if classified.human != format!("{err:#}") {
-        return classified.human;
-    }
-    for cause in err.chain() {
-        if let Some(lib @ LibError::Config(_)) = cause.downcast_ref::<LibError>() {
-            return map_lib_error(lib);
-        }
-    }
-    format!("{err:#}")
+    crate::error_map::classify(err).human
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
+    use grit_lib::error::Error as LibError;
     use grit_lib::lockfile::LockHolder;
 
     use super::*;
     use crate::error_kind::ErrorKind;
+    use crate::json_error::StructuredCliError;
     use crate::json_error::{ensure_structured, structured_json_payload};
 
     /// Library error carried as the `source()` of another error type, so `anyhow` downcasts
@@ -113,42 +89,5 @@ mod tests {
             payload.lock.expect("lock").path,
             grit_lib::config::git_path::user_display_path(&path)
         );
-    }
-}
-
-fn map_lib_error(err: &LibError) -> String {
-    if let Some(msg) = map_lib_revision_error(err) {
-        return msg;
-    }
-    match err {
-        LibError::HashCollision { oid } => {
-            format!(
-                "refusing to store content that triggers an SHA-1 hash collision (digest {})",
-                oid.to_hex()
-            )
-        }
-        LibError::LockHeld { path, holder } => {
-            crate::json_error::lock_held(path, *holder).to_string()
-        }
-        LibError::RefStore(RefStoreError::NotFound { name }) => {
-            match name.strip_prefix("refs/heads/") {
-                Some(short) => format!("no branch named '{short}'"),
-                None => format!("ref not found: {name}"),
-            }
-        }
-        LibError::InvalidPathComponent { path, reason } => {
-            format!("cannot use path '{path}': {reason}")
-        }
-        LibError::Hook(hook) => {
-            let mut message = hook.to_string();
-            let mut cause = std::error::Error::source(hook);
-            while let Some(c) = cause {
-                message.push_str(": ");
-                message.push_str(&c.to_string());
-                cause = c.source();
-            }
-            message
-        }
-        other => other.git_stderr_message(),
     }
 }

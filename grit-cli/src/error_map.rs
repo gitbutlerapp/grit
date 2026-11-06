@@ -4,9 +4,12 @@
 use std::error::Error as StdError;
 
 use anyhow::Error;
+use grit_lib::command_runner::hooks::HookError;
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::pull::PullError;
+use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
@@ -14,8 +17,7 @@ use grit_lib::revwalk::rev_parse_error::RevParseError;
 use crate::error_kind::ErrorKind;
 use crate::exit_status::ExitStatus;
 use crate::json_error::{
-    hash_collision, hook_failure_payload, lock_held, would_overwrite_error, StructuredCliError,
-    StructuredJsonError,
+    hash_collision, lock_held, would_overwrite_error, StructuredCliError, StructuredJsonError,
 };
 use crate::revision_errors;
 
@@ -77,218 +79,313 @@ impl ClassifiedError {
     }
 }
 
+/// Human-readable text for a bare [`LibError`] (same rules as the legacy CLI mapper).
+#[must_use]
+pub fn human_message_for_lib(err: &LibError) -> String {
+    if let Some(msg) = revision_errors::map_lib_revision_error(err) {
+        return msg;
+    }
+    match err {
+        LibError::HashCollision { oid } => format!(
+            "refusing to store content that triggers an SHA-1 hash collision (digest {})",
+            oid.to_hex()
+        ),
+        LibError::LockHeld { path, holder } => lock_held(path, *holder).to_string(),
+        LibError::RefStore(RefStoreError::NotFound { name }) => {
+            match name.strip_prefix("refs/heads/") {
+                Some(short) => format!("no branch named '{short}'"),
+                None => format!("ref not found: {name}"),
+            }
+        }
+        LibError::InvalidPathComponent { path, reason } => {
+            format!("cannot use path '{path}': {reason}")
+        }
+        LibError::Hook(hook) => {
+            let mut message = hook.to_string();
+            let mut cause = StdError::source(hook);
+            while let Some(c) = cause {
+                message.push_str(": ");
+                message.push_str(&c.to_string());
+                cause = c.source();
+            }
+            message
+        }
+        other => other.git_stderr_message(),
+    }
+}
+
 /// Walk `err`'s chain once and classify it for exit codes and output.
 #[must_use]
 pub fn classify(err: &Error) -> ClassifiedError {
     if let Some(structured) = err.downcast_ref::<StructuredCliError>() {
         return ClassifiedError::from_structured_cli(structured);
     }
+
+    let mut first_guided: Option<Error> = None;
+    let mut first_lock: Option<ClassifiedError> = None;
+    let mut first_hook: Option<StructuredJsonError> = None;
+    let mut first_hash: Option<ObjectId> = None;
+    let mut first_overwrite: Option<ClassifiedError> = None;
+    let mut first_revision: Option<StructuredJsonError> = None;
+    let mut remote_unreadable = false;
+    let mut first_lib: Option<&LibError> = None;
+
     for cause in err.chain() {
         if let Some(structured) = cause.downcast_ref::<StructuredCliError>() {
             return ClassifiedError::from_structured_cli(structured);
         }
+        if first_lib.is_none() {
+            first_lib = cause.downcast_ref::<LibError>();
+        }
+        if first_guided.is_none() {
+            first_guided = guide_cause(cause);
+        }
+        if first_lock.is_none() {
+            first_lock = lock_classified_from_cause(cause);
+        }
+        if first_hook.is_none() {
+            first_hook = hook_payload_from_cause(cause);
+        }
+        if first_hash.is_none() {
+            first_hash = hash_oid_from_cause(cause);
+        }
+        if first_overwrite.is_none() {
+            first_overwrite = would_overwrite_classified_from_cause(cause);
+        }
+        if first_revision.is_none() {
+            first_revision = revision_payload_from_cause(cause);
+        }
+        if !remote_unreadable {
+            remote_unreadable = cause_is_remote_unreadable(cause);
+        }
     }
-    if let Some(payload) = hook_failure_payload(err) {
+
+    if let Some(guided) = first_guided {
+        return classified_from_structured_error(&guided);
+    }
+    if let Some(lock) = first_lock {
+        return lock;
+    }
+    if let Some(payload) = first_hook {
         let human = payload.error.clone();
         return ClassifiedError::structured(payload.kind, human, payload.hint.clone(), payload);
     }
-    if let Some(guided) = try_guided(err) {
-        return guided;
+    if let Some(oid) = first_hash {
+        return classified_from_structured_error(&hash_collision(oid));
     }
-    if let Some(structured) = would_overwrite_from_chain(err) {
-        if let Some(cli) = structured.downcast_ref::<StructuredCliError>() {
-            return ClassifiedError::from_structured_cli(cli);
-        }
+    if let Some(overwrite) = first_overwrite {
+        return overwrite;
     }
-    if let Some(oid) = hash_collision_from_chain(err) {
-        let structured = hash_collision(oid);
-        if let Some(cli) = structured.downcast_ref::<StructuredCliError>() {
-            return ClassifiedError::from_structured_cli(cli);
-        }
-    }
-    if let Some(structured) = lock_held_from_chain(err) {
-        if let Some(cli) = structured.downcast_ref::<StructuredCliError>() {
-            return ClassifiedError::from_structured_cli(cli);
-        }
-    }
-    if let Some(payload) = revision_not_found_payload_from_chain(err) {
+    if let Some(payload) = first_revision {
         let human = payload.error.clone();
         return ClassifiedError::structured(payload.kind, human, payload.hint.clone(), payload);
     }
-    if is_remote_unreadable(err) {
-        let human = human_for_unstructured(err);
+    if remote_unreadable {
+        let human = first_lib
+            .map(human_message_for_lib)
+            .unwrap_or_else(|| format!("{err:#}"));
         let payload = StructuredJsonError::new(human.clone(), ErrorKind::RemoteUnreadable);
         return ClassifiedError::structured(ErrorKind::RemoteUnreadable, human, None, payload);
     }
+
     ClassifiedError {
         kind: None,
         exit: ExitStatus::Failure,
-        human: human_for_unstructured(err),
+        human: first_lib
+            .map(human_message_for_lib)
+            .unwrap_or_else(|| format!("{err:#}")),
         hint: None,
         payload: None,
     }
 }
 
-fn try_guided(err: &Error) -> Option<ClassifiedError> {
-    err.chain()
-        .find_map(guide_cause)
-        .map(|guided| classify(&guided))
-}
-
-fn human_for_unstructured(err: &Error) -> String {
-    if let Some(lib) = err.downcast_ref::<LibError>() {
-        return human_for_lib(lib);
-    }
-    for cause in err.chain() {
-        if let Some(lib) = cause.downcast_ref::<LibError>() {
-            return human_for_lib(lib);
-        }
-    }
-    format!("{err:#}")
-}
-
-fn human_for_lib(err: &LibError) -> String {
-    if let Some(msg) = revision_errors::map_lib_revision_error(err) {
-        return msg;
-    }
-    match err {
-        LibError::HashCollision { oid } => {
-            format!(
-                "refusing to store content that triggers an SHA-1 hash collision (digest {})",
-                oid.to_hex()
-            )
-        }
-        LibError::LockHeld { path, holder } => lock_held(path, *holder).to_string(),
-        other => other.git_stderr_message(),
-    }
-}
-
-fn hash_collision_from_chain(err: &Error) -> Option<ObjectId> {
-    if let Some(LibError::HashCollision { oid }) = err.downcast_ref::<LibError>() {
-        return Some(*oid);
-    }
-    for cause in err.chain() {
-        if let Some(LibError::HashCollision { oid }) = cause.downcast_ref::<LibError>() {
-            return Some(*oid);
-        }
-    }
-    None
-}
-
-fn lock_held_from_chain(err: &Error) -> Option<Error> {
-    err.chain()
-        .find_map(|cause| match cause.downcast_ref::<LibError>() {
-            Some(LibError::LockHeld { path, holder }) => Some(lock_held(path, *holder)),
-            _ => None,
+fn classified_from_structured_error(err: &Error) -> ClassifiedError {
+    err.downcast_ref::<StructuredCliError>()
+        .map(ClassifiedError::from_structured_cli)
+        .unwrap_or_else(|| ClassifiedError {
+            kind: None,
+            exit: ExitStatus::Failure,
+            human: format!("{err:#}"),
+            hint: None,
+            payload: None,
         })
 }
 
-fn revision_not_found_payload_from_chain(err: &Error) -> Option<StructuredJsonError> {
-    for cause in err.chain() {
-        let Some(lib) = cause.downcast_ref::<LibError>() else {
-            continue;
-        };
-        match lib {
-            LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
-                return Some(StructuredJsonError::new(
-                    format!("revision '{name}' not found"),
-                    ErrorKind::RevisionNotFound,
-                ));
-            }
-            LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
-                return Some(StructuredJsonError::new(
-                    format!("revision '{spec}' not found"),
-                    ErrorKind::RevisionNotFound,
-                ));
-            }
-            LibError::RevParse(
-                RevParseError::PathNotInRevision { .. }
-                | RevParseError::PathMissingFromWorktreeAndIndex { .. },
-            ) => {
-                return Some(StructuredJsonError::new(
-                    lib.to_string(),
-                    ErrorKind::PathNotFound,
-                ));
-            }
-            _ => {}
-        }
-    }
-    None
+fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
+    let hook = cause
+        .downcast_ref::<LibError>()
+        .and_then(|lib| match lib {
+            LibError::Hook(h) => Some(h),
+            _ => None,
+        })
+        .or_else(|| cause.downcast_ref::<HookError>())?;
+    let HookError::Failed {
+        hook_name,
+        status,
+        output,
+    } = hook
+    else {
+        return None;
+    };
+    Some(StructuredJsonError {
+        hook: Some(crate::json_error::HookFailureJson {
+            name: hook_name.clone(),
+            status: *status,
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }),
+        ..StructuredJsonError::new(hook.to_string(), ErrorKind::HookFailed)
+    })
 }
 
-fn would_overwrite_from_chain(err: &Error) -> Option<Error> {
+fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<ClassifiedError> {
+    match cause.downcast_ref::<LibError>()? {
+        LibError::LockHeld { path, holder } => {
+            Some(classified_from_structured_error(&lock_held(path, *holder)))
+        }
+        _ => None,
+    }
+}
+
+fn hash_oid_from_cause(cause: &(dyn StdError + 'static)) -> Option<ObjectId> {
+    match cause.downcast_ref::<LibError>()? {
+        LibError::HashCollision { oid } => Some(*oid),
+        _ => None,
+    }
+}
+
+fn would_overwrite_classified_from_cause(
+    cause: &(dyn StdError + 'static),
+) -> Option<ClassifiedError> {
     if let Some(PullError::Repository(LibError::WouldOverwrite {
         reason,
         paths,
         message,
-    })) = err.downcast_ref::<PullError>()
+    })) = cause.downcast_ref::<PullError>()
     {
-        return Some(would_overwrite_error(
+        return Some(classified_from_structured_error(&would_overwrite_error(
             *reason,
             paths.clone(),
             message.clone(),
-        ));
+        )));
     }
-    if let Some(LibError::WouldOverwrite {
-        reason,
-        paths,
-        message,
-    }) = err.downcast_ref::<LibError>()
-    {
-        return Some(would_overwrite_error(
+    match cause.downcast_ref::<LibError>()? {
+        LibError::WouldOverwrite {
+            reason,
+            paths,
+            message,
+        } => Some(classified_from_structured_error(&would_overwrite_error(
             *reason,
             paths.clone(),
             message.clone(),
-        ));
+        ))),
+        _ => None,
     }
-    for cause in err.chain() {
-        if let Some(PullError::Repository(LibError::WouldOverwrite {
-            reason,
-            paths,
-            message,
-        })) = cause.downcast_ref::<PullError>()
-        {
-            return Some(would_overwrite_error(
-                *reason,
-                paths.clone(),
-                message.clone(),
-            ));
-        }
-        if let Some(LibError::WouldOverwrite {
-            reason,
-            paths,
-            message,
-        }) = cause.downcast_ref::<LibError>()
-        {
-            return Some(would_overwrite_error(
-                *reason,
-                paths.clone(),
-                message.clone(),
-            ));
-        }
-    }
-    None
 }
 
-fn is_remote_unreadable(err: &Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .downcast_ref::<LibError>()
-            .is_some_and(LibError::is_remote_unreadable)
-            || cause
-                .downcast_ref::<RemoteError>()
-                .is_some_and(RemoteError::is_remote_unreadable)
-            || cause
-                .downcast_ref::<CloneError>()
-                .is_some_and(CloneError::is_remote_unreadable)
-            || cause
-                .downcast_ref::<PullError>()
-                .is_some_and(PullError::is_remote_unreadable)
-    })
+fn revision_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
+    let lib = cause.downcast_ref::<LibError>()?;
+    match lib {
+        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+            Some(StructuredJsonError::new(
+                format!("revision '{name}' not found"),
+                ErrorKind::RevisionNotFound,
+            ))
+        }
+        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
+            Some(StructuredJsonError::new(
+                format!("revision '{spec}' not found"),
+                ErrorKind::RevisionNotFound,
+            ))
+        }
+        LibError::RevParse(
+            RevParseError::PathNotInRevision { .. }
+            | RevParseError::PathMissingFromWorktreeAndIndex { .. },
+        ) => Some(StructuredJsonError::new(
+            lib.to_string(),
+            ErrorKind::PathNotFound,
+        )),
+        _ => None,
+    }
+}
+
+fn cause_is_remote_unreadable(cause: &(dyn StdError + 'static)) -> bool {
+    cause
+        .downcast_ref::<LibError>()
+        .is_some_and(LibError::is_remote_unreadable)
+        || cause
+            .downcast_ref::<RemoteError>()
+            .is_some_and(RemoteError::is_remote_unreadable)
+        || cause
+            .downcast_ref::<CloneError>()
+            .is_some_and(CloneError::is_remote_unreadable)
+        || cause
+            .downcast_ref::<PullError>()
+            .is_some_and(PullError::is_remote_unreadable)
+}
+
+/// Map a [`RemoteError`] for fetch, push, pull, and remote commands.
+pub fn map_remote_error(err: RemoteError) -> Error {
+    if let Some(guided) = guide_remote(&err) {
+        return guided;
+    }
+    match err {
+        RemoteError::Library(LibError::BundleMissingPrerequisites) => {
+            Error::new(crate::commands::bundle::MissingPrerequisites {
+                commits: Vec::new(),
+            })
+        }
+        RemoteError::Library(LibError::HashCollision { oid }) => {
+            crate::json_error::map_lib_error(LibError::HashCollision { oid })
+        }
+        RemoteError::Library(hook @ LibError::Hook(_)) => Error::new(hook),
+        RemoteError::Library(lib) if lib.is_cancelled() => Error::new(lib),
+        RemoteError::Library(lib) if lib.is_remote_unreadable() => Error::new(lib),
+        RemoteError::Library(lib) => Error::msg(RemoteError::Library(lib).to_string()),
+        other => Error::msg(other.to_string()),
+    }
+}
+
+fn branch_error_message(err: &BranchError) -> String {
+    match err {
+        BranchError::NotFullyMerged { name, .. } => format!(
+            "{err}\nIf you are sure you want to delete it, run 'grit branch --force-delete {name}'"
+        ),
+        BranchError::AlreadyExists { name } => {
+            format!("branch '{name}' already exists (use --force to replace its tip)")
+        }
+        other => other.to_string(),
+    }
+}
+
+/// Map a library [`LibError`] from branch commands to a structured CLI error.
+pub fn map_branch_error(err: LibError) -> Error {
+    match err {
+        LibError::Branch(branch_err) => {
+            let human = branch_error_message(&branch_err);
+            Error::new(StructuredCliError {
+                payload: StructuredJsonError::new(
+                    human.clone(),
+                    ErrorKind::from_branch_error(&branch_err),
+                ),
+                human,
+            })
+        }
+        LibError::BranchCheckedOutInWorktree { worktree_path, .. } => {
+            let worktree = grit_lib::config::git_path::path_for_error_message(
+                std::path::Path::new(&worktree_path),
+            );
+            let human = format!("branch is checked out in '{worktree}'");
+            Error::new(StructuredCliError {
+                payload: StructuredJsonError::new(human.clone(), ErrorKind::BranchCheckedOut),
+                human,
+            })
+        }
+        other => crate::json_error::map_lib_error(other),
+    }
 }
 
 use grit_lib::error::{AuthFailure, OverwriteReason, RemoteUnreadableReason};
-use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::merge::ContinueMergeError;
 use grit_lib::remote::github_auth::is_github_https_url;
 use grit_lib::remote::push_plan::PushPlanError;
@@ -462,6 +559,23 @@ fn guide_lib(err: &LibError) -> Option<Error> {
         )),
         LibError::EmptyCommitMessage => Some(guided(
             ErrorKind::EmptyCommitMessage,
+            err.to_string(),
+            None,
+            None,
+        )),
+        LibError::Tag(tag_err) => match tag_err {
+            grit_lib::porcelain::tag::TagError::AlreadyExists { name } => {
+                let human = format!("tag '{name}' already exists (use --force to replace)");
+                Some(guided(ErrorKind::TagAlreadyExists, human, None, None))
+            }
+            grit_lib::porcelain::tag::TagError::NotFound { name } => {
+                let human = format!("no tag named '{name}'");
+                Some(guided(ErrorKind::TagNotFound, human, None, None))
+            }
+            _ => None,
+        },
+        LibError::EmbeddedRepoWithoutCommit { .. } => Some(guided(
+            ErrorKind::EmbeddedRepoWithoutCommit,
             err.to_string(),
             None,
             None,
@@ -1136,162 +1250,13 @@ mod tests {
         assert!(guided_error(&unreachable).is_none());
     }
 
-    use crate::exit_status::ExitStatus;
-    use crate::json_error::{hash_collision, map_lib_error, replay_conflict, revision_not_found};
-    use grit_lib::command_runner::hooks::{HookError, HookOutput};
-    use grit_lib::objects::ObjectId;
-    use grit_lib::porcelain::branch::BranchError;
-
-    /// Contract: [`classify`] output for representative library and wrapper errors.
     #[test]
     fn error_map_snapshot() {
-        let oid = ObjectId::from_hex("f92d74e3874587aaf443d1db961d4e26dde13e9c").expect("oid");
-        let cases: Vec<(Error, ErrorKind, ExitStatus)> = vec![
-            (
-                Error::new(PushPlanError::NoRemote),
-                ErrorKind::NoRemote,
-                ExitStatus::Failure,
-            ),
-            (
-                Error::new(LibError::NoMergeInProgress),
-                ErrorKind::NoOperationInProgress,
-                ExitStatus::Failure,
-            ),
-            (
-                map_lib_error(LibError::HashCollision { oid }),
-                ErrorKind::HashCollision,
-                ExitStatus::Failure,
-            ),
-            (
-                revision_not_found("missing"),
-                ErrorKind::RevisionNotFound,
-                ExitStatus::Failure,
-            ),
-            (
-                replay_conflict("rebase", oid, "subject", vec!["f.txt".into()], Vec::new()),
-                ErrorKind::Conflict,
-                ExitStatus::Failure,
-            ),
-            (
-                hash_collision(oid),
-                ErrorKind::HashCollision,
-                ExitStatus::Failure,
-            ),
-            (
-                Error::new(LibError::remote_unreadable(
-                    "/nope.git",
-                    RemoteUnreadableReason::RepositoryNotFound,
-                )),
-                ErrorKind::RemoteUnreadable,
-                ExitStatus::RemoteUnreadable,
-            ),
-            (
-                map_lib_error(LibError::Branch(BranchError::NotFound { name: "x".into() })),
-                ErrorKind::BranchNotFound,
-                ExitStatus::Failure,
-            ),
-        ];
-        for (err, kind, exit) in cases {
-            let c = classify(&err);
-            assert_eq!(c.kind, Some(kind), "{err:?}");
-            assert_eq!(c.exit, exit, "{err:?}");
-            assert_eq!(ExitStatus::for_error(&err), exit, "{err:?}");
-            let payload = c.payload.expect("payload");
-            assert_eq!(payload.kind, kind);
-            if !matches!(kind, ErrorKind::HashCollision | ErrorKind::Conflict) {
-                assert_eq!(payload.error, c.human, "{err:?}");
-            }
-            if let Some(h) = c.hint {
-                assert_eq!(payload.hint.as_deref(), Some(h.as_str()));
-            }
-        }
-        let hook_err = Error::new(LibError::Hook(HookError::Failed {
-            hook_name: "pre-commit".into(),
-            status: 1,
-            output: HookOutput {
-                stdout: b"out\n".to_vec(),
-                stderr: b"err\n".to_vec(),
-            },
-        }));
-        let c = classify(&hook_err);
-        assert_eq!(c.kind, Some(ErrorKind::HookFailed));
-        assert_eq!(c.exit, ExitStatus::Failure);
+        crate::error_map_contract::assert_error_map_contract();
     }
 
-    /// Library error variants must not be matched for rendering outside [`super::classify`].
     #[test]
     fn lib_errors_rendered_in_one_place() {
-        const ALLOWLIST: &[&str] = &[
-            "src/revision_errors.rs",
-            "src/unborn_errors.rs",
-            "src/cli_messages.rs",
-            "src/json_error.rs",
-            "src/exit_status.rs",
-            "src/context.rs",
-            "src/global_args.rs",
-            "src/commands/add.rs",
-            "src/commands/auth.rs",
-            "src/commands/branch.rs",
-            "src/commands/bundle.rs",
-            "src/commands/cat.rs",
-            "src/commands/checkin.rs",
-            "src/commands/commit.rs",
-            "src/commands/config.rs",
-            "src/commands/diff.rs",
-            "src/commands/fetch.rs",
-            "src/commands/history.rs",
-            "src/commands/log.rs",
-            "src/commands/merge.rs",
-            "src/commands/notes.rs",
-            "src/commands/pick.rs",
-            "src/commands/pull.rs",
-            "src/commands/reflog.rs",
-            "src/commands/reset.rs",
-            "src/commands/resolve.rs",
-            "src/commands/restore.rs",
-            "src/commands/revert.rs",
-            "src/commands/rm.rs",
-            "src/commands/serve.rs",
-            "src/commands/stash.rs",
-            "src/commands/switch.rs",
-            "src/commands/tag.rs",
-        ];
-        fn scan_dir(
-            manifest: &std::path::Path,
-            dir: &std::path::Path,
-            allowlist: &[&str],
-            outside: &mut usize,
-        ) {
-            for entry in std::fs::read_dir(dir).expect("read_dir") {
-                let entry = entry.expect("entry");
-                let path = entry.path();
-                if path.is_dir() {
-                    scan_dir(manifest, &path, allowlist, outside);
-                    continue;
-                }
-                if path.extension().is_none_or(|x| x != "rs") {
-                    continue;
-                }
-                let rel = path.strip_prefix(manifest).expect("under manifest");
-                let rel = rel.to_string_lossy();
-                if rel == "src/error_map.rs" {
-                    continue;
-                }
-                let allowed = allowlist.iter().any(|a| rel == *a);
-                let text = std::fs::read_to_string(&path).expect("read");
-                let count = text.matches("LibError::").count()
-                    + text.matches("grit_lib::error::Error::").count();
-                if count > 0 && !allowed {
-                    *outside += count;
-                }
-            }
-        }
-        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let mut outside = 0usize;
-        scan_dir(manifest, &manifest.join("src"), ALLOWLIST, &mut outside);
-        assert_eq!(
-            outside, 0,
-            "move LibError rendering matches into error_map.rs (count outside allowlist: {outside})"
-        );
+        crate::error_map_contract::assert_lib_error_match_ratchet();
     }
 }

@@ -831,41 +831,4 @@ fn unset(repo: &Repository, branch: &str, dry_run: bool) -> Result<BranchOutcome
     })
 }
 
-fn branch_error_message(err: &grit_lib::porcelain::branch::BranchError) -> String {
-    use grit_lib::porcelain::branch::BranchError;
-    match err {
-        BranchError::NotFullyMerged { name, .. } => format!(
-            "{err}\nIf you are sure you want to delete it, run 'grit branch --force-delete {name}'"
-        ),
-        BranchError::AlreadyExists { name } => {
-            format!("branch '{name}' already exists (use --force to replace its tip)")
-        }
-        other => other.to_string(),
-    }
-}
-
-pub fn map_branch_error(err: Error) -> anyhow::Error {
-    match err {
-        Error::Branch(branch_err) => {
-            let human = branch_error_message(&branch_err);
-            anyhow::Error::new(StructuredCliError {
-                payload: StructuredJsonError::new(
-                    human.clone(),
-                    ErrorKind::from_branch_error(&branch_err),
-                ),
-                human,
-            })
-        }
-        Error::BranchCheckedOutInWorktree { worktree_path, .. } => {
-            let worktree = grit_lib::config::git_path::path_for_error_message(
-                std::path::Path::new(&worktree_path),
-            );
-            let human = format!("branch is checked out in '{worktree}'");
-            anyhow::Error::new(StructuredCliError {
-                payload: StructuredJsonError::new(human.clone(), ErrorKind::BranchCheckedOut),
-                human,
-            })
-        }
-        other => json_error::map_lib_error(other),
-    }
-}
+pub use crate::error_map::map_branch_error;

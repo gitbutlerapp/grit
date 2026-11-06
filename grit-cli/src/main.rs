@@ -26,6 +26,8 @@ mod embedded_gitlink;
 mod error_hints;
 mod error_kind;
 mod error_map;
+#[cfg(test)]
+mod error_map_contract;
 mod exit_status;
 mod global_args;
 mod grit_trace;
