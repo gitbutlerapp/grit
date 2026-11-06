@@ -36,20 +36,23 @@ fn wrapper_helpers_classify_only_cancelled() {
     assert!(PullError::Repository(cancelled()).is_cancelled());
     assert!(!PullError::DetachedHead.is_cancelled());
 
-    assert!(HistoryError::Engine(HistoryEngineError::Cancelled).is_cancelled());
+    assert!(HistoryError::Engine(Box::new(HistoryEngineError::Cancelled)).is_cancelled());
     assert!(!HistoryError::EmptyMessage.is_cancelled());
 
     assert!(RebaseSessionError::Library(cancelled()).is_cancelled());
-    assert!(
-        RebaseSessionError::History(HistoryError::Engine(HistoryEngineError::Cancelled))
-            .is_cancelled()
-    );
+    assert!(RebaseSessionError::History(HistoryError::Engine(Box::new(
+        HistoryEngineError::Cancelled,
+    )))
+    .is_cancelled());
     assert!(!RebaseSessionError::NoRebaseInProgress.is_cancelled());
 
     assert!(BundleError::Cancelled.is_cancelled());
     assert!(!BundleError::BadSignature.is_cancelled());
 
-    assert!(Error::History(HistoryError::Engine(HistoryEngineError::Cancelled)).is_cancelled());
+    assert!(Error::History(HistoryError::Engine(Box::new(
+        HistoryEngineError::Cancelled,
+    )))
+    .is_cancelled());
 }
 
 #[test]

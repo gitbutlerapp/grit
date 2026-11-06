@@ -64,7 +64,7 @@ pub enum CommitError {
         /// Subprocess exit status when the program ran.
         status: Option<i32>,
         /// Subprocess stderr (or a short summary when spawn failed).
-        stderr: String,
+        stderr: Box<String>,
     },
 
     /// Hunk id resolution failed during a patch-scoped commit.
@@ -119,7 +119,7 @@ impl CommitError {
         Self::Signing {
             program: String::new(),
             status: None,
-            stderr: message,
+            stderr: Box::new(message),
         }
     }
 
@@ -133,7 +133,16 @@ impl CommitError {
         Self::Signing {
             program: program.into(),
             status,
-            stderr: stderr.into(),
+            stderr: Box::new(stderr.into()),
+        }
+    }
+
+    /// Whether an in-flight operation asked to stop ([`crate::error::Error::Cancelled`] in [`Self::Library`]).
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Library(e) => e.is_cancelled(),
+            _ => false,
         }
     }
 }
@@ -145,16 +154,6 @@ impl From<Error> for CommitError {
             Error::HunkSelection(e) => Self::HunkSelect(e),
             Error::Apply(e) => Self::PatchApply(e),
             other => Self::Library(Box::new(other)),
-        }
-    }
-}
-
-impl From<CommitError> for crate::error::Error {
-    /// Unwraps [`CommitError::Library`]; every other variant stays as [`crate::error::Error::Commit`].
-    fn from(err: CommitError) -> Self {
-        match err {
-            CommitError::Library(boxed) => *boxed,
-            other => Self::Commit(other),
         }
     }
 }

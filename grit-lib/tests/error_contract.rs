@@ -172,7 +172,7 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
 ];
 
 /// Size of [`Error`] when the error-contract step landed (area enums must stay ≤ this until step 12).
-const ERROR_SIZE_CEILING: usize = 120;
+const ERROR_SIZE_CEILING: usize = 112;
 
 /// Slugs from `Error::kind_name` match arms in `grit-lib/src/error.rs` (must stay in sync with the table).
 fn kind_name_slugs_from_source() -> Vec<String> {

@@ -7,6 +7,7 @@ use anyhow::Error;
 use grit_lib::command_runner::hooks::HookError;
 use grit_lib::config::ident_resolve::IdentityError;
 use grit_lib::error::Error as LibError;
+use grit_lib::error::LockHeldError;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::merge::ContinueMergeError;
@@ -15,6 +16,7 @@ use grit_lib::porcelain::{CommitError, MergeError};
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
+use grit_lib::revwalk::history::{HistoryEngineError, HistoryError};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 
 use crate::error_kind::ErrorKind;
@@ -308,6 +310,74 @@ fn peel_lib_error<'a>(cause: &'a (dyn StdError + 'static)) -> Option<&'a LibErro
     cause.downcast_ref::<LibError>()
 }
 
+/// Walk the same wrappers as [`peel_lib_error`], then [`HistoryError`] / [`HistoryEngineError`],
+/// to find a [`LockHeldError`] for structured `lock_held` JSON (commit may fail only through history).
+fn peel_lock_held(cause: &(dyn StdError + 'static)) -> Option<LockHeldError> {
+    if let Some(LibError::Commit(CommitError::Library(boxed))) = cause.downcast_ref::<LibError>() {
+        return peel_lock_held(boxed.as_ref());
+    }
+    if let Some(LibError::Merge(MergeError::Library(boxed))) = cause.downcast_ref::<LibError>() {
+        return peel_lock_held(boxed.as_ref());
+    }
+    if let Some(CommitError::Library(boxed)) = cause.downcast_ref::<CommitError>() {
+        return peel_lock_held(boxed.as_ref());
+    }
+    if let Some(MergeError::Library(boxed)) = cause.downcast_ref::<MergeError>() {
+        return peel_lock_held(boxed.as_ref());
+    }
+    if let Some(LibError::LockHeld(lock)) = cause.downcast_ref::<LibError>() {
+        return Some(lock.clone());
+    }
+    if let Some(LibError::History(h)) = cause.downcast_ref::<LibError>() {
+        return lock_from_history_error(h);
+    }
+    cause
+        .downcast_ref::<HistoryError>()
+        .and_then(lock_from_history_error)
+}
+
+fn lock_from_history_error(history: &HistoryError) -> Option<LockHeldError> {
+    match history {
+        HistoryError::Nested(boxed) => peel_lock_held(boxed.as_ref()),
+        HistoryError::Engine(engine) => lock_from_history_engine(engine),
+        HistoryError::WorktreeApply { source } => lock_from_history_engine(source),
+        HistoryError::UndoRecordRead { source } | HistoryError::UndoRecordWrite { source } => {
+            lock_from_history_engine(source)
+        }
+        HistoryError::ApplyRollbackIncomplete {
+            checkout,
+            ref_rollback,
+            worktree_restore,
+        } => lock_from_history_engine(checkout)
+            .or_else(|| ref_rollback.as_deref().and_then(lock_from_history_engine))
+            .or_else(|| {
+                worktree_restore
+                    .as_deref()
+                    .and_then(lock_from_history_engine)
+            }),
+        _ => None,
+    }
+}
+
+fn lock_from_history_engine(engine: &HistoryEngineError) -> Option<LockHeldError> {
+    match engine {
+        HistoryEngineError::LockHeld(lock) => Some(lock.clone()),
+        HistoryEngineError::CorruptLooseObject { source, .. }
+        | HistoryEngineError::CorruptPackedObject { source, .. } => {
+            lock_from_history_engine(source)
+        }
+        HistoryEngineError::CheckoutRollbackIncomplete { source, .. } => {
+            lock_from_history_engine(source)
+        }
+        HistoryEngineError::PromisorFetchFailed { failures, .. } => failures
+            .iter()
+            .find_map(|(_, e)| lock_from_history_engine(e)),
+        HistoryEngineError::Commit(CommitError::Library(boxed)) => peel_lock_held(boxed.as_ref()),
+        HistoryEngineError::Merge(MergeError::Library(boxed)) => peel_lock_held(boxed.as_ref()),
+        _ => None,
+    }
+}
+
 fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
     let hook = peel_lib_error(cause)
         .and_then(|lib| match lib {
@@ -335,13 +405,8 @@ fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<Structure
 }
 
 fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<ClassifiedError> {
-    match peel_lib_error(cause)? {
-        LibError::LockHeld(lock) => Some(classified_from_structured_error(&lock_held(
-            &lock.path,
-            lock.holder,
-        ))),
-        _ => None,
-    }
+    peel_lock_held(cause)
+        .map(|lock| classified_from_structured_error(&lock_held(&lock.path, lock.holder)))
 }
 
 fn hash_oid_from_cause(cause: &(dyn StdError + 'static)) -> Option<ObjectId> {

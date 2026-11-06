@@ -1285,7 +1285,7 @@ pub enum Error {
         missing: crate::objects::ObjectId,
         /// One entry per remote that failed, in the order they were tried: the remote's
         /// name and its first error.
-        failures: Vec<(String, Error)>,
+        failures: Vec<(String, Box<Error>)>,
     },
 
     /// An object's stored data is corrupt or malformed.
@@ -1593,14 +1593,12 @@ pub enum Error {
     Branch(#[from] crate::porcelain::branch_error::BranchError),
 
     /// Commit, identity, signing, and patch-scoped commit failures.
-    ///
-    /// [`From`] unwraps [`crate::porcelain::commit_error::CommitError::Library`]; other variants stay here.
     #[error(transparent)]
     Commit(crate::porcelain::commit_error::CommitError),
 
     /// Merge, cherry-pick, revert, and in-progress operation failures.
     #[error(transparent)]
-    Merge(#[from] crate::porcelain::merge_error::MergeError),
+    Merge(crate::porcelain::merge_error::MergeError),
 
     /// Reference lock failure while updating refs.
     #[error(transparent)]
@@ -2633,10 +2631,8 @@ impl Error {
         match self {
             Self::Cancelled => true,
             Self::History(e) => e.is_cancelled(),
-            Self::Commit(crate::porcelain::commit_error::CommitError::Library(e))
-            | Self::Merge(crate::porcelain::merge_error::MergeError::Library(e)) => {
-                e.is_cancelled()
-            }
+            Self::Commit(e) => e.is_cancelled(),
+            Self::Merge(e) => e.is_cancelled(),
             Self::CheckoutRollbackIncomplete { source, .. } => source.is_cancelled(),
             Self::Io(err)
                 if err.to_string() == crate::transport::stateless_http::TRANSPORT_IO_CANCELLED =>
@@ -2784,6 +2780,36 @@ impl From<Cancelled> for Error {
     }
 }
 
+impl From<crate::porcelain::commit_error::CommitError> for Error {
+    fn from(err: crate::porcelain::commit_error::CommitError) -> Self {
+        use crate::porcelain::commit_error::CommitError;
+        match err {
+            CommitError::Library(boxed) => match *boxed {
+                inner @ (Self::Cancelled | Self::IndexUnmerged | Self::GitDirPathIo { .. }) => {
+                    inner
+                }
+                other => Self::Commit(CommitError::Library(Box::new(other))),
+            },
+            other => Self::Commit(other),
+        }
+    }
+}
+
+impl From<crate::porcelain::merge_error::MergeError> for Error {
+    fn from(err: crate::porcelain::merge_error::MergeError) -> Self {
+        use crate::porcelain::merge_error::MergeError;
+        match err {
+            MergeError::Library(boxed) => match *boxed {
+                inner @ (Self::Cancelled | Self::IndexUnmerged | Self::GitDirPathIo { .. }) => {
+                    inner
+                }
+                other => Self::Merge(MergeError::Library(Box::new(other))),
+            },
+            other => Self::Merge(other),
+        }
+    }
+}
+
 impl From<PathIoError> for Error {
     fn from(value: PathIoError) -> Self {
         let path = value
@@ -2827,7 +2853,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub(crate) fn promisor_fetch_failed_message(
     missing: &crate::objects::ObjectId,
-    failures: &[(String, Error)],
+    failures: &[(String, Box<Error>)],
 ) -> String {
     let causes = failures
         .iter()

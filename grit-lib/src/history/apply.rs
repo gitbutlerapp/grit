@@ -2293,7 +2293,7 @@ mod inject_and_apply_tests {
         .expect_err("invalid notes rewrite mode");
         let notes_mode_invalid = match &err {
             HistoryError::Engine(e) => {
-                matches!(e, crate::history::HistoryEngineError::NotesRewriteMode(_))
+                matches!(**e, crate::history::HistoryEngineError::NotesRewriteMode(_))
             }
             HistoryError::Nested(boxed) => matches!(**boxed, Error::NotesRewriteMode(_)),
             _ => false,

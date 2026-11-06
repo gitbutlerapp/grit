@@ -1342,7 +1342,7 @@ fn run_rebase_with_exec(
             commit,
             conflicts,
             runs,
-        })) => RebaseCliOutcome::from_exec_conflict(commit, &conflicts, &runs),
+        })) => RebaseCliOutcome::from_exec_conflict(commit, conflicts.as_ref(), &runs),
         Err(RebaseSessionError::History(HistoryError::ExecFailed {
             exit_code,
             stdout,
@@ -1440,7 +1440,7 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
                 commit,
                 conflicts,
                 runs,
-            })) => RebaseCliOutcome::from_exec_conflict(commit, &conflicts, &runs),
+            })) => RebaseCliOutcome::from_exec_conflict(commit, conflicts.as_ref(), &runs),
             Err(RebaseSessionError::History(HistoryError::ExecFailed {
                 exit_code,
                 stdout,
@@ -1805,13 +1805,11 @@ pub(crate) fn history_error(
 
 fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
     match err {
-        HistoryError::Engine(HistoryEngineError::Cancelled) => {
-            anyhow::Error::new(LibError::Cancelled)
-        }
-        HistoryError::Engine(HistoryEngineError::Hook(hook)) => {
-            anyhow::Error::new(LibError::Hook(hook))
-        }
-        HistoryError::Engine(engine) => anyhow::Error::new(engine),
+        HistoryError::Engine(engine) => match *engine {
+            HistoryEngineError::Cancelled => anyhow::Error::new(LibError::Cancelled),
+            HistoryEngineError::Hook(hook) => anyhow::Error::new(LibError::Hook(hook)),
+            engine => anyhow::Error::new(engine),
+        },
         HistoryError::Planning(planning) => {
             anyhow::anyhow!("history rewrite planning failed: {planning}")
         }
@@ -1839,7 +1837,7 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
             operation,
             commit,
             &subject,
-            conflict_paths(conflicts),
+            conflict_paths(conflicts.as_ref().clone()),
             refs,
         ),
         HistoryError::Signing {
@@ -1976,7 +1974,7 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
             operation,
             commit,
             "(during rebase --exec)",
-            conflict_paths(conflicts),
+            conflict_paths(conflicts.as_ref().clone()),
             Vec::new(),
         ),
         HistoryError::ExecFailed {

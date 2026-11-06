@@ -114,6 +114,12 @@ pub enum MergeError {
 }
 
 impl MergeError {
+    /// Whether a [`crate::error::Error::Cancelled`] is carried in [`Self::Library`].
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Library(e) if e.is_cancelled())
+    }
+
     /// Stable snake_case slug for this failure (matches former [`Error::kind_name`] values).
     #[must_use]
     pub fn kind_name(&self) -> &'static str {

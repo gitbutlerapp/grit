@@ -207,7 +207,7 @@ pub(crate) fn fetch_from_promisors(
     order: &[String],
     fetch_one: &mut FetchOne<'_>,
 ) -> Result<()> {
-    let mut failures: Vec<(String, Error)> = Vec::new();
+    let mut failures: Vec<(String, Box<Error>)> = Vec::new();
     let mut unusable: Vec<&str> = Vec::new();
     let mut unresolved: Vec<ObjectId> = Vec::new();
     let mut batches: Vec<Vec<ObjectId>> = vec![oids.to_vec()];
@@ -234,7 +234,7 @@ pub(crate) fn fetch_from_promisors(
                 }
                 failed = true;
                 if !failures.iter().any(|(n, _)| n == name) {
-                    failures.push((name.clone(), err));
+                    failures.push((name.clone(), Box::new(err)));
                 }
             }
             clear_pack_cache();

@@ -162,7 +162,7 @@ impl CloneError {
     /// Each failing remote's name with its first error, in the order they were tried;
     /// empty when the checkout did not fail on [`Error::PromisorFetchFailed`].
     #[must_use]
-    pub fn failed_promisor_remotes(&self) -> &[(String, Error)] {
+    pub fn failed_promisor_remotes(&self) -> &[(String, Box<Error>)] {
         let Self::CheckoutFailed { source, .. } = self else {
             return &[];
         };

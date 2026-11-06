@@ -171,7 +171,7 @@ fn history_planning_reports_unborn_head_as_typed_library_error() {
     };
     let err = move_commit(&repo, commit, Placement::Before(commit), &opts).expect_err("unborn");
     assert!(
-        matches!(&err, HistoryError::Engine(HistoryEngineError::UnbornHead)),
+        matches!(&err, HistoryError::Engine(e) if matches!(*e.as_ref(), HistoryEngineError::UnbornHead)),
         "{err:?}"
     );
 }
@@ -182,8 +182,9 @@ fn history_error_from_library_error_unwraps_history_failures() {
         HistoryError::from(Error::History(HistoryError::NotLinear)),
         HistoryError::NotLinear
     ));
-    assert!(matches!(
-        HistoryError::from(Error::UnbornHead),
-        HistoryError::Engine(HistoryEngineError::UnbornHead)
-    ));
+    let unborn = HistoryError::from(Error::UnbornHead);
+    assert!(
+        matches!(&unborn, HistoryError::Engine(e) if matches!(*e.as_ref(), HistoryEngineError::UnbornHead)),
+        "{unborn:?}"
+    );
 }

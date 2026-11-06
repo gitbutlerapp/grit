@@ -5524,7 +5524,7 @@ pub grit_lib::error::Error::PreciousObjectsRepository
 pub grit_lib::error::Error::PreciousObjectsRepository::operation: &'static str
 pub grit_lib::error::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
 pub grit_lib::error::Error::PromisorFetchFailed
-pub grit_lib::error::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
+pub grit_lib::error::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, alloc::boxed::Box<grit_lib::error::Error>)>
 pub grit_lib::error::Error::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::PushAtomicUnsupported
 pub grit_lib::error::Error::PushOptionsUnsupported
@@ -14292,12 +14292,13 @@ pub grit_lib::porcelain::CommitError::PatchApply(grit_lib::error::ApplyError)
 pub grit_lib::porcelain::CommitError::Signing
 pub grit_lib::porcelain::CommitError::Signing::program: alloc::string::String
 pub grit_lib::porcelain::CommitError::Signing::status: core::option::Option<i32>
-pub grit_lib::porcelain::CommitError::Signing::stderr: alloc::string::String
+pub grit_lib::porcelain::CommitError::Signing::stderr: alloc::boxed::Box<alloc::string::String>
 impl grit_lib::porcelain::CommitError
-pub fn grit_lib::porcelain::CommitError::kind_name(&self) -> &'static str
-impl grit_lib::porcelain::CommitError
+pub fn grit_lib::porcelain::CommitError::is_cancelled(&self) -> bool
 pub fn grit_lib::porcelain::CommitError::signing_failure(impl core::convert::Into<alloc::string::String>, core::option::Option<i32>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::porcelain::CommitError::signing_from_message(alloc::string::String) -> Self
+impl grit_lib::porcelain::CommitError
+pub fn grit_lib::porcelain::CommitError::kind_name(&self) -> &'static str
 impl core::convert::From<grit_lib::change_id::ChangeIdError> for grit_lib::porcelain::CommitError
 pub fn grit_lib::porcelain::CommitError::from(grit_lib::change_id::ChangeIdError) -> Self
 impl core::convert::From<grit_lib::config::ident_resolve::IdentityError> for grit_lib::porcelain::CommitError
@@ -14356,6 +14357,7 @@ pub grit_lib::porcelain::MergeError::UnrelatedHistories
 pub grit_lib::porcelain::MergeError::UnrelatedHistories::ours: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::MergeError::UnrelatedHistories::theirs: grit_lib::objects::ObjectId
 impl grit_lib::porcelain::MergeError
+pub fn grit_lib::porcelain::MergeError::is_cancelled(&self) -> bool
 pub fn grit_lib::porcelain::MergeError::kind_name(&self) -> &'static str
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::MergeError
 pub fn grit_lib::porcelain::MergeError::from(grit_lib::error::Error) -> Self
@@ -14567,7 +14569,7 @@ pub grit_lib::prelude::Error::PreciousObjectsRepository
 pub grit_lib::prelude::Error::PreciousObjectsRepository::operation: &'static str
 pub grit_lib::prelude::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
 pub grit_lib::prelude::Error::PromisorFetchFailed
-pub grit_lib::prelude::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
+pub grit_lib::prelude::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, alloc::boxed::Box<grit_lib::error::Error>)>
 pub grit_lib::prelude::Error::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::PushAtomicUnsupported
 pub grit_lib::prelude::Error::PushOptionsUnsupported
@@ -18216,7 +18218,7 @@ pub grit_lib::remote::clone::CloneError::Library(grit_lib::error::Error)
 pub grit_lib::remote::clone::CloneError::Remote(grit_lib::remote::RemoteError)
 pub grit_lib::remote::clone::CloneError::RemoteRefNotFound(alloc::string::String)
 impl grit_lib::remote::clone::CloneError
-pub fn grit_lib::remote::clone::CloneError::failed_promisor_remotes(&self) -> &[(alloc::string::String, grit_lib::error::Error)]
+pub fn grit_lib::remote::clone::CloneError::failed_promisor_remotes(&self) -> &[(alloc::string::String, alloc::boxed::Box<grit_lib::error::Error>)]
 pub fn grit_lib::remote::clone::CloneError::is_cancelled(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::is_remote_ref_not_found(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::is_remote_unreadable(&self) -> bool
@@ -24060,7 +24062,7 @@ pub grit_lib::revwalk::history::HistoryEngineError::PreciousObjectsRepository
 pub grit_lib::revwalk::history::HistoryEngineError::PreciousObjectsRepository::operation: &'static str
 pub grit_lib::revwalk::history::HistoryEngineError::PromisedObjectMissing(grit_lib::objects::ObjectId)
 pub grit_lib::revwalk::history::HistoryEngineError::PromisorFetchFailed
-pub grit_lib::revwalk::history::HistoryEngineError::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::revwalk::history::HistoryEngineError)>
+pub grit_lib::revwalk::history::HistoryEngineError::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, alloc::boxed::Box<grit_lib::revwalk::history::HistoryEngineError>)>
 pub grit_lib::revwalk::history::HistoryEngineError::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryEngineError::PushAtomicUnsupported
 pub grit_lib::revwalk::history::HistoryEngineError::PushOptionsUnsupported
@@ -24241,16 +24243,16 @@ pub grit_lib::revwalk::history::HistoryError::BranchCheckedOutElsewhere::worktre
 pub grit_lib::revwalk::history::HistoryError::ChangeId(grit_lib::change_id::ChangeIdError)
 pub grit_lib::revwalk::history::HistoryError::Conflict
 pub grit_lib::revwalk::history::HistoryError::Conflict::commit: grit_lib::objects::ObjectId
-pub grit_lib::revwalk::history::HistoryError::Conflict::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::revwalk::history::HistoryError::Conflict::conflicts: alloc::boxed::Box<alloc::vec::Vec<grit_lib::operation::Conflict>>
 pub grit_lib::revwalk::history::HistoryError::Conflict::refs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::revwalk::history::HistoryError::Conflict::subject: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::DivergentBranch
 pub grit_lib::revwalk::history::HistoryError::DivergentBranch::name: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::EmptyMessage
-pub grit_lib::revwalk::history::HistoryError::Engine(grit_lib::revwalk::history::HistoryEngineError)
+pub grit_lib::revwalk::history::HistoryError::Engine(alloc::boxed::Box<grit_lib::revwalk::history::HistoryEngineError>)
 pub grit_lib::revwalk::history::HistoryError::ExecConflict
 pub grit_lib::revwalk::history::HistoryError::ExecConflict::commit: grit_lib::objects::ObjectId
-pub grit_lib::revwalk::history::HistoryError::ExecConflict::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::revwalk::history::HistoryError::ExecConflict::conflicts: alloc::boxed::Box<alloc::vec::Vec<grit_lib::operation::Conflict>>
 pub grit_lib::revwalk::history::HistoryError::ExecConflict::runs: alloc::vec::Vec<grit_lib::revwalk::history::ExecRunRecord>
 pub grit_lib::revwalk::history::HistoryError::ExecDirty
 pub grit_lib::revwalk::history::HistoryError::ExecDirty::command: alloc::string::String
@@ -24304,7 +24306,7 @@ pub grit_lib::revwalk::history::HistoryError::RootCommit::commit: grit_lib::obje
 pub grit_lib::revwalk::history::HistoryError::Signing
 pub grit_lib::revwalk::history::HistoryError::Signing::program: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::Signing::status: core::option::Option<i32>
-pub grit_lib::revwalk::history::HistoryError::Signing::stderr: alloc::string::String
+pub grit_lib::revwalk::history::HistoryError::Signing::stderr: alloc::boxed::Box<alloc::string::String>
 pub grit_lib::revwalk::history::HistoryError::SplitSelectsEverything
 pub grit_lib::revwalk::history::HistoryError::SplitSelectsNothing
 pub grit_lib::revwalk::history::HistoryError::SquashDiscardsMessage

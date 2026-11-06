@@ -15,7 +15,7 @@ use super::PlanningError;
 
 fn promisor_fetch_failed_engine_message(
     missing: &crate::objects::ObjectId,
-    failures: &[(String, HistoryEngineError)],
+    failures: &[(String, Box<HistoryEngineError>)],
 ) -> String {
     let causes = failures
         .iter()
@@ -401,7 +401,7 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
                 missing,
                 failures: failures
                     .into_iter()
-                    .map(|(name, e)| (name, error_to_engine(e)))
+                    .map(|(name, e)| (name, Box::new(error_to_engine(*e))))
                     .collect(),
             }
         }
@@ -501,7 +501,7 @@ pub enum HistoryEngineError {
         missing: crate::objects::ObjectId,
         /// One entry per remote that failed, in the order they were tried: the remote's
         /// name and its first error.
-        failures: Vec<(String, HistoryEngineError)>,
+        failures: Vec<(String, Box<HistoryEngineError>)>,
     },
 
     /// An object's stored data is corrupt or malformed.
@@ -1552,6 +1552,6 @@ impl From<crate::error::Error> for HistoryEngineError {
 
 impl From<HistoryEngineError> for crate::error::Error {
     fn from(err: HistoryEngineError) -> Self {
-        Self::History(super::HistoryError::Engine(err))
+        Self::History(super::HistoryError::Engine(Box::new(err)))
     }
 }

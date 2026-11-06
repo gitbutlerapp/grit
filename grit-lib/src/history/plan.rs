@@ -1655,7 +1655,7 @@ pub(crate) fn conflict_error(
     HistoryError::Conflict {
         commit,
         subject,
-        conflicts: crate::operation::conflicts_from_tree_merge(merge),
+        conflicts: Box::new(crate::operation::conflicts_from_tree_merge(merge)),
         refs: Vec::new(),
     }
 }
@@ -1835,7 +1835,7 @@ fn signing_err(err: Error) -> HistoryError {
             status,
             stderr,
         },
-        other => HistoryError::Engine(error_to_engine(other)),
+        other => HistoryError::Engine(Box::new(error_to_engine(other))),
     }
 }
 

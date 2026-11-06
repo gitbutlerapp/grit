@@ -1109,9 +1109,11 @@ fn plan_rewrite_surfaces_missing_object_as_library_error() {
     )
     .expect_err("missing commit object");
     match err {
-        grit_lib::revwalk::history::HistoryError::Engine(
-            grit_lib::revwalk::history::HistoryEngineError::ObjectNotFound(_),
-        ) => {}
+        grit_lib::revwalk::history::HistoryError::Engine(e)
+            if matches!(
+                e.as_ref(),
+                grit_lib::revwalk::history::HistoryEngineError::ObjectNotFound(_)
+            ) => {}
         grit_lib::revwalk::history::HistoryError::Conflict { .. } => {
             panic!("missing object must not surface as Conflict");
         }

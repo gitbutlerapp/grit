@@ -294,7 +294,7 @@ fn remove_journal_without_meta(repo: &Repository) -> Result<(), HistoryError> {
     }
     let _index_lock = match lock_index_for_recovery(repo) {
         Ok(lock) => lock,
-        Err(err) if matches!(&err, HistoryError::Engine(HistoryEngineError::LockHeld(_))) => {
+        Err(HistoryError::Engine(e)) if matches!(*e, HistoryEngineError::LockHeld(_)) => {
             return Ok(());
         }
         Err(err) => return Err(err),

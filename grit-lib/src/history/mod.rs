@@ -225,9 +225,11 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                HistoryError::Engine(
-                    crate::history::HistoryEngineError::UnexpectedObjectKind { .. }
-                )
+                HistoryError::Engine(e)
+                    if matches!(
+                        e.as_ref(),
+                        crate::history::HistoryEngineError::UnexpectedObjectKind { .. }
+                    )
             ),
             "{err:?}"
         );
@@ -250,9 +252,11 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                HistoryError::Engine(
-                    crate::history::HistoryEngineError::UnexpectedObjectKind { .. }
-                )
+                HistoryError::Engine(e)
+                    if matches!(
+                        e.as_ref(),
+                        crate::history::HistoryEngineError::UnexpectedObjectKind { .. }
+                    )
             ),
             "{err:?}"
         );
@@ -268,11 +272,15 @@ mod tests {
         let err = squash(&repo, &["no-such-branch..main"], &opts).unwrap_err();
         assert!(
             matches!(
-                err,
-                HistoryError::Engine(crate::history::HistoryEngineError::RevisionNotFound(_))
-                    | HistoryError::Engine(crate::history::HistoryEngineError::RevParse(
-                        crate::rev_parse_error::RevParseError::AmbiguousArgument { .. }
-                    ))
+                &err,
+                HistoryError::Engine(e)
+                    if matches!(
+                        e.as_ref(),
+                        crate::history::HistoryEngineError::RevisionNotFound(_)
+                            | crate::history::HistoryEngineError::RevParse(
+                                crate::rev_parse_error::RevParseError::AmbiguousArgument { .. }
+                            )
+                    )
             ),
             "{err:?}"
         );
