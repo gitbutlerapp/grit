@@ -91,7 +91,7 @@ pub fn human_message_for_lib(err: &LibError) -> String {
             "refusing to store content that triggers an SHA-1 hash collision (digest {})",
             oid.to_hex()
         ),
-        LibError::LockHeld { path, holder } => lock_held(path, *holder).to_string(),
+        LibError::LockHeld(lock) => lock_held(&lock.path, lock.holder).to_string(),
         LibError::RefStore(RefStoreError::NotFound { name }) => {
             match name.strip_prefix("refs/heads/") {
                 Some(short) => format!("no branch named '{short}'"),
@@ -315,8 +315,8 @@ fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<Structure
 
 fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<ClassifiedError> {
     match cause.downcast_ref::<LibError>()? {
-        LibError::LockHeld { path, holder } => {
-            Some(classified_from_structured_error(&lock_held(path, *holder)))
+        LibError::LockHeld(lock) => {
+            Some(classified_from_structured_error(&lock_held(&lock.path, lock.holder)))
         }
         _ => None,
     }
