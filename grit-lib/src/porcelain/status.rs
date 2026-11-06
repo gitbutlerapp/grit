@@ -88,8 +88,8 @@ pub struct StatusOptions {
     pub ignored: IgnoredMode,
     /// Rename/copy detection, or `None` to skip rename detection.
     pub renames: Option<RenameDetection>,
-    /// Limit the report to paths matching these pathspecs (empty = whole tree).
-    pub pathspecs: Vec<String>,
+    /// Limit the report to paths matching this pathspec (`Pathspec::is_entire_tree` = whole tree).
+    pub pathspec: crate::pathspec::Pathspec,
     /// Compute ahead/behind counts relative to the upstream branch.
     pub ahead_behind: bool,
     /// Override parallel index stat workers (`Some(1)` forces serial). Used by tests and embedders.
@@ -151,7 +151,9 @@ impl Default for StatusOptions {
             untracked: UntrackedMode::Normal,
             ignored: IgnoredMode::No,
             renames: None,
-            pathspecs: Vec::new(),
+            pathspec: crate::pathspec::Pathspec::entire_tree(
+                crate::pathspec::PathspecGlobalFlags::default(),
+            ),
             ahead_behind: true,
             stat_parallel_threads: None,
             fsmonitor_query_boundary: None,
@@ -168,7 +170,7 @@ const STATUS_RENAME_DEFAULT_THRESHOLD: u32 = 50;
 /// Build [`StatusOptions`] from repository config (untracked mode and rename detection).
 ///
 /// CLI callers merge command-line overrides for [`StatusOptions::untracked`],
-/// [`StatusOptions::pathspecs`], and other flags after calling this.
+/// [`StatusOptions::pathspec`], and other flags after calling this.
 pub fn status_options_from_config(
     config: &ConfigSet,
 ) -> std::result::Result<StatusOptions, ConfigError> {
@@ -2354,11 +2356,11 @@ pub fn status(
         .collect();
     let index_sparse_on_disk =
         index.sparse_directories || index.has_sparse_directory_placeholders();
-    if !opts.pathspecs.is_empty() {
+    if !opts.pathspec.is_entire_tree() {
         crate::porcelain::index_from_tree::expand_sparse_for_pathspecs(
             repo,
             &mut index,
-            &opts.pathspecs,
+            opts.pathspec.specs(),
         )?;
     }
     if let Some(cfg) = repo_config.as_deref() {
@@ -2377,7 +2379,7 @@ pub fn status(
     };
 
     // Staged: index vs HEAD tree, narrowed to pathspecs before rename detection.
-    let mut staged: Vec<DiffEntry> = if opts.pathspecs.is_empty()
+    let mut staged: Vec<DiffEntry> = if opts.pathspec.is_entire_tree()
         && index.entries.iter().all(|e| e.stage() == 0)
         && head_tree
             .as_ref()
@@ -2388,7 +2390,7 @@ pub fn status(
     } else {
         crate::diff::diff_index_to_tree(repo.odb(), &index, head_tree.as_ref(), false)?
             .into_iter()
-            .filter(|e| status_diff_entry_matches_pathspec(e, &opts.pathspecs))
+            .filter(|e| status_diff_entry_matches_pathspec(e, opts.pathspec.specs()))
             .collect()
     };
 
@@ -2440,7 +2442,7 @@ pub fn status(
         || index.entry_modes_repaired_on_load;
     let mut unstaged: Vec<DiffEntry> = unstaged_raw
         .into_iter()
-        .filter(|e| status_diff_entry_matches_pathspec(e, &opts.pathspecs))
+        .filter(|e| status_diff_entry_matches_pathspec(e, opts.pathspec.specs()))
         .collect();
 
     if let Some(rd) = opts.renames {
@@ -2471,8 +2473,8 @@ pub fn status(
     }
 
     let mut conflict_details = conflicts_from_index(&index);
-    if !opts.pathspecs.is_empty() {
-        conflict_details.retain(|c| status_path_matches(&c.path, &opts.pathspecs));
+    if !opts.pathspec.is_entire_tree() {
+        conflict_details.retain(|c| status_path_matches(&c.path, opts.pathspec.specs()));
     }
     let conflicts: Vec<String> = conflict_details.iter().map(|c| c.path.clone()).collect();
     normalize_status_conflicts(&mut staged, &mut unstaged, &conflicts);
@@ -2492,7 +2494,7 @@ pub fn status(
                     work_tree,
                     opts.ignored,
                     opts.untracked == UntrackedMode::All,
-                    &opts.pathspecs,
+                    opts.pathspec.specs(),
                     &rules_guard,
                     Some(std::sync::Arc::clone(&watch)),
                 )?;
@@ -4472,7 +4474,10 @@ mod status_op_tests {
         )
         .unwrap();
         let opts = StatusOptions {
-            pathspecs: vec!["scoped".into()],
+            pathspec: crate::pathspec::Pathspec::scoped(
+                vec!["scoped".into()],
+                crate::pathspec::PathspecGlobalFlags::default(),
+            ),
             renames: Some(RenameDetection {
                 threshold: 50,
                 copies: false,
@@ -4659,7 +4664,10 @@ mod status_op_tests {
 
         for spec in ["old.txt", "new.txt"] {
             let opts = StatusOptions {
-                pathspecs: vec![spec.into()],
+                pathspec: crate::pathspec::Pathspec::scoped(
+                    vec![spec.into()],
+                    crate::pathspec::PathspecGlobalFlags::default(),
+                ),
                 renames,
                 ..StatusOptions::default()
             };
@@ -4673,7 +4681,10 @@ mod status_op_tests {
         }
 
         let opts_both = StatusOptions {
-            pathspecs: vec![".".into()],
+            pathspec: crate::pathspec::Pathspec::scoped(
+                vec![".".into()],
+                crate::pathspec::PathspecGlobalFlags::default(),
+            ),
             renames,
             ..StatusOptions::default()
         };

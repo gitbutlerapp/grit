@@ -7,7 +7,8 @@ use grit_lib::error::PathspecFromFileParseError;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::is_long_magic_pathspec_token;
 use grit_lib::worktree::pathspec::{
-    parse_pathspecs_from_source, PathspecInput, PathspecResolveError, ResolvedPathspecs,
+    parse_pathspecs_from_source, Pathspec, PathspecGlobalFlags, PathspecInput, PathspecOptions,
+    PathspecResolveError, ResolvedPathspecs,
 };
 use std::io::Read;
 use std::sync::OnceLock;
@@ -49,6 +50,16 @@ pub struct TrailingPathspecArgs {
     pub pathspec_file_nul: bool,
 }
 
+fn pathspec_options_from_repo(
+    repo: &Repository,
+    from_file: Option<PathspecInput>,
+) -> PathspecOptions {
+    let mut options = PathspecOptions::default();
+    options.globals = PathspecGlobalFlags::from_environment(repo.environment());
+    options.from_file = from_file;
+    options
+}
+
 impl PathspecArgs {
     /// Resolve argv and optional from-file pathspecs against `repo` and the process cwd.
     pub fn resolve(&self, repo: &Repository) -> Result<ResolvedPathspecs> {
@@ -58,6 +69,20 @@ impl PathspecArgs {
             self.pathspec_from_file.as_deref(),
             self.pathspec_file_nul,
         )
+    }
+
+    /// Resolve into a [`Pathspec`] (preferred for porcelain options).
+    pub fn resolve_pathspec(&self, repo: &Repository) -> Result<Pathspec> {
+        let from_file = match self.pathspec_from_file.as_deref() {
+            None => None,
+            Some(path) => {
+                let data = read_pathspec_source(path)?;
+                Some(PathspecInput::new(data, self.pathspec_file_nul))
+            }
+        };
+        let options = pathspec_options_from_repo(repo, from_file);
+        repo.pathspec(&self.paths, &options)
+            .map_err(map_pathspec_resolve)
     }
 
     /// Require at least one pathspec source (argv or from-file).
@@ -130,6 +155,20 @@ impl TrailingPathspecArgs {
             self.pathspec_from_file.as_deref(),
             self.pathspec_file_nul,
         )
+    }
+
+    /// Resolve into a [`Pathspec`] (preferred for porcelain options).
+    pub fn resolve_pathspec(&self, repo: &Repository) -> Result<Pathspec> {
+        let from_file = match self.pathspec_from_file.as_deref() {
+            None => None,
+            Some(path) => {
+                let data = read_pathspec_source(path)?;
+                Some(PathspecInput::new(data, self.pathspec_file_nul))
+            }
+        };
+        let options = pathspec_options_from_repo(repo, from_file);
+        repo.pathspec(&self.paths, &options)
+            .map_err(map_pathspec_resolve)
     }
 
     /// Require at least one pathspec source (argv or from-file).

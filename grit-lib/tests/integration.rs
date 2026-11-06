@@ -1329,6 +1329,8 @@ mod pathspec_from_file_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_git_compat.rs"]
 mod pathspec_git_compat;
+#[path = "pathspec_type.rs"]
+mod pathspec_type;
 #[cfg(feature = "full-tests")]
 #[path = "pick_stash_apply_git_compat.rs"]
 mod pick_stash_apply_git_compat;

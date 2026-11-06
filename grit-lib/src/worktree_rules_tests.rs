@@ -112,7 +112,10 @@ mod tests {
         status(
             &probe_repo,
             &StatusOptions {
-                pathspecs: vec![":(attr:probe)".to_string()],
+                pathspec: crate::pathspec::Pathspec::scoped(
+                    vec![":(attr:probe)".to_string()],
+                    crate::pathspec::PathspecGlobalFlags::default(),
+                ),
                 ..StatusOptions::default()
             },
             &mut NullProgress,

@@ -50,6 +50,14 @@ pub struct Environment {
     /// When false, opportunistic index updates that take optional locks are skipped (Git
     /// `GIT_OPTIONAL_LOCKS=0` / `--no-optional-locks`). Defaults to true when unset.
     pub git_optional_locks: bool,
+    /// `GIT_LITERAL_PATHSPECS` — argv pathspecs treat `*` and `?` as literal.
+    pub git_literal_pathspecs: bool,
+    /// `GIT_GLOB_PATHSPECS` — argv pathspecs are globs.
+    pub git_glob_pathspecs: bool,
+    /// `GIT_NOGLOB_PATHSPECS` — disable glob interpretation in argv pathspecs.
+    pub git_noglob_pathspecs: bool,
+    /// `GIT_ICASE_PATHSPECS` — case-fold argv pathspec patterns.
+    pub git_icase_pathspecs: bool,
     /// Override for `GIT_ALTERNATE_OBJECT_DIRECTORIES` when set (see Git environment variable of the same name).
     pub git_alternate_object_directories: Option<String>,
     /// Override for `GIT_OBJECT_DIRECTORY` when set (see Git environment variable of the same name).
@@ -145,6 +153,10 @@ impl Environment {
             git_replace_ref_base: None,
             git_no_replace_objects: false,
             git_optional_locks: true,
+            git_literal_pathspecs: false,
+            git_glob_pathspecs: false,
+            git_noglob_pathspecs: false,
+            git_icase_pathspecs: false,
             git_alternate_object_directories: None,
             git_object_directory: None,
             git_prefix: None,
@@ -198,6 +210,10 @@ impl Environment {
             && self.git_replace_ref_base == e.git_replace_ref_base
             && self.git_no_replace_objects == e.git_no_replace_objects
             && self.git_optional_locks == e.git_optional_locks
+            && self.git_literal_pathspecs == e.git_literal_pathspecs
+            && self.git_glob_pathspecs == e.git_glob_pathspecs
+            && self.git_noglob_pathspecs == e.git_noglob_pathspecs
+            && self.git_icase_pathspecs == e.git_icase_pathspecs
             && self.git_alternate_object_directories == e.git_alternate_object_directories
             && self.git_object_directory == e.git_object_directory
             && self.git_prefix == e.git_prefix
@@ -269,6 +285,10 @@ impl Environment {
             git_replace_ref_base: get("GIT_REPLACE_REF_BASE"),
             git_no_replace_objects: map.contains_key("GIT_NO_REPLACE_OBJECTS"),
             git_optional_locks: git_optional_locks_from_env(get("GIT_OPTIONAL_LOCKS").as_deref()),
+            git_literal_pathspecs: map.contains_key("GIT_LITERAL_PATHSPECS"),
+            git_glob_pathspecs: map.contains_key("GIT_GLOB_PATHSPECS"),
+            git_noglob_pathspecs: map.contains_key("GIT_NOGLOB_PATHSPECS"),
+            git_icase_pathspecs: map.contains_key("GIT_ICASE_PATHSPECS"),
             git_alternate_object_directories: get("GIT_ALTERNATE_OBJECT_DIRECTORIES"),
             git_object_directory: get("GIT_OBJECT_DIRECTORY"),
             git_prefix: get("GIT_PREFIX"),
