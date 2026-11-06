@@ -370,7 +370,7 @@ impl OffloadPack {
 ///
 /// # Errors
 ///
-/// [`Error::Offload`] for the [`OffloadError`] cases, [`RepositoryError::UnsupportedObjectStore`]
+/// [`Error::Offload`] for the [`OffloadError`] cases, [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore)
 /// without a files-backed object store, and read, write and config failures.
 pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
     let odb = repo.odb();

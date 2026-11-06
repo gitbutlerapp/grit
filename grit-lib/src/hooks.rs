@@ -117,7 +117,7 @@ pub enum HookError {
     },
     /// Repository or config could not be loaded for the hook run.
     #[error(transparent)]
-    Repository(Box<crate::error::Error>),
+    Repository(std::sync::Arc<crate::error::Error>),
 
     /// A configured hook event references `hook.<name>` without `hook.<name>.command`.
     #[error(
@@ -149,7 +149,7 @@ impl From<crate::error::Error> for HookError {
     fn from(value: crate::error::Error) -> Self {
         match value {
             crate::error::Error::Hook(hook) => hook,
-            other => HookError::Repository(Box::new(other)),
+            other => HookError::Repository(std::sync::Arc::new(other)),
         }
     }
 }
@@ -835,7 +835,7 @@ pub fn run_post_merge(repo: &Repository, squash: bool) -> bool {
 /// # Errors
 ///
 /// [`HookError::Failed`] when the hook exits non-zero, which refuses the rebase;
-/// [`HookError::Spawn`] / [`HookError::Internal`] as for [`run_hook`].
+/// [`HookError::Spawn`] / [`HookError::MissingHookCommand`] / [`HookError::Repository`] as for [`run_hook`].
 pub fn run_pre_rebase(repo: &Repository, upstream: Option<&str>) -> Result<bool, HookError> {
     let configured;
     let upstream_arg = match upstream {
@@ -1134,7 +1134,7 @@ fn finish_hook_wait(
 /// # Errors
 ///
 /// [`HookError::Spawn`] when a hook (or the shell that runs it) cannot be started, carrying the
-/// output earlier hooks for the event already wrote, and [`HookError::Internal`] for invalid
+/// output earlier hooks for the event already wrote, and [`HookError::MissingHookCommand`] for invalid
 /// `hook.*` configuration. A hook that runs and exits non-zero is `Ok(HookResult::Failed { .. })`.
 pub fn run_hook_opts(
     repo: Option<&Repository>,
@@ -1358,8 +1358,8 @@ pub fn run_commit_hook_checked(
 ///
 /// # Errors
 ///
-/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Internal`] when the
-/// repository config cannot be loaded or `hook.*` entries are invalid.
+/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Repository`] when the
+/// repository config cannot be loaded, or [`HookError::MissingHookCommand`] when `hook.*` entries are invalid.
 pub fn run_commit_hook(
     repo: &Repository,
     hook_name: &str,
@@ -1412,8 +1412,8 @@ fn repo_hook_options<'a>(repo: &Repository, hook_name: &str) -> RunHookOptions<'
 ///
 /// # Errors
 ///
-/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Internal`] when the
-/// repository config cannot be loaded or `hook.*` entries are invalid.
+/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Repository`] when the
+/// repository config cannot be loaded, or [`HookError::MissingHookCommand`] when `hook.*` entries are invalid.
 pub fn run_hook(
     repo: &Repository,
     hook_name: &str,
@@ -1544,8 +1544,8 @@ impl PrePushRef {
 /// # Errors
 ///
 /// [`HookError::Failed`] when the hook exits non-zero (the push must not proceed),
-/// [`HookError::Spawn`] when it cannot be started, and [`HookError::Internal`] when the
-/// configuration cannot be loaded or `hook.*` entries are invalid.
+/// [`HookError::Spawn`] when it cannot be started, [`HookError::Repository`] when the
+/// configuration cannot be loaded, or [`HookError::MissingHookCommand`] when `hook.*` entries are invalid.
 pub fn run_pre_push_hook(
     repo: &Repository,
     remote: &str,

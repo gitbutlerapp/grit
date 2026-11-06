@@ -28,5 +28,5 @@ umbrella_error_variants = 169
 pub_error_catch_all_variants = 5
 pub_error_string_tuple_variants = 51
 pub_error_enum_not_non_exhaustive = 39
-pub_area_error_wraps_umbrella = 32
-error_message_construction_sites = 318
+pub_area_error_wraps_umbrella = 31
+error_message_construction_sites = 317

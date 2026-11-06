@@ -237,9 +237,9 @@ impl ReferenceTransactionHookErr {
                     hook_name: hook_name.clone(),
                 }
             }
-            crate::hooks::HookError::Repository(err) => crate::hooks::HookError::Repository(
-                Box::new(crate::error::Error::Message(err.to_string())),
-            ),
+            crate::hooks::HookError::Repository(err) => {
+                crate::hooks::HookError::Repository(std::sync::Arc::clone(err))
+            }
             crate::hooks::HookError::Cancelled => crate::hooks::HookError::Cancelled,
         })
     }

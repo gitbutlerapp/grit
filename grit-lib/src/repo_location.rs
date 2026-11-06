@@ -61,7 +61,7 @@ impl RepositoryLocation {
     ///
     /// # Errors
     ///
-    /// The same errors as [`Repository::discover`]: [`RepositoryError::NotARepository`]
+    /// The same errors as [`Repository::discover`]: [`RepositoryError::NotARepository`](crate::repo::RepositoryError::NotARepository)
     /// when no repository is found, [`crate::error::Error::Config`] when a config file in the
     /// cascade cannot be parsed or contains an invalid value, [`RepositoryError::DubiousOwnership`](crate::repo::RepositoryError::DubiousOwnership) when
     /// `safe.directory` rejects it, and repository format errors such as
@@ -218,7 +218,7 @@ mod tests {
 
     use super::*;
     use crate::environment::Environment;
-    use crate::repo::InitOptions;
+    use crate::repo::{InitOptions, RepositoryError};
     use std::ffi::OsString;
 
     fn options_at(cwd: &Path, vars: &[(&str, &str)]) -> RepositoryOptions {

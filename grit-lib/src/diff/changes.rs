@@ -794,7 +794,8 @@ impl<'repo> UncommittedDiff<'repo> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repo::InitOptions;
+    use crate::error::Error;
+    use crate::repo::{InitOptions, RepositoryError};
 
     fn entry(status: DiffStatus, old: Option<&str>, new: Option<&str>) -> DiffEntry {
         DiffEntry {
