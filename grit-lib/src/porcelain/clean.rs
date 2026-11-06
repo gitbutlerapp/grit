@@ -121,6 +121,7 @@ pub fn clean_untracked_with_cancel(
         &mut index,
         work_tree,
         &opts.pathspecs,
+        None,
         scan,
         &rules,
         None,

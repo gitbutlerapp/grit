@@ -349,6 +349,7 @@ fn staging_pathspec_context_for_mode(
         is_directory: from_mode.is_directory,
         is_git_submodule: from_mode.is_git_submodule,
         precompose_paths: base.precompose_paths,
+        globals: base.globals,
     }
 }
 
@@ -774,6 +775,7 @@ fn stage_inner_on_index(
             index,
             work_tree,
             staging_pathspecs.as_ref(),
+            None,
             scan,
             &rules,
             None,

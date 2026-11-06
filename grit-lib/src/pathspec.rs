@@ -7,10 +7,9 @@
 //! assert_eq!(specs, ["README.md"]);
 //! ```
 //!
-//! Global flags are read from the same environment variables as Git:
-//! `GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`, `GIT_NOGLOB_PATHSPECS`,
-//! `GIT_ICASE_PATHSPECS`. The `grit` binary sets these from CLI flags such as
-//! `--literal-pathspecs` before dispatching subcommands.
+//! Global pathspec flags (`GIT_*_PATHSPECS`) are supplied by embedders through
+//! [`PathspecOptions::globals`] or [`PathspecGlobalFlags::from_environment`]; the
+//! library does not read the process environment for them.
 
 use crate::git_path::CanonicalizeExt;
 use std::borrow::Cow;
@@ -21,6 +20,7 @@ use hashbrown::HashSet;
 use crate::attributes::MacroTable;
 use crate::crlf::path_gitattribute_values;
 use crate::crlf::AttrRule;
+use crate::environment::Environment;
 pub use crate::error::{AttrPathspecError, PathspecFromFileParseError, PathspecResolveError};
 use crate::precompose_config::argv_precompose_enabled;
 use crate::repo::Repository;
@@ -298,6 +298,323 @@ impl ResolvedPathspecs {
     }
 }
 
+/// Git global pathspec mode flags (`GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`, …).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PathspecGlobalFlags {
+    /// `GIT_LITERAL_PATHSPECS` — treat `*` and `?` in argv pathspecs as literal.
+    pub literal_pathspecs: bool,
+    /// `GIT_GLOB_PATHSPECS` — treat argv pathspecs as globs.
+    pub glob_pathspecs: bool,
+    /// `GIT_NOGLOB_PATHSPECS` — disable glob interpretation in argv pathspecs.
+    pub noglob_pathspecs: bool,
+    /// `GIT_ICASE_PATHSPECS` — case-fold argv pathspec patterns.
+    pub icase_pathspecs: bool,
+}
+
+impl PathspecGlobalFlags {
+    /// Read Git's global pathspec flags from a captured [`Environment`].
+    #[must_use]
+    pub fn from_environment(env: &Environment) -> Self {
+        Self {
+            literal_pathspecs: env.git_literal_pathspecs,
+            glob_pathspecs: env.git_glob_pathspecs,
+            noglob_pathspecs: env.git_noglob_pathspecs,
+            icase_pathspecs: env.git_icase_pathspecs,
+        }
+    }
+
+    /// Validate flag combinations the same way Git does.
+    pub fn validate(&self) -> Result<(), String> {
+        validate_global_pathspec_flags_from(self)
+    }
+}
+
+/// Options for building a [`Pathspec`] ([`Pathspec::parse`] or [`Repository::pathspec`]).
+#[non_exhaustive]
+#[derive(Debug, Clone, Default)]
+pub struct PathspecOptions {
+    /// Work-tree-relative cwd prefix for argv pathspecs (`None` = repository root).
+    pub cwd_prefix: Option<String>,
+    /// Global pathspec mode flags (defaults match Git with no env vars set).
+    pub globals: PathspecGlobalFlags,
+    /// When set, overrides `core.ignorecase` for attribute pathspec patterns.
+    pub ignore_case: Option<bool>,
+    /// Optional `--pathspec-from-file` payload merged with argv items.
+    pub from_file: Option<PathspecInput>,
+}
+
+impl PathspecOptions {
+    /// Set [`Self::cwd_prefix`].
+    #[must_use]
+    pub fn with_cwd_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.cwd_prefix = Some(prefix.into());
+        self
+    }
+
+    /// Set [`Self::globals`].
+    #[must_use]
+    pub fn with_globals(mut self, globals: PathspecGlobalFlags) -> Self {
+        self.globals = globals;
+        self
+    }
+
+    /// Set [`Self::from_file`].
+    #[must_use]
+    pub fn with_from_file(mut self, input: PathspecInput) -> Self {
+        self.from_file = Some(input);
+        self
+    }
+}
+
+/// Errors while assembling pathspec argv / from-file tokens (before work-tree resolution).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PathspecParseError {
+    /// No argv paths and no from-file entries.
+    #[error("empty pathspec")]
+    Empty,
+    /// A pathspec line or argv token was empty.
+    #[error("empty pathspec element")]
+    EmptyElement,
+    /// `--pathspec-from-file` bytes could not be parsed.
+    #[error(transparent)]
+    FromFile(#[from] PathspecFromFileParseError),
+    /// Incompatible global pathspec flags.
+    #[error("{0}")]
+    IncompatibleGlobals(String),
+}
+
+/// Parsed and optionally work-tree–resolved pathspec list for matching and display.
+#[derive(Debug, Clone)]
+pub struct Pathspec {
+    specs: Vec<String>,
+    sources: Vec<String>,
+    scoped: bool,
+    globals: PathspecGlobalFlags,
+    literal_prefix: Option<String>,
+}
+
+impl Pathspec {
+    /// Build a scoped pathspec from already-resolved work-tree-relative strings.
+    #[must_use]
+    pub fn scoped(specs: Vec<String>, globals: PathspecGlobalFlags) -> Self {
+        Self::from_resolved(
+            ResolvedPathspecs {
+                sources: specs.clone(),
+                specs,
+                scoped: true,
+            },
+            globals,
+        )
+    }
+
+    /// Pathspec list that selects the entire work tree (no argv paths).
+    #[must_use]
+    pub fn entire_tree(globals: PathspecGlobalFlags) -> Self {
+        Self {
+            specs: Vec::new(),
+            sources: Vec::new(),
+            scoped: false,
+            globals,
+            literal_prefix: None,
+        }
+    }
+
+    /// Parse argv / from-file pathspec tokens without resolving against a work tree.
+    ///
+    /// Work-tree-relative resolution and `core.precomposeunicode` normalization require
+    /// [`Repository::pathspec`].
+    pub fn parse(
+        items: impl IntoIterator<Item = impl AsRef<str>>,
+        options: &PathspecOptions,
+    ) -> Result<Self, PathspecParseError> {
+        options
+            .globals
+            .validate()
+            .map_err(PathspecParseError::IncompatibleGlobals)?;
+        let mut sources: Vec<String> = Vec::new();
+        if let Some(input) = &options.from_file {
+            let parsed = parse_pathspecs_from_source(&input.data, input.nul_terminated)
+                .map_err(PathspecParseError::FromFile)?;
+            sources.extend(parsed);
+        }
+        for item in items {
+            let s = item.as_ref();
+            if s.is_empty() {
+                return Err(PathspecParseError::EmptyElement);
+            }
+            sources.push(s.to_owned());
+        }
+        if sources.is_empty() {
+            return Err(PathspecParseError::Empty);
+        }
+        Ok(Self {
+            specs: sources.clone(),
+            literal_prefix: common_prefix_of_specs(&sources, options.globals),
+            scoped: true,
+            globals: options.globals,
+            sources,
+        })
+    }
+
+    /// Whether the invocation limits paths (false = entire work tree).
+    #[must_use]
+    pub fn is_entire_tree(&self) -> bool {
+        !self.scoped
+    }
+
+    /// Whether no path limit was given (alias of [`Self::is_entire_tree`]).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.is_entire_tree()
+    }
+
+    /// Longest shared literal directory prefix across positive specs (Git tree narrowing).
+    #[must_use]
+    pub fn common_prefix(&self) -> Option<&str> {
+        self.literal_prefix.as_deref()
+    }
+
+    /// Resolved work-tree-relative pathspec strings used for matching.
+    #[must_use]
+    pub fn specs(&self) -> &[String] {
+        &self.specs
+    }
+
+    /// User-facing spellings (argv or from-file lines) for messages and `--json`.
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.sources.iter().map(String::as_str)
+    }
+
+    /// Global pathspec flags active for this list.
+    #[must_use]
+    pub fn globals(&self) -> PathspecGlobalFlags {
+        self.globals
+    }
+
+    /// Build from a resolved [`ResolvedPathspecs`] snapshot.
+    #[must_use]
+    pub(crate) fn from_resolved(resolved: ResolvedPathspecs, globals: PathspecGlobalFlags) -> Self {
+        let specs = resolved.specs.clone();
+        let literal_prefix = if resolved.scoped {
+            common_prefix_of_specs(&specs, globals)
+        } else {
+            None
+        };
+        Self {
+            scoped: resolved.scoped,
+            sources: resolved.sources,
+            specs,
+            literal_prefix,
+            globals,
+        }
+    }
+
+    fn match_context(&self, precompose: bool) -> PathspecMatchContext {
+        PathspecMatchContext {
+            precompose_paths: precompose,
+            globals: self.globals,
+            ..PathspecMatchContext::default()
+        }
+    }
+
+    /// Whether `path` is selected in `repo` (positive match, no exclude).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Repository::pathspec_matcher`].
+    pub fn matches(&self, repo: &Repository, path: &str) -> crate::error::Result<bool> {
+        if self.is_entire_tree() {
+            return Ok(true);
+        }
+        Ok(self.matcher(repo)?.matches(path))
+    }
+
+    /// Entry-aware matching (trailing `/`, submodules, `:(attr:...)`).
+    pub fn matches_entry(
+        &self,
+        repo: &Repository,
+        path: &str,
+        mode: u32,
+    ) -> crate::error::Result<bool> {
+        if self.is_entire_tree() {
+            return Ok(true);
+        }
+        Ok(self.matcher(repo)?.matches_entry(path, mode))
+    }
+
+    /// Whether a diff/staging change is selected (checks `old_path` for renames).
+    pub fn matches_change(
+        &self,
+        repo: &Repository,
+        path: &str,
+        old_path: Option<&str>,
+    ) -> crate::error::Result<bool> {
+        if self.is_entire_tree() {
+            return Ok(true);
+        }
+        Ok(self.matcher(repo)?.matches_change(path, old_path))
+    }
+
+    fn matcher(&self, repo: &Repository) -> crate::error::Result<PathspecMatcher<'_>> {
+        repo.pathspec_matcher_with_globals(&self.specs, self.globals)
+    }
+
+    /// Match using only pattern rules (no repository attributes); for tests and pure parsing.
+    #[must_use]
+    pub fn matches_path(&self, path: &str) -> bool {
+        if self.is_entire_tree() {
+            return true;
+        }
+        let ctx = self.match_context(false);
+        matches_pathspec_list_with_context(path, &self.specs, ctx)
+    }
+}
+
+fn common_prefix_of_specs(specs: &[String], globals: PathspecGlobalFlags) -> Option<String> {
+    let mut prefix: Option<String> = None;
+    for spec in specs {
+        if pathspec_is_exclude(spec) {
+            continue;
+        }
+        let (elem_magic, raw) = parse_element_magic(spec, globals);
+        let magic = combine_magic(elem_magic, globals);
+        if magic.exclude || magic.glob || magic.icase || !magic.attr_requirements.is_empty() {
+            return None;
+        }
+        let pattern = strip_top_magic(raw);
+        if has_glob_chars(pattern) {
+            return None;
+        }
+        let dir = pattern.strip_suffix('/').unwrap_or(pattern);
+        prefix = Some(match prefix {
+            None => dir.to_owned(),
+            Some(p) => shared_dir_prefix(&p, dir),
+        });
+        if prefix.as_deref() == Some("") {
+            return None;
+        }
+    }
+    prefix.filter(|p| !p.is_empty())
+}
+
+fn shared_dir_prefix(a: &str, b: &str) -> String {
+    let mut end = 0usize;
+    for (i, (ca, cb)) in a.bytes().zip(b.bytes()).enumerate() {
+        if ca != cb {
+            break;
+        }
+        if ca == b'/' {
+            end = i + 1;
+        }
+    }
+    if end == 0 {
+        String::new()
+    } else {
+        a[..end].trim_end_matches('/').to_owned()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct PathspecMagic {
     literal: bool,
@@ -330,54 +647,30 @@ impl AttrRequirement {
     }
 }
 
-/// The library never reads the process environment, so Git's `GIT_*_PATHSPECS` globals are
-/// always unset here and every global flag takes its default. This runs on every pathspec
-/// comparison, so it must stay allocation-free.
-fn git_env_bool(_key: &str, default: bool) -> bool {
-    default
-}
-
-fn literal_global() -> bool {
-    git_env_bool("GIT_LITERAL_PATHSPECS", false)
-}
-
-/// Whether `GIT_LITERAL_PATHSPECS` is enabled (shell `*` and `?` are literal, not globs).
+/// Whether `GIT_LITERAL_PATHSPECS` is enabled with default (unset) global flags.
 #[must_use]
 pub fn literal_pathspecs_enabled() -> bool {
-    literal_global()
+    PathspecGlobalFlags::default().literal_pathspecs
 }
 
-fn glob_global() -> bool {
-    git_env_bool("GIT_GLOB_PATHSPECS", false)
-}
-
-fn noglob_global() -> bool {
-    git_env_bool("GIT_NOGLOB_PATHSPECS", false)
-}
-
-fn icase_global() -> bool {
-    git_env_bool("GIT_ICASE_PATHSPECS", false)
-}
-
-/// Validates global pathspec environment flags the same way Git does.
-///
-/// Returns an error message suitable for `bail!` when flags are incompatible.
-pub fn validate_global_pathspec_flags() -> Result<(), String> {
-    let lit = literal_global();
-    let glob = glob_global();
-    let noglob = noglob_global();
-    let icase = icase_global();
-
-    if glob && noglob {
+fn validate_global_pathspec_flags_from(globals: &PathspecGlobalFlags) -> Result<(), String> {
+    if globals.glob_pathspecs && globals.noglob_pathspecs {
         return Err("global 'glob' and 'noglob' pathspec settings are incompatible".to_string());
     }
-    if lit && (glob || noglob || icase) {
+    if globals.literal_pathspecs
+        && (globals.glob_pathspecs || globals.noglob_pathspecs || globals.icase_pathspecs)
+    {
         return Err(
             "global 'literal' pathspec setting is incompatible with all other global pathspec settings"
                 .to_string(),
         );
     }
     Ok(())
+}
+
+/// Validates global pathspec flags the same way Git does (all flags unset / default).
+pub fn validate_global_pathspec_flags() -> Result<(), String> {
+    validate_global_pathspec_flags_from(&PathspecGlobalFlags::default())
 }
 
 fn is_valid_attr_name(name: &str) -> bool {
@@ -463,7 +756,7 @@ fn parse_attr_requirements(expr: &str) -> Result<Vec<AttrRequirement>, AttrPaths
 
 /// The `attr:` clauses inside a long-form `:(...)` magic prefix (none for other specs).
 fn attr_clauses(spec: &str) -> Vec<String> {
-    if literal_global() {
+    if PathspecGlobalFlags::default().literal_pathspecs {
         return Vec::new();
     }
     let Some(rest) = spec.strip_prefix(":(") else {
@@ -618,8 +911,8 @@ fn parse_short_magic(elem: &str) -> (PathspecMagic, &str) {
 }
 
 /// Strip `:(magic)` / `:magic` prefix when not in literal-global mode.
-fn parse_element_magic(elem: &str) -> (PathspecMagic, &str) {
-    if !elem.starts_with(':') || literal_global() {
+fn parse_element_magic(elem: &str, globals: PathspecGlobalFlags) -> (PathspecMagic, &str) {
+    if !elem.starts_with(':') || globals.literal_pathspecs {
         return (PathspecMagic::default(), elem);
     }
     if let Some(rest) = elem.strip_prefix(":(") {
@@ -628,18 +921,18 @@ fn parse_element_magic(elem: &str) -> (PathspecMagic, &str) {
     parse_short_magic(elem)
 }
 
-fn combine_magic(element: PathspecMagic) -> PathspecMagic {
+fn combine_magic(element: PathspecMagic, globals: PathspecGlobalFlags) -> PathspecMagic {
     let mut m = element;
-    if literal_global() {
+    if globals.literal_pathspecs {
         m.literal = true;
     }
-    if glob_global() && !m.literal {
+    if globals.glob_pathspecs && !m.literal {
         m.glob = true;
     }
-    if icase_global() {
+    if globals.icase_pathspecs {
         m.icase = true;
     }
-    if noglob_global() && !m.glob {
+    if globals.noglob_pathspecs && !m.glob {
         m.literal = true;
     }
     m
@@ -661,8 +954,8 @@ pub fn bloom_lookup_prefix_with_cwd(
     spec: &str,
     cwd_from_repo_root: Option<&str>,
 ) -> Option<String> {
-    let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let magic = combine_magic(elem_magic);
+    let (elem_magic, raw_pattern) = parse_element_magic(spec, PathspecGlobalFlags::default());
+    let magic = combine_magic(elem_magic, PathspecGlobalFlags::default());
     if magic.exclude || magic.icase {
         return None;
     }
@@ -726,8 +1019,8 @@ pub fn path_allowed_by_pathspec_list(specs: &[String], path: &str) -> bool {
     let mut has_positive = false;
     let mut positive_match = false;
     for s in specs {
-        let (elem, raw_pattern) = parse_element_magic(s);
-        let magic = combine_magic(elem);
+        let (elem, raw_pattern) = parse_element_magic(s, PathspecGlobalFlags::default());
+        let magic = combine_magic(elem, PathspecGlobalFlags::default());
         if magic.exclude {
             if path_matches_pathspec_tail(raw_pattern, path, magic) {
                 return false;
@@ -797,8 +1090,8 @@ pub fn pathspec_matches(spec: &str, path: &str) -> bool {
 /// Returns whether `spec` uses Git's exclude magic (`:(exclude)`, `:!`, `:^`, etc.).
 #[must_use]
 pub fn pathspec_is_exclude(spec: &str) -> bool {
-    let (elem_magic, _) = parse_element_magic(spec);
-    combine_magic(elem_magic).exclude
+    let (elem_magic, _) = parse_element_magic(spec, PathspecGlobalFlags::default());
+    combine_magic(elem_magic, PathspecGlobalFlags::default()).exclude
 }
 
 /// Whether a path-limited revision tree walk should recurse into directory `path`.
@@ -823,6 +1116,7 @@ pub(crate) fn pathspec_wants_descent_for_rev_tree(path: &str, specs: &[String]) 
         is_directory: true,
         is_git_submodule: false,
         precompose_paths: false,
+        ..PathspecMatchContext::default()
     };
     for spec in specs {
         if pathspec_is_exclude(spec)
@@ -854,8 +1148,9 @@ pub fn pathspec_wants_descent_into_tree(spec: &str, full_name: &str) -> bool {
     if pathspec_is_exclude(spec) {
         return false;
     }
-    let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let magic = combine_magic(elem_magic);
+    let globals = PathspecGlobalFlags::default();
+    let (elem_magic, raw_pattern) = parse_element_magic(spec, globals);
+    let magic = combine_magic(elem_magic, globals);
     if magic.exclude {
         return false;
     }
@@ -1080,8 +1375,8 @@ pub fn matches_pathspec_set_for_object(
 /// True if `spec` uses `:(top)` or short `:/` (repo-root-relative) magic.
 #[must_use]
 pub fn pathspec_has_top(spec: &str) -> bool {
-    let (elem_magic, _) = parse_element_magic(spec);
-    combine_magic(elem_magic).top
+    let (elem_magic, _) = parse_element_magic(spec, PathspecGlobalFlags::default());
+    combine_magic(elem_magic, PathspecGlobalFlags::default()).top
 }
 
 /// True if `spec` carries an `attr:` clause in long-form `:(...)` magic, so matching it needs
@@ -1111,6 +1406,7 @@ pub struct PathspecMatcher<'s> {
     attrs: Option<std::sync::Arc<crate::attributes::ParsedGitAttributes>>,
     /// Match attribute patterns case-insensitively (`core.ignorecase`).
     attr_icase: bool,
+    globals: PathspecGlobalFlags,
 }
 
 impl<'s> PathspecMatcher<'s> {
@@ -1120,6 +1416,7 @@ impl<'s> PathspecMatcher<'s> {
         precompose: bool,
         attrs: Option<std::sync::Arc<crate::attributes::ParsedGitAttributes>>,
         attr_icase: bool,
+        globals: PathspecGlobalFlags,
     ) -> Self {
         // The attribute-aware matcher has no precompose context, so normalize the specs up front.
         let specs = if precompose && attrs.is_some() {
@@ -1137,6 +1434,7 @@ impl<'s> PathspecMatcher<'s> {
             precompose,
             attrs,
             attr_icase,
+            globals,
         }
     }
 
@@ -1159,6 +1457,7 @@ impl<'s> PathspecMatcher<'s> {
             is_directory: ctx.is_directory,
             is_git_submodule: ctx.is_git_submodule,
             precompose_paths: self.precompose,
+            globals: self.globals,
         };
         let Some(attrs) = &self.attrs else {
             return matches_pathspec_list_with_context(path, &self.specs, match_ctx);
@@ -1265,13 +1564,13 @@ fn attr_requirements_match(
     })
 }
 
-fn matches_pathspec_element_with_context(
+pub(crate) fn matches_pathspec_element_with_context(
     spec: &str,
     path: &str,
     ctx: PathspecMatchContext,
 ) -> bool {
-    let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let magic = combine_magic(elem_magic);
+    let (elem_magic, raw_pattern) = parse_element_magic(spec, ctx.globals);
+    let magic = combine_magic(elem_magic, ctx.globals);
     if magic.exclude {
         return false;
     }
@@ -1282,7 +1581,7 @@ fn matches_pathspec_element_with_context(
         return false;
     }
     if magic.literal || magic.glob || magic.icase {
-        return pathspec_matches(spec, path);
+        return pathspec_match_one_positive(path, magic, raw_pattern);
     }
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
@@ -1296,13 +1595,13 @@ fn matches_pathspec_element_with_context(
     matches_pathspec_with_context(pattern, path_for_match, ctx)
 }
 
-fn pathspec_exclude_element_matches_with_context(
+pub(crate) fn pathspec_exclude_element_matches_with_context(
     spec: &str,
     path: &str,
     ctx: PathspecMatchContext,
 ) -> bool {
-    let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let mut magic = combine_magic(elem_magic);
+    let (elem_magic, raw_pattern) = parse_element_magic(spec, ctx.globals);
+    let mut magic = combine_magic(elem_magic, ctx.globals);
     if !magic.exclude {
         return false;
     }
@@ -1512,7 +1811,10 @@ pub(crate) fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -
         && !spec.starts_with("./")
         && !spec.starts_with(':')
         && simple_length(spec) == spec.len()
-        && !(literal_global() || glob_global() || noglob_global() || icase_global())
+        && !ctx.globals.literal_pathspecs
+        && !ctx.globals.glob_pathspecs
+        && !ctx.globals.noglob_pathspecs
+        && !ctx.globals.icase_pathspecs
 }
 
 /// Encode an exact repository-relative path for pathspec-limited diffs and Bloom prechecks.
@@ -1648,8 +1950,9 @@ fn matches_pathspec_exclude_for_object(
     mode: u32,
     attrs: AttrLookup<'_>,
 ) -> bool {
-    let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let mut magic = combine_magic(elem_magic);
+    let globals = PathspecGlobalFlags::default();
+    let (elem_magic, raw_pattern) = parse_element_magic(spec, globals);
+    let mut magic = combine_magic(elem_magic, globals);
     if !magic.exclude {
         return false;
     }
@@ -1810,6 +2113,8 @@ pub struct PathspecMatchContext {
     pub is_git_submodule: bool,
     /// NFC-normalize pathspec and path when matching (per-repository `core.precomposeunicode`).
     pub precompose_paths: bool,
+    /// Git global pathspec mode flags for this match.
+    pub globals: PathspecGlobalFlags,
 }
 
 /// Returns whether `path` matches the pathspec `spec` with default (file) context.
@@ -1849,8 +2154,8 @@ pub fn matches_pathspec_with_context(spec: &str, path: &str, ctx: PathspecMatchC
         return true;
     }
 
-    let (elem_magic, raw_pattern) = parse_element_magic(trimmed);
-    let magic = combine_magic(elem_magic);
+    let (elem_magic, raw_pattern) = parse_element_magic(trimmed, ctx.globals);
+    let magic = combine_magic(elem_magic, ctx.globals);
 
     if magic.literal && magic.glob {
         return false;
@@ -1929,6 +2234,7 @@ pub(crate) fn context_from_mode_bits(mode: u32) -> PathspecMatchContext {
         is_directory: ty == 0o040000,
         is_git_submodule: ty == 0o160000,
         precompose_paths: false,
+        ..PathspecMatchContext::default()
     }
 }
 
@@ -1944,8 +2250,9 @@ pub(crate) fn matches_ls_tree_pathspec(
     mode: u32,
     attr_rules: &[AttrRule],
 ) -> bool {
-    let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let mut magic = combine_magic(elem_magic);
+    let globals = PathspecGlobalFlags::default();
+    let (elem_magic, raw_pattern) = parse_element_magic(spec, globals);
+    let mut magic = combine_magic(elem_magic, globals);
     magic.exclude = false;
 
     if magic.literal && magic.glob {
@@ -2033,8 +2340,9 @@ fn matches_pathspec_for_object_with_attrs(
     mode: u32,
     attrs: AttrLookup<'_>,
 ) -> bool {
-    let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let mut magic = combine_magic(elem_magic);
+    let globals = PathspecGlobalFlags::default();
+    let (elem_magic, raw_pattern) = parse_element_magic(spec, globals);
+    let mut magic = combine_magic(elem_magic, globals);
     magic.exclude = false;
 
     if magic.literal && magic.glob {
@@ -2276,8 +2584,9 @@ fn prepend_cwd_to_short_exclude_pathspec(spec: &str, cwd: &str) -> Option<String
     if cwd.is_empty() {
         return None;
     }
-    let (elem_magic, pattern) = parse_element_magic(spec);
-    let magic = combine_magic(elem_magic);
+    let globals = PathspecGlobalFlags::default();
+    let (elem_magic, pattern) = parse_element_magic(spec, globals);
+    let magic = combine_magic(elem_magic, globals);
     if !magic.exclude || magic.top {
         return None;
     }

@@ -753,6 +753,7 @@ fn has_stashable_changes(
         &mut index,
         work_tree,
         &[],
+        None,
         UntrackedScan {
             ignored_mode: IgnoredMode::No,
             show_all: false,
@@ -778,6 +779,7 @@ pub(crate) fn collect_untracked_paths(repo: &Repository, work_tree: &Path) -> Re
         &mut index,
         work_tree,
         &[],
+        None,
         UntrackedScan {
             ignored_mode: IgnoredMode::No,
             show_all: true,
@@ -2465,6 +2467,7 @@ fn collect_worktree_paths_blocking_stash_untracked_restore(
         index,
         work_tree,
         &[],
+        None,
         UntrackedScan {
             ignored_mode: IgnoredMode::Traditional,
             show_all: true,

@@ -1107,6 +1107,9 @@ pub enum PathspecResolveError {
     /// Command requires a working tree but the repository is bare.
     #[error("this operation needs a working tree")]
     NeedsWorkTree,
+    /// Incompatible `GIT_*_PATHSPECS` global flags.
+    #[error("{0}")]
+    InvalidGlobals(String),
 }
 
 /// Why a `:(attr:...)` pathspec clause was rejected.

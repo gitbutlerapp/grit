@@ -7,7 +7,8 @@ use grit_lib::error::PathspecFromFileParseError;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::is_long_magic_pathspec_token;
 use grit_lib::worktree::pathspec::{
-    parse_pathspecs_from_source, PathspecInput, PathspecResolveError, ResolvedPathspecs,
+    parse_pathspecs_from_source, Pathspec, PathspecGlobalFlags, PathspecInput, PathspecOptions,
+    PathspecResolveError, ResolvedPathspecs,
 };
 use std::io::Read;
 use std::sync::OnceLock;
@@ -49,10 +50,48 @@ pub struct TrailingPathspecArgs {
     pub pathspec_file_nul: bool,
 }
 
+fn pathspec_options_from_repo(
+    repo: &Repository,
+    from_file: Option<PathspecInput>,
+) -> PathspecOptions {
+    let mut options = PathspecOptions::default();
+    options.globals = PathspecGlobalFlags::from_environment(repo.environment());
+    options.from_file = from_file;
+    options
+}
+
+fn resolve_typed_pathspec(
+    repo: &Repository,
+    paths: &[String],
+    pathspec_from_file: Option<&str>,
+    pathspec_file_nul: bool,
+) -> Result<Pathspec> {
+    let from_file = match pathspec_from_file {
+        None => None,
+        Some(path) => {
+            let data = read_pathspec_source(path)?;
+            Some(PathspecInput::new(data, pathspec_file_nul))
+        }
+    };
+    let options = pathspec_options_from_repo(repo, from_file);
+    repo.pathspec(paths, &options)
+        .map_err(map_pathspec_resolve)
+}
+
 impl PathspecArgs {
     /// Resolve argv and optional from-file pathspecs against `repo` and the process cwd.
     pub fn resolve(&self, repo: &Repository) -> Result<ResolvedPathspecs> {
         resolve_pathspec_args(
+            repo,
+            &self.paths,
+            self.pathspec_from_file.as_deref(),
+            self.pathspec_file_nul,
+        )
+    }
+
+    /// Resolve into a [`Pathspec`] (preferred for porcelain options).
+    pub fn resolve_pathspec(&self, repo: &Repository) -> Result<Pathspec> {
+        resolve_typed_pathspec(
             repo,
             &self.paths,
             self.pathspec_from_file.as_deref(),

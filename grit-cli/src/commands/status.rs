@@ -1093,8 +1093,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         status_opts.untracked = mode.into_lib();
     }
     if !args.pathspecs.paths.is_empty() || args.pathspecs.pathspec_from_file.is_some() {
-        let resolved = args.pathspecs.resolve(&repo)?;
-        status_opts.pathspecs = resolved.specs;
+        status_opts.pathspec = args.pathspecs.resolve_pathspec(&repo)?;
     }
     if args.ignored {
         status_opts.ignored = IgnoredMode::Traditional;

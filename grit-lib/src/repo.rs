@@ -1537,13 +1537,22 @@ impl Repository {
         &self,
         specs: &'s [String],
     ) -> Result<crate::pathspec::PathspecMatcher<'s>> {
+        self.pathspec_matcher_with_globals(specs, crate::pathspec::PathspecGlobalFlags::default())
+    }
+
+    /// Like [`Self::pathspec_matcher`], with explicit Git global pathspec flags.
+    pub fn pathspec_matcher_with_globals<'s>(
+        &self,
+        specs: &'s [String],
+        globals: crate::pathspec::PathspecGlobalFlags,
+    ) -> Result<crate::pathspec::PathspecMatcher<'s>> {
         let precompose = self.pathspec_precompose_enabled();
         if !specs
             .iter()
             .any(|spec| crate::pathspec::pathspec_has_attr_magic(spec))
         {
             return Ok(crate::pathspec::PathspecMatcher::new(
-                specs, precompose, None, false,
+                specs, precompose, None, false, globals,
             ));
         }
         crate::pathspec::validate_attr_pathspecs(specs)?;
@@ -1557,6 +1566,42 @@ impl Repository {
             precompose,
             Some(attrs),
             icase,
+            globals,
+        ))
+    }
+
+    /// Resolve argv and optional from-file pathspecs into a [`crate::pathspec::Pathspec`].
+    ///
+    /// `options.cwd_prefix` overrides the repository environment cwd when resolving relative
+    /// paths; global flags come from [`crate::pathspec::PathspecOptions::globals`].
+    ///
+    /// # Errors
+    ///
+    /// [`crate::pathspec::PathspecResolveError`] when resolution fails.
+    pub fn pathspec(
+        &self,
+        items: impl IntoIterator<Item = impl AsRef<str>>,
+        options: &crate::pathspec::PathspecOptions,
+    ) -> std::result::Result<crate::pathspec::Pathspec, crate::pathspec::PathspecResolveError> {
+        options
+            .globals
+            .validate()
+            .map_err(crate::pathspec::PathspecResolveError::InvalidGlobals)?;
+        let argv: Vec<String> = items.into_iter().map(|s| s.as_ref().to_owned()).collect();
+        let cwd = options
+            .cwd_prefix
+            .as_ref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| self.environment().cwd.clone());
+        let resolved = crate::pathspec::ResolvedPathspecs::resolve(
+            self,
+            &cwd,
+            &argv,
+            options.from_file.clone(),
+        )?;
+        Ok(crate::pathspec::Pathspec::from_resolved(
+            resolved,
+            options.globals,
         ))
     }
 
