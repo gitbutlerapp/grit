@@ -826,6 +826,17 @@ mod tests {
         assert!(token.is_cancelled());
     }
 
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn cancellation_checks_do_not_consume_poll_countdown() {
+        let token = CancelToken::after_polls(2);
+        assert!(!token.is_cancelled());
+        assert!(!token.is_cancelled());
+        assert!(token.poll().is_ok());
+        assert!(!token.is_cancelled());
+        assert!(token.poll().is_err());
+    }
+
     #[test]
     fn cancel_token_cross_thread() {
         let token = CancelToken::new();
