@@ -38,7 +38,6 @@ use grit_lib::porcelain::paths::{BlockedRemoval, RemoveBlockReason};
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::porcelain::tag::TagError;
 use grit_lib::remote::clone::CloneError;
-use grit_lib::revision_error::RevisionError;
 use grit_lib::revwalk::history::RebaseSessionError;
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 use grit_lib::state::InProgressOperation;
@@ -415,16 +414,14 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_ambiguous_change_id",
         build: || {
-            Error::new(LibError::Revision(RevisionError::RevParse(
-                RevParseError::AmbiguousChangeId {
+            Error::new(LibError::RevParse(RevParseError::AmbiguousChangeId {
                     prefix: "abc".into(),
                     candidates: vec![AmbiguousChangeIdHint {
                         oid_hex: "f92d74e3874587aaf443d1db961d4e26dde13e9c".into(),
                         change_id: "changeid123456".into(),
                         subject: "fix bug".into(),
                     }],
-                },
-            )))
+                }))
         },
         kind: None,
         exit: ExitStatus::Failure,
@@ -436,11 +433,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_invalid_object_name",
         build: || {
-            Error::new(LibError::Revision(RevisionError::RevParse(
-                RevParseError::InvalidObjectName {
+            Error::new(LibError::RevParse(RevParseError::InvalidObjectName {
                     name: "deadbeef".into(),
-                },
-            )))
+                }))
         },
         kind: Some(ErrorKind::RevisionNotFound),
         exit: ExitStatus::Failure,
@@ -450,11 +445,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_ambiguous_argument",
         build: || {
-            Error::new(LibError::Revision(RevisionError::RevParse(
-                RevParseError::AmbiguousArgument {
+            Error::new(LibError::RevParse(RevParseError::AmbiguousArgument {
                     spec: "HEAD:foo".into(),
-                },
-            )))
+                }))
         },
         kind: Some(ErrorKind::RevisionNotFound),
         exit: ExitStatus::Failure,
@@ -464,11 +457,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_reflog_date_unparseable",
         build: || {
-            Error::new(LibError::Revision(RevisionError::RevParse(
-                RevParseError::ReflogDateUnparseable {
+            Error::new(LibError::RevParse(RevParseError::ReflogDateUnparseable {
                     date: "not-a-date".into(),
-                },
-            )))
+                }))
         },
         kind: None,
         exit: ExitStatus::Failure,
@@ -509,11 +500,11 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_path_missing_worktree_and_index",
         build: || {
-            Error::new(LibError::Revision(RevisionError::RevParse(
+            Error::new(LibError::RevParse(
                 RevParseError::PathMissingFromWorktreeAndIndex {
                     path: "missing.txt".into(),
                 },
-            )))
+            ))
         },
         kind: Some(ErrorKind::PathNotFound),
         exit: ExitStatus::Failure,

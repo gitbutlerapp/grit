@@ -127,9 +127,7 @@ pub fn human_message_for_lib(err: &LibError) -> String {
         LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
             format!("revision '{name}' not found")
         }
-        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
-            format!("revision '{spec}' not found")
-        }
+        LibError::RevParse(e @ RevParseError::AmbiguousArgument { .. }) => e.to_string(),
         LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
             format!("invalid reflog date '{date}'")
         }
@@ -310,8 +308,8 @@ pub fn map_commit_spec_error(err: LibError) -> Error {
         LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
             crate::json_error::structured_revision_not_found(format!("revision '{name}' not found"))
         }
-        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
-            crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
+        LibError::RevParse(e @ RevParseError::AmbiguousArgument { .. }) => {
+            crate::json_error::structured_revision_not_found(e.to_string())
         }
         LibError::ObjectNotFound(spec) => {
             crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
@@ -671,12 +669,9 @@ fn revision_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<Struc
                 ErrorKind::RevisionNotFound,
             ))
         }
-        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
-            Some(StructuredJsonError::new(
-                format!("revision '{spec}' not found"),
-                ErrorKind::RevisionNotFound,
-            ))
-        }
+        LibError::RevParse(e @ RevParseError::AmbiguousArgument { .. }) => Some(
+            StructuredJsonError::new(e.to_string(), ErrorKind::RevisionNotFound),
+        ),
         LibError::RevParse(
             RevParseError::PathNotInRevision { .. }
             | RevParseError::PathMissingFromWorktreeAndIndex { .. },

@@ -94,11 +94,11 @@ pub enum RepositoryError {
         value: String,
     },
 
-    /// [`super::Repository::init_with_outcome`] refused to change object format on reinit.
+    /// [`super::Repository::init`] refused to change object format on reinit.
     #[error("cannot change object format in an existing repository")]
     InitObjectFormatChange,
 
-    /// [`super::Repository::init_with_outcome`] with incompatible `--bare` and separate git dir.
+    /// [`super::Repository::init`] with incompatible `--bare` and separate git dir.
     #[error("cannot combine bare repository with separate git directory")]
     InitBareWithSeparateGitDir,
 

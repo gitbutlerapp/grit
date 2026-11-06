@@ -2570,7 +2570,7 @@ pub fn grit_lib::config::ConfigSet::get_color(&self, &str) -> core::result::Resu
 pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::result::Result<core::option::Option<i64>, grit_lib::error::ConfigError>
 pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option::Option<grit_lib::config::ConfigEntry>
 pub fn grit_lib::config::ConfigSet::get_path(&self, &grit_lib::config::environment::Environment, &str) -> core::result::Result<core::option::Option<std::path::PathBuf>, grit_lib::error::ConfigError>
-pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
+pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, grit_lib::error::ConfigError>
 pub fn grit_lib::config::ConfigSet::get_with_origin(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigValueOrigin>>
 pub fn grit_lib::config::ConfigSet::has_key(&self, &str) -> bool
 pub fn grit_lib::config::ConfigSet::ignore_case(&self) -> bool
@@ -15454,7 +15454,7 @@ pub fn grit_lib::config::ConfigSet::get_color(&self, &str) -> core::result::Resu
 pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::result::Result<core::option::Option<i64>, grit_lib::error::ConfigError>
 pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option::Option<grit_lib::config::ConfigEntry>
 pub fn grit_lib::config::ConfigSet::get_path(&self, &grit_lib::config::environment::Environment, &str) -> core::result::Result<core::option::Option<std::path::PathBuf>, grit_lib::error::ConfigError>
-pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
+pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, grit_lib::error::ConfigError>
 pub fn grit_lib::config::ConfigSet::get_with_origin(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigValueOrigin>>
 pub fn grit_lib::config::ConfigSet::has_key(&self, &str) -> bool
 pub fn grit_lib::config::ConfigSet::ignore_case(&self) -> bool
