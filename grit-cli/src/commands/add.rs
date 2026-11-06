@@ -22,7 +22,6 @@ use std::collections::BTreeMap;
 use std::io::Write;
 
 use crate::context;
-use crate::json_error;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::ui::PathDisplayOptions;
@@ -379,7 +378,7 @@ fn stage_with_hint(
         o.force_ignored = force_ignored;
         o
     };
-    stage_paths(repo, &opts, progress, cancel).map_err(map_add_error)
+    stage_paths(repo, &opts, progress, cancel).map_err(crate::error_map::map_stage_lib_error)
 }
 
 fn map_apply_error(err: grit_lib::error::ApplyError) -> anyhow::Error {
@@ -387,44 +386,4 @@ fn map_apply_error(err: grit_lib::error::ApplyError) -> anyhow::Error {
         return crate::json_error::map_lib_error(LibError::Cancelled);
     }
     anyhow::anyhow!("{err}")
-}
-
-fn map_add_error(err: LibError) -> anyhow::Error {
-    match err {
-        LibError::UnmergedConflictMarkers { paths } => {
-            let mut msg = String::new();
-            for path in paths {
-                msg.push_str(&path);
-                msg.push_str(": conflict markers remain; not staged\n");
-            }
-            msg.pop();
-            anyhow::anyhow!("{msg}")
-        }
-        LibError::PathspecIgnored { paths } => {
-            let mut msg =
-                String::from("the following paths are ignored by one of your ignore files:\n");
-            for path in paths {
-                msg.push_str("    ");
-                msg.push_str(&path);
-                msg.push('\n');
-            }
-            msg.push_str("Use --force if you really want to add them.");
-            anyhow::anyhow!("{msg}")
-        }
-        LibError::EmbeddedRepoWithoutCommit { path } => {
-            let human =
-                format!("cannot stage '{path}': embedded git repository has no commit checked out");
-            anyhow::Error::new(crate::json_error::StructuredCliError {
-                payload: crate::json_error::StructuredJsonError {
-                    paths: Some(vec![path]),
-                    ..crate::json_error::StructuredJsonError::new(
-                        human.clone(),
-                        crate::error_kind::ErrorKind::EmbeddedRepoWithoutCommit,
-                    )
-                },
-                human,
-            })
-        }
-        other => json_error::map_lib_error(other),
-    }
 }

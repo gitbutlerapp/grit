@@ -14,13 +14,17 @@ use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::RemoteError;
 
 use crate::error_kind::ErrorKind;
-use crate::error_map::{classify, human_message_for_lib, map_branch_error, map_remote_error};
+use crate::error_map::{
+    classify, human_message_for_lib, identity_error, map_branch_error, map_remote_error,
+    map_stage_lib_error, pathspec_ignored_human, stage_conflict_markers_human,
+};
 use crate::exit_status::ExitStatus;
 use crate::json_error::{
     gitbutler_workspace_commit, incompatible_output_flags, invalid_commit_filter, invalid_pickaxe,
     lock_held, map_lib_error, no_operation_in_progress, operation_in_progress, replay_conflict,
     revision_not_found, would_overwrite_error, StructuredCliError, StructuredJsonError,
 };
+use grit_lib::config::ident_resolve::{IdentRole, IdentityError};
 use grit_lib::error::{GitDirPathOperation, WorktreePathOperation};
 use grit_lib::lockfile::LockHolder;
 use grit_lib::porcelain::pull::PullError;
@@ -479,18 +483,96 @@ static CONTRACT: &[ContractRow] = &[
         hint: None,
     },
     ContractRow {
-        label: "identity_unknown",
+        label: "identity_missing_author_email",
         build: || {
-            structured(
-                ErrorKind::IdentityUnknown,
-                "author identity unknown\n\nTell grit who you are:\n  grit config --global user.name \"Your Name\"\n  grit config --global user.email \"you@example.com\"",
-                Some("Tell grit who you are:\n  grit config --global user.name \"Your Name\"\n  grit config --global user.email \"you@example.com\""),
-            )
+            Error::new(LibError::Identity(IdentityError::MissingConfiguredEmail {
+                role: IdentRole::Author,
+            }))
         },
         kind: Some(ErrorKind::IdentityUnknown),
         exit: ExitStatus::Failure,
-        human: || "author identity unknown\n\nTell grit who you are:\n  grit config --global user.name \"Your Name\"\n  grit config --global user.email \"you@example.com\"".to_owned(),
+        human: || {
+            identity_error(IdentityError::MissingConfiguredEmail {
+                role: IdentRole::Author,
+            })
+            .to_string()
+        },
         hint: Some("Tell grit who you are:\n  grit config --global user.name \"Your Name\"\n  grit config --global user.email \"you@example.com\""),
+    },
+    ContractRow {
+        label: "lib_revision_not_found",
+        build: || map_lib_error(LibError::RevisionNotFound("missing".into())),
+        kind: Some(ErrorKind::RevisionNotFound),
+        exit: ExitStatus::Failure,
+        human: || "no branch, tag or commit named 'missing'".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "lib_invalid_ref",
+        build: || Error::new(LibError::InvalidRef("not a valid object name: bad".into())),
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || "invalid ref: not a valid object name: bad".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "pathspec_ignored",
+        build: || Error::new(LibError::PathspecIgnored {
+            paths: vec!["build".into()],
+        }),
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || pathspec_ignored_human(&["build".into()]),
+        hint: None,
+    },
+    ContractRow {
+        label: "stage_conflict_markers",
+        build: || Error::new(LibError::UnmergedConflictMarkers {
+            paths: vec!["f.txt".into()],
+        }),
+        kind: Some(ErrorKind::UnmergedPaths),
+        exit: ExitStatus::Failure,
+        human: || stage_conflict_markers_human(&["f.txt".into()]),
+        hint: Some("edit out the conflict markers in f.txt, then try again"),
+    },
+    ContractRow {
+        label: "restore_path_unmerged",
+        build: || {
+            Error::new(LibError::RestorePathUnmerged {
+                paths: vec!["a b".into()],
+            })
+        },
+        kind: Some(ErrorKind::UnmergedPaths),
+        exit: ExitStatus::Failure,
+        human: || LibError::RestorePathUnmerged {
+            paths: vec!["a b".into()],
+        }
+        .to_string(),
+        hint: Some("take one side with `grit restore --ours 'a b'` or `grit restore --theirs 'a b'`, bring the conflict markers back with `grit restore --merge 'a b'`, or edit out the markers and run `grit add 'a b'`"),
+    },
+    ContractRow {
+        label: "unborn_head",
+        build: || map_lib_error(LibError::UnbornHead),
+        kind: Some(ErrorKind::BranchNoCommits),
+        exit: ExitStatus::Failure,
+        human: || {
+            "no commits yet on this branch — make one with `grit commit \"message\"`".to_owned()
+        },
+        hint: Some(r#"make one with `grit commit "message"`"#),
+    },
+    ContractRow {
+        label: "embedded_repo_stage_refused",
+        build: || {
+            map_stage_lib_error(LibError::EmbeddedRepoWithoutCommit {
+                path: "sub".into(),
+            })
+        },
+        kind: Some(ErrorKind::EmbeddedRepoWithoutCommit),
+        exit: ExitStatus::Failure,
+        human: || {
+            "cannot stage 'sub': embedded git repository has no commit checked out".to_owned()
+        },
+        hint: None,
     },
     ContractRow {
         label: "tag_already_exists",
@@ -834,7 +916,7 @@ static MATCH_BUDGETS: &[MatchBudget] = &[
     },
     MatchBudget {
         path: "src/commands/add.rs",
-        max: 4,
+        max: 1,
     },
     MatchBudget {
         path: "src/context.rs",
@@ -905,10 +987,6 @@ static MATCH_BUDGETS: &[MatchBudget] = &[
         max: 1,
     },
     MatchBudget {
-        path: "src/commands/restore.rs",
-        max: 1,
-    },
-    MatchBudget {
         path: "src/commands/cat.rs",
         max: 1,
     },
@@ -973,7 +1051,7 @@ pub fn assert_lib_error_match_ratchet() {
         .collect();
     let mut total = 0usize;
     visit_rs_sources(manifest, &manifest.join("src"), &budgets, &mut total);
-    const TOTAL_MATCHES_OUTSIDE_ERROR_MAP: usize = 58;
+    const TOTAL_MATCHES_OUTSIDE_ERROR_MAP: usize = 54;
     assert_eq!(
         total, TOTAL_MATCHES_OUTSIDE_ERROR_MAP,
         "update TOTAL_MATCHES_OUTSIDE_ERROR_MAP downward after removing matches (now {total})"

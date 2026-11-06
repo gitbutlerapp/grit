@@ -5,6 +5,7 @@ use std::error::Error as StdError;
 
 use anyhow::Error;
 use grit_lib::command_runner::hooks::HookError;
+use grit_lib::config::ident_resolve::IdentityError;
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
@@ -100,6 +101,8 @@ pub fn human_message_for_lib(err: &LibError) -> String {
         LibError::InvalidPathComponent { path, reason } => {
             format!("cannot use path '{path}': {reason}")
         }
+        LibError::PathspecIgnored { paths } => pathspec_ignored_human(paths),
+        LibError::UnmergedConflictMarkers { paths } => stage_conflict_markers_human(paths),
         LibError::Hook(hook) => {
             let mut message = hook.to_string();
             let mut cause = StdError::source(hook);
@@ -111,6 +114,78 @@ pub fn human_message_for_lib(err: &LibError) -> String {
             message
         }
         other => other.git_stderr_message(),
+    }
+}
+
+const IDENTITY_SETUP_HINT: &str = "Tell grit who you are:\n  grit config --global user.name \"Your Name\"\n  grit config --global user.email \"you@example.com\"";
+
+/// Map [`IdentityError`] to a structured CLI error (`IdentityUnknown`).
+#[must_use]
+pub fn identity_error(err: IdentityError) -> Error {
+    let (short, extra) = match &err {
+        IdentityError::MissingConfiguredEmail { role }
+        | IdentityError::AutoDetectionDisabled { role } => (
+            role.missing_email_hint().to_owned(),
+            Some("\n\nunable to auto-detect email address".to_owned()),
+        ),
+        other => (other.to_string(), None),
+    };
+    let human = match extra {
+        Some(extra) => format!("{short}{extra}\n\n{IDENTITY_SETUP_HINT}"),
+        None => format!("{short}\n\n{IDENTITY_SETUP_HINT}"),
+    };
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            hint: Some(IDENTITY_SETUP_HINT.to_owned()),
+            ..StructuredJsonError::new(short, ErrorKind::IdentityUnknown)
+        },
+        human,
+    })
+}
+
+/// Human text for [`LibError::PathspecIgnored`] (explicit `grit add` of ignored paths).
+#[must_use]
+pub fn pathspec_ignored_human(paths: &[String]) -> String {
+    let mut msg = String::from("the following paths are ignored by one of your ignore files:\n");
+    for path in paths {
+        msg.push_str("    ");
+        msg.push_str(path);
+        msg.push('\n');
+    }
+    msg.push_str("Use --force if you really want to add them.");
+    msg
+}
+
+/// Human text when staging refuses paths that still contain conflict markers.
+#[must_use]
+pub fn stage_conflict_markers_human(paths: &[String]) -> String {
+    let mut msg = String::new();
+    for path in paths {
+        msg.push_str(path);
+        msg.push_str(": conflict markers remain; not staged\n");
+    }
+    if !msg.is_empty() {
+        msg.pop();
+    }
+    msg
+}
+
+/// Map library errors from [`crate::commands::add::stage_paths`] to structured CLI errors.
+#[must_use]
+pub fn map_stage_lib_error(err: LibError) -> Error {
+    match err {
+        LibError::EmbeddedRepoWithoutCommit { path } => {
+            let human =
+                format!("cannot stage '{path}': embedded git repository has no commit checked out");
+            Error::new(StructuredCliError {
+                payload: StructuredJsonError {
+                    paths: Some(vec![path.clone()]),
+                    ..StructuredJsonError::new(human.clone(), ErrorKind::EmbeddedRepoWithoutCommit)
+                },
+                human,
+            })
+        }
+        other => crate::json_error::map_lib_error(other),
     }
 }
 
@@ -563,6 +638,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             None,
             None,
         )),
+        LibError::Identity(identity_err) => Some(identity_error(identity_err.clone())),
         LibError::Tag(tag_err) => match tag_err {
             grit_lib::porcelain::tag::TagError::AlreadyExists { name } => {
                 let human = format!("tag '{name}' already exists (use --force to replace)");
@@ -639,7 +715,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             ))
         }
         LibError::UnmergedConflictMarkers { paths } => Some(Error::new(StructuredCliError {
-            human: format!("{err}{}", indented_paths(paths)),
+            human: stage_conflict_markers_human(paths),
             payload: StructuredJsonError {
                 hint: Some(format!(
                     "edit out the conflict markers in {}, then try again",

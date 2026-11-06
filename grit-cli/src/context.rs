@@ -5,7 +5,7 @@ use grit_lib::change_id::resolved_change_id;
 use grit_lib::command_runner::hooks::HookStdio;
 use grit_lib::config::environment::Environment;
 use grit_lib::config::ident_resolve::{
-    resolve_identity_with, resolve_loose_committer_identity_with, IdentRole, IdentityError,
+    resolve_identity_with, resolve_loose_committer_identity_with, IdentRole,
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::ident::Signature;
@@ -41,8 +41,6 @@ pub fn hook_stdio_for_repo() -> HookStdio {
 }
 
 use crate::diagnostics;
-use crate::error_kind::ErrorKind;
-use crate::json_error::{StructuredCliError, StructuredJsonError};
 
 static PROCESS_ENVIRONMENT: OnceLock<Environment> = OnceLock::new();
 
@@ -273,14 +271,14 @@ pub fn identity(
     role: IdentRole,
     now: OffsetDateTime,
 ) -> Result<String> {
-    resolve_identity_with(env, config, role, now).map_err(identity_error)
+    resolve_identity_with(env, config, role, now).map_err(crate::error_map::identity_error)
 }
 
 /// The author or committer `repo` records on a new commit, stash, or notes commit
 /// ([`Repository::identity`]), with setup advice when no identity is configured.
 pub fn signature(repo: &Repository, role: IdentRole, now: OffsetDateTime) -> Result<Signature> {
     repo.identity(role, now).map_err(|err| match err {
-        grit_lib::error::Error::Identity(err) => identity_error(err),
+        grit_lib::error::Error::Identity(err) => crate::error_map::identity_error(err),
         other => other.into(),
     })
 }
@@ -301,28 +299,4 @@ pub fn committer_reflog_signature(
         }
         Err(other) => Err(other.into()),
     }
-}
-
-const IDENTITY_SETUP_HINT: &str = "Tell grit who you are:\n  grit config --global user.name \"Your Name\"\n  grit config --global user.email \"you@example.com\"";
-
-fn identity_error(err: IdentityError) -> anyhow::Error {
-    let (short, extra) = match &err {
-        IdentityError::MissingConfiguredEmail { role }
-        | IdentityError::AutoDetectionDisabled { role } => (
-            role.missing_email_hint().to_owned(),
-            Some("\n\nunable to auto-detect email address".to_owned()),
-        ),
-        other => (other.to_string(), None),
-    };
-    let human = match extra {
-        Some(extra) => format!("{short}{extra}\n\n{IDENTITY_SETUP_HINT}"),
-        None => format!("{short}\n\n{IDENTITY_SETUP_HINT}"),
-    };
-    anyhow::Error::new(StructuredCliError {
-        payload: StructuredJsonError {
-            hint: Some(IDENTITY_SETUP_HINT.to_owned()),
-            ..StructuredJsonError::new(short, ErrorKind::IdentityUnknown)
-        },
-        human,
-    })
 }
