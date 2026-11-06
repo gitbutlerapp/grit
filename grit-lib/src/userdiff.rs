@@ -295,9 +295,11 @@ fn compile_matcher(
         let negate = line.starts_with('!');
         if negate {
             if idx == lines.len() - 1 {
-                return Err(DiffError::UserdiffInvalidFuncname {
+                return Err(DiffError::InvalidFuncname {
                     driver: driver.to_owned(),
-                    detail: format!("Last expression must not be negated: {line}"),
+                    source: crate::diff::error::UserdiffFuncnameSourceError::NegatedLastLine {
+                        line: line.to_owned(),
+                    },
                 });
             }
             line = &line[1..];
@@ -310,10 +312,10 @@ fn compile_matcher(
         };
 
         let matcher =
-            compile_posix_ere_rule(&posix_pattern, ignore_case, line).map_err(|detail| {
-                DiffError::UserdiffInvalidFuncname {
+            compile_posix_ere_rule(&posix_pattern, ignore_case, line).map_err(|source| {
+                DiffError::InvalidFuncname {
                     driver: driver.to_owned(),
-                    detail,
+                    source,
                 }
             })?;
         rules.push(FuncRule { matcher, negate });
@@ -511,15 +513,16 @@ fn compile_posix_ere_rule(
     pattern: &str,
     ignore_case: bool,
     line: &str,
-) -> Result<RuleMatcher, String> {
-    validate_posix_ere(pattern, ignore_case)
-        .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))?;
-    let rust_pattern = posix_ere_to_rust_regex(pattern)
-        .ok_or_else(|| format!("Invalid regexp to look for hunk header: {line}"))?;
+) -> std::result::Result<RuleMatcher, crate::diff::error::UserdiffFuncnameSourceError> {
+    let invalid = || crate::diff::error::UserdiffFuncnameSourceError::InvalidRegexp {
+        line: line.to_owned(),
+    };
+    validate_posix_ere(pattern, ignore_case).map_err(|_| invalid())?;
+    let rust_pattern = posix_ere_to_rust_regex(pattern).ok_or_else(invalid)?;
     RegexBuilder::new(&rust_pattern)
         .case_insensitive(ignore_case)
         .build()
-        .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))
+        .map_err(|_| invalid())
         .map(RuleMatcher::Rust)
 }
 
@@ -543,13 +546,13 @@ mod tests {
     fn unterminated_posix_bracket_class_is_rejected() {
         let err = compile_matcher("[a", true, false, "probe").unwrap_err();
         assert!(
-            matches!(err, DiffError::UserdiffInvalidFuncname { .. }),
+            matches!(err, DiffError::InvalidFuncname { .. }),
             "unexpected error: {err}"
         );
         let cfg = config_with_xfuncname("probe", "[a");
         let err = matcher_for_driver(&cfg, "probe").unwrap_err();
         assert!(
-            matches!(err, DiffError::UserdiffInvalidFuncname { .. }),
+            matches!(err, DiffError::InvalidFuncname { .. }),
             "unexpected error: {err}"
         );
     }

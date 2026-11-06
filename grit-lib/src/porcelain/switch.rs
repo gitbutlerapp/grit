@@ -353,7 +353,8 @@ fn is_at_minus_branch_spec(spec: &str) -> bool {
     spec.starts_with("@{-") && spec.ends_with('}')
 }
 
-fn map_at_minus_switch_error(spec: &str, err: Error) -> Error {
+fn map_at_minus_switch_error(spec: &str, err: crate::revision_error::RevisionError) -> Error {
+    let err: Error = err.into();
     if is_at_minus_branch_spec(spec) && matches!(err, Error::Ref(RefError::InvalidName { .. })) {
         return Error::Branch(BranchError::NoPreviousBranch);
     }
@@ -412,21 +413,27 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
         ));
     }
     let oid = resolve_revision(repo, spec).map_err(|err| map_revision_spec_error(spec, err))?;
-    peel_to_commit_for_merge_base(repo, oid)
+    peel_to_commit_for_merge_base(repo, oid).map_err(Into::into)
 }
 
-fn map_revision_spec_error(spec: &str, err: Error) -> Error {
+fn map_revision_spec_error(spec: &str, err: crate::revision_error::RevisionError) -> Error {
     match err {
-        Error::ObjectNotFound(_)
-        | Error::Revision(crate::revision_error::RevisionError::RevParse(
+        crate::revision_error::RevisionError::Nested(ref nested)
+            if matches!(**nested, Error::ObjectNotFound(_)) =>
+        {
+            Error::Revision(crate::revision_error::RevisionError::NotFound {
+                spec: spec.to_owned(),
+            })
+        }
+        crate::revision_error::RevisionError::RevParse(
             RevParseError::InvalidObjectName { .. }
             | RevParseError::RevisionOutOfRange { .. }
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::NoSuchBranch { .. },
-        )) => Error::Revision(crate::revision_error::RevisionError::NotFound {
+        ) => Error::Revision(crate::revision_error::RevisionError::NotFound {
             spec: spec.to_owned(),
         }),
-        other => other,
+        other => Error::Revision(other),
     }
 }
 
@@ -2228,7 +2235,7 @@ mod tests {
                 .expect_err("tree start");
         assert!(matches!(
             not_commit,
-            Error::Ref(RefError::InvalidName { .. })
+            Error::Revision(crate::revision_error::RevisionError::RevParse(_))
         ));
         let _ = tip;
     }

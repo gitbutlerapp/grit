@@ -751,18 +751,21 @@ fn resolve_create_start(
 }
 
 fn validate_start_commit(repo: &Repository, oid: ObjectId, label: &str) -> Result<ObjectId> {
-    peel_to_commit_for_merge_base(repo, oid).map_err(|err| match err {
-        Error::ObjectNotFound(_) => Error::Branch(BranchError::InvalidStartPoint {
-            label: label.to_owned(),
-            reason: "object not found".into(),
-        }),
-        Error::Ref(RefError::InvalidName { reason: msg, .. }) | Error::CorruptObject(msg) => {
-            Error::Branch(BranchError::InvalidStartPoint {
+    peel_to_commit_for_merge_base(repo, oid).map_err(|err| {
+        let err: Error = err.into();
+        match err {
+            Error::ObjectNotFound(_) => Error::Branch(BranchError::InvalidStartPoint {
                 label: label.to_owned(),
-                reason: msg,
-            })
+                reason: "object not found".into(),
+            }),
+            Error::Ref(RefError::InvalidName { reason: msg, .. }) | Error::CorruptObject(msg) => {
+                Error::Branch(BranchError::InvalidStartPoint {
+                    label: label.to_owned(),
+                    reason: msg,
+                })
+            }
+            other => other,
         }
-        other => other,
     })
 }
 

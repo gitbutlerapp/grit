@@ -747,6 +747,12 @@ impl From<crate::error::Error> for CheckoutError {
     }
 }
 
+impl From<crate::revision_error::RevisionError> for CheckoutError {
+    fn from(err: crate::revision_error::RevisionError) -> Self {
+        Self::from(crate::error::Error::from(err))
+    }
+}
+
 impl From<crate::resumable::ResumableError> for CheckoutError {
     fn from(e: crate::resumable::ResumableError) -> Self {
         Self::Download(Box::new(e))

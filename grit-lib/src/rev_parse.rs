@@ -31,6 +31,7 @@ use crate::refs::store::RawRef;
 use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
+use crate::revision_error::{RevResult, RevisionError};
 
 /// Return `Some(repo)` when a repository can be discovered at `start`.
 ///
@@ -209,7 +210,7 @@ fn remote_tracking_head_symbolic_target(repo: &Repository, name: &str) -> Option
 ///   to a branch name.
 /// - `Ok(None)` when `spec` is not an `@{-N}` token.
 /// - `Err(...)` when `spec` matches `@{-N}` syntax but cannot be resolved.
-pub fn expand_at_minus_to_branch_name(repo: &Repository, spec: &str) -> Result<Option<String>> {
+pub fn expand_at_minus_to_branch_name(repo: &Repository, spec: &str) -> RevResult<Option<String>> {
     if !spec.starts_with("@{-") || !spec.ends_with('}') {
         return Ok(None);
     }
@@ -222,12 +223,14 @@ pub fn expand_at_minus_to_branch_name(repo: &Repository, spec: &str) -> Result<O
     if n < 1 {
         return Ok(None);
     }
-    resolve_at_minus_to_branch(repo, n).map(Some)
+    resolve_at_minus_to_branch(repo, n)
+        .map(Some)
+        .map_err(Into::into)
 }
 
 /// Resolve `@{-N}` to the commit OID it points to.
-pub fn resolve_at_minus_to_oid(repo: &Repository, spec: &str) -> Result<Option<ObjectId>> {
-    try_resolve_at_minus(repo, spec)
+pub fn resolve_at_minus_to_oid(repo: &Repository, spec: &str) -> RevResult<Option<ObjectId>> {
+    try_resolve_at_minus(repo, spec).map_err(Into::into)
 }
 
 /// Abbreviate a full ref name to its shortest unambiguous form.
@@ -267,13 +270,14 @@ pub fn upstream_suffix_info(spec: &str) -> Option<(&str, bool)> {
 }
 
 /// Resolve `@{upstream}` / `@{u}` / `@{push}` to the symbolic full ref name (for `rev-parse --symbolic-full-name`).
-pub fn resolve_upstream_symbolic_name(repo: &Repository, spec: &str) -> Result<String> {
+pub fn resolve_upstream_symbolic_name(repo: &Repository, spec: &str) -> RevResult<String> {
     let Some((base, is_push)) = upstream_suffix_info(spec) else {
-        return Err(Error::Ref(RefError::invalid_reason(format!(
-            "not an upstream spec: {spec}"
-        ))));
+        return Err(RevParseError::InvalidObjectName {
+            name: spec.to_owned(),
+        }
+        .into());
     };
-    resolve_upstream_full_ref_name(repo, base, is_push)
+    resolve_upstream_full_ref_name(repo, base, is_push).map_err(Into::into)
 }
 
 fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) -> Result<String> {
@@ -316,7 +320,10 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
 ///
 /// Honors `remote.pushRemote`, `branch.<name>.pushRemote`, `push.default`, and per-remote
 /// `push` refspecs (exact `refs/heads/<branch>:refs/heads/<dest>` mappings).
-pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -> Result<String> {
+pub fn resolve_push_full_ref_for_branch(
+    repo: &Repository,
+    branch_short: &str,
+) -> RevResult<String> {
     let config_path = repo.common_git_dir().join("config");
     let _ = repo.config().snapshot()?;
     let config_content = repo.caches().local_config_text(&config_path)?;
@@ -555,7 +562,7 @@ fn map_dest_to_tracking(config_content: &str, remote_name: &str, dst: &str) -> O
 
 fn resolve_push_ref_name(repo: &Repository, base: &str) -> Result<String> {
     let (branch_key, _display) = resolve_upstream_branch_context(repo, base)?;
-    resolve_push_full_ref_for_branch(repo, &branch_key)
+    resolve_push_full_ref_for_branch(repo, &branch_key).map_err(Into::into)
 }
 
 /// Returns `(config_branch_key, display_name_for_errors)` for upstream resolution.
@@ -1104,13 +1111,15 @@ pub(crate) fn split_top_level_triple_dot_range(spec: &str) -> Option<(&str, &str
 
 /// Like [`resolve_revision`], but does not treat a bare filename as an index path
 /// (matches `git rev-parse` / plumbing, where `file.txt` stays ambiguous).
-pub fn resolve_revision_without_index_dwim(repo: &Repository, spec: &str) -> Result<ObjectId> {
+pub fn resolve_revision_without_index_dwim(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
     resolve_revision_impl(repo, spec, false, false, true, false, false, false, false)
+        .map_err(Into::into)
 }
 
 /// Resolve a revision string to an object ID.
-pub fn resolve_revision(repo: &Repository, spec: &str) -> Result<ObjectId> {
+pub fn resolve_revision(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
     resolve_revision_impl(repo, spec, true, false, true, false, false, false, true)
+        .map_err(Into::into)
 }
 
 /// Like [`resolve_revision`], but can disable remote-tracking DWIM used by `git checkout`
@@ -1119,7 +1128,7 @@ pub fn resolve_revision_for_checkout_guess(
     repo: &Repository,
     spec: &str,
     remote_branch_guess: bool,
-) -> Result<ObjectId> {
+) -> RevResult<ObjectId> {
     resolve_revision_impl(
         repo,
         spec,
@@ -1131,12 +1140,14 @@ pub fn resolve_revision_for_checkout_guess(
         false,
         remote_branch_guess,
     )
+    .map_err(Into::into)
 }
 
 /// Resolve `spec` when it appears as the end of a revision range (`A..B`, `A...B`, etc.):
 /// abbreviated hex and `core.disambiguate` prefer a commit (porcelain range parsing).
-pub fn resolve_revision_for_range_end(repo: &Repository, spec: &str) -> Result<ObjectId> {
+pub fn resolve_revision_for_range_end(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
     resolve_revision_impl(repo, spec, true, true, true, false, false, false, true)
+        .map_err(Into::into)
 }
 
 /// Like [`resolve_revision_for_range_end`], but does not resolve a bare filename as an index path.
@@ -1148,26 +1159,30 @@ pub fn resolve_revision_for_range_end(repo: &Repository, spec: &str) -> Result<O
 pub fn resolve_revision_for_range_end_without_index_dwim(
     repo: &Repository,
     spec: &str,
-) -> Result<ObjectId> {
+) -> RevResult<ObjectId> {
     resolve_revision_impl(repo, spec, false, true, true, false, false, false, true)
+        .map_err(Into::into)
 }
 
 /// Resolve a single revision for `git rev-parse --verify` (no index path DWIM).
 ///
 /// Git's `--verify` mode must reject tokens that only match an index entry when the path is
 /// missing from the work tree (`t7102-reset` disambiguation).
-pub fn resolve_revision_for_verify(repo: &Repository, spec: &str) -> Result<ObjectId> {
+pub fn resolve_revision_for_verify(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
     resolve_revision_impl(repo, spec, false, true, true, false, false, false, true)
+        .map_err(Into::into)
 }
 
 /// First argument to `commit-tree`: ambiguous short hex uses tree-ish rules (blob vs tree).
-pub fn resolve_revision_for_commit_tree_tree(repo: &Repository, spec: &str) -> Result<ObjectId> {
+pub fn resolve_revision_for_commit_tree_tree(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
     resolve_revision_impl(repo, spec, true, false, true, false, true, false, true)
+        .map_err(Into::into)
 }
 
 /// Old blob OID from a patch `index <old>..<new>` line (`git apply --build-fake-ancestor`).
-pub fn resolve_revision_for_patch_old_blob(repo: &Repository, spec: &str) -> Result<ObjectId> {
+pub fn resolve_revision_for_patch_old_blob(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
     resolve_revision_impl(repo, spec, true, false, true, false, false, true, true)
+        .map_err(Into::into)
 }
 
 /// When `spec` uses two-dot range syntax (`A..B`, `..B`, `A..`), returns the commits to
@@ -1182,7 +1197,7 @@ pub fn resolve_revision_for_patch_old_blob(repo: &Repository, spec: &str) -> Res
 pub fn try_parse_double_dot_log_range(
     repo: &Repository,
     spec: &str,
-) -> Result<Option<(ObjectId, ObjectId)>> {
+) -> RevResult<Option<(ObjectId, ObjectId)>> {
     let Some((left, right)) = split_double_dot_range(spec) else {
         return Ok(None);
     };
@@ -1204,7 +1219,7 @@ pub fn try_parse_double_dot_log_range(
 fn try_parse_double_dot_log_range_without_index_dwim(
     repo: &Repository,
     spec: &str,
-) -> Result<Option<(ObjectId, ObjectId)>> {
+) -> RevResult<Option<(ObjectId, ObjectId)>> {
     let Some((left, right)) = split_double_dot_range(spec) else {
         return Ok(None);
     };
@@ -1239,7 +1254,7 @@ pub fn revision_spec_contains_ancestry_navigation(spec: &str) -> bool {
 }
 
 /// `resolve_revision_as_commit` function.
-pub fn resolve_revision_as_commit(repo: &Repository, spec: &str) -> Result<ObjectId> {
+pub fn resolve_revision_as_commit(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
     if let Some((left, right)) = split_triple_dot_range(spec) {
         let left_tip = if left.is_empty() {
             resolve_revision_for_range_end(repo, "HEAD")?
@@ -1254,10 +1269,11 @@ pub fn resolve_revision_as_commit(repo: &Repository, spec: &str) -> Result<Objec
         let left_c = peel_to_commit_for_merge_base(repo, left_tip)?;
         let right_c = peel_to_commit_for_merge_base(repo, right_tip)?;
         let bases = crate::merge_base::merge_bases_first_vs_rest(repo, left_c, &[right_c])?;
-        return bases
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::ObjectNotFound(format!("no merge base for '{spec}'")));
+        return bases.into_iter().next().ok_or_else(|| {
+            crate::revision_error::RevisionError::NotFound {
+                spec: spec.to_owned(),
+            }
+        });
     }
     if let Some((_excl, tip)) = try_parse_double_dot_log_range(repo, spec)? {
         return Ok(tip);
@@ -1273,7 +1289,7 @@ pub fn resolve_revision_as_commit(repo: &Repository, spec: &str) -> Result<Objec
 pub fn resolve_revision_as_commit_without_index_dwim(
     repo: &Repository,
     spec: &str,
-) -> Result<ObjectId> {
+) -> RevResult<ObjectId> {
     if let Some((left, right)) = split_triple_dot_range(spec) {
         let left_tip = if left.is_empty() {
             resolve_revision_for_range_end_without_index_dwim(repo, "HEAD")?
@@ -1288,10 +1304,11 @@ pub fn resolve_revision_as_commit_without_index_dwim(
         let left_c = peel_to_commit_for_merge_base(repo, left_tip)?;
         let right_c = peel_to_commit_for_merge_base(repo, right_tip)?;
         let bases = crate::merge_base::merge_bases_first_vs_rest(repo, left_c, &[right_c])?;
-        return bases
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::ObjectNotFound(format!("no merge base for '{spec}'")));
+        return bases.into_iter().next().ok_or_else(|| {
+            crate::revision_error::RevisionError::NotFound {
+                spec: spec.to_owned(),
+            }
+        });
     }
     if let Some((_excl, tip)) = try_parse_double_dot_log_range_without_index_dwim(repo, spec)? {
         return Ok(tip);
@@ -1721,11 +1738,11 @@ fn is_unreplaced_commit(repo: &Repository, oid: ObjectId) -> bool {
 }
 
 /// Peel tags to a commit OID for merge-base computation (`A...B` and `rev-parse` output).
-pub fn peel_to_commit_for_merge_base(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
+pub fn peel_to_commit_for_merge_base(repo: &Repository, oid: ObjectId) -> RevResult<ObjectId> {
     peel_tags_to_commit(repo, oid)?.map_err(|other| {
-        Error::Ref(RefError::invalid_reason(format!(
-            "object {other} does not name a commit"
-        )))
+        RevisionError::RevParse(RevParseError::InvalidObjectName {
+            name: other.to_string(),
+        })
     })
 }
 
@@ -3159,7 +3176,7 @@ fn resolve_at_minus_token_to_branch(repo: &Repository, token: &str) -> Result<Op
 /// Ref whose reflog `git log -g` should walk for a revision like `other@{u}` or `main@{1}`.
 ///
 /// Returns `None` when `spec` is not a reflog-chain form (no `@{` step after the prefix).
-pub fn reflog_walk_refname(repo: &Repository, spec: &str) -> Result<Option<String>> {
+pub fn reflog_walk_refname(repo: &Repository, spec: &str) -> RevResult<Option<String>> {
     let now_sec = repo.wall_clock_epoch();
     let Some((prefix, steps)) = split_reflog_at_chain(spec, now_sec)? else {
         return Ok(None);
@@ -3221,7 +3238,7 @@ pub fn reflog_walk_refname(repo: &Repository, spec: &str) -> Result<Option<Strin
 ///
 /// Mirrors Git `add_reflog_for_walk` / `read_complete_reflog` ref resolution before reading
 /// `logs/<ref>`.
-pub fn resolve_reflog_walk_log_ref(repo: &Repository, r: &str) -> Result<String> {
+pub fn resolve_reflog_walk_log_ref(repo: &Repository, r: &str) -> RevResult<String> {
     if let Ok(Some(w)) = reflog_walk_refname(repo, r) {
         return Ok(w);
     }
@@ -4461,13 +4478,14 @@ mod line_coverage_tests {
         for not_commit in [tree, blob, blob_tag] {
             assert!(matches!(
                 peel_to_commit_for_merge_base(&repo, not_commit),
-                Err(crate::error::Error::Ref(RefError::InvalidName { .. }))
+                Err(crate::revision_error::RevisionError::RevParse(_))
             ));
         }
         let absent = ObjectId::from_hex("1111111111111111111111111111111111111111")?;
         assert!(matches!(
             peel_to_commit_for_merge_base(&repo, absent),
-            Err(crate::error::Error::ObjectNotFound(_))
+            Err(crate::revision_error::RevisionError::RevParse(_))
+                | Err(crate::revision_error::RevisionError::Nested(_))
         ));
         Ok(())
     }
@@ -5000,7 +5018,14 @@ mod line_coverage_tests {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
         let repo = crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         let err = resolve_revision_for_range_end(&repo, "HEAD").expect_err("HEAD");
-        assert!(matches!(err, Error::Ref(RefError::UnbornHead)), "{err:?}");
+        assert!(
+            matches!(
+                err,
+                crate::revision_error::RevisionError::Nested(ref nested)
+                    if matches!(**nested, Error::Ref(RefError::UnbornHead))
+            ),
+            "{err:?}"
+        );
         Ok(())
     }
 

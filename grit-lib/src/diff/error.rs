@@ -10,8 +10,27 @@
 
 use crate::diff::hunk_id::HunkIdError;
 use crate::diff::pickaxe::PickaxeError;
-use crate::error::{ApplyError, Error};
+use crate::error::{ApplyError, Error, PathIoError};
 use thiserror::Error;
+
+/// Why a `diff.<driver>.funcname` / `xfuncname` pattern failed to compile.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UserdiffFuncnameSourceError {
+    /// POSIX ERE / Rust regex compilation failed for one pattern line.
+    #[error("invalid regexp to look for hunk header: {line}")]
+    InvalidRegexp {
+        /// Pattern line from the funcname config block.
+        line: String,
+    },
+
+    /// A negated rule (`!…`) appeared on the last line of a funcname block.
+    #[error("Last expression must not be negated: {line}")]
+    NegatedLastLine {
+        /// Offending line text.
+        line: String,
+    },
+}
 
 /// Diff, apply, and blame failures.
 #[derive(Debug, Error)]
@@ -36,14 +55,14 @@ pub enum DiffError {
         rev: String,
     },
 
-    /// `--ignore-revs-file` could not be read.
+    /// `--ignore-revs-file` could not be opened or read.
     #[error("could not open object name list: {path}")]
     BlameIgnoreRevsFileOpen {
         /// Path argument (before expansion).
         path: String,
-        /// Underlying open error.
+        /// Resolved path and operation for the I/O failure.
         #[source]
-        source: std::io::Error,
+        io: PathIoError,
     },
 
     /// A line in an ignore-revs file is not a full-length object id.
@@ -67,12 +86,13 @@ pub enum DiffError {
     },
 
     /// Invalid `diff.<driver>.funcname` / `xfuncname` pattern.
-    #[error("invalid funcname pattern for diff driver '{driver}': {detail}")]
-    UserdiffInvalidFuncname {
+    #[error("invalid funcname pattern for diff driver '{driver}': {source}")]
+    InvalidFuncname {
         /// Driver name (`diff.<driver>.*` config section).
         driver: String,
-        /// Parse failure detail for the pattern text.
-        detail: String,
+        /// Regex / funcname block parse failure.
+        #[source]
+        source: UserdiffFuncnameSourceError,
     },
 
     /// Blame encountered an internal invariant violation.
@@ -126,7 +146,7 @@ impl DiffError {
             Self::BlameIgnoreRevsFileInvalidRev { .. } => "blame_ignore_revs_file_invalid_rev",
             Self::BlameWorktreeBareRepository => "blame_worktree_bare_repository",
             Self::DiffMergesParse { .. } => "diff_merges_parse",
-            Self::UserdiffInvalidFuncname { .. } => "userdiff_invalid_funcname",
+            Self::InvalidFuncname { .. } => "userdiff_invalid_funcname",
             Self::BlameInternal { .. } => "blame_internal",
             Self::WorktreeRulesLockPoisoned => "worktree_rules_lock_poisoned",
             Self::BlameHeadNotCommit => "blame_head_not_commit",

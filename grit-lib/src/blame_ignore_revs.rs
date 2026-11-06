@@ -6,10 +6,12 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::config::parse_path;
-use crate::error::{Error, Result};
+use crate::diff::error::DiffError;
+use crate::error::{Error, PathIoError, Result};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision_as_commit;
+use crate::worktree::io_error::WorktreePathOperation;
 
 /// Where to load ignored revisions from (config, CLI files, CLI rev specs).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -107,19 +109,23 @@ fn resolve_ignore_revs_file_path(repo: &Repository, path: &str) -> Option<PathBu
     Some(resolved)
 }
 
+fn blame_ignore_revs_file_io(path_arg: &str, resolved: &Path, source: std::io::Error) -> Error {
+    let display = resolved.to_string_lossy().into_owned();
+    Error::Diff(DiffError::BlameIgnoreRevsFileOpen {
+        path: path_arg.to_owned(),
+        io: PathIoError::worktree(display, WorktreePathOperation::Read, source),
+    })
+}
+
 fn load_file_into(repo: &Repository, path: &str, revs: &mut HashSet<ObjectId>) -> Result<()> {
     let Some(resolved) = resolve_ignore_revs_file_path(repo, path) else {
         return Ok(());
     };
-    let file = fs::File::open(&resolved).map_err(|e| {
-        Error::Diff(crate::diff::error::DiffError::BlameIgnoreRevsFileOpen {
-            path: path.to_owned(),
-            source: e,
-        })
-    })?;
+    let file =
+        fs::File::open(&resolved).map_err(|e| blame_ignore_revs_file_io(path, &resolved, e))?;
     let reader = BufReader::new(file);
     for line in reader.lines() {
-        let line = line?;
+        let line = line.map_err(|e| blame_ignore_revs_file_io(path, &resolved, e))?;
         parse_ignore_revs_line(repo, path, &line, revs)?;
     }
     Ok(())

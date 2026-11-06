@@ -12,6 +12,7 @@ use crate::merge_base::{ReachableWalkCommitterCutoffs, ReachableWalkSnapshot, Re
 use crate::objects::{parse_commit, CommitData, ObjectId, OidHashMap};
 use crate::porcelain::log::CommitReuse;
 use crate::repo::Repository;
+use crate::revision_error::RevResult;
 use crate::revwalk::queries::{resolve_log_walk_tips_and_hide, MergeFilter, RevWalkListOptions};
 
 const CURSOR_PREFIX: &str = "lw1.";
@@ -202,7 +203,7 @@ impl LogWalkCursor {
         query: &LogWalkQuery,
         cursor: Option<&LogWalkCursor>,
         limit: usize,
-    ) -> Result<LogWalkPage> {
+    ) -> RevResult<LogWalkPage> {
         if limit == 0 {
             return Ok(LogWalkPage {
                 commits: Vec::new(),
@@ -217,7 +218,8 @@ impl LogWalkCursor {
                 if c.query != *query {
                     return Err(Error::CorruptObject(
                         "log walk cursor does not match the current revision selection".to_owned(),
-                    ));
+                    )
+                    .into());
                 }
                 Some(c.walk.clone())
             }

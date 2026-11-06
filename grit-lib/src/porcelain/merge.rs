@@ -676,16 +676,34 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
     });
     // A full-length hex id parses without an object lookup, so a missing object only shows up
     // when peeling; that is still "names nothing", unlike a ref pointing at a missing object.
-    let not_found = |err: Error| match err {
-        Error::ObjectNotFound(_)
-        | Error::Revision(crate::revision_error::RevisionError::RevParse(
-            RevParseError::InvalidObjectName { .. }
-            | RevParseError::RevisionOutOfRange { .. }
-            | RevParseError::AmbiguousArgument { .. }
-            | RevParseError::NoSuchBranch { .. },
-        )) => Error::Revision(crate::revision_error::RevisionError::NotFound {
-            spec: spec.to_owned(),
-        }),
+    let not_found = |err: crate::revision_error::RevisionError| {
+        let missing = match &err {
+            crate::revision_error::RevisionError::NotFound { .. } => true,
+            crate::revision_error::RevisionError::RevParse(
+                RevParseError::InvalidObjectName { .. }
+                | RevParseError::RevisionOutOfRange { .. }
+                | RevParseError::AmbiguousArgument { .. }
+                | RevParseError::NoSuchBranch { .. },
+            ) => true,
+            crate::revision_error::RevisionError::Nested(nested) => {
+                matches!(**nested, Error::ObjectNotFound(_))
+            }
+            _ => false,
+        };
+        Error::Revision(if missing {
+            crate::revision_error::RevisionError::NotFound {
+                spec: spec.to_owned(),
+            }
+        } else {
+            err
+        })
+    };
+    let not_found_io = |err: Error| match err {
+        Error::ObjectNotFound(_) => {
+            Error::Revision(crate::revision_error::RevisionError::NotFound {
+                spec: spec.to_owned(),
+            })
+        }
         other => other,
     };
     let (peeled, actual, kind) = match named {
@@ -705,7 +723,7 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
             }
             let oid = crate::rev_parse::resolve_revision_without_index_dwim(repo, spec)
                 .map_err(not_found)?;
-            let (peeled, actual) = repo.odb().peel_tags(oid).map_err(not_found)?;
+            let (peeled, actual) = repo.odb().peel_tags(oid).map_err(not_found_io)?;
             (peeled, actual, MergeSourceKind::Commit)
         }
     };

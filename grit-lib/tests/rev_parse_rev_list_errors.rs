@@ -57,7 +57,7 @@ fn upstream_missing_reports_no_upstream_variant() {
     let err = resolve_upstream_symbolic_name(&repo, "main@{u}").unwrap_err();
     assert!(matches!(
         err,
-        Error::Revision(RevisionError::RevParse(RevParseError::NoUpstream { .. }))
+        RevisionError::RevParse(RevParseError::NoUpstream { .. })
     ));
 }
 
@@ -81,7 +81,7 @@ fn push_default_nothing_reports_variant() {
     let err = resolve_push_full_ref_for_branch(&repo, "main").unwrap_err();
     assert!(matches!(
         err,
-        Error::Revision(RevisionError::RevParse(RevParseError::PushDefaultNothing))
+        RevisionError::RevParse(RevParseError::PushDefaultNothing)
     ));
 }
 
@@ -92,9 +92,7 @@ fn ambiguous_spec_reports_ambiguous_argument() {
     let err = resolve_revision(&repo, "not-a-ref-or-path").unwrap_err();
     assert!(matches!(
         err,
-        Error::Revision(RevisionError::RevParse(
-            RevParseError::AmbiguousArgument { .. }
-        ))
+        RevisionError::RevParse(RevParseError::AmbiguousArgument { .. })
     ));
 }
 
@@ -162,9 +160,7 @@ fn push_refspec_missing_when_branch_not_mapped() {
     assert!(
         matches!(
             err,
-            Error::Revision(RevisionError::RevParse(
-                RevParseError::PushRefspecMissing { .. }
-            ))
+            RevisionError::RevParse(RevParseError::PushRefspecMissing { .. })
         ),
         "unexpected error: {err:?}"
     );

@@ -5420,7 +5420,8 @@ fn loaded_index<'a>(repo: &Repository, slot: &'a mut Option<Index>) -> Result<&'
 
 fn resolve_blame_start(repo: &Repository, start: Option<ObjectId>) -> Result<ObjectId> {
     if let Some(oid) = start {
-        return crate::revwalk::rev_parse::peel_to_commit_for_merge_base(repo, oid);
+        return crate::revwalk::rev_parse::peel_to_commit_for_merge_base(repo, oid)
+            .map_err(Into::into);
     }
     use crate::state::{resolve_head, HeadState};
     match resolve_head(repo.git_dir())? {

@@ -361,8 +361,12 @@ fn ref_tip_as_commit(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
     }
     match peel_to_commit_for_merge_base(repo, oid) {
         Ok(commit) => Ok(commit),
-        Err(crate::error::Error::ObjectNotFound(_)) => Ok(oid),
-        Err(err) => Err(err),
+        Err(crate::revision_error::RevisionError::Nested(ref nested))
+            if matches!(**nested, crate::error::Error::ObjectNotFound(_)) =>
+        {
+            Ok(oid)
+        }
+        Err(err) => Err(err.into()),
     }
 }
 

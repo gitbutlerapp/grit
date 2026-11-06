@@ -80,11 +80,11 @@ impl std::fmt::Display for OracleMismatch {
 
 fn grit_resolve(repo: &Repository, spec: &str, mode: ResolveMode) -> Result<ObjectId, Error> {
     match mode {
-        ResolveMode::Revision => resolve_revision(repo, spec),
-        ResolveMode::Verify => resolve_revision_for_verify(repo, spec),
-        ResolveMode::AsCommit => resolve_revision_as_commit(repo, spec),
+        ResolveMode::Revision => resolve_revision(repo, spec).map_err(Error::from),
+        ResolveMode::Verify => resolve_revision_for_verify(repo, spec).map_err(Error::from),
+        ResolveMode::AsCommit => resolve_revision_as_commit(repo, spec).map_err(Error::from),
         ResolveMode::PeelTree => {
-            let oid = resolve_revision_for_verify(repo, spec)?;
+            let oid = resolve_revision_for_verify(repo, spec).map_err(Error::from)?;
             peel_to_tree(repo, oid)
         }
         ResolveMode::TreeishBlobAtPath => Ok(resolve_treeish_blob_at_path(repo, spec)?.oid),

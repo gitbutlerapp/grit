@@ -60,7 +60,7 @@ pub fn commits_to_revert(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
     }
     tokens
         .iter()
-        .map(|spec| resolve_revision_as_commit(repo, spec))
+        .map(|spec| resolve_revision_as_commit(repo, spec).map_err(Into::into))
         .collect()
 }
 

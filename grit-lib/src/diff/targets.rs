@@ -207,6 +207,12 @@ impl From<Error> for ResolveDiffArgumentsError {
     }
 }
 
+impl From<crate::revision_error::RevisionError> for ResolveDiffArgumentsError {
+    fn from(err: crate::revision_error::RevisionError) -> Self {
+        Self::from(Error::from(err))
+    }
+}
+
 type ResolveResult<T> = std::result::Result<T, ResolveDiffArgumentsError>;
 
 /// Parse `grit diff` flags and positionals into a [`DiffTarget`] and pathspecs.
@@ -1149,7 +1155,7 @@ fn resolve_diff_commit(repo: &Repository, spec: &str) -> ResolveResult<ObjectId>
     let oid = resolve_revision(repo, spec).map_err(|source| {
         ResolveDiffArgumentsError::UnresolvedRevision {
             spec: spec.to_owned(),
-            source: Box::new(source),
+            source: Box::new(source.into()),
         }
     })?;
     peel_diff_commit(repo, oid)

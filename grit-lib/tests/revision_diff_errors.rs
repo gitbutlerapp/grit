@@ -1,6 +1,6 @@
 //! Typed [`RevisionError`] and [`DiffError`] variants (factory step 7106).
 
-use grit_lib::apply::parse_patch;
+use grit_lib::apply::{apply_patch_to_index, parse_patch, IndexApplyOptions};
 use grit_lib::blame::{IgnoreRevs, IgnoreRevsSources};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
@@ -29,7 +29,7 @@ fn revision_error_not_found_for_unknown_rev() {
     )
     .unwrap();
     let err = resolve_revision(&repo, "not-a-real-rev").unwrap_err();
-    assert!(matches!(err, Error::Revision(RevisionError::RevParse(_))));
+    assert!(matches!(err, RevisionError::RevParse(_)));
     assert_eq!(err.kind_name(), "rev_parse");
 }
 
@@ -84,7 +84,83 @@ fn userdiff_invalid_funcname() {
     let mut cfg = ConfigSet::new();
     cfg.merge(&file);
     let err = matcher_for_driver(&cfg, "probe").unwrap_err();
-    assert!(matches!(err, DiffError::UserdiffInvalidFuncname { .. }));
+    assert!(matches!(
+        err,
+        DiffError::InvalidFuncname {
+            source: grit_lib::diff::error::UserdiffFuncnameSourceError::InvalidRegexp { .. },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn rev_walk_public_api_returns_revision_error() {
+    let dir = tempdir().unwrap();
+    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
+    let repo = Repository::open(
+        &dir.path().join(".git"),
+        &RepositoryOptions::empty().with_work_tree(dir.path()),
+    )
+    .unwrap();
+    let err = repo.rev_walk().resolve("no-such-revision").unwrap_err();
+    assert!(matches!(err, RevisionError::RevParse(_)));
+}
+
+#[test]
+fn peel_bad_object_returns_revision_error() {
+    let dir = tempdir().unwrap();
+    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
+    let tree_hex = git(dir.path(), &["rev-parse", "HEAD^{tree}"]);
+    let tree_oid = ObjectId::from_hex(tree_hex.trim()).unwrap();
+    let err =
+        grit_lib::revwalk::rev_parse::peel_to_commit_for_merge_base(&repo, tree_oid).unwrap_err();
+    assert!(matches!(err, RevisionError::RevParse(_)));
+}
+
+#[test]
+fn apply_patch_that_does_not_apply() {
+    let dir = tempdir().unwrap();
+    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    fs::write(dir.path().join("f"), "hello\n").unwrap();
+    git(dir.path(), &["add", "f"]);
+    git(dir.path(), &["commit", "-m", "init"]);
+    let patch_text = "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-other\n+hello\n";
+    let patches = parse_patch(patch_text, 1, "stdin", false, None).unwrap();
+    let mut index = repo.index_handle().load().unwrap();
+    let err = apply_patch_to_index(&repo, &mut index, &patches, &IndexApplyOptions::default())
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ApplyError::ContextMismatch { .. } | ApplyError::PatchFailed { .. }
+        ),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn blame_ignore_revs_file_io_error() {
+    let dir = tempdir().unwrap();
+    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
+    let err = IgnoreRevs::load(
+        &repo,
+        &IgnoreRevsSources {
+            files: vec!["/no/such/ignore-revs-file".into()],
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        Error::Diff(DiffError::BlameIgnoreRevsFileOpen { io, .. })
+            if io.path.is_some()
+    ));
 }
 
 #[test]

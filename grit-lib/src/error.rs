@@ -76,6 +76,18 @@ fn preserve_io_error(source: &std::io::Error) -> std::io::Error {
     }
 }
 
+impl std::fmt::Display for PathIoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+impl std::error::Error for PathIoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 impl PathIoError {
     /// Build a worktree-path failure (path is the index- or worktree-relative display path).
     #[must_use]

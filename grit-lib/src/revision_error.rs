@@ -15,6 +15,9 @@ use crate::rev_list_error::RevListError;
 use crate::rev_parse_error::RevParseError;
 use thiserror::Error;
 
+/// Result type for public revision parsing, walking, and merge-base entry points.
+pub type RevResult<T> = std::result::Result<T, RevisionError>;
+
 /// Revision parsing, rev-list, merge-base, and object-filter failures.
 #[derive(Debug, Error)]
 #[non_exhaustive]

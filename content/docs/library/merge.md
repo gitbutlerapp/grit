@@ -24,7 +24,7 @@ Both functions take two commits and [`MergePredictionOptions`](rustdoc:grit_lib:
 
 The tree id in [`MergePrediction::Clean`](rustdoc:grit_lib::porcelain::merge::MergePrediction) is the id `git merge-tree --write-tree` prints, but the tree is **not stored**: committing, diffing or reading it fails with `ObjectNotFound`. Use `predict_merge` to answer "would this merge cleanly?" cheaply (merge queues, `grit merge --check`). Use `write_merge_tree` when you need the result itself: it is the library form of `git merge-tree --write-tree`. A clean result can be committed straight away with `NewCommit::new(tree, ..).with_parents(vec![ours, theirs])`. On conflicts the stored tree holds conflict markers in the conflicted files, and [`WrittenMergeTree::stages`](rustdoc:grit_lib::porcelain::merge::WrittenMergeTree) lists the `mode`, `oid`, `stage` and `path` rows Git prints after the tree id. Set `ours_label` and `theirs_label` to choose the conflict-marker labels.
 
-`write_merge_tree` always merges (the fast-forward option is ignored), merges several merge bases into a virtual base first (stage 1 entries then come from it, as with `git merge-tree`), and refuses commits with no common ancestor with `Error::UnrelatedHistories` unless `allow_unrelated_histories` is set.
+`write_merge_tree` always merges (the fast-forward option is ignored), merges several merge bases into a virtual base first (stage 1 entries then come from it, as with `git merge-tree`), and refuses commits with no common ancestor with [`RevisionError::UnrelatedHistories`](https://grit-scm.com/docs/library/revwalk) unless `allow_unrelated_histories` is set.
 
 ## Directory renames
 

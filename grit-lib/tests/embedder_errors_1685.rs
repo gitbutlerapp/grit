@@ -120,9 +120,9 @@ fn deep_parent_navigation_is_revision_out_of_range() {
     assert!(
         matches!(
             err,
-            Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
+            grit_lib::revision_error::RevisionError::RevParse(
                 RevParseError::RevisionOutOfRange { ref spec, .. },
-            )) if spec == "main~99"
+            ) if spec == "main~99"
         ),
         "got {err:?}"
     );

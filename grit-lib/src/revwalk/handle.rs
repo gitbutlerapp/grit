@@ -1,5 +1,4 @@
 //! Repository-scoped revision parsing and walking via [`RevWalk`].
-use crate::error::Result;
 use crate::object_inspect::{ResolveError, ResolvedObject};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
@@ -8,6 +7,7 @@ use crate::rev_list::{
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::resolve_revision;
+use crate::revision_error::{RevResult, RevisionError};
 use crate::revwalk::parse_rev_walk_tokens;
 use crate::revwalk::RevWalkCommitIterOptions;
 use std::borrow::Cow;
@@ -65,7 +65,7 @@ impl<'repo> RevWalk<'repo> {
     /// # }
     /// ```
     #[inline]
-    pub fn resolve(&self, spec: &str) -> Result<ObjectId> {
+    pub fn resolve(&self, spec: &str) -> RevResult<ObjectId> {
         resolve_revision(self.repo, spec)
     }
 
@@ -102,7 +102,7 @@ impl<'repo> RevWalk<'repo> {
     /// # Examples
     ///
     /// See the library guide page on [revision walking](https://grit-scm.com/docs/library/revwalk/).
-    pub fn walk(&self, spec: &str, options: &RevListOptions) -> Result<RevListResult> {
+    pub fn walk(&self, spec: &str, options: &RevListOptions) -> RevResult<RevListResult> {
         if !is_single_walk_spec(spec) {
             return Err(RevListError::UnsupportedWalkSpec {
                 spec: spec.to_owned(),
@@ -120,7 +120,7 @@ impl<'repo> RevWalk<'repo> {
         } else {
             Cow::Borrowed(options)
         };
-        rev_list(self.repo, &parsed.positive, &parsed.negative, &options)
+        rev_list(self.repo, &parsed.positive, &parsed.negative, &options).map_err(Into::into)
     }
 
     /// Lazy commit-only iterator for one revision `spec` (same single-token rules as [`Self::walk`]).
@@ -137,7 +137,7 @@ impl<'repo> RevWalk<'repo> {
         &self,
         spec: &str,
         options: &RevWalkCommitIterOptions,
-    ) -> Result<RevWalkCommitIter<'repo>> {
+    ) -> RevResult<RevWalkCommitIter<'repo>> {
         if !is_single_walk_spec(spec) {
             return Err(RevListError::UnsupportedWalkSpec {
                 spec: spec.to_owned(),
@@ -170,10 +170,12 @@ pub struct RevWalkCommitIter<'repo> {
 }
 
 impl Iterator for RevWalkCommitIter<'_> {
-    type Item = Result<ObjectId>;
+    type Item = std::result::Result<ObjectId, RevisionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|item| item.map(|row| row.oid))
+        self.inner
+            .next()
+            .map(|item| item.map(|row| row.oid).map_err(Into::into))
     }
 }
 
@@ -235,7 +237,7 @@ mod commit_iter_tests {
             .rev_walk()
             .commits_iter("HEAD", &options)
             .expect("iter")
-            .collect::<Result<Vec<_>>>()
+            .collect::<std::result::Result<Vec<_>, RevisionError>>()
             .expect("walk");
         assert_eq!(ids.len(), 2);
     }
@@ -251,7 +253,7 @@ mod commit_iter_tests {
         let all: Vec<_> = open_commit_stream(&repo, std::slice::from_ref(&newest), &[], &params)
             .expect("stream")
             .map(|item| item.map(|row| row.oid))
-            .collect::<Result<Vec<_>>>()
+            .collect::<crate::error::Result<Vec<_>>>()
             .expect("walk");
         assert_eq!(all.len(), 4);
 
@@ -267,7 +269,7 @@ mod commit_iter_tests {
         )
         .expect("stream")
         .map(|item| item.map(|row| row.oid))
-        .collect::<Result<Vec<_>>>()
+        .collect::<crate::error::Result<Vec<_>>>()
         .expect("walk");
         assert!(filtered.is_empty());
     }
