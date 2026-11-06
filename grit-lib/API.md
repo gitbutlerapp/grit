@@ -221,7 +221,19 @@ Regenerate with `make public-api` when you intentionally change the supported su
 
 ### API ratchet (`make api-ratchet-check`)
 
-Quality counts in [`api-ratchet.toml`](api-ratchet.toml) must not rise without an intentional fix; update the baseline with `make api-ratchet` when counts fall. See [`TESTING.md`](../TESTING.md).
+Quality counts in [`api-ratchet.toml`](api-ratchet.toml) must not rise without an intentional fix; update the baseline with `make api-ratchet` when counts fall. See [`TESTING.md`](../TESTING.md) for the full metric table.
+
+Duplicate-concept counters (API 0.6 plan) track progress toward one cancel type, one progress sink, typed ref names, pathspecs, config access, and repository constructors:
+
+| Metric | Target direction |
+| --- | --- |
+| `pub_cancel_types` | ↓ toward `CancelToken` |
+| `pub_progress_interfaces` | ↓ toward one progress sink |
+| `pub_refname_validators` | ↓ toward `RefName::parse` |
+| `pub_fn_refname_str` | ↓ toward `RefName` parameters |
+| `pub_fn_pathspec_strings` | ↓ toward a `Pathspec` type |
+| `pub_fn_configset_with_repo` | ↓ toward `repo.config()` reads |
+| `pub_repo_constructors` | ↓ toward `Repository::open` / `::discover` only |
 
 ### Results (visibility sweep: refs, config, worktree, index and small root modules)
 

@@ -264,6 +264,18 @@ The check fails if any count **increases**, or **decreases** without updating th
 
 Unit tests: `python3 -m unittest scripts/tests/test_api_ratchet.py` (also covered by the **scripts** CI job).
 
+| Metric | What increases the count |
+| --- | --- |
+| `pub_cancel_types` | Public items in the cancel family (`Cancel`, `NeverCancel`, `FlagCancel`, `CancelProgress`, `WatchProgress`, `HttpStackWatch`, `cancel_watch_arc`, `poll_watch`, `poll_cancel_watch`, `mirror_stack_cancel`) plus every public function parameter or struct field typed `dyn Cancel`, `Arc<AtomicBool>`, or `&AtomicBool`. |
+| `pub_progress_interfaces` | Public traits whose name ends in `Progress` or that inherit `ProgressSink`, public structs whose name ends in `Progress`, plus public functions taking `FnMut` whose callback argument type name contains `Progress`. |
+| `pub_refname_validators` | Public free functions defined under `refs/` (including `check_ref_format`) whose name or path matches `refname` / `ref_name` / `ref_format` and that return `bool` or `Result<(), _>`. |
+| `pub_fn_refname_str` | Public functions or methods under `refs`, `refs::store`, `repo_handles`, or `revwalk` with a parameter named `name`, `refname`, `ref_name`, or `target_ref` typed `&str` or `String`. |
+| `pub_fn_pathspec_strings` | Public functions with a parameter named `pathspec`, `pathspecs`, `paths`, or `specs` typed `&[String]`, `Vec<String>`, or `&[&str]`, plus `sources` / `specs` fields on `ResolvedPathspecs`. |
+| `pub_fn_configset_with_repo` | Public functions or methods that take `&ConfigSet` and also take `&Repository` as the first parameter or use `&self` on a repository handle. |
+| `pub_repo_constructors` | Public associated functions returning `Repository` or `Result<Repository, _>`, plus `RepositoryLocation::discover*` and `rev_parse::discover_optional`. |
+
+Existing metrics (`public_api_lines`, `pub_fn_with_in_name`, `pub_free_fn_repository_first`, and the rest) are unchanged.
+
 ### `test-support` and public API test hooks
 
 **`test-support`** is an empty-by-default, **unstable** `grit-lib` feature. It exposes [`grit_lib::test_support`](grit-lib/src/test_support/mod.rs) (including [`test_support::fixtures`](grit-lib/src/test_support/fixtures/mod.rs) for synthetic benchmark repos and [`test_support::ewah`](grit-lib/src/test_support/ewah.rs) for EWAH Criterion fixtures) for workspace tests and internal crates only. Enable it from **`grit-test-support`**, **`grit-utils`**, and **`cargo test --workspace`** / **`make gate`** via **`--features grit-lib/test-support`**; do not enable it from **`grit-cli`**, **`grit-protocol`**, or **`grit-http-server`** `[dependencies]`. It is **outside semver**: omitted from **`public-api.txt`** and **`make semver-check`**, and may change in any release. **`make gate`** and CI still run **`cargo check -p grit-lib`** and **`cargo check -p grit-cli`** without the feature so the default embedder build stays clean.

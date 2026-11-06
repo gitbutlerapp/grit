@@ -612,6 +612,340 @@ class ApiRatchetMetricTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any("pub_unsafe_fn" in line for line in failures))
 
+    def test_pub_cancel_types_dyn_cancel_param(self) -> None:
+        cancel_trait = {
+            "name": "Cancel",
+            "inner": {"trait": {"items": [], "bounds": []}},
+        }
+        payload = _minimal_rustdoc(
+            cancel_trait,
+            {
+                "name": "run",
+                "inner": {
+                    "function": {
+                        "sig": {
+                            "inputs": [
+                                [
+                                    "cancel",
+                                    {
+                                        "borrowed_ref": {
+                                            "is_mutable": False,
+                                            "type": {
+                                                "dyn_trait": {
+                                                    "traits": [
+                                                        {
+                                                            "trait": {
+                                                                "path": "Cancel",
+                                                                "id": 99,
+                                                                "args": None,
+                                                            }
+                                                        }
+                                                    ]
+                                                }
+                                            },
+                                        }
+                                    },
+                                ]
+                            ],
+                            "output": None,
+                        },
+                        "header": {},
+                    }
+                },
+            },
+        )
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertGreaterEqual(snap.metrics["pub_cancel_types"].count, 2)
+
+    def test_pub_progress_interfaces_trait_and_fnmut(self) -> None:
+        payload = _minimal_rustdoc(
+            {
+                "name": "Progress",
+                "inner": {
+                    "trait": {
+                        "items": [],
+                        "bounds": [
+                            {
+                                "trait_bound": {
+                                    "trait": {"path": "ProgressSink", "id": 1},
+                                    "generic_params": [],
+                                    "modifier": "none",
+                                }
+                            }
+                        ],
+                    }
+                },
+            },
+            {
+                "name": "cb",
+                "inner": {
+                    "function": {
+                        "sig": {
+                            "inputs": [
+                                [
+                                    "f",
+                                    {
+                                        "borrowed_ref": {
+                                            "is_mutable": True,
+                                            "type": {
+                                                "dyn_trait": {
+                                                    "traits": [
+                                                        {
+                                                            "trait": {
+                                                                "path": "FnMut",
+                                                                "id": 2,
+                                                                "args": {
+                                                                    "parenthesized": {
+                                                                        "inputs": [
+                                                                            {
+                                                                                "resolved_path": {
+                                                                                    "path": "PackProgress",
+                                                                                    "id": 3,
+                                                                                }
+                                                                            }
+                                                                        ],
+                                                                        "output": None,
+                                                                    }
+                                                                },
+                                                            }
+                                                        }
+                                                    ]
+                                                }
+                                            },
+                                        }
+                                    },
+                                ]
+                            ],
+                            "output": None,
+                        },
+                        "header": {},
+                    }
+                },
+            },
+        )
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_progress_interfaces"].count, 2)
+
+    def test_pub_refname_validators(self) -> None:
+        payload = {
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [1, 2]}},
+                },
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "refname_is_safe",
+                    "visibility": "public",
+                    "span": {"filename": "grit-lib/src/check_ref_format.rs", "begin": [1, 1]},
+                    "inner": {
+                        "function": {
+                            "sig": {
+                                "inputs": [["name", {"type": {"primitive": "str"}}]],
+                                "output": {"primitive": "bool"},
+                            },
+                            "header": {},
+                        }
+                    },
+                },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "name": "other",
+                    "visibility": "public",
+                    "span": {"filename": "grit-lib/src/lib.rs", "begin": [1, 1]},
+                    "inner": {
+                        "function": {
+                            "sig": {
+                                "inputs": [],
+                                "output": {
+                                    "resolved_path": {
+                                        "path": "Result",
+                                        "args": {
+                                            "angle_bracketed": {
+                                                "args": [
+                                                    {"type": {"tuple": []}},
+                                                    {"type": {"primitive": "u8"}},
+                                                ]
+                                            }
+                                        },
+                                    }
+                                },
+                            },
+                            "header": {},
+                        }
+                    },
+                },
+            },
+            "paths": {"0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"}},
+        }
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_refname_validators"].count, 1)
+
+    def test_pub_fn_refname_str(self) -> None:
+        payload = _minimal_rustdoc(
+            {
+                "name": "resolve_ref",
+                "span": {"filename": "grit-lib/src/refs/mod.rs", "begin": [1, 1]},
+                "inner": {
+                    "function": {
+                        "sig": {
+                            "inputs": [
+                                [
+                                    "refname",
+                                    {
+                                        "borrowed_ref": {
+                                            "is_mutable": False,
+                                            "type": {"primitive": "str"},
+                                        }
+                                    },
+                                ]
+                            ],
+                            "output": None,
+                        },
+                        "header": {},
+                    }
+                },
+            }
+        )
+        payload["paths"]["1"] = {
+            "crate_id": 0,
+            "path": ["grit_lib", "refs", "resolve_ref"],
+            "kind": "function",
+        }
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_fn_refname_str"].count, 1)
+
+    def test_pub_fn_pathspec_strings(self) -> None:
+        payload = _minimal_rustdoc(
+            {
+                "name": "filter_paths",
+                "inner": {
+                    "function": {
+                        "sig": {
+                            "inputs": [
+                                [
+                                    "paths",
+                                    {
+                                        "borrowed_ref": {
+                                            "is_mutable": False,
+                                            "type": {
+                                                "resolved_path": {
+                                                    "path": "Vec",
+                                                    "args": {
+                                                        "angle_bracketed": {
+                                                            "args": [
+                                                                {
+                                                                    "type": {
+                                                                        "resolved_path": {
+                                                                            "path": "String"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            ]
+                                                        }
+                                                    },
+                                                }
+                                            },
+                                        }
+                                    },
+                                ]
+                            ],
+                            "output": None,
+                        },
+                        "header": {},
+                    }
+                },
+            }
+        )
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_fn_pathspec_strings"].count, 1)
+
+    def test_pub_fn_configset_with_repo(self) -> None:
+        repo_ref = {
+            "borrowed_ref": {
+                "is_mutable": False,
+                "type": {"resolved_path": {"path": "Repository"}},
+            }
+        }
+        config_ref = {
+            "borrowed_ref": {
+                "is_mutable": False,
+                "type": {"resolved_path": {"path": "ConfigSet"}},
+            }
+        }
+        payload = _minimal_rustdoc(
+            {
+                "name": "prepare",
+                "inner": {
+                    "function": {
+                        "sig": {
+                            "inputs": [["repo", repo_ref], ["cfg", config_ref]],
+                            "output": None,
+                        },
+                        "header": {},
+                    }
+                },
+            }
+        )
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_fn_configset_with_repo"].count, 1)
+
+    def test_pub_repo_constructors(self) -> None:
+        payload = {
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [10, 11]}},
+                },
+                "10": {
+                    "id": 10,
+                    "crate_id": 0,
+                    "visibility": "public",
+                    "inner": {
+                        "impl": {
+                            "items": [11],
+                            "for": {"resolved_path": {"path": "Repository"}},
+                        }
+                    },
+                },
+                "11": {
+                    "id": 11,
+                    "crate_id": 0,
+                    "name": "open",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {
+                                "inputs": [],
+                                "output": {
+                                    "resolved_path": {
+                                        "path": "Result",
+                                        "args": {
+                                            "angle_bracketed": {
+                                                "args": [{"type": {"generic": "Self"}}]
+                                            }
+                                        },
+                                    }
+                                },
+                            },
+                            "header": {},
+                        }
+                    },
+                },
+            },
+            "paths": {"0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"}},
+        }
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_repo_constructors"].count, 1)
+
     def test_compare_fails_on_unrecorded_decrease(self) -> None:
         snap = ar.RatchetSnapshot(
             metrics={key: ar.MetricResult(0) for key in ar.METRIC_KEYS}

@@ -39,7 +39,46 @@ METRIC_KEYS = (
     "pub_items_multiple_paths",
     "pub_libc_types",
     "pub_unsafe_fn",
+    "pub_cancel_types",
+    "pub_progress_interfaces",
+    "pub_refname_validators",
+    "pub_fn_refname_str",
+    "pub_fn_pathspec_strings",
+    "pub_fn_configset_with_repo",
+    "pub_repo_constructors",
 )
+
+CANCEL_FAMILY_NAMES = frozenset(
+    {
+        "Cancel",
+        "NeverCancel",
+        "FlagCancel",
+        "CancelProgress",
+        "WatchProgress",
+        "HttpStackWatch",
+        "cancel_watch_arc",
+        "poll_watch",
+        "poll_cancel_watch",
+        "mirror_stack_cancel",
+    }
+)
+
+REFNAME_PARAM_NAMES = frozenset({"name", "refname", "ref_name", "target_ref"})
+REFNAME_FN_NAME_RE = re.compile(r"refname|ref_name|ref_format", re.IGNORECASE)
+REFNAME_VALIDATOR_PATH_MARK = "::check_ref_format::"
+
+REFNAME_STR_MODULE_PREFIXES = (
+    "grit_lib::refs::",
+    "grit_lib::refs::store::",
+    "grit_lib::repo_handles::",
+    "grit_lib::revwalk::",
+)
+
+PATHSPEC_PARAM_NAMES = frozenset({"pathspec", "pathspecs", "paths", "specs"})
+RESOLVED_PATHSPECS_TYPE = "grit_lib::worktree::pathspec::ResolvedPathspecs"
+RESOLVED_PATHSPECS_STRING_FIELDS = frozenset({"sources", "specs"})
+
+REFNAME_VALIDATOR_MODULE_PREFIX = "grit_lib::refs::"
 
 GIT_DIR_PARAM_NAMES = frozenset(
     {"git_dir", "gitdir", "repo_git_dir", "common_dir"},
@@ -277,6 +316,362 @@ def build_associated_function_ids(index: dict[str, Any]) -> frozenset[str]:
     return frozenset(associated)
 
 
+def build_function_impl_for(index: dict[str, Any]) -> dict[str, str]:
+    """Map public function item id -> ``type_display`` of the impl's ``for`` type."""
+    mapping: dict[str, str] = {}
+    for item_id, item in index.items():
+        if item.get("crate_id") != 0:
+            continue
+        inner = item.get("inner") or {}
+        if "impl" not in inner:
+            continue
+        for_path = impl_for_type_path(item)
+        if not for_path:
+            continue
+        for member_id in inner["impl"].get("items") or []:
+            member = index_entry(index, member_id)
+            if member and "function" in (member.get("inner") or {}):
+                mapping[str(member_id)] = for_path
+    return mapping
+
+
+def is_str_or_string_type(type_node: Any) -> bool:
+    """True for ``&str``, ``&mut str``, or ``String`` (after one layer of borrow)."""
+    if isinstance(type_node, dict) and "borrowed_ref" in type_node:
+        inner = type_node["borrowed_ref"].get("type")
+        if isinstance(inner, dict) and inner.get("primitive") == "str":
+            return True
+    if isinstance(type_node, dict) and type_node.get("primitive") == "str":
+        return True
+    path = _resolved_path_name(type_node)
+    if path in STRING_RUST_TYPES or (path and path.endswith("::String")):
+        return True
+    return False
+
+
+def is_pathspec_string_collection(type_node: Any) -> bool:
+    """``&[String]``, ``Vec<String>``, or ``&[&str]``."""
+    display = type_display(type_node)
+    if "&[&str]" in display or "&[ &str ]" in display.replace(" ", ""):
+        return True
+    if "Vec<String>" in display or "Vec<alloc::string::String>" in display:
+        return True
+    if "&[String]" in display or "&[alloc::string::String]" in display:
+        return True
+    if not isinstance(type_node, dict):
+        return False
+    if "borrowed_ref" in type_node:
+        return is_pathspec_string_collection(type_node["borrowed_ref"].get("type"))
+    if "resolved_path" in type_node:
+        rp = type_node["resolved_path"]
+        path = str(rp.get("path", ""))
+        if path.endswith("::Vec") or path == "Vec":
+            args = rp.get("args")
+            inner = _first_generic_arg_type(args)
+            if inner and is_str_or_string_type(inner):
+                return True
+        if path.endswith("::slice") or path == "slice" or "[T]" in display:
+            inner = _first_generic_arg_type(rp.get("args"))
+            if inner and is_str_or_string_type(inner):
+                return True
+    return False
+
+
+def _first_generic_arg_type(args: Any) -> Any | None:
+    if isinstance(args, dict):
+        ab = args.get("angle_bracketed", {})
+        arg_list = ab.get("args", [])
+        if arg_list:
+            first = arg_list[0]
+            return first.get("type") if isinstance(first, dict) and "type" in first else first
+    if isinstance(args, list) and args:
+        first = args[0]
+        return first.get("type") if isinstance(first, dict) and "type" in first else first
+    return None
+
+
+def type_is_bool(type_node: Any) -> bool:
+    if isinstance(type_node, dict) and "type" in type_node:
+        type_node = type_node["type"]
+    return isinstance(type_node, dict) and type_node.get("primitive") == "bool"
+
+
+def _type_node_is_unit(type_node: Any) -> bool:
+    if type_node is None:
+        return False
+    if isinstance(type_node, dict):
+        if type_node.get("primitive") == "unit":
+            return True
+        if "tuple" in type_node and not type_node["tuple"]:
+            return True
+        if "type" in type_node:
+            return _type_node_is_unit(type_node["type"])
+    return type_display(type_node) in {"()", "unit"}
+
+
+def returns_bool_or_unit_result(type_node: Any, index: dict[str, Any]) -> bool:
+    if type_is_bool(type_node):
+        return True
+    if isinstance(type_node, dict) and "resolved_path" in type_node:
+        rp = type_node["resolved_path"]
+        if "Result" in str(rp.get("path", "")):
+            ok_ty = _first_generic_arg_type(rp.get("args"))
+            if ok_ty is not None:
+                ok_inner = ok_ty.get("type") if isinstance(ok_ty, dict) and "type" in ok_ty else ok_ty
+                if _type_node_is_unit(ok_inner):
+                    return True
+    resolved = resolve_type_node(type_node, index)
+    if not isinstance(resolved, dict):
+        return False
+    rp = resolved.get("resolved_path")
+    if not isinstance(rp, dict) or "Result" not in str(rp.get("path", "")):
+        return False
+    ok_ty = _first_generic_arg_type(rp.get("args"))
+    if ok_ty is None:
+        return False
+    ok_inner = ok_ty.get("type") if isinstance(ok_ty, dict) and "type" in ok_ty else ok_ty
+    return _type_node_is_unit(ok_inner)
+
+
+def is_dyn_cancel_type(type_node: Any, index: dict[str, Any]) -> bool:
+    resolved = resolve_type_node(type_node, index)
+    if isinstance(resolved, dict) and "dyn_trait" in resolved:
+        traits = resolved["dyn_trait"].get("traits") or []
+        for trait in traits:
+            if "Cancel" in type_display(trait):
+                return True
+    if isinstance(resolved, dict) and "borrowed_ref" in resolved:
+        return is_dyn_cancel_type(resolved["borrowed_ref"].get("type"), index)
+    display = type_display(resolved)
+    return "dyn" in display and "Cancel" in display
+
+
+def is_atomic_bool_watch_type(type_node: Any, index: dict[str, Any]) -> bool:
+    resolved = resolve_type_node(type_node, index)
+    display = type_display(resolved)
+    if "AtomicBool" not in display:
+        return False
+    if "Arc" in display:
+        return True
+    if isinstance(resolved, dict) and "borrowed_ref" in resolved:
+        return True
+    return display.startswith("&") and "AtomicBool" in display
+
+
+def _type_is_repository_node(resolved: Any) -> bool:
+    path = _resolved_path_name(resolved)
+    if not path:
+        return False
+    return path == REPOSITORY_TYPE_PLAIN or path.endswith(REPOSITORY_TYPE_SUFFIX)
+
+
+def returns_repository(
+    type_node: Any,
+    index: dict[str, Any],
+    *,
+    impl_for: str | None = None,
+) -> bool:
+    if type_node is None:
+        return False
+    if isinstance(type_node, dict) and type_node.get("generic") == "Self":
+        return _type_is_repository_node({"resolved_path": {"path": impl_for or ""}})
+    if _type_is_repository_node(type_node):
+        return True
+    if isinstance(type_node, dict) and "resolved_path" in type_node:
+        rp = type_node["resolved_path"]
+        path = str(rp.get("path", ""))
+        if "Option" in path:
+            inner = _first_generic_arg_type(rp.get("args"))
+            if inner is not None:
+                inner_ty = inner.get("type") if isinstance(inner, dict) and "type" in inner else inner
+                if returns_repository(inner_ty, index, impl_for=impl_for):
+                    return True
+        if "Result" in path:
+            ok = _first_generic_arg_type(rp.get("args"))
+            if ok is not None:
+                ok_ty = ok.get("type") if isinstance(ok, dict) and "type" in ok else ok
+                if isinstance(ok_ty, dict) and ok_ty.get("generic") == "Self":
+                    if _type_is_repository_node({"resolved_path": {"path": impl_for or ""}}):
+                        return True
+                if returns_repository(ok_ty, index, impl_for=impl_for):
+                    return True
+    resolved = resolve_type_node(type_node, index)
+    if resolved is type_node:
+        return False
+    return returns_repository(resolved, index, impl_for=impl_for)
+
+
+def _result_ok_type(resolved: Any) -> Any | None:
+    if not isinstance(resolved, dict):
+        return None
+    rp = resolved.get("resolved_path")
+    if not isinstance(rp, dict) or "Result" not in str(rp.get("path", "")):
+        return None
+    return _first_generic_arg_type(rp.get("args"))
+
+
+def impl_for_type_path(item: dict[str, Any]) -> str | None:
+    inner = item.get("inner") or {}
+    if "impl" not in inner:
+        return None
+    for_block = inner["impl"].get("for") or inner["impl"].get("type")
+    if for_block is None:
+        return None
+    return type_display(for_block)
+
+
+def handle_borrows_repository(for_path: str | None) -> bool:
+    if not for_path:
+        return False
+    if for_path == REPOSITORY_TYPE_PLAIN or for_path.endswith(REPOSITORY_TYPE_SUFFIX):
+        return True
+    if "repo_handles" in for_path:
+        return True
+    if for_path.endswith("::References") or for_path.endswith("::Diff"):
+        return True
+    if "IndexHandle" in for_path or "ConfigHandle" in for_path or "Objects" in for_path:
+        return True
+    return False
+
+
+def has_configset_param(inputs: list[tuple[str, Any]], index: dict[str, Any]) -> bool:
+    for _name, ty in inputs:
+        display = type_display(resolve_type_node(ty, index))
+        if "ConfigSet" in display:
+            return True
+    return False
+
+
+def has_repository_first_param(inputs: list[tuple[str, Any]]) -> bool:
+    if not inputs:
+        return False
+    _name, ty = inputs[0]
+    return is_exact_repository_ref(ty) or (
+        _resolved_path_name(ty) == REPOSITORY_TYPE_PLAIN
+        or (_resolved_path_name(ty) or "").endswith(REPOSITORY_TYPE_SUFFIX)
+    )
+
+
+def trait_name_from_item(item: dict[str, Any]) -> str | None:
+    return item.get("name")
+
+
+def trait_has_progress_sink_supertrait(trait_inner: dict[str, Any]) -> bool:
+    for bound in trait_inner.get("bounds") or []:
+        tb = bound.get("trait_bound") or {}
+        trait = tb.get("trait") or {}
+        path = str(trait.get("path", ""))
+        if path == "ProgressSink" or path.endswith("::ProgressSink"):
+            return True
+    decl = trait_inner.get("decl") or {}
+    for bound in decl.get("supertraits") or []:
+        if "ProgressSink" in type_display(bound):
+            return True
+    return False
+
+
+def _dyn_fnmut_input_types(type_node: Any) -> list[Any]:
+    """Extract FnMut callback input types from ``dyn FnMut(...)`` rustdoc nodes."""
+    candidates: list[Any] = [type_node]
+    if isinstance(type_node, dict) and "borrowed_ref" in type_node:
+        candidates.append(type_node["borrowed_ref"].get("type"))
+    out: list[Any] = []
+    for node in candidates:
+        if not isinstance(node, dict) or "dyn_trait" not in node:
+            continue
+        for entry in node["dyn_trait"].get("traits") or []:
+            trait = entry.get("trait") or {}
+            if "FnMut" not in str(trait.get("path", "")):
+                continue
+            args = trait.get("args") or {}
+            paren = args.get("parenthesized") or {}
+            out.extend(paren.get("inputs") or [])
+            angle = args.get("angle_bracketed") or {}
+            fn_args = _first_generic_arg_type({"angle_bracketed": angle})
+            if fn_args is not None:
+                if isinstance(fn_args, dict) and "tuple" in fn_args:
+                    for entry in fn_args["tuple"]:
+                        ty = entry.get("type") if isinstance(entry, dict) else entry
+                        if ty is not None:
+                            out.append(ty)
+                else:
+                    out.append(fn_args)
+    return out
+
+
+def fn_param_is_fnmut_with_progress_arg(type_node: Any, index: dict[str, Any]) -> bool:
+    for inp in _dyn_fnmut_input_types(type_node):
+        if "Progress" in type_display(inp):
+            return True
+    resolved = resolve_type_node(type_node, index)
+    if not isinstance(resolved, dict):
+        return False
+    rp = resolved.get("resolved_path")
+    if not isinstance(rp, dict):
+        return False
+    path = str(rp.get("path", ""))
+    if "FnMut" not in path:
+        return False
+    args = rp.get("args")
+    fn_args = _first_generic_arg_type(args)
+    if fn_args is None:
+        return False
+    if isinstance(fn_args, dict) and "tuple" in fn_args:
+        for entry in fn_args["tuple"]:
+            ty = entry.get("type") if isinstance(entry, dict) else entry
+            if ty and "Progress" in type_display(ty):
+                return True
+        return False
+    return "Progress" in type_display(fn_args)
+
+
+def module_path_allowed(path: str, prefixes: tuple[str, ...]) -> bool:
+    return any(path.startswith(prefix) for prefix in prefixes)
+
+
+def item_has_public_path_prefix(
+    item_id: str,
+    path_map: dict[str, list[str]],
+    fallback_path: str,
+    prefix: str,
+) -> bool:
+    paths = path_map.get(item_id) or []
+    if not paths and fallback_path:
+        paths = [fallback_path]
+    return any(p.startswith(prefix) for p in paths)
+
+
+def item_defined_in_refs(
+    item_id: str,
+    path_map: dict[str, list[str]],
+    fallback_path: str,
+    item: dict[str, Any],
+) -> bool:
+    """True when exported under ``grit_lib::refs::`` or defined under ``src/refs/``."""
+    if item_has_public_path_prefix(item_id, path_map, fallback_path, "grit_lib::refs::"):
+        return True
+    span = item.get("span") or {}
+    filename = str(span.get("filename", "")).replace("\\", "/")
+    if "/refs/" in filename or filename.endswith("/refs/mod.rs"):
+        return True
+    if filename.endswith("/check_ref_format.rs"):
+        return True
+    candidates = [
+        Path(filename),
+        GRIT_LIB / "src" / Path(filename).name,
+        GRIT_LIB / "src" / filename.replace("grit-lib/src/", ""),
+    ]
+    for path in candidates:
+        try:
+            rel = path.resolve().relative_to((GRIT_LIB / "src").resolve())
+        except (ValueError, OSError):
+            continue
+        parts = rel.parts
+        if parts and parts[0] == "refs":
+            return True
+    return False
+
+
 def is_bare_bool(type_node: Any) -> bool:
     if isinstance(type_node, dict) and "type" in type_node:
         type_node = type_node["type"]
@@ -511,6 +906,69 @@ def compute_metrics(
     unsafe_fns: list[str] = []
     libc_offenders: list[str] = []
     associated_fn_ids = build_associated_function_ids(index)
+    fn_impl_for = build_function_impl_for(index)
+    path_map = collect_public_paths(payload)
+
+    def path_in_refname_str_modules(item_id: str, fallback: str) -> bool:
+        if module_path_allowed(fallback, REFNAME_STR_MODULE_PREFIXES):
+            return True
+        for prefix in REFNAME_STR_MODULE_PREFIXES:
+            if item_has_public_path_prefix(item_id, path_map, fallback, prefix):
+                return True
+        return False
+
+    cancel_offenders: list[str] = []
+    progress_offenders: list[str] = []
+    refname_validator_offenders: list[str] = []
+    refname_str_offenders: list[str] = []
+    pathspec_str_offenders: list[str] = []
+    configset_repo_offenders: list[str] = []
+    repo_constructor_offenders: list[str] = []
+
+    for item_id, item in index.items():
+        if item.get("crate_id") != 0 or item.get("visibility") != "public":
+            continue
+        path = public_path_for_item(index, paths_map, str(item_id))
+        name = item.get("name") or "?"
+        inner = item.get("inner") or {}
+
+        if name in CANCEL_FAMILY_NAMES:
+            cancel_offenders.append(f"{path} :: {name}")
+
+        if "trait" in inner:
+            trait_inner = inner["trait"]
+            if (
+                name.endswith("Progress")
+                or name == "ProgressSink"
+                or trait_has_progress_sink_supertrait(trait_inner)
+            ):
+                progress_offenders.append(f"{path} :: trait {name}")
+
+        if "struct" in inner and name.endswith("Progress"):
+            progress_offenders.append(f"{path} :: struct {name}")
+
+        if "struct" in inner:
+            fields_raw = inner["struct"].get("fields")
+            fields: list[dict[str, Any]] = []
+            if isinstance(fields_raw, dict):
+                fields = fields_raw.get("fields") or []
+            elif isinstance(fields_raw, list):
+                fields = fields_raw
+            is_resolved_pathspecs = path.endswith("::ResolvedPathspecs")
+            for field in fields:
+                field_name = field.get("name")
+                field_ty = field.get("type")
+                if field_ty and is_dyn_cancel_type(field_ty, index):
+                    cancel_offenders.append(f"{path} :: field {field_name}")
+                if field_ty and is_atomic_bool_watch_type(field_ty, index):
+                    cancel_offenders.append(f"{path} :: field {field_name}")
+                if (
+                    is_resolved_pathspecs
+                    and field_name in RESOLVED_PATHSPECS_STRING_FIELDS
+                    and field_ty
+                    and is_pathspec_string_collection(field_ty)
+                ):
+                    pathspec_str_offenders.append(f"{path} :: field {field_name}")
 
     for item_id, item, fn in iter_public_functions(index):
         path = public_path_for_item(index, paths_map, item_id)
@@ -549,6 +1007,79 @@ def compute_metrics(
             ):
                 git_dir_first.append(f"{path} :: {name}")
 
+        for param_name, param_ty in inputs:
+            if is_dyn_cancel_type(param_ty, index):
+                cancel_offenders.append(f"{path} :: {name}({param_name})")
+            if is_atomic_bool_watch_type(param_ty, index):
+                cancel_offenders.append(f"{path} :: {name}({param_name})")
+            if fn_param_is_fnmut_with_progress_arg(param_ty, index):
+                progress_offenders.append(f"{path} :: {name}({param_name})")
+            if param_name in PATHSPEC_PARAM_NAMES and is_pathspec_string_collection(
+                param_ty,
+            ):
+                pathspec_str_offenders.append(f"{path} :: {name}({param_name})")
+
+        validator_name = REFNAME_FN_NAME_RE.search(name) or (
+            REFNAME_VALIDATOR_PATH_MARK in path
+        )
+        if (
+            is_free_fn
+            and item_defined_in_refs(item_id, path_map, path, item)
+            and validator_name
+            and returns_bool_or_unit_result(fn.get("sig", {}).get("output"), index)
+        ):
+            refname_validator_offenders.append(f"{path} :: {name}")
+
+        if path_in_refname_str_modules(item_id, path):
+            for param_name, param_ty in inputs:
+                if param_name in REFNAME_PARAM_NAMES and is_str_or_string_type(param_ty):
+                    refname_str_offenders.append(f"{path} :: {name}({param_name})")
+
+        if has_configset_param(inputs, index):
+            method = is_method(fn)
+            repo_ctx = False
+            if method:
+                for_path = fn_impl_for.get(item_id)
+                repo_ctx = handle_borrows_repository(for_path)
+            elif has_repository_first_param(inputs):
+                repo_ctx = True
+            if repo_ctx:
+                configset_repo_offenders.append(f"{path} :: {name}")
+
+        output = fn.get("sig", {}).get("output")
+        impl_for = fn_impl_for.get(item_id)
+        if item_id in associated_fn_ids and returns_repository(
+            output,
+            index,
+            impl_for=impl_for,
+        ):
+            repo_constructor_offenders.append(f"{path} :: {name}")
+        if "rev_parse" in path and path.endswith("::discover_optional"):
+            repo_constructor_offenders.append(f"{path} :: {name}")
+
+    for item_id, item in index.items():
+        if item.get("crate_id") != 0:
+            continue
+        inner = item.get("inner") or {}
+        if "impl" not in inner:
+            continue
+        for_path = impl_for_type_path(item)
+        if not for_path or (
+            "RepositoryLocation" not in for_path and not for_path.endswith("::RepositoryLocation")
+        ):
+            continue
+        for member_id in inner["impl"].get("items") or []:
+            member = index_entry(index, member_id)
+            if not member or member.get("visibility") != "public":
+                continue
+            member_inner = member.get("inner") or {}
+            if "function" not in member_inner:
+                continue
+            fname = member.get("name") or "?"
+            if fname.startswith("discover"):
+                mpath = public_path_for_item(index, paths_map, str(member_id))
+                repo_constructor_offenders.append(f"{mpath} :: {fname}")
+
     # Also scan non-function public items for libc in signatures? Task says "public signatures"
     for item_id, item in index.items():
         if item.get("crate_id") != 0 or item.get("visibility") != "public":
@@ -560,7 +1091,6 @@ def compute_metrics(
             path = public_path_for_item(index, paths_map, str(item_id))
             libc_offenders.append(f"{path} :: {item.get('name', '?')}")
 
-    path_map = collect_public_paths(payload)
     multi_paths: list[str] = []
     for item_id, paths in sorted(path_map.items(), key=lambda kv: kv[0]):
         non_prelude = [
@@ -584,6 +1114,34 @@ def compute_metrics(
         "pub_items_multiple_paths": MetricResult(len(multi_paths), multi_paths),
         "pub_libc_types": MetricResult(len(sorted(set(libc_offenders))), sorted(set(libc_offenders))),
         "pub_unsafe_fn": MetricResult(len(unsafe_fns), unsafe_fns),
+        "pub_cancel_types": MetricResult(
+            len(sorted(set(cancel_offenders))),
+            sorted(set(cancel_offenders)),
+        ),
+        "pub_progress_interfaces": MetricResult(
+            len(sorted(set(progress_offenders))),
+            sorted(set(progress_offenders)),
+        ),
+        "pub_refname_validators": MetricResult(
+            len(sorted(set(refname_validator_offenders))),
+            sorted(set(refname_validator_offenders)),
+        ),
+        "pub_fn_refname_str": MetricResult(
+            len(sorted(set(refname_str_offenders))),
+            sorted(set(refname_str_offenders)),
+        ),
+        "pub_fn_pathspec_strings": MetricResult(
+            len(sorted(set(pathspec_str_offenders))),
+            sorted(set(pathspec_str_offenders)),
+        ),
+        "pub_fn_configset_with_repo": MetricResult(
+            len(sorted(set(configset_repo_offenders))),
+            sorted(set(configset_repo_offenders)),
+        ),
+        "pub_repo_constructors": MetricResult(
+            len(sorted(set(repo_constructor_offenders))),
+            sorted(set(repo_constructor_offenders)),
+        ),
     }
     return RatchetSnapshot(metrics=metrics)
 
@@ -600,15 +1158,33 @@ def load_baseline(path: Path) -> dict[str, int]:
 
 def write_baseline(path: Path, snapshot: RatchetSnapshot) -> None:
     today = date.today().isoformat()
+    preserved_meta: dict[str, str] = {}
+    if path.is_file():
+        existing = tomllib.loads(path.read_text(encoding="utf-8"))
+        meta_table = existing.get("meta", {})
+        if isinstance(meta_table, dict):
+            for key, value in meta_table.items():
+                if key != "updated" and value is not None:
+                    preserved_meta[str(key)] = str(value)
     lines = [
         "# grit-lib public API quality counts — ratchet baseline",
         "# Regenerate with: make api-ratchet",
         "",
         "[meta]",
         f'updated = "{today}"',
+    ]
+    for key in sorted(preserved_meta):
+        val = preserved_meta[key]
+        if val.startswith('"') or val.isdigit():
+            lines.append(f"{key} = {val}")
+        else:
+            lines.append(f'{key} = "{val}"')
+    lines.extend(
+        [
         "",
         "[counts]",
-    ]
+        ]
+    )
     for key in METRIC_KEYS:
         lines.append(f"{key} = {snapshot.metrics[key].count}")
     lines.append("")
