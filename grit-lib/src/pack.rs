@@ -10,6 +10,8 @@ pub(crate) use crate::pack_index::parse_pack_index_bytes;
 pub use crate::pack_index::{PackIndex, PackIndexEntryRef};
 
 #[cfg(test)]
+use crate::objects::ObjectError;
+#[cfg(test)]
 use crate::pack_index::compute_fanout_from_oid_slices;
 
 use crate::error::{Error, Result};
@@ -7699,7 +7701,10 @@ mod tests {
         clear_pack_cache();
         let odb = Odb::new(&objects);
         let err = odb.read(&oid).expect_err("lying header must not abort");
-        assert!(matches!(err, Error::CorruptPackedObject { .. }), "{err:?}");
+        assert!(
+            matches!(err, ObjectError::CorruptPackedObject { .. }),
+            "{err:?}"
+        );
     }
 
     fn install_synthetic_pack(
@@ -8148,7 +8153,7 @@ mod tests {
 
             let err = odb.read(&oid).expect_err("read after corrupt hinted miss");
             assert!(
-                matches!(err, Error::CorruptPackedObject { .. }),
+                matches!(err, ObjectError::CorruptPackedObject { .. }),
                 "read: {err:?}"
             );
 
@@ -8169,7 +8174,7 @@ mod tests {
                 .read_into(&oid, &mut Vec::new())
                 .expect_err("read_into after corrupt hinted miss");
             assert!(
-                matches!(err, Error::CorruptPackedObject { .. }),
+                matches!(err, ObjectError::CorruptPackedObject { .. }),
                 "read_into: {err:?}"
             );
         });
@@ -8430,10 +8435,10 @@ mod tests {
         let missing = HashAlgo::Sha1
             .hash_object(ObjectKind::Blob, b"missing")
             .expect("missing id");
-        assert!(matches!(
-            custom.read_into_caching_delta_bases(&missing, &mut buf),
-            Err(Error::ObjectNotFound(_))
-        ));
+        assert!(custom
+            .read_into_caching_delta_bases(&missing, &mut buf)
+            .unwrap_err()
+            .is_object_not_found());
     }
 
     #[test]

@@ -1493,7 +1493,7 @@ fn collect_reachable_excluding(
             // `skip_missing` it simply contributes nothing (no descent), instead
             // of failing the whole pack build.
             Err(_) if skip_missing => continue,
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         };
         match obj.kind {
             ObjectKind::Commit => {
@@ -1745,7 +1745,7 @@ fn read_object_infos_with_progress(
     on_objects: &mut Option<&mut dyn FnMut(u64)>,
 ) -> Result<Vec<ObjectInfo>> {
     let par = crate::pack_delta::pack_delta_search_parallel_options(odb, search_threads)?;
-    let read = |oid: &ObjectId| odb.read_info(oid);
+    let read = |oid: &ObjectId| odb.read_info(oid).map_err(Error::from);
     let stride = crate::progress::OBJECT_PROGRESS_STRIDE as usize;
     if par.threads.get() <= 1 || oids.len() < 32 {
         let mut out = Vec::with_capacity(oids.len());

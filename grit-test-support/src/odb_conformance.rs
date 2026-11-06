@@ -543,18 +543,21 @@ pub mod broken_store {
             self.inner.hash_algo()
         }
 
-        fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+        fn read(&self, oid: &ObjectId) -> grit_lib::objects::ObjectResult<Option<Object>> {
             self.inner.read(oid)
         }
 
-        fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+        fn read_info(&self, oid: &ObjectId) -> grit_lib::objects::ObjectResult<Option<ObjectInfo>> {
             Ok(self.inner.read_info(oid)?.map(|info| ObjectInfo {
                 kind: ObjectKind::Tag,
                 size: info.size,
             }))
         }
 
-        fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+        fn for_each_object(
+            &self,
+            f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+        ) -> grit_lib::objects::ObjectResult<()> {
             self.inner.for_each_object(f)
         }
     }

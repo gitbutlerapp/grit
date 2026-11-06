@@ -9,8 +9,9 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, RwLock};
 
 use crate::diagnostics::NullDiagnostics;
-use crate::error::{Error, Result};
+use crate::error::Error;
 use crate::midx::{prepared_midx_chain_strict, PreparedMidxChain};
+use crate::objects::error::{ObjectError, ObjectResult};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo};
 use crate::pack_store::PackStore;
 
@@ -60,7 +61,7 @@ impl MidxObjects {
     /// # Errors
     ///
     /// Propagates MIDX chain preparation failures other than a missing or skipped index.
-    pub fn new(store: Arc<PackStore>, multi_pack_index: bool) -> Result<Self> {
+    pub fn new(store: Arc<PackStore>, multi_pack_index: bool) -> ObjectResult<Self> {
         let packs = PackedObjects::new(Arc::clone(&store));
         let status = if multi_pack_index {
             PackStore::with_context(Arc::clone(&store), || {
@@ -92,7 +93,7 @@ impl MidxObjects {
     /// # Errors
     ///
     /// Propagates MIDX chain load failures.
-    pub fn covered_pack_basenames(&self) -> Result<HashSet<String>> {
+    pub fn covered_pack_basenames(&self) -> ObjectResult<HashSet<String>> {
         let Some(chain) = self.active_chain()? else {
             return Ok(HashSet::new());
         };
@@ -105,7 +106,7 @@ impl MidxObjects {
         &self.packs
     }
 
-    fn active_chain(&self) -> Result<Option<Arc<PreparedMidxChain>>> {
+    fn active_chain(&self) -> ObjectResult<Option<Arc<PreparedMidxChain>>> {
         if self.status() != MidxObjectsStatus::Active {
             return Ok(None);
         }
@@ -115,25 +116,29 @@ impl MidxObjects {
         }) {
             Ok(chain) => Ok(chain),
             Err(Error::Midx(_)) => Ok(None),
-            Err(err) => Err(err),
+            Err(err) => Err(ObjectError::from(err)),
         }
     }
 
-    fn read_via_chain(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read_via_chain(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         PackStore::with_context(Arc::clone(self.packs.pack_store()), || {
             let Some(chain) = self.active_chain()? else {
                 return Ok(None);
             };
-            chain.try_read_object(oid, &NullDiagnostics)
+            chain
+                .try_read_object(oid, &NullDiagnostics)
+                .map_err(ObjectError::from)
         })
     }
 
-    fn read_info_via_chain(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info_via_chain(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         PackStore::with_context(Arc::clone(self.packs.pack_store()), || {
             let Some(chain) = self.active_chain()? else {
                 return Ok(None);
             };
-            chain.try_read_info(oid, &NullDiagnostics)
+            chain
+                .try_read_info(oid, &NullDiagnostics)
+                .map_err(ObjectError::from)
         })
     }
 }
@@ -143,15 +148,15 @@ impl ObjectStore for MidxObjects {
         self.packs.hash_algo()
     }
 
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         self.read_via_chain(oid)
     }
 
-    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         self.read_info_via_chain(oid)
     }
 
-    fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
+    fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'_>>> {
         let Some(info) = self.read_info(oid)? else {
             return Ok(None);
         };
@@ -162,7 +167,10 @@ impl ObjectStore for MidxObjects {
             return Ok(None);
         };
         let size = u64::try_from(obj.data.len()).map_err(|_| {
-            Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+            ObjectError::from(Error::CorruptObject(format!(
+                "object size overflow for {}",
+                oid.to_hex()
+            )))
         })?;
         Ok(Some(ObjectStream {
             kind: info.kind,
@@ -171,14 +179,19 @@ impl ObjectStore for MidxObjects {
         }))
     }
 
-    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()> {
         let Some(chain) = self.active_chain()? else {
             return Ok(());
         };
-        chain.for_each_listed_object(f)
+        chain.for_each_listed_object(f).map_err(ObjectError::from)
     }
 
-    fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
+    fn lookup_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+        out: &mut Vec<ObjectId>,
+    ) -> ObjectResult<()> {
         if prefix.len() > self.hash_algo().hex_len() {
             return Ok(());
         }
@@ -186,10 +199,12 @@ impl ObjectStore for MidxObjects {
             return Ok(());
         };
         let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
-        chain.lookup_prefix(&prefix, limit, out)
+        chain
+            .lookup_prefix(&prefix, limit, out)
+            .map_err(ObjectError::from)
     }
 
-    fn refresh(&self) -> Result<bool> {
+    fn refresh(&self) -> ObjectResult<bool> {
         if !self.multi_pack_index {
             return Ok(false);
         }
@@ -201,19 +216,19 @@ impl ObjectStore for MidxObjects {
         let mut guard = self
             .status
             .write()
-            .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
+            .map_err(|e| ObjectError::from(Error::Io(std::io::Error::other(e.to_string()))))?;
         let changed = *guard != new_status;
         *guard = new_status;
         Ok(changed)
     }
 }
 
-fn classify_midx_status(objects_dir: &std::path::Path) -> Result<MidxObjectsStatus> {
+fn classify_midx_status(objects_dir: &std::path::Path) -> ObjectResult<MidxObjectsStatus> {
     match prepared_midx_chain_strict(objects_dir) {
         Ok(Some(_)) => Ok(MidxObjectsStatus::Active),
         Ok(None) | Err(Error::Midx(_)) | Err(Error::CorruptObject(_)) => {
             Ok(MidxObjectsStatus::Unusable)
         }
-        Err(err) => Err(err),
+        Err(err) => Err(ObjectError::from(err)),
     }
 }

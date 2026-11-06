@@ -2424,6 +2424,18 @@ pub enum Error {
 }
 
 impl Error {
+    /// Whether this is a missing-object failure from object lookup (legacy or [`ObjectError`]).
+    #[must_use]
+    pub fn is_object_not_found(&self) -> bool {
+        match self {
+            Self::ObjectNotFound(_) => true,
+            Self::Object(e) => {
+                matches!(e, crate::objects::ObjectError::ObjectNotFound { .. })
+            }
+            _ => false,
+        }
+    }
+
     /// Stable snake_case name of this error's variant (for example `"not_a_repository"`),
     /// for scripts and serialized output that must branch on the failure kind.
     ///

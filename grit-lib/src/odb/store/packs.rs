@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use flate2::{Decompress, FlushDecompress, Status};
 
-use crate::error::{Error, Result};
+use crate::error::Error;
+use crate::objects::error::{ObjectError, ObjectResult};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use crate::pack::{self, read_local_pack_indexes_cached, reprepare_pack_directory_on_miss};
 use crate::pack_index::PackIndex;
@@ -69,7 +70,7 @@ impl PackedObjects {
     /// # Errors
     ///
     /// Propagates pack index parse/verify failures from [`pack::read_pack_index`].
-    pub fn object_ids_from_index_path(idx_path: &Path) -> Result<HashSet<ObjectId>> {
+    pub fn object_ids_from_index_path(idx_path: &Path) -> ObjectResult<HashSet<ObjectId>> {
         let idx = pack::read_pack_index(idx_path)?;
         let mut out = HashSet::new();
         for entry in idx.iter() {
@@ -88,7 +89,7 @@ impl PackedObjects {
     /// # Errors
     ///
     /// Propagates pack directory enumeration failures.
-    pub fn contains_filtered(&self, oid: &ObjectId, filter: PackFilter) -> Result<bool> {
+    pub fn contains_filtered(&self, oid: &ObjectId, filter: PackFilter) -> ObjectResult<bool> {
         self.with_pack(|objects_dir| {
             for idx in filtered_indexes(objects_dir, filter)? {
                 if idx.contains(oid)? {
@@ -107,7 +108,7 @@ impl PackedObjects {
     pub fn for_each_promisor_object(
         &self,
         f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
-    ) -> Result<()> {
+    ) -> ObjectResult<()> {
         self.with_pack(|objects_dir| {
             let indexes = read_local_pack_indexes_cached(objects_dir)?;
             let mut seen = HashSet::new();
@@ -136,7 +137,7 @@ impl PackedObjects {
     /// # Errors
     ///
     /// Propagates pack directory or index read failures.
-    pub fn kept_pack_object_ids(&self) -> Result<HashSet<ObjectId>> {
+    pub fn kept_pack_object_ids(&self) -> ObjectResult<HashSet<ObjectId>> {
         self.with_pack(collect_kept_pack_object_ids)
     }
 
@@ -151,7 +152,7 @@ impl PackedObjects {
     pub fn for_each_removable_pack_object(
         &self,
         f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
-    ) -> Result<()> {
+    ) -> ObjectResult<()> {
         self.with_pack(|objects_dir| for_each_removable_pack_object_ids(objects_dir, f))
     }
 
@@ -160,7 +161,7 @@ impl PackedObjects {
     /// # Errors
     ///
     /// Propagates I/O failures from pack listing or utime.
-    pub fn freshen_pack_containing(&self, oid: &ObjectId) -> Result<bool> {
+    pub fn freshen_pack_containing(&self, oid: &ObjectId) -> ObjectResult<bool> {
         self.with_pack(|objects_dir| {
             let indexes = read_local_pack_indexes_cached(objects_dir)?;
             for idx in &indexes {
@@ -176,7 +177,7 @@ impl PackedObjects {
         })
     }
 
-    fn with_pack<R>(&self, f: impl FnOnce(&std::path::Path) -> Result<R>) -> Result<R> {
+    fn with_pack<R>(&self, f: impl FnOnce(&std::path::Path) -> ObjectResult<R>) -> ObjectResult<R> {
         if PackStore::read_context_matches_objects_dir(self.store.objects_dir()) {
             return f(self.store.objects_dir());
         }
@@ -196,12 +197,12 @@ impl PackedObjects {
         .unwrap_or(HashAlgo::Sha1)
     }
 
-    fn read_from_packs(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read_from_packs(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         self.with_pack(
             |objects_dir| match pack::read_object_from_packs(objects_dir, oid) {
                 Ok(obj) => Ok(Some(obj)),
                 Err(Error::ObjectNotFound(_)) => Ok(None),
-                Err(err) => Err(err),
+                Err(err) => Err(ObjectError::from(err)),
             },
         )
     }
@@ -210,22 +211,22 @@ impl PackedObjects {
         &self,
         oid: &ObjectId,
         buf: &mut Vec<u8>,
-    ) -> Result<Option<ObjectKind>> {
+    ) -> ObjectResult<Option<ObjectKind>> {
         self.with_pack(|objects_dir| {
             match pack::read_object_from_packs_into(objects_dir, oid, buf) {
                 Ok(kind) => Ok(Some(kind)),
                 Err(Error::ObjectNotFound(_)) => Ok(None),
-                Err(err) => Err(err),
+                Err(err) => Err(ObjectError::from(err)),
             }
         })
     }
 
-    fn read_info_from_packs(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info_from_packs(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         self.with_pack(
             |objects_dir| match pack::read_object_info_from_packs(objects_dir, oid) {
                 Ok(info) => Ok(Some(info)),
                 Err(Error::ObjectNotFound(_)) => Ok(None),
-                Err(err) => Err(err),
+                Err(err) => Err(ObjectError::from(err)),
             },
         )
     }
@@ -236,19 +237,19 @@ impl ObjectStore for PackedObjects {
         self.hash_algo_from_indexes()
     }
 
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         self.read_from_packs(oid)
     }
 
-    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> ObjectResult<Option<ObjectKind>> {
         self.read_from_packs_into(oid, buf)
     }
 
-    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         self.read_info_from_packs(oid)
     }
 
-    fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
+    fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'_>>> {
         self.with_pack(|dir| {
             let verify_crc = pack::count_local_packs_holding(dir, oid)? > 1;
             let mut entry = pack::locate_packed_whole_object(dir, oid, verify_crc)?;
@@ -267,7 +268,7 @@ impl ObjectStore for PackedObjects {
         })
     }
 
-    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()> {
         self.with_pack(|objects_dir| {
             let indexes = read_local_pack_indexes_cached(objects_dir)?;
             let mut seen = HashSet::new();
@@ -288,7 +289,12 @@ impl ObjectStore for PackedObjects {
         })
     }
 
-    fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
+    fn lookup_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+        out: &mut Vec<ObjectId>,
+    ) -> ObjectResult<()> {
         if prefix.len() > self.hash_algo().hex_len() {
             return Ok(());
         }
@@ -307,15 +313,15 @@ impl ObjectStore for PackedObjects {
         })
     }
 
-    fn refresh(&self) -> Result<bool> {
-        self.with_pack(reprepare_pack_directory_on_miss)
+    fn refresh(&self) -> ObjectResult<bool> {
+        self.with_pack(|dir| reprepare_pack_directory_on_miss(dir).map_err(ObjectError::from))
     }
 }
 
 fn for_each_removable_pack_object_ids(
     objects_dir: &Path,
     f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
-) -> Result<()> {
+) -> ObjectResult<()> {
     let pack_dir = objects_dir.join("pack");
     let indexes = read_local_pack_indexes_cached(objects_dir)?;
     let mut seen = HashSet::new();
@@ -349,7 +355,7 @@ fn pack_index_has_keep_marker(pack_dir: &Path, pack_path: &Path) -> bool {
     pack_dir.join(format!("{stem}.keep")).is_file()
 }
 
-fn collect_kept_pack_object_ids(objects_dir: &Path) -> Result<HashSet<ObjectId>> {
+fn collect_kept_pack_object_ids(objects_dir: &Path) -> ObjectResult<HashSet<ObjectId>> {
     let pack_dir = objects_dir.join("pack");
     let mut kept = HashSet::new();
     if !pack_dir.is_dir() {
@@ -373,7 +379,7 @@ fn collect_kept_pack_object_ids(objects_dir: &Path) -> Result<HashSet<ObjectId>>
 fn filtered_indexes(
     objects_dir: &std::path::Path,
     filter: PackFilter,
-) -> Result<Vec<Arc<PackIndex>>> {
+) -> ObjectResult<Vec<Arc<PackIndex>>> {
     let indexes = read_local_pack_indexes_cached(objects_dir)?;
     Ok(indexes
         .into_iter()
@@ -390,7 +396,7 @@ fn collect_prefix_from_index(
     count: &mut usize,
     out: &mut Vec<ObjectId>,
     seen: &mut HashSet<ObjectId>,
-) -> Result<()> {
+) -> ObjectResult<()> {
     let lo = lower_bound_oid(idx, prefix.lowest().as_bytes());
     let hi = upper_bound_oid(idx, prefix.highest().as_bytes());
     for i in lo..hi {
@@ -593,7 +599,7 @@ impl Read for PackPayloadStream {
 fn stream_from_buffered_read(
     store: &PackedObjects,
     oid: &ObjectId,
-) -> Result<Option<ObjectStream<'static>>> {
+) -> ObjectResult<Option<ObjectStream<'static>>> {
     let Some(obj) = store.read(oid)? else {
         return Ok(None);
     };

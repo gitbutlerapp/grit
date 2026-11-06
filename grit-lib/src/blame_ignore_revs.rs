@@ -147,7 +147,7 @@ fn parse_ignore_revs_line(
             revs.insert(commit);
         }
         Ok(None) => {}
-        Err(Error::ObjectNotFound(_)) => {}
+        Err(e) if e.is_object_not_found() => {}
         Err(e) => return Err(e),
     }
     Ok(())

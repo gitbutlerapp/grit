@@ -112,9 +112,9 @@ impl PushedObjects<'_> {
     /// the repository; `None` when neither has it.
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
         if self.received.contains(oid) {
-            self.odb.try_read_once(oid)
+            self.odb.try_read_once(oid).map_err(Error::from)
         } else {
-            self.repo_odb.try_read_once(oid)
+            self.repo_odb.try_read_once(oid).map_err(Error::from)
         }
     }
 

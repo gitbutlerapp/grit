@@ -55,7 +55,7 @@ impl<'repo> Objects<'repo> {
     /// ```
     #[inline]
     pub fn contains(&self, oid: &ObjectId) -> Result<bool> {
-        self.repo.odb().contains(oid)
+        self.repo.odb().contains(oid).map_err(Error::from)
     }
 
     /// Read the object named `oid`.
@@ -80,7 +80,7 @@ impl<'repo> Objects<'repo> {
     /// ```
     #[inline]
     pub fn read(&self, oid: &ObjectId) -> Result<Object> {
-        self.repo.odb().read(oid)
+        self.repo.odb().read(oid).map_err(Error::from)
     }
 
     /// Read object type and size without inflating full blob bodies when possible.
@@ -90,7 +90,7 @@ impl<'repo> Objects<'repo> {
     /// Propagates object lookup failures from the ODB.
     #[inline]
     pub fn read_info(&self, oid: &ObjectId) -> Result<ObjectInfo> {
-        self.repo.odb().read_info(oid)
+        self.repo.odb().read_info(oid).map_err(Error::from)
     }
 
     /// Read `oid` and parse it as a commit (annotated tags are not followed).

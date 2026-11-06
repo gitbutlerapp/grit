@@ -29,8 +29,8 @@ use std::sync::{Arc, RwLock};
 
 use std::path::Path;
 
-use crate::error::{Error, Result};
 use crate::hash;
+use crate::objects::error::{ObjectError, ObjectResult};
 use crate::objects::{
     oid_hash_map, HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind, OidHashMap,
 };
@@ -38,6 +38,12 @@ use crate::odb::WriteOptions;
 use crate::pack;
 
 type MemoryObjectEntry = (ObjectKind, Arc<[u8]>);
+
+fn lock_read_err<T>(err: std::sync::PoisonError<T>) -> ObjectError {
+    ObjectError::Backend {
+        source: Box::new(io::Error::other(err.to_string())),
+    }
+}
 
 /// An object read only when its payload is no larger than a caller's limit.
 #[derive(Debug)]
@@ -91,7 +97,7 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns I/O or corruption errors from the backend; never [`Error::ObjectNotFound`].
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>>;
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>>;
 
     /// Load object payload into `buf`, reusing its capacity when possible.
     ///
@@ -104,7 +110,7 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Same as [`Self::read`].
-    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> ObjectResult<Option<ObjectKind>> {
         let Some(obj) = self.read(oid)? else {
             return Ok(None);
         };
@@ -118,14 +124,14 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Same as [`Self::read`].
-    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>>;
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>>;
 
     /// Whether `oid` is stored in this backend (without reading the payload).
     ///
     /// # Errors
     ///
     /// Propagates backend failures other than "not found".
-    fn contains(&self, oid: &ObjectId) -> Result<bool> {
+    fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
         Ok(self.read_info(oid)?.is_some())
     }
 
@@ -141,7 +147,7 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Propagates the first backend failure, like [`Self::contains`].
-    fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+    fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
         oids.iter().map(|oid| self.contains(oid)).collect()
     }
 
@@ -152,12 +158,15 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Same as [`Self::read`].
-    fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
+    fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'_>>> {
         let Some(obj) = self.read(oid)? else {
             return Ok(None);
         };
         let size = u64::try_from(obj.data.len()).map_err(|_| {
-            Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+            ObjectError::corrupt_object(
+                Some(*oid),
+                format!("object size overflow for {}", oid.to_hex()),
+            )
         })?;
         Ok(Some(ObjectStream {
             kind: obj.kind,
@@ -171,7 +180,7 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Propagates backend enumeration failures.
-    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()>;
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()>;
 
     /// Fill `out` with object ids whose hex form starts with `prefix` (case-insensitive).
     ///
@@ -190,8 +199,14 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     ///
     /// Returns [`Error::InvalidObjectId`] when `prefix` is not valid hex or is longer
     /// than a full object id for this store's hash algorithm.
-    fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
-        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
+    fn lookup_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+        out: &mut Vec<ObjectId>,
+    ) -> ObjectResult<()> {
+        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())
+            .map_err(ObjectError::from_umbrella)?;
         let mut count = 0usize;
         self.for_each_object(&mut |oid| {
             if prefix.matches(oid) {
@@ -212,7 +227,7 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Propagates backend refresh failures.
-    fn refresh(&self) -> Result<bool> {
+    fn refresh(&self) -> ObjectResult<bool> {
         Ok(false)
     }
 }
@@ -227,7 +242,8 @@ pub trait WritableObjectStore: ObjectStore {
     /// # Errors
     ///
     /// Returns I/O, hashing, or validation errors from the backend.
-    fn write(&self, kind: ObjectKind, data: &[u8], options: WriteOptions) -> Result<ObjectId>;
+    fn write(&self, kind: ObjectKind, data: &[u8], options: WriteOptions)
+        -> ObjectResult<ObjectId>;
 
     /// Store an object from a byte stream of known uncompressed size.
     ///
@@ -242,12 +258,14 @@ pub trait WritableObjectStore: ObjectStore {
         size: u64,
         reader: &mut dyn Read,
         options: WriteOptions,
-    ) -> Result<ObjectId> {
+    ) -> ObjectResult<ObjectId> {
         let size_usize = usize::try_from(size).map_err(|_| {
-            Error::CorruptObject(format!("object size {size} exceeds address space"))
+            ObjectError::corrupt_object(None, format!("object size {size} exceeds address space"))
         })?;
         let mut buf = vec![0u8; size_usize];
-        reader.read_exact(&mut buf).map_err(Error::Io)?;
+        reader
+            .read_exact(&mut buf)
+            .map_err(|e| ObjectError::Nested(Box::new(e.into())))?;
         self.write(kind, &buf, options)
     }
 
@@ -258,7 +276,7 @@ pub trait WritableObjectStore: ObjectStore {
     /// # Errors
     ///
     /// Propagates backend failures.
-    fn freshen(&self, oid: &ObjectId) -> Result<bool>;
+    fn freshen(&self, oid: &ObjectId) -> ObjectResult<bool>;
 
     /// Make prior successful [`Self::write`] calls durable (commit a transaction, fsync, …).
     ///
@@ -272,7 +290,7 @@ pub trait WritableObjectStore: ObjectStore {
     /// # Errors
     ///
     /// Propagates backend persistence failures.
-    fn flush(&self) -> Result<()> {
+    fn flush(&self) -> ObjectResult<()> {
         Ok(())
     }
 
@@ -281,7 +299,7 @@ pub trait WritableObjectStore: ObjectStore {
     /// # Errors
     ///
     /// Propagates flush failures after attempting [`Self::rollback`].
-    fn flush_for_publish(&self) -> Result<()> {
+    fn flush_for_publish(&self) -> ObjectResult<()> {
         if let Err(err) = self.flush() {
             let _ = self.rollback();
             return Err(err);
@@ -296,7 +314,7 @@ pub trait WritableObjectStore: ObjectStore {
     /// # Errors
     ///
     /// Propagates backend failures while aborting the batch.
-    fn rollback(&self) -> Result<()> {
+    fn rollback(&self) -> ObjectResult<()> {
         Ok(())
     }
 }
@@ -312,34 +330,38 @@ macro_rules! forward_object_store {
                 (**self).hash_algo()
             }
 
-            fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+            fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
                 (**self).read(oid)
             }
 
-            fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+            fn read_into(
+                &self,
+                oid: &ObjectId,
+                buf: &mut Vec<u8>,
+            ) -> ObjectResult<Option<ObjectKind>> {
                 (**self).read_into(oid, buf)
             }
 
-            fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+            fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
                 (**self).read_info(oid)
             }
 
-            fn contains(&self, oid: &ObjectId) -> Result<bool> {
+            fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
                 (**self).contains(oid)
             }
 
-            fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+            fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
                 (**self).contains_many(oids)
             }
 
-            fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
+            fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'_>>> {
                 (**self).open_stream(oid)
             }
 
             fn for_each_object(
                 &self,
                 f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
-            ) -> Result<()> {
+            ) -> ObjectResult<()> {
                 (**self).for_each_object(f)
             }
 
@@ -348,11 +370,11 @@ macro_rules! forward_object_store {
                 prefix: &str,
                 limit: usize,
                 out: &mut Vec<ObjectId>,
-            ) -> Result<()> {
+            ) -> ObjectResult<()> {
                 (**self).lookup_prefix(prefix, limit, out)
             }
 
-            fn refresh(&self) -> Result<bool> {
+            fn refresh(&self) -> ObjectResult<bool> {
                 (**self).refresh()
             }
         }
@@ -363,7 +385,7 @@ macro_rules! forward_object_store {
                 kind: ObjectKind,
                 data: &[u8],
                 options: WriteOptions,
-            ) -> Result<ObjectId> {
+            ) -> ObjectResult<ObjectId> {
                 (**self).write(kind, data, options)
             }
 
@@ -373,23 +395,23 @@ macro_rules! forward_object_store {
                 size: u64,
                 reader: &mut dyn Read,
                 options: WriteOptions,
-            ) -> Result<ObjectId> {
+            ) -> ObjectResult<ObjectId> {
                 (**self).write_stream(kind, size, reader, options)
             }
 
-            fn freshen(&self, oid: &ObjectId) -> Result<bool> {
+            fn freshen(&self, oid: &ObjectId) -> ObjectResult<bool> {
                 (**self).freshen(oid)
             }
 
-            fn flush(&self) -> Result<()> {
+            fn flush(&self) -> ObjectResult<()> {
                 (**self).flush()
             }
 
-            fn flush_for_publish(&self) -> Result<()> {
+            fn flush_for_publish(&self) -> ObjectResult<()> {
                 (**self).flush_for_publish()
             }
 
-            fn rollback(&self) -> Result<()> {
+            fn rollback(&self) -> ObjectResult<()> {
                 (**self).rollback()
             }
         }
@@ -496,22 +518,16 @@ impl ObjectStore for MemoryStore {
         self.algo
     }
 
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
-        let guard = self
-            .objects
-            .read()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
+        let guard = self.objects.read().map_err(lock_read_err)?;
         Ok(guard.get(oid).map(|(kind, data)| Object {
             kind: *kind,
             data: data.to_vec(),
         }))
     }
 
-    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
-        let guard = self
-            .objects
-            .read()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> ObjectResult<Option<ObjectKind>> {
+        let guard = self.objects.read().map_err(lock_read_err)?;
         Ok(guard.get(oid).map(|(kind, data)| {
             buf.clear();
             buf.extend_from_slice(data);
@@ -519,43 +535,34 @@ impl ObjectStore for MemoryStore {
         }))
     }
 
-    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
-        let guard = self
-            .objects
-            .read()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
+        let guard = self.objects.read().map_err(lock_read_err)?;
         Ok(guard.get(oid).map(|(kind, data)| ObjectInfo {
             kind: *kind,
             size: u64::try_from(data.len()).unwrap_or(u64::MAX),
         }))
     }
 
-    fn contains(&self, oid: &ObjectId) -> Result<bool> {
-        let guard = self
-            .objects
-            .read()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
+        let guard = self.objects.read().map_err(lock_read_err)?;
         Ok(guard.contains_key(oid))
     }
 
-    fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
-        let guard = self
-            .objects
-            .read()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
+        let guard = self.objects.read().map_err(lock_read_err)?;
         Ok(oids.iter().map(|oid| guard.contains_key(oid)).collect())
     }
 
-    fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
-        let guard = self
-            .objects
-            .read()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'_>>> {
+        let guard = self.objects.read().map_err(lock_read_err)?;
         let Some((kind, data)) = guard.get(oid) else {
             return Ok(None);
         };
         let size = u64::try_from(data.len()).map_err(|_| {
-            Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+            ObjectError::corrupt_object(
+                Some(*oid),
+                format!("object size overflow for {}", oid.to_hex()),
+            )
         })?;
         Ok(Some(ObjectStream {
             kind: *kind,
@@ -564,11 +571,8 @@ impl ObjectStore for MemoryStore {
         }))
     }
 
-    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
-        let guard = self
-            .objects
-            .read()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()> {
+        let guard = self.objects.read().map_err(lock_read_err)?;
         for oid in guard.keys() {
             if f(oid).is_break() {
                 break;
@@ -577,12 +581,15 @@ impl ObjectStore for MemoryStore {
         Ok(())
     }
 
-    fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
-        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
-        let guard = self
-            .objects
-            .read()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn lookup_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+        out: &mut Vec<ObjectId>,
+    ) -> ObjectResult<()> {
+        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())
+            .map_err(ObjectError::from_umbrella)?;
+        let guard = self.objects.read().map_err(lock_read_err)?;
         let matches = guard.keys().filter(|oid| prefix.matches(oid)).copied();
         if limit == 0 {
             out.extend(matches);
@@ -594,23 +601,22 @@ impl ObjectStore for MemoryStore {
 }
 
 impl WritableObjectStore for MemoryStore {
-    fn write(&self, kind: ObjectKind, data: &[u8], _options: WriteOptions) -> Result<ObjectId> {
-        let oid = hash::hash_object(self.algo, kind, data)?;
-        let mut guard = self
-            .objects
-            .write()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn write(
+        &self,
+        kind: ObjectKind,
+        data: &[u8],
+        _options: WriteOptions,
+    ) -> ObjectResult<ObjectId> {
+        let oid = hash::hash_object(self.algo, kind, data).map_err(ObjectError::from_umbrella)?;
+        let mut guard = self.objects.write().map_err(lock_read_err)?;
         guard
             .entry(oid)
             .or_insert_with(|| (kind, Arc::from(data.to_owned())));
         Ok(oid)
     }
 
-    fn freshen(&self, oid: &ObjectId) -> Result<bool> {
-        let guard = self
-            .objects
-            .read()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+    fn freshen(&self, oid: &ObjectId) -> ObjectResult<bool> {
+        let guard = self.objects.read().map_err(lock_read_err)?;
         Ok(guard.contains_key(oid))
     }
 }
@@ -623,8 +629,8 @@ pub(crate) fn resolve_pending(
     oids: &[ObjectId],
     present: &mut [bool],
     pending: &mut Vec<usize>,
-    probe: impl FnOnce(&[ObjectId]) -> Result<Vec<bool>>,
-) -> Result<()> {
+    probe: impl FnOnce(&[ObjectId]) -> ObjectResult<Vec<bool>>,
+) -> ObjectResult<()> {
     if pending.is_empty() {
         return Ok(());
     }
@@ -642,7 +648,7 @@ pub(crate) fn resolve_pending(
 pub(crate) fn for_each_propagate_break(
     store: &dyn ObjectStore,
     f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
-) -> Result<bool> {
+) -> ObjectResult<bool> {
     let mut stop = false;
     store.for_each_object(&mut |oid| {
         if stop {
@@ -816,7 +822,7 @@ mod tests {
         let mut out = Vec::new();
         assert!(matches!(
             store.lookup_prefix("xyz", 0, &mut out),
-            Err(Error::InvalidObjectId(_))
+            Err(ObjectError::InvalidObjectId { .. })
         ));
     }
 
@@ -879,18 +885,18 @@ mod tests {
                 self.inner.hash_algo()
             }
 
-            fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+            fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
                 self.inner.read(oid)
             }
 
-            fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+            fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
                 self.inner.read_info(oid)
             }
 
             fn for_each_object(
                 &self,
                 f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
-            ) -> Result<()> {
+            ) -> ObjectResult<()> {
                 self.inner.for_each_object(f)
             }
         }

@@ -20,6 +20,7 @@ use crate::gitmodules::{self, DotFsckTracker};
 use crate::hash::{ChecksumHasher, ObjectPayloadHasher};
 use crate::index::MODE_GITLINK;
 use crate::index_pack::ObjectKindCounts;
+use crate::objects::ObjectError;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
 use crate::odb::store::{ObjectStore, WritableObjectStore};
 use crate::odb::{Odb, WriteOptions};
@@ -307,13 +308,13 @@ impl UnpackSink for Odb {
     fn read_stored(&self, oid: &ObjectId) -> Result<Option<Object>> {
         match self.read(oid) {
             Ok(obj) => Ok(Some(obj)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
-            Err(e) => Err(e),
+            Err(ObjectError::ObjectNotFound { .. }) => Ok(None),
+            Err(e) => Err(e.into()),
         }
     }
 
     fn contains(&self, oid: &ObjectId) -> Result<bool> {
-        Odb::contains(self, oid)
+        Odb::contains(self, oid).map_err(Error::from)
     }
 
     fn supports_streaming_inflate(&self) -> bool {
@@ -363,18 +364,21 @@ impl UnpackSink for StoreSink<'_> {
         if dry_run {
             return crate::hash::hash_object(self.store.hash_algo(), kind, data);
         }
-        self.store.write(kind, data, WriteOptions::default())
+        self.store
+            .write(kind, data, WriteOptions::default())
+            .map_err(Error::from)
     }
 
     fn read_stored(&self, oid: &ObjectId) -> Result<Option<Object>> {
-        if let Some(obj) = self.store.read(oid)? {
+        if let Some(obj) = self.store.read(oid).map_err(Error::from)? {
             return Ok(Some(obj));
         }
-        self.bases.read(oid)
+        self.bases.read(oid).map_err(Error::from)
     }
 
     fn contains(&self, oid: &ObjectId) -> Result<bool> {
-        Ok(self.store.contains(oid)? || self.bases.contains(oid)?)
+        Ok(self.store.contains(oid).map_err(Error::from)?
+            || self.bases.contains(oid).map_err(Error::from)?)
     }
 }
 
@@ -1177,7 +1181,7 @@ fn strict_ref_resolves(
     if pack.contains_key(oid) {
         return Ok(true);
     }
-    odb.map_or(Ok(false), |o| o.contains(oid))
+    odb.map_or(Ok(false), |o| o.contains(oid).map_err(Error::from))
 }
 
 /// Verifies that references from commits, trees, and tags resolve to objects present in `pack`
@@ -3240,7 +3244,7 @@ mod tests {
             }
 
             fn contains(&self, oid: &ObjectId) -> Result<bool> {
-                Odb::contains(self.inner, oid)
+                Odb::contains(self.inner, oid).map_err(Error::from)
             }
         }
 
@@ -3332,7 +3336,7 @@ mod tests {
             }
 
             fn contains(&self, oid: &ObjectId) -> Result<bool> {
-                Odb::contains(self.inner, oid)
+                Odb::contains(self.inner, oid).map_err(Error::from)
             }
         }
 

@@ -1795,6 +1795,12 @@ impl From<Error> for TreePathError {
     }
 }
 
+impl From<crate::objects::ObjectError> for TreePathError {
+    fn from(err: crate::objects::ObjectError) -> Self {
+        Self::Other(err.into())
+    }
+}
+
 /// Like Git `rev-parse` for `treeish:path`: the leaf may be a blob or a tree OID.
 fn resolve_tree_path_rev_parse(
     repo: &Repository,
@@ -4413,10 +4419,9 @@ mod line_coverage_tests {
             ));
         }
         let absent = ObjectId::from_hex("1111111111111111111111111111111111111111")?;
-        assert!(matches!(
-            peel_to_commit_for_merge_base(&repo, absent),
-            Err(crate::error::Error::ObjectNotFound(_))
-        ));
+        assert!(peel_to_commit_for_merge_base(&repo, absent)
+            .unwrap_err()
+            .is_object_not_found());
         Ok(())
     }
 

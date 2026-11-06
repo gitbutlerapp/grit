@@ -3,8 +3,7 @@
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use crate::error::Result;
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo};
+use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectResult};
 use crate::odb::store::{ObjectStore, ObjectStream};
 
 use super::Odb;
@@ -21,35 +20,40 @@ impl ObjectStore for OdbReadStore {
         self.0.hash_algo()
     }
 
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         self.0.try_read_once(oid)
     }
 
-    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         self.0.try_read_info_once(oid)
     }
 
-    fn contains(&self, oid: &ObjectId) -> Result<bool> {
+    fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
         self.0.contains(oid)
     }
 
-    fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+    fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
         self.0.contains_many(oids)
     }
 
-    fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
+    fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'_>>> {
         self.0.open_stream(oid)
     }
 
-    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()> {
         self.0.for_each_object(f)
     }
 
-    fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
+    fn lookup_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+        out: &mut Vec<ObjectId>,
+    ) -> ObjectResult<()> {
         self.0.lookup_prefix(prefix, limit, out)
     }
 
-    fn refresh(&self) -> Result<bool> {
+    fn refresh(&self) -> ObjectResult<bool> {
         let odb = &self.0;
         let mut changed = odb.primary_writable()?.refresh()?;
         for source in &odb.extra_read_sources {

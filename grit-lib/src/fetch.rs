@@ -1821,7 +1821,7 @@ pub fn fetch_remote_into(
                 match local_odb.contains(&oid) {
                     Ok(true) => None,
                     Ok(false) => Some(Ok(oid)),
-                    Err(err) => Some(Err(err)),
+                    Err(err) => Some(Err(Error::from(err))),
                 }
             })
             .collect::<Result<_>>()?

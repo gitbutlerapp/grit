@@ -185,6 +185,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
+    use crate::objects::ObjectError;
     use tempfile::TempDir;
 
     fn commit_with_parent(odb: &Odb, tree: ObjectId, parent: Option<ObjectId>) -> ObjectId {
@@ -433,7 +434,7 @@ mod tests {
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
         assert!(matches!(
             odb.read_commit_through_subject(&missing),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
     }
 
@@ -486,11 +487,11 @@ mod tests {
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
         assert!(matches!(
             odb.read_commit(&missing),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
         assert!(matches!(
             odb.commit_tree(&missing),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
 
         let no_tree = odb

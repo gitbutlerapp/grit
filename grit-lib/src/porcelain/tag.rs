@@ -472,7 +472,7 @@ fn summarize_listing(repo: &Repository, listing: &RefListing) -> Result<TagSumma
             Ok(obj) => return Ok(direct_summary(name, oid, obj.kind)),
             Err(err) => {
                 if odb.read_info(&oid).is_ok() {
-                    return Err(err);
+                    return Err(err.into());
                 }
                 return Ok(missing_summary(name, oid, Some(peeled)));
             }

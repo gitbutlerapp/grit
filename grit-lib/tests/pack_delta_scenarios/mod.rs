@@ -202,6 +202,7 @@ pub fn oid_from_hex(_algo: HashAlgo, hex: &str) -> ObjectId {
 
 pub fn read_blob(odb: &Odb, hex: &str) -> Result<grit_lib::objects::Object, Error> {
     odb.read(&oid_from_hex(HashAlgo::Sha1, hex))
+        .map_err(Error::from)
 }
 
 pub fn expect_corrupt_object(err: Error) {

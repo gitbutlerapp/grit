@@ -1545,7 +1545,7 @@ mod tests {
 
         flaky.fail_contains(true);
         let err = push_pack_bytes(&plan, &repo, &adv).unwrap_err();
-        assert!(crate::odb::store::flaky::is_injected(&err), "{err:?}");
+        assert!(crate::odb::store::flaky::is_injected_error(&err), "{err:?}");
     }
 
     #[test]
@@ -1647,7 +1647,7 @@ mod tests {
         let err = decide_push_wire(&spec, &repo, &HashMap::new())
             .err()
             .unwrap();
-        assert!(crate::odb::store::flaky::is_injected(&err), "{err:?}");
+        assert!(crate::odb::store::flaky::is_injected_error(&err), "{err:?}");
     }
 
     fn send_decision(refname: &str, new_oid: ObjectId) -> PushDecision {

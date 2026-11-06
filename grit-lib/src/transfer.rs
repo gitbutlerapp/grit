@@ -1751,7 +1751,7 @@ fn collect_reachable_excluding_peer(
         let obj = match source_odb.read(&oid) {
             Ok(o) => o,
             Err(_) if skip_missing => continue,
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         };
         match obj.kind {
             ObjectKind::Commit => {
@@ -3894,7 +3894,7 @@ fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> Re
         remote_odb
     };
     match peel_odb.peel_tags(tag_oid) {
-        Ok((peeled, _)) => local_odb.contains(&peeled),
+        Ok((peeled, _)) => local_odb.contains(&peeled).map_err(Error::from),
         Err(_) => Ok(false),
     }
 }

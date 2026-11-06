@@ -618,6 +618,12 @@ impl ObjectError {
     }
 }
 
+impl From<Error> for ObjectError {
+    fn from(err: Error) -> Self {
+        Self::from_umbrella(err)
+    }
+}
+
 impl From<PathIoError> for ObjectError {
     fn from(path_io: PathIoError) -> Self {
         Self::PathIo { path_io }

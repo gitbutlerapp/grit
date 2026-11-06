@@ -5385,7 +5385,11 @@ pub(crate) fn read_blob_unless_streamed(
     cache_small: bool,
 ) -> Result<Option<Object>> {
     if !is_regular_git_mode(mode) || !crlf::worktree_conversion_is_identity(conv, attrs) {
-        return repo.odb().read(oid).map(Some);
+        return repo
+            .odb()
+            .read(oid)
+            .map(Some)
+            .map_err(crate::error::Error::from);
     }
     match repo
         .odb()

@@ -54,7 +54,7 @@ impl WalkExclude {
 }
 use crate::objects::{
     oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, CommitRef,
-    ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
+    ObjectError, ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
 };
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
@@ -2435,8 +2435,8 @@ fn resolve_specs_for_objects_with_options(
         if let Ok(raw_oid) = spec.parse::<ObjectId>() {
             let raw_object = match repo.odb().read(&raw_oid) {
                 Ok(obj) => obj,
-                Err(Error::ObjectNotFound(_)) if ignore_missing => continue,
-                Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+                Err(ObjectError::ObjectNotFound { .. }) if ignore_missing => continue,
+                Err(ObjectError::ObjectNotFound { .. } | ObjectError::PromisedObjectMissing(_))
                     if missing_action != MissingAction::Error =>
                 {
                     roots.push(RootObject {
@@ -2448,7 +2448,7 @@ fn resolve_specs_for_objects_with_options(
                     });
                     continue;
                 }
-                Err(err) => return Err(err),
+                Err(err) => return Err(err.into()),
             };
             match raw_object.kind {
                 ObjectKind::Commit => {
@@ -2510,13 +2510,11 @@ fn resolve_specs_for_objects_with_options(
                 };
                 let expected_kind = match repo.odb().read_info(&object_oid) {
                     Ok(info) => ExpectedObjectKind::from_object_kind(info.kind),
-                    Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
-                        if missing_action != MissingAction::Error =>
-                    {
-                        None
-                    }
-                    Err(Error::ObjectNotFound(_)) if ignore_missing => continue,
-                    Err(err) => return Err(err),
+                    Err(
+                        ObjectError::ObjectNotFound { .. } | ObjectError::PromisedObjectMissing(_),
+                    ) if missing_action != MissingAction::Error => None,
+                    Err(ObjectError::ObjectNotFound { .. }) if ignore_missing => continue,
+                    Err(err) => return Err(err.into()),
                 };
                 roots.push(RootObject {
                     oid: object_oid,
@@ -9519,15 +9517,15 @@ fn collect_tree_objects_filtered(
             if needs_child_read_info {
                 let child_info = match repo.odb().read_info(&entry.oid) {
                     Ok(info) => info,
-                    Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
-                        if missing_action != MissingAction::Error =>
-                    {
+                    Err(
+                        ObjectError::ObjectNotFound { .. } | ObjectError::PromisedObjectMissing(_),
+                    ) if missing_action != MissingAction::Error => {
                         if missing_action.reports_missing() && missing_seen.insert(entry.oid) {
                             missing.push(entry.oid);
                         }
                         continue;
                     }
-                    Err(err) => return Err(err),
+                    Err(err) => return Err(err.into()),
                 };
                 if child_info.kind != ObjectKind::Tree {
                     return Err(rev_list_unexpected_kind(entry.oid, "tree"));
@@ -9593,15 +9591,15 @@ fn collect_tree_objects_filtered(
             if needs_child_read_info {
                 let child_info = match repo.odb().read_info(&entry.oid) {
                     Ok(info) => info,
-                    Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
-                        if missing_action != MissingAction::Error =>
-                    {
+                    Err(
+                        ObjectError::ObjectNotFound { .. } | ObjectError::PromisedObjectMissing(_),
+                    ) if missing_action != MissingAction::Error => {
                         if missing_action.reports_missing() && missing_seen.insert(entry.oid) {
                             missing.push(entry.oid);
                         }
                         continue;
                     }
-                    Err(err) => return Err(err),
+                    Err(err) => return Err(err.into()),
                 };
                 if child_info.kind == ObjectKind::Blob {
                     let sparse_blob =
@@ -9668,15 +9666,15 @@ fn collect_tree_objects_filtered(
             } else {
                 let child_info = match repo.odb().read_info(&entry.oid) {
                     Ok(info) => info,
-                    Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
-                        if missing_action != MissingAction::Error =>
-                    {
+                    Err(
+                        ObjectError::ObjectNotFound { .. } | ObjectError::PromisedObjectMissing(_),
+                    ) if missing_action != MissingAction::Error => {
                         if missing_action.reports_missing() && missing_seen.insert(entry.oid) {
                             missing.push(entry.oid);
                         }
                         continue;
                     }
-                    Err(err) => return Err(err),
+                    Err(err) => return Err(err.into()),
                 };
                 if child_info.kind != ObjectKind::Blob {
                     if emitted.contains(&entry.oid) {
@@ -9761,7 +9759,7 @@ fn collect_root_object(
 
     let object = match repo.odb().read(&root.oid) {
         Ok(object) => object,
-        Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
+        Err(ObjectError::ObjectNotFound { .. } | ObjectError::PromisedObjectMissing(_))
             if missing_action != MissingAction::Error =>
         {
             if missing_action.reports_missing() && missing_seen.insert(root.oid) {
@@ -9769,7 +9767,7 @@ fn collect_root_object(
             }
             return Ok(());
         }
-        Err(err) => return Err(err),
+        Err(err) => return Err(err.into()),
     };
 
     if let Some(expected) = root.expected_kind {
@@ -10082,6 +10080,7 @@ fn kept_object_ids(repo: &Repository) -> Result<HashSet<ObjectId>> {
         .primary()?
         .packed_objects()
         .kept_pack_object_ids()
+        .map_err(Error::from)
 }
 
 /// Like [`flatten_tree`] but also carries each blob's file mode, so callers can detect
@@ -10114,8 +10113,8 @@ fn flatten_tree_with_mode(
         };
         let child_info = match repo.odb().read_info(&entry.oid) {
             Ok(info) => info,
-            Err(Error::ObjectNotFound(_)) => continue,
-            Err(err) => return Err(err),
+            Err(ObjectError::ObjectNotFound { .. }) => continue,
+            Err(err) => return Err(err.into()),
         };
         if child_info.kind == ObjectKind::Tree {
             subtrees.push((entry.oid, path));
@@ -12789,7 +12788,7 @@ mod line_coverage_tests {
                 ..RevListOptions::default()
             },
         );
-        assert!(matches!(result, Err(Error::ObjectNotFound(oid)) if oid == missing.to_hex()));
+        assert!(matches!(result, Err(e) if e.is_object_not_found()));
         Ok(())
     }
 

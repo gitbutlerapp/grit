@@ -136,6 +136,7 @@ mod tests {
     use super::*;
     use crate::change_id::ChangeIdError;
     use crate::error::Error;
+    use crate::objects::ObjectError;
     use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
     use crate::repo::{init_repository, Repository};
     use crate::RefStorageFormat;
@@ -201,7 +202,13 @@ mod tests {
         let (_dir, repo, _tip, blob) = repo_with_history();
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("hex");
         let err = load_commit(&repo, missing).unwrap_err();
-        assert!(matches!(err, Error::ObjectNotFound(_)), "{err:?}");
+        assert!(
+            matches!(
+                err,
+                Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. })
+            ),
+            "{err:?}"
+        );
         let err = commit_tree(&repo, blob).unwrap_err();
         assert!(
             matches!(

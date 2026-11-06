@@ -492,6 +492,12 @@ impl From<crate::error::Error> for UnpackError {
     }
 }
 
+impl From<crate::objects::ObjectError> for UnpackError {
+    fn from(err: crate::objects::ObjectError) -> Self {
+        Self::from(crate::error::Error::from(err))
+    }
+}
+
 /// In-process checks an embedding server runs on every push.
 ///
 /// These run in addition to [`ReceivePolicy`] and the repository's hook scripts,

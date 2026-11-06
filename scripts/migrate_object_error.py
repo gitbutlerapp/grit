@@ -44,10 +44,6 @@ REPLACEMENTS: list[tuple[str, str]] = [
         r"Error::Zlib\(([^)]+)\)",
         r"ObjectError::Zlib { detail: \1 }.into()",
     ),
-    (
-        r"matches!\([^,]+,\s*Error::ObjectNotFound\(_\)",
-        r"matches!(\1, Error::Object(ObjectError::ObjectNotFound { .. }))",
-    ),
 ]
 
 SCOPE_DIRS = [

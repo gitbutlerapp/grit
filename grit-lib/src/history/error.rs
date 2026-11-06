@@ -343,3 +343,9 @@ impl From<Error> for HistoryError {
         }
     }
 }
+
+impl From<crate::objects::ObjectError> for HistoryError {
+    fn from(err: crate::objects::ObjectError) -> Self {
+        Self::Library(Box::new(err.into()))
+    }
+}

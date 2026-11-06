@@ -61,8 +61,13 @@ use crate::error::{Error, Result};
 use crate::hash;
 use crate::midx::validate_midx_referenced_packs_with_diagnostics;
 use crate::objects::{
-    oid_hash_set, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind, OidHashMap, OidHashSet,
+    oid_hash_set, HashAlgo, Object, ObjectError, ObjectId, ObjectInfo, ObjectKind, ObjectResult,
+    OidHashMap, OidHashSet,
 };
+
+fn object_error_from_repo(err: Error) -> ObjectError {
+    ObjectError::from_umbrella(err)
+}
 use crate::pack;
 use crate::pack_store::PackStore;
 use filetime::{set_file_mtime, FileTime};
@@ -1028,6 +1033,7 @@ impl Odb {
         self.invalidate_loose_negative_cache(self.objects_dir.as_path());
         let primary = self.primary_writable()?;
         self.with_primary_read_context(|| primary.read(oid))
+            .map_err(Error::from)
     }
 
     #[cold]
@@ -1048,6 +1054,7 @@ impl Odb {
         self.invalidate_loose_negative_cache(self.objects_dir.as_path());
         let primary = self.primary_writable()?;
         self.with_primary_read_context(|| primary.read_info(oid))
+            .map_err(Error::from)
     }
 
     #[cold]
@@ -1060,6 +1067,7 @@ impl Odb {
         self.invalidate_loose_negative_cache(self.objects_dir.as_path());
         let primary = self.primary_writable()?;
         self.with_primary_read_context(|| primary.read_into(oid, buf))
+            .map_err(Error::from)
     }
 
     #[cold]
@@ -1366,6 +1374,7 @@ impl Odb {
             diagnostics,
         )
         .map(Arc::new)
+        .map_err(Error::from)
     }
 
     /// Register `<submodule-git-dir>/objects` for every stage-0 gitlink in `index` that has a
@@ -2041,7 +2050,7 @@ impl Odb {
             return Ok(true);
         }
         if let Some(primary) = &self.custom_primary {
-            return primary.contains(oid);
+            return primary.contains(oid).map_err(Error::from);
         }
         Ok(self.with_pack_store_for(&self.objects_dir, || {
             exists_materialized_in_objects_dir(&self.objects_dir, oid)
@@ -2066,7 +2075,7 @@ impl Odb {
             return Ok(true);
         }
         if let Some(primary) = &self.custom_primary {
-            return primary.contains(oid);
+            return primary.contains(oid).map_err(Error::from);
         }
         Ok(self.with_pack_store_for(&self.objects_dir, || {
             store::local_object_stored(&self.objects_dir, oid)
@@ -2182,8 +2191,8 @@ impl Odb {
     ///
     /// The first source failure (for example an [`Error::Io`] from a network- or
     /// database-backed store), instead of reporting the object as present or missing.
-    pub fn contains(&self, oid: &ObjectId) -> Result<bool> {
-        self.probe_sources(oid, Err)
+    pub fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
+        self.probe_sources(oid, Err).map_err(object_error_from_repo)
     }
 
     /// Probe every source for `oid` in lookup order; `on_err` decides whether a failing
@@ -2202,18 +2211,24 @@ impl Odb {
             Ok(present) => Ok(present),
             Err(err) => on_err(err).map(|()| false),
         };
-        if found(self.primary_writable().and_then(|p| p.contains(oid)))? {
+        if found(
+            self.primary_writable()
+                .and_then(|p| p.contains(oid).map_err(Error::from)),
+        )? {
             return Ok(true);
         }
         for src in &self.extra_read_sources {
-            if found(src.contains(oid))? {
+            if found(src.contains(oid).map_err(Error::from))? {
                 return Ok(true);
             }
         }
         if !self.alternate_object_lookup_needed() {
             return Ok(false);
         }
-        found(self.sources().and_then(|s| s.contains(oid)))
+        found(
+            self.sources()
+                .and_then(|s| s.contains(oid).map_err(Error::from)),
+        )
     }
 
     /// [`Self::contains`] for every id in `oids`, one answer per id in input order.
@@ -2225,7 +2240,7 @@ impl Odb {
     /// # Errors
     ///
     /// The first source failure, as for [`Self::contains`].
-    pub(crate) fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+    pub(crate) fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
         #[cfg(test)]
         self.exists_probe.fetch_add(oids.len(), Ordering::Relaxed);
         let mut present: Vec<bool> = oids
@@ -2617,7 +2632,7 @@ impl Odb {
     ///
     /// - [`Error::CorruptLooseObject`] — stored bytes could not be decoded (wraps zlib/header/EOF).
     /// - [`Error::LooseHashMismatch`] — payload OID does not match `expected_oid`.
-    pub fn read_loose_verify_oid(path: &Path, expected_oid: &ObjectId) -> Result<Object> {
+    pub fn read_loose_verify_oid(path: &Path, expected_oid: &ObjectId) -> ObjectResult<Object> {
         LooseStore::read_verify_oid(path, expected_oid)
     }
 
@@ -2646,8 +2661,8 @@ impl Odb {
     ///
     /// - [`Error::ObjectNotFound`] — no file at the expected path.
     /// - [`Error::CorruptLooseObject`] / [`Error::CorruptPackedObject`] — stored copy is damaged.
-    pub fn read(&self, oid: &ObjectId) -> Result<Object> {
-        self.read_impl(oid, true)
+    pub fn read(&self, oid: &ObjectId) -> ObjectResult<Object> {
+        self.read_impl(oid, true).map_err(object_error_from_repo)
     }
 
     /// `remember` keeps a copy in the session loose-read cache; callers that cache a
@@ -2693,7 +2708,7 @@ impl Odb {
                 {
                     unreadable_local_loose = Some(err);
                 }
-                Err(err) => return Err(err),
+                Err(err) => return Err(err.into()),
             }
         }
 
@@ -2705,12 +2720,12 @@ impl Odb {
             match self.sources()?.read(oid) {
                 Ok(Some(obj)) => return self.finish_session_loose_read(oid, obj, remember),
                 Ok(None) => {}
-                Err(err) => return Err(err),
+                Err(err) => return Err(err.into()),
             }
         }
 
         if let Some(err) = unreadable_local_loose {
-            return Err(err);
+            return Err(err.into());
         }
 
         self.read_after_promisor_miss(oid)
@@ -2743,7 +2758,7 @@ impl Odb {
 
     /// Read available storage without consulting the promisor fetcher.
     /// Missing objects return `None`; corrupt storage still returns an error.
-    pub(crate) fn try_read_once(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    pub(crate) fn try_read_once(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         if self.is_empty_tree(oid) {
             return Ok(Some(Object {
                 kind: ObjectKind::Tree,
@@ -2758,8 +2773,14 @@ impl Odb {
         if let Some(obj) = self.overlay_read(oid) {
             return Ok(Some(obj));
         }
-        if let Some(obj) = self.try_read_packed_in_batch_context(oid)? {
-            return Ok(Some(self.finish_session_loose_read(oid, obj, true)?));
+        if let Some(obj) = self
+            .try_read_packed_in_batch_context(oid)
+            .map_err(object_error_from_repo)?
+        {
+            return Ok(Some(
+                self.finish_session_loose_read(oid, obj, true)
+                    .map_err(object_error_from_repo)?,
+            ));
         }
 
         let use_midx = self.multi_pack_index_reads_enabled();
@@ -2771,11 +2792,16 @@ impl Odb {
 
         let mut unreadable_local_loose = None;
         if !self.skip_primary_for_alternate_backed_reads() {
-            let primary = self.primary_writable()?;
+            let primary = self.primary_writable().map_err(object_error_from_repo)?;
             let files_primary = self.primary().ok();
             let read_primary = || primary.read(oid);
             match self.with_primary_read_context(read_primary) {
-                Ok(Some(obj)) => return Ok(Some(self.finish_session_loose_read(oid, obj, true)?)),
+                Ok(Some(obj)) => {
+                    return Ok(Some(
+                        self.finish_session_loose_read(oid, obj, true)
+                            .map_err(object_error_from_repo)?,
+                    ));
+                }
                 Ok(None) => {}
                 Err(err)
                     if files_primary
@@ -2788,13 +2814,24 @@ impl Odb {
             }
         }
 
-        if let Some(obj) = self.try_read_extra_sources(oid)? {
-            return Ok(Some(self.finish_session_loose_read(oid, obj, true)?));
+        if let Some(obj) = self
+            .try_read_extra_sources(oid)
+            .map_err(object_error_from_repo)?
+        {
+            return Ok(Some(
+                self.finish_session_loose_read(oid, obj, true)
+                    .map_err(object_error_from_repo)?,
+            ));
         }
 
         if self.alternates_enabled {
-            match self.sources()?.read(oid) {
-                Ok(Some(obj)) => return Ok(Some(self.finish_session_loose_read(oid, obj, true)?)),
+            match self.sources().map_err(object_error_from_repo)?.read(oid) {
+                Ok(Some(obj)) => {
+                    return Ok(Some(
+                        self.finish_session_loose_read(oid, obj, true)
+                            .map_err(object_error_from_repo)?,
+                    ));
+                }
                 Ok(None) => {}
                 Err(err) => return Err(err),
             }
@@ -2851,7 +2888,7 @@ impl Odb {
     /// # Errors
     ///
     /// Same as [`Self::read`].
-    pub fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<ObjectKind> {
+    pub fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> ObjectResult<ObjectKind> {
         if self.is_empty_tree(oid) {
             buf.clear();
             return Ok(ObjectKind::Tree);
@@ -2916,6 +2953,7 @@ impl Odb {
         }
 
         self.read_into_after_promisor_miss(oid, buf)
+            .map_err(object_error_from_repo)
     }
 
     /// Like [`Self::read_into`], but keep delta bases resolved from local packs in the
@@ -2955,9 +2993,9 @@ impl Odb {
             }
         }
         if self.custom_primary.is_some() {
-            return self.read_into(oid, buf);
+            return self.read_into(oid, buf).map_err(Error::from);
         }
-        let object = self.read(oid)?;
+        let object = self.read(oid).map_err(Error::from)?;
         buf.clear();
         buf.extend_from_slice(&object.data);
         Ok(object.kind)
@@ -2986,7 +3024,9 @@ impl Odb {
         let Ok(files) = self.primary() else {
             return Ok(false);
         };
-        files.read_packed_commit_header_block_into(oid, buf)
+        files
+            .read_packed_commit_header_block_into(oid, buf)
+            .map_err(Error::from)
     }
 
     /// [`Self::read_packed_commit_header_block_into`] for many commits, setting up the pack
@@ -3009,7 +3049,9 @@ impl Odb {
         let Ok(files) = self.primary() else {
             return Ok(());
         };
-        files.read_packed_commit_header_blocks(oids, found)
+        files
+            .read_packed_commit_header_blocks(oids, found)
+            .map_err(Error::from)
     }
 
     #[cold]
@@ -3047,7 +3089,7 @@ impl Odb {
         &self,
         oid: &ObjectId,
         buf: &mut Vec<u8>,
-    ) -> Result<Option<ObjectKind>> {
+    ) -> ObjectResult<Option<ObjectKind>> {
         if oid.is_well_known_empty_tree() {
             buf.clear();
             return Ok(Some(ObjectKind::Tree));
@@ -3065,7 +3107,10 @@ impl Odb {
             return Ok(Some(obj.kind));
         }
 
-        if let Some(kind) = self.try_read_packed_in_batch_context_into(oid, false, buf)? {
+        if let Some(kind) = self
+            .try_read_packed_in_batch_context_into(oid, false, buf)
+            .map_err(object_error_from_repo)?
+        {
             return Ok(Some(kind));
         }
 
@@ -3078,7 +3123,7 @@ impl Odb {
 
         let mut unreadable_local_loose = None;
         if !self.skip_primary_for_alternate_backed_reads() {
-            let primary = self.primary_writable()?;
+            let primary = self.primary_writable().map_err(object_error_from_repo)?;
             let files_primary = self.primary().ok();
             let read_primary = || primary.read_into(oid, buf);
             match self.with_primary_read_context(read_primary) {
@@ -3118,7 +3163,7 @@ impl Odb {
         &self,
         oid: &ObjectId,
         buf: &mut Vec<u8>,
-    ) -> Result<Option<ObjectKind>> {
+    ) -> ObjectResult<Option<ObjectKind>> {
         for src in &self.extra_read_sources {
             if let Some(kind) = src.read_into(oid, buf)? {
                 return Ok(Some(kind));
@@ -3163,7 +3208,7 @@ impl Odb {
     ///
     /// - [`Error::ObjectNotFound`] — no object with this id in any consulted store.
     /// - [`Error::CorruptLooseObject`] / [`Error::CorruptPackedObject`] — stored copy is damaged.
-    pub fn read_info(&self, oid: &ObjectId) -> Result<ObjectInfo> {
+    pub fn read_info(&self, oid: &ObjectId) -> ObjectResult<ObjectInfo> {
         if self.is_empty_tree(oid) {
             return Ok(ObjectInfo {
                 kind: ObjectKind::Tree,
@@ -3223,6 +3268,7 @@ impl Odb {
         }
 
         self.read_info_after_promisor_miss(oid)
+            .map_err(object_error_from_repo)
     }
 
     /// Object metadata for local-only probes, serving, and maintenance.
@@ -3253,8 +3299,8 @@ impl Odb {
         }
         match self.try_read_info_once(oid) {
             Ok(info) => Ok(info.map(|info| info.kind)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
+            Err(ObjectError::ObjectNotFound { .. }) => Ok(None),
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -3300,7 +3346,7 @@ impl Odb {
 
     /// Header-only [`Self::try_read_once`]: kind and size from available storage, without
     /// consulting the promisor fetcher. Missing objects return `None`.
-    pub(crate) fn try_read_info_once(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    pub(crate) fn try_read_info_once(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         if self.is_empty_tree(oid) {
             return Ok(Some(ObjectInfo {
                 kind: ObjectKind::Tree,
@@ -3343,7 +3389,10 @@ impl Odb {
             }
         }
 
-        if let Some(info) = self.try_read_info_extra_sources(oid)? {
+        if let Some(info) = self
+            .try_read_info_extra_sources(oid)
+            .map_err(object_error_from_repo)?
+        {
             return Ok(Some(info));
         }
 
@@ -3415,7 +3464,9 @@ impl Odb {
                 LocalSizedRead::Packed(Some(size)) if size > limit => {
                     return Ok(BoundedRead::Larger);
                 }
-                LocalSizedRead::Packed(_) => return self.read(oid).map(BoundedRead::Object),
+                LocalSizedRead::Packed(_) => {
+                    return self.read(oid).map(BoundedRead::Object).map_err(Error::from);
+                }
                 LocalSizedRead::Loose(BoundedRead::Object(obj)) => {
                     if cache_small && obj.data.len() <= SESSION_BOUNDED_LOOSE_CACHE_MAX {
                         self.remember_session_loose_read(oid, &obj);
@@ -3430,7 +3481,7 @@ impl Odb {
         if info.size > limit {
             return Ok(BoundedRead::Larger);
         }
-        self.read(oid).map(BoundedRead::Object)
+        self.read(oid).map(BoundedRead::Object).map_err(Error::from)
     }
 
     /// Open a stream over `oid`'s uncompressed payload (overlay, primary, then alternates).
@@ -3441,8 +3492,9 @@ impl Odb {
     /// # Errors
     ///
     /// Propagates backend failures other than a missing object (`Ok(None)`).
-    pub fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'static>>> {
+    pub fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'static>>> {
         self.with_stream(oid, materialize_stream)
+            .map_err(object_error_from_repo)
     }
 
     /// Run `f` on a stream over `oid`'s uncompressed payload (overlay, primary, then alternates).
@@ -3503,7 +3555,7 @@ impl Odb {
             {
                 unreadable_local_loose = Some(err);
             }
-            Err(err) => return Err(err),
+            Err(err) => return Err(err.into()),
         }
         if let Some(stream) = self.try_open_stream_extra_sources(oid)? {
             return f(stream).map(Some);
@@ -3516,7 +3568,7 @@ impl Odb {
             }
         }
         if let Some(err) = unreadable_local_loose {
-            return Err(err);
+            return Err(err.into());
         }
         Ok(None)
     }
@@ -3526,9 +3578,12 @@ impl Odb {
     /// # Errors
     ///
     /// Propagates enumeration failures from any consulted backend.
-    pub fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+    pub fn for_each_object(
+        &self,
+        f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+    ) -> ObjectResult<()> {
         let mut seen = oid_hash_set();
-        let mut visit = |store: &dyn ObjectStore| -> Result<bool> {
+        let mut visit = |store: &dyn ObjectStore| -> ObjectResult<bool> {
             store::for_each_propagate_break(store, &mut |oid| {
                 if !seen.insert(*oid) {
                     return ControlFlow::Continue(());
@@ -3560,7 +3615,12 @@ impl Odb {
     /// # Errors
     ///
     /// Returns [`Error::InvalidObjectId`] when `prefix` is not valid hex.
-    pub fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
+    pub fn lookup_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+        out: &mut Vec<ObjectId>,
+    ) -> ObjectResult<()> {
         let mut seen: OidHashSet = out.iter().copied().collect();
         if let Some(overlay) = self.overlay_store() {
             append_lookup_prefix_layer(overlay.as_ref(), prefix, limit, out, &mut seen)?;
@@ -3775,7 +3835,7 @@ impl Odb {
     /// Propagates the primary store's flush failure.
     pub fn flush(&self) -> Result<()> {
         if let Some(primary) = &self.custom_primary {
-            primary.flush()
+            primary.flush().map_err(Error::from)
         } else {
             Ok(())
         }
@@ -3791,7 +3851,7 @@ impl Odb {
     /// Propagates the primary store's flush failure after attempting [`Self::rollback`].
     pub fn flush_for_publish(&self) -> Result<()> {
         if let Some(primary) = &self.custom_primary {
-            primary.flush_for_publish()
+            primary.flush_for_publish().map_err(Error::from)
         } else {
             Ok(())
         }
@@ -3806,7 +3866,7 @@ impl Odb {
     /// Propagates the primary store's rollback failure.
     pub fn rollback(&self) -> Result<()> {
         if let Some(primary) = &self.custom_primary {
-            primary.rollback()
+            primary.rollback().map_err(Error::from)
         } else {
             Ok(())
         }
@@ -3824,7 +3884,9 @@ impl Odb {
         if self.custom_primary.is_some() {
             return Ok(());
         }
-        self.local_loose()?.ensure_all_loose_prefix_dirs()
+        self.local_loose()?
+            .ensure_all_loose_prefix_dirs()
+            .map_err(Error::from)
     }
 
     /// Test-only: filesystem path for a loose object (see `grit-lib/tests/odb_abstraction_guard.rs`).
@@ -3877,7 +3939,9 @@ impl Odb {
     ///
     /// Returns [`Error::Zlib`] when compression fails.
     pub fn zlib_compress_loose_store(&self, store_bytes: &[u8]) -> Result<Vec<u8>> {
-        self.local_loose()?.zlib_compress_store_bytes(store_bytes)
+        self.local_loose()?
+            .zlib_compress_store_bytes(store_bytes)
+            .map_err(Error::from)
     }
 
     /// Write a loose object from precomputed id and zlib-compressed store bytes.
@@ -3932,7 +3996,9 @@ impl Odb {
             return Ok(*oid);
         }
 
-        primary.write_zlib_prehashed(oid, zlib_store, options)
+        primary
+            .write_zlib_prehashed(oid, zlib_store, options)
+            .map_err(Error::from)
     }
 
     /// Write blob `data` whose id `oid` the caller already computed.
@@ -3973,6 +4039,7 @@ impl Odb {
         primary
             .loose_store()
             .write_prehashed(oid, ObjectKind::Blob, data, options)
+            .map_err(Error::from)
     }
     /// Like [`Self::write`], with control over freshen behaviour on existing objects.
     ///
@@ -4082,7 +4149,7 @@ impl Odb {
         &self,
         kind: ObjectKind,
         size: u64,
-        supply: impl FnMut(&mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()>,
+        mut supply: impl FnMut(&mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()>,
     ) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
             return Err(Error::UnsupportedObjectStore {
@@ -4090,13 +4157,18 @@ impl Odb {
             });
         }
         let loose = self.local_loose()?;
-        let oid = loose.write_payload_stream_with(
-            kind,
-            size,
-            WriteOptions::default(),
-            self.pack_compression()?,
-            supply,
-        )?;
+        let oid = loose
+            .write_payload_stream_with(
+                kind,
+                size,
+                WriteOptions::default(),
+                self.pack_compression()?,
+                |chunk_sink| {
+                    supply(&mut |chunk| chunk_sink(chunk).map_err(Error::from))
+                        .map_err(ObjectError::from)
+                },
+            )
+            .map_err(Error::from)?;
         self.note_commit_object_written(kind);
         Ok(oid)
     }
@@ -4125,6 +4197,7 @@ impl Odb {
 
         self.local_loose()?
             .write(kind, data, WriteOptions::default())
+            .map_err(Error::from)
     }
 
     /// Write an already-serialized object (header + data) to the loose store.
@@ -4152,7 +4225,8 @@ impl Odb {
                 obj.kind,
                 &obj.data,
                 WriteOptions::default(),
-            );
+            )
+            .map_err(Error::from);
         }
 
         if let Some(existing) = self.try_freshen_existing(&oid) {
@@ -4161,6 +4235,7 @@ impl Odb {
 
         self.local_loose()?
             .write_store_prehashed(&oid, store_bytes, WriteOptions::default())
+            .map_err(Error::from)
     }
 
     /// Like [`Self::write_raw`] but only consults this object directory, not alternates.
@@ -4184,6 +4259,7 @@ impl Odb {
 
         self.local_loose()?
             .write_store_prehashed(&oid, store_bytes, WriteOptions::default())
+            .map_err(Error::from)
     }
 
     /// Update `path`'s mtime to "now" (Git `utime(path, NULL)`), returning whether it succeeded.
@@ -4441,6 +4517,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
+    use crate::objects::ObjectError;
     use tempfile::TempDir;
 
     #[test]
@@ -4584,7 +4661,7 @@ mod tests {
         let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").unwrap();
         assert!(matches!(
             odb.read_unless_larger(&missing, 1000, false),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
     }
 
@@ -4662,7 +4739,7 @@ mod tests {
         ));
         assert!(matches!(
             odb.read_unless_larger(&big, 1_200_000, true),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
     }
 
@@ -4679,7 +4756,7 @@ mod tests {
     fn parse_object_header_prefix_unknown_kind_is_typed_error() {
         let err = crate::odb::store::loose::parse_object_header_prefix(b"not-a-git-kind 0\0")
             .unwrap_err();
-        assert!(matches!(err, Error::UnknownObjectType(_)));
+        assert!(matches!(err, ObjectError::UnknownObjectType { .. }));
     }
 
     fn git_dir_with_config(config: &str) -> (TempDir, PathBuf, PathBuf) {
@@ -4910,24 +4987,24 @@ mod tests {
             fn hash_algo(&self) -> HashAlgo {
                 self.0.hash_algo()
             }
-            fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+            fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
                 self.0.read(oid)
             }
-            fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+            fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
                 self.0.read_info(oid)
             }
-            fn contains(&self, oid: &ObjectId) -> Result<bool> {
+            fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
                 self.1.fetch_add(1, Ordering::Relaxed);
                 self.0.contains(oid)
             }
-            fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+            fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
                 self.2.fetch_add(1, Ordering::Relaxed);
                 self.0.contains_many(oids)
             }
             fn for_each_object(
                 &self,
                 f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
-            ) -> Result<()> {
+            ) -> ObjectResult<()> {
                 self.0.for_each_object(f)
             }
         }
@@ -4938,10 +5015,10 @@ mod tests {
                 kind: ObjectKind,
                 data: &[u8],
                 options: WriteOptions,
-            ) -> Result<ObjectId> {
+            ) -> ObjectResult<ObjectId> {
                 self.0.write(kind, data, options)
             }
-            fn freshen(&self, oid: &ObjectId) -> Result<bool> {
+            fn freshen(&self, oid: &ObjectId) -> ObjectResult<bool> {
                 self.0.freshen(oid)
             }
         }
@@ -5386,10 +5463,10 @@ mod tests {
         assert!(odb.contains(&odb.empty_tree_oid().unwrap()).unwrap());
 
         let try_local = odb.try_exists_local(&oid).unwrap_err();
-        assert!(store::flaky::is_injected(&try_local));
+        assert!(store::flaky::is_injected_error(&try_local));
         assert!(!odb.exists_local(&oid));
         let try_stored = odb.try_exists_stored(&oid).unwrap_err();
-        assert!(store::flaky::is_injected(&try_stored));
+        assert!(store::flaky::is_injected_error(&try_stored));
         assert!(!odb.exists_stored(&oid));
     }
 
@@ -5558,13 +5635,13 @@ mod tests {
         assert!(store::flaky::is_injected(
             &odb.contains_many(&[oid]).unwrap_err()
         ));
-        assert!(store::flaky::is_injected(
+        assert!(store::flaky::is_injected_error(
             &odb.present_oids([oid]).unwrap_err()
         ));
-        assert!(store::flaky::is_injected(
+        assert!(store::flaky::is_injected_error(
             &odb.missing_oids([oid]).unwrap_err()
         ));
-        assert!(store::flaky::is_injected(
+        assert!(store::flaky::is_injected_error(
             &odb.missing_stored_oids([oid]).unwrap_err()
         ));
     }

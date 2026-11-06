@@ -779,7 +779,7 @@ fn check_local_loose_object(
     fsck_opts: FsckObjectOptions,
 ) -> LooseCheckOutcome {
     let (oid, path) = item;
-    match Odb::read_loose_verify_oid(path, oid) {
+    match Odb::read_loose_verify_oid(path, oid).map_err(Error::from) {
         Err(Error::LooseHashMismatch { .. }) => LooseCheckOutcome::Issue(FsckIssue::HashMismatch {
             oid: *oid,
             path: path.clone(),
@@ -989,7 +989,7 @@ fn verify_custom_primary_objects(
             // Removed between enumeration and read; connectivity reports it if still needed.
             Ok(None) => continue,
             Err(err) => {
-                push_corrupt_parse(issues, config, strict, oid, err);
+                push_corrupt_parse(issues, config, strict, oid, Error::from(err));
                 continue;
             }
         };
@@ -1024,7 +1024,7 @@ fn verify_custom_primary_objects(
                 continue;
             }
             Err(err) => {
-                push_corrupt_parse(issues, config, strict, oid, err);
+                push_corrupt_parse(issues, config, strict, oid, Error::from(err));
                 continue;
             }
         }

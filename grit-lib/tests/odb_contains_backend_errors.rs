@@ -12,6 +12,7 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, Result};
+use grit_lib::objects::error::{ObjectError, ObjectResult};
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
@@ -27,12 +28,12 @@ struct Flaky {
 }
 
 impl Flaky {
-    fn check(&self) -> Result<()> {
+    fn check(&self) -> ObjectResult<()> {
         if self.fail.load(Ordering::Relaxed) {
-            return Err(Error::Io(io::Error::new(
+            return Err(ObjectError::from(Error::Io(io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "backend down",
-            )));
+            ))));
         }
         Ok(())
     }
@@ -43,41 +44,60 @@ impl ObjectStore for Flaky {
         HashAlgo::Sha1
     }
 
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         self.check()?;
         self.inner.read(oid)
     }
 
-    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         self.check()?;
         self.inner.read_info(oid)
     }
 
-    fn contains(&self, oid: &ObjectId) -> Result<bool> {
+    fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
         self.check()?;
         self.inner.contains(oid)
     }
 
-    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()> {
         self.check()?;
         self.inner.for_each_object(f)
     }
 }
 
 impl WritableObjectStore for Flaky {
-    fn write(&self, kind: ObjectKind, data: &[u8], options: WriteOptions) -> Result<ObjectId> {
+    fn write(
+        &self,
+        kind: ObjectKind,
+        data: &[u8],
+        options: WriteOptions,
+    ) -> ObjectResult<ObjectId> {
         self.check()?;
         self.inner.write(kind, data, options)
     }
 
-    fn freshen(&self, oid: &ObjectId) -> Result<bool> {
+    fn freshen(&self, oid: &ObjectId) -> ObjectResult<bool> {
         self.check()?;
         self.inner.freshen(oid)
     }
 }
 
-fn is_backend_down(err: &Error) -> bool {
-    matches!(err, Error::Io(e) if e.kind() == io::ErrorKind::ConnectionReset)
+fn is_backend_down_error(err: &Error) -> bool {
+    match err {
+        Error::Object(inner) => is_backend_down_object(inner),
+        Error::Io(e) => e.kind() == io::ErrorKind::ConnectionReset,
+        _ => false,
+    }
+}
+
+fn is_backend_down_object(err: &ObjectError) -> bool {
+    match err {
+        ObjectError::Backend { source } => source
+            .downcast_ref::<io::Error>()
+            .is_some_and(|e| e.kind() == io::ErrorKind::ConnectionReset),
+        ObjectError::Nested(inner) => is_backend_down_error(inner),
+        _ => false,
+    }
 }
 
 /// A repository whose primary object store is `Flaky`, holding one commit on `main`.
@@ -132,9 +152,13 @@ fn contains_reports_backend_failure_like_read_does() {
     assert!(repo.objects().contains(&commit).unwrap());
 
     flaky.fail.store(true, Ordering::Relaxed);
-    assert!(is_backend_down(&repo.odb().read(&commit).unwrap_err()));
-    assert!(is_backend_down(&repo.odb().contains(&commit).unwrap_err()));
-    assert!(is_backend_down(
+    assert!(is_backend_down_object(
+        &repo.odb().read(&commit).unwrap_err()
+    ));
+    assert!(is_backend_down_object(
+        &repo.odb().contains(&commit).unwrap_err()
+    ));
+    assert!(is_backend_down_error(
         &repo.objects().contains(&commit).unwrap_err()
     ));
     assert!(
@@ -159,8 +183,8 @@ fn contains_reports_primary_failure_even_when_extra_source_has_object() {
         .push_read_source(extra)
         .alternates(false)
         .build();
-    assert!(is_backend_down(&odb.read(&oid).unwrap_err()));
-    assert!(is_backend_down(&odb.contains(&oid).unwrap_err()));
+    assert!(is_backend_down_object(&odb.read(&oid).unwrap_err()));
+    assert!(is_backend_down_object(&odb.contains(&oid).unwrap_err()));
 }
 
 #[test]
@@ -176,7 +200,7 @@ fn refs_fsck_reports_backend_failure_not_missing_object() {
 
     flaky.fail.store(true, Ordering::Relaxed);
     let err = refs_fsck(&repo, repo.odb(), &config, false).unwrap_err();
-    assert!(is_backend_down(&err), "{err:?}");
+    assert!(is_backend_down_error(&err), "{err:?}");
 }
 
 #[test]
@@ -187,5 +211,5 @@ fn abbreviate_object_id_reports_backend_failure() {
 
     flaky.fail.store(true, Ordering::Relaxed);
     let err = abbreviate_object_id(&repo, commit, 7).unwrap_err();
-    assert!(is_backend_down(&err), "{err:?}");
+    assert!(is_backend_down_error(&err), "{err:?}");
 }

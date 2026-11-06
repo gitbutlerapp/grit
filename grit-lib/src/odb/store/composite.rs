@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use crate::error::Result;
+use crate::objects::error::ObjectResult;
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 
 use super::{ObjectStore, ObjectStream};
@@ -46,8 +46,8 @@ impl CompositeStore {
     /// the lookup immediately.
     fn first_hit<'s, T>(
         &'s self,
-        mut lookup: impl FnMut(&'s dyn ObjectStore) -> Result<Option<T>>,
-    ) -> Result<Option<T>> {
+        mut lookup: impl FnMut(&'s dyn ObjectStore) -> ObjectResult<Option<T>>,
+    ) -> ObjectResult<Option<T>> {
         let mut damaged = None;
         for store in &self.stores {
             match lookup(store.as_ref()) {
@@ -71,19 +71,19 @@ impl ObjectStore for CompositeStore {
             .unwrap_or(self.hash_algo)
     }
 
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         self.first_hit(|store| store.read(oid))
     }
 
-    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> ObjectResult<Option<ObjectKind>> {
         self.first_hit(|store| store.read_into(oid, buf))
     }
 
-    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         self.first_hit(|store| store.read_info(oid))
     }
 
-    fn contains(&self, oid: &ObjectId) -> Result<bool> {
+    fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
         for store in &self.stores {
             if store.contains(oid)? {
                 return Ok(true);
@@ -92,7 +92,7 @@ impl ObjectStore for CompositeStore {
         Ok(false)
     }
 
-    fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+    fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
         let mut present = vec![false; oids.len()];
         let mut pending: Vec<usize> = (0..oids.len()).collect();
         for store in &self.stores {
@@ -103,11 +103,11 @@ impl ObjectStore for CompositeStore {
         Ok(present)
     }
 
-    fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
+    fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'_>>> {
         self.first_hit(|store| store.open_stream(oid))
     }
 
-    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()> {
         let mut seen = HashSet::new();
         for store in &self.stores {
             let stop = super::for_each_propagate_break(store.as_ref(), &mut |oid| {
@@ -123,7 +123,12 @@ impl ObjectStore for CompositeStore {
         Ok(())
     }
 
-    fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
+    fn lookup_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+        out: &mut Vec<ObjectId>,
+    ) -> ObjectResult<()> {
         let mut seen: HashSet<ObjectId> = out.iter().copied().collect();
         for store in &self.stores {
             if limit != 0 && out.len() >= limit {
@@ -148,7 +153,7 @@ impl ObjectStore for CompositeStore {
         Ok(())
     }
 
-    fn refresh(&self) -> Result<bool> {
+    fn refresh(&self) -> ObjectResult<bool> {
         let mut changed = false;
         for store in &self.stores {
             if store.refresh()? {
@@ -163,6 +168,7 @@ impl ObjectStore for CompositeStore {
 mod tests {
     use super::*;
     use crate::error::Error;
+    use crate::objects::ObjectError;
     use crate::objects::ObjectKind;
     use crate::odb::store::{MemoryStore, WritableObjectStore};
     use crate::odb::WriteOptions;
@@ -232,7 +238,7 @@ mod tests {
     #[derive(Debug)]
     struct Rotten {
         inner: MemoryStore,
-        make_err: fn() -> Error,
+        make_err: fn() -> ObjectError,
     }
 
     impl ObjectStore for Rotten {
@@ -240,29 +246,32 @@ mod tests {
             self.inner.hash_algo()
         }
 
-        fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+        fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
             match self.inner.read(oid)? {
                 Some(_) => Err((self.make_err)()),
                 None => Ok(None),
             }
         }
 
-        fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+        fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> ObjectResult<Option<ObjectKind>> {
             buf.clear();
             buf.extend_from_slice(b"garbage from a half-inflated copy");
             self.read(oid).map(|obj| obj.map(|o| o.kind))
         }
 
-        fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+        fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
             self.read(oid).map(|obj| obj.map(|_| unreachable!()))
         }
 
-        fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+        fn for_each_object(
+            &self,
+            f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+        ) -> ObjectResult<()> {
             self.inner.for_each_object(f)
         }
     }
 
-    fn rotten_with(data: &[u8], make_err: fn() -> Error) -> (Arc<dyn ObjectStore>, ObjectId) {
+    fn rotten_with(data: &[u8], make_err: fn() -> ObjectError) -> (Arc<dyn ObjectStore>, ObjectId) {
         let inner = MemoryStore::new(HashAlgo::Sha1);
         let oid = inner
             .write(ObjectKind::Blob, data, WriteOptions::default())
@@ -270,18 +279,20 @@ mod tests {
         (Arc::new(Rotten { inner, make_err }), oid)
     }
 
-    fn corrupt() -> Error {
-        Error::CorruptObject("checksum mismatch".to_owned())
+    fn corrupt() -> ObjectError {
+        ObjectError::corrupt_object(None, "checksum mismatch")
     }
 
-    fn zlib() -> Error {
-        Error::Zlib("invalid stored block lengths".to_owned())
+    fn zlib() -> ObjectError {
+        ObjectError::Zlib {
+            detail: "invalid stored block lengths".to_owned(),
+        }
     }
 
     fn assert_every_read_fails(
         composite: &CompositeStore,
         oid: &ObjectId,
-        is_expected: fn(&Error) -> bool,
+        is_expected: fn(&ObjectError) -> bool,
     ) {
         let err = composite.read(oid).unwrap_err();
         assert!(is_expected(&err), "read: {err:?}");
@@ -300,7 +311,9 @@ mod tests {
         let (rotten, oid) = rotten_with(b"precious data", corrupt);
         let empty = Arc::new(MemoryStore::new(HashAlgo::Sha1)) as Arc<dyn ObjectStore>;
         let composite = CompositeStore::new(vec![rotten, empty], HashAlgo::Sha1);
-        assert_every_read_fails(&composite, &oid, |e| matches!(e, Error::CorruptObject(_)));
+        assert_every_read_fails(&composite, &oid, |e| {
+            matches!(e, ObjectError::CorruptObject { .. })
+        });
     }
 
     #[test]
@@ -308,7 +321,7 @@ mod tests {
         let empty = Arc::new(MemoryStore::new(HashAlgo::Sha1)) as Arc<dyn ObjectStore>;
         let (rotten, oid) = rotten_with(b"precious data", zlib);
         let composite = CompositeStore::new(vec![empty, rotten], HashAlgo::Sha1);
-        assert_every_read_fails(&composite, &oid, |e| matches!(e, Error::Zlib(_)));
+        assert_every_read_fails(&composite, &oid, |e| matches!(e, ObjectError::Zlib { .. }));
     }
 
     #[test]
@@ -316,12 +329,12 @@ mod tests {
         let (zlib_store, oid) = rotten_with(b"precious data", zlib);
         let (corrupt_store, _) = rotten_with(b"precious data", corrupt);
         let composite = CompositeStore::new(vec![zlib_store, corrupt_store], HashAlgo::Sha1);
-        assert_every_read_fails(&composite, &oid, |e| matches!(e, Error::Zlib(_)));
+        assert_every_read_fails(&composite, &oid, |e| matches!(e, ObjectError::Zlib { .. }));
     }
 
     #[test]
     fn good_copy_in_later_store_beats_corrupt_copy() {
-        for make_err in [corrupt as fn() -> Error, zlib] {
+        for make_err in [corrupt as fn() -> ObjectError, zlib] {
             let (rotten, oid) = rotten_with(b"precious data", make_err);
             let good = MemoryStore::new(HashAlgo::Sha1);
             good.write(ObjectKind::Blob, b"precious data", WriteOptions::default())
@@ -353,7 +366,10 @@ mod tests {
     #[test]
     fn other_errors_still_stop_the_lookup() {
         let (rotten, oid) = rotten_with(b"precious data", || {
-            Error::Io(std::io::Error::other("backend down"))
+            ObjectError::from(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "backend down",
+            )))
         });
         let good = MemoryStore::new(HashAlgo::Sha1);
         good.write(ObjectKind::Blob, b"precious data", WriteOptions::default())
@@ -362,7 +378,8 @@ mod tests {
             vec![rotten, Arc::new(good) as Arc<dyn ObjectStore>],
             HashAlgo::Sha1,
         );
-        assert!(matches!(composite.read(&oid), Err(Error::Io(_))));
+        let err = composite.read(&oid).unwrap_err();
+        assert!(crate::odb::store::flaky::is_injected(&err));
     }
 
     #[test]
@@ -392,20 +409,23 @@ mod tests {
         fn hash_algo(&self) -> HashAlgo {
             self.inner.hash_algo()
         }
-        fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+        fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
             self.inner.read(oid)
         }
-        fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+        fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
             self.inner.read_info(oid)
         }
-        fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+        fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
             self.batches
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .push(oids.to_vec());
             self.inner.contains_many(oids)
         }
-        fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+        fn for_each_object(
+            &self,
+            f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+        ) -> ObjectResult<()> {
             self.inner.for_each_object(f)
         }
     }

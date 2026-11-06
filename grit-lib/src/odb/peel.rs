@@ -185,6 +185,7 @@ mod tests {
 
     use super::*;
     use crate::objects::HashAlgo;
+    use crate::objects::ObjectError;
     use crate::odb::{MemoryStore, OdbBuilder};
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -242,12 +243,12 @@ mod tests {
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
         assert!(matches!(
             odb.peel_tags(missing),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
         let dangling = tag(&odb, missing, "commit", "dangling");
         assert!(matches!(
             odb.peel_to_commit(dangling),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
     }
 
@@ -303,11 +304,11 @@ mod tests {
         let dangling_outer = tag(&odb, missing, "tag", "dangling-outer");
         assert!(matches!(
             odb.peel_tag_target(dangling_outer),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
         assert!(matches!(
             odb.peel_tag_target(missing),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
     }
 

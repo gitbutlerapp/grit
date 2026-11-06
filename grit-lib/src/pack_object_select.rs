@@ -843,7 +843,7 @@ fn commits_reachable_from_haves(
         let obj = match odb.read(&oid) {
             Ok(o) => o,
             Err(_) if skip_missing => continue,
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         };
         if obj.kind != ObjectKind::Commit {
             continue;
@@ -1120,7 +1120,7 @@ fn collect_reachable_excluding_with_name_hashes(
                     Ok(info) if info.kind == ObjectKind::Blob => continue,
                     Ok(_) => {}
                     Err(_) if skip_missing => continue,
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                 }
             }
             let read = match read_ahead_result {
@@ -1130,7 +1130,7 @@ fn collect_reachable_excluding_with_name_hashes(
             let obj = match read {
                 Ok(o) => o,
                 Err(_) if skip_missing => continue,
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.into()),
             };
             walk.expand(oid, obj, path_hash, depth, oid_len)?;
         }
@@ -1453,7 +1453,7 @@ impl<'a> EnumerationWalk<'a> {
             }
             Ok(_) => {}
             Err(_) if self.skip_missing => return Ok(()),
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         }
         match self.read(&oid)? {
             Some(obj) if obj.kind == ObjectKind::Commit => self.queue_commit(oid, obj),
@@ -1797,11 +1797,11 @@ impl<'a> EnumerationWalk<'a> {
         }
         let info = if self.missing.is_some() {
             match self.odb.read_info_without_fetch(oid) {
-                Err(crate::error::Error::ObjectNotFound(_)) => return Ok(None),
+                Err(Error::ObjectNotFound(_)) => return Ok(None),
                 other => other,
             }
         } else {
-            self.odb.read_info(oid)
+            self.odb.read_info(oid).map_err(Error::from)
         };
         match info {
             Ok(info) => Ok(Some((

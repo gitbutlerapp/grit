@@ -2795,7 +2795,7 @@ impl Repository {
         oid: &crate::objects::ObjectId,
     ) -> Result<crate::objects::ObjectInfo> {
         let effective = self.object_id_after_replace(oid);
-        self.odb.read_info(&effective)
+        self.odb.read_info(&effective).map_err(Error::from)
     }
 
     /// Read an object, transparently following replace refs.
@@ -2809,7 +2809,7 @@ impl Repository {
         oid: &crate::objects::ObjectId,
     ) -> Result<crate::objects::Object> {
         let effective = self.object_id_after_replace(oid);
-        self.odb.read(&effective)
+        self.odb.read(&effective).map_err(Error::from)
     }
 
     fn resolve_replace_redirect(
@@ -2865,7 +2865,7 @@ impl Repository {
         buf: &mut Vec<u8>,
     ) -> Result<ObjectKind> {
         let effective = self.object_id_after_replace(oid);
-        self.odb().read_into(&effective, buf)
+        self.odb().read_into(&effective, buf).map_err(Error::from)
     }
 }
 

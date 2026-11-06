@@ -85,7 +85,7 @@ mod tests {
 
     use super::*;
     use crate::error::Error;
-    use crate::objects::{serialize_tree, ObjectKind};
+    use crate::objects::{serialize_tree, ObjectError, ObjectKind};
     use tempfile::TempDir;
 
     fn write_tree(odb: &Odb, mut entries: Vec<TreeEntry>) -> ObjectId {
@@ -219,9 +219,9 @@ mod tests {
         ));
 
         let missing = ObjectId::from_hex("2222222222222222222222222222222222222222").unwrap();
-        assert!(matches!(
-            odb.tree_entry_at_path(&missing, b"x"),
-            Err(Error::ObjectNotFound(_))
-        ));
+        assert!(odb
+            .tree_entry_at_path(&missing, b"x")
+            .unwrap_err()
+            .is_object_not_found());
     }
 }

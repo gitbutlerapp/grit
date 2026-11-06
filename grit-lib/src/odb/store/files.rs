@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::diagnostics::DiagnosticsHandle;
-use crate::error::{Error, Result};
+use crate::error::Error;
 use crate::hash;
 use crate::midx::midx_oid_listed_in_tip;
+use crate::objects::error::{ObjectError, ObjectResult};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use crate::pack::{self, PackLookupOptions};
 use crate::pack_store::PackStore;
@@ -69,7 +70,7 @@ impl FilesSource {
         use_midx: bool,
         midx_tip_listing_for_exists: bool,
         diagnostics: DiagnosticsHandle,
-    ) -> Result<Self> {
+    ) -> ObjectResult<Self> {
         let midx = MidxObjects::new(Arc::clone(&pack_store), use_midx)?;
         Ok(Self {
             objects_dir: pack_store.objects_dir().to_path_buf(),
@@ -115,7 +116,7 @@ impl FilesSource {
         &self,
         oid: &ObjectId,
         options: WriteOptions,
-    ) -> Result<Option<ObjectId>> {
+    ) -> ObjectResult<Option<ObjectId>> {
         if let Some(existing) = self.loose.try_finish_if_loose_present(oid, options)? {
             return Ok(Some(existing));
         }
@@ -143,7 +144,7 @@ impl FilesSource {
         oid: &ObjectId,
         zlib_store: &[u8],
         options: WriteOptions,
-    ) -> Result<ObjectId> {
+    ) -> ObjectResult<ObjectId> {
         if let Some(existing) = self.try_finish_duplicate_write(oid, options)? {
             return Ok(existing);
         }
@@ -151,17 +152,11 @@ impl FilesSource {
     }
 
     /// Whether a loose object file exists but could not be parsed (caller may consult alternates).
-    pub fn local_loose_exists_but_unreadable(&self, oid: &ObjectId, err: &Error) -> bool {
+    pub fn local_loose_exists_but_unreadable(&self, oid: &ObjectId, err: &ObjectError) -> bool {
         if !self.loose.object_path(oid).is_file() {
             return false;
         }
-        matches!(
-            err,
-            Error::CorruptObject(_)
-                | Error::CorruptLooseObject { .. }
-                | Error::LooseHashMismatch { .. }
-                | Error::Zlib(_)
-        )
+        err.is_damaged_object()
     }
 
     fn midx_pack_filter_active(&self) -> bool {
@@ -173,7 +168,7 @@ impl FilesSource {
         self.midx_pack_filter_active()
     }
 
-    fn midx_read_should_fallback_to_packs(err: &Error) -> bool {
+    fn midx_read_should_fallback_to_packs(err: &ObjectError) -> bool {
         err.is_damaged_object()
     }
 
@@ -182,7 +177,7 @@ impl FilesSource {
         oid: &ObjectId,
         populate_delta_lru: bool,
         buf: &mut Vec<u8>,
-    ) -> Result<Option<ObjectKind>> {
+    ) -> ObjectResult<Option<ObjectKind>> {
         if empty_tree_oid_matches(self.hash_algo(), oid) {
             buf.clear();
             return Ok(Some(ObjectKind::Tree));
@@ -198,7 +193,7 @@ impl FilesSource {
             match self.midx.read_into(oid, buf) {
                 Ok(Some(kind)) => return Ok(Some(kind)),
                 Ok(None) => {}
-                Err(Error::Midx(_)) => {}
+                Err(err) if matches!(err, ObjectError::Midx(_)) => {}
                 Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                 Err(err) => return Err(err),
             }
@@ -212,8 +207,8 @@ impl FilesSource {
             buf,
         ) {
             Ok(kind) => return Ok(Some(kind)),
-            Err(Error::ObjectNotFound(_)) => {}
-            Err(err) => return Err(err),
+            Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+            Err(err) => return Err(ObjectError::from(err)),
         }
 
         if midx_pack_filter {
@@ -225,8 +220,8 @@ impl FilesSource {
                 buf,
             ) {
                 Ok(kind) => return Ok(Some(kind)),
-                Err(Error::ObjectNotFound(_)) => {}
-                Err(err) => return Err(err),
+                Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+                Err(err) => return Err(ObjectError::from(err)),
             }
         }
 
@@ -238,7 +233,7 @@ impl FilesSource {
         self.loose.read_into(oid, buf)
     }
 
-    fn try_read_object(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn try_read_object(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         if empty_tree_oid_matches(self.hash_algo(), oid) {
             return Ok(Some(Object {
                 kind: ObjectKind::Tree,
@@ -256,7 +251,7 @@ impl FilesSource {
             match self.midx.read(oid) {
                 Ok(Some(obj)) => return Ok(Some(obj)),
                 Ok(None) => {}
-                Err(Error::Midx(_)) => {}
+                Err(err) if matches!(err, ObjectError::Midx(_)) => {}
                 Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                 Err(err) => return Err(err),
             }
@@ -264,8 +259,8 @@ impl FilesSource {
 
         match pack::try_read_object_from_packs_with_options(&self.objects_dir, oid, pack_opts) {
             Ok(obj) => return Ok(Some(obj)),
-            Err(Error::ObjectNotFound(_)) => {}
-            Err(err) => return Err(err),
+            Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+            Err(err) => return Err(ObjectError::from(err)),
         }
 
         if midx_pack_filter {
@@ -275,8 +270,8 @@ impl FilesSource {
                 PackLookupOptions::MIDX_COVERED_PACKS,
             ) {
                 Ok(obj) => return Ok(Some(obj)),
-                Err(Error::ObjectNotFound(_)) => {}
-                Err(err) => return Err(err),
+                Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+                Err(err) => return Err(ObjectError::from(err)),
             }
         }
 
@@ -288,7 +283,7 @@ impl FilesSource {
         self.loose.read(oid)
     }
 
-    fn try_read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn try_read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         if empty_tree_oid_matches(self.hash_algo(), oid) {
             return Ok(Some(ObjectInfo {
                 kind: ObjectKind::Tree,
@@ -306,7 +301,7 @@ impl FilesSource {
             match self.midx.read_info(oid) {
                 Ok(Some(info)) => return Ok(Some(info)),
                 Ok(None) => {}
-                Err(Error::Midx(_)) => {}
+                Err(err) if matches!(err, ObjectError::Midx(_)) => {}
                 Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                 Err(err) => return Err(err),
             }
@@ -315,8 +310,8 @@ impl FilesSource {
         match pack::try_read_object_info_from_packs_with_options(&self.objects_dir, oid, pack_opts)
         {
             Ok(info) => return Ok(Some(info)),
-            Err(Error::ObjectNotFound(_)) => {}
-            Err(err) => return Err(err),
+            Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+            Err(err) => return Err(ObjectError::from(err)),
         }
 
         if midx_pack_filter {
@@ -326,8 +321,8 @@ impl FilesSource {
                 PackLookupOptions::MIDX_COVERED_PACKS,
             ) {
                 Ok(info) => return Ok(Some(info)),
-                Err(Error::ObjectNotFound(_)) => {}
-                Err(err) => return Err(err),
+                Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+                Err(err) => return Err(ObjectError::from(err)),
             }
         }
 
@@ -348,7 +343,11 @@ impl FilesSource {
     /// # Errors
     ///
     /// Propagates pack lookup and loose read failures.
-    pub(crate) fn read_unless_larger(&self, oid: &ObjectId, limit: u64) -> Result<LocalSizedRead> {
+    pub(crate) fn read_unless_larger(
+        &self,
+        oid: &ObjectId,
+        limit: u64,
+    ) -> ObjectResult<LocalSizedRead> {
         let probe = || {
             match pack::locate_packed_whole_object(&self.objects_dir, oid, false)? {
                 pack::PackedEntry::Whole(whole) => {
@@ -365,7 +364,7 @@ impl FilesSource {
         self.with_pack_access(probe)
     }
 
-    fn read_with_pack_retry(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read_with_pack_retry(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         match self.try_read_object(oid) {
             Ok(Some(obj)) => Ok(Some(obj)),
             Ok(None) => {
@@ -384,7 +383,7 @@ impl FilesSource {
         oid: &ObjectId,
         populate_delta_lru: bool,
         buf: &mut Vec<u8>,
-    ) -> Result<Option<ObjectKind>> {
+    ) -> ObjectResult<Option<ObjectKind>> {
         match self.try_read_object_into(oid, populate_delta_lru, buf) {
             Ok(Some(kind)) => Ok(Some(kind)),
             Ok(None) => {
@@ -398,7 +397,7 @@ impl FilesSource {
         }
     }
 
-    fn read_info_with_pack_retry(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info_with_pack_retry(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         match self.try_read_info(oid) {
             Ok(Some(info)) => Ok(Some(info)),
             Ok(None) => {
@@ -412,7 +411,7 @@ impl FilesSource {
         }
     }
 
-    fn contains_in_packs(&self, oid: &ObjectId) -> Result<bool> {
+    fn contains_in_packs(&self, oid: &ObjectId) -> ObjectResult<bool> {
         let indexes = pack::read_local_pack_indexes_cached(&self.objects_dir)?;
         if indexes.is_empty() && !pack_directory_has_index_files(&self.objects_dir) {
             if self.midx_tip_listing_for_exists && self.use_midx {
@@ -455,7 +454,7 @@ impl FilesSource {
         oid: &ObjectId,
         populate_delta_lru: bool,
         buf: &mut Vec<u8>,
-    ) -> Result<Option<ObjectKind>> {
+    ) -> ObjectResult<Option<ObjectKind>> {
         self.with_pack_access(|| self.read_with_pack_retry_into(oid, populate_delta_lru, buf))
     }
 
@@ -464,9 +463,10 @@ impl FilesSource {
         &self,
         oid: &ObjectId,
         buf: &mut Vec<u8>,
-    ) -> Result<bool> {
+    ) -> ObjectResult<bool> {
         self.with_pack_access(|| {
             pack::read_packed_commit_header_block_into(&self.objects_dir, oid, buf)
+                .map_err(ObjectError::from)
         })
     }
 
@@ -475,9 +475,10 @@ impl FilesSource {
         &self,
         oids: &[ObjectId],
         found: impl FnMut(usize, &[u8]),
-    ) -> Result<()> {
+    ) -> ObjectResult<()> {
         self.with_pack_access(|| {
             pack::read_packed_commit_header_blocks(&self.objects_dir, oids, found)
+                .map_err(ObjectError::from)
         })
     }
 }
@@ -487,19 +488,19 @@ impl ObjectStore for FilesSource {
         ObjectStore::hash_algo(&self.loose)
     }
 
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         self.with_pack_access(|| self.read_with_pack_retry(oid))
     }
 
-    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+    fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> ObjectResult<Option<ObjectKind>> {
         self.read_into_with_delta_policy(oid, false, buf)
     }
 
-    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         self.with_pack_access(|| self.read_info_with_pack_retry(oid))
     }
 
-    fn contains(&self, oid: &ObjectId) -> Result<bool> {
+    fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
         if empty_tree_oid_matches(self.hash_algo(), oid) {
             return Ok(true);
         }
@@ -509,7 +510,7 @@ impl ObjectStore for FilesSource {
         self.with_pack_access(|| self.contains_in_packs(oid))
     }
 
-    fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+    fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
         // Batches are mostly packed objects (cached trees, unchanged tree members), so
         // the loaded pack indexes answer first and only misses pay a loose-path stat. A
         // pack failure falls through to `contains`, which reports it as a single probe would.
@@ -530,7 +531,7 @@ impl ObjectStore for FilesSource {
         self.with_pack_access(probe)
     }
 
-    fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
+    fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'_>>> {
         if empty_tree_oid_matches(self.hash_algo(), oid) {
             return Ok(Some(ObjectStream {
                 kind: ObjectKind::Tree,
@@ -543,24 +544,25 @@ impl ObjectStore for FilesSource {
                 match self.midx.open_stream(oid) {
                     Ok(Some(stream)) => return Ok(Some(stream)),
                     Ok(None) => {}
-                    Err(Error::Midx(_)) => {}
+                    Err(err) if matches!(err, ObjectError::Midx(_)) => {}
                     Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                     Err(err) => return Err(err),
                 }
             }
             match self.packs.open_stream(oid) {
                 Ok(Some(stream)) => return Ok(Some(stream)),
-                Ok(None) | Err(Error::ObjectNotFound(_)) => {}
-                Err(err) => return Err(err),
+                Ok(None) => {}
+                Err(ObjectError::ObjectNotFound { .. }) => {}
+                Err(err) => return Err(ObjectError::from(err)),
             }
             self.loose.open_stream(oid)
         })
     }
 
-    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()> {
         let mut seen = HashSet::new();
         self.with_pack_access(|| {
-            let mut layer = |store: &dyn ObjectStore| -> Result<bool> {
+            let mut layer = |store: &dyn ObjectStore| -> ObjectResult<bool> {
                 super::for_each_propagate_break(store, &mut |oid| {
                     if !seen.insert(*oid) {
                         return ControlFlow::Continue(());
@@ -579,13 +581,18 @@ impl ObjectStore for FilesSource {
         })
     }
 
-    fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
-        ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
+    fn lookup_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+        out: &mut Vec<ObjectId>,
+    ) -> ObjectResult<()> {
+        ObjectIdPrefix::from_hex(prefix, self.hash_algo()).map_err(ObjectError::from)?;
         let mut seen: HashSet<ObjectId> = out.iter().copied().collect();
         self.with_pack_access(|| files_lookup_prefix_layers(self, prefix, limit, out, &mut seen))
     }
 
-    fn refresh(&self) -> Result<bool> {
+    fn refresh(&self) -> ObjectResult<bool> {
         self.with_pack_access(|| {
             let mut changed = self.packs.refresh()?;
             if self.midx.refresh()? {
@@ -597,15 +604,20 @@ impl ObjectStore for FilesSource {
 }
 
 impl WritableObjectStore for FilesSource {
-    fn write(&self, kind: ObjectKind, data: &[u8], options: WriteOptions) -> Result<ObjectId> {
-        let oid = hash::hash_object(self.hash_algo(), kind, data)?;
+    fn write(
+        &self,
+        kind: ObjectKind,
+        data: &[u8],
+        options: WriteOptions,
+    ) -> ObjectResult<ObjectId> {
+        let oid = hash::hash_object(self.hash_algo(), kind, data).map_err(ObjectError::from)?;
         if let Some(existing) = self.try_finish_duplicate_write(&oid, options)? {
             return Ok(existing);
         }
         self.loose.write(kind, data, options)
     }
 
-    fn freshen(&self, oid: &ObjectId) -> Result<bool> {
+    fn freshen(&self, oid: &ObjectId) -> ObjectResult<bool> {
         if self.loose.freshen(oid)? {
             return Ok(true);
         }
@@ -629,7 +641,7 @@ fn files_lookup_prefix_layers(
     limit: usize,
     out: &mut Vec<ObjectId>,
     seen: &mut HashSet<ObjectId>,
-) -> Result<()> {
+) -> ObjectResult<()> {
     if src.use_midx {
         merge_prefix_matches(&src.midx, prefix, limit, out, seen)?;
         if limit != 0 && out.len() >= limit {
@@ -649,7 +661,7 @@ fn merge_prefix_matches(
     limit: usize,
     out: &mut Vec<ObjectId>,
     seen: &mut HashSet<ObjectId>,
-) -> Result<()> {
+) -> ObjectResult<()> {
     if limit != 0 && out.len() >= limit {
         return Ok(());
     }

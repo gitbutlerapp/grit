@@ -816,10 +816,10 @@ mod tests {
             .prepare(dangling)
             .and_then(|prepared| prepared.commit())
             .expect("dangling tag ref");
-        assert!(matches!(
-            repo.revision_label("missing"),
-            Err(Error::ObjectNotFound(_))
-        ));
+        assert!(repo
+            .revision_label("missing")
+            .unwrap_err()
+            .is_object_not_found());
     }
     #[test]
     fn revision_labels_use_injected_ref_store() {

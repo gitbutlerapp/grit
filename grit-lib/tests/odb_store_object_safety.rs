@@ -3,7 +3,7 @@
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use grit_lib::error::Result;
+use grit_lib::objects::error::ObjectResult;
 use grit_lib::objects::odb::store::{ObjectStore, ObjectStream, WritableObjectStore};
 use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
@@ -23,25 +23,34 @@ impl ObjectStore for ExternalStore {
         self.algo
     }
 
-    fn read(&self, _oid: &ObjectId) -> Result<Option<Object>> {
+    fn read(&self, _oid: &ObjectId) -> ObjectResult<Option<Object>> {
         Ok(None)
     }
 
-    fn read_info(&self, _oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info(&self, _oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         Ok(None)
     }
 
-    fn for_each_object(&self, _f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_object(
+        &self,
+        _f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+    ) -> ObjectResult<()> {
         Ok(())
     }
 }
 
 impl WritableObjectStore for ExternalStore {
-    fn write(&self, kind: ObjectKind, data: &[u8], _options: WriteOptions) -> Result<ObjectId> {
+    fn write(
+        &self,
+        kind: ObjectKind,
+        data: &[u8],
+        _options: WriteOptions,
+    ) -> ObjectResult<ObjectId> {
         grit_lib::objects::hash::hash_object(self.algo, kind, data)
+            .map_err(grit_lib::objects::ObjectError::from)
     }
 
-    fn freshen(&self, _oid: &ObjectId) -> Result<bool> {
+    fn freshen(&self, _oid: &ObjectId) -> ObjectResult<bool> {
         Ok(false)
     }
 }

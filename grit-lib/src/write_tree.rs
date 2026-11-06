@@ -1151,7 +1151,7 @@ mod tests {
 
     use super::*;
     use crate::index::{IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK, MODE_TREE};
-    use crate::objects::parse_tree;
+    use crate::objects::{parse_tree, ObjectError};
     use tempfile::TempDir;
 
     fn entry(path: &str, mode: u32, oid: ObjectId) -> IndexEntry {
@@ -1313,7 +1313,10 @@ mod tests {
         let mut index = Index::new();
         index.add_or_replace(entry("gone", MODE_REGULAR, missing));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
-        assert!(matches!(err, Error::ObjectNotFound(_)));
+        assert!(matches!(
+            err,
+            Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. })
+        ));
     }
 
     #[test]
@@ -1334,7 +1337,10 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(matches!(err, Error::ObjectNotFound(_)));
+        assert!(matches!(
+            err,
+            Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. })
+        ));
     }
 
     #[test]

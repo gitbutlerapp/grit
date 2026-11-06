@@ -315,9 +315,10 @@ fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<Structure
 
 fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<ClassifiedError> {
     match cause.downcast_ref::<LibError>()? {
-        LibError::LockHeld(lock) => {
-            Some(classified_from_structured_error(&lock_held(&lock.path, lock.holder)))
-        }
+        LibError::LockHeld(lock) => Some(classified_from_structured_error(&lock_held(
+            &lock.path,
+            lock.holder,
+        ))),
         _ => None,
     }
 }

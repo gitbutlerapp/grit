@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use crate::error::Error;
 use crate::merge_base::{branch_tips_merged_into, RefContainsBatch, RefContainsMemo};
+use crate::objects::ObjectError;
 use crate::objects::{oid_hash_map, oid_hash_set, OidHashMap, OidHashSet};
 use crate::objects::{parse_tag, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -23,8 +24,8 @@ pub fn resolve_commit_filter_target(
     oid: ObjectId,
 ) -> std::result::Result<ObjectId, RefQueryError> {
     match repo.odb().read_info(&oid) {
-        Err(Error::ObjectNotFound(_)) => Err(RefQueryError::MissingObject(oid)),
-        Err(e) => Err(RefQueryError::Store(e)),
+        Err(ObjectError::ObjectNotFound { .. }) => Err(RefQueryError::MissingObject(oid)),
+        Err(e) => Err(RefQueryError::Store(e.into())),
         Ok(info) => match info.kind {
             ObjectKind::Commit => Ok(oid),
             ObjectKind::Tag | ObjectKind::Tree | ObjectKind::Blob => {
@@ -58,8 +59,8 @@ pub fn ref_points_at(
         }
         let obj = match odb.read(&current) {
             Ok(o) => o,
-            Err(Error::ObjectNotFound(_)) => return Ok(false),
-            Err(e) => return Err(e),
+            Err(ObjectError::ObjectNotFound { .. }) => return Ok(false),
+            Err(e) => return Err(e.into()),
         };
         if obj.kind != ObjectKind::Tag {
             return Ok(false);

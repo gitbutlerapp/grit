@@ -1810,18 +1810,19 @@ pub(crate) fn read_object_for_blame(
     oid: &ObjectId,
     repo: Option<&Repository>,
 ) -> Result<Object> {
+    use crate::objects::ObjectError;
     match odb.read(oid) {
         Ok(obj) => Ok(obj),
-        Err(LibError::ObjectNotFound(_)) => {
+        Err(ObjectError::ObjectNotFound { .. }) => {
             if let Some(repo) = repo {
                 if let Some(hook) = repo.promisor_hydrate_hook() {
                     hook(repo, *oid);
-                    return odb.read(oid);
+                    return odb.read(oid).map_err(LibError::from);
                 }
             }
             Err(LibError::ObjectNotFound(oid.to_hex()))
         }
-        Err(err) => Err(err),
+        Err(err) => Err(err.into()),
     }
 }
 

@@ -136,7 +136,7 @@ pub mod unpack_objects {
     //! Unpack loose objects from pack streams.
     pub use crate::unpack_objects::{
         apply_delta, apply_delta_into, ingest_pack_into, pack_index_records_with_threads,
-        UnpackOptions,
+        pack_is_thin, UnpackOptions,
     };
 }
 

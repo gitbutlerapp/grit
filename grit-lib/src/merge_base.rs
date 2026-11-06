@@ -13,8 +13,8 @@ use crate::error::{Error, Result};
 use crate::ewah_bitmap::Bitmap;
 use crate::log_walk::WalkedCommits;
 use crate::objects::{
-    oid_hash_map, oid_hash_set, oid_hash_set_from, CommitRef, ObjectId, ObjectKind, OidHashMap,
-    OidHashSet,
+    oid_hash_map, oid_hash_set, oid_hash_set_from, CommitRef, ObjectError, ObjectId, ObjectKind,
+    OidHashMap, OidHashSet,
 };
 use crate::pack_bitmap::BitmapIndex;
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
@@ -532,7 +532,10 @@ pub(crate) fn is_ancestor_odb_walk_with_graph(
                 Some(&time) => time,
                 None => {
                     let linkage = match read_commit_linkage(odb, graph, &parent) {
-                        Err(Error::ObjectNotFound(_)) => None,
+                        Err(
+                            Error::ObjectNotFound(_)
+                            | Error::Object(ObjectError::ObjectNotFound { .. }),
+                        ) => None,
                         other => other?,
                     };
                     let Some((time, grandparents)) = linkage else {
@@ -3078,7 +3081,7 @@ impl PaintWalk {
         let committed_at = match cache.commit_time(oid) {
             Ok(time) => time,
             // Hidden either way, and unpainted ancestors count as hidden too.
-            Err(Error::ObjectNotFound(_))
+            Err(Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. }))
                 if self.skip_missing_right && after & PAINT_RIGHT != 0 =>
             {
                 return Ok(());
@@ -4401,6 +4404,7 @@ fn clear_walk_linkage(repo: &Repository) {
 mod tests {
     use super::*;
     use crate::environment::RepositoryOptions;
+    use crate::objects::ObjectError;
     use crate::odb::Odb;
     use crate::repo::{InitOptions, Repository};
     use crate::revwalk::RevWalkListOptions;
@@ -5372,7 +5376,10 @@ mod tests {
         let tip = write_commit_same_time(&repo.odb(), &[missing], "tip", 100)?;
 
         let err = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None).unwrap_err();
-        assert!(matches!(err, Error::ObjectNotFound(_)));
+        assert!(matches!(
+            err,
+            Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. })
+        ));
 
         Ok(())
     }
@@ -5435,7 +5442,7 @@ mod tests {
         assert!(!is_ancestor_odb_walk(&odb, base, tip)?);
         assert!(matches!(
             is_ancestor_odb_walk(&odb, missing, base),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }))
         ));
         Ok(())
     }
