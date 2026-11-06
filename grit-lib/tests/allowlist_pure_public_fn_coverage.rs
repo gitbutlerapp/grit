@@ -63,6 +63,7 @@ fn init_repo(dir: &Path) -> Repository {
             .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init")
+    .0
 }
 
 fn hermetic_git(cmd: &mut Command) {

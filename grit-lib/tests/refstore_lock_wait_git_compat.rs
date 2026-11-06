@@ -16,7 +16,8 @@ fn files_disjoint_ref_updates_git_show_ref_and_fsck() {
     const THREADS: usize = 8;
     const ITERS: usize = 50;
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Arc::new(Repository::init(tmp.path(), &InitOptions::default()).expect("init"));
+    let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+    let repo = Arc::new(repo);
     let sig = Signature::new(
         "A",
         "a@example.com",

@@ -23,6 +23,7 @@ fn init_bare(dir: &Path, algo: HashAlgo) -> Repository {
             .with_object_format(algo),
     )
     .expect("init bare repository")
+    .0
 }
 
 fn when(unix: i64, offset_minutes: i32) -> OffsetDateTime {

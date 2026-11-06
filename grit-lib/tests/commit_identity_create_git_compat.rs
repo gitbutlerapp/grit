@@ -43,6 +43,7 @@ fn init(root: &std::path::Path) -> Repository {
         &InitOptions::default().with_initial_branch("main".to_owned()),
     )
     .expect("init")
+    .0
 }
 
 /// Reopen `root` with an explicit identity environment (no process environment reads).

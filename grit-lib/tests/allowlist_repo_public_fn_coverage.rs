@@ -82,6 +82,7 @@ fn init_repo(dir: &Path) -> Repository {
             .with_ref_storage(RefStorageFormat::Files),
     )
     .expect("init")
+    .0
 }
 
 fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {

@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn init_repo(dir: &Path) -> Repository {
-    Repository::init(dir, &InitOptions::default()).expect("init")
+    Repository::init(dir, &InitOptions::default())
+        .expect("init")
+        .0
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {

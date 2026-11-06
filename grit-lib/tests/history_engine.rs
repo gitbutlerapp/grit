@@ -409,7 +409,7 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
 #[test]
 fn plan_rewrite_non_commit_tip_returns_planning_error() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let grit = grit_lib::repo::Repository::init(
+    let (grit, _) = grit_lib::repo::Repository::init(
         dir.path(),
         &grit_lib::repo::InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -765,7 +765,7 @@ fn plan_rewrite_replays_merge_descendants() {
 #[test]
 fn plan_rewrite_reports_conflict_with_paths() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let grit = grit_lib::repo::Repository::init(
+    let (grit, _) = grit_lib::repo::Repository::init(
         dir.path(),
         &grit_lib::repo::InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -823,7 +823,7 @@ fn plan_rewrite_reports_conflict_with_paths() {
 #[test]
 fn plan_rewrite_empty_policy_drop_keep_abort() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let grit = grit_lib::repo::Repository::init(
+    let (grit, _) = grit_lib::repo::Repository::init(
         dir.path(),
         &grit_lib::repo::InitOptions::new()
             .with_initial_branch("main".to_owned())

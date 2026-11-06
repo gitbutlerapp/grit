@@ -31,7 +31,9 @@ fn unreadable_reason(err: &RemoteError) -> &RemoteUnreadableReason {
 }
 
 fn init_repo(dir: &Path) -> Repository {
-    Repository::init(dir, &InitOptions::default()).expect("init")
+    Repository::init(dir, &InitOptions::default())
+        .expect("init")
+        .0
 }
 
 /// Port with nothing listening (bound, then released).
