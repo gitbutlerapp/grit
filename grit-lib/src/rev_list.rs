@@ -613,6 +613,11 @@ pub struct RevListOptions {
     /// Keep the commits a walk parses anyway in [`RevListResult::commit_data`], so callers that
     /// render the listed commits do not read and inflate them a second time.
     pub retain_commit_data: bool,
+    /// How much of each retained commit object to keep when [`Self::retain_commit_data`] is set.
+    ///
+    /// [`CommitExtent::ThroughSubject`] matches [`Odb::read_commit_through_subject`](crate::odb::Odb::read_commit_through_subject)
+    /// and is enough for one-line listings and commit filters without re-reading full bodies.
+    pub retained_commit_extent: CommitExtent,
     /// Follow renames when history is limited to a single literal file path (Git `log --follow`).
     /// Requires exactly one plain file pathspec in [`Self::paths`].
     pub follow: bool,
@@ -706,6 +711,7 @@ impl Default for RevListOptions {
             commit_filter: None,
             pickaxe: None,
             retain_commit_data: false,
+            retained_commit_extent: CommitExtent::default(),
             follow: false,
             cancel: None,
         }
