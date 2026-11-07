@@ -376,7 +376,8 @@ impl OffloadPack {
 /// without a files-backed object store, and read, write and config failures.
 pub(crate) fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
     let odb = repo.odb();
-    odb.require_files_primary(FilesOnlyOperation::Offload)?;
+    odb.primary_store()
+        .require_files_primary(FilesOnlyOperation::Offload)?;
     let config = repo.config().snapshot()?;
     let remote = opts.remote.as_str();
     let url = config
@@ -585,6 +586,7 @@ fn open_lop(repo: &Repository, opts: &OffloadOptions, url: &str) -> Result<Repos
         .into());
     }
     lop.odb()
+        .primary_store()
         .require_files_primary(FilesOnlyOperation::Offload)?;
     Ok(lop)
 }

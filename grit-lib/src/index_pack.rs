@@ -396,7 +396,8 @@ pub fn install_pack_bytes_with_progress(
     progress: Option<&mut dyn ProgressSink>,
     cancel: Option<&CancelToken>,
 ) -> Result<IngestedPack> {
-    odb.require_files_primary(crate::repo::error::FilesOnlyOperation::PackInstall)?;
+    odb.primary_store()
+        .require_files_primary(crate::repo::error::FilesOnlyOperation::PackInstall)?;
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
     let tmp = pack_dir.join(format!("tmp_install_{}", unique_install_suffix()));
@@ -448,7 +449,8 @@ pub(crate) fn install_pack_path_with_progress(
     mut progress: Option<&mut dyn ProgressSink>,
     cancel: Option<&CancelToken>,
 ) -> Result<IngestedPack> {
-    odb.require_files_primary(crate::repo::error::FilesOnlyOperation::PackInstall)?;
+    odb.primary_store()
+        .require_files_primary(crate::repo::error::FilesOnlyOperation::PackInstall)?;
     let publish_policy = resolve_ingest_pack_publish_policy(opts, odb)?;
     let owned = pack_path.to_path_buf();
     let hb = odb.hash_algo().len();

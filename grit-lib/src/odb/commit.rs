@@ -79,7 +79,7 @@ impl Odb {
     /// - [`crate::error::ObjectError::UnexpectedKind`] when `oid` names a tree, blob or tag.
     /// - Any other error [`Self::read`] reports.
     pub fn read_commit_through_subject(&self, oid: &ObjectId) -> Result<Vec<u8>> {
-        if self.custom_primary.is_none() {
+        if !self.primary.is_custom() {
             if crate::pack_store::PackStore::has_context() {
                 let active = crate::pack_store::PackStore::active_for_reads();
                 let active_dir = active.objects_dir();

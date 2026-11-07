@@ -429,6 +429,7 @@ pub(crate) fn drop_promised_blobs(
     opts: &DropPromisedBlobsOptions,
 ) -> Result<DropPromisedBlobsReport> {
     repo.odb()
+        .primary_store()
         .require_files_primary(FilesOnlyOperation::DropLargeBlobs)?;
     let config = repo.config().snapshot()?;
     if let Some(refusal) = gate(repo, &config)? {

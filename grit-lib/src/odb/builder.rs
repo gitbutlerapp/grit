@@ -57,7 +57,7 @@ use crate::repo::error::FilesOnlyOperation;
 use crate::repo::Repository;
 use crate::repo::RepositoryError;
 
-use super::Odb;
+use super::{Odb, PrimaryStore};
 
 /// Where a prune deletes unreachable objects from ([`Odb::prune_target`]).
 pub(crate) enum PruneTarget<'a> {
@@ -157,7 +157,9 @@ impl OdbBuilder {
     ) -> Odb {
         let mut odb = Odb::new(objects_dir);
         odb.alternates_enabled = self.alternates.unwrap_or(primary.is_none());
-        odb.custom_primary = primary;
+        if let Some(store) = primary {
+            odb.primary = PrimaryStore::Custom(store);
+        }
         odb.extra_read_sources = self.read_sources;
         odb.attached_commit_graph = self.commit_graph;
         odb
@@ -168,26 +170,16 @@ impl Odb {
     /// Whether the primary backend is the default on-disk [`super::store::FilesSource`].
     #[must_use]
     pub fn uses_files_primary(&self) -> bool {
-        self.custom_primary.is_none()
+        matches!(self.primary, PrimaryStore::Files(_))
     }
 
     /// `objects/` path when the primary is files-backed; `None` for custom primaries.
     #[must_use]
     pub fn files_objects_dir(&self) -> Option<&Path> {
-        if self.uses_files_primary() {
-            Some(&self.objects_dir)
-        } else {
-            None
+        match self.primary {
+            PrimaryStore::Files(_) => Some(&self.objects_dir),
+            PrimaryStore::Custom(_) => None,
         }
-    }
-
-    /// Refuse `operation` with [`RepositoryError::UnsupportedObjectStore`] unless the primary
-    /// is files-backed.
-    pub(crate) fn require_files_primary(&self, operation: FilesOnlyOperation) -> Result<()> {
-        if self.custom_primary.is_some() {
-            return Err(RepositoryError::UnsupportedObjectStore { operation }.into());
-        }
-        Ok(())
     }
 
     /// Primary writable backend (files source or custom store).
@@ -196,10 +188,10 @@ impl Odb {
     ///
     /// Propagates failures while opening the lazy files source.
     pub fn primary_writable(&self) -> Result<Arc<dyn WritableObjectStore>> {
-        if let Some(primary) = &self.custom_primary {
-            return Ok(Arc::clone(primary));
+        match &self.primary {
+            PrimaryStore::Custom(primary) => Ok(Arc::clone(primary)),
+            PrimaryStore::Files(_) => Ok(self.primary()? as Arc<dyn WritableObjectStore>),
         }
-        Ok(self.primary()? as Arc<dyn WritableObjectStore>)
     }
 
     /// Where a prune deletes from: the files layout, or the custom primary's
@@ -210,7 +202,7 @@ impl Odb {
     /// [`RepositoryError::UnsupportedObjectStore`] with [`FilesOnlyOperation::Prune`] for a
     /// custom primary whose [`WritableObjectStore::as_prunable`] is `None`.
     pub(crate) fn prune_target(&self) -> Result<PruneTarget<'_>> {
-        let Some(primary) = &self.custom_primary else {
+        let PrimaryStore::Custom(primary) = &self.primary else {
             return Ok(PruneTarget::Files);
         };
         primary
@@ -258,7 +250,7 @@ impl Odb {
             .cloned()
             .unwrap_or_else(crate::environment::Environment::empty);
         let mut opts = crate::environment::RepositoryOptions::with_environment(environment);
-        if let Some(primary) = &self.custom_primary {
+        if let PrimaryStore::Custom(primary) = &self.primary {
             let mut builder = OdbBuilder::new().alternates(self.alternates_enabled);
             for source in &self.extra_read_sources {
                 builder = builder.push_read_source(Arc::clone(source));
@@ -303,7 +295,8 @@ impl Odb {
     /// Returns [`RepositoryError::UnsupportedObjectStore`] for custom primaries, or errors from graph
     /// generation or I/O.
     pub fn write_commit_graph(&self) -> Result<()> {
-        self.require_files_primary(FilesOnlyOperation::CommitGraphWrite)?;
+        self.primary
+            .require_files_primary(FilesOnlyOperation::CommitGraphWrite)?;
         let Some(git_dir) = self.config_git_dir() else {
             return Err(RepositoryError::UnsupportedObjectStore {
                 operation: FilesOnlyOperation::CommitGraphWrite,

@@ -737,7 +737,8 @@ pub(crate) fn write_commit_graph(
     opts: &CommitGraphOptions,
 ) -> Result<CommitGraphWriteReport> {
     let odb = repo.odb();
-    odb.require_files_primary(FilesOnlyOperation::CommitGraphWrite)?;
+    odb.primary_store()
+        .require_files_primary(FilesOnlyOperation::CommitGraphWrite)?;
     let objects_dir = odb
         .files_objects_dir()
         .ok_or(RepositoryError::UnsupportedObjectStore {
@@ -815,7 +816,8 @@ pub(crate) fn write_commit_graph(
 /// [`crate::error::ObjectError::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
 pub(crate) fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteReport> {
     let odb = repo.odb();
-    odb.require_files_primary(FilesOnlyOperation::MidxWrite)?;
+    odb.primary_store()
+        .require_files_primary(FilesOnlyOperation::MidxWrite)?;
     let requested = match opts.version {
         Some(v) => Some(v),
         None => midx_version_from_config(&*repo.config().snapshot()?)?,
@@ -943,7 +945,8 @@ fn repack_detail(
 ) -> Result<RepackDetail> {
     poll_cancel(progress, cancel)?;
     let odb = repo.odb();
-    odb.require_files_primary(FilesOnlyOperation::Repack)?;
+    odb.primary_store()
+        .require_files_primary(FilesOnlyOperation::Repack)?;
     let objects_dir = odb
         .files_objects_dir()
         .ok_or(RepositoryError::UnsupportedObjectStore {
@@ -2658,7 +2661,8 @@ pub(crate) fn rewrite_local_objects_without(
     when: PromisorRewriteWhen,
 ) -> Result<PromisorRewrite> {
     let odb = repo.odb();
-    odb.require_files_primary(FilesOnlyOperation::PromisorRewrite)?;
+    odb.primary_store()
+        .require_files_primary(FilesOnlyOperation::PromisorRewrite)?;
     if omit.is_empty() && when == PromisorRewriteWhen::Dropping {
         return Ok(PromisorRewrite::default());
     }
