@@ -11,9 +11,8 @@ use std::sync::OnceLock;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use fixture::{build_deep_repack_read_sample, ObjectBenchFixtures};
 use flate2::read::ZlibDecoder;
-use grit_lib::objects::pack::{
-    clear_pack_cache, read_object_from_pack, read_object_from_pack_into, read_pack_index,
-};
+use grit_lib::objects::pack::{clear_pack_cache, read_pack_index};
+use grit_lib::test_support::objects_pack::{read_object_from_pack, read_object_from_pack_into};
 fn bench_idx_lookup(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
     let mut group = c.benchmark_group("odb_read/idx_lookup");

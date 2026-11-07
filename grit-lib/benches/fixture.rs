@@ -16,15 +16,15 @@ use grit_lib::error::Result;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::delta_encode::encode_lcp_delta;
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::{
-    clear_pack_cache, max_verify_pack_delta_depth, read_pack_index, verify_pack_and_collect,
-    PackIndex, PackedType,
-};
+use grit_lib::objects::pack::{clear_pack_cache, read_pack_index, PackIndex};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::refs;
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::objects_pack::{
+    max_verify_pack_delta_depth, verify_pack_and_collect, PackedType,
+};
 use tempfile::TempDir;
 
 const GIT_ENV: &[(&str, &str)] = &[

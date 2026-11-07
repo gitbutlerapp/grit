@@ -1,12 +1,11 @@
 use std::path::Path;
 
-use crate::progress::CancelToken;
 use criterion::{BenchmarkId, Criterion};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 
 pub fn bench_sparse_transitions(c: &mut Criterion) {
