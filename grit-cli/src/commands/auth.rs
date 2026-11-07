@@ -634,10 +634,8 @@ fn has_token_helper(config: &ConfigSet, credential: &Credential) -> bool {
 fn ensure_credential_helper() -> Result<ConfigSet> {
     let exe = std::env::current_exe()
         .context("could not locate the grit executable to set up the credential helper")?;
-    // Git accepts forward slashes in helper paths on Windows, and they avoid the
-    // backslash-escaping pitfalls of the helper string being shell-split.
-    let exe = exe.to_string_lossy().replace('\\', "/");
-    let helper = format!("\"{exe}\" manager");
+    let helper = grit_lib::remote::credentials::helper_config_value(&exe, &["manager"])
+        .context("could not express the grit executable path as a credential helper")?;
     crate::commands::config::set_global("credential.helper", &helper)
         .context("setting up the Windows credential helper")?;
     eprintln!("Set credential.helper to `grit manager` (Windows Credential Manager).");

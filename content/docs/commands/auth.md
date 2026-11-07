@@ -28,7 +28,7 @@ The token is saved with your credential helper. When no `credential.helper` is s
 
 - on macOS, `osxkeychain` (the keychain);
 - on Linux, `libsecret` when it is installed;
-- on Windows, its built-in one ([`grit manager`](../manager/));
+- on Windows, its built-in one ([`grit manager`](../manager/)), stored as the absolute path of `grit.exe` followed by `manager` so that `git` can run it too;
 - otherwise `store`, which keeps tokens in plain text in `~/.git-credentials`.
 
 To use a different one, set it yourself with [`grit config`](../config/) before signing in:

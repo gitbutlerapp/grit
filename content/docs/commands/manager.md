@@ -15,11 +15,20 @@ grit manager (get | store | erase)
 
 A Git credential helper backed by the Windows Credential Manager. You don't run it yourself: Git and `grit` run it when they need a password or token. It speaks Git's [credential helper protocol](https://git-scm.com/docs/gitcredentials), reading the request on stdin and, for `get`, writing the credentials it found on stdout.
 
-[`grit auth`](../auth/) sets `credential.helper` to `grit manager` on Windows when no other helper is configured. To set it up yourself:
+[`grit auth`](../auth/) sets `credential.helper` to `grit manager` on Windows when no other helper is configured. It writes the absolute path of `grit.exe` with forward slashes, then `manager`, and escapes spaces and other shell characters with a backslash:
 
 ```text
-> grit config --global credential.helper "grit manager"
+[credential]
+	helper = C:/Users/jane/bin/grit.exe manager
 ```
+
+`git` runs a `credential.helper` value as a command only when it starts with an absolute path (or `!`). A bare `grit manager` would make `git` look for a `git-credential-grit` program, so to set it up yourself, use the full path:
+
+```text
+> grit config --global credential.helper "C:/Users/jane/bin/grit.exe manager"
+```
+
+If the path contains a space, escape it with a backslash (`C:/Program\ Files/grit/grit.exe manager`) rather than quoting it: a value that starts with a quote is not an absolute path to `git`.
 
 It works only on Windows. On other systems it exits with an error.
 
