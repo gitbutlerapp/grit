@@ -164,7 +164,7 @@ Some parts of grit-lib read or write `objects/` on disk directly, because what t
 | Repository layout | Opening a repository with the default files primary, discovering a repository from a directory, and creating the directories of a new repository. |
 | Submodules and alternates | A submodule's git dir and `objects/info/alternates` name directories on disk. Alternates are read for the files primary unless `OdbBuilder::alternates(false)`, and for a custom primary only with `OdbBuilder::alternates(true)`. |
 | Local-path transport | Fetch, push and clone from a peer repository given as a local path open that repository's own files store. |
-| Gated fast paths | Rev-list, merge-base, fsck and bitmap walks read packs directly only after checking that the primary is the files backend, or that a pack bitmap exists. A custom primary takes the general path through `ObjectStore`. |
+| Gated fast paths | Rev-list, merge-base, fsck, bitmap walks, change-id lookup and author grouping (`log --group-by author`) read packs directly only after checking that the primary is the files backend, or that a pack bitmap exists. A custom primary takes the general path through `ObjectStore`. |
 | Git-directory fallbacks | Functions that take only a git directory path, such as `refs::write_ref`, `refs::pack_remote_tracking_refs_for_clone`, `remote::list_refs_from_git_dir` without an `Odb`, and `promisor_pack_object_ids`, have no repository to ask, so they use that directory's files database. Called through a `Repository`, the same work (ref updates, `packed-refs` peel lines, ls-refs peeling) goes through your store. |
 | Scratch databases | Throwaway, empty databases in a temporary directory, such as the one the thin-pack check indexes a received pack against. They never hold your objects. |
 
@@ -173,6 +173,14 @@ A source-scan test in grit-lib (`storage_backend_guard`) keeps this list honest:
 ## Fast history walks
 
 Rev-list, merge-base and path-limited log read every commit they cross through [`ObjectStore::read_into`](rustdoc:grit_lib::objects::odb::store::ObjectStore::read_into), into one buffer the walk reuses. Implement it to copy or decode your stored bytes straight into that buffer. The default goes through `read`, which allocates an owned `Object` per commit before copying it. Without a commit-graph, a store that implements `read_into` walks history about as fast as the files backend: on a 120,000-commit history, counting every commit takes the same time through a pass-through store as through the files backend.
+
+## Change ids and author counts
+
+A change id used as a revision (or passed to [`find_commits_by_change_id_prefix`](rustdoc:grit_lib::change_id::find_commits_by_change_id_prefix)) names a commit by the `change-id` header grit stamps into it, or by the id derived from its commit id when it has none. Finding a stored header means walking every commit reachable from your refs and reading its header. On the files backend grit records under `objects/info` whether any object holds a change-id header at all, so a repository without them (a clone of a project that never used grit) skips the header scan and matches derived ids from the walk alone. A custom primary has no such record and grit writes nothing to disk for it, so every lookup reads each reachable commit's header through `ObjectStore::read_into`, spread over the repository's worker threads.
+
+On a git.git clone (86,000 commits, release build, 4-vCPU VM) a warm lookup takes about 72 ms on the files backend, which walks its commit-graph and skips the scan. Git's closest operation, `git rev-list --all --count`, takes 76 ms. With the same commits in a `MemoryStore` and no attached graph, a lookup takes about 243 ms: about 217 ms walking history through the store and about 26 ms scanning headers. Attaching a commit-graph (see [Commit-graphs for a custom store](#commit-graphs-for-a-custom-store)) shortens the walk, and implementing `read_into` (see [Fast history walks](#fast-history-walks)) keeps each header read down to one copy. A store that pays per call pays it once per commit, on every lookup.
+
+Author counts (`log --group-by author`) read packs, the pack bitmap and commit-graph files directly on the files backend. On a custom primary they read each commit through the store instead, and walk parents through the commit-graph attached with `OdbBuilder::commit_graph`, if there is one. The counts are the same either way.
 
 ## Commit-graphs for a custom store
 
