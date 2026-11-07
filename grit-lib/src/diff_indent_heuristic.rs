@@ -734,23 +734,7 @@ pub(crate) fn apply_change_compact_to_ops_with_ws_histogram(
     ops_from_masks(old.lines, new.lines, &c1, &c2)
 }
 
-/// Line-diff then Git-style compaction; used by unified diff generation.
-pub fn diff_lines_ops_compacted(
-    old_content: &str,
-    new_content: &str,
-    algorithm: Algorithm,
-    indent_heuristic: bool,
-) -> Vec<DiffOp> {
-    let diff = TextDiff::configure()
-        .algorithm(algorithm)
-        .diff_lines(old_content, new_content);
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    let new_lines: Vec<&str> = new_content.lines().collect();
-    let raw = diff.ops().to_vec();
-    apply_change_compact_to_ops(&raw, &old_lines, &new_lines, indent_heuristic)
-}
-
-/// Like [`diff_lines_ops_compacted`] but for pre-split line slices (e.g. `--no-index` compare keys).
+/// Line diff of pre-split line slices (e.g. `--no-index` compare keys), then Git-style compaction.
 pub(crate) fn diff_slice_ops_compacted(
     old_lines: &[&str],
     new_lines: &[&str],

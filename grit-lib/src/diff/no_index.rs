@@ -18,7 +18,7 @@ use super::core::{
     apply_rename_detection_to_diff_entries, mode_from_metadata, read_worktree_bytes_for_mode,
     zero_oid, DiffEntry, DiffStatus,
 };
-use super::detail::line_change_counts;
+use super::detail::line_stat_for_options;
 use super::options::DiffOptions;
 use super::patch_log::{write_patch, PatchTextOptions};
 use super::structured::{structured_file_diff, SideBytes};
@@ -187,7 +187,7 @@ fn file_diff_from_entry(
     } else if stat_only {
         let old_text = String::from_utf8_lossy(&old_bytes.data);
         let new_text = String::from_utf8_lossy(&new_bytes.data);
-        let stat = line_change_counts(old_text.as_ref(), new_text.as_ref(), &opts);
+        let stat = line_stat_for_options(old_text.as_ref(), new_text.as_ref(), &opts);
         (
             old_bytes.encoding_lossy,
             new_bytes.encoding_lossy,

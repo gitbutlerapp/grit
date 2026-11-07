@@ -3,11 +3,9 @@
 use crate::support;
 
 use grit_lib::diff::{
-    anchored_unified_diff, annotate_unified_diff_no_newline_at_eof, count_changes_with_algorithm,
-    normalize_ignore_space_change, unified_diff_histogram_hunks_only,
-    unified_diff_with_prefix_and_funcname_and_algorithm,
+    line_change_counts, normalize_ignore_space_change, unified_diff, DiffAlgorithm, HunkExtent,
+    UnifiedDiffOptions,
 };
-use similar::Algorithm;
 use support::{blob_pairs, grit_blob_patch, grit_numstat, GritBlobPatchOpts, LineDiffAlgo};
 
 #[test]
@@ -28,28 +26,24 @@ fn all_blob_pairs_exercise_diff_printers() {
             };
             let patch = grit_blob_patch(pair.old, pair.new, pair.name, &opts);
             assert!(!patch.is_empty() || pair.old == pair.new);
-            let _ = annotate_unified_diff_no_newline_at_eof(&patch, old_s, new_s);
         }
         let _ = normalize_ignore_space_change(old_s);
-        let _ = unified_diff_histogram_hunks_only(old_s, new_s, 3, 0, false);
-        for algo in [Algorithm::Myers, Algorithm::Patience, Algorithm::Histogram] {
-            let _ = unified_diff_with_prefix_and_funcname_and_algorithm(
-                old_s, new_s, "a/x", "b/x", 3, 0, "a/", "b/", None, algo, true, false, true, false,
-            );
-            let _ = count_changes_with_algorithm(old_s, new_s, algo, algo == Algorithm::Myers);
+        for algorithm in [
+            DiffAlgorithm::Myers,
+            DiffAlgorithm::Patience,
+            DiffAlgorithm::Histogram,
+        ] {
+            let options = UnifiedDiffOptions::new()
+                .with_paths("x", "x")
+                .with_algorithm(algorithm)
+                .with_extent(HunkExtent::Function);
+            let _ = unified_diff(old_s, new_s, &options);
+            let _ = line_change_counts(old_s, new_s, &options);
         }
-        let anchors = vec!["A".to_string(), "x".to_string()];
-        let _ = anchored_unified_diff(
-            old_s,
-            new_s,
-            "a/x",
-            "b/x",
-            3,
-            &anchors,
-            Algorithm::Myers,
-            false,
-            true,
-            false,
-        );
+        let anchored = UnifiedDiffOptions::new()
+            .with_paths("x", "x")
+            .with_anchors(["A", "x"]);
+        let _ = unified_diff(old_s, new_s, &anchored);
+        let _ = line_change_counts(old_s, new_s, &anchored);
     }
 }

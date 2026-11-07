@@ -8,14 +8,14 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use grit_lib::diff::{
-    count_changes_with_algorithm, DiffDetail, DiffOptions, RenameDetection, TreeDiffOptions,
+    line_change_counts, DiffAlgorithm, DiffDetail, DiffOptions, RenameDetection, TreeDiffOptions,
+    UnifiedDiffOptions,
 };
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{ObjectId, ObjectKind, TreeEntry};
 use grit_lib::prelude::RepositoryOptions;
 use grit_lib::repo::{InitOptions, Repository};
-use similar::Algorithm;
 
 use s7::HistoryBenchFixtures;
 
@@ -205,25 +205,13 @@ fn bench_blob_myers_10k_lines(c: &mut Criterion) {
     let new = fx.blob_large_new.as_str();
     let mut group = c.benchmark_group("diff/blob_myers_10k_lines");
     group.throughput(Throughput::Bytes(old.len() as u64 + new.len() as u64));
+    let myers = UnifiedDiffOptions::new();
+    let histogram = UnifiedDiffOptions::new().with_algorithm(DiffAlgorithm::Histogram);
     group.bench_function("myers", |b| {
-        b.iter(|| {
-            black_box(count_changes_with_algorithm(
-                old,
-                new,
-                Algorithm::Myers,
-                false,
-            ))
-        });
+        b.iter(|| black_box(line_change_counts(old, new, &myers)));
     });
     group.bench_function("histogram", |b| {
-        b.iter(|| {
-            black_box(count_changes_with_algorithm(
-                old,
-                new,
-                Algorithm::Myers,
-                true,
-            ))
-        });
+        b.iter(|| black_box(line_change_counts(old, new, &histogram)));
     });
     group.finish();
 }

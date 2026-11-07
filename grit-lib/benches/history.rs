@@ -8,14 +8,13 @@ mod s7;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use grit_lib::diff::{count_changes_with_algorithm, TreeDiffOptions};
+use grit_lib::diff::{line_change_counts, DiffAlgorithm, TreeDiffOptions, UnifiedDiffOptions};
 use grit_lib::refs::branch_tracking::TipComparison;
 
 use grit_lib::revwalk::rev_list::{OrderingMode, RevListOptions};
 
 use grit_lib::revwalk::CommitFilterBuilder;
 use grit_lib::revwalk::{DescribeOptions, GroupByAuthorOptions, RevWalkListOptions};
-use similar::Algorithm;
 use std::sync::{Arc, OnceLock};
 
 use s7::HistoryBenchFixtures;
@@ -531,52 +530,47 @@ fn bench_blob_diff(c: &mut Criterion) {
             "small_myers",
             &fx.blob_small_old,
             &fx.blob_small_new,
-            Algorithm::Myers,
-            false,
+            DiffAlgorithm::Myers,
         ),
         (
             "small_histogram",
             &fx.blob_small_old,
             &fx.blob_small_new,
-            Algorithm::Myers,
-            true,
+            DiffAlgorithm::Histogram,
         ),
         (
             "10k_lines_myers",
             &fx.blob_large_old,
             &fx.blob_large_new,
-            Algorithm::Myers,
-            false,
+            DiffAlgorithm::Myers,
         ),
         (
             "10k_lines_histogram",
             &fx.blob_large_old,
             &fx.blob_large_new,
-            Algorithm::Myers,
-            true,
+            DiffAlgorithm::Histogram,
         ),
         (
             "pathological_myers",
             &fx.blob_pathological_old,
             &fx.blob_pathological_new,
-            Algorithm::Myers,
-            false,
+            DiffAlgorithm::Myers,
         ),
         (
             "pathological_histogram",
             &fx.blob_pathological_old,
             &fx.blob_pathological_new,
-            Algorithm::Myers,
-            true,
+            DiffAlgorithm::Histogram,
         ),
     ];
-    for (name, old, new, algo, histogram) in cases {
+    for (name, old, new, algorithm) in cases {
         group.throughput(Throughput::Bytes(old.len() as u64 + new.len() as u64));
+        let options = UnifiedDiffOptions::new().with_algorithm(algorithm);
         group.bench_with_input(
             BenchmarkId::from_parameter(name),
-            &(old.as_str(), new.as_str(), algo, histogram),
-            |b, (old, new, algo, histogram)| {
-                b.iter(|| black_box(count_changes_with_algorithm(old, new, *algo, *histogram)));
+            &(old.as_str(), new.as_str()),
+            |b, (old, new)| {
+                b.iter(|| black_box(line_change_counts(old, new, &options)));
             },
         );
     }

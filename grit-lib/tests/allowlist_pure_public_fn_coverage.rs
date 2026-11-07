@@ -17,7 +17,7 @@ use grit_lib::config::config_file_display_for_error;
 use grit_lib::config::dotfile::is_ntfs_dot_gitignore;
 use grit_lib::diff::{
     detect_copies, read_submodule_head_for_checkout, submodule_commit_subject_line, unified_diff,
-    unified_diff_with_prefix,
+    UnifiedDiffOptions,
 };
 use grit_lib::ident::SignatureTimestamp;
 use grit_lib::ident::{fsck_commit_idents, timestamp_for_at_ct};
@@ -92,8 +92,11 @@ fn blame_diff_dotfile_ident_and_hash_helpers() {
     let exact = vec![Some(0), None];
     let _ = build_fuzzy_line_map(&old, &new, &exact);
 
-    let _ = unified_diff("a\n", "b\n", "f", "f", 3, false, false);
-    let _ = unified_diff_with_prefix("a\n", "b\n", "f", "f", 3, 0, "a/", "b/", false, false);
+    let _ = unified_diff(
+        "a\n",
+        "b\n",
+        &UnifiedDiffOptions::new().with_paths("f", "f"),
+    );
     let empty_tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("tree");
     let odb_dir = tempdir().expect("t").path().join("objects");
     let odb = grit_lib::objects::odb::Odb::new(&odb_dir);

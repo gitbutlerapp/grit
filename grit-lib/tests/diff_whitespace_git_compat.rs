@@ -2,7 +2,7 @@
 
 use crate::support;
 
-use grit_lib::diff::{line_diff_unified_hunk_body, DiffAlgorithm, DiffOptions, WhitespaceMode};
+use grit_lib::diff::{unified_diff, DiffAlgorithm, UnifiedDiffOptions, WhitespaceMode};
 use support::{
     git_diff_no_index_patch, patch_hunk_body, LineDiffAlgo, WhitespaceMode as HarnessWs,
 };
@@ -19,10 +19,10 @@ fn git_hunks(old: &str, new: &str, algo: LineDiffAlgo, ws: HarnessWs) -> String 
 }
 
 fn grit_hunks(old: &str, new: &str, algo: DiffAlgorithm, ws: WhitespaceMode) -> String {
-    let opts = DiffOptions::default()
+    let opts = UnifiedDiffOptions::new()
         .with_whitespace(ws)
         .with_algorithm(algo);
-    let body = line_diff_unified_hunk_body(old, new, &opts);
+    let body = unified_diff(old, new, &opts);
     if body.is_empty() {
         return String::new();
     }
@@ -78,9 +78,9 @@ fn ignore_blank_lines_matches_git() {
 fn whitespace_only_file_omitted_like_git() {
     let old = "same\n";
     let new = "s a m e\n";
-    let opts = DiffOptions::default().with_whitespace(WhitespaceMode::ignore_all_space());
+    let opts = UnifiedDiffOptions::new().with_whitespace(WhitespaceMode::ignore_all_space());
     assert!(
-        line_diff_unified_hunk_body(old, new, &opts).is_empty(),
+        unified_diff(old, new, &opts).is_empty(),
         "whitespace-only change produces no hunks"
     );
     assert!(
@@ -94,9 +94,9 @@ fn ignore_all_space_nbsp_still_differs_like_git() {
     let old = "a\u{00a0}b\n";
     let new = "ab\n";
     let ws = WhitespaceMode::ignore_all_space();
-    let opts = DiffOptions::default().with_whitespace(ws);
+    let opts = UnifiedDiffOptions::new().with_whitespace(ws);
     assert!(
-        !line_diff_unified_hunk_body(old, new, &opts).is_empty(),
+        !unified_diff(old, new, &opts).is_empty(),
         "NBSP removal must not be treated as ignorable -w whitespace"
     );
     assert_eq!(
@@ -113,9 +113,10 @@ fn ignore_blank_lines_respects_myers_not_histogram() {
     let new = (0..5)
         .map(|i| format!("{}\n", char::from(b'A' + i)))
         .collect::<String>();
-    let mut opts = DiffOptions::default().with_whitespace(WhitespaceMode::ignore_blank_lines());
-    opts.algorithm = DiffAlgorithm::Myers;
-    let body = line_diff_unified_hunk_body(&old, &new, &opts);
+    let opts = UnifiedDiffOptions::new()
+        .with_whitespace(WhitespaceMode::ignore_blank_lines())
+        .with_algorithm(DiffAlgorithm::Myers);
+    let body = unified_diff(&old, &new, &opts);
     assert!(
         body.is_empty(),
         "identical non-blank lines should produce no hunks"

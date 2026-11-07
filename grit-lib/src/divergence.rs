@@ -26,7 +26,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::change_id::change_id;
-use crate::diff::{diff_trees, unified_diff};
+use crate::diff::{diff_trees, unified_diff, IndentHeuristic, UnifiedDiffOptions};
 use crate::error::Result;
 use crate::merge_base::{
     is_ancestor, merge_bases_first_vs_rest, walk_commits_reachable_excluding_ancestors_of,
@@ -620,16 +620,11 @@ fn load_changes(repo: &Repository, v: &mut Version) -> Result<()> {
         let patch = unified_diff(
             &text(&entry.old_oid),
             &text(&entry.new_oid),
-            &path,
-            &path,
-            0,
-            false,
-            false,
+            &UnifiedDiffOptions::new()
+                .with_context_lines(0)
+                .with_indent_heuristic(IndentHeuristic::Disabled),
         );
         for line in patch.lines() {
-            if line.starts_with("+++") || line.starts_with("---") {
-                continue;
-            }
             if let Some(rest) = line.strip_prefix('+') {
                 lines.insert((path.clone(), '+', rest.to_owned()));
             } else if let Some(rest) = line.strip_prefix('-') {

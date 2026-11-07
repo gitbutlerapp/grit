@@ -40,6 +40,7 @@ mod stat;
 pub(crate) use core::is_func_line;
 pub(crate) use posix_ere::PosixBre;
 pub(crate) mod targets;
+mod text;
 mod tree_content;
 mod tree_options;
 pub(crate) use tree_content::gitlink_line;
@@ -49,45 +50,21 @@ mod whitespace_mode;
 #[cfg(all(test, feature = "full-tests"))]
 mod worktree_scan_git_compat_tests;
 
+pub use crate::submodule_ignore::SubmoduleIgnoreMode;
 pub use changes::{FileChange, UncommittedDiff};
 pub use commit_files_many::{CommitFilesManyInput, CommitFilesManyOptions, CommitFilesResult};
 pub use core::structured;
-/// Unified diff for two text sides with default `a/` / `b/` path prefixes.
-#[must_use]
-pub fn unified_diff(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    core::unified_diff(
-        old_content,
-        new_content,
-        old_path,
-        new_path,
-        context_lines,
-        indent_heuristic,
-        quote_path_fully,
-    )
-}
 
-pub use crate::submodule_ignore::SubmoduleIgnoreMode;
 pub use core::{
-    anchored_unified_diff, annotate_unified_diff_no_newline_at_eof, count_changes_with_algorithm,
     count_git_lines, empty_blob_oid, format_raw, format_raw_abbrev, index_mtime_for_diff,
     mode_from_metadata, normalize_ignore_space_change, parse_diff_rename_threshold_percent,
     read_worktree_side_bytes_for_diff, refresh_index_stat_content_verified,
     rename_similarity_score, resolve_indent_heuristic, sort_entries_by_path, stat_matches,
-    submodule_porcelain_flags, tree_oid_of_commit, unified_diff_histogram_hunks_only,
-    unified_diff_histogram_ignore_with_prefix_and_funcname, unified_diff_with_prefix_and_funcname,
-    unified_diff_with_prefix_and_funcname_and_algorithm, zero_oid, DiffEntriesResult, DiffEntry,
+    submodule_porcelain_flags, tree_oid_of_commit, zero_oid, DiffEntriesResult, DiffEntry,
     DiffStatus, InexactRenameDetectionSkipped,
 };
 pub use detail::FileDiff as ListedFileDiff;
-pub use detail::{line_change_counts, DiffDetail, DiffTotals, LineStat};
+pub use detail::{DiffDetail, DiffTotals, LineStat};
 pub(crate) use files::build_file_diffs;
 pub use files::{name_status_line, DiffFilesOutput};
 pub use filter::{DiffFilter, InvalidDiffFilter};
@@ -106,15 +83,6 @@ pub(crate) use tree_content::tree_diff_structured_parallel;
 pub use tree_options::{BreakRewrites, CopyDetection, TreeDiffOptions};
 pub use whitespace_mode::{normalize_ignore_space_change_line, WhitespaceMode};
 
-/// Unified hunk bodies (`@@` …) for two text sides using [`DiffOptions`].
-#[must_use]
-pub fn line_diff_unified_hunk_body(
-    old_content: &str,
-    new_content: &str,
-    options: &DiffOptions,
-) -> String {
-    core::unified_hunk_body_for_diff_options(old_content, new_content, options)
-}
 pub(crate) use core::{imara_unified_hunk_slices, unified_hunk_body_for_diff_options};
 pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
@@ -130,6 +98,10 @@ pub(crate) use targets::{
     unstaged_raw_changes_with_peer_hunks, unstaged_raw_changes_with_peer_hunks_in,
 };
 pub use targets::{DiffArguments, DiffRequest, DiffTarget, FileDiff, ResolveDiffArgumentsError};
+pub use text::{
+    line_change_counts, unified_diff, DiffLabel, HunkExtent, IndentHeuristic, NoNewlineMarker,
+    PathQuoting, UnifiedDiffOptions,
+};
 pub use tree_content::{tree_diff_structured_entry, TreeDiffStructured};
 
 pub(crate) mod bloom {

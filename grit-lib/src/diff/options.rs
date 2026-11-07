@@ -39,18 +39,6 @@ impl std::str::FromStr for DiffAlgorithm {
     }
 }
 
-impl DiffAlgorithm {
-    /// `similar` crate algorithm for non-histogram engines.
-    #[must_use]
-    pub fn similar_algorithm(self) -> similar::Algorithm {
-        match self {
-            Self::Myers | Self::Histogram => similar::Algorithm::Myers,
-            Self::Minimal => similar::Algorithm::Lcs,
-            Self::Patience => similar::Algorithm::Patience,
-        }
-    }
-}
-
 /// u32 rename APIs: thresholds `0`–`100` run detection at that Git `-M` percent;
 /// [`RENAME_DETECTION_DISABLED`] (101) and above skip detection (legacy postprocess and `--no-renames` plumbing).
 pub const RENAME_DETECTION_DISABLED: u32 = 101;
@@ -109,7 +97,7 @@ pub struct DiffOptions {
     pub word_level_inline: bool,
     /// Expand hunks to enclosing function boundaries (`git diff -W`).
     pub function_context: bool,
-    /// For [`super::diff_paths`] only: count lines via [`super::line_change_counts`] without hunks.
+    /// For [`super::diff_paths`] only: count lines without building hunks.
     pub(crate) no_index_stat_only: bool,
 }
 
@@ -218,7 +206,7 @@ impl DiffOptions {
         self
     }
 
-    /// When true, [`super::diff_paths`] uses [`super::line_change_counts`] instead of building hunks.
+    /// When true, [`super::diff_paths`] counts lines instead of building hunks.
     #[must_use]
     pub fn with_no_index_stat_only(mut self, stat_only: bool) -> Self {
         self.no_index_stat_only = stat_only;

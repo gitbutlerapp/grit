@@ -95,13 +95,6 @@ impl<'a> LineSide<'a> {
     pub fn records(&self) -> &[&'a str] {
         &self.records
     }
-
-    /// Index of the last line that lacks a trailing line separator, if any.
-    #[must_use]
-    pub fn incomplete_last_line_index(&self) -> Option<usize> {
-        let last = self.records.len().checked_sub(1)?;
-        (!self.records[last].ends_with('\n')).then_some(last)
-    }
 }
 
 /// Token for line-based diff alignment (Git compares full records including newline).
@@ -188,7 +181,6 @@ fn format_hunk_side(start0: i64, count: i64) -> String {
 }
 
 /// Emit unified hunk bodies for precomputed edit spans (Myers / xdiff ops path).
-#[allow(clippy::too_many_arguments)]
 pub fn emit_unified_body_from_edits(
     before: &LineSide,
     after: &LineSide,
@@ -265,58 +257,114 @@ pub fn emit_unified_body_from_edits(
         Some((scr, lx))
     };
 
+    let is_func = |body: &str| is_func_line(body, funcname_matcher);
+    // Nearest function line of the old side from `start` toward `limit` (exclusive).
+    let func_line_toward = |start: i64, limit: i64| -> Option<i64> {
+        let step = if start > limit { -1 } else { 1 };
+        let mut l = start;
+        while l != limit && (0..before_len).contains(&l) {
+            if is_func(before_body(l)) {
+                return Some(l);
+            }
+            l += step;
+        }
+        None
+    };
+    let is_blank = |body: &str| body.bytes().all(|b| b.is_ascii_whitespace() || b == 0x0b);
+
     let mut out = String::new();
     let mut cursor = 0usize;
     while cursor < edits.len() {
-        let Some((first_idx, last_idx)) = next_hunk(cursor) else {
+        let Some((mut first_idx, mut last_idx)) = next_hunk(cursor) else {
             break;
         };
-        let first = &edits[first_idx];
-        let last = &edits[last_idx];
 
-        let mut b_start = (first.before_start - ctxlen).max(0);
-        let mut a_start = (first.after_start - ctxlen).max(0);
-        let mut post = ctxlen;
-        post = post.min(before_len - (last.before_start + last.before_len));
-        post = post.min(after_len - (last.after_start + last.after_len));
-        let mut b_end = last.before_start + last.before_len + post;
-        let mut a_end = last.after_start + last.after_len + post;
-
-        if options.function_context {
-            let mut func_start = first.before_start;
-            while func_start >= 0 && !is_func_line(before_body(func_start), funcname_matcher) {
-                func_start -= 1;
+        let (mut b_start, mut a_start);
+        let mut rewind_from = cursor;
+        loop {
+            let first = &edits[first_idx];
+            b_start = (first.before_start - ctxlen).max(0);
+            a_start = (first.after_start - ctxlen).max(0);
+            if !options.function_context {
+                break;
             }
+            let mut anchor = first.before_start;
+            if anchor >= before_len {
+                // An appended block that brings its own function needs no earlier context.
+                let adds_function =
+                    (first.after_start..after_len).any(|i| is_func(after.line(i as usize).body));
+                if adds_function {
+                    break;
+                }
+                anchor = before_len - 1;
+            }
+            let mut func_start = func_line_toward(anchor, -1).unwrap_or(-1);
             while func_start > 0
-                && !before_body(func_start - 1).trim().is_empty()
-                && !is_func_line(before_body(func_start - 1), funcname_matcher)
+                && !is_blank(before_body(func_start - 1))
+                && !is_func(before_body(func_start - 1))
             {
                 func_start -= 1;
             }
-            if func_start < 0 {
-                func_start = 0;
+            let func_start = func_start.max(0);
+            if func_start >= b_start {
+                break;
             }
-            if func_start < b_start {
-                a_start = (a_start - (b_start - func_start)).max(0);
-                b_start = func_start;
+            a_start = (a_start - (b_start - func_start)).max(0);
+            b_start = func_start;
+            // Show ignorable changes that the widened context now reaches into.
+            let reached = (rewind_from..first_idx).find(|&i| {
+                let e = &edits[i];
+                e.before_start + e.before_len > b_start || e.after_start + e.after_len > a_start
+            });
+            match reached {
+                Some(i) => {
+                    first_idx = i;
+                    rewind_from = i;
+                }
+                None => break,
             }
+        }
 
-            let end_before = last.before_start + last.before_len;
-            let mut func_end = end_before;
-            while func_end < before_len && !is_func_line(before_body(func_end), funcname_matcher) {
-                func_end += 1;
+        let (mut b_end, mut a_end);
+        loop {
+            let last = &edits[last_idx];
+            let last_before_end = last.before_start + last.before_len;
+            let last_after_end = last.after_start + last.after_len;
+            let post = ctxlen
+                .min(before_len - last_before_end)
+                .min(after_len - last_after_end);
+            b_end = last_before_end + post;
+            a_end = last_after_end + post;
+            if !options.function_context {
+                break;
             }
-            while func_end > 0 && before_body(func_end - 1).trim().is_empty() {
-                func_end -= 1;
-            }
-            if func_end > before_len {
-                func_end = before_len;
-            }
+            let func_end = match func_line_toward(last_before_end, before_len) {
+                Some(mut end) => {
+                    while end > 0 && is_blank(before_body(end - 1)) {
+                        end -= 1;
+                    }
+                    end
+                }
+                None => before_len,
+            };
             if func_end > b_end {
                 a_end = (a_end + (func_end - b_end)).min(after_len);
                 b_end = func_end;
             }
+            // Pull the next change in when it starts inside the widened hunk or within the same
+            // function.
+            let Some(next) = edits.get(last_idx + 1) else {
+                break;
+            };
+            let next_start = next.before_start.min(before_len - 1);
+            if next_start - ctxlen <= b_end || func_line_toward(next_start, b_end).is_none() {
+                last_idx += 1;
+                continue;
+            }
+            break;
         }
+        let first = &edits[first_idx];
+        let last = &edits[last_idx];
 
         let _ = writeln!(
             out,

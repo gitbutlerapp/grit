@@ -20,7 +20,7 @@ use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
 
-use super::detail::{line_change_counts, LineStat};
+use super::detail::{line_stat_for_options, LineStat};
 use super::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
 use super::DiffEntry;
 use super::DiffOptions;
@@ -216,7 +216,7 @@ pub(crate) fn tree_diff_stat_parallel(
             let stat = if binary {
                 None
             } else {
-                Some(line_change_counts(
+                Some(line_stat_for_options(
                     &String::from_utf8_lossy(&old_bytes.data),
                     &String::from_utf8_lossy(&new_bytes.data),
                     &line_diff_opts,

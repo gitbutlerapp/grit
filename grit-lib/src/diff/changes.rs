@@ -20,11 +20,10 @@ use crate::diff::tree_content::{gitlink_line, load_new_side, load_old_side};
 use crate::diff::{
     apply_rename_detection_to_diff_entries, diff_index_to_tree_with_renames,
     diff_index_to_worktree_with_renames, diff_tree_to_worktree_with_git_dir_and_rules_extras,
-    index_mtime_for_diff, line_change_counts, load_worktree_side_for_diff,
-    peer_scope_includes_path, read_submodule_head_oid, sort_entries_by_path,
-    submodule_porcelain_flags, DiffEntry, DiffIndexToWorktreeOptions, DiffOptions, DiffSide,
-    DiffStatus, DiffTarget, DiffTreeToWorktreeExtras, LineStat, RenameDetection,
-    RENAME_DETECTION_DISABLED,
+    index_mtime_for_diff, load_worktree_side_for_diff, peer_scope_includes_path,
+    read_submodule_head_oid, sort_entries_by_path, submodule_porcelain_flags, DiffEntry,
+    DiffIndexToWorktreeOptions, DiffOptions, DiffSide, DiffStatus, DiffTarget,
+    DiffTreeToWorktreeExtras, LineStat, RenameDetection, RENAME_DETECTION_DISABLED,
 };
 use crate::error::Result;
 use crate::index::write_tree::cache_tree_extension_valid;
@@ -135,7 +134,7 @@ impl FileChange {
         if self.binary {
             return None;
         }
-        Some(line_change_counts(
+        Some(super::detail::line_stat_for_options(
             &self.old_bytes.text(),
             &self.new_bytes.text(),
             options,

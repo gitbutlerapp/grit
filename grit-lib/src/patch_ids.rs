@@ -19,9 +19,9 @@
 //! [`crate::diff::structured`] text diffs so context lines stay aligned with `git diff`.
 
 use crate::diff::{
-    diff_trees_with_renames, gitlink_line, structured::text_bytes_for_diff,
-    unified_diff_with_prefix_and_funcname, unified_hunk_body_for_diff_options, zero_oid, DiffEntry,
-    DiffOptions, DiffStatus,
+    diff_trees_with_renames, gitlink_line, structured::text_bytes_for_diff, unified_diff,
+    unified_hunk_body_for_diff_options, zero_oid, DiffEntry, DiffLabel, DiffOptions, DiffStatus,
+    UnifiedDiffOptions,
 };
 use crate::error::Result;
 use crate::hash::ChecksumHasher;
@@ -755,19 +755,14 @@ fn patch_id_append_git_show_entry(odb: &Odb, entry: &DiffEntry, out: &mut Vec<u8
     } else {
         format!("b/{git_new}")
     };
-    let unified = unified_diff_with_prefix_and_funcname(
-        old_str.as_ref(),
-        new_str.as_ref(),
-        &old_path,
-        &new_path,
-        3,
-        0,
-        "",
-        "",
-        None,
-        true,
-        false,
+    let options = UnifiedDiffOptions::new().with_labels(
+        DiffLabel::Verbatim(&old_path),
+        DiffLabel::Verbatim(&new_path),
     );
+    let unified = unified_diff(old_str.as_ref(), new_str.as_ref(), &options);
+    if unified.is_empty() {
+        out.extend_from_slice(format!("--- {old_path}\n+++ {new_path}\n").as_bytes());
+    }
     out.extend_from_slice(unified.as_bytes());
     Ok(())
 }

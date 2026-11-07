@@ -3,10 +3,11 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use grit_lib::diff::{count_changes_with_algorithm, line_change_counts, DiffOptions};
+use grit_lib::diff::{line_change_counts, DiffOptions, UnifiedDiffOptions};
 
 fn line_stats(c: &mut Criterion) {
-    let options = DiffOptions::default();
+    let full_file = UnifiedDiffOptions::new();
+    let stat = UnifiedDiffOptions::from(&DiffOptions::default());
     let mut group = c.benchmark_group("log_stat");
     for (name, old, new) in [
         {
@@ -29,11 +30,10 @@ fn line_stats(c: &mut Criterion) {
             &(&old, &new),
             |b, (old, new)| {
                 b.iter(|| {
-                    black_box(count_changes_with_algorithm(
+                    black_box(line_change_counts(
                         black_box(old),
                         black_box(new),
-                        similar::Algorithm::Myers,
-                        false,
+                        &full_file,
                     ))
                 });
             },
@@ -42,7 +42,7 @@ fn line_stats(c: &mut Criterion) {
             BenchmarkId::new("stat", name),
             &(&old, &new),
             |b, (old, new)| {
-                b.iter(|| black_box(line_change_counts(black_box(old), black_box(new), &options)));
+                b.iter(|| black_box(line_change_counts(black_box(old), black_box(new), &stat)));
             },
         );
     }

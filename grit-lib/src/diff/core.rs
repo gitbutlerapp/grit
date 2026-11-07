@@ -321,37 +321,13 @@ pub(crate) fn compacted_line_ops_for_options(
         DiffAlgorithm::Histogram => {
             histogram_compacted_line_ops(old_content, new_content, options.indent_heuristic, ws)
         }
-        DiffAlgorithm::Patience => {
-            let before = LineSide::from_text(old_content);
-            let after = LineSide::from_text(new_content);
-            if before.is_empty() && after.is_empty() {
-                return Vec::new();
-            }
-            let old_refs: Vec<&str> = before.lines().map(|l| l.body).collect();
-            let new_refs: Vec<&str> = after.lines().map(|l| l.body).collect();
-            let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-            let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
-            let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
-            let (changed1, changed2) =
-                git_xdiff::patience_changed_flags(&old_compare, &new_compare);
-            let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
-            diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
-                &raw,
-                diff_indent_heuristic::CompactSide {
-                    lines: &old_refs,
-                    keys: &old_compare,
-                    compare_ids: None,
-                },
-                diff_indent_heuristic::CompactSide {
-                    lines: &new_refs,
-                    keys: &new_compare,
-                    compare_ids: None,
-                },
-                options.indent_heuristic,
-                ws,
-                false,
-            )
-        }
+        DiffAlgorithm::Patience => patience_compacted_line_ops(
+            &LineSide::from_text(old_content),
+            &LineSide::from_text(new_content),
+            options.indent_heuristic,
+            ws,
+            &[],
+        ),
         DiffAlgorithm::Myers | DiffAlgorithm::Minimal => {
             let before = LineSide::from_text(old_content);
             let after = LineSide::from_text(new_content);
@@ -849,17 +825,44 @@ where
 {
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
+    let ops = patience_compacted_line_ops(&before, &after, indent_heuristic, ws, &[]);
+    unified_body_from_ops(
+        &before,
+        &after,
+        &ops,
+        ws,
+        UnifiedEmitOptions {
+            context_lines,
+            inter_hunk_context,
+            function_context: false,
+        },
+        None,
+        is_ignorable_change,
+    )
+}
+
+/// Patience line alignment (Git `xpatience.c`), then change compaction and the indent heuristic.
+///
+/// `new_anchored[i]` marks new-side line `i` for `--anchored`; pass `&[]` for plain patience.
+pub(crate) fn patience_compacted_line_ops(
+    before: &LineSide<'_>,
+    after: &LineSide<'_>,
+    indent_heuristic: bool,
+    ws: super::WhitespaceMode,
+    new_anchored: &[bool],
+) -> Vec<similar::DiffOp> {
     if before.is_empty() && after.is_empty() {
-        return String::new();
+        return Vec::new();
     }
-    let old_refs: Vec<&str> = before.lines().map(|l| l.body).collect();
-    let new_refs: Vec<&str> = after.lines().map(|l| l.body).collect();
+    let old_refs = line_bodies(before);
+    let new_refs = line_bodies(after);
     let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
-    let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
+    let old_compare = line_compare_keys(before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(after, ws, &mut new_normalized);
+    let (changed1, changed2) =
+        git_xdiff::patience_changed_flags(&old_compare, &new_compare, new_anchored);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
-    let ops = diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
+    diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
         &raw,
         diff_indent_heuristic::CompactSide {
             lines: &old_refs,
@@ -874,34 +877,47 @@ where
         indent_heuristic,
         ws,
         false,
-    );
-    let mut edits = if let Some(is_ignorable) = is_ignorable_change {
-        diff_ops_to_ignorable_edit_spans(&ops, &old_refs, &new_refs, is_ignorable)
-    } else {
-        diff_ops_to_edit_spans(&ops)
-    };
-    if edits.is_empty() {
-        if old_content != new_content && !ws.normalizes_line_compare() {
-            edits = line_ending_only_edits(&before, &after);
-        }
-        if edits.is_empty() {
-            return String::new();
-        }
-    }
-    emit_unified_body_from_edits(
-        &before,
-        &after,
-        &edits,
-        UnifiedEmitOptions {
-            context_lines,
-            inter_hunk_context,
-            function_context: false,
-        },
-        None,
     )
 }
 
-fn blank_line_ignorable(ws: super::WhitespaceMode) -> impl Fn(&[&str], &[&str]) -> bool + Copy {
+/// Unified hunk body (`@@` … with no-newline markers) for compacted line `ops`.
+///
+/// `is_ignorable_change` marks whole change records as ignorable (`--ignore-blank-lines`); hunks
+/// made only of ignorable records are dropped. When `ops` is empty but the texts still differ in
+/// line endings only, those lines are emitted as replacements, as Git does.
+pub(crate) fn unified_body_from_ops<F>(
+    before: &LineSide<'_>,
+    after: &LineSide<'_>,
+    ops: &[similar::DiffOp],
+    ws: super::WhitespaceMode,
+    emit: UnifiedEmitOptions,
+    funcname_matcher: Option<&FuncnameMatcher>,
+    is_ignorable_change: Option<F>,
+) -> String
+where
+    F: Fn(&[&str], &[&str]) -> bool,
+{
+    let mut edits = match is_ignorable_change {
+        Some(is_ignorable) => diff_ops_to_ignorable_edit_spans(
+            ops,
+            &line_bodies(before),
+            &line_bodies(after),
+            is_ignorable,
+        ),
+        None => diff_ops_to_edit_spans(ops),
+    };
+    if edits.is_empty() && !ws.normalizes_line_compare() && before.records() != after.records() {
+        edits = line_ending_only_edits(before, after);
+    }
+    if edits.is_empty() {
+        return String::new();
+    }
+    emit_unified_body_from_edits(before, after, &edits, emit, funcname_matcher)
+}
+
+pub(crate) fn blank_line_ignorable(
+    ws: super::WhitespaceMode,
+) -> impl Fn(&[&str], &[&str]) -> bool + Copy {
     move |removed: &[&str], added: &[&str]| {
         ws.ignore_blank_lines
             && removed.iter().all(|l| crate::ws::ws_blank_line(l))
@@ -1068,54 +1084,14 @@ fn git_patience_unified_body_raw(
     inter_hunk_context: usize,
     indent_heuristic: bool,
 ) -> String {
-    let before = LineSide::from_text(old_content);
-    let after = LineSide::from_text(new_content);
-    if before.is_empty() && after.is_empty() {
-        return String::new();
-    }
-    let old_refs: Vec<&str> = before.lines().map(|l| l.body).collect();
-    let new_refs: Vec<&str> = after.lines().map(|l| l.body).collect();
-    let ws = super::WhitespaceMode::default();
-    let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
-    let old_compare = line_compare_keys(&before, ws, &mut old_normalized);
-    let new_compare = line_compare_keys(&after, ws, &mut new_normalized);
-    let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
-    let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
-    let ops = diff_indent_heuristic::apply_change_compact_to_ops_with_ws_histogram(
-        &raw,
-        diff_indent_heuristic::CompactSide {
-            lines: &old_refs,
-            keys: &old_compare,
-            compare_ids: None,
-        },
-        diff_indent_heuristic::CompactSide {
-            lines: &new_refs,
-            keys: &new_compare,
-            compare_ids: None,
-        },
+    git_patience_unified_body_raw_with_ignorable(
+        old_content,
+        new_content,
+        context_lines,
+        inter_hunk_context,
         indent_heuristic,
-        ws,
-        false,
-    );
-    let mut edits = diff_ops_to_edit_spans(&ops);
-    if edits.is_empty() {
-        if old_content != new_content {
-            edits = line_ending_only_edits(&before, &after);
-        }
-        if edits.is_empty() {
-            return String::new();
-        }
-    }
-    emit_unified_body_from_edits(
-        &before,
-        &after,
-        &edits,
-        UnifiedEmitOptions {
-            context_lines,
-            inter_hunk_context,
-            function_context: false,
-        },
-        None,
+        super::WhitespaceMode::default(),
+        None::<fn(&[&str], &[&str]) -> bool>,
     )
 }
 
@@ -1207,443 +1183,6 @@ pub(crate) fn write_unified_diff_from_diff_options<W: std::io::Write>(
         }
     }
     Ok(())
-}
-
-#[expect(clippy::too_many_arguments)]
-fn unified_diff_git_myers_with_prefix_and_funcname(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    use crate::quote_path::format_diff_path_with_prefix;
-
-    let body = git_xdiff_unified_body_raw(
-        old_content,
-        new_content,
-        context_lines,
-        inter_hunk_context,
-        indent_heuristic,
-        false,
-        super::WhitespaceMode::default(),
-    );
-
-    let mut output = String::new();
-    if old_path == "/dev/null" {
-        output.push_str("--- /dev/null\n");
-    } else if src_prefix.is_empty() {
-        output.push_str(&format!("--- {old_path}\n"));
-    } else {
-        output.push_str("--- ");
-        output.push_str(&format_diff_path_with_prefix(
-            src_prefix,
-            old_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-    if new_path == "/dev/null" {
-        output.push_str("+++ /dev/null\n");
-    } else if dst_prefix.is_empty() {
-        output.push_str(&format!("+++ {new_path}\n"));
-    } else {
-        output.push_str("+++ ");
-        output.push_str(&format_diff_path_with_prefix(
-            dst_prefix,
-            new_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    for hunk_str in imara_unified_hunk_slices(&body) {
-        if hunk_str.is_empty() {
-            continue;
-        }
-        if let Some(first_newline) = hunk_str.find('\n') {
-            let header_line = &hunk_str[..first_newline];
-            let rest = &hunk_str[first_newline..];
-            if let Some(func_ctx) =
-                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
-            {
-                output.push_str(header_line);
-                output.push(' ');
-                output.push_str(&func_ctx);
-                output.push_str(rest);
-            } else {
-                output.push_str(hunk_str);
-            }
-        } else {
-            output.push_str(hunk_str);
-        }
-    }
-
-    annotate_unified_diff_no_newline_at_eof(&output, old_content, new_content)
-}
-
-#[expect(clippy::too_many_arguments)]
-fn unified_diff_git_minimal_with_prefix_and_funcname(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    use crate::quote_path::format_diff_path_with_prefix;
-
-    let body = git_xdiff_unified_body_raw(
-        old_content,
-        new_content,
-        context_lines,
-        inter_hunk_context,
-        indent_heuristic,
-        true,
-        super::WhitespaceMode::default(),
-    );
-
-    let mut output = String::new();
-    if old_path == "/dev/null" {
-        output.push_str("--- /dev/null\n");
-    } else if src_prefix.is_empty() {
-        output.push_str(&format!("--- {old_path}\n"));
-    } else {
-        output.push_str("--- ");
-        output.push_str(&format_diff_path_with_prefix(
-            src_prefix,
-            old_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-    if new_path == "/dev/null" {
-        output.push_str("+++ /dev/null\n");
-    } else if dst_prefix.is_empty() {
-        output.push_str(&format!("+++ {new_path}\n"));
-    } else {
-        output.push_str("+++ ");
-        output.push_str(&format_diff_path_with_prefix(
-            dst_prefix,
-            new_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    for hunk_str in imara_unified_hunk_slices(&body) {
-        if hunk_str.is_empty() {
-            continue;
-        }
-        if let Some(first_newline) = hunk_str.find('\n') {
-            let header_line = &hunk_str[..first_newline];
-            let rest = &hunk_str[first_newline..];
-            if let Some(func_ctx) =
-                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
-            {
-                output.push_str(header_line);
-                output.push(' ');
-                output.push_str(&func_ctx);
-                output.push_str(rest);
-            } else {
-                output.push_str(hunk_str);
-            }
-        } else {
-            output.push_str(hunk_str);
-        }
-    }
-
-    annotate_unified_diff_no_newline_at_eof(&output, old_content, new_content)
-}
-
-#[expect(clippy::too_many_arguments)]
-fn unified_diff_git_patience_with_prefix_and_funcname(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    use crate::quote_path::format_diff_path_with_prefix;
-
-    let body = git_patience_unified_body_raw(
-        old_content,
-        new_content,
-        context_lines,
-        inter_hunk_context,
-        indent_heuristic,
-    );
-
-    let mut output = String::new();
-    if old_path == "/dev/null" {
-        output.push_str("--- /dev/null\n");
-    } else if src_prefix.is_empty() {
-        output.push_str(&format!("--- {old_path}\n"));
-    } else {
-        output.push_str("--- ");
-        output.push_str(&format_diff_path_with_prefix(
-            src_prefix,
-            old_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-    if new_path == "/dev/null" {
-        output.push_str("+++ /dev/null\n");
-    } else if dst_prefix.is_empty() {
-        output.push_str(&format!("+++ {new_path}\n"));
-    } else {
-        output.push_str("+++ ");
-        output.push_str(&format_diff_path_with_prefix(
-            dst_prefix,
-            new_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    for hunk_str in imara_unified_hunk_slices(&body) {
-        if hunk_str.is_empty() {
-            continue;
-        }
-        if let Some(first_newline) = hunk_str.find('\n') {
-            let header_line = &hunk_str[..first_newline];
-            let rest = &hunk_str[first_newline..];
-            if let Some(func_ctx) =
-                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
-            {
-                output.push_str(header_line);
-                output.push(' ');
-                output.push_str(&func_ctx);
-                output.push_str(rest);
-            } else {
-                output.push_str(hunk_str);
-            }
-        } else {
-            output.push_str(hunk_str);
-        }
-    }
-
-    annotate_unified_diff_no_newline_at_eof(&output, old_content, new_content)
-}
-
-/// Unified diff hunks for Git's histogram algorithm (no `---` / `+++` lines).
-///
-/// Used by `--no-index` when whitespace normalization is off so the patch matches upstream Git.
-#[must_use]
-pub fn unified_diff_histogram_hunks_only(
-    old_content: &str,
-    new_content: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    indent_heuristic: bool,
-) -> String {
-    histogram_unified_body_raw(
-        old_content,
-        new_content,
-        context_lines,
-        inter_hunk_context,
-        indent_heuristic,
-        super::WhitespaceMode::default(),
-    )
-}
-
-#[expect(clippy::too_many_arguments)]
-fn unified_diff_histogram_with_prefix_and_funcname_indent(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    use crate::quote_path::format_diff_path_with_prefix;
-
-    let body = histogram_unified_body_raw(
-        old_content,
-        new_content,
-        context_lines,
-        inter_hunk_context,
-        indent_heuristic,
-        super::WhitespaceMode::default(),
-    );
-
-    let mut output = String::new();
-    if old_path == "/dev/null" {
-        output.push_str("--- /dev/null\n");
-    } else if src_prefix.is_empty() {
-        output.push_str(&format!("--- {old_path}\n"));
-    } else {
-        output.push_str("--- ");
-        output.push_str(&format_diff_path_with_prefix(
-            src_prefix,
-            old_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-    if new_path == "/dev/null" {
-        output.push_str("+++ /dev/null\n");
-    } else if dst_prefix.is_empty() {
-        output.push_str(&format!("+++ {new_path}\n"));
-    } else {
-        output.push_str("+++ ");
-        output.push_str(&format_diff_path_with_prefix(
-            dst_prefix,
-            new_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    for hunk_str in imara_unified_hunk_slices(&body) {
-        if hunk_str.is_empty() {
-            continue;
-        }
-        if let Some(first_newline) = hunk_str.find('\n') {
-            let header_line = &hunk_str[..first_newline];
-            let rest = &hunk_str[first_newline..];
-            if let Some(func_ctx) =
-                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
-            {
-                output.push_str(header_line);
-                output.push(' ');
-                output.push_str(&func_ctx);
-                output.push_str(rest);
-            } else {
-                output.push_str(hunk_str);
-            }
-        } else {
-            output.push_str(hunk_str);
-        }
-    }
-
-    annotate_unified_diff_no_newline_at_eof(&output, old_content, new_content)
-}
-
-/// Full unified diff (`---` / `+++` / hunks) using Git's histogram algorithm,
-/// applying `--ignore-blank-lines` / `-I` change-record suppression
-/// (`histogram_unified_body_ignore_fc`) and then attaching function-name hunk
-/// headers like `unified_diff_histogram_with_prefix_and_funcname_indent`.
-///
-/// `is_ignorable_change` is given the removed/added line slices (without
-/// trailing newlines) of one change record and returns whether the whole change
-/// is ignorable. Returns an empty string when no substantive change survives so
-/// the caller can hide the file entry.
-#[allow(clippy::too_many_arguments)]
-pub fn unified_diff_histogram_ignore_with_prefix_and_funcname<F>(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    quote_path_fully: bool,
-    function_context: bool,
-    indent_heuristic: bool,
-    is_ignorable_change: F,
-) -> String
-where
-    F: Fn(&[&str], &[&str]) -> bool,
-{
-    use crate::quote_path::format_diff_path_with_prefix;
-
-    let body = histogram_unified_body_ignore_fc(
-        old_content,
-        new_content,
-        context_lines,
-        inter_hunk_context,
-        function_context,
-        funcname_matcher,
-        indent_heuristic,
-        super::WhitespaceMode::default(),
-        is_ignorable_change,
-    );
-    if body.is_empty() {
-        return String::new();
-    }
-
-    let mut output = String::new();
-    if old_path == "/dev/null" {
-        output.push_str("--- /dev/null\n");
-    } else if src_prefix.is_empty() {
-        output.push_str(&format!("--- {old_path}\n"));
-    } else {
-        output.push_str("--- ");
-        output.push_str(&format_diff_path_with_prefix(
-            src_prefix,
-            old_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-    if new_path == "/dev/null" {
-        output.push_str("+++ /dev/null\n");
-    } else if dst_prefix.is_empty() {
-        output.push_str(&format!("+++ {new_path}\n"));
-    } else {
-        output.push_str("+++ ");
-        output.push_str(&format_diff_path_with_prefix(
-            dst_prefix,
-            new_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    for hunk_str in imara_unified_hunk_slices(&body) {
-        if hunk_str.is_empty() {
-            continue;
-        }
-        if let Some(first_newline) = hunk_str.find('\n') {
-            let header_line = &hunk_str[..first_newline];
-            let rest = &hunk_str[first_newline..];
-            if let Some(func_ctx) =
-                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
-            {
-                output.push_str(header_line);
-                output.push(' ');
-                output.push_str(&func_ctx);
-                output.push_str(rest);
-            } else {
-                output.push_str(hunk_str);
-            }
-        } else {
-            output.push_str(hunk_str);
-        }
-    }
-
-    output
 }
 
 /// `diff.indentHeuristic` from config (Git defaults to true when unset).
@@ -2354,24 +1893,37 @@ mod git_xdiff {
     }
 
     /// Patience diff: match unique lines, then recurse on gaps with xdiff Myers.
+    ///
+    /// `new_anchored[i]` marks new-side line `i` as an `--anchored` line: when it is unique on
+    /// both sides it is forced into the common sequence. An empty slice anchors nothing.
     pub(crate) fn patience_changed_flags(
         lines1: &[&str],
         lines2: &[&str],
+        new_anchored: &[bool],
     ) -> (Vec<bool>, Vec<bool>) {
         let b1: Vec<&[u8]> = lines1.iter().map(|l| l.as_bytes()).collect();
         let b2: Vec<&[u8]> = lines2.iter().map(|l| l.as_bytes()).collect();
-        patience_changed_flags_bytes(&b1, &b2)
+        patience_changed_flags_bytes_anchored(&b1, &b2, new_anchored)
     }
 
     pub(crate) fn patience_changed_flags_bytes(
         lines1: &[&[u8]],
         lines2: &[&[u8]],
     ) -> (Vec<bool>, Vec<bool>) {
+        patience_changed_flags_bytes_anchored(lines1, lines2, &[])
+    }
+
+    fn patience_changed_flags_bytes_anchored(
+        lines1: &[&[u8]],
+        lines2: &[&[u8]],
+        new_anchored: &[bool],
+    ) -> (Vec<bool>, Vec<bool>) {
         let mut changed1 = vec![false; lines1.len()];
         let mut changed2 = vec![false; lines2.len()];
         patience_recurse_bytes(
             lines1,
             lines2,
+            new_anchored,
             &mut changed1,
             &mut changed2,
             0,
@@ -2386,6 +1938,7 @@ mod git_xdiff {
     fn patience_recurse_bytes(
         lines1: &[&[u8]],
         lines2: &[&[u8]],
+        new_anchored: &[bool],
         changed1: &mut [bool],
         changed2: &mut [bool],
         o_start: usize,
@@ -2405,8 +1958,9 @@ mod git_xdiff {
             return;
         }
 
-        let anchors = patience_anchors_bytes(lines1, lines2, o_start, o_end, n_start, n_end);
-        if anchors.is_empty() {
+        let matches =
+            patience_anchors_bytes(lines1, lines2, new_anchored, o_start, o_end, n_start, n_end);
+        if matches.is_empty() {
             merge_myers_region_bytes(
                 lines1, lines2, changed1, changed2, o_start, o_end, n_start, n_end,
             );
@@ -2415,20 +1969,41 @@ mod git_xdiff {
 
         let mut prev_o = o_start;
         let mut prev_n = n_start;
-        for (ao, an) in anchors {
-            patience_recurse_bytes(lines1, lines2, changed1, changed2, prev_o, ao, prev_n, an);
+        for (ao, an) in matches {
+            patience_recurse_bytes(
+                lines1,
+                lines2,
+                new_anchored,
+                changed1,
+                changed2,
+                prev_o,
+                ao,
+                prev_n,
+                an,
+            );
             prev_o = ao + 1;
             prev_n = an + 1;
         }
         patience_recurse_bytes(
-            lines1, lines2, changed1, changed2, prev_o, o_end, prev_n, n_end,
+            lines1,
+            lines2,
+            new_anchored,
+            changed1,
+            changed2,
+            prev_o,
+            o_end,
+            prev_n,
+            n_end,
         );
     }
 
+    /// Unique-in-both line pairs of one region, reduced to the longest run increasing on both
+    /// sides (anchored lines are always kept).
     #[allow(clippy::too_many_arguments)]
     fn patience_anchors_bytes(
         lines1: &[&[u8]],
         lines2: &[&[u8]],
+        new_anchored: &[bool],
         o_start: usize,
         o_end: usize,
         n_start: usize,
@@ -2459,7 +2034,11 @@ mod git_xdiff {
             }
         }
         pairs.sort_by_key(|p| p.0);
-        longest_increasing_by_second(&pairs)
+        if new_anchored.is_empty() {
+            longest_increasing_by_second(&pairs)
+        } else {
+            longest_increasing_by_second_anchored(&pairs, new_anchored)
+        }
     }
 
     fn longest_increasing_by_second(pairs: &[(usize, usize)]) -> Vec<(usize, usize)> {
@@ -2492,6 +2071,59 @@ mod git_xdiff {
         }
         let mut out = Vec::with_capacity(len);
         let mut k = tails[len.saturating_sub(1)];
+        while k != usize::MAX {
+            out.push(pairs[k]);
+            k = prev[k];
+        }
+        out.reverse();
+        out
+    }
+
+    /// [`longest_increasing_by_second`] for `--anchored`: a pair whose new line is marked in
+    /// `new_anchored` pins its slot. The sequence is cut back to end at it, and no later pair may
+    /// replace it or anything before it, so every anchor that an earlier anchor does not undercut
+    /// survives into the result.
+    fn longest_increasing_by_second_anchored(
+        pairs: &[(usize, usize)],
+        new_anchored: &[bool],
+    ) -> Vec<(usize, usize)> {
+        let n = pairs.len();
+        let mut tails = vec![0usize; n];
+        let mut prev = vec![usize::MAX; n];
+        let mut len = 0usize;
+        let mut pinned: Option<usize> = None;
+        for i in 0..n {
+            let v = pairs[i].1;
+            let lo = tails[..len].partition_point(|&t| pairs[t].1 < v);
+            if lo > 0 {
+                prev[i] = tails[lo - 1];
+            }
+            if pinned.is_some_and(|p| lo <= p) {
+                continue;
+            }
+            tails[lo] = i;
+            if new_anchored.get(v).copied().unwrap_or(false) {
+                pinned = Some(lo);
+                len = lo + 1;
+            } else if lo == len {
+                len += 1;
+            }
+        }
+        if len == 0 {
+            return Vec::new();
+        }
+        chain_from_tail(pairs, &prev, tails[len - 1], len)
+    }
+
+    /// The pairs on the `prev` chain ending at `tail`, in order.
+    fn chain_from_tail(
+        pairs: &[(usize, usize)],
+        prev: &[usize],
+        tail: usize,
+        len: usize,
+    ) -> Vec<(usize, usize)> {
+        let mut out = Vec::with_capacity(len);
+        let mut k = tail;
         while k != usize::MAX {
             out.push(pairs[k]);
             k = prev[k];
@@ -11044,1028 +10676,6 @@ pub fn format_raw_abbrev(entry: &DiffEntry, abbrev_len: usize) -> String {
     )
 }
 
-/// Generate a unified diff patch for two blobs.
-///
-/// # Parameters
-///
-/// - `old_content` — the old file content (empty for added files).
-/// - `new_content` — the new file content (empty for deleted files).
-/// - `old_path` — display path for the old side.
-/// - `new_path` — display path for the new side.
-/// - `context_lines` — number of context lines around changes (default: 3).
-/// - Inter-hunk context defaults to `0` (see [`unified_diff_with_prefix`]).
-///
-/// # Returns
-///
-/// The unified diff as a string.
-pub(crate) fn unified_diff(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    unified_diff_with_prefix(
-        old_content,
-        new_content,
-        old_path,
-        new_path,
-        context_lines,
-        0,
-        "a/",
-        "b/",
-        indent_heuristic,
-        quote_path_fully,
-    )
-}
-
-/// Same as `unified_diff` but with configurable source/destination prefixes.
-///
-/// `inter_hunk_context` is Git's `--inter-hunk-context`: adjacent hunks merge when
-/// the unchanged gap between them is at most `2 * context_lines + inter_hunk_context` lines.
-#[allow(clippy::too_many_arguments)] // Mirrors Git-style unified diff parameters.
-pub(crate) fn unified_diff_with_prefix(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    unified_diff_with_prefix_and_funcname(
-        old_content,
-        new_content,
-        old_path,
-        new_path,
-        context_lines,
-        inter_hunk_context,
-        src_prefix,
-        dst_prefix,
-        None,
-        indent_heuristic,
-        quote_path_fully,
-    )
-}
-
-/// Same as `unified_diff_with_prefix` with optional custom hunk-header
-/// function-name matching.
-#[allow(clippy::too_many_arguments)]
-pub fn unified_diff_with_prefix_and_funcname(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    unified_diff_with_prefix_and_funcname_and_algorithm(
-        old_content,
-        new_content,
-        old_path,
-        new_path,
-        context_lines,
-        inter_hunk_context,
-        src_prefix,
-        dst_prefix,
-        funcname_matcher,
-        similar::Algorithm::Myers,
-        false,
-        false,
-        indent_heuristic,
-        quote_path_fully,
-    )
-}
-
-/// Same as [`unified_diff_with_prefix_and_funcname_and_algorithm`], streaming to `out`.
-///
-/// # Errors
-///
-/// Returns I/O errors from `out`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Write>(
-    out: &mut W,
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    algorithm: similar::Algorithm,
-    function_context: bool,
-    use_git_histogram: bool,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> Result<()> {
-    if function_context {
-        let patch = unified_diff_with_function_context(
-            old_content,
-            new_content,
-            old_path,
-            new_path,
-            context_lines,
-            inter_hunk_context,
-            src_prefix,
-            dst_prefix,
-            funcname_matcher,
-            algorithm,
-            indent_heuristic,
-            quote_path_fully,
-        );
-        out.write_all(patch.as_bytes())?;
-        return Ok(());
-    }
-
-    if use_git_histogram {
-        let patch = unified_diff_histogram_with_prefix_and_funcname_indent(
-            old_content,
-            new_content,
-            old_path,
-            new_path,
-            context_lines,
-            inter_hunk_context,
-            src_prefix,
-            dst_prefix,
-            funcname_matcher,
-            indent_heuristic,
-            quote_path_fully,
-        );
-        out.write_all(patch.as_bytes())?;
-        return Ok(());
-    }
-
-    if algorithm == similar::Algorithm::Myers && !function_context {
-        let patch = unified_diff_git_myers_with_prefix_and_funcname(
-            old_content,
-            new_content,
-            old_path,
-            new_path,
-            context_lines,
-            inter_hunk_context,
-            src_prefix,
-            dst_prefix,
-            funcname_matcher,
-            indent_heuristic,
-            quote_path_fully,
-        );
-        out.write_all(patch.as_bytes())?;
-        return Ok(());
-    }
-
-    if algorithm == similar::Algorithm::Lcs && !function_context {
-        let patch = unified_diff_git_minimal_with_prefix_and_funcname(
-            old_content,
-            new_content,
-            old_path,
-            new_path,
-            context_lines,
-            inter_hunk_context,
-            src_prefix,
-            dst_prefix,
-            funcname_matcher,
-            indent_heuristic,
-            quote_path_fully,
-        );
-        out.write_all(patch.as_bytes())?;
-        return Ok(());
-    }
-
-    if algorithm == similar::Algorithm::Patience && !function_context {
-        let patch = unified_diff_git_patience_with_prefix_and_funcname(
-            old_content,
-            new_content,
-            old_path,
-            new_path,
-            context_lines,
-            inter_hunk_context,
-            src_prefix,
-            dst_prefix,
-            funcname_matcher,
-            indent_heuristic,
-            quote_path_fully,
-        );
-        out.write_all(patch.as_bytes())?;
-        return Ok(());
-    }
-
-    use crate::quote_path::format_diff_path_with_prefix;
-    use similar::{udiff::UnifiedDiffHunk, TextDiff};
-
-    let diff = TextDiff::configure()
-        .algorithm(algorithm)
-        .diff_lines(old_content, new_content);
-    let compacted_ops = diff_indent_heuristic::diff_lines_ops_compacted(
-        old_content,
-        new_content,
-        algorithm,
-        indent_heuristic,
-    );
-
-    if old_path == "/dev/null" {
-        out.write_all(b"--- /dev/null\n")?;
-    } else if src_prefix.is_empty() {
-        writeln!(out, "--- {old_path}")?;
-    } else {
-        out.write_all(b"--- ")?;
-        out.write_all(
-            format_diff_path_with_prefix(src_prefix, old_path, quote_path_fully).as_bytes(),
-        )?;
-        out.write_all(b"\n")?;
-    }
-    if new_path == "/dev/null" {
-        out.write_all(b"+++ /dev/null\n")?;
-    } else if dst_prefix.is_empty() {
-        writeln!(out, "+++ {new_path}")?;
-    } else {
-        out.write_all(b"+++ ")?;
-        out.write_all(
-            format_diff_path_with_prefix(dst_prefix, new_path, quote_path_fully).as_bytes(),
-        )?;
-        out.write_all(b"\n")?;
-    }
-
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    let max_common_gap = context_lines
-        .saturating_mul(2)
-        .saturating_add(inter_hunk_context);
-    let op_groups = group_diff_ops_gap(compacted_ops, context_lines, max_common_gap);
-
-    let mut hunk_buf = String::new();
-    let mut eof_annot = UnifiedDiffNoNewlineAnnotator::new(old_content, new_content);
-    for ops in op_groups {
-        if ops.is_empty() {
-            continue;
-        }
-        let hunk = UnifiedDiffHunk::new(ops, &diff, true);
-        hunk_buf.clear();
-        use std::fmt::Write as FmtWrite;
-        let _ = FmtWrite::write_fmt(&mut hunk_buf, format_args!("{hunk}"));
-        let mut fragment = hunk_buf.clone();
-        if let Some(first_newline) = hunk_buf.find('\n') {
-            let header_line = &hunk_buf[..first_newline];
-            let rest = &hunk_buf[first_newline..];
-            if let Some(func_ctx) =
-                extract_function_context(header_line, &old_lines, funcname_matcher, Some(old_path))
-            {
-                fragment.clear();
-                fragment.push_str(header_line);
-                fragment.push(' ');
-                fragment.push_str(&func_ctx);
-                fragment.push_str(rest);
-            }
-        }
-        eof_annot.write_hunk(out, &fragment)?;
-    }
-    Ok(())
-}
-
-/// Same as [`unified_diff_with_prefix_and_funcname`] but allows callers to
-/// choose the line diff algorithm used for hunk generation.
-///
-/// When `function_context` is true (`git diff -W`), hunks are expanded to
-/// whole logical functions using the same rules as Git's `XDL_EMIT_FUNCCONTEXT`.
-#[allow(clippy::too_many_arguments)]
-pub fn unified_diff_with_prefix_and_funcname_and_algorithm(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    algorithm: similar::Algorithm,
-    function_context: bool,
-    use_git_histogram: bool,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    let mut output = Vec::new();
-    if write_unified_diff_with_prefix_and_funcname_and_algorithm(
-        &mut output,
-        old_content,
-        new_content,
-        old_path,
-        new_path,
-        context_lines,
-        inter_hunk_context,
-        src_prefix,
-        dst_prefix,
-        funcname_matcher,
-        algorithm,
-        function_context,
-        use_git_histogram,
-        indent_heuristic,
-        quote_path_fully,
-    )
-    .is_err()
-    {
-        output.clear();
-    }
-    String::from_utf8_lossy(&output).into_owned()
-}
-
-/// Group diff ops into hunks like Git's `xdl_get_hunk`: two changes merge into one hunk while
-/// the run of unchanged lines between them is at most `max_common_gap`
-/// (`2 * context + inter_hunk_context`), and each hunk keeps at most `context` unchanged lines
-/// at its edges. Unlike `similar::group_diff_ops`, the split threshold is decoupled from the
-/// edge context so odd gap limits group exactly like Git.
-pub(crate) fn group_diff_ops_gap(
-    mut ops: Vec<similar::DiffOp>,
-    context: usize,
-    max_common_gap: usize,
-) -> Vec<Vec<similar::DiffOp>> {
-    use similar::DiffOp;
-    if ops.is_empty() {
-        return vec![];
-    }
-
-    let mut pending_group = Vec::new();
-    let mut rv = Vec::new();
-
-    if let Some(DiffOp::Equal {
-        old_index,
-        new_index,
-        len,
-    }) = ops.first_mut()
-    {
-        let offset = (*len).saturating_sub(context);
-        *old_index += offset;
-        *new_index += offset;
-        *len -= offset;
-    }
-
-    if let Some(DiffOp::Equal { len, .. }) = ops.last_mut() {
-        *len -= (*len).saturating_sub(context);
-    }
-
-    for op in ops.into_iter() {
-        if let DiffOp::Equal {
-            old_index,
-            new_index,
-            len,
-        } = op
-        {
-            // End the current group and start a new one whenever the unchanged
-            // run is too long to fuse the surrounding changes.
-            if len > max_common_gap {
-                pending_group.push(DiffOp::Equal {
-                    old_index,
-                    new_index,
-                    len: context,
-                });
-                rv.push(pending_group);
-                let offset = len.saturating_sub(context);
-                pending_group = vec![DiffOp::Equal {
-                    old_index: old_index + offset,
-                    new_index: new_index + offset,
-                    len: len - offset,
-                }];
-                continue;
-            }
-        }
-        pending_group.push(op);
-    }
-
-    match &pending_group[..] {
-        &[] | &[similar::DiffOp::Equal { .. }] => {}
-        _ => rv.push(pending_group),
-    }
-
-    rv
-}
-#[expect(clippy::too_many_arguments)]
-/// `git diff -W`: expand each hunk to include full function bodies (see Git `xemit.c`).
-fn unified_diff_with_function_context(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    inter_hunk_context: usize,
-    src_prefix: &str,
-    dst_prefix: &str,
-    funcname_matcher: Option<&FuncnameMatcher>,
-    algorithm: similar::Algorithm,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    use crate::quote_path::format_diff_path_with_prefix;
-    use similar::{udiff::UnifiedDiffHunk, TextDiff};
-
-    let diff = TextDiff::configure()
-        .algorithm(algorithm)
-        .diff_lines(old_content, new_content);
-
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    let new_lines: Vec<&str> = new_content.lines().collect();
-    let n_old = old_lines.len();
-    let n_new = new_lines.len();
-
-    // Group changes the way Git's xdl_get_hunk does: merge while the unchanged
-    // gap is at most `2*context + inter_hunk_context`. `similar::group_diff_ops`
-    // splits only at gap > `2*radius`, which over-merges changes in *different*
-    // functions (e.g. a leading insertion and a body change) into one hunk and
-    // then over-expands the function context (t4015 #136). Use the gap-correct
-    // grouping (same as the non-function-context path).
-    let max_common_gap = context_lines
-        .saturating_mul(2)
-        .saturating_add(inter_hunk_context);
-    let all_ops = diff.ops().to_vec();
-    let op_groups = group_diff_ops_gap(all_ops.clone(), context_lines, max_common_gap);
-
-    let mut ranges: Vec<(usize, usize, usize, usize)> = Vec::new();
-
-    for ops in op_groups {
-        if ops.is_empty() {
-            continue;
-        }
-        let i1_anchor = func_context_old_anchor(&ops, n_old);
-        let i1_end = hunk_old_change_end_exclusive(&ops);
-        let skip_preimage_pull =
-            append_with_whole_function_added(&ops, n_old, n_new, &new_lines, funcname_matcher);
-        let hunk = UnifiedDiffHunk::new(ops, &diff, true);
-        let hunk_str = format!("{hunk}");
-        let header_line = hunk_str
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim_end_matches(['\r', '\n']);
-        let Some((base_s1, _base_e1, _base_s2, _base_e2)) =
-            parse_unified_hunk_header_ranges(header_line)
-        else {
-            continue;
-        };
-
-        let ctx = context_lines;
-        let (s1, e1, s2, e2) = if skip_preimage_pull {
-            let s = n_old.saturating_sub(ctx);
-            let s2 = map_old_line_to_new(&all_ops, s, n_new).min(n_new);
-            (s, n_old, s2, n_new)
-        } else {
-            let mut s1 = base_s1.saturating_sub(ctx);
-            let mut s2 = map_old_line_to_new(&all_ops, s1, n_new).min(n_new);
-
-            let base_pre_s1 = i1_anchor.saturating_sub(ctx);
-            if base_pre_s1 < s1 {
-                s1 = base_pre_s1;
-                s2 = map_old_line_to_new(&all_ops, s1, n_new).min(n_new);
-            }
-
-            let fs1 = expand_func_pre_start(s1, i1_anchor, n_old, &old_lines, funcname_matcher);
-            if fs1 < s1 {
-                s1 = fs1;
-                s2 = map_old_line_to_new(&all_ops, s1, n_new).min(n_new);
-            }
-
-            // `i1_end` is the exclusive end of the changed region; its post-image
-            // context is `ctx` lines (Git's `xche->i1 + xche->chg1 + lctx`). The
-            // hunk's `base_e1` already includes the group's trailing context, so
-            // use the change end + ctx directly to avoid double-counting context
-            // (which over-extended the hunk and merged separate functions — t4015 #136).
-            let mut e1 = (i1_end + ctx).min(n_old);
-            let mut e2 = map_old_line_to_new(&all_ops, e1, n_new).min(n_new);
-            let fe1 = expand_func_post_end(e1, i1_end, n_old, &old_lines, funcname_matcher);
-            if fe1 > e1 {
-                e1 = fe1;
-                e2 = map_old_line_to_new(&all_ops, e1, n_new).min(n_new);
-            }
-            (s1, e1, s2, e2)
-        };
-
-        ranges.push((s1, e1, s2, e2));
-    }
-
-    // Merge ranges whose function-context expansion made them overlap on the old
-    // side (Git emits a single hunk in that case).
-    ranges.sort_by_key(|r| (r.0, r.2));
-    let mut merged: Vec<(usize, usize, usize, usize)> = Vec::with_capacity(ranges.len());
-    for (s1, e1, s2, e2) in ranges {
-        if let Some(last) = merged.last_mut() {
-            if s1 < last.1 {
-                last.1 = last.1.max(e1);
-                last.3 = last.3.max(e2);
-                continue;
-            }
-        }
-        merged.push((s1, e1, s2, e2));
-    }
-    let ranges = merged;
-
-    let mut output = String::new();
-    if old_path == "/dev/null" {
-        output.push_str("--- /dev/null\n");
-    } else if src_prefix.is_empty() {
-        output.push_str(&format!("--- {old_path}\n"));
-    } else {
-        output.push_str("--- ");
-        output.push_str(&format_diff_path_with_prefix(
-            src_prefix,
-            old_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-    if new_path == "/dev/null" {
-        output.push_str("+++ /dev/null\n");
-    } else if dst_prefix.is_empty() {
-        output.push_str(&format!("+++ {new_path}\n"));
-    } else {
-        output.push_str("+++ ");
-        output.push_str(&format_diff_path_with_prefix(
-            dst_prefix,
-            new_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-
-    for (s1, e1, s2, e2) in ranges {
-        if s1 >= e1 && s2 >= e2 {
-            continue;
-        }
-        let old_seg =
-            line_slice_for_diff_with_eof_nl(&old_lines, s1, e1, old_content.ends_with('\n'));
-        let new_seg =
-            line_slice_for_diff_with_eof_nl(&new_lines, s2, e2, new_content.ends_with('\n'));
-        let inner_ctx = old_seg.lines().count().max(new_seg.lines().count()).max(1);
-        let piece = unified_diff_with_prefix_and_funcname_and_algorithm(
-            &old_seg,
-            &new_seg,
-            old_path,
-            new_path,
-            inner_ctx,
-            0,
-            src_prefix,
-            dst_prefix,
-            funcname_matcher,
-            algorithm,
-            false,
-            false,
-            indent_heuristic,
-            quote_path_fully,
-        );
-        let shifted = shift_unified_hunk_headers_to_full_file(&piece, s1, s2);
-        let with_func =
-            enrich_unified_hunk_headers_funcname(&shifted, &old_lines, funcname_matcher);
-        for line in with_func.lines() {
-            if line.starts_with("--- ") || line.starts_with("+++ ") {
-                continue;
-            }
-            output.push_str(line);
-            output.push('\n');
-        }
-    }
-
-    output
-}
-
-/// `piece` is a unified diff for a slice of the file; hunk headers use 1-based
-/// coordinates relative to that slice. Shift them by `delta_old` / `delta_new`
-/// (0-based offsets of the slice in the full file) so the combined patch applies
-/// to the whole file.
-fn shift_unified_hunk_headers_to_full_file(
-    patch: &str,
-    delta_old: usize,
-    delta_new: usize,
-) -> String {
-    if delta_old == 0 && delta_new == 0 {
-        return patch.to_owned();
-    }
-    let mut out = String::with_capacity(patch.len());
-    for line in patch.lines() {
-        if let Some(shifted) = shift_one_unified_hunk_header(line, delta_old, delta_new) {
-            out.push_str(&shifted);
-        } else {
-            out.push_str(line);
-        }
-        out.push('\n');
-    }
-    out
-}
-
-fn shift_one_unified_hunk_header(line: &str, delta_old: usize, delta_new: usize) -> Option<String> {
-    let rest = line.strip_prefix("@@ ")?;
-    let (old_chunk, after_plus) = rest.split_once(" +")?;
-    let old_spec = old_chunk.strip_prefix('-')?;
-    let (new_spec, suffix) = after_plus.split_once(" @@")?;
-    let shifted_old = shift_unified_range_spec(old_spec, delta_old)?;
-    let shifted_new = shift_unified_range_spec(new_spec, delta_new)?;
-    Some(format!("@@ -{shifted_old} +{shifted_new} @@{suffix}"))
-}
-
-fn shift_unified_range_spec(spec: &str, delta: usize) -> Option<String> {
-    let spec = spec.trim();
-    if let Some((start_s, count_s)) = spec.split_once(',') {
-        let start: usize = start_s.parse().ok()?;
-        let count: usize = count_s.parse().ok()?;
-        Some(format!("{},{}", start.saturating_add(delta), count))
-    } else {
-        let start: usize = spec.parse().ok()?;
-        Some(format!("{}", start.saturating_add(delta)))
-    }
-}
-
-/// Re-attach `@@ ... @@ <funcname>` using full-file line indices (inner diffs use slices).
-fn enrich_unified_hunk_headers_funcname(
-    patch: &str,
-    full_old_lines: &[&str],
-    funcname_matcher: Option<&FuncnameMatcher>,
-) -> String {
-    let mut out = String::with_capacity(patch.len());
-    for line in patch.lines() {
-        if let Some(fixed) = enrich_one_hunk_header_funcname(line, full_old_lines, funcname_matcher)
-        {
-            out.push_str(&fixed);
-        } else {
-            out.push_str(line);
-        }
-        out.push('\n');
-    }
-    out
-}
-
-fn enrich_one_hunk_header_funcname(
-    line: &str,
-    full_old_lines: &[&str],
-    funcname_matcher: Option<&FuncnameMatcher>,
-) -> Option<String> {
-    let after_at = line.strip_prefix("@@ ")?;
-    let idx = after_at.find(" @@")?;
-    let mid = after_at[..idx].trim();
-    let tail = after_at[idx + 3..].trim_start();
-    let header_for_parse = format!("@@ {mid} @@");
-    let func = extract_function_context(&header_for_parse, full_old_lines, funcname_matcher, None);
-    Some(if let Some(f) = func {
-        format!("@@ {mid} @@ {f}")
-    } else if !tail.is_empty() {
-        format!("@@ {mid} @@ {tail}")
-    } else {
-        format!("@@ {mid} @@")
-    })
-}
-
-fn line_slice_for_diff_with_eof_nl(
-    lines: &[&str],
-    start: usize,
-    end: usize,
-    full_file_ends_with_newline: bool,
-) -> String {
-    if start >= end {
-        return String::new();
-    }
-    let mut s = lines[start..end].join("\n");
-    let slice_is_suffix_of_file = end == lines.len();
-    let need_trailing_nl = if slice_is_suffix_of_file {
-        full_file_ends_with_newline
-    } else {
-        true
-    };
-    if need_trailing_nl && !s.ends_with('\n') {
-        s.push('\n');
-    }
-    s
-}
-
-/// Map a 0-based old line index to the corresponding 0-based new line index using the full-file
-/// diff ops (Git aligns context across deletions/insertions).
-fn map_old_line_to_new(ops: &[similar::DiffOp], old_line: usize, n_new: usize) -> usize {
-    use similar::DiffOp;
-    let mut n = 0usize;
-    for op in ops {
-        match *op {
-            DiffOp::Equal {
-                old_index,
-                new_index,
-                len,
-            } => {
-                if old_index + len <= old_line {
-                    n = new_index + len;
-                    continue;
-                }
-                if old_index < old_line {
-                    let take = old_line - old_index;
-                    return (new_index + take).min(n_new);
-                }
-                return new_index.min(n_new);
-            }
-            DiffOp::Delete {
-                old_index,
-                old_len,
-                new_index,
-            } => {
-                if old_index + old_len <= old_line {
-                    n = new_index;
-                    continue;
-                }
-                if old_index < old_line {
-                    return new_index.min(n_new);
-                }
-            }
-            DiffOp::Insert {
-                old_index,
-                new_index,
-                new_len,
-            } => {
-                if old_index < old_line {
-                    n = new_index + new_len;
-                    continue;
-                }
-                if old_index == old_line {
-                    // `old_line` is an exclusive end or insertion point aligned with this insert
-                    // (e.g. EOF append maps to after the inserted block).
-                    return (new_index + new_len).min(n_new);
-                }
-                return new_index.min(n_new);
-            }
-            DiffOp::Replace {
-                old_index,
-                old_len,
-                new_index,
-                new_len,
-            } => {
-                if old_index + old_len <= old_line {
-                    n = new_index + new_len;
-                    continue;
-                }
-                if old_index < old_line {
-                    let into_old = old_line - old_index;
-                    let mapped = new_index + into_old.min(new_len);
-                    return mapped.min(n_new);
-                }
-                return new_index.min(n_new);
-            }
-        }
-    }
-    n.min(n_new)
-}
-
-/// Parse `@@ -old +new @@` into 0-based half-open ranges in each file.
-fn parse_unified_hunk_header_ranges(header: &str) -> Option<(usize, usize, usize, usize)> {
-    let rest = header.strip_prefix("@@ ")?;
-    let (old_tok, rest2) = rest.split_once(" +")?;
-    let old_tok = old_tok.strip_prefix('-')?;
-    let new_tok = rest2.split_once(" @@").map(|(a, _)| a)?;
-
-    fn parse_side(spec: &str) -> Option<(usize, usize)> {
-        let spec = spec.trim();
-        let (start_one_based, count) = if let Some((a, b)) = spec.split_once(',') {
-            (a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)
-        } else {
-            let s = spec.parse::<usize>().ok()?;
-            (s, 1usize)
-        };
-        let s0 = start_one_based.saturating_sub(1);
-        let e0 = s0.saturating_add(count);
-        Some((s0, e0))
-    }
-
-    let (os, oe) = parse_side(old_tok)?;
-    let (ns, ne) = parse_side(new_tok)?;
-    Some((os, oe, ns, ne))
-}
-
-/// Git `xemit.c`: when a hunk only inserts at EOF (first inserted line is `new_index == n_old`)
-/// and the added text already contains a funcname line, do not pull extra context from the preimage.
-fn append_with_whole_function_added(
-    ops: &[similar::DiffOp],
-    n_old: usize,
-    n_new: usize,
-    new_lines: &[&str],
-    matcher: Option<&FuncnameMatcher>,
-) -> bool {
-    use similar::DiffOp;
-    if n_old == 0 {
-        return false;
-    }
-    let mut only_ins_or_eq = true;
-    let mut min_new_ins = usize::MAX;
-    for op in ops {
-        match *op {
-            DiffOp::Equal { .. } => {}
-            DiffOp::Insert {
-                new_index, new_len, ..
-            } => {
-                min_new_ins = min_new_ins.min(new_index);
-                if new_len == 0 {
-                    only_ins_or_eq = false;
-                }
-            }
-            DiffOp::Delete { .. } | DiffOp::Replace { .. } => {
-                only_ins_or_eq = false;
-            }
-        }
-    }
-    let mut insert_at_eof = false;
-    for op in ops {
-        if let DiffOp::Insert { old_index, .. } = *op {
-            if old_index == n_old {
-                insert_at_eof = true;
-                break;
-            }
-        }
-    }
-    let append_at_eof = min_new_ins == n_old || insert_at_eof;
-    if !only_ins_or_eq || !append_at_eof || min_new_ins == usize::MAX {
-        return false;
-    }
-    // Git only skips preimage pull when the inserted block is clearly a new logical
-    // function (see `xemit.c` walking `xdf2` for `is_func_rec`). A loose "any line
-    // looks like a function" check would match `return` / `printf` and break `-W`
-    // hunks that still need preimage context (t4051 `extended`).
-    let mut j = min_new_ins;
-    while j < n_new {
-        let line = new_lines[j];
-        if line.trim().is_empty() {
-            j += 1;
-            continue;
-        }
-        if let Some(m) = matcher {
-            if m.match_line(line).is_some() {
-                return true;
-            }
-        } else if inserted_block_starts_with_c_like_function_definition(line) {
-            return true;
-        }
-        j += 1;
-    }
-    false
-}
-
-fn inserted_block_starts_with_c_like_function_definition(line: &str) -> bool {
-    let t = line.trim_start();
-    let Some(open_paren) = t.find('(') else {
-        return false;
-    };
-    let head = &t[..open_paren];
-    let tokens: Vec<&str> = head.split_whitespace().collect();
-    if tokens.len() < 2 {
-        // `printf(...)`, `return (`, etc. — not `return_type name(`.
-        return false;
-    }
-    let nameish = tokens.last().copied().unwrap_or("");
-    let name = nameish.trim_end_matches(['*', '&']);
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return false;
-    }
-    let type_or_modifier = |tok: &str| {
-        matches!(
-            tok,
-            "static"
-                | "extern"
-                | "inline"
-                | "void"
-                | "int"
-                | "char"
-                | "short"
-                | "long"
-                | "float"
-                | "double"
-                | "unsigned"
-                | "signed"
-                | "struct"
-                | "enum"
-                | "union"
-                | "const"
-                | "volatile"
-                | "typedef"
-        )
-    };
-    tokens[..tokens.len() - 1]
-        .iter()
-        .any(|tok| type_or_modifier(tok))
-}
-
-fn hunk_old_change_end_exclusive(ops: &[similar::DiffOp]) -> usize {
-    use similar::DiffOp;
-    let mut max_o = 0usize;
-    for op in ops {
-        match *op {
-            DiffOp::Delete {
-                old_index, old_len, ..
-            } => {
-                max_o = max_o.max(old_index + old_len);
-            }
-            DiffOp::Replace {
-                old_index, old_len, ..
-            } => {
-                max_o = max_o.max(old_index + old_len);
-            }
-            DiffOp::Insert { old_index, .. } => {
-                // Pure insertions do not consume old lines; Git's post-context anchor is the
-                // insertion point (`old_index`), not 0 (t4051 `extended`).
-                max_o = max_o.max(old_index);
-            }
-            DiffOp::Equal { .. } => {}
-        }
-    }
-    max_o
-}
-
-fn func_context_old_anchor(ops: &[similar::DiffOp], n_old: usize) -> usize {
-    use similar::DiffOp;
-    let mut has_delete_or_replace = false;
-    let mut min_del = usize::MAX;
-    let mut min_ins_old = usize::MAX;
-
-    for op in ops {
-        match *op {
-            DiffOp::Delete {
-                old_index, old_len, ..
-            } => {
-                has_delete_or_replace = true;
-                min_del = min_del.min(old_index);
-                min_del = min_del.min(old_index + old_len.saturating_sub(1));
-            }
-            DiffOp::Replace {
-                old_index, old_len, ..
-            } => {
-                has_delete_or_replace = true;
-                min_del = min_del.min(old_index);
-                min_del = min_del.min(old_index + old_len.saturating_sub(1));
-            }
-            DiffOp::Insert { old_index, .. } => {
-                min_ins_old = min_ins_old.min(old_index);
-            }
-            DiffOp::Equal { .. } => {}
-        }
-    }
-
-    let mut i1 = if has_delete_or_replace {
-        min_del
-    } else if min_ins_old != usize::MAX {
-        min_ins_old
-    } else {
-        0
-    };
-
-    let pure_insert = ops
-        .iter()
-        .all(|op| matches!(op, DiffOp::Insert { .. } | DiffOp::Equal { .. }))
-        && ops.iter().any(|op| matches!(op, DiffOp::Insert { .. }));
-
-    if pure_insert && i1 >= n_old && n_old > 0 {
-        i1 = n_old - 1;
-    }
-
-    i1.min(n_old.saturating_sub(1))
-}
-
-fn expand_func_pre_start(
-    s1: usize,
-    i1: usize,
-    n_old: usize,
-    old_lines: &[&str],
-    matcher: Option<&FuncnameMatcher>,
-) -> usize {
-    if n_old == 0 {
-        return s1;
-    }
-    let i1 = i1.min(n_old.saturating_sub(1));
-    let mut fs1 = get_func_line_backward(old_lines, i1, matcher).unwrap_or(i1);
-    while fs1 > 0
-        && !is_line_empty_for_func_context(old_lines[fs1 - 1])
-        && !is_func_line(old_lines[fs1 - 1], matcher)
-    {
-        fs1 -= 1;
-    }
-    s1.min(fs1)
-}
-
-fn expand_func_post_end(
-    e1: usize,
-    i1_end: usize,
-    n_old: usize,
-    old_lines: &[&str],
-    matcher: Option<&FuncnameMatcher>,
-) -> usize {
-    let from = i1_end.min(n_old);
-    let fe1 = get_func_line_forward(old_lines, from, matcher).unwrap_or(n_old);
-    let mut fe1_adj = fe1;
-    while fe1_adj > 0 && is_line_empty_for_func_context(old_lines[fe1_adj - 1]) {
-        fe1_adj -= 1;
-    }
-    e1.max(fe1_adj).min(n_old)
-}
-
-fn is_line_empty_for_func_context(line: &str) -> bool {
-    line.chars().all(|c| c.is_whitespace())
-}
-
 pub(crate) fn is_func_line(line: &str, matcher: Option<&FuncnameMatcher>) -> bool {
     if let Some(m) = matcher {
         return m.match_line(line).is_some();
@@ -12081,357 +10691,6 @@ pub(crate) fn is_func_line(line: &str, matcher: Option<&FuncnameMatcher>) -> boo
     true
 }
 
-fn get_func_line_backward(
-    old_lines: &[&str],
-    start: usize,
-    matcher: Option<&FuncnameMatcher>,
-) -> Option<usize> {
-    let mut l = start.min(old_lines.len().saturating_sub(1));
-    if old_lines.is_empty() {
-        return None;
-    }
-    loop {
-        if is_func_line(old_lines[l], matcher) {
-            return Some(l);
-        }
-        if l == 0 {
-            break;
-        }
-        l -= 1;
-    }
-    None
-}
-
-fn get_func_line_forward(
-    old_lines: &[&str],
-    start: usize,
-    matcher: Option<&FuncnameMatcher>,
-) -> Option<usize> {
-    let mut l = start;
-    while l < old_lines.len() {
-        if is_func_line(old_lines[l], matcher) {
-            return Some(l);
-        }
-        l += 1;
-    }
-    None
-}
-#[expect(clippy::too_many_arguments)]
-/// Compute a unified diff with anchored lines.
-///
-/// Anchored lines that appear exactly once in both old and new content are
-/// forced to match, splitting the diff into segments around those anchor points.
-/// This produces diffs where the anchored text stays as context and surrounding
-/// lines are shown as additions/removals.
-///
-/// Segment diffs use `algorithm`. When `use_git_histogram` is true, histogram uses the
-/// Git-compatible histogram engine; otherwise `algorithm` is passed to `similar`.
-pub fn anchored_unified_diff(
-    old_content: &str,
-    new_content: &str,
-    old_path: &str,
-    new_path: &str,
-    context_lines: usize,
-    anchors: &[String],
-    algorithm: similar::Algorithm,
-    use_git_histogram: bool,
-    indent_heuristic: bool,
-    quote_path_fully: bool,
-) -> String {
-    use crate::quote_path::format_diff_path_with_prefix;
-    use similar::TextDiff;
-
-    let old_lines: Vec<&str> = old_content.lines().collect();
-    let new_lines: Vec<&str> = new_content.lines().collect();
-
-    // Find anchored lines that appear exactly once in both old and new
-    let mut anchor_pairs: Vec<(usize, usize)> = Vec::new(); // (old_idx, new_idx)
-
-    for anchor in anchors {
-        let anchor_str = anchor.as_str();
-
-        // Count occurrences in old
-        let old_positions: Vec<usize> = old_lines
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| l.trim_end() == anchor_str)
-            .map(|(i, _)| i)
-            .collect();
-
-        // Count occurrences in new
-        let new_positions: Vec<usize> = new_lines
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| l.trim_end() == anchor_str)
-            .map(|(i, _)| i)
-            .collect();
-
-        // Only anchor if unique in both
-        if old_positions.len() == 1 && new_positions.len() == 1 {
-            anchor_pairs.push((old_positions[0], new_positions[0]));
-        }
-    }
-
-    // If no valid anchors, fall back to normal diff
-    if anchor_pairs.is_empty() {
-        return unified_diff_with_prefix_and_funcname_and_algorithm(
-            old_content,
-            new_content,
-            old_path,
-            new_path,
-            context_lines,
-            0,
-            "a/",
-            "b/",
-            None,
-            algorithm,
-            false,
-            use_git_histogram,
-            indent_heuristic,
-            quote_path_fully,
-        );
-    }
-
-    // Sort anchor pairs by their position in the old file
-    anchor_pairs.sort_by_key(|&(old_idx, _)| old_idx);
-
-    // Filter to only keep pairs where new positions are also increasing
-    // (longest increasing subsequence of new positions)
-    let mut filtered: Vec<(usize, usize)> = Vec::new();
-    for &pair in &anchor_pairs {
-        if filtered.is_empty() || filtered.last().is_some_and(|last| pair.1 > last.1) {
-            filtered.push(pair);
-        }
-    }
-    let anchor_pairs = filtered;
-
-    // Build a modified version of old/new where we diff segments between anchors.
-    // We'll construct the diff by processing segments:
-    // - Before first anchor
-    // - Between consecutive anchors
-    // - After last anchor
-    // Each anchor line itself is a fixed context match.
-
-    // Collect all diff operations
-    struct LineDiffOp {
-        tag: char, // ' ', '+', '-'
-        line: String,
-    }
-
-    let append_segment_diff =
-        |ops: &mut Vec<LineDiffOp>, old_seg_input: &str, new_seg_input: &str| {
-            use similar::ChangeTag;
-            let old_ls: Vec<&str> = old_seg_input.lines().collect();
-            let new_ls: Vec<&str> = new_seg_input.lines().collect();
-            if old_ls.is_empty() && new_ls.is_empty() {
-                return;
-            }
-            let seg_diff = TextDiff::configure()
-                .algorithm(algorithm)
-                .diff_slices(&old_ls, &new_ls);
-            let raw = seg_diff.ops().to_vec();
-            let compacted = diff_indent_heuristic::apply_change_compact_to_ops(
-                &raw,
-                &old_ls,
-                &new_ls,
-                indent_heuristic,
-            );
-            for op in &compacted {
-                for ch in op.iter_changes(&old_ls, &new_ls) {
-                    let t = match ch.tag() {
-                        ChangeTag::Equal => ' ',
-                        ChangeTag::Delete => '-',
-                        ChangeTag::Insert => '+',
-                    };
-                    ops.push(LineDiffOp {
-                        tag: t,
-                        line: ch.value().to_string(),
-                    });
-                }
-            }
-        };
-
-    let mut ops: Vec<LineDiffOp> = Vec::new();
-    let mut old_pos = 0usize;
-    let mut new_pos = 0usize;
-
-    for &(old_anchor, new_anchor) in &anchor_pairs {
-        // Diff the segment before this anchor
-        let old_segment: Vec<&str> = old_lines[old_pos..old_anchor].to_vec();
-        let new_segment: Vec<&str> = new_lines[new_pos..new_anchor].to_vec();
-
-        let old_seg_text = old_segment.join("\n");
-        let new_seg_text = new_segment.join("\n");
-
-        if !old_seg_text.is_empty() || !new_seg_text.is_empty() {
-            let old_seg_input = if old_seg_text.is_empty() {
-                String::new()
-            } else {
-                format!("{}\n", old_seg_text)
-            };
-            let new_seg_input = if new_seg_text.is_empty() {
-                String::new()
-            } else {
-                format!("{}\n", new_seg_text)
-            };
-            append_segment_diff(&mut ops, &old_seg_input, &new_seg_input);
-        }
-
-        // The anchor line itself is always context
-        ops.push(LineDiffOp {
-            tag: ' ',
-            line: old_lines[old_anchor].to_string(),
-        });
-
-        old_pos = old_anchor + 1;
-        new_pos = new_anchor + 1;
-    }
-
-    // Diff the remaining segment after the last anchor
-    let old_segment: Vec<&str> = old_lines[old_pos..].to_vec();
-    let new_segment: Vec<&str> = new_lines[new_pos..].to_vec();
-    let old_seg_text = old_segment.join("\n");
-    let new_seg_text = new_segment.join("\n");
-
-    if !old_seg_text.is_empty() || !new_seg_text.is_empty() {
-        let old_seg_input = if old_seg_text.is_empty() {
-            String::new()
-        } else {
-            format!("{}\n", old_seg_text)
-        };
-        let new_seg_input = if new_seg_text.is_empty() {
-            String::new()
-        } else {
-            format!("{}\n", new_seg_text)
-        };
-        append_segment_diff(&mut ops, &old_seg_input, &new_seg_input);
-    }
-
-    // Now format as unified diff with hunks
-    let mut output = String::new();
-    if old_path == "/dev/null" {
-        output.push_str("--- /dev/null\n");
-    } else {
-        output.push_str("--- ");
-        output.push_str(&format_diff_path_with_prefix(
-            "a/",
-            old_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-    if new_path == "/dev/null" {
-        output.push_str("+++ /dev/null\n");
-    } else {
-        output.push_str("+++ ");
-        output.push_str(&format_diff_path_with_prefix(
-            "b/",
-            new_path,
-            quote_path_fully,
-        ));
-        output.push('\n');
-    }
-
-    // Group ops into hunks with context
-    let total_ops = ops.len();
-    if total_ops == 0 {
-        return output;
-    }
-
-    // Find ranges of changes
-    let mut hunks: Vec<(usize, usize)> = Vec::new(); // (start, end) indices into ops
-    let mut i = 0;
-    while i < total_ops {
-        if ops[i].tag != ' ' {
-            let start = i.saturating_sub(context_lines);
-            let mut end = i;
-            // Extend to include consecutive changes and their context
-            while end < total_ops {
-                if ops[end].tag != ' ' {
-                    end += 1;
-                    continue;
-                }
-                // Check if there's another change within context_lines
-                let mut next_change = end;
-                while next_change < total_ops && ops[next_change].tag == ' ' {
-                    next_change += 1;
-                }
-                if next_change < total_ops && next_change - end <= context_lines * 2 {
-                    end = next_change + 1;
-                } else {
-                    end = (end + context_lines).min(total_ops);
-                    break;
-                }
-            }
-            // Merge with previous hunk if overlapping
-            if let Some(last) = hunks.last_mut() {
-                if start <= last.1 {
-                    last.1 = end;
-                } else {
-                    hunks.push((start, end));
-                }
-            } else {
-                hunks.push((start, end));
-            }
-            i = end;
-        } else {
-            i += 1;
-        }
-    }
-
-    // Output each hunk
-    for (start, end) in hunks {
-        // Count old/new lines in this hunk
-        let mut old_start = 1usize;
-        let mut new_start = 1usize;
-        // Calculate line numbers by counting ops before this hunk
-        for op in &ops[..start] {
-            match op.tag {
-                ' ' => {
-                    old_start += 1;
-                    new_start += 1;
-                }
-                '-' => {
-                    old_start += 1;
-                }
-                '+' => {
-                    new_start += 1;
-                }
-                _ => {}
-            }
-        }
-        let mut old_count = 0usize;
-        let mut new_count = 0usize;
-        for op in &ops[start..end] {
-            match op.tag {
-                ' ' => {
-                    old_count += 1;
-                    new_count += 1;
-                }
-                '-' => {
-                    old_count += 1;
-                }
-                '+' => {
-                    new_count += 1;
-                }
-                _ => {}
-            }
-        }
-
-        output.push_str(&format!(
-            "@@ -{},{} +{},{} @@\n",
-            old_start, old_count, new_start, new_count
-        ));
-        for op in &ops[start..end] {
-            output.push(op.tag);
-            output.push_str(&op.line);
-            output.push('\n');
-        }
-    }
-
-    output
-}
-
 /// Extract function context for a hunk header.
 ///
 /// Given a hunk header like `@@ -8,7 +8,7 @@`, find the last line
@@ -12444,7 +10703,7 @@ fn func_context_line_matches(line: &str, funcname_matcher: Option<&FuncnameMatch
     is_func_line(line, None)
 }
 
-fn extract_function_context(
+pub(crate) fn extract_function_context(
     header: &str,
     old_lines: &[&str],
     funcname_matcher: Option<&FuncnameMatcher>,
@@ -12529,149 +10788,6 @@ fn extract_function_context(
     None
 }
 
-fn last_line_index_without_trailing_newline(text: &str) -> Option<usize> {
-    LineSide::from_text(text).incomplete_last_line_index()
-}
-
-fn parse_unified_hunk_starts(header: &str) -> Option<(usize, usize)> {
-    let rest = header.strip_prefix("@@ ")?;
-    let (old_part, new_part) = rest.split_once(" +")?;
-    let old_start = parse_unified_range_start(old_part.strip_prefix('-')?)?;
-    let new_start = parse_unified_range_start(new_part.split(" @@").next()?)?;
-    Some((old_start, new_start))
-}
-
-fn parse_unified_range_start(spec: &str) -> Option<usize> {
-    let spec = spec.trim();
-    if let Some((start, _)) = spec.split_once(',') {
-        start.parse().ok()
-    } else {
-        spec.parse().ok()
-    }
-}
-
-/// Tracks hunk line numbers while streaming `\ No newline at end of file` markers.
-struct UnifiedDiffNoNewlineAnnotator {
-    old_last: Option<usize>,
-    new_last: Option<usize>,
-    old_line: usize,
-    new_line: usize,
-    passthrough: bool,
-}
-
-impl UnifiedDiffNoNewlineAnnotator {
-    fn new(old: &str, new: &str) -> Self {
-        let old_last = last_line_index_without_trailing_newline(old);
-        let new_last = last_line_index_without_trailing_newline(new);
-        Self {
-            old_last,
-            new_last,
-            old_line: 1,
-            new_line: 1,
-            passthrough: old_last.is_none() && new_last.is_none(),
-        }
-    }
-
-    fn write_hunk<W: std::io::Write>(&mut self, out: &mut W, patch: &str) -> Result<()> {
-        if self.passthrough {
-            out.write_all(patch.as_bytes())?;
-            return Ok(());
-        }
-        let mut lines = patch.lines().peekable();
-        while let Some(line) = lines.next() {
-            self.write_annotated_line(out, line, &mut lines)?;
-        }
-        Ok(())
-    }
-
-    fn write_annotated_line<W: std::io::Write>(
-        &mut self,
-        out: &mut W,
-        line: &str,
-        lines: &mut std::iter::Peekable<std::str::Lines<'_>>,
-    ) -> Result<()> {
-        if let Some((o, n)) = line
-            .strip_prefix("@@ ")
-            .and_then(|_| parse_unified_hunk_starts(line))
-        {
-            self.old_line = o;
-            self.new_line = n;
-            writeln!(out, "{line}")?;
-            return Ok(());
-        }
-        if line.starts_with("--- ")
-            || line.starts_with("+++ ")
-            || line.starts_with("diff --git ")
-            || line.starts_with("diff --cc ")
-            || line.starts_with("diff --combined ")
-        {
-            writeln!(out, "{line}")?;
-            return Ok(());
-        }
-        if line.starts_with('-') {
-            writeln!(out, "{line}")?;
-            let already_marked = lines
-                .peek()
-                .is_some_and(|next| *next == "\\ No newline at end of file");
-            if !already_marked && self.old_last == Some(self.old_line.saturating_sub(1)) {
-                writeln!(out, "\\ No newline at end of file")?;
-            }
-            self.old_line += 1;
-            return Ok(());
-        }
-        if line.starts_with('+') {
-            writeln!(out, "{line}")?;
-            let already_marked = lines
-                .peek()
-                .is_some_and(|next| *next == "\\ No newline at end of file");
-            if !already_marked && self.new_last == Some(self.new_line.saturating_sub(1)) {
-                writeln!(out, "\\ No newline at end of file")?;
-            }
-            self.new_line += 1;
-            return Ok(());
-        }
-        if line.starts_with(' ') {
-            writeln!(out, "{line}")?;
-            let already_marked = lines
-                .peek()
-                .is_some_and(|next| *next == "\\ No newline at end of file");
-            if !already_marked {
-                let old_idx = self.old_line.saturating_sub(1);
-                let new_idx = self.new_line.saturating_sub(1);
-                if self.old_last == Some(old_idx) || self.new_last == Some(new_idx) {
-                    writeln!(out, "\\ No newline at end of file")?;
-                }
-            }
-            self.old_line += 1;
-            self.new_line += 1;
-            return Ok(());
-        }
-        writeln!(out, "{line}")?;
-        Ok(())
-    }
-}
-
-/// Insert Git `\ No newline at end of file` after `-`/`+` hunk lines when that side of the
-/// file lacks a trailing newline on the last line.
-#[must_use]
-pub fn annotate_unified_diff_no_newline_at_eof(patch: &str, old: &str, new: &str) -> String {
-    let mut annotator = UnifiedDiffNoNewlineAnnotator::new(old, new);
-    if annotator.passthrough {
-        return patch.to_string();
-    }
-    let mut out = Vec::with_capacity(patch.len() + 64);
-    let mut lines = patch.lines().peekable();
-    while let Some(line) = lines.next() {
-        if annotator
-            .write_annotated_line(&mut out, line, &mut lines)
-            .is_err()
-        {
-            return patch.to_string();
-        }
-    }
-    String::from_utf8(out).unwrap_or_else(|_| patch.to_string())
-}
-
 /// Normalise one line like Git's `-b` / `--ignore-space-change`.
 #[must_use]
 pub fn normalize_ignore_space_change_line(line: &str) -> String {
@@ -12706,44 +10822,6 @@ pub fn normalize_ignore_space_change(content: &str) -> String {
         .map(normalize_ignore_space_change_line)
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// Count insertions and deletions using the given line-diff algorithm.
-///
-/// Uses the same compacted line alignment as unified patches and [`crate::diff::line_change_counts`].
-#[must_use]
-pub fn count_changes_with_algorithm(
-    old_content: &str,
-    new_content: &str,
-    algorithm: similar::Algorithm,
-    use_git_histogram: bool,
-) -> (usize, usize) {
-    use crate::diff::options::{DiffAlgorithm, DiffOptions};
-    let diff_algorithm = if use_git_histogram {
-        DiffAlgorithm::Histogram
-    } else {
-        match algorithm {
-            similar::Algorithm::Myers => DiffAlgorithm::Myers,
-            similar::Algorithm::Lcs => DiffAlgorithm::Minimal,
-            similar::Algorithm::Patience => DiffAlgorithm::Patience,
-            _ => DiffAlgorithm::Myers,
-        }
-    };
-    count_line_changes_with_options(
-        old_content,
-        new_content,
-        &DiffOptions {
-            algorithm: diff_algorithm,
-            ..DiffOptions::default()
-        },
-    )
-}
-
-/// Count insertions and deletions using Git's histogram line-diff engine.
-#[must_use]
-#[allow(dead_code)]
-fn count_changes_git_histogram(old_content: &str, new_content: &str) -> (usize, usize) {
-    count_changes_with_algorithm(old_content, new_content, similar::Algorithm::Myers, true)
 }
 
 /// Line count for diffstat/`--numstat`, matching Git's `count_lines()` in `diff.c`.
@@ -16181,8 +14259,11 @@ mod read_worktree_bytes_for_mode_tests {
     fn annotate_marks_context_line_when_eof_line_is_unchanged() {
         let old = "a\nb\nc";
         let new = "a\nx\nc";
-        let raw = super::unified_diff_histogram_hunks_only(old, new, 3, 0, false);
-        let out = annotate_unified_diff_no_newline_at_eof(&raw, old, new);
+        use crate::diff::{unified_diff, DiffAlgorithm, UnifiedDiffOptions};
+        let options = UnifiedDiffOptions::new()
+            .with_algorithm(DiffAlgorithm::Histogram)
+            .with_indent_heuristic(crate::diff::IndentHeuristic::Disabled);
+        let out = unified_diff(old, new, &options);
         assert!(
             out.contains(" c\n\\ No newline at end of file"),
             "histogram hunk should mark trailing context line:\n{out}"
@@ -16191,27 +14272,14 @@ mod read_worktree_bytes_for_mode_tests {
 
     #[test]
     fn annotate_does_not_treat_removed_dash_lines_as_file_headers() {
-        use super::unified_diff_with_prefix_and_funcname_and_algorithm;
-        use similar::Algorithm;
+        use crate::diff::{unified_diff, UnifiedDiffOptions};
 
         let old = "--old";
         let new = "--new";
-        let raw = unified_diff_with_prefix_and_funcname_and_algorithm(
-            old,
-            new,
-            "a/x",
-            "b/x",
-            3,
-            0,
-            "",
-            "",
-            None,
-            Algorithm::Myers,
-            false,
-            false,
-            false,
-            false,
-        );
+        let options = UnifiedDiffOptions::new()
+            .with_paths("x", "x")
+            .with_indent_heuristic(crate::diff::IndentHeuristic::Disabled);
+        let raw = unified_diff(old, new, &options);
         assert_eq!(
             raw.matches("\\ No newline at end of file").count(),
             2,
@@ -16222,24 +14290,22 @@ mod read_worktree_bytes_for_mode_tests {
 
 #[cfg(test)]
 mod annotate_no_newline_tests {
-    use super::annotate_unified_diff_no_newline_at_eof;
+    use crate::diff::{unified_diff, UnifiedDiffOptions};
 
     #[test]
     fn annotate_marks_both_sides_without_trailing_newline() {
-        let raw = "@@ -1 +1 @@\n-foo\n+f o o\n";
-        let out = annotate_unified_diff_no_newline_at_eof(raw, "foo", "f o o");
-        assert!(out.contains("\\ No newline at end of file"));
-        assert_eq!(out.matches("\\ No newline at end of file").count(), 2);
+        let out = unified_diff("foo", "f o o", &UnifiedDiffOptions::new());
+        assert_eq!(
+            out,
+            "@@ -1 +1 @@\n-foo\n\\ No newline at end of file\n+f o o\n\\ No newline at end of file\n"
+        );
     }
 }
 
 #[cfg(test)]
 mod blob_diff_algorithm_smoke {
-    use super::{
-        anchored_unified_diff, count_changes_with_algorithm, unified_diff_histogram_hunks_only,
-        unified_diff_with_prefix_and_funcname_and_algorithm, unified_hunk_body_for_diff_options,
-    };
-    use similar::Algorithm;
+    use super::unified_hunk_body_for_diff_options;
+    use crate::diff::{line_change_counts, unified_diff, DiffAlgorithm, UnifiedDiffOptions};
 
     const OLD: &str = "alpha\nbeta\ngamma\n";
     const NEW: &str = "alpha\nBETA\ngamma\ndelta\n";
@@ -16366,54 +14432,38 @@ mod blob_diff_algorithm_smoke {
 
     #[test]
     fn myers_patience_histogram_minimal_emit_unified_hunks() {
-        for algo in [Algorithm::Myers, Algorithm::Patience, Algorithm::Histogram] {
-            let patch = unified_diff_with_prefix_and_funcname_and_algorithm(
-                OLD,
-                NEW,
-                "a/old.txt",
-                "b/new.txt",
-                3,
-                0,
-                "a/",
-                "b/",
-                None,
-                algo,
-                false,
-                false,
-                true,
-                false,
-            );
-            assert!(patch.contains("@@"), "algo {algo:?} should emit hunks");
+        for algo in [
+            DiffAlgorithm::Myers,
+            DiffAlgorithm::Minimal,
+            DiffAlgorithm::Patience,
+            DiffAlgorithm::Histogram,
+        ] {
+            let options = UnifiedDiffOptions::new()
+                .with_paths("old.txt", "new.txt")
+                .with_algorithm(algo);
+            let patch = unified_diff(OLD, NEW, &options);
+            assert!(patch.starts_with("--- a/old.txt\n+++ b/new.txt\n@@"));
             assert!(patch.contains("-beta") || patch.contains("-BETA"));
         }
     }
 
     #[test]
     fn git_histogram_printer_and_anchored_diff_smoke() {
-        let hist = unified_diff_histogram_hunks_only(OLD, NEW, 3, 0, false);
-        assert!(!hist.is_empty());
-        let anchors = vec!["beta".to_string()];
-        let anchored = anchored_unified_diff(
-            OLD,
-            NEW,
-            "old",
-            "new",
-            3,
-            &anchors,
-            Algorithm::Myers,
-            false,
-            true,
-            false,
-        );
-        assert!(anchored.contains("@@"));
+        let histogram = UnifiedDiffOptions::new().with_algorithm(DiffAlgorithm::Histogram);
+        assert!(!unified_diff(OLD, NEW, &histogram).is_empty());
+        let anchored = UnifiedDiffOptions::new()
+            .with_paths("old", "new")
+            .with_anchors(["beta"]);
+        assert!(unified_diff(OLD, NEW, &anchored).contains("@@"));
     }
 
     #[test]
-    fn count_changes_git_histogram_vs_similar() {
-        let hist = count_changes_with_algorithm(OLD, NEW, Algorithm::Myers, true);
-        let myers = count_changes_with_algorithm(OLD, NEW, Algorithm::Myers, false);
-        assert!(hist.0 + hist.1 > 0);
-        assert!(myers.0 + myers.1 > 0);
+    fn count_changes_git_histogram_vs_myers() {
+        let histogram = UnifiedDiffOptions::new().with_algorithm(DiffAlgorithm::Histogram);
+        let hist = line_change_counts(OLD, NEW, &histogram);
+        let myers = line_change_counts(OLD, NEW, &UnifiedDiffOptions::new());
+        assert!(hist.insertions + hist.deletions > 0);
+        assert!(myers.insertions + myers.deletions > 0);
     }
 }
 
@@ -16745,41 +14795,42 @@ mod line_coverage_tests {
     fn unified_diff_flag_matrix() {
         let old = "fn main() {\n    println!(\"hi\");\n}\n";
         let new = "fn main() {\n    println!(\"bye\");\n}\n";
-        for algo in [Algorithm::Myers, Algorithm::Patience, Algorithm::Histogram] {
-            for (ws, ws_all, fc, ig) in [(true, false, false, false), (false, true, true, true)] {
-                let patch = unified_diff_with_prefix_and_funcname_and_algorithm(
-                    old,
-                    new,
-                    "a/main.rs",
-                    "b/main.rs",
-                    3,
-                    0,
-                    "a/",
-                    "b/",
-                    None,
-                    algo,
-                    ws,
-                    ws_all,
-                    fc,
-                    ig,
-                );
+        use crate::diff::{
+            DiffAlgorithm, HunkExtent, IndentHeuristic, PathQuoting, UnifiedDiffOptions,
+        };
+        for algo in [
+            DiffAlgorithm::Myers,
+            DiffAlgorithm::Patience,
+            DiffAlgorithm::Histogram,
+        ] {
+            for (extent, indent_heuristic, quoting) in [
+                (
+                    HunkExtent::Function,
+                    IndentHeuristic::Disabled,
+                    PathQuoting::KeepNonAscii,
+                ),
+                (
+                    HunkExtent::Context,
+                    IndentHeuristic::Enabled,
+                    PathQuoting::EscapeNonAscii,
+                ),
+            ] {
+                let options = UnifiedDiffOptions::new()
+                    .with_paths("main.rs", "main.rs")
+                    .with_algorithm(algo)
+                    .with_extent(extent)
+                    .with_indent_heuristic(indent_heuristic)
+                    .with_path_quoting(quoting);
+                let patch = crate::diff::unified_diff(old, new, &options);
                 assert!(patch.contains("@@"), "algo {algo:?}");
             }
         }
-        let hist = unified_diff_histogram_ignore_with_prefix_and_funcname(
+        let hist = crate::diff::unified_diff(
             old,
             new,
-            "a/x",
-            "b/x",
-            3,
-            0,
-            "",
-            "",
-            None,
-            false,
-            false,
-            false,
-            |_old, _new| false,
+            &crate::diff::UnifiedDiffOptions::new()
+                .with_algorithm(crate::diff::DiffAlgorithm::Histogram)
+                .with_whitespace(crate::diff::WhitespaceMode::ignore_blank_lines()),
         );
         assert!(!hist.is_empty());
         let raw = format_raw_abbrev(
@@ -16909,11 +14960,14 @@ mod line_coverage_tests {
 
         let cfg = ConfigSet::new();
         assert!(indent_heuristic_from_config(&cfg));
-        let _ = unified_diff_histogram_hunks_only("a\nb\n", "a\nB\n", 3, 0, false);
-        let _ = unified_diff_histogram_with_prefix_and_funcname_indent(
-            "x\n", "y\n", "a/f", "b/f", 3, 0, "", "", None, false, false,
+        let _ = crate::diff::unified_diff(
+            "x\n",
+            "y\n",
+            &crate::diff::UnifiedDiffOptions::new()
+                .with_paths("f", "f")
+                .with_algorithm(crate::diff::DiffAlgorithm::Histogram)
+                .with_indent_heuristic(crate::diff::IndentHeuristic::Disabled),
         );
-        let _ = count_changes_with_algorithm("a\n", "b\n", Algorithm::Myers, false);
         let _ = should_break_rewrite_pair(b"short", b"totally different body", 50);
         let _ = head_path_states(&odb, Some(&new_tree))?;
         std::fs::write(wt.join("tracked.txt"), b"hello\n").expect("wt");
@@ -17000,49 +15054,28 @@ mod line_coverage_tests {
             None,
             None,
         )?;
-        let patch = anchored_unified_diff(
+        let patch = crate::diff::unified_diff(
             "a\nb\n",
             "a\nB\n",
-            "f",
-            "f",
-            3,
-            &[String::from("b")],
-            Algorithm::Myers,
-            false,
-            true,
-            false,
+            &crate::diff::UnifiedDiffOptions::new()
+                .with_paths("f", "f")
+                .with_anchors(["b"]),
         );
         assert!(patch.contains("@@"));
-        let _ = annotate_unified_diff_no_newline_at_eof("@@\n+a\n\\ No newline\n", "a", "a\n");
         Ok(())
     }
 
     #[test]
     fn unmerged_only_tree_worktree_diff_and_func_heuristics() -> Result<()> {
-        use similar::DiffOp;
-        assert!(inserted_block_starts_with_c_like_function_definition(
-            "static int foo(int bar) {"
-        ));
-        assert!(!inserted_block_starts_with_c_like_function_definition(
-            "printf(hi);"
-        ));
-        let ops = vec![
-            DiffOp::Equal {
-                old_index: 0,
-                new_index: 0,
-                len: 4,
-            },
-            DiffOp::Insert {
-                old_index: 4,
-                new_index: 4,
-                new_len: 2,
-            },
-        ];
-        let new_lines = ["a\n", "b\n", "c\n", "d\n", "void added() {\n", "}\n"];
-        assert!(append_with_whole_function_added(
-            &ops, 4, 6, &new_lines, None
-        ));
-        let _ = hunk_old_change_end_exclusive(&ops);
+        let appended_function = crate::diff::unified_diff(
+            "a\nb\nc\nd\n",
+            "a\nb\nc\nd\nvoid added() {\n}\n",
+            &crate::diff::UnifiedDiffOptions::new().with_extent(crate::diff::HunkExtent::Function),
+        );
+        assert_eq!(
+            appended_function, "@@ -2,3 +2,5 @@ a\n b\n c\n d\n+void added() {\n+}\n",
+            "an appended whole function keeps ordinary pre-context under -W"
+        );
 
         let temp = TempDir::new().expect("tempdir");
         let wt = temp.path();
@@ -17078,22 +15111,31 @@ mod line_coverage_tests {
         for i in 0..600u32 {
             let old = format!("seed {i}\nalpha\n");
             let new = format!("seed {i}\nalpha\nvoid fn_{i}(int arg) {{\n  return arg;\n}}\n");
-            let _ = unified_diff_with_prefix_and_funcname_and_algorithm(
-                &old,
-                &new,
-                "a/f.c",
-                "b/f.c",
-                3,
-                0,
-                "a/",
-                "b/",
-                None,
-                Algorithm::Myers,
-                i % 2 == 0,
-                i % 3 == 0,
-                i % 5 == 0,
-                i % 7 == 0,
-            );
+            let quoting = if i % 7 == 0 {
+                crate::diff::PathQuoting::EscapeNonAscii
+            } else {
+                crate::diff::PathQuoting::KeepNonAscii
+            };
+            let algorithm = if i % 3 == 0 {
+                crate::diff::DiffAlgorithm::Histogram
+            } else {
+                crate::diff::DiffAlgorithm::Myers
+            };
+            let options = crate::diff::UnifiedDiffOptions::new()
+                .with_paths("f.c", "f.c")
+                .with_algorithm(algorithm)
+                .with_extent(if i % 2 == 0 {
+                    crate::diff::HunkExtent::Function
+                } else {
+                    crate::diff::HunkExtent::Context
+                })
+                .with_indent_heuristic(if i % 5 == 0 {
+                    crate::diff::IndentHeuristic::Enabled
+                } else {
+                    crate::diff::IndentHeuristic::Disabled
+                })
+                .with_path_quoting(quoting);
+            let _ = crate::diff::unified_diff(&old, &new, &options);
             let threshold = 30 + (i % 40);
             let raw = diff_trees(&odb, Some(&old_tree), Some(&new_tree), "")?;
             let opts = DiffPostprocessOptions {

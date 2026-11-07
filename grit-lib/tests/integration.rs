@@ -2131,6 +2131,8 @@ mod tag_packed_peel_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "target_comparison_git_compat.rs"]
 mod target_comparison_git_compat;
+#[path = "text_diff_options.rs"]
+mod text_diff_options;
 #[path = "total_line_coverage_sweep.rs"]
 mod total_line_coverage_sweep;
 #[path = "total_misc_module_sweep.rs"]

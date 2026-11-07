@@ -4,8 +4,8 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::ConfigSet;
-use grit_lib::diff::unified_diff_with_prefix_and_funcname;
 use grit_lib::diff::userdiff::matcher_for_driver;
+use grit_lib::diff::{unified_diff, UnifiedDiffOptions};
 
 fn git_diff_hunk_headers(repo: &Path) -> Vec<String> {
     let out = Command::new("git")
@@ -32,19 +32,10 @@ fn grit_hunk_headers(driver: &str, path: &str, before: &str, after: &str) -> Vec
     let matcher = matcher_for_driver(&config, driver)
         .expect("matcher")
         .expect("builtin matcher");
-    let diff = unified_diff_with_prefix_and_funcname(
-        before,
-        after,
-        path,
-        path,
-        3,
-        0,
-        "",
-        "",
-        Some(&matcher),
-        false,
-        false,
-    );
+    let options = UnifiedDiffOptions::new()
+        .with_paths(path, path)
+        .with_funcname(&matcher);
+    let diff = unified_diff(before, after, &options);
     diff.lines()
         .filter(|l| l.starts_with("@@"))
         .map(|l| l.to_owned())

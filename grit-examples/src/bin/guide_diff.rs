@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{unified_diff, DiffEntry, DiffStatus, TreeDiffOptions};
+use grit_lib::diff::{unified_diff, DiffEntry, DiffStatus, TreeDiffOptions, UnifiedDiffOptions};
 use grit_lib::repo::Repository;
 
 use std::path::{Path, PathBuf};
@@ -94,7 +94,8 @@ fn main() -> Result<()> {
             let new_text = String::from_utf8_lossy(&new_blob);
             let old_path = entry.old_path.as_deref().unwrap_or(entry.path());
             let new_path = entry.new_path.as_deref().unwrap_or(entry.path());
-            let patch = unified_diff(&old_text, &new_text, old_path, new_path, 3, false, false);
+            let options = UnifiedDiffOptions::new().with_paths(old_path, new_path);
+            let patch = unified_diff(&old_text, &new_text, &options);
             let hunk_lines = patch
                 .lines()
                 .filter(|l| l.starts_with('-') || l.starts_with('+'))
