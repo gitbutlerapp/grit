@@ -1,9 +1,9 @@
 ---
 title: Object stores
-summary: Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.
+summary: Pluggable ObjectStore backends, RepositoryOptions::with_object_store, OdbBuilder layers, and the odb_conformance test suite.
 ---
 
-By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-backed [`Odb`](rustdoc:grit_lib::objects::odb::Odb) (loose objects, packs, and optional MIDX). Embedders can swap the **primary** store or add read-only layers with [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) and [`RepositoryOptions::with_odb_builder`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_odb_builder).
+By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-backed [`Odb`](rustdoc:grit_lib::objects::odb::Odb) (loose objects, packs, and optional MIDX). Embedders swap the **primary** store with [`RepositoryOptions::with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store), and add read-only layers, an attached commit-graph or an alternates override with an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) passed to [`RepositoryOptions::with_odb_builder`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_odb_builder). Neither takes a path: [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) resolves the `objects/` directory itself.
 
 ## Traits
 
@@ -21,30 +21,35 @@ For a given [`Odb`](rustdoc:grit_lib::objects::odb::Odb) handle:
 1. In-memory overlay (when enabled for merge-tree-style operations)
 2. **Primary** store — files source by default, or your custom [`WritableObjectStore`](rustdoc:grit_lib::objects::odb::store::WritableObjectStore)
 3. Extra read sources from `OdbBuilder::push_read_source`
-4. Alternate object directories when `OdbBuilder::alternates` is true (`info/alternates`, environment alternates, submodule object dirs)
+4. Alternate object directories (`info/alternates`, environment alternates, submodule object dirs). They are on for the files primary and off for a custom primary unless `OdbBuilder::alternates(true)` turns them on; `OdbBuilder::alternates(false)` turns them off for the files primary.
 
 [`Odb::read_store`](rustdoc:grit_lib::objects::odb::Odb::read_store) returns that whole chain as one `Arc<dyn ObjectStore>`, whatever the primary is. Hand it to another repository's `push_read_source` to layer one repository under another (a read-through cache or a mirror), or pass it as the `bases` of `ingest_pack_into`. A missing object is `Ok(None)` and never starts a promisor fetch. Its `open_stream` buffers the payload; for a large blob call [`Odb::with_stream`](rustdoc:grit_lib::objects::odb::Odb::with_stream) on the `Odb` itself.
 
 The narrower accessors keep their meaning: [`Odb::sources`](rustdoc:grit_lib::objects::odb::Odb::sources) is the alternates alone (step 4), and [`Odb::primary`](rustdoc:grit_lib::objects::odb::Odb::primary) returns the files-backed primary and fails with `UnsupportedObjectStore` (`files_source`) on a custom one. Use [`Odb::primary_writable`](rustdoc:grit_lib::objects::odb::Odb::primary_writable) for the primary of any kind.
 
 ```rust
+use std::path::Path;
 use std::sync::Arc;
 
+use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::refs::store::MemoryRefStore;
+use grit_lib::repo::Repository;
 
-let upstream = OdbBuilder::files("/nowhere/upstream/objects")
-    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-    .alternates(false)
-    .build();
-let mirror = OdbBuilder::files("/nowhere/mirror/objects")
-    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-    .push_read_source(upstream.read_store())
-    .alternates(false)
-    .build();
-let oid = upstream.write(ObjectKind::Blob, b"shared")?;
-assert!(mirror.contains(&oid)?);
+let in_memory = || {
+    RepositoryOptions::empty()
+        .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+        .with_ref_store(Arc::new(MemoryRefStore::new()))
+};
+let upstream = Repository::open(Path::new("/nowhere/upstream.git"), &in_memory())?;
+let mirror = Repository::open(
+    Path::new("/nowhere/mirror.git"),
+    &in_memory().with_odb_builder(OdbBuilder::new().push_read_source(upstream.odb().read_store())),
+)?;
+let oid = upstream.odb().write(ObjectKind::Blob, b"shared")?;
+assert!(mirror.odb().contains(&oid)?);
 # Ok::<(), grit_lib::error::Error>(())
 ```
 
@@ -62,9 +67,9 @@ A damaged copy ([`Error::Zlib`](rustdoc:grit_lib::error::Error::Zlib) or [`Error
 
 ## Building a custom repository
 
-Pass an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) rooted at the repository's `objects/` directory (or at `GIT_OBJECT_DIRECTORY` when the environment sets it) through [`RepositoryOptions::with_odb_builder`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_odb_builder) when calling [`Repository::open`](rustdoc:grit_lib::repo::Repository::open). Any path naming that directory works: one through symlinks (such as macOS `/var` → `/private/var` or `/tmp` → `/private/tmp`) or one relative to the environment's current directory. The opened [`Odb`](rustdoc:grit_lib::objects::odb::Odb) reports the canonical path. A builder rooted anywhere else fails with [`RepositoryError::OdbObjectsDirMismatch`](rustdoc:grit_lib::error::RepositoryError::OdbObjectsDirMismatch).
+Pass your store to [`RepositoryOptions::with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store) when calling [`Repository::open`](rustdoc:grit_lib::repo::Repository::open). That is the only way to replace the files primary. The repository still resolves its `objects/` directory (`GIT_OBJECT_DIRECTORY` included) and the opened [`Odb`](rustdoc:grit_lib::objects::odb::Odb) reports its canonical path, but no object is read from or written to it and it need not exist. With `GIT_OBJECT_DIRECTORY` set, the custom store still wins and the environment's directory is left untouched. Add read sources, a commit-graph or an alternates override with an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) through [`RepositoryOptions::with_odb_builder`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_odb_builder); it works with the files primary as well.
 
-The custom primary and every read source must hash with the repository's object format: the `extensions.objectformat` value in `<git_dir>/config`, or SHA-1 when that key or the config file is missing. Create the store with the same [`HashAlgo`](rustdoc:grit_lib::objects::HashAlgo) the repository was initialized with (`MemoryStore::new(HashAlgo::Sha256)` for a SHA-256 repository). A store that reports another algorithm through `ObjectStore::hash_algo` fails to open with [`RepositoryError::ObjectFormatMismatch`](rustdoc:grit_lib::error::RepositoryError::ObjectFormatMismatch), whose `repository` and `store` fields name the two algorithms, instead of writing object ids the repository's refs, index and config disagree with. Calling `OdbBuilder::build` on its own does no check, since there is no repository config to compare against.
+The custom primary and every read source must hash with the repository's object format: the `extensions.objectformat` value in `<git_dir>/config`, or SHA-1 when that key or the config file is missing. Create the store with the same [`HashAlgo`](rustdoc:grit_lib::objects::HashAlgo) the repository was initialized with (`MemoryStore::new(HashAlgo::Sha256)` for a SHA-256 repository). A store that reports another algorithm through `ObjectStore::hash_algo` fails to open with [`RepositoryError::ObjectFormatMismatch`](rustdoc:grit_lib::error::RepositoryError::ObjectFormatMismatch), whose `repository` and `store` fields name the two algorithms, instead of writing object ids the repository's refs, index and config disagree with.
 
 <!-- include: grit-examples/src/bin/memory_primary.rs -->
 
@@ -82,23 +87,20 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::HashAlgo;
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::refs::store::MemoryRefStore;
 
 let git_dir = std::path::Path::new("/nowhere/in-memory.git");
 let repo = Repository::open(
     git_dir,
     &RepositoryOptions::empty()
-        .with_odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
+        .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
         .with_ref_store(Arc::new(MemoryRefStore::new()))
         .with_initial_branch("main"),
 )?;
 # Ok::<(), grit_lib::error::Error>(())
 ```
+
+What still touches the git directory on disk with both stores injected: `<git_dir>/config` (read when present), the index and the files a commit leaves beside it (`COMMIT_EDITMSG`, operation state for merge, revert and rebase), hook scripts under `hooks/`, and linked-worktree admin directories. With only the object store injected, refs, reflogs and `HEAD` stay in the git directory as usual.
 
 Hooks still run, but there is nothing on disk for another program to open. They start in the work tree (the git directory when there is none), and `GIT_DIR` is exported only when the [`Environment`](rustdoc:grit_lib::config::environment::Environment) you passed sets [`git_dir`](rustdoc:grit_lib::config::environment::Environment::git_dir); opening a path through [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) does not set it. Even when it is set, objects and refs held in memory are invisible to the system `git`, so a `pre-commit` hook that runs `git status` or `git rev-parse` fails with "not a git repository". Keep hooks for such repositories to work that only needs the work tree and the hook's arguments.
 
@@ -161,14 +163,17 @@ fn open(
     store: Arc<dyn WritableObjectStore>,
     graph: Option<Vec<u8>>,
 ) -> grit_lib::error::Result<Repository> {
-    let mut odb = OdbBuilder::files(git_dir.join("objects"))
-        .primary(store)
-        .alternates(false);
+    let mut layers = OdbBuilder::new();
     if let Some(bytes) = graph {
         let built = BuiltCommitGraph { bytes };
-        odb = odb.commit_graph(Arc::new(built.to_chain()?));
+        layers = layers.commit_graph(Arc::new(built.to_chain()?));
     }
-    Repository::open(git_dir, &(RepositoryOptions::empty().with_odb_builder(odb)))
+    Repository::open(
+        git_dir,
+        &RepositoryOptions::empty()
+            .with_object_store(store)
+            .with_odb_builder(layers),
+    )
 }
 
 fn refresh_graph(repo: &Repository) -> grit_lib::error::Result<Option<Vec<u8>>> {
