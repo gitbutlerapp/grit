@@ -326,6 +326,9 @@ struct SessionLooseReads {
 }
 
 impl SessionLooseReads {
+    // Every session-cache hit calls this; without the hint, codegen-unit partitioning
+    // decides whether it is inlined into the read path.
+    #[inline]
     fn get(&self, oid: &ObjectId) -> Option<&Object> {
         self.objects.get(oid)
     }
