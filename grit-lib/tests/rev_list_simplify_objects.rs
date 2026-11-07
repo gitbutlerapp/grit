@@ -223,10 +223,16 @@ fn t6018_ref_globs_and_exclude_match_git() {
     git(wt, &["checkout", "main"]);
 
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
-    let (pos, _neg, _all, _paths) = grit_repo
+    let specs = grit_repo
         .revwalk()
         .parse_stdin_specs(&[], &["--glob=refs/heads/subspace/*"])
         .expect("stdin glob");
+    let (pos, _neg, _all, _paths) = (
+        specs.positive,
+        specs.negative,
+        specs.all_refs,
+        specs.pathspecs,
+    );
     let git_oids = git_rev_list(wt, &["--glob=refs/heads/subspace/*"]);
     let grit_oids = grit_repo
         .revwalk()
@@ -406,10 +412,16 @@ fn t6017_stdin_revision_specs_match_git_semantics() {
     commit_file(wt, "a", "1\n", "one");
     commit_file(wt, "b", "2\n", "two");
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
-    let (pos, neg, all, paths) = grit_repo
+    let specs = grit_repo
         .revwalk()
         .parse_stdin_specs(&[String::from("HEAD")], &["--not", "HEAD~1"])
         .expect("stdin");
+    let (pos, neg, all, paths) = (
+        specs.positive,
+        specs.negative,
+        specs.all_refs,
+        specs.pathspecs,
+    );
     assert!(!all);
     assert!(paths.is_empty());
     assert_eq!(neg.len(), 1);

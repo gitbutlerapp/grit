@@ -77,20 +77,23 @@ impl<'repo> RevWalk<'repo> {
 
     /// Merge command-line revision `args` with `rev-list --stdin` `lines`.
     ///
-    /// Returns `(positive, negative, all_refs, pathspecs)`. Stdin lines use their own `--not`
-    /// toggle, independent of the command line; ref pseudo-options on stdin (`--all`,
-    /// `--branches[=<glob>]`, `--tags`, `--remotes`, `--glob`) list refs through the
-    /// repository's ref store, and lines after `--` are pathspecs.
+    /// Stdin lines use their own `--not` toggle, independent of the command line; ref
+    /// pseudo-options on stdin (`--all`, `--branches[=<glob>]`, `--tags`, `--remotes`,
+    /// `--glob`) list refs through the repository's ref store, and lines after `--` are
+    /// pathspecs.
     ///
     /// # Errors
     ///
     /// Propagates [`RevListError`] for invalid stdin pseudo-options and ref store failures.
-    pub fn parse_stdin_specs(
-        &self,
-        args: &[String],
-        lines: &[&str],
-    ) -> Result<(Vec<String>, Vec<String>, bool, Vec<String>)> {
-        crate::rev_list::collect_revision_specs_from_stdin_lines(self.repo, args, lines)
+    pub fn parse_stdin_specs(&self, args: &[String], lines: &[&str]) -> Result<StdinRevisionSpecs> {
+        let (positive, negative, all_refs, pathspecs) =
+            crate::rev_list::collect_revision_specs_from_stdin_lines(self.repo, args, lines)?;
+        Ok(StdinRevisionSpecs {
+            positive,
+            negative,
+            all_refs,
+            pathspecs,
+        })
     }
 
     /// Object ids every tag under `refs/tags/` points at, read through the repository's ref
@@ -186,6 +189,21 @@ impl<'repo> RevWalk<'repo> {
             inner: open_commit_stream(self.repo, &include, &exclude, &params)?,
         })
     }
+}
+
+/// Revision specs from [`RevWalk::parse_stdin_specs`], ready for [`RevWalk::rev_list`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct StdinRevisionSpecs {
+    /// Tips to include.
+    pub positive: Vec<String>,
+    /// Tips to exclude (`^rev`, range left sides, and stdin lines after `--not`).
+    pub negative: Vec<String>,
+    /// Whether stdin asked for every ref (`--all`); set
+    /// [`RevListOptions::all_refs`] to walk them.
+    pub all_refs: bool,
+    /// Pathspecs from stdin lines after `--`.
+    pub pathspecs: Vec<String>,
 }
 
 /// Iterator over commits from [`RevWalk::commits_iter`].

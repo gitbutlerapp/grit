@@ -163,10 +163,11 @@ fn battery(repo: &Repository, wt: &Path, linked: &Path) -> Observed {
             .parse_stdin_specs(&[], lines)
             .expect("stdin specs")
     };
-    let (_, stdin_all_negated, all_flag, _) = stdin(&["--not", "--all"]);
-    assert!(!all_flag);
-    let (stdin_branches, _, _, _) = stdin(&["--branches"]);
-    let (stdin_tags_glob, _, _, _) = stdin(&["--tags=v*"]);
+    let negated = stdin(&["--not", "--all"]);
+    assert!(!negated.all_refs);
+    let stdin_all_negated = negated.negative;
+    let stdin_branches = stdin(&["--branches"]).positive;
+    let stdin_tags_glob = stdin(&["--tags=v*"]).positive;
     let mut tags: Vec<ObjectId> = repo
         .revwalk()
         .tag_targets()
@@ -352,15 +353,17 @@ fn mid_component_ref_globs_match_packed_refs() {
     git(wt, &["pack-refs", "--all"]);
     let repo = Repository::open(&wt.join(".git"), &options().with_work_tree(wt)).expect("open");
 
-    let (tags, _, _, _) = repo
+    let specs = repo
         .revwalk()
         .parse_stdin_specs(&[], &["--tags=v*"])
         .expect("stdin");
+    let tags = specs.positive;
     assert_eq!(tags, vec![tip.to_hex()]);
-    let (branches, _, _, _) = repo
+    let specs = repo
         .revwalk()
         .parse_stdin_specs(&[], &["--branches=b05*"])
         .expect("stdin");
+    let branches = specs.positive;
     assert_eq!(branches, vec![tip.to_hex()]);
     assert_eq!(count(&repo, vec![RefSelection::Tags(Some("v*".into()))]), 1);
     assert_eq!(

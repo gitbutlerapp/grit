@@ -50,10 +50,16 @@ fn grit_stdin_rev_list(
         &grit_lib::config::environment::RepositoryOptions::empty(),
     )
     .expect("discover");
-    let (pos, neg, all_refs, paths) = grit_repo
+    let specs = grit_repo
         .revwalk()
         .parse_stdin_specs(args_specs, lines)
         .expect("stdin specs");
+    let (pos, neg, all_refs, paths) = (
+        specs.positive,
+        specs.negative,
+        specs.all_refs,
+        specs.pathspecs,
+    );
     let mut walk_opts = opts.clone();
     if all_refs {
         walk_opts.all_refs = true;
@@ -131,10 +137,16 @@ fn stdin_not_all_expands_negative_refs() {
         &grit_lib::config::environment::RepositoryOptions::empty(),
     )
     .expect("discover");
-    let (_pos, neg, all, _paths) = grit_repo
+    let specs = grit_repo
         .revwalk()
         .parse_stdin_specs(&[], &lines)
         .expect("stdin --not --all specs");
+    let (_pos, neg, all, _paths) = (
+        specs.positive,
+        specs.negative,
+        specs.all_refs,
+        specs.pathspecs,
+    );
     assert!(!neg.is_empty(), "expected negative refs from --not --all");
     assert!(!all, "--not --all must not set all_refs positive mode");
 }

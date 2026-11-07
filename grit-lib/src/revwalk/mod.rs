@@ -32,7 +32,7 @@ pub use graph::{
 };
 pub use group_by::{AuthorGroup, GroupByAuthorOptions};
 pub use handle::RevWalk;
-pub use handle::RevWalkCommitIter;
+pub use handle::{RevWalkCommitIter, StdinRevisionSpecs};
 pub use merge_bases::{AheadBehind, AheadBehindOptions, MergeBaseMode, ReachableWalkOptions};
 pub(crate) use queries::parse_rev_walk_tokens;
 pub use queries::{

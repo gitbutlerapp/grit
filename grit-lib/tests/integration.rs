@@ -1539,6 +1539,8 @@ mod refs_query_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "refs_query_reachability_git_compat.rs"]
 mod refs_query_reachability_git_compat;
+#[path = "refs_refname_git_roundtrip.rs"]
+mod refs_refname_git_roundtrip;
 #[cfg(feature = "full-tests")]
 #[path = "refs_refname_git_roundtrip.rs"]
 mod refs_refname_git_roundtrip;
@@ -1601,6 +1603,8 @@ mod release_unused_heap;
 #[cfg(feature = "full-tests")]
 #[path = "remote_config_git_compat.rs"]
 mod remote_config_git_compat;
+#[path = "remote_error_variants.rs"]
+mod remote_error_variants;
 #[cfg(feature = "full-tests")]
 #[path = "remote_error_variants.rs"]
 mod remote_error_variants;
