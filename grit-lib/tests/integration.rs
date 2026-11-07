@@ -192,6 +192,11 @@ mod cache_tree_extension_hot_path;
 mod cache_tree_git_compat;
 #[path = "canonical_paths.rs"]
 mod canonical_paths;
+#[path = "change_id_custom_store.rs"]
+mod change_id_custom_store;
+#[cfg(feature = "full-tests")]
+#[path = "change_id_custom_store_git_compat.rs"]
+mod change_id_custom_store_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "change_id_git_compat.rs"]
 mod change_id_git_compat;
@@ -977,6 +982,8 @@ mod local_transport_reachable;
 #[cfg(feature = "full-tests")]
 #[path = "lockfile_contention_git_compat.rs"]
 mod lockfile_contention_git_compat;
+#[path = "log_group_by_custom_store.rs"]
+mod log_group_by_custom_store;
 #[cfg(feature = "full-tests")]
 #[path = "log_oneline_abbrev_packed.rs"]
 mod log_oneline_abbrev_packed;

@@ -394,20 +394,18 @@ pub fn find_commits_by_change_id_prefix(
         }
     }
 
-    let objects_dir = repo.odb().objects_dir();
-    let scan_stored_headers = stored_change_id_headers_likely(repo, objects_dir)?;
+    let source = HeaderSource::of(repo);
+    let scan_stored_headers = source.may_hold_stored_headers(repo)?;
     repo.odb().with_pack_read_context(|| {
         let mut matches = Vec::new();
         let mut seen = HashSet::new();
-        let mut pack_reader: Option<SingleLocalPackReader> = None;
+        let mut reader = ChangeIdHeaderReader::new(source);
 
         for oid in derived_hits {
-            let derived = ChangeId::derived_from_commit_id(&oid);
-            let resolved =
-                match stored_change_id_from_commit_oid(repo, objects_dir, &mut pack_reader, oid)? {
-                    Some(stored) => stored,
-                    None => derived,
-                };
+            let resolved = match reader.stored_change_id(repo, oid)? {
+                Some(stored) => stored,
+                None => ChangeId::derived_from_commit_id(&oid),
+            };
             if resolved.as_str().starts_with(prefix) && seen.insert(oid) {
                 matches.push(ChangeIdMatch {
                     oid,
@@ -418,7 +416,7 @@ pub fn find_commits_by_change_id_prefix(
 
         if scan_stored_headers {
             let stored_matches =
-                find_stored_change_id_prefix_matches(repo, objects_dir, &stored_scan, prefix)?;
+                find_stored_change_id_prefix_matches(repo, source, &stored_scan, prefix)?;
             for m in stored_matches {
                 if seen.insert(m.oid) {
                     matches.push(m);
@@ -431,13 +429,48 @@ pub fn find_commits_by_change_id_prefix(
     })
 }
 
+/// Where a prefix lookup reads stored change-id headers from.
+#[derive(Clone, Copy)]
+enum HeaderSource<'a> {
+    /// The files primary at this `objects/` directory. A probe persisted under
+    /// `objects/info` skips the scan when no object holds a header, and headers come
+    /// from single-pack prefix reads.
+    Files(&'a Path),
+    /// A custom primary. Nothing on disk describes its objects, so every scan reads
+    /// commit headers through the object database.
+    Store,
+}
+
+impl<'a> HeaderSource<'a> {
+    fn of(repo: &'a Repository) -> Self {
+        repo.odb()
+            .files_objects_dir()
+            .map_or(Self::Store, Self::Files)
+    }
+
+    /// Whether any object may carry a stored change-id header worth scanning for.
+    fn may_hold_stored_headers(self, repo: &Repository) -> Result<bool> {
+        match self {
+            Self::Files(objects_dir) => stored_change_id_headers_likely(repo, objects_dir),
+            Self::Store => Ok(true),
+        }
+    }
+}
+
 /// Drop cached and persisted change-id header probe state after the ODB changes.
-pub(crate) fn invalidate_stored_change_id_header_probe(caches: &RepoCaches, objects_dir: &Path) {
+///
+/// `files_objects_dir` is the files primary's `objects/` directory, where the probe is
+/// persisted; `None` for a custom primary, which never has one on disk.
+pub(crate) fn invalidate_stored_change_id_header_probe(
+    caches: &RepoCaches,
+    files_objects_dir: Option<&Path>,
+) {
     if let Ok(mut guard) = caches.stored_change_id_header_likely().lock() {
         *guard = None;
     }
-    let path = change_id_probe_marker_path(objects_dir);
-    let _ = fs::remove_file(path);
+    if let Some(objects_dir) = files_objects_dir {
+        let _ = fs::remove_file(change_id_probe_marker_path(objects_dir));
+    }
 }
 
 fn stored_change_id_headers_likely(repo: &Repository, objects_dir: &Path) -> Result<bool> {
@@ -638,7 +671,7 @@ fn object_bytes_may_contain_change_id_header(data: &[u8]) -> bool {
 
 fn find_stored_change_id_prefix_matches(
     repo: &Repository,
-    objects_dir: &Path,
+    source: HeaderSource<'_>,
     oids: &[ObjectId],
     prefix: &str,
 ) -> Result<Vec<ChangeIdMatch>> {
@@ -655,8 +688,8 @@ fn find_stored_change_id_prefix_matches(
         oids,
         par_opts,
         total_bytes,
-        || ChangeIdHeaderReader { pack_reader: None },
-        |reader, oid| stored_change_id_match_for_oid(repo, objects_dir, reader, oid, prefix),
+        || ChangeIdHeaderReader::new(source),
+        |reader, oid| stored_change_id_match_for_oid(repo, reader, oid, prefix),
     )
     .map_err(|e| match e {
         crate::parallel::ParallelHashError::Task(err) => err,
@@ -664,20 +697,51 @@ fn find_stored_change_id_prefix_matches(
     Ok(scan_results.into_iter().flatten().collect())
 }
 
-struct ChangeIdHeaderReader {
+/// Per-worker state for reading stored change-id headers.
+struct ChangeIdHeaderReader<'a> {
+    source: HeaderSource<'a>,
+    /// Pack the last files-primary commit came from, reused while ids stay in it.
     pack_reader: Option<SingleLocalPackReader>,
+    /// Reused object buffer for custom-primary reads.
+    buf: Vec<u8>,
+}
+
+impl<'a> ChangeIdHeaderReader<'a> {
+    fn new(source: HeaderSource<'a>) -> Self {
+        Self {
+            source,
+            pack_reader: None,
+            buf: Vec::new(),
+        }
+    }
+
+    /// The change id stored in commit `oid`'s header, if it has one.
+    fn stored_change_id(&mut self, repo: &Repository, oid: ObjectId) -> Result<Option<ChangeId>> {
+        match self.source {
+            HeaderSource::Files(objects_dir) => {
+                let header =
+                    read_files_commit_header_prefix(repo, objects_dir, &mut self.pack_reader, oid)?;
+                Ok(header.and_then(|header| change_id_from_commit_object_header(&header)))
+            }
+            HeaderSource::Store => {
+                if repo.odb().read_into(&oid, &mut self.buf)? != ObjectKind::Commit {
+                    return Ok(None);
+                }
+                Ok(change_id_from_commit_object_header(commit_header_bytes(
+                    &self.buf,
+                )))
+            }
+        }
+    }
 }
 
 fn stored_change_id_match_for_oid(
     repo: &Repository,
-    objects_dir: &Path,
-    reader: &mut ChangeIdHeaderReader,
+    reader: &mut ChangeIdHeaderReader<'_>,
     oid: &ObjectId,
     prefix: &str,
 ) -> Result<Option<ChangeIdMatch>> {
-    let Some(stored) =
-        stored_change_id_from_commit_oid(repo, objects_dir, &mut reader.pack_reader, *oid)?
-    else {
+    let Some(stored) = reader.stored_change_id(repo, *oid)? else {
         return Ok(None);
     };
     if stored.as_str().starts_with(prefix) {
@@ -690,19 +754,9 @@ fn stored_change_id_match_for_oid(
     }
 }
 
-fn stored_change_id_from_commit_oid(
-    repo: &Repository,
-    objects_dir: &Path,
-    pack_reader: &mut Option<SingleLocalPackReader>,
-    oid: ObjectId,
-) -> Result<Option<ChangeId>> {
-    let Some(header) = read_commit_header_prefix(repo, objects_dir, pack_reader, oid)? else {
-        return Ok(None);
-    };
-    Ok(change_id_from_commit_object_header(&header))
-}
-
-fn read_commit_header_prefix(
+/// Header bytes of commit `oid` on a files primary, from a pack prefix read when the
+/// commit is packed.
+fn read_files_commit_header_prefix(
     repo: &Repository,
     objects_dir: &Path,
     pack_reader: &mut Option<SingleLocalPackReader>,

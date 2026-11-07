@@ -477,8 +477,6 @@ mod tests {
         /// Step 4: the internal `PrimaryStore` enum in `Odb`, which gives fast
         /// paths and scratch stores a store handle instead of a directory.
         PrimaryStoreEnum,
-        /// Step 5: change-id resolution and log grouping through the store.
-        ChangeIdAndGroupBy,
     }
 
     struct ByDesign {
@@ -571,6 +569,7 @@ mod tests {
         by_design("transfer.rs", ObjectsDir, Area::LocalTransport),
         by_design("transfer.rs", OdbNew, Area::LocalTransport),
         by_design("bitmap_walk.rs", ObjectsDir, Area::GatedFastPath),
+        by_design("change_id.rs", SingleLocalPackReader, Area::GatedFastPath),
         by_design("fsck/mod.rs", SingleLocalPackReader, Area::GatedFastPath),
         by_design("merge_base.rs", ObjectsDir, Area::GatedFastPath),
         by_design("merge_base.rs", SingleLocalPackReader, Area::GatedFastPath),
@@ -590,6 +589,11 @@ mod tests {
         // The thin-pack probe indexes a received pack against an empty database.
         by_design("unpack_objects.rs", JoinObjects, Area::ScratchDatabase),
         by_design("unpack_objects.rs", OdbNew, Area::ScratchDatabase),
+        by_design(
+            "revwalk/group_by.rs",
+            SingleLocalPackReader,
+            Area::GatedFastPath,
+        ),
     ];
 
     const KNOWN_LEAKS: &[Leak] = &[
@@ -622,24 +626,6 @@ mod tests {
         leak("fetch.rs", ObjectsDir, FixStep::PrimaryStoreEnum),
         // A scratch database in a temp dir that could be an in-memory store.
         leak("diff/no_index.rs", OdbNew, FixStep::PrimaryStoreEnum),
-        // Stored change-id header probe and single-pack commit reader.
-        leak("change_id.rs", ObjectsDir, FixStep::ChangeIdAndGroupBy),
-        leak(
-            "change_id.rs",
-            SingleLocalPackReader,
-            FixStep::ChangeIdAndGroupBy,
-        ),
-        // `log --group-by` pack fast paths.
-        leak(
-            "revwalk/group_by.rs",
-            ObjectsDir,
-            FixStep::ChangeIdAndGroupBy,
-        ),
-        leak(
-            "revwalk/group_by.rs",
-            SingleLocalPackReader,
-            FixStep::ChangeIdAndGroupBy,
-        ),
     ];
 
     type Key = (&'static str, Access);

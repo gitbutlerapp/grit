@@ -264,10 +264,13 @@ fn try_count_authors_via_bitmap(
     all_refs: bool,
     mailmap: Option<&MailmapTable>,
 ) -> Result<Option<Vec<AuthorGroup>>> {
+    // Bitmaps index the files primary's packs; a custom store's commits are not in them.
+    let Some(objects_dir) = repo.odb().files_objects_dir() else {
+        return Ok(None);
+    };
     let (mut opts, _context) =
         rev_list_options_from_walk(repo, walk_options, parsed, all_refs, false)?;
     opts.use_bitmap_index = true;
-    let objects_dir = repo.odb().objects_dir();
     repo.odb().with_pack_read_context(|| {
         if let Some((index, reachable)) =
             try_bitmap_reachable_commit_set_for_specs(repo, positive, negative, &opts)?
@@ -289,7 +292,7 @@ fn try_count_authors_via_bitmap(
                         let mut pack_reader = None;
                         accumulate_author_for_oid(
                             repo,
-                            objects_dir,
+                            Some(objects_dir),
                             &mut pack_reader,
                             *oid,
                             mailmap,
@@ -312,7 +315,7 @@ fn try_count_authors_via_bitmap(
             |oid| {
                 accumulate_author_for_oid(
                     repo,
-                    objects_dir,
+                    Some(objects_dir),
                     &mut pack_reader,
                     oid,
                     mailmap,
@@ -451,9 +454,16 @@ fn count_authors_at_pack_rows_serial(
     Ok(())
 }
 
+/// Whether history walks have a commit-graph: graph files under a files primary's
+/// `objects/info`, or a graph attached to a custom store.
 fn commit_graph_available(repo: &Repository) -> bool {
-    let objects = repo.odb().objects_dir();
-    objects.join("info/commit-graph").is_file() || objects.join("info/commit-graphs").is_dir()
+    match repo.odb().files_objects_dir() {
+        Some(objects) => {
+            objects.join("info/commit-graph").is_file()
+                || objects.join("info/commit-graphs").is_dir()
+        }
+        None => repo.odb().commit_graph_chain().is_some(),
+    }
 }
 
 fn shortlog_stack_walk_compatible(walk: &RevWalkListOptions, parsed: &RevWalkParsedSpecs) -> bool {
@@ -469,15 +479,25 @@ fn shortlog_stack_walk_compatible(walk: &RevWalkListOptions, parsed: &RevWalkPar
         && parsed.symmetric_right.is_none()
 }
 
+/// Count the author of commit `oid`, returning the whole commit when it was read in full
+/// (otherwise its header prefix is left in `pack_reader`).
+///
+/// `files_objects_dir` is the files primary's `objects/` directory, whose packs are read
+/// for just the header; `None` for a custom primary, read through the object database.
 fn load_commit_prefix_and_count_author(
     repo: &Repository,
-    objects_dir: &Path,
+    files_objects_dir: Option<&Path>,
     pack_reader: &mut Option<SingleLocalPackReader>,
     oid: ObjectId,
     mailmap: Option<&MailmapTable>,
     counter: &mut AuthorCounter,
     monotonic_pack_probe: bool,
 ) -> Result<Option<Vec<u8>>> {
+    let Some(objects_dir) = files_objects_dir else {
+        let obj = repo.odb().read(&oid)?;
+        accumulate_author_count(&obj.data, mailmap, counter)?;
+        return Ok(Some(obj.data));
+    };
     for _ in 0..3 {
         if pack_reader.is_none() {
             *pack_reader = SingleLocalPackReader::open_allow_loose_for_commits(objects_dir, &oid)?;
@@ -528,7 +548,7 @@ fn load_commit_prefix_and_count_author(
 
 fn accumulate_author_for_oid(
     repo: &Repository,
-    objects_dir: &Path,
+    files_objects_dir: Option<&Path>,
     pack_reader: &mut Option<SingleLocalPackReader>,
     oid: ObjectId,
     mailmap: Option<&MailmapTable>,
@@ -537,7 +557,7 @@ fn accumulate_author_for_oid(
 ) -> Result<()> {
     load_commit_prefix_and_count_author(
         repo,
-        objects_dir,
+        files_objects_dir,
         pack_reader,
         oid,
         mailmap,
@@ -558,7 +578,7 @@ fn count_authors_stack_walk(
     if tips.is_empty() {
         return Ok(Vec::new());
     }
-    let objects_dir = repo.odb().objects_dir();
+    let files_objects_dir = repo.odb().files_objects_dir();
     let excluded = crate::merge_base::RangeWalkHide::for_range_walk(
         repo,
         tips,
@@ -578,7 +598,7 @@ fn count_authors_stack_walk(
         }
         let full_commit = load_commit_prefix_and_count_author(
             repo,
-            objects_dir,
+            files_objects_dir,
             &mut pack_reader,
             oid,
             mailmap,
@@ -631,17 +651,17 @@ fn count_authors_from_commit_oids(
     oids: &[ObjectId],
     mailmap: Option<&MailmapTable>,
 ) -> Result<Vec<AuthorGroup>> {
-    let objects_dir = repo.odb().objects_dir();
+    let files_objects_dir = repo.odb().files_objects_dir();
     let mut counter = AuthorCounter::new();
     repo.odb().with_pack_read_context(|| {
-        count_authors_single_pack(repo, objects_dir, oids, mailmap, &mut counter)
+        count_authors_single_pack(repo, files_objects_dir, oids, mailmap, &mut counter)
     })?;
     Ok(counter.into_sorted_groups())
 }
 
 fn count_authors_single_pack(
     repo: &Repository,
-    objects_dir: &Path,
+    files_objects_dir: Option<&Path>,
     oids: &[ObjectId],
     mailmap: Option<&MailmapTable>,
     counter: &mut AuthorCounter,
@@ -650,7 +670,7 @@ fn count_authors_single_pack(
     for oid in oids {
         accumulate_author_for_oid(
             repo,
-            objects_dir,
+            files_objects_dir,
             &mut pack_reader,
             *oid,
             mailmap,
