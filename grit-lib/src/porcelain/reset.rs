@@ -68,6 +68,8 @@ pub struct ResetOptions {
     pub dry_run: bool,
     /// Maximum orphaned commits to return; defaults to [`DEFAULT_ORPHAN_LIMIT`].
     pub orphan_limit: usize,
+    /// When `HEAD` is on a branch, also mirror the branch tip move in `HEAD`'s reflog.
+    pub(crate) mirror_head_reflog: bool,
 }
 
 impl ResetOptions {
@@ -86,6 +88,7 @@ impl ResetOptions {
             message: message.into(),
             dry_run: false,
             orphan_limit: DEFAULT_ORPHAN_LIMIT,
+            mirror_head_reflog: true,
         }
     }
 
@@ -410,9 +413,15 @@ fn move_head_tip(
     previous: ObjectId,
     opts: &ResetOptions,
 ) -> Result<String> {
-    let (moved, logged): (&str, &[&str]) = match head {
-        HeadState::Branch { refname, .. } => (refname, &[refname.as_str(), "HEAD"]),
-        HeadState::Detached { .. } => ("HEAD", &["HEAD"]),
+    let (moved, logged): (&str, Vec<&str>) = match head {
+        HeadState::Branch { refname, .. } => {
+            let mut names = vec![refname.as_str()];
+            if opts.mirror_head_reflog {
+                names.push("HEAD");
+            }
+            (refname, names)
+        }
+        HeadState::Detached { .. } => ("HEAD", vec!["HEAD"]),
         HeadState::Invalid => return Err(Error::InvalidHead),
     };
     refs::store_write_value_on_store(
@@ -516,14 +525,12 @@ mod tests {
     }
 
     fn reset_opts(target: ObjectId, mode: ResetMode) -> ResetOptions {
-        ResetOptions {
+        ResetOptions::new(
             target,
             mode,
-            identity: "T <t@t> 0 +0000".parse().expect("identity"),
-            message: "reset".into(),
-            dry_run: false,
-            orphan_limit: DEFAULT_ORPHAN_LIMIT,
-        }
+            "T <t@t> 0 +0000".parse().expect("identity"),
+            "reset",
+        )
     }
 
     #[cfg_attr(

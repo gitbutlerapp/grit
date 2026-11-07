@@ -68,16 +68,11 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
     }
 }
 
-/// Assert the finished rebase is the newest `HEAD` reflog entry, moving from `orig_tip` to the
-/// current `HEAD`, and that every `HEAD` log entry starts where the previous one ended.
-fn assert_head_reflog_records_rebase_finish(wt: &std::path::Path, orig_tip: ObjectId) {
+/// Assert the finish step is the newest `HEAD` reflog entry (from the detached replay tip to
+/// the current branch tip) and that every `HEAD` log entry starts where the previous one ended.
+fn assert_head_reflog_records_rebase_finish(wt: &std::path::Path) {
     let head = git_oid(wt, "HEAD");
     assert_eq!(git_oid(wt, "HEAD@{0}"), head, "HEAD@{{0}} must be HEAD");
-    assert_eq!(
-        git_oid(wt, "HEAD@{1}"),
-        orig_tip,
-        "HEAD@{{1}} must be the pre-rebase tip"
-    );
     let log = std::fs::read_to_string(wt.join(".git/logs/HEAD")).expect("HEAD log");
     let entries: Vec<(&str, &str, &str)> = log
         .lines()
@@ -92,11 +87,47 @@ fn assert_head_reflog_records_rebase_finish(wt: &std::path::Path, orig_tip: Obje
         })
         .collect();
     let &(old, new, message) = entries.last().expect("entries");
-    assert_eq!(old, orig_tip.to_hex());
     assert_eq!(new, head.to_hex());
     assert_eq!(message, "rebase");
+    assert_eq!(
+        git_oid(wt, "HEAD@{1}"),
+        ObjectId::from_hex(old).expect("hex"),
+        "HEAD@{{1}} must match the finish entry's old oid"
+    );
     for pair in entries.windows(2) {
         assert_eq!(pair[1].0, pair[0].1, "HEAD reflog chain broken: {log}");
+    }
+}
+
+fn assert_head_reflog_chain(wt: &std::path::Path) {
+    let head = git_oid(wt, "HEAD");
+    assert_eq!(git_oid(wt, "HEAD@{0}"), head, "HEAD@{{0}} must be HEAD");
+    let log = std::fs::read_to_string(wt.join(".git/logs/HEAD")).expect("HEAD log");
+    let entries: Vec<(&str, &str, &str)> = log
+        .lines()
+        .map(|line| {
+            let (header, message) = line.split_once('\t').expect("reflog message");
+            let mut oids = header.split(' ');
+            (
+                oids.next().expect("old"),
+                oids.next().expect("new"),
+                message,
+            )
+        })
+        .collect();
+    for pair in entries.windows(2) {
+        assert_eq!(pair[1].0, pair[0].1, "HEAD reflog chain broken: {log}");
+    }
+}
+
+fn rebase_apply_opts(
+    reflog_message: impl Into<String>,
+) -> grit_lib::revwalk::history::ApplyOptions {
+    grit_lib::revwalk::history::ApplyOptions {
+        identity: test_ident(),
+        reflog_message: reflog_message.into(),
+        record_operation: Some("rebase".into()),
+        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
     }
 }
 
@@ -259,7 +290,7 @@ fn rebase_session_conflict_stop_continue_and_abort() {
     assert!(!grit.git_dir().join("rebase-merge").exists());
     assert_ne!(git_oid(wt, "topic"), orig_tip);
     assert_eq!(git(wt, &["show", "HEAD:f.txt"]), "resolved\n");
-    assert_head_reflog_records_rebase_finish(wt, orig_tip);
+    assert_head_reflog_records_rebase_finish(wt);
     assert_git_fsck_strict(wt);
 
     // Abort path on a fresh conflict stop.
@@ -752,7 +783,7 @@ fn skip_drops_conflicting_commit() {
     assert_eq!(git(wt, &["show", "HEAD:f.txt"]), "main change\n");
     assert!(git(wt, &["status", "--porcelain"]).trim().is_empty());
     assert!(!grit.git_dir().join("rebase-merge").exists());
-    assert_head_reflog_records_rebase_finish(wt, tip);
+    assert_head_reflog_records_rebase_finish(wt);
     assert_git_fsck_strict(wt);
 }
 
@@ -931,7 +962,9 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
     assert!(
         matches!(
             pick_err,
-            MergeError::OperationInProgress(InProgressOperation::Rebase)
+            grit_lib::error::Error::Merge(grit_lib::porcelain::MergeError::OperationInProgress(
+                InProgressOperation::Rebase
+            ))
         ),
         "pick: {pick_err:?}"
     );
@@ -976,9 +1009,11 @@ fn stop_writes_markers_and_detaches_head() {
     let wt = repo.worktree();
     let grit = open_grit(wt);
     git(wt, &["switch", "topic"]);
+    let mut opts = start_opts(upstream, Some(onto), tip);
+    opts.apply = rebase_apply_opts("rebase: onto");
     let out = start_rebase(
         &grit,
-        &start_opts(upstream, Some(onto), tip),
+        &opts,
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -994,6 +1029,59 @@ fn stop_writes_markers_and_detaches_head() {
         resolve_head(grit.git_dir()).expect("head"),
         grit_lib::state::HeadState::Detached { .. }
     ));
+    assert_head_reflog_chain(wt);
+    let head = git_oid(wt, "HEAD");
+    assert_eq!(git_oid(wt, "HEAD@{0}"), head);
+    let log = std::fs::read_to_string(wt.join(".git/logs/HEAD")).expect("HEAD log");
+    let last = log.lines().last().expect("entry");
+    assert!(
+        last.starts_with(&format!("{} {} ", orig_tip.to_hex(), head.to_hex())),
+        "detach must log pre-rebase tip → replay parent: {last}"
+    );
+    assert!(last.contains("\trebase: onto"));
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn conflict_stop_abort_head_reflog_reattaches() {
+    let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();
+    let wt = repo.worktree();
+    let grit = open_grit(wt);
+    git(wt, &["switch", "topic"]);
+    let mut opts = start_opts(upstream, Some(onto), tip);
+    opts.apply = rebase_apply_opts("rebase: onto");
+    let detached_before = git_oid(wt, "topic");
+    assert!(matches!(
+        start_rebase(
+            &grit,
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("start"),
+        RebaseOutcome::Stopped(_)
+    ));
+    let detached = git_oid(wt, "HEAD");
+    assert_ne!(detached, detached_before);
+    assert_head_reflog_chain(wt);
+    let log_before_abort = std::fs::read_to_string(wt.join(".git/logs/HEAD")).expect("HEAD log");
+    let detach_line = log_before_abort.lines().last().expect("detach");
+    abort_rebase(&grit, &test_ident()).expect("abort");
+    assert_eq!(
+        resolve_head(grit.git_dir()).unwrap().branch_name(),
+        Some("topic")
+    );
+    assert_eq!(git_oid(wt, "topic"), orig_tip);
+    assert_head_reflog_chain(wt);
+    assert_eq!(git_oid(wt, "HEAD@{0}"), orig_tip);
+    let log = std::fs::read_to_string(wt.join(".git/logs/HEAD")).expect("HEAD log");
+    let abort_line = log.lines().last().expect("abort");
+    assert!(
+        abort_line.starts_with(&format!("{} {} ", detached.to_hex(), orig_tip.to_hex())),
+        "abort must log detached → restored tip: {abort_line}"
+    );
+    assert!(abort_line.contains("\trebase (abort)"));
+    assert_eq!(log.lines().nth(log.lines().count() - 2), Some(detach_line));
     assert_git_fsck_strict(wt);
 }
 
@@ -2049,7 +2137,7 @@ fn switch_refuses_during_git_started_rebase_and_git_continue_still_moves_only_to
         assert!(
             matches!(
                 err,
-                MergeError::OperationInProgress(InProgressOperation::RebaseInteractive)
+                Error::OperationInProgress(InProgressOperation::RebaseInteractive)
             ),
             "dry_run={dry_run}: {err:?}"
         );
@@ -2104,10 +2192,7 @@ fn switch_refuses_during_merge_conflict() {
     )
     .unwrap_err();
     assert!(
-        matches!(
-            err,
-            MergeError::OperationInProgress(InProgressOperation::Merge)
-        ),
+        matches!(err, Error::OperationInProgress(InProgressOperation::Merge)),
         "{err:?}"
     );
     assert_eq!(git(wt, &["symbolic-ref", "HEAD"]).trim(), "refs/heads/main");
@@ -2654,7 +2739,7 @@ fn multiple_conflict_stops_report_the_last_invocation_head_change() {
     assert_eq!(git(wt, &["show", "HEAD:g.txt"]), "resolved g\n");
     assert!(git(wt, &["status", "--porcelain"]).trim().is_empty());
     assert!(!grit.git_dir().join("rebase-merge").exists());
-    assert_head_reflog_records_rebase_finish(wt, tip);
+    assert_head_reflog_records_rebase_finish(wt);
     assert_git_fsck_strict(wt);
 }
 
@@ -2820,7 +2905,7 @@ fn skip_with_remaining_replay_reports_head_change() {
         Some("topic")
     );
     assert!(!grit.git_dir().join("rebase-merge").exists());
-    assert_head_reflog_records_rebase_finish(wt, tip);
+    assert_head_reflog_records_rebase_finish(wt);
     assert_git_fsck_strict(wt);
 }
 

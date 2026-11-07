@@ -1388,9 +1388,13 @@ fn commit_planned_ref_updates(
             opts,
         );
         if head_target.as_deref() == Some(planned.name.as_str()) {
-            if let Some(head_update) =
-                head_log_update(config.as_ref().map(|c| c.as_ref()), git_dir, planned, opts)
-            {
+            if let Some(head_update) = head_oid_log_update(
+                config.as_ref().map(|c| c.as_ref()),
+                git_dir,
+                planned.old,
+                planned.new,
+                opts,
+            ) {
                 txn = txn
                     .update(head_update)
                     .map_err(|e| map_ref_store_error(e, "HEAD"))?;
@@ -1445,22 +1449,59 @@ fn rollback_ref_updates(
     commit_planned_ref_updates(repo, &inverse, opts)
 }
 
-/// Append one `HEAD` reflog entry for `branch` moving `old` → `new`, as if `HEAD` had been
-/// attached to that branch when it moved.
-///
-/// Used by callers that move the checked-out branch while `HEAD` is detached (a resumed rebase)
-/// and reattach it afterwards, so the `HEAD` log still records the move. Logging follows the
-/// same policy as [`apply_rewrite`]; nothing is written when that policy skips `HEAD`.
-pub(super) fn log_head_move(
+/// Point detached `HEAD` at `new` and append a `HEAD` reflog entry when policy allows.
+pub(super) fn update_detached_head_with_reflog(
     repo: &Repository,
-    branch: &PlannedRefUpdate,
+    old: ObjectId,
+    new: ObjectId,
     opts: &ApplyOptions,
 ) -> Result<(), HistoryError> {
     let config = repo.config().snapshot().ok();
-    let Some(update) = head_log_update(
+    let Some(mut reflog) = reflog_for_update(
         config.as_ref().map(|c| c.as_ref()),
         repo.git_dir(),
-        branch,
+        "HEAD",
+        opts,
+    ) else {
+        return crate::refs::update_direct_ref_on_store(
+            repo.ref_store(),
+            repo.git_dir(),
+            "HEAD",
+            &new,
+        )
+        .map_err(crate::history::error::engine_err);
+    };
+    reflog.old_oid = Some(old);
+    reflog.new_oid = Some(new);
+    crate::refs::commit_ref_update_on_store(
+        repo.ref_store(),
+        RefUpdate {
+            name: crate::refs::store::RefName::from_trusted("HEAD"),
+            new_value: Some(RawRef::Direct(new)),
+            expected: Expected::Any,
+            reflog: Some(reflog),
+            flags: RefUpdateFlags {
+                no_deref: true,
+                ..Default::default()
+            },
+        },
+    )
+    .map_err(crate::history::error::engine_err)
+}
+
+/// Append one log-only `HEAD` entry for `old` → `new` without changing the ref tip.
+pub(super) fn log_head_oid_move(
+    repo: &Repository,
+    old: ObjectId,
+    new: ObjectId,
+    opts: &ApplyOptions,
+) -> Result<(), HistoryError> {
+    let config = repo.config().snapshot().ok();
+    let Some(update) = head_oid_log_update(
+        config.as_ref().map(|c| c.as_ref()),
+        repo.git_dir(),
+        old,
+        new,
         opts,
     ) else {
         return Ok(());
@@ -1476,18 +1517,19 @@ pub(super) fn log_head_move(
 }
 
 /// Log-only `HEAD` update mirroring `branch`, or `None` when `HEAD` is not logged.
-fn head_log_update(
+fn head_oid_log_update(
     config: Option<&ConfigSet>,
     git_dir: &std::path::Path,
-    branch: &PlannedRefUpdate,
+    old: ObjectId,
+    new: ObjectId,
     opts: &ApplyOptions,
 ) -> Option<RefUpdate> {
     let mut reflog = reflog_for_update(config, git_dir, "HEAD", opts)?;
-    reflog.old_oid = Some(branch.old);
-    reflog.new_oid = Some(branch.new);
+    reflog.old_oid = Some(old);
+    reflog.new_oid = Some(new);
     Some(RefUpdate {
         name: crate::refs::store::RefName::from_trusted("HEAD"),
-        new_value: Some(RawRef::Direct(branch.new)),
+        new_value: Some(RawRef::Direct(new)),
         expected: Expected::Any,
         reflog: Some(reflog),
         flags: RefUpdateFlags {

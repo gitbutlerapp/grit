@@ -27,7 +27,7 @@ use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, write_orig_head, HeadState};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
-use super::apply::{apply_rewrite, log_head_move};
+use super::apply::{apply_rewrite, log_head_oid_move, update_detached_head_with_reflog};
 use super::error::{undo_record_write_str, HistoryError};
 use super::last::{write_history_last, HistoryLastRecord};
 use super::plan::{
@@ -728,8 +728,8 @@ pub fn continue_rebase(
             write_rebase_staged_resolution(repo, &state.rewrite, current, new_tree, &parents)
                 .map_err(RebaseSessionError::from)?;
         repo.odb().flush_for_publish().map_err(map_lib)?;
-        refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &resolved)
-            .map_err(map_lib)?;
+        update_detached_head_with_reflog(repo, head_oid, resolved, &opts.apply)
+            .map_err(map_apply_err)?;
         ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
         return advance_after_user_resolution_commit(
             repo, &state, opts, current, resolved, rerere, progress, cancel,
@@ -747,8 +747,8 @@ pub fn continue_rebase(
             write_rebase_staged_resolution(repo, &state.rewrite, current, new_tree, &parents)
                 .map_err(RebaseSessionError::from)?;
         repo.odb().flush_for_publish().map_err(map_lib)?;
-        refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &resolved)
-            .map_err(map_lib)?;
+        update_detached_head_with_reflog(repo, head_oid, resolved, &opts.apply)
+            .map_err(map_apply_err)?;
         ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
         return advance_after_user_resolution_commit(
             repo, &state, opts, current, resolved, rerere, progress, cancel,
@@ -913,7 +913,7 @@ pub fn abort_rebase(
             let abort = if rebase_head_is_branch(&state.head_ref) {
                 hard_reset_branch(repo, &state.head_ref, state.orig_head, identity)?
             } else {
-                hard_reset_head(repo, state.orig_head, identity)?;
+                hard_reset_detached_head(repo, state.orig_head, identity)?;
                 RebaseAbort::default()
             };
             clear_rebase_state(repo.git_dir())?;
@@ -938,7 +938,7 @@ fn abort_foreign_rebase(
         match first_line(&state_dir.join("head-name")).filter(|name| name.starts_with("refs/")) {
             Some(head_ref) => hard_reset_branch(repo, &head_ref, orig_head, identity)?,
             None => {
-                hard_reset_head(repo, orig_head, identity)?;
+                hard_reset_detached_head(repo, orig_head, identity)?;
                 RebaseAbort::default()
             }
         };
@@ -1390,13 +1390,13 @@ fn install_stopped_rebase(
     write_persisted_state(repo.git_dir(), &persisted)?;
 
     repo.odb().flush_for_publish().map_err(map_lib)?;
-    refs::update_direct_ref_on_store(
-        repo.ref_store(),
-        repo.git_dir(),
-        "HEAD",
-        &conflict.replayed_parent,
-    )
-    .map_err(map_lib)?;
+    let head_old = resolve_head_for_repository(repo)
+        .map_err(map_lib)?
+        .oid()
+        .copied()
+        .ok_or_else(|| map_lib(crate::error::Error::InvalidHead))?;
+    update_detached_head_with_reflog(repo, head_old, conflict.replayed_parent, apply)
+        .map_err(map_apply_err)?;
     // With the stop state and HEAD published, a half-installed stop would let continue commit
     // without the conflict stages, so the checkouts below run to completion.
     let mut progress = UncancellableProgress::new(progress);
@@ -1499,7 +1499,7 @@ fn advance_after_plan(
                     .iter()
                     .find(|u| u.name.as_str() == prev.head_ref.as_str() && u.old != u.new)
                 {
-                    log_head_move(repo, branch, apply)?;
+                    log_head_oid_move(repo, head_before, branch.new, apply)?;
                 }
                 refs::write_symbolic_ref_on_store(
                     repo.ref_store(),
@@ -1768,13 +1768,21 @@ fn hard_reset_branch(
     target: ObjectId,
     identity: &crate::ident::Signature,
 ) -> Result<RebaseAbort, RebaseSessionError> {
+    let detached_head = match resolve_head_for_repository(repo).map_err(map_lib)? {
+        HeadState::Detached { oid } => Some(oid),
+        _ => None,
+    };
     let before = repo
         .references()
         .resolve_if_exists(refname)
         .map_err(map_lib)?;
     refs::write_symbolic_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", refname)
         .map_err(map_lib)?;
-    hard_reset_head(repo, target, identity)?;
+    hard_reset_head(repo, target, identity, detached_head.is_some())?;
+    if let Some(detached) = detached_head {
+        log_head_oid_move(repo, detached, target, &abort_reflog_options(identity))
+            .map_err(map_apply_err)?;
+    }
     let overwritten = (before != Some(target)).then(|| PlannedRefUpdate {
         name: RefName::from_trusted(refname.to_owned()),
         old: before.unwrap_or_else(crate::diff::zero_oid),
@@ -1785,19 +1793,39 @@ fn hard_reset_branch(
     })
 }
 
-fn hard_reset_head(
+fn hard_reset_detached_head(
     repo: &Repository,
     target: ObjectId,
     identity: &crate::ident::Signature,
 ) -> Result<(), RebaseSessionError> {
+    hard_reset_head(repo, target, identity, false)
+}
+
+fn hard_reset_head(
+    repo: &Repository,
+    target: ObjectId,
+    identity: &crate::ident::Signature,
+    suppress_head_mirror: bool,
+) -> Result<(), RebaseSessionError> {
+    let mut opts = ResetOptions::new(target, ResetMode::Hard, identity.clone(), "rebase (abort)");
+    opts.mirror_head_reflog = !suppress_head_mirror;
     reset_to_commit(
         repo,
-        &ResetOptions::new(target, ResetMode::Hard, identity.clone(), "rebase (abort)"),
+        &opts,
         &mut crate::progress::NullProgress,
         &crate::progress::CancelToken::never(),
     )
     .map_err(map_lib)?;
     Ok(())
+}
+
+pub(super) fn abort_reflog_options(identity: &crate::ident::Signature) -> ApplyOptions {
+    ApplyOptions {
+        identity: identity.clone(),
+        reflog_message: "rebase (abort)".into(),
+        record_operation: Some("rebase".into()),
+        hooks: PostOperationHooks::Skip,
+    }
 }
 
 use std::io::Write;

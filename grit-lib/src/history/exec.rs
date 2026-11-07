@@ -1490,6 +1490,14 @@ pub(super) fn abort_exec_rebase(
         HistoryError::RefCasMismatch { name } => super::RebaseSessionError::AbortRefMoved { name },
         other => other.into(),
     })?;
+    if matches!(prestate.head, SavedHead::Symbolic(_)) {
+        super::apply::log_head_oid_move(
+            repo,
+            current,
+            prestate.head_commit,
+            &super::rebase_session::abort_reflog_options(identity),
+        )?;
+    }
     super::rebase_session::clear_rebase_state(repo.git_dir())?;
     Ok(super::RebaseAbort {
         overwritten: overwritten.into_iter().collect(),

@@ -302,6 +302,11 @@ path = "tests/integration.rs"
 required-features = ["test-support"]
 
 [[test]]
+name = "rebase_head_reflog_2560"
+path = "tests/rebase_head_reflog_2560.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "clone_reflog_injected_ref_store"
 path = "tests/clone_reflog_injected_ref_store.rs"
 required-features = ["full-tests"]
