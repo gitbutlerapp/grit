@@ -121,6 +121,11 @@ pub struct StructuredJsonError {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub clone_checkout: Option<CloneCheckoutJson>,
+    /// The refused operation's stable snake_case name (`gc`, `commit_graph_write`, …), when
+    /// `kind == "unsupported_object_store"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<&'static str>,
 }
 
 impl StructuredJsonError {
@@ -140,6 +145,7 @@ impl StructuredJsonError {
             hint: None,
             lock: None,
             clone_checkout: None,
+            operation: None,
         }
     }
 }

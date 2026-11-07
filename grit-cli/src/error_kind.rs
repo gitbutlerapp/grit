@@ -112,6 +112,9 @@ pub enum ErrorKind {
     /// `HEAD` is on a GitButler workspace, which GitButler rewrites; commit with `but commit`.
     #[serde(rename = "gitbutler_workspace")]
     GitButlerWorkspace,
+    /// The repository's primary object store is not the files backend, and the operation
+    /// needs the on-disk `objects/` layout (`operation`).
+    UnsupportedObjectStore,
 }
 
 impl ErrorKind {
@@ -187,6 +190,7 @@ impl ErrorKind {
             Self::PathNotFound,
             Self::EmbeddedRepoWithoutCommit,
             Self::GitButlerWorkspace,
+            Self::UnsupportedObjectStore,
         ]
     }
 }

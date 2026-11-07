@@ -17,6 +17,7 @@ use grit_lib::porcelain::merge::ContinueMergeError;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::RemoteError;
+use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::RepositoryError;
 
 use crate::error_kind::ErrorKind;
@@ -1021,6 +1022,22 @@ static CONTRACT: &[ContractRow] = &[
         human: || "HTTP 404 from https://example.com/x.git".to_owned(),
         hint: Some("check the URL, and that you have access to the repository"),
     },
+    ContractRow {
+        label: "unsupported_object_store",
+        build: || {
+            Error::new(LibError::Repository(
+                RepositoryError::UnsupportedObjectStore {
+                    operation: FilesOnlyOperation::CommitGraphWrite,
+                },
+            ))
+        },
+        kind: Some(ErrorKind::UnsupportedObjectStore),
+        exit: ExitStatus::Failure,
+        human: || {
+            "writing a commit-graph file needs the files-backed object store, but this repository's primary store is custom".to_owned()
+        },
+        hint: None,
+    },
 ];
 
 pub fn assert_error_map_contract() {
@@ -1045,6 +1062,16 @@ pub fn assert_error_map_contract() {
             }
         }
     }
+    let refused = classify(&Error::new(LibError::Repository(
+        RepositoryError::UnsupportedObjectStore {
+            operation: FilesOnlyOperation::PackInstall,
+        },
+    )));
+    let payload = refused.payload.expect("unsupported_object_store payload");
+    assert_eq!(payload.operation, Some("pack_install"));
+    let json = serde_json::to_value(&payload).expect("serialize payload");
+    assert_eq!(json["kind"], "unsupported_object_store");
+    assert_eq!(json["operation"], "pack_install");
     for kind in required_kinds {
         assert!(
             CONTRACT.iter().any(|r| r.kind == Some(*kind)),

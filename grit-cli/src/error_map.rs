@@ -1057,6 +1057,15 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 },
             },
         )),
+        LibError::Repository(RepositoryError::UnsupportedObjectStore { operation }) => {
+            Some(Error::new(StructuredCliError {
+                human: err.to_string(),
+                payload: StructuredJsonError {
+                    operation: Some(operation.as_str()),
+                    ..StructuredJsonError::new(err.to_string(), ErrorKind::UnsupportedObjectStore)
+                },
+            }))
+        }
         LibError::Repository(RepositoryError::GitDirPathIo(io)) => {
             let path = io
                 .path
