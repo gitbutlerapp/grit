@@ -4,10 +4,11 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 use grit_test_support::objects::git_supports_sha256;
 
 const EMPTY_TREE_SHA1: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";

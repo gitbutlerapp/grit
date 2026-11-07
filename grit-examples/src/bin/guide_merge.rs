@@ -5,8 +5,8 @@
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::ident::Signature;
+use grit_lib::merge::MergePredictionOptions;
 use grit_lib::objects::{NewCommit, ObjectId};
-use grit_lib::porcelain::merge::{write_merge_tree, MergePredictionOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::ResolveOptions;
 use std::path::{Path, PathBuf};
@@ -44,7 +44,9 @@ fn main() -> Result<()> {
         .resolve("theirs", &ResolveOptions::default())?;
 
     // Merges over the first merge base and stores the result, like `git merge-tree --write-tree`.
-    let merged = write_merge_tree(&repo, ours, theirs, &MergePredictionOptions::default())?;
+    let merged = repo
+        .merge()
+        .write_tree(ours, theirs, &MergePredictionOptions::default())?;
 
     println!("merged_tree={}", merged.tree.to_hex());
     println!("conflicted_paths={}", merged.conflicts.len());

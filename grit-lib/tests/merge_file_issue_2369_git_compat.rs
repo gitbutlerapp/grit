@@ -4,14 +4,12 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::{IntegrateBranchOutcome, MergePrediction, MergePredictionOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::{
-    integrate_branch, predict_merge, IntegrateBranchOutcome, MergePrediction,
-    MergePredictionOptions,
-};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::{integrate_branch, predict_merge};
 
 #[test]
 fn issue_2369_repo_merge_and_predict_match_git_merge_file() {

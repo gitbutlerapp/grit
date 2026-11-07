@@ -4,18 +4,19 @@ use std::fs;
 use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{parse_commit, parse_tree};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::Repository;
+use grit_test_support::integrate_branch;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 

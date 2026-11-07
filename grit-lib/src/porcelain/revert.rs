@@ -45,7 +45,7 @@ use crate::revwalk::parse_rev_walk_tokens;
 ///
 /// Rev-parse errors when a spec does not resolve to a commit (for example a tree-ish),
 /// and rev-list or object read errors while walking a range.
-pub fn commits_to_revert(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
+pub(crate) fn commits_to_revert(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
     let tokens: Vec<&str> = specs.iter().map(String::as_str).collect();
     let parsed = parse_rev_walk_tokens(repo, &tokens)?;
     let include = resolve_revision_specs_to_commits(repo, &parsed.positive)?;
@@ -73,7 +73,7 @@ pub fn commits_to_revert(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
 /// # Errors
 ///
 /// Propagates rev-list and object read errors.
-pub fn revision_range_apply_order(
+pub(crate) fn revision_range_apply_order(
     repo: &Repository,
     include: &[ObjectId],
     exclude: &[ObjectId],

@@ -5,9 +5,10 @@ use std::path::Path;
 use crate::support::{git, git_ls_files_stage, open_grit_repo};
 use grit_lib::error::Error;
 use grit_lib::index::IndexError;
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
+use grit_test_support::{abort_branch_merge, integrate_branch};
 
 fn build_issue_2359_fixture(root: &Path) -> (ObjectId, ObjectId) {
     git(root, &["init", "-q", "-b", "main"]);

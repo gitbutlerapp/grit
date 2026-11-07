@@ -5,14 +5,16 @@ use std::path::Path;
 use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::MergeSourceKind;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
-use grit_lib::porcelain::merge::{resolve_merge_source, MergeSourceKind};
+use grit_lib::refs::list_refs_for_repository;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefNameRef, RefStore, RefTransaction, RefUpdate,
     ReflogUpdate,
 };
 use grit_lib::repo::Repository;
+use grit_test_support::resolve_merge_source;
 use time::OffsetDateTime;
 
 fn open_memory_ref_repo(git_dir: &Path) -> Repository {

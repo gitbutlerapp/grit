@@ -9,6 +9,7 @@ pub mod blame;
 pub mod cli_fixture;
 pub mod commit;
 pub mod git_http_backend;
+pub mod merge_api;
 pub mod net;
 pub mod objects;
 pub mod odb_conformance;
@@ -26,6 +27,13 @@ pub use cli_fixture::{
     SnapshotExitCodes, SnapshotOutputMode,
 };
 pub use commit::{commit_request, empty_commit_request};
+pub use merge_api::{
+    abort_branch_merge, abort_replay_sequence, commits_to_replay, continue_merge,
+    continue_replay_sequence, integrate_branch, integrate_branch_with, integrate_detached_head,
+    plan_branch_merge, predict_merge, predict_replay_sequence, replay_commit, repo_rerere,
+    rerere_diff_for_path, rerere_post_commit, rerere_remaining_lines, rerere_status_lines,
+    resolve_merge_source, skip_replay_step, start_replay_sequence, write_merge_tree,
+};
 pub use net::free_port;
 pub use objects::{
     git_cat_file_batch_check, git_commit_graph_verify, git_fsck, git_hash_object_literally,

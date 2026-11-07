@@ -789,8 +789,8 @@ pub fn hash_object_stdin_write(repo: &Repository) -> Result<()> {
 /// Run [`predict_merge`](grit_lib::porcelain::merge::predict_merge) for the pick/merge
 /// hot-path fixture metadata in `repo` (matches `git merge-tree --write-tree` oids).
 pub fn merge_predict_hot_path(repo_path: &Path) -> Result<()> {
+    use grit_lib::merge::MergePredictionOptions;
     use grit_lib::objects::ObjectId;
-    use grit_lib::porcelain::merge::{predict_merge, MergePredictionOptions};
 
     let meta = crate::hot_path_fixture::load_meta(repo_path)?;
     let into: ObjectId = meta
@@ -802,7 +802,8 @@ pub fn merge_predict_hot_path(repo_path: &Path) -> Result<()> {
         .parse()
         .context("parse pick_commit from hot-path meta")?;
     let repo = open_repo(repo_path)?;
-    predict_merge(&repo, into, other, &MergePredictionOptions::default())?;
+    repo.merge()
+        .predict(into, other, &MergePredictionOptions::default())?;
     Ok(())
 }
 

@@ -10,16 +10,17 @@ use std::sync::Arc;
 
 use grit_lib::change_id::{change_id, ChangeId, ChangeIdGenerator, ChangeIdPolicy};
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::stage;
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 
 struct FixedGenerator([u8; 16]);
 

@@ -1100,6 +1100,13 @@ impl Repository {
         crate::diff::Diff::new(self)
     }
 
+    /// Merge, pick, revert, replay and rerere for this repository.
+    #[inline]
+    #[must_use]
+    pub fn merge(&self) -> crate::merge::Merge<'_> {
+        crate::merge::Merge::new(self)
+    }
+
     /// Snapshot-checkout operations for this repository: making and projecting snapshots
     /// on a server, and refreshing and checking in from a checkout.
     #[must_use]

@@ -101,7 +101,7 @@ pub enum ReplayOutcome {
 ///
 /// The work-tree update reports [`crate::progress::ProgressPhase::CheckingOutFiles`] to
 /// `progress`.
-pub fn replay_commit(
+pub(crate) fn replay_commit(
     repo: &Repository,
     req: &ReplayRequest,
     progress: &mut dyn ProgressSink,

@@ -21,14 +21,15 @@ use crate::worktree::WorktreeError;
 
 use crate::fetch_request::{configured_remote_for_pull, resolve_remote_argument};
 use crate::index::IndexError;
+use crate::merge::{BranchIntegrateRequest, MergeSource, MergeSourceKind};
 use crate::merge_base::{count_symmetric_ahead_behind, is_ancestor};
 use crate::objects::ObjectId;
 use crate::operation::Conflict;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::checkout_reflog::checkout_reflog_identity;
 use crate::porcelain::merge::{
-    ensure_branch_tip, integrate_branch_with_options, predict_merge, update_checked_out_branch,
-    IntegrateBranchOptions, IntegrateBranchOutcome, MergePrediction, MergePredictionOptions,
+    ensure_branch_tip, predict_merge, update_checked_out_branch, IntegrateBranchOptions,
+    IntegrateBranchOutcome, MergePrediction, MergePredictionOptions,
 };
 use crate::porcelain::merge_error::MergeError;
 use crate::porcelain::stash::{
@@ -861,15 +862,20 @@ fn integrate_fetched_upstream(
         }
     }
 
-    let integrate = integrate_branch_with_options(
-        repo,
-        refname,
-        head_oid,
-        upstream_oid,
-        label,
-        IntegrateBranchOptions {
-            allow_fast_forward: integration.allow_fast_forward,
+    let integrate = repo.merge().integrate_into_branch(
+        &BranchIntegrateRequest {
+            into_ref: refname,
+            into_oid: head_oid,
+            source: &MergeSource {
+                oid: upstream_oid,
+                kind: MergeSourceKind::Commit,
+            },
+            label,
         },
+        &IntegrateBranchOptions {
+            allow_fast_forward: integration.allow_fast_forward,
+        }
+        .into(),
         progress,
         cancel,
     )?;
@@ -938,15 +944,20 @@ fn rebase_fetched_upstream(
         // Nothing was rewritten: integrate like `git pull --rebase`, which fast-forwards when
         // the branch is simply behind the upstream tip.
         RebaseOutcome::Done { .. } | RebaseOutcome::ExecDone { .. } => {
-            let integrate = integrate_branch_with_options(
-                repo,
-                refname,
-                head_oid,
-                upstream_oid,
-                label,
-                IntegrateBranchOptions {
-                    allow_fast_forward: true,
+            let integrate = repo.merge().integrate_into_branch(
+                &BranchIntegrateRequest {
+                    into_ref: refname,
+                    into_oid: head_oid,
+                    source: &MergeSource {
+                        oid: upstream_oid,
+                        kind: MergeSourceKind::Commit,
+                    },
+                    label,
                 },
+                &IntegrateBranchOptions {
+                    allow_fast_forward: true,
+                }
+                .into(),
                 progress,
                 cancel,
             )?;

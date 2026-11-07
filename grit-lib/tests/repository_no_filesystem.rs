@@ -15,10 +15,10 @@ use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::{ConfigOverride, Environment, RepositoryOptions};
 use grit_lib::diff::{DiffStatus, TreeDiffOptions};
 use grit_lib::ident::Signature;
+use grit_lib::merge::MergePredictionOptions;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{parse_tree, HashAlgo, NewCommit, ObjectId, ObjectKind, TreeEntry};
-use grit_lib::porcelain::merge::{write_merge_tree, MergePredictionOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RefName};
 use grit_lib::remote::fetch::NoProgress;
@@ -29,6 +29,7 @@ use grit_lib::repo_handles::{NoteAddOutcome, NotesWriteOptions};
 use grit_lib::revwalk::history::{ApplyOptions, EmptyPolicy, RefScope, RewriteOptions};
 use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::revwalk::ResolveOptions;
+use grit_test_support::write_merge_tree;
 use time::OffsetDateTime;
 
 fn signature(name: &str, seconds: i64) -> Signature {

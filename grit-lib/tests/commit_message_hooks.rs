@@ -15,12 +15,9 @@ use grit_lib::command_runner::hooks::HookError;
 use grit_lib::command_runner::hooks::{HookName, PostOperationHooks};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
+use grit_lib::merge::{ContinueOptions, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{create_commit, CommitOutcome, CommitRequest, HookPolicy};
-use grit_lib::porcelain::merge::{
-    continue_merge, integrate_branch_with, ContinueOptions, IntegrateBranchOutcome,
-    MergeCommitMode, MergeOptions,
-};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -29,6 +26,7 @@ use grit_lib::revwalk::history::{
     RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope, RewriteOptions,
     StartRebaseOptions,
 };
+use grit_test_support::{continue_merge, integrate_branch_with};
 
 const IDENT: &str = "Hook Tester <hooks@grit.test> 1700000000 +0000";
 const LOGGED_HOOKS: [&str; 6] = [

@@ -43,7 +43,7 @@ pub struct WorktreeSnapshot {
 /// # Errors
 ///
 /// Returns errors from index I/O, ODB reads, or when the repository has no work tree.
-pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
+pub(crate) fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
     let _work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
@@ -1628,7 +1628,7 @@ pub(crate) fn prepare_worktree_for_pick(repo: &Repository) -> Result<Option<Work
 /// # Errors
 ///
 /// Returns [`crate::worktree::WorktreeError::DirtyWorktree`] naming the changed paths.
-pub fn ensure_worktree_clean_for_pick(repo: &Repository) -> Result<()> {
+pub(crate) fn ensure_worktree_clean_for_pick(repo: &Repository) -> Result<()> {
     ensure_worktree_clean_for(repo, WorktreeOperation::Pick, false)
 }
 
@@ -1637,7 +1637,8 @@ pub fn ensure_worktree_clean_for_pick(repo: &Repository) -> Result<()> {
 /// # Errors
 ///
 /// Returns [`crate::worktree::WorktreeError::DirtyWorktree`] naming the changed paths.
-pub fn ensure_worktree_clean_for_merge(repo: &Repository) -> Result<()> {
+#[allow(dead_code)]
+pub(crate) fn ensure_worktree_clean_for_merge(repo: &Repository) -> Result<()> {
     ensure_worktree_clean_for(repo, WorktreeOperation::Merge, true)
 }
 
@@ -1646,7 +1647,7 @@ pub fn ensure_worktree_clean_for_merge(repo: &Repository) -> Result<()> {
 /// # Errors
 ///
 /// Returns [`crate::worktree::WorktreeError::DirtyWorktree`] naming the changed paths.
-pub fn ensure_worktree_clean_for_rebase_exec(repo: &Repository) -> Result<()> {
+pub(crate) fn ensure_worktree_clean_for_rebase_exec(repo: &Repository) -> Result<()> {
     ensure_worktree_clean_for(repo, WorktreeOperation::RebaseExec, false)
 }
 
@@ -1663,7 +1664,8 @@ pub struct TreeSwitchPlan {
 /// # Errors
 ///
 /// Returns [`crate::worktree::WorktreeError::DirtyWorktree`] when staged or unstaged changes exist, or I/O/ODB failures.
-pub fn prepare_tree_switch(
+#[allow(dead_code)]
+pub(crate) fn prepare_tree_switch(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
@@ -1742,7 +1744,7 @@ fn added_path_collides_with_untracked(added: &str, untracked: &str) -> bool {
 /// exact matches and file/directory clashes at component boundaries (e.g. added `slot` vs
 /// untracked `slot/precious.txt`, or the reverse).
 #[must_use]
-pub fn untracked_would_be_overwritten_by_tree_changes(
+pub(crate) fn untracked_would_be_overwritten_by_tree_changes(
     untracked_paths: &[String],
     tree_changes: &[DiffEntry],
 ) -> Vec<String> {
@@ -1778,7 +1780,7 @@ pub fn untracked_would_be_overwritten_by_tree_changes(
 ///
 /// Returns [`crate::worktree::WorktreeError::WouldOverwrite`] with [`OverwriteReason::Untracked`] and every
 /// colliding path (same display wording as `grit switch`).
-pub fn ensure_no_untracked_overwrite(
+pub(crate) fn ensure_no_untracked_overwrite(
     untracked_paths: &[String],
     tree_changes: &[DiffEntry],
 ) -> Result<()> {
@@ -1802,7 +1804,7 @@ pub fn ensure_no_untracked_overwrite(
 ///
 /// Returns [`crate::worktree::WorktreeError::WouldOverwrite`] when an untracked path would be overwritten, or on
 /// I/O/ODB failures.
-pub fn prepare_tree_checkout(
+pub(crate) fn prepare_tree_checkout(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,

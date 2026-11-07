@@ -14,15 +14,13 @@ use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::error::RefError;
+use grit_lib::merge::{
+    ReplayAbortOutcome, ReplayCreated, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+    SequencePrediction,
+};
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::Conflict;
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    abort_replay_sequence, continue_replay_sequence, predict_replay_sequence, skip_replay_step,
-    start_replay_sequence, ReplayCreated, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
-    SequencePrediction,
-};
-use grit_lib::porcelain::revert::commits_to_revert;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -242,8 +240,11 @@ pub struct RevertRunOptions {
 pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     let repo = context::discover()?;
     if opts.abort {
-        use grit_lib::porcelain::replay_sequence::ReplayAbortOutcome;
-        match abort_replay_sequence(&repo).map_err(|e| map_replay_error(&repo, e))? {
+        match repo
+            .merge()
+            .abort_sequence()
+            .map_err(|e| map_replay_error(&repo, e))?
+        {
             ReplayAbortOutcome::Rewound => {}
             ReplayAbortOutcome::ClearedInPlace => {
                 eprintln!(
@@ -262,31 +263,35 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     let mut progress = grit_lib::progress::NullProgress;
 
     if opts.continue_revert {
-        let outcome = continue_replay_sequence(
-            &repo,
-            &committer,
-            &mut progress,
-            &crate::interrupt::process_cancel_token(),
-        )
-        .map_err(|e| map_replay_error(&repo, e))?;
+        let outcome = repo
+            .merge()
+            .continue_sequence(
+                &committer,
+                &mut progress,
+                &crate::interrupt::process_cancel_token(),
+            )
+            .map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome));
     }
     if opts.skip {
-        let outcome = skip_replay_step(
-            &repo,
-            &committer,
-            &mut progress,
-            &crate::interrupt::process_cancel_token(),
-        )
-        .map_err(|e| map_replay_error(&repo, e))?;
+        let outcome = repo
+            .merge()
+            .skip_sequence_step(
+                &committer,
+                &mut progress,
+                &crate::interrupt::process_cancel_token(),
+            )
+            .map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome));
     }
 
     if opts.commits.is_empty() {
         bail!("at least one commit is required unless using --continue, --abort, or --skip");
     }
-    let sources =
-        commits_to_revert(&repo, &opts.commits).map_err(crate::error_map::map_commit_spec_error)?;
+    let sources = repo
+        .merge()
+        .commits_to_revert(&opts.commits)
+        .map_err(crate::error_map::map_commit_spec_error)?;
     if opts.dry_run {
         return Ok(RevertOutcome::dry_run(sources));
     }
@@ -313,17 +318,20 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
         },
     };
     if opts.check {
-        let prediction =
-            predict_replay_sequence(&repo, &req).map_err(|e| map_replay_error(&repo, e))?;
+        let prediction = repo
+            .merge()
+            .predict_sequence(&req)
+            .map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_prediction_outcome(prediction));
     }
-    let outcome = start_replay_sequence(
-        &repo,
-        &req,
-        &mut progress,
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(|e| map_replay_error(&repo, e))?;
+    let outcome = repo
+        .merge()
+        .start_sequence(
+            &req,
+            &mut progress,
+            &crate::interrupt::process_cancel_token(),
+        )
+        .map_err(|e| map_replay_error(&repo, e))?;
     Ok(map_sequence_outcome(outcome))
 }
 

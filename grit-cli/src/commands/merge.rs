@@ -18,15 +18,13 @@ use anyhow::{bail, Context, Result};
 use grit_lib::change_id::ChangeId;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
+use grit_lib::merge::{
+    ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeDryRunPlan,
+    MergeOptions, MergePrediction, MergePredictionOptions, MergeSource,
+};
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::Conflict;
 use grit_lib::porcelain::commit::HookPolicy;
-use grit_lib::porcelain::merge::{
-    abort_branch_merge, continue_merge, integrate_branch_with, integrate_detached_head_with,
-    plan_branch_merge, predict_merge, resolve_merge_source, ContinueOptions, FastForwardPolicy,
-    IntegrateBranchOutcome, MergeCommitMode, MergeDryRunPlan, MergeOptions, MergePrediction,
-    MergePredictionOptions,
-};
 use grit_lib::porcelain::MergeError;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::ProgressSink;
@@ -586,7 +584,7 @@ pub fn run(
     let _interrupt = crate::interrupt::InterruptCancel::install();
 
     if abort {
-        abort_branch_merge(&repo).map_err(anyhow::Error::new)?;
+        repo.merge().abort().map_err(anyhow::Error::new)?;
         return Ok(MergeOutcome::aborted());
     }
 
@@ -614,14 +612,15 @@ pub fn run(
     }
 
     let head = repo.references().head()?;
-    let other_oid = resolve_merge_source(&repo, branch)
-        .map_err(crate::json_error::map_lib_error)?
-        .oid;
+    let source = repo
+        .merge()
+        .resolve_source(branch)
+        .map_err(crate::json_error::map_lib_error)?;
+    let other_oid = source.oid;
     let merge_options = build_merge_options(&options)?;
 
     match head {
         HeadState::Branch {
-            refname,
             short_name,
             oid: Some(head_oid),
             ..
@@ -648,9 +647,7 @@ pub fn run(
             }
             integrate_with_options(
                 &repo,
-                &refname,
-                head_oid,
-                other_oid,
+                &source,
                 branch,
                 &short_name,
                 &merge_options,
@@ -682,11 +679,11 @@ pub fn run(
                 )?
                 .for_detached_head());
             }
-            integrate_detached_with_options(
+            integrate_with_options(
                 &repo,
-                head_oid,
-                other_oid,
+                &source,
                 branch,
+                "HEAD",
                 &merge_options,
                 progress,
                 &crate::interrupt::process_cancel_token(),
@@ -762,7 +759,7 @@ fn run_continue(
         author: Some(context::signature(repo, IdentRole::Author, now)?),
         committer: Some(context::signature(repo, IdentRole::Committer, now)?),
     };
-    match continue_merge(repo, &options, progress, cancel) {
+    match repo.merge().continue_merge(&options, progress, cancel) {
         Ok(outcome) => {
             let mut merged = MergeOutcome::merged(&label, outcome.oid, outcome.change_id);
             merged.rerere = crate::operation_output::rerere_events_json(&outcome.rerere);
@@ -783,7 +780,10 @@ fn dry_run_merge(
     head_short: &str,
     options: &MergeOptions,
 ) -> Result<MergeOutcome> {
-    match plan_branch_merge(repo, into_oid, other_oid, label, options)? {
+    match repo
+        .merge()
+        .plan_integration(into_oid, other_oid, label, options)?
+    {
         MergeDryRunPlan::UpToDate => Ok(MergeOutcome::up_to_date_dry_run(label)),
         MergeDryRunPlan::FastForward { tip, change_id } => Ok(MergeOutcome::fast_forward_dry_run(
             label, head_short, tip, change_id,
@@ -812,7 +812,7 @@ fn check_merge(
         directory_renames: merge_options.directory_renames,
         ..MergePredictionOptions::default()
     };
-    match predict_merge(repo, into_oid, other_oid, &options)? {
+    match repo.merge().predict(into_oid, other_oid, &options)? {
         MergePrediction::UpToDate => Ok(MergeOutcome::up_to_date_check(label)),
         MergePrediction::FastForward => Ok(MergeOutcome::fast_forward_check(
             label,
@@ -837,59 +837,33 @@ fn stored_change_id(repo: &Repository, oid: ObjectId) -> Result<Option<ChangeId>
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn integrate_with_options(
     repo: &Repository,
-    into_ref: &str,
-    into_oid: ObjectId,
-    other_oid: ObjectId,
+    source: &MergeSource,
     label: &str,
     head_short: &str,
     options: &MergeOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<MergeOutcome> {
-    match integrate_branch_with(
-        repo,
-        into_ref,
-        into_oid,
-        other_oid,
-        label,
-        options,
-        progress,
-        cancel,
-    ) {
-        Ok(outcome) => Ok(map_integrate_outcome(outcome, label, head_short)),
-        Err(Error::Merge(MergeError::NotFastForward)) => Ok(MergeOutcome::refused_not_ff(label)),
-        Err(err @ Error::Hook(_)) => Err(json_error::hook_failed_with_hint(
-            err,
-            "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel",
-        )),
-        Err(err) => Err(err.into()),
-    }
-}
-
-fn integrate_detached_with_options(
-    repo: &Repository,
-    into_oid: ObjectId,
-    other_oid: ObjectId,
-    label: &str,
-    options: &MergeOptions,
-    progress: &mut dyn ProgressSink,
-    cancel: &CancelToken,
-) -> Result<MergeOutcome> {
-    match integrate_detached_head_with(
-        repo,
-        into_oid,
-        other_oid,
-        label,
-        options,
-        progress,
-        cancel,
-    ) {
-        Ok(outcome) => Ok(map_integrate_outcome(outcome, label, "HEAD").for_detached_head()),
+    let detached = matches!(repo.references().head()?, HeadState::Detached { .. });
+    match repo
+        .merge()
+        .integrate(source, label, options, progress, cancel)
+    {
+        Ok(outcome) => {
+            let mut mapped = map_integrate_outcome(outcome, label, head_short);
+            if detached {
+                mapped = mapped.for_detached_head();
+            }
+            Ok(mapped)
+        }
         Err(Error::Merge(MergeError::NotFastForward)) => {
-            Ok(MergeOutcome::refused_not_ff(label).for_detached_head())
+            let mut o = MergeOutcome::refused_not_ff(label);
+            if detached {
+                o = o.for_detached_head();
+            }
+            Ok(o)
         }
         Err(err @ Error::Hook(_)) => Err(json_error::hook_failed_with_hint(
             err,

@@ -1,9 +1,8 @@
 //! In-memory merge dry-run planning (`plan_branch_merge`).
 
-use grit_lib::porcelain::merge::{
-    plan_branch_merge, FastForwardPolicy, MergeCommitMode, MergeDryRunPlan, MergeOptions,
-};
+use grit_lib::merge::{FastForwardPolicy, MergeCommitMode, MergeDryRunPlan, MergeOptions};
 use grit_lib::repo::Repository;
+use grit_test_support::plan_branch_merge;
 use grit_test_support::{git, git_dir_state_digest, git_fsck};
 use tempfile::TempDir;
 

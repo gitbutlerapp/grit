@@ -14,15 +14,14 @@ use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::error::RefError;
+use grit_lib::merge::{
+    ReplayAbortOutcome, ReplayCreated, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+    SequencePrediction,
+};
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::next_step_grit_commands;
 use grit_lib::operation::Conflict;
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
-    skip_replay_step, start_replay_sequence, ReplayAbortOutcome, ReplayCreated, ReplayOptions,
-    ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
-};
 use grit_lib::state::InProgressOperation;
 use grit_lib::state::{operation_alternatives, operation_next_steps_empty};
 use schemars::JsonSchema;
@@ -211,7 +210,11 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
     }
 
     if opts.abort {
-        match abort_replay_sequence(&repo).map_err(|e| map_replay_error(&repo, e))? {
+        match repo
+            .merge()
+            .abort_sequence()
+            .map_err(|e| map_replay_error(&repo, e))?
+        {
             ReplayAbortOutcome::Rewound => {}
             ReplayAbortOutcome::ClearedInPlace => {
                 eprintln!(
@@ -226,24 +229,26 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
     let mut progress = grit_lib::progress::NullProgress;
 
     if opts.continue_pick {
-        let outcome = continue_replay_sequence(
-            &repo,
-            &committer,
-            &mut progress,
-            &crate::interrupt::process_cancel_token(),
-        )
-        .map_err(|e| map_replay_error(&repo, e))?;
+        let outcome = repo
+            .merge()
+            .continue_sequence(
+                &committer,
+                &mut progress,
+                &crate::interrupt::process_cancel_token(),
+            )
+            .map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome, PickResult::Picked));
     }
 
     if opts.skip {
-        let outcome = skip_replay_step(
-            &repo,
-            &committer,
-            &mut progress,
-            &crate::interrupt::process_cancel_token(),
-        )
-        .map_err(|e| map_replay_error(&repo, e))?;
+        let outcome = repo
+            .merge()
+            .skip_sequence_step(
+                &committer,
+                &mut progress,
+                &crate::interrupt::process_cancel_token(),
+            )
+            .map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_sequence_outcome(outcome, PickResult::Skipped));
     }
 
@@ -251,8 +256,10 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
         bail!("at least one commit or `--continue` / `--abort` / `--skip` is required");
     }
 
-    let sources =
-        commits_to_replay(&repo, &opts.commits).map_err(crate::error_map::map_commit_spec_error)?;
+    let sources = repo
+        .merge()
+        .commits_to_pick(&opts.commits)
+        .map_err(crate::error_map::map_commit_spec_error)?;
     if opts.dry_run {
         return Ok(PickOutcome {
             commits: sources
@@ -293,17 +300,20 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
         },
     };
     if opts.check {
-        let prediction =
-            predict_replay_sequence(&repo, &req).map_err(|e| map_replay_error(&repo, e))?;
+        let prediction = repo
+            .merge()
+            .predict_sequence(&req)
+            .map_err(|e| map_replay_error(&repo, e))?;
         return Ok(map_prediction_outcome(prediction));
     }
-    let outcome = start_replay_sequence(
-        &repo,
-        &req,
-        &mut progress,
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(|e| map_replay_error(&repo, e))?;
+    let outcome = repo
+        .merge()
+        .start_sequence(
+            &req,
+            &mut progress,
+            &crate::interrupt::process_cancel_token(),
+        )
+        .map_err(|e| map_replay_error(&repo, e))?;
     Ok(map_sequence_outcome(outcome, PickResult::Picked))
 }
 

@@ -13,8 +13,8 @@ use crate::support;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::index::sparse_checkout::SparseCheckout;
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::pull::{pull, PullMode, PullOptions};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
@@ -22,6 +22,7 @@ use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
+use grit_test_support::integrate_branch;
 use grit_test_support::{git, git_cmd, git_fsck, unique_tmp};
 
 fn open(dir: &Path) -> Repository {

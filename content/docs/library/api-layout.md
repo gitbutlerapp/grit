@@ -12,7 +12,8 @@ For naming rules, semver policy on the path to **0.6.0**, and how to add a publi
 | [`refs`](rustdoc:grit_lib::refs) | Ref backends, reflog, refspecs, reftable, name validation |
 | [`index`](rustdoc:grit_lib::index) | Index file, sparse checkout, split index, untracked cache |
 | [`revwalk`](rustdoc:grit_lib::revwalk) | `rev-parse`, `rev-list`, merge-base, commit-graph |
-| [`diff`](rustdoc:grit_lib::diff) | Tree/content diff, merge diffs, rerere, patch-ids helpers |
+| [`diff`](rustdoc:grit_lib::diff) | Tree/content diff, patch-ids helpers |
+| [`merge`](rustdoc:grit_lib::merge) | Branch merge, pick/revert/replay, rerere, tree merge |
 | [`config`](rustdoc:grit_lib::config) | Config cascade, identity, init/bootstrap |
 | [`remote`](rustdoc:grit_lib::remote) | Remotes, fetch/push, transport, credentials |
 | [`worktree`](rustdoc:grit_lib::worktree) | Working tree, ignore, attributes, pathspec |

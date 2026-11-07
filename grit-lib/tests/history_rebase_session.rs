@@ -952,13 +952,12 @@ fn start_rebase_refuses_when_session_active() {
 #[test]
 fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
     use grit_lib::error::Error;
+    use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest};
     use grit_lib::porcelain::pull::{pull, PullOptions};
     use grit_lib::porcelain::replay::ReplayDirection;
-    use grit_lib::porcelain::replay_sequence::{
-        start_replay_sequence, ReplayOptions, ReplaySequenceRequest,
-    };
     use grit_lib::progress::NullProgress;
     use grit_lib::remote::fetch::NoProgress;
+    use grit_test_support::start_replay_sequence;
 
     let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();
     let wt = repo.worktree();

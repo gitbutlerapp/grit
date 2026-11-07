@@ -4,13 +4,10 @@
 
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::{ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    continue_replay_sequence, start_replay_sequence, ReplayEmptyPolicy, ReplayOptions,
-    ReplaySequenceRequest, SequenceOutcome,
-};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use std::fs;
@@ -107,8 +104,7 @@ fn demo_conflict_sequence(root: &Path) -> Result<()> {
         },
     };
 
-    match start_replay_sequence(
-        &repo,
+    match repo.merge().start_sequence(
         &req,
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -141,8 +137,7 @@ fn demo_conflict_sequence(root: &Path) -> Result<()> {
         &grit_lib::progress::CancelToken::never(),
     )?;
 
-    match continue_replay_sequence(
-        &repo,
+    match repo.merge().continue_sequence(
         &replay_identity(),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -201,8 +196,7 @@ fn main() -> Result<()> {
             println!("unmerged index — resolve and stage before continue");
             return Ok(());
         }
-        match continue_replay_sequence(
-            &repo,
+        match repo.merge().continue_sequence(
             &replay_identity(),
             &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),

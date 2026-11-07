@@ -13,11 +13,9 @@ use std::process::Command;
 
 use grit_lib::command_runner::hooks::{HookName, PostOperationHooks};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::merge::{IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::merge::{
-    integrate_branch_with, IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
-};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -27,6 +25,7 @@ use grit_lib::revwalk::history::{
     RewordOptions, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
+use grit_test_support::integrate_branch_with;
 
 const IDENT: &str = "Hook Tester <hooks@grit.test> 1700000000 +0000";
 const LOGGED_HOOKS: [&str; 4] = ["post-checkout", "post-merge", "post-rewrite", "post-commit"];

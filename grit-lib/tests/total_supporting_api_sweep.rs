@@ -13,12 +13,14 @@ use grit_lib::commit::trailers::interpret::{
 };
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::diff::rerere::{
-    repo_rerere, rerere_clear, rerere_conflict_id, rerere_diff_for_path, rerere_enabled, rerere_gc,
-    rerere_post_commit, rerere_remaining_lines, rerere_status_lines, RerereAutoupdate,
-};
+use grit_lib::diff::rerere::{rerere_clear, rerere_conflict_id, rerere_enabled, rerere_gc};
+use grit_lib::merge::RerereAutoupdate;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
+use grit_test_support::{
+    repo_rerere, rerere_diff_for_path, rerere_post_commit, rerere_remaining_lines,
+    rerere_status_lines,
+};
 use std::fs;
 use tempfile::tempdir;
 

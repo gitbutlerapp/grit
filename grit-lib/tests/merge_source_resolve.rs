@@ -3,10 +3,11 @@
 use grit_lib::error::Error;
 use grit_lib::error::ObjectError;
 use grit_lib::error::RevisionError;
+use grit_lib::merge::{MergeSource, MergeSourceKind};
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::merge::{resolve_merge_source, MergeSource, MergeSourceKind};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::resolve_merge_source;
 use tempfile::TempDir;
 
 fn open_repo(path: &std::path::Path) -> Repository {

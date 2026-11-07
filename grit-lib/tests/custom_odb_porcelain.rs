@@ -12,20 +12,20 @@ use std::sync::Arc;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::{ConfigEditor, ConfigScope, ConfigWriteOptions};
 use grit_lib::maintenance::repository_fsck::FsckOptions;
+use grit_lib::merge::IntegrateBranchOutcome;
+use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
-};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RefName};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_test_support::integrate_branch;
+use grit_test_support::start_replay_sequence;
 
 const IDENT: &str = "A U Thor <author@example.com> 1700000000 +0000";
 

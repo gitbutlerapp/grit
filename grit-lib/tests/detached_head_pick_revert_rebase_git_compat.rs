@@ -6,9 +6,9 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayRequest};
-use grit_lib::porcelain::replay_sequence::{ReplayOptions, ReplaySequenceRequest};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -298,7 +298,8 @@ fn grit_predict_pick_on_detached_head() {
     let root = tempfile::tempdir().expect("tmpdir");
     let (_main_tip, side_tip) = init_linear_repo(root.path());
     let repo = open_grit(root.path());
-    use grit_lib::porcelain::replay_sequence::{predict_replay_sequence, SequencePrediction};
+    use grit_lib::merge::SequencePrediction;
+    use grit_test_support::predict_replay_sequence;
     let prediction = predict_replay_sequence(
         &repo,
         &ReplaySequenceRequest {

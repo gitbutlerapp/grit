@@ -61,13 +61,14 @@ lockfile = "lockfile"
 line_range = "line_range"
 log_walk = "revwalk::log_walk"
 merge_base = "revwalk::merge_base"
-merge_diff = "diff::merge_diff"
-merge_file = "diff::merge_file"
-merge_trees = "diff::merge_trees"
+merge_diff = "merge::merge_diff"
+merge_file = "merge::merge_file"
+merge_trees = "merge::merge_trees"
 midx = "objects::midx"
 midx_error = "objects::midx"
 mailmap = "config::mailmap"
 maintenance = "maintenance"
+merge = "merge"
 notes = "notes"
 object_inspect = "revwalk::object_inspect"
 objects = "objects"
@@ -158,6 +159,7 @@ modules = [
   "history",
   "index",
   "maintenance",
+  "merge",
   "notes",
   "objects",
   "parallel",

@@ -12,14 +12,14 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::merge_file::MergeFavor;
 use grit_lib::diff::merge_trees::merge_trees_three_way;
+use grit_lib::merge::{
+    IntegrateBranchOutcome, MergeOptions, MergePrediction, MergePredictionOptions,
+};
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
-use grit_lib::porcelain::merge::{
-    integrate_branch_with, predict_merge, IntegrateBranchOutcome, MergeOptions, MergePrediction,
-    MergePredictionOptions,
-};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::{integrate_branch_with, predict_merge};
 use support::{
     assert_git_fsck_strict, assert_merge_output_matches_oracle, commit_tree, git_ls_files_stage,
     git_merge_tree_oracle, CommitMergeLabels,

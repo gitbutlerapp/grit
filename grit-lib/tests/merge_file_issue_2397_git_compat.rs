@@ -5,14 +5,12 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome, SequencePrediction};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    predict_replay_sequence, start_replay_sequence, ReplayOptions, ReplaySequenceRequest,
-    SequenceOutcome, SequencePrediction,
-};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_test_support::{predict_replay_sequence, start_replay_sequence};
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
 const BASE: &str = include_str!("fixtures/issue_2397_base.rs");

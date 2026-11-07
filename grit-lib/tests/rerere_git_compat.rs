@@ -4,16 +4,11 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::rerere::{repo_rerere, rerere_enabled, RerereAutoupdate, RerereEventKind};
+use grit_lib::merge::{ContinueOptions, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
+use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::merge::{
-    continue_merge, integrate_branch, integrate_branch_with, ContinueOptions,
-    IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
-};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
-};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -21,7 +16,9 @@ use grit_lib::revwalk::history::{
     EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
     StartRebaseOptions,
 };
-use grit_lib::state::HeadState;
+use grit_lib::state::{resolve_head, HeadState};
+use grit_test_support::start_replay_sequence;
+use grit_test_support::{continue_merge, integrate_branch, integrate_branch_with};
 use tempfile::TempDir;
 
 fn git_cmd(root: &std::path::Path, args: &[&str]) -> String {

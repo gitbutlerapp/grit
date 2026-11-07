@@ -10,10 +10,11 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::{abort_branch_merge, integrate_branch};
 
 const DIRS: usize = 200;
 const FILES_PER_DIR: usize = 300;

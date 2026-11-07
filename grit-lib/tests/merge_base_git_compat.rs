@@ -7,9 +7,10 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::repo::Repository;
+use grit_test_support::integrate_branch;
 
 use support::{
     build_commit_dag, commit_labeled_with_dates, git_commit_graph_write, git_merge_base,

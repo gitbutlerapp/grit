@@ -1,12 +1,13 @@
 //! Issue #2521: assume-unchanged must survive reset, merge, and stash like Git.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, DEFAULT_ORPHAN_LIMIT};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 
 use crate::support::{
     assert_git_fsck_strict, git_ls_files_verbose_map, git_status_porcelain_v2_lines,

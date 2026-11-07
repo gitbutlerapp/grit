@@ -6,13 +6,12 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    start_replay_sequence, ReplayOptions, ReplaySequenceRequest,
-};
 use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::repo::Repository;
+use grit_test_support::start_replay_sequence;
 
 struct CancelReplayOnCheckout {
     flag: CancelToken,

@@ -44,6 +44,10 @@ use grit_lib::config::{ConfigEditor, ConfigScope, ConfigWriteOptions};
 use grit_lib::diff::structured::{StructuredHunk, StructuredLineKind};
 use grit_lib::diff::{hunk_ids, DiffOptions, DiffSide, DiffTarget};
 use grit_lib::maintenance::repository_fsck::FsckOptions;
+use grit_lib::merge::{
+    BranchIntegrateRequest, IntegrateBranchOutcome, MergeOptions, MergeSource, MergeSourceKind,
+    ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+};
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::HashAlgo;
 use grit_lib::objects::ObjectId;
@@ -54,11 +58,7 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitOutcome, CommitRequest};
 use grit_lib::porcelain::hunk_select::unstaged_file_diffs;
 use grit_lib::porcelain::log::DecorationOptions;
-use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
-};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
@@ -616,16 +616,23 @@ fn run_snapshot_on_repo(
     commit_path(repo, "main-only.txt", "main\n", "main line", 1_700_000_010);
     let main_before_merge = head_oid(repo, "main");
 
-    let merge_out = integrate_branch(
-        repo,
-        "refs/heads/main",
-        main_before_merge,
-        feature_tip,
-        "feature",
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("merge");
+    let merge_out = repo
+        .merge()
+        .integrate_into_branch(
+            &BranchIntegrateRequest {
+                into_ref: "refs/heads/main",
+                into_oid: main_before_merge,
+                source: &MergeSource {
+                    oid: feature_tip,
+                    kind: MergeSourceKind::LocalBranch,
+                },
+                label: "feature",
+            },
+            &MergeOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("merge");
     let clean_merge_tip = match merge_out {
         IntegrateBranchOutcome::Merged { oid, .. } => oid,
         other => panic!("expected clean merge, got {other:?}"),
@@ -649,18 +656,19 @@ fn run_snapshot_on_repo(
             oid: clean_merge_tip,
         },
     );
-    let pick_out = start_replay_sequence(
-        repo,
-        &ReplaySequenceRequest {
-            commits: vec![pick_src],
-            direction: ReplayDirection::Pick,
-            committer: signature_at(1_700_000_031).parse().expect("sig"),
-            options: ReplayOptions::default(),
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("pick");
+    let pick_out = repo
+        .merge()
+        .start_sequence(
+            &ReplaySequenceRequest {
+                commits: vec![pick_src],
+                direction: ReplayDirection::Pick,
+                committer: signature_at(1_700_000_031).parse().expect("sig"),
+                options: ReplayOptions::default(),
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("pick");
     let pick_tip = match pick_out {
         SequenceOutcome::Completed { created, .. } => {
             assert_eq!(created.len(), 1);
@@ -677,18 +685,19 @@ fn run_snapshot_on_repo(
         1_700_000_040,
     );
     let revert_src = head_oid(repo, "main");
-    let revert_out = start_replay_sequence(
-        repo,
-        &ReplaySequenceRequest {
-            commits: vec![revert_src],
-            direction: ReplayDirection::Revert,
-            committer: signature_at(1_700_000_041).parse().expect("sig"),
-            options: ReplayOptions::default(),
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("revert");
+    let revert_out = repo
+        .merge()
+        .start_sequence(
+            &ReplaySequenceRequest {
+                commits: vec![revert_src],
+                direction: ReplayDirection::Revert,
+                committer: signature_at(1_700_000_041).parse().expect("sig"),
+                options: ReplayOptions::default(),
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("revert");
     let revert_tip = match revert_out {
         SequenceOutcome::Completed { created, .. } => {
             assert_eq!(created.len(), 1);
@@ -729,16 +738,23 @@ fn run_snapshot_on_repo(
         1_700_000_021,
     );
     let main_conflict = head_oid(repo, "main");
-    let conflict_out = integrate_branch(
-        repo,
-        "refs/heads/main",
-        main_conflict,
-        topic_conflict,
-        "conflict",
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("conflict merge");
+    let conflict_out = repo
+        .merge()
+        .integrate_into_branch(
+            &BranchIntegrateRequest {
+                into_ref: "refs/heads/main",
+                into_oid: main_conflict,
+                source: &MergeSource {
+                    oid: topic_conflict,
+                    kind: MergeSourceKind::LocalBranch,
+                },
+                label: "conflict",
+            },
+            &MergeOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("conflict merge");
     let conflict_paths = match conflict_out {
         IntegrateBranchOutcome::Conflicts { paths, .. } => paths,
         other => panic!("expected conflicts, got {other:?}"),
@@ -771,7 +787,7 @@ fn run_snapshot_on_repo(
     let shared_has_conflict_markers = fs::read_to_string(work_tree(repo).join("shared.txt"))
         .expect("shared")
         .contains("<<<<<<<");
-    abort_branch_merge(repo).expect("abort");
+    repo.merge().abort().expect("abort");
     let status_after_abort = status(
         repo,
         &StatusOptions::default(),

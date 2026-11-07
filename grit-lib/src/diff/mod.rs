@@ -153,18 +153,24 @@ pub mod userdiff {
 }
 pub mod merge_diff {
     //! Combined diff content for octopus merges.
-    pub use crate::merge_diff::*;
+    //!
+    //! Canonical path: [`crate::merge::merge_diff`].
+    pub use crate::merge::merge_diff::*;
 }
 pub mod merge_file {
     //! merge_file API (re-exported at this path).
     pub use crate::merge_file::*;
 }
 pub mod merge_trees {
-    //! merge_trees API (re-exported at this path).
-    pub use crate::merge_trees::*;
+    //! Tree-level three-way merge engine.
+    //!
+    //! Canonical path: [`crate::merge::merge_trees`].
+    pub use crate::merge::merge_trees::*;
 }
 pub mod rerere {
-    //! rerere API (re-exported at this path).
+    //! Recorded conflict resolution (`rerere`).
+    //!
+    //! Repository operations: [`crate::merge::MergeRerere`] from [`crate::repo::Repository::merge`].
     pub use crate::rerere::*;
 }
 /// Merge commit message formatting from FETCH_HEAD-style input.

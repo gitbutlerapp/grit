@@ -1,14 +1,15 @@
 //! Issue #1005: modify/delete merge conflicts must be resolvable via grit add/rm.
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::ConflictKind;
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 use std::fs;
 
 fn issue_1005_repo() -> (tempfile::TempDir, Repository) {

@@ -5,15 +5,15 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::IntegrateBranchOutcome;
+use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
-};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::start_replay_sequence;
+use grit_test_support::{abort_branch_merge, integrate_branch};
 
 fn ident() -> String {
     "Merge Test <merge@example.com> 1700000000 +0000".to_owned()

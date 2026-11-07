@@ -101,7 +101,7 @@ An operation on a repository is a method on the handle that owns its area. Exten
 | Linked worktrees | `repo.worktrees()` | `repo_handles::RepositoryWorktrees` | Add, list, lock, move, remove and prune linked worktrees |
 | Workspace snapshots | `repo.workspace_snapshot()` | `repo_handles::RepositoryWorkspaceSnapshot` | GitButler workspace snapshots |
 | Current checkout (new) | `repo.checkout()` | *to be added* | Status, switch, checkout, reset, restore, clean |
-| Merge family (new) | `repo.merge()` | *to be added* | Merge, pick, revert, replay, `--check` predictions, `--continue`, `--abort` and `--skip` (reading paused state stays on `operation()`) |
+| Merge family | `repo.merge()` | `merge::Merge` | Merge, pick, revert, replay, `--check` predictions, operation state (`--continue`, `--abort`, `--skip`), rerere |
 | History | `repo.history()` | `revwalk::history::History` | Commit creation and amend, history edits (reword, drop, move, fixup, squash, split, absorb), undo, rebase sessions |
 
 The remaining new accessors are added by the first step that needs each one. `repo.work_tree()` already returns the work-tree path, so the current-checkout handle is `checkout()`. Linked-worktree administration stays on `worktrees()`.

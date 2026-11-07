@@ -103,7 +103,7 @@ use crate::write_tree::write_tree_from_index;
 /// # Errors
 ///
 /// Returns an error if `oid` cannot be read or does not name a tree object.
-pub fn tree_to_index_entries(
+pub(crate) fn tree_to_index_entries(
     repo: &Repository,
     oid: &ObjectId,
     prefix: &str,
@@ -162,7 +162,7 @@ fn tree_to_index_entries_with_protect(
 
 /// Index a flat entry list by path, keeping the last entry for any duplicate.
 #[must_use]
-pub fn tree_to_map(entries: Vec<IndexEntry>) -> HashMap<Vec<u8>, IndexEntry> {
+pub(crate) fn tree_to_map(entries: Vec<IndexEntry>) -> HashMap<Vec<u8>, IndexEntry> {
     let mut out = HashMap::new();
     for e in entries {
         out.insert(e.path.clone(), e);
@@ -181,7 +181,7 @@ pub fn tree_to_map(entries: Vec<IndexEntry>) -> HashMap<Vec<u8>, IndexEntry> {
 /// # Errors
 ///
 /// Returns an error if `target_tree` or `head_tree` cannot be read as trees.
-pub fn compose_fast_forward_index(
+pub(crate) fn compose_fast_forward_index(
     repo: &Repository,
     target_tree: ObjectId,
     head_tree: ObjectId,
@@ -271,7 +271,7 @@ pub struct MergeOptions {
 
 /// Resolve conflict marker style: explicit option, then `merge.conflictStyle`, then `merge`.
 #[must_use]
-pub fn resolve_merge_conflict_style(
+pub(crate) fn resolve_merge_conflict_style(
     repo: &Repository,
     override_style: Option<ConflictStyle>,
 ) -> ConflictStyle {
@@ -379,7 +379,7 @@ pub enum MergePrediction {
 /// # Errors
 ///
 /// Propagates object read and merge failures. Does not require a clean worktree.
-pub fn predict_merge(
+pub(crate) fn predict_merge(
     repo: &Repository,
     into_oid: ObjectId,
     other_oid: ObjectId,
@@ -473,7 +473,7 @@ impl WrittenMergeTree {
 /// - [`MergeError::UnrelatedHistories`] when the commits share no merge base and
 ///   [`MergePredictionOptions::allow_unrelated_histories`] is `false`.
 /// - Object read, merge and object write failures are propagated.
-pub fn write_merge_tree(
+pub(crate) fn write_merge_tree(
     repo: &Repository,
     into_oid: ObjectId,
     other_oid: ObjectId,
@@ -579,7 +579,7 @@ pub enum MergeDryRunPlan {
 ///
 /// Propagates object read and merge failures. Returns [`MergeError::UnrelatedHistories`] when histories are
 /// unrelated and [`MergeOptions::allow_unrelated`] is false.
-pub fn plan_branch_merge(
+pub(crate) fn plan_branch_merge(
     repo: &Repository,
     into_oid: ObjectId,
     other_oid: ObjectId,
@@ -672,7 +672,7 @@ pub struct MergeSource {
 /// - [`crate::error::RevisionError::NotFound`] when `spec` names nothing.
 /// - [`crate::error::ObjectError::UnexpectedKind`] when `spec` names (or a tag peels to) a tree or blob.
 /// - Object database errors (missing or corrupt objects behind a ref) are propagated.
-pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource> {
+pub(crate) fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource> {
     let named = [
         ("refs/heads/", MergeSourceKind::LocalBranch),
         ("refs/remotes/", MergeSourceKind::RemoteBranch),
@@ -942,7 +942,8 @@ pub enum IntegrateBranchOutcome {
 /// is touched, and again when the ref moves).
 /// Returns [`Error::Cancelled`] when cancelled; the branch, `HEAD`, the index and the merge
 /// state are unchanged, and a cancel during the checkout rolls the work tree back.
-pub fn integrate_branch(
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn integrate_branch(
     repo: &Repository,
     into_ref: &str,
     into_oid: ObjectId,
@@ -988,7 +989,7 @@ pub fn integrate_branch(
 /// merged index and work tree with `MERGE_HEAD`, `ORIG_HEAD` and `MERGE_MSG` recorded and the
 /// branch unchanged: finish it with a commit ([`continue_merge`]) or [`abort_branch_merge`].
 #[allow(clippy::too_many_arguments)]
-pub fn integrate_branch_with(
+pub(crate) fn integrate_branch_with(
     repo: &Repository,
     into_ref: &str,
     into_oid: ObjectId,
@@ -1046,39 +1047,11 @@ enum IntegrateTarget {
     DetachedHead,
 }
 
-/// Integrate `other_oid` into detached `HEAD` (currently at `into_oid`).
-///
-/// Same outcomes, options, hooks, and conflict handling as [`integrate_branch`], but only
-/// `HEAD` moves on success; no branch ref is updated.
-///
-/// # Errors
-///
-/// Same as [`integrate_branch_with`], except branch-not-found and symbolic-HEAD cases do
-/// not apply when `into_oid` matches detached `HEAD`.
-pub fn integrate_detached_head(
-    repo: &Repository,
-    into_oid: ObjectId,
-    other_oid: ObjectId,
-    label: &str,
-    progress: &mut dyn ProgressSink,
-    cancel: &CancelToken,
-) -> Result<IntegrateBranchOutcome> {
-    integrate_detached_head_with(
-        repo,
-        into_oid,
-        other_oid,
-        label,
-        &MergeOptions::default(),
-        progress,
-        cancel,
-    )
-}
-
 /// Integrate `other_oid` into detached `HEAD` at `into_oid` with explicit merge options.
 ///
 /// See [`integrate_detached_head`] and [`integrate_branch_with`].
 #[allow(clippy::too_many_arguments)]
-pub fn integrate_detached_head_with(
+pub(crate) fn integrate_detached_head_with(
     repo: &Repository,
     into_oid: ObjectId,
     other_oid: ObjectId,
@@ -1341,36 +1314,6 @@ fn integrate_at_tip_without_hooks(
     }
 }
 
-/// Like [`integrate_branch`], with explicit fast-forward policy for [`pull`](crate::porcelain::pull).
-///
-/// `into_ref` and `label` follow [`integrate_branch`].
-///
-/// # Errors
-///
-/// Same as [`integrate_branch_with`].
-#[allow(clippy::too_many_arguments)]
-pub fn integrate_branch_with_options(
-    repo: &Repository,
-    into_ref: &str,
-    into_oid: ObjectId,
-    other_oid: ObjectId,
-    label: &str,
-    options: IntegrateBranchOptions,
-    progress: &mut dyn ProgressSink,
-    cancel: &CancelToken,
-) -> Result<IntegrateBranchOutcome> {
-    integrate_branch_with(
-        repo,
-        into_ref,
-        into_oid,
-        other_oid,
-        label,
-        &options.into(),
-        progress,
-        cancel,
-    )
-}
-
 struct MergeCommitPreflight {
     author: String,
     committer: String,
@@ -1560,7 +1503,7 @@ pub fn squash_conflict_merge_in_progress(git_dir: &Path) -> bool {
 /// Returns [`MergeError::NoMergeInProgress`] when no merge is active,
 /// [`MergeError::ContinueUnmergedPaths`] when conflict stages remain, and propagates
 /// commit and I/O failures (including [`Error::Cancelled`]).
-pub fn continue_merge(
+pub(crate) fn continue_merge(
     repo: &Repository,
     options: &ContinueOptions,
     progress: &mut dyn ProgressSink,
@@ -1692,7 +1635,7 @@ fn resolved_not_staged_paths(repo: &Repository, index: &Index, unmerged: &[Strin
 ///
 /// Returns [`MergeError::NoMergeInProgress`] when no merge is in progress, or propagates checkout and
 /// I/O errors.
-pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
+pub(crate) fn abort_branch_merge(repo: &Repository) -> Result<()> {
     let git_dir = repo.git_dir();
     let in_merge = !read_merge_heads(git_dir)?.is_empty();
     let squash_conflict =

@@ -2,16 +2,14 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::merge::{FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::porcelain::commit::pending_commit_message;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::merge::{
-    abort_branch_merge, integrate_branch_with, FastForwardPolicy, IntegrateBranchOutcome,
-    MergeCommitMode, MergeOptions,
-};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::{abort_branch_merge, integrate_branch_with};
 use std::process::Command;
 
 fn grit_repo(tmp: &tempfile::TempDir) -> Repository {

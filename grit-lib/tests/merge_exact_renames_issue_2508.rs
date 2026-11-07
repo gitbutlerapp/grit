@@ -7,9 +7,10 @@ use std::io::Write;
 use std::path::Path;
 
 use grit_lib::diff::merge_file::MergeFavor;
+use grit_lib::merge::{MergePrediction, MergePredictionOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::{predict_merge, MergePrediction, MergePredictionOptions};
 use grit_test_support::git;
+use grit_test_support::predict_merge;
 
 use support::{git_merge_tree_oracle, git_version_at_least, open_grit_repo};
 

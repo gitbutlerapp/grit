@@ -7,11 +7,11 @@ use std::fs;
 use std::path::Path;
 
 use grit_lib::error::Error;
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
-use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayRequest};
+use grit_lib::porcelain::replay::{ReplayDirection, ReplayRequest};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
@@ -22,6 +22,8 @@ use grit_lib::revwalk::history::{
     RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::stash::{StashApplyOptions, StashError, StashMode, StashPushOptions};
+use grit_test_support::integrate_branch;
+use grit_test_support::replay_commit;
 
 const IDENT: &str = "Cancel Test <cancel@example.com> 1700000000 +0000";
 const FILES: usize = 300;

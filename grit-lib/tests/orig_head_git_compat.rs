@@ -10,11 +10,8 @@ use grit_lib::command_runner::{system_command_runner, RecordingRunner};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
+use grit_lib::merge::{FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
-use grit_lib::porcelain::merge::{
-    integrate_branch_with, plan_branch_merge, FastForwardPolicy, IntegrateBranchOutcome,
-    MergeCommitMode, MergeOptions,
-};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::MergeError;
 use grit_lib::progress::CancelToken;
@@ -27,6 +24,7 @@ use grit_lib::revwalk::history::{
     RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_test_support::{git, git_cmd};
+use grit_test_support::{integrate_branch_with, plan_branch_merge};
 use tempfile::TempDir;
 
 const IDENT: &str = "T <t@e.c> 1700000000 +0000";

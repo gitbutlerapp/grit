@@ -165,7 +165,7 @@ pub enum SequencePrediction {
 ///
 /// Same validation failures as [`start_replay_sequence`] except worktree cleanliness and
 /// in-progress replay checks are skipped.
-pub fn predict_replay_sequence(
+pub(crate) fn predict_replay_sequence(
     repo: &Repository,
     req: &ReplaySequenceRequest,
 ) -> Result<SequencePrediction> {
@@ -242,7 +242,7 @@ pub enum SequenceOutcome {
 ///
 /// Propagates rev-parse and rev-list errors. Merge commits are not rejected here; replay stops
 /// with [`MergeError::MergeCommit`] when a step is applied without `mainline`.
-pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
+pub(crate) fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     for spec in specs {
         if let Some((exclude, include)) = try_parse_double_dot_log_range(repo, spec)? {
@@ -280,7 +280,7 @@ pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
 /// - [`crate::error::RefError::UnbornHead`], [`MergeError::MergeCommit`] (without `mainline`).
 /// - [`MergeError::ReplaySourceAtHead`] when picking a commit already at `HEAD`.
 /// - Worktree cleanliness, merge, checkout, and ref update failures.
-pub fn start_replay_sequence(
+pub(crate) fn start_replay_sequence(
     repo: &Repository,
     req: &ReplaySequenceRequest,
     progress: &mut dyn ProgressSink,
@@ -335,7 +335,7 @@ pub fn start_replay_sequence(
 ///
 /// - [`MergeError::NoReplayInProgress`] when no sequence is active.
 /// - [`MergeError::ReplayContinueUnmerged`] when the index still has unmerged entries.
-pub fn continue_replay_sequence(
+pub(crate) fn continue_replay_sequence(
     repo: &Repository,
     identity: &crate::ident::Signature,
     progress: &mut dyn ProgressSink,
@@ -534,7 +534,7 @@ fn attach_continue_rerere(
 /// # Errors
 ///
 /// - [`MergeError::NoReplayInProgress`] when no sequence is active.
-pub fn skip_replay_step(
+pub(crate) fn skip_replay_step(
     repo: &Repository,
     identity: &crate::ident::Signature,
     progress: &mut dyn ProgressSink,
@@ -667,7 +667,7 @@ pub(crate) fn finish_replay_commit_state(repo: &Repository, new_oid: ObjectId) -
 /// # Errors
 ///
 /// - [`MergeError::NoReplayInProgress`] when nothing is in progress.
-pub fn abort_replay_sequence(repo: &Repository) -> Result<ReplayAbortOutcome> {
+pub(crate) fn abort_replay_sequence(repo: &Repository) -> Result<ReplayAbortOutcome> {
     let active = load_active_replay(repo)?;
     let (branch_ref, head_oid) = branch_head(repo)?;
     if head_oid != active.abort_safety {

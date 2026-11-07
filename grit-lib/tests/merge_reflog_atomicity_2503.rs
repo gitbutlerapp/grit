@@ -10,12 +10,12 @@ use std::sync::{Arc, Mutex};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::merge::{IntegrateBranchOutcome, MergeOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{integrate_branch_with, IntegrateBranchOutcome, MergeOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::reflog::ReflogEntry;
@@ -24,6 +24,7 @@ use grit_lib::refs::store::{
     RefStore, RefStoreError, RefTransaction,
 };
 use grit_lib::repo::Repository;
+use grit_test_support::integrate_branch_with;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 

@@ -5,13 +5,13 @@ use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::merge_file::{ConflictStyle, MergeFavor};
 use grit_lib::error::Error;
-use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::merge::{
-    integrate_branch_with, resolve_merge_conflict_style, IntegrateBranchOutcome, MergeCommitMode,
-    MergeOptions,
+use grit_lib::merge::{
+    resolve_merge_conflict_style, IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
 };
+use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::integrate_branch_with;
 use std::fs;
 use std::process::Command;
 

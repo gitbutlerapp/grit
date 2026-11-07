@@ -11,11 +11,11 @@ use std::process::Command;
 use std::sync::Arc;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::branch::{create_branch, delete_branch, CreateBranchOptions, DeleteMode};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::{
     resolve_switch_target, switch_repository, SwitchMode, SwitchOptions,
@@ -29,7 +29,8 @@ use grit_lib::refs::store::{
 };
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
-use grit_lib::state::HeadState;
+use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_test_support::integrate_branch;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 

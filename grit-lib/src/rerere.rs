@@ -801,7 +801,10 @@ fn stage_resolved_path(repo: &Repository, index: &mut Index, path: &str) -> Resu
 }
 
 /// Invoked after mergy operations with conflicts (`merge`, `rebase`, …).
-pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<Vec<RerereEvent>> {
+pub(crate) fn repo_rerere(
+    repo: &Repository,
+    autoupdate: RerereAutoupdate,
+) -> Result<Vec<RerereEvent>> {
     let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(Vec::new());
@@ -1021,7 +1024,7 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<Ve
 }
 
 /// After successful commit: record postimages, clear `MERGE_RR` entries.
-pub fn rerere_post_commit(repo: &Repository) -> Result<Vec<RerereEvent>> {
+pub(crate) fn rerere_post_commit(repo: &Repository) -> Result<Vec<RerereEvent>> {
     let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(Vec::new());
@@ -1084,7 +1087,7 @@ pub fn rerere_post_commit(repo: &Repository) -> Result<Vec<RerereEvent>> {
 /// # Errors
 ///
 /// Propagates rerere and I/O failures.
-pub fn finish_merge_rerere(repo: &Repository) -> Result<Vec<RerereEvent>> {
+pub(crate) fn finish_merge_rerere(repo: &Repository) -> Result<Vec<RerereEvent>> {
     let events = rerere_post_commit(repo)?;
     let path = merge_rr_path(repo.git_dir());
     if path.exists() {
@@ -1230,7 +1233,7 @@ pub fn rerere_gc(env: &crate::environment::Environment, git_dir: &Path, now: i64
 }
 
 /// Lines for `git rerere status` (paths listed in `MERGE_RR`).
-pub fn rerere_status_lines(repo: &Repository) -> Result<Vec<String>> {
+pub(crate) fn rerere_status_lines(repo: &Repository) -> Result<Vec<String>> {
     let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(Vec::new());
@@ -1240,7 +1243,7 @@ pub fn rerere_status_lines(repo: &Repository) -> Result<Vec<String>> {
 }
 
 /// Unified diff: recorded preimage vs working tree (Git/xdiff style header).
-pub fn rerere_diff_for_path(repo: &Repository, path: &str) -> Result<Option<String>> {
+pub(crate) fn rerere_diff_for_path(repo: &Repository, path: &str) -> Result<Option<String>> {
     let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(None);
@@ -1282,7 +1285,7 @@ pub fn rerere_diff_for_path(repo: &Repository, path: &str) -> Result<Option<Stri
 /// resolved; a PUNTED conflict (unmerged but not rerere-handled, e.g.
 /// rename/rename) is inserted into the list. Finally emit every MERGE_RR entry
 /// that was not marked resolved.
-pub fn rerere_remaining_lines(repo: &Repository) -> Result<Vec<String>> {
+pub(crate) fn rerere_remaining_lines(repo: &Repository) -> Result<Vec<String>> {
     let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(Vec::new());
@@ -1337,7 +1340,7 @@ pub fn rerere_remaining_lines(repo: &Repository) -> Result<Vec<String>> {
 }
 
 /// Drop recorded resolution for `path` (working tree must show conflict markers).
-pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEvent>> {
+pub(crate) fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEvent>> {
     let mut events = Vec::new();
     let config = repo.config().snapshot()?;
     if !rerere_enabled(&config, repo.git_dir()) {

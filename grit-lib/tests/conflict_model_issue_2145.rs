@@ -10,13 +10,11 @@ use std::fs;
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::IntegrateBranchOutcome;
+use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
-};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -26,6 +24,8 @@ use grit_lib::revwalk::history::{
     RewriteOptions, StartRebaseOptions,
 };
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
+use grit_test_support::start_replay_sequence;
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
 

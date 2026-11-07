@@ -9,17 +9,20 @@ use std::process::Command;
 
 use grit_lib::change_id::change_id;
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::{
+    ReplayAbortOutcome, ReplayCreated, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
+    SequenceOutcome, SequencePrediction,
+};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
-    skip_replay_step, start_replay_sequence, ReplayAbortOutcome, ReplayCreated, ReplayEmptyPolicy,
-    ReplayOptions, ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
-};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_test_support::{
+    abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
+    skip_replay_step, start_replay_sequence,
+};
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
 
 fn replay_ident() -> grit_lib::ident::Signature {

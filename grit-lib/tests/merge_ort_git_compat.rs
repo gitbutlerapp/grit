@@ -765,7 +765,8 @@ fn assert_integrate_matches_git_merge(
     ours_branch: &str,
     theirs_branch: &str,
 ) -> MergeState {
-    use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+    use grit_lib::merge::IntegrateBranchOutcome;
+    use grit_test_support::integrate_branch;
 
     hist_git(root, &["switch", "-q", "-f", ours_branch]);
     hist_git(root, &["reset", "-q", "--hard"]);
@@ -873,7 +874,8 @@ fn criss_cross_integrate_with_favor_matches_git_merge_tree() {
         return;
     }
     use grit_lib::diff::merge_file::MergeFavor;
-    use grit_lib::porcelain::merge::{integrate_branch_with, IntegrateBranchOutcome, MergeOptions};
+    use grit_lib::merge::{IntegrateBranchOutcome, MergeOptions};
+    use grit_test_support::integrate_branch_with;
 
     for favor in [MergeFavor::Ours, MergeFavor::Theirs] {
         let cc = criss_cross_conflicting_resolutions();

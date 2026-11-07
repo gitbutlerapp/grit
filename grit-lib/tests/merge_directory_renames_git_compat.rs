@@ -14,19 +14,21 @@ use grit_lib::diff::merge_file::MergeFavor;
 use grit_lib::diff::merge_trees::{
     merge_trees_three_way, DirectoryRenameConflict, DirectoryRenameMode, MergeSide,
 };
+use grit_lib::merge::{
+    IntegrateBranchOutcome, MergeDryRunPlan, MergeOptions, MergePrediction, MergePredictionOptions,
+    MergeTreeStage,
+};
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{
     conflicts_from_index, conflicts_from_tree_merge, tree_merge_has_conflicts, Conflict,
     ConflictKind, MovedPath,
 };
-use grit_lib::porcelain::merge::{
-    integrate_branch_with, plan_branch_merge, predict_merge, write_merge_tree,
-    IntegrateBranchOutcome, MergeDryRunPlan, MergeOptions, MergePrediction, MergePredictionOptions,
-    MergeTreeStage,
-};
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::{
+    integrate_branch_with, plan_branch_merge, predict_merge, write_merge_tree,
+};
 use support::{
     assert_git_fsck_strict, assert_merge_output_matches_oracle, commit_tree, git_ls_files_stage,
     git_merge_tree_oracle, CommitMergeLabels,

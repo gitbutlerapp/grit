@@ -4,13 +4,11 @@ use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::merge_trees::merge_trees_three_way;
+use grit_lib::merge::{IntegrateBranchOutcome, MergePrediction, MergePredictionOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::{
-    integrate_branch, predict_merge, IntegrateBranchOutcome, MergePrediction,
-    MergePredictionOptions,
-};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::{integrate_branch, predict_merge};
 use std::fs;
 use support::{
     assert_merge_output_matches_oracle, commit_tree, git_ls_files_stage, git_ls_files_stage0_map,

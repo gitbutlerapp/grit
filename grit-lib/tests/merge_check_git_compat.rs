@@ -10,12 +10,11 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::merge_file::MergeFavor;
 use grit_lib::error::Error;
 use grit_lib::ident::Signature;
+use grit_lib::merge::{MergePrediction, MergePredictionOptions};
 use grit_lib::objects::{NewCommit, ObjectId};
-use grit_lib::porcelain::merge::{
-    predict_merge, write_merge_tree, MergePrediction, MergePredictionOptions,
-};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
+use grit_test_support::{predict_merge, write_merge_tree};
 use time::OffsetDateTime;
 
 use support::{

@@ -12,10 +12,10 @@ use std::time::{Duration, Instant};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::{integrate_branch, resolve_merge_source};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::RefName;
 use grit_lib::repo::Repository;
+use grit_test_support::{integrate_branch, resolve_merge_source};
 
 const DIRS: u32 = 150;
 const FILES: u32 = 150;

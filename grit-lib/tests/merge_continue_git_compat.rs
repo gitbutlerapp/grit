@@ -5,14 +5,13 @@ use std::process::Command;
 
 use grit_lib::change_id::change_id;
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::merge::{ContinueMergeError, ContinueOptions, IntegrateBranchOutcome};
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::merge::{
-    continue_merge, integrate_branch, ContinueMergeError, ContinueOptions, IntegrateBranchOutcome,
-};
 use grit_lib::porcelain::MergeError;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::{continue_merge, integrate_branch};
 
 fn ident() -> String {
     "Merge Test <merge@example.com> 1700000000 +0000".to_owned()

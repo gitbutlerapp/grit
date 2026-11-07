@@ -5,21 +5,18 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::error::RefError;
+use grit_lib::merge::{ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome, MergeOptions};
+use grit_lib::merge::{ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{
-    continue_merge, integrate_branch, integrate_branch_with, ContinueOptions, FastForwardPolicy,
-    IntegrateBranchOutcome, MergeOptions,
-};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::replay_sequence::{
-    start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
-};
 use grit_lib::porcelain::{CommitError, MergeError};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::state::InProgressOperation;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
+use grit_test_support::start_replay_sequence;
+use grit_test_support::{continue_merge, integrate_branch, integrate_branch_with};
 use std::path::Path;
 use std::process::Command;
 
