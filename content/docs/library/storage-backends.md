@@ -85,8 +85,8 @@ Object format comes from the store’s `hash_algo`; do not fight it with [`InitO
 
 | API | On a prunable custom primary |
 | --- | --- |
-| [`maintenance::prune_loose_objects`](rustdoc:grit_lib::maintenance::prune_loose_objects) | Deletes unreachable objects past `gc.pruneExpire` |
-| [`maintenance::gc`](rustdoc:grit_lib::maintenance::gc) | Pack-refs + reflog expiry + prune (skips on-disk repack / commit-graph) |
+| [`Maintenance::prune_loose_objects`](rustdoc:grit_lib::maintenance::Maintenance::prune_loose_objects) | Deletes unreachable objects past `gc.pruneExpire` |
+| [`Maintenance::gc`](rustdoc:grit_lib::maintenance::Maintenance::gc) | Pack-refs + reflog expiry + prune (skips on-disk repack / commit-graph) |
 | [`Odb::gc`](rustdoc:grit_lib::objects::odb::Odb::gc) | Deletes all unreachable objects (no grace) |
 
 ### `FilesOnlyOperation` (typed refusal)
@@ -96,7 +96,7 @@ Operations that need the on-disk `objects/` layout return [`RepositoryError::Uns
 | Operation | Fallback on custom primary |
 | --------- | -------------------------- |
 | Repack / `.pack` install | Pack stream ingested object-by-object ([`ingest_pack_into`](rustdoc:grit_lib::objects::unpack_objects::ingest_pack_into), [`ingest_received_pack`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack)) |
-| Commit-graph file | Build in memory with [`build_commit_graph`](rustdoc:grit_lib::maintenance::build_commit_graph); attach bytes via [`OdbBuilder::commit_graph`](rustdoc:grit_lib::objects::odb::OdbBuilder::commit_graph) |
+| Commit-graph file | Build in memory with [`Maintenance::build_commit_graph`](rustdoc:grit_lib::maintenance::Maintenance::build_commit_graph); attach bytes via [`OdbBuilder::commit_graph`](rustdoc:grit_lib::objects::odb::OdbBuilder::commit_graph) |
 | Promisor / partial clone ODB | Not supported (no silent filesystem promisor) |
 | Prune / `gc` object deletion | Only with `PrunableObjectStore`; otherwise typed `prune` refusal |
 

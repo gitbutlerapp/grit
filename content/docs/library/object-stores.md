@@ -155,8 +155,8 @@ A store that can delete objects implements [`PrunableObjectStore`](rustdoc:grit_
 
 | API | What it does on a custom store |
 | --- | --- |
-| [`maintenance::prune_loose_objects`](rustdoc:grit_lib::maintenance::prune_loose_objects) | Deletes unreachable objects older than `gc.pruneExpire` (or `PruneOptions::older_than`) |
-| [`maintenance::gc`](rustdoc:grit_lib::maintenance::gc) | Pack-refs, reflog expiry, then the same prune; repack, drop-large-blobs and the commit-graph write are skipped |
+| [`Maintenance::prune_loose_objects`](rustdoc:grit_lib::maintenance::Maintenance::prune_loose_objects) | Deletes unreachable objects older than `gc.pruneExpire` (or `PruneOptions::older_than`) |
+| [`Maintenance::gc`](rustdoc:grit_lib::maintenance::Maintenance::gc) | Pack-refs, reflog expiry, then the same prune; repack, drop-large-blobs and the commit-graph write are skipped |
 | [`Odb::gc`](rustdoc:grit_lib::objects::odb::Odb::gc) | Deletes every unreachable object, with no grace period |
 | [`refs::gc::prune_loose_unreachable`](rustdoc:grit_lib::refs::gc::prune_loose_unreachable) | Deletes what your own root set does not reach |
 
