@@ -3,7 +3,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::HashAlgo;
 use grit_lib::repo::{InitOptions, Repository};

@@ -23,10 +23,13 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use grit_lib::change_id::{ChangeId, ChangeIdError, ChangeIdGenerator};
+use grit_lib::change_id::{
+    resolve_commit_by_change_id_prefix, ChangeId, ChangeIdError, ChangeIdGenerator,
+};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::{ConfigEditor, ConfigScope, ConfigWriteOptions};
-use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+use grit_lib::diff::hunk_ids;
+use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffOptions, DiffSide, DiffTarget};
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::HashAlgo;
@@ -50,6 +53,7 @@ use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::NotesWriteOptions;
 use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 use crate::system_git_version;
 
@@ -203,6 +207,10 @@ fn log_main(repo: &Repository) -> Vec<(ObjectId, String, ChangeId)> {
         .collect()
 }
 
+fn pathspec_one(path: &str) -> Pathspec {
+    Pathspec::scoped([path], PathspecGlobalFlags::default())
+}
+
 fn unstaged_hunk_hex_ids(repo: &Repository, path: &str) -> Vec<String> {
     let files = unstaged_file_diffs(repo, &[path.to_owned()]).expect("unstaged diff");
     if files.is_empty() {
@@ -211,8 +219,31 @@ fn unstaged_hunk_hex_ids(repo: &Repository, path: &str) -> Vec<String> {
     let (file, peer) = &files[0];
     hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &file.path, &file.hunks, peer)
         .into_iter()
-        .map(|id| id.as_str())
+        .map(|id| id.as_str().to_owned())
         .collect()
+}
+
+fn index_head_hunk_hex_ids(repo: &Repository, path: &str) -> Vec<String> {
+    let files = repo
+        .diff()
+        .files(
+            &DiffTarget::IndexVsHead,
+            &pathspec_one(path),
+            &DiffOptions::default(),
+        )
+        .expect("staged diff");
+    if files.is_empty() {
+        return Vec::new();
+    }
+    hunk_ids(DiffSide::Staged, &files[0].path, &files[0].hunks)
+        .into_iter()
+        .map(|id| id.as_str().to_owned())
+        .collect()
+}
+
+fn init_files_primary_repo(dir: &Path) -> Repository {
+    let (repo, _) = Repository::init(dir, &suite_init_options()).expect("init files");
+    repo
 }
 
 fn object_hex_set(repo: &Repository) -> BTreeSet<String> {
@@ -278,25 +309,55 @@ pub fn export_objects_to_files_repo(repo: &Repository, dest: &Path) {
 /// Typed outcomes of the shared conformance scenario (for parity diffs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepositorySnapshot {
+    /// Newest-first `main` commits: oid, subject line, change id.
     pub main_history: Vec<(ObjectId, String, ChangeId)>,
+    /// Tip of `feature` after its single commit.
     pub feature_tip: ObjectId,
+    /// Stable hunk ids for unstaged `story.txt` (worktree vs index).
     pub unstaged_hunk_ids: Vec<String>,
+    /// Stable hunk ids for staged `staged-only.txt` (index vs `HEAD`).
+    pub staged_hunk_ids: Vec<String>,
+    /// Paths changed in the clean feature merge commit.
+    pub committed_merge_paths: Vec<String>,
     pub staged_paths: Vec<String>,
     pub unstaged_paths: Vec<String>,
     pub untracked_paths: Vec<String>,
     pub clean_merge_tip: ObjectId,
+    /// Paths reported as unmerged during the conflicted merge.
     pub conflict_paths: Vec<String>,
+    pub merge_in_progress_before_abort: bool,
+    pub merge_conflicts_before_abort: Vec<String>,
+    pub shared_has_conflict_markers: bool,
+    pub main_head_at_conflict: ObjectId,
+    pub head_after_merge_abort: ObjectId,
+    pub merge_in_progress_after_abort: bool,
+    pub shared_content_after_abort: String,
     pub pick_tip: ObjectId,
     pub revert_tip: ObjectId,
+    /// Commit oid blamed for each line of `story.txt` (oldest line first).
     pub blame_commits: Vec<ObjectId>,
-    pub rev_parse_short: String,
-    pub change_id_prefix: String,
+    /// Commit resolved from the short oid prefix of the second main commit.
+    pub short_oid_resolved: ObjectId,
+    /// Commit resolved from the change-id prefix of the tip main commit.
+    pub change_id_resolved: ObjectId,
     pub note_body: Vec<u8>,
     pub stash_tip: ObjectId,
+    pub stash_count_after_push: usize,
+    pub stash_count_after_pop: usize,
+    pub story_content_after_stash_pop: String,
+    pub staged_paths_after_stash_pop: Vec<String>,
+    pub unstaged_paths_after_stash_pop: Vec<String>,
+    pub untracked_paths_after_stash_pop: Vec<String>,
+    pub untracked_file_after_stash_pop: bool,
     pub pushed_main_tip: ObjectId,
-    pub fetched_tip: ObjectId,
-    pub object_set: BTreeSet<String>,
-    pub refs_after_fetch: BTreeMap<String, String>,
+    /// Every object reachable in the bare remote after push.
+    pub bare_object_set: BTreeSet<String>,
+    /// Objects in the backend-primary repo after fetch from that bare remote.
+    pub backend_fetch_object_set: BTreeSet<String>,
+    /// Objects in a files-primary repo after fetch from the same bare remote.
+    pub files_fetch_object_set: BTreeSet<String>,
+    pub backend_fetch_refs: BTreeMap<String, String>,
+    pub files_fetch_refs: BTreeMap<String, String>,
     pub fsck_clean: bool,
 }
 
@@ -476,23 +537,59 @@ fn run_snapshot_on_repo(
         IntegrateBranchOutcome::Conflicts { paths, .. } => paths,
         other => panic!("expected conflicts, got {other:?}"),
     };
+    let status_during_merge = status(
+        repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("status during merge");
+    let merge_in_progress_before_abort = status_during_merge.state.merge_in_progress;
+    let merge_conflicts_before_abort = status_during_merge.conflicts.clone();
+    let shared_has_conflict_markers = fs::read_to_string(work_tree(repo).join("shared.txt"))
+        .expect("shared")
+        .contains("<<<<<<<");
     abort_branch_merge(repo).expect("abort");
+    let status_after_abort = status(
+        repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("status after abort");
+    let main_head_at_conflict = main_conflict;
+    let head_after_merge_abort = head_oid(repo, "main");
+    let merge_in_progress_after_abort = status_after_abort.state.merge_in_progress;
+    let shared_content_after_abort =
+        fs::read_to_string(work_tree(repo).join("shared.txt")).expect("shared after abort");
+
+    let committed_merge_paths = repo
+        .diff()
+        .entries(
+            &DiffTarget::Commit(clean_merge_tip),
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+            &DiffOptions::default(),
+        )
+        .expect("commit diff")
+        .entries
+        .iter()
+        .map(|entry| entry.path().to_owned())
+        .collect();
 
     let blame =
         grit_lib::blame::blame_file(repo, "story.txt", &grit_lib::blame::BlameOptions::default())
             .expect("blame");
     let blame_commits: Vec<_> = blame.lines.iter().map(|l| l.commit).collect();
 
-    let short = repo
+    let c2_oid = main_history[1].0;
+    let short_prefix: String = c2_oid.to_hex().chars().take(7).collect();
+    let short_oid_resolved = repo
         .revwalk()
-        .resolve_commits(&["HEAD~1".to_owned()])
-        .expect("rev-parse")[0]
-        .to_hex();
-    let rev_parse_short = short.chars().take(7).collect();
-    let change_id_prefix = main_history
-        .first()
-        .map(|(_, _, id)| id.as_str().chars().take(8).collect())
-        .unwrap_or_default();
+        .resolve_commits(&[short_prefix])
+        .expect("rev-parse short oid")[0];
+    let change_id_prefix: String = main_history[0].2.as_str().chars().take(8).collect();
+    let change_id_resolved =
+        resolve_commit_by_change_id_prefix(repo, &change_id_prefix).expect("change-id prefix");
 
     let note_target = head_oid(repo, "main");
     let notes = repo.notes();
@@ -532,6 +629,7 @@ fn run_snapshot_on_repo(
         "line1\nline2\nline3\nwip\n",
     )
     .expect("wip");
+    let staged_hunk_ids = index_head_hunk_hex_ids(repo, "staged-only.txt");
     let unstaged_hunk_ids = unstaged_hunk_hex_ids(repo, "story.txt");
     let model = status(
         repo,
@@ -542,7 +640,6 @@ fn run_snapshot_on_repo(
     .expect("status");
     let staged_paths: Vec<_> = model.staged.iter().map(|e| e.path().to_owned()).collect();
     let unstaged_paths: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
-
     stage(
         repo,
         &StageOptions::default(),
@@ -560,6 +657,7 @@ fn run_snapshot_on_repo(
         .expect("stash push")
         .expect("stash created");
     let stash_tip = stash_out.oid;
+    let stash_count_after_push = repo.stash().list().expect("stash list").len();
 
     repo.stash()
         .pop(
@@ -569,6 +667,28 @@ fn run_snapshot_on_repo(
             &CancelToken::never(),
         )
         .expect("stash pop");
+    let stash_count_after_pop = repo.stash().list().expect("stash list after pop").len();
+    let story_content_after_stash_pop =
+        fs::read_to_string(work_tree(repo).join("story.txt")).expect("story after pop");
+    let model_after_stash = status(
+        repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("status after stash pop");
+    let staged_paths_after_stash_pop: Vec<_> = model_after_stash
+        .staged
+        .iter()
+        .map(|e| e.path().to_owned())
+        .collect();
+    let unstaged_paths_after_stash_pop: Vec<_> = model_after_stash
+        .unstaged
+        .iter()
+        .map(|e| e.path().to_owned())
+        .collect();
+    let untracked_paths_after_stash_pop = model_after_stash.untracked.clone();
+    let untracked_file_after_stash_pop = work_tree(repo).join("untracked.txt").is_file();
 
     let bare = root.join("remote.git");
     fs::create_dir_all(&bare).expect("bare");
@@ -579,7 +699,6 @@ fn run_snapshot_on_repo(
             .with_initial_branch("main"),
     )
     .expect("init bare");
-    let bare_repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open bare");
     let mut progress = NullProgress;
     repo.remotes()
         .add("origin", bare.to_str().expect("utf8"))
@@ -607,20 +726,47 @@ fn run_snapshot_on_repo(
         )
         .expect("push");
 
-    let fetch_dir = root.join("fetch-dest");
-    fs::create_dir_all(&fetch_dir).expect("mkdir");
-    let fetch_repo = fixture.init(&fetch_dir, &suite_init_options());
-    configure_local_identity(&fetch_repo);
-    fetch_repo
-        .remotes()
-        .add("origin", bare.to_str().expect("utf8"))
-        .expect("remote");
-    fetch_repo.reload_config().expect("reload");
-    let origin = Remote::from_url(bare.to_str().expect("utf8")).expect("origin url");
+    let bare_repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open bare");
+    let bare_object_set = object_hex_set(&bare_repo);
+
+    let bare_url = bare.to_str().expect("utf8");
+    let origin = Remote::from_url(bare_url).expect("origin url");
     let mut fetch_opts = FetchOptions::default();
     fetch_opts.remote_name = Some("origin".into());
     fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
-    fetch_repo
+
+    let backend_dir = root.join("fetch-backend");
+    fs::create_dir_all(&backend_dir).expect("mkdir backend fetch");
+    let backend_fetch = fixture.init(&backend_dir, &suite_init_options());
+    configure_local_identity(&backend_fetch);
+    backend_fetch
+        .remotes()
+        .add("origin", bare_url)
+        .expect("remote backend");
+    backend_fetch.reload_config().expect("reload backend");
+    backend_fetch
+        .remotes()
+        .fetch(
+            &origin,
+            fetch_opts.clone(),
+            &mut NullProgress,
+            &CancelToken::never(),
+            None,
+        )
+        .expect("fetch backend");
+    let backend_fetch_object_set = object_hex_set(&backend_fetch);
+    let backend_fetch_refs = ref_map(&backend_fetch);
+
+    let files_dir = root.join("fetch-files");
+    fs::create_dir_all(&files_dir).expect("mkdir files fetch");
+    let files_fetch = init_files_primary_repo(&files_dir);
+    configure_local_identity(&files_fetch);
+    files_fetch
+        .remotes()
+        .add("origin", bare_url)
+        .expect("remote files");
+    files_fetch.reload_config().expect("reload files");
+    files_fetch
         .remotes()
         .fetch(
             &origin,
@@ -629,12 +775,9 @@ fn run_snapshot_on_repo(
             &CancelToken::never(),
             None,
         )
-        .expect("fetch");
-    let fetched_tip = fetch_repo
-        .references()
-        .resolve(RefName::try_from("refs/remotes/origin/main").expect("ref"))
-        .expect("fetched");
-    let refs_after_fetch = ref_map(&fetch_repo);
+        .expect("fetch files");
+    let files_fetch_object_set = object_hex_set(&files_fetch);
+    let files_fetch_refs = ref_map(&files_fetch);
 
     let fsck = repo
         .fsck(
@@ -645,28 +788,44 @@ fn run_snapshot_on_repo(
         .expect("fsck");
     let fsck_clean = fsck.issues.is_empty();
 
-    let _ = bare_repo;
-
     RepositorySnapshot {
         main_history,
         feature_tip,
         unstaged_hunk_ids,
+        staged_hunk_ids,
+        committed_merge_paths,
         staged_paths,
         unstaged_paths,
         untracked_paths: model.untracked,
         clean_merge_tip,
         conflict_paths,
+        merge_in_progress_before_abort,
+        merge_conflicts_before_abort,
+        shared_has_conflict_markers,
+        main_head_at_conflict,
+        head_after_merge_abort,
+        merge_in_progress_after_abort,
+        shared_content_after_abort,
         pick_tip,
         revert_tip,
         blame_commits,
-        rev_parse_short,
-        change_id_prefix,
+        short_oid_resolved,
+        change_id_resolved,
         note_body,
         stash_tip,
+        stash_count_after_push,
+        stash_count_after_pop,
+        story_content_after_stash_pop,
+        staged_paths_after_stash_pop,
+        unstaged_paths_after_stash_pop,
+        untracked_paths_after_stash_pop,
+        untracked_file_after_stash_pop,
         pushed_main_tip,
-        fetched_tip,
-        object_set: object_hex_set(repo),
-        refs_after_fetch,
+        bare_object_set,
+        backend_fetch_object_set,
+        files_fetch_object_set,
+        backend_fetch_refs,
+        files_fetch_refs,
         fsck_clean,
     }
 }
@@ -711,14 +870,32 @@ fn case_init_non_bare(fixture: &impl BackendFixture) {
 fn case_history_and_log(fixture: &impl BackendFixture) {
     let snap = build_snapshot(fixture);
     assert_eq!(snap.main_history.len(), 3);
-    assert_eq!(snap.main_history[0].1, "c3");
+    assert_eq!(
+        snap.main_history
+            .iter()
+            .map(|(_, s, _)| s.as_str())
+            .collect::<Vec<_>>(),
+        ["c3", "c2", "c1"]
+    );
+    let change_ids: BTreeSet<_> = snap
+        .main_history
+        .iter()
+        .map(|(_, _, id)| id.as_str())
+        .collect();
+    assert_eq!(change_ids.len(), 3);
     assert_ne!(snap.feature_tip, snap.main_history[0].0);
 }
 
 fn case_diff_and_status(fixture: &impl BackendFixture) {
     let snap = build_snapshot(fixture);
     assert!(!snap.unstaged_hunk_ids.is_empty());
+    assert!(!snap.staged_hunk_ids.is_empty());
+    assert!(snap
+        .committed_merge_paths
+        .iter()
+        .any(|p| p == "feature.txt" || p == "main-only.txt"));
     assert!(snap.staged_paths.iter().any(|p| p == "staged-only.txt"));
+    assert!(snap.unstaged_paths.iter().any(|p| p == "story.txt"));
     assert!(snap.untracked_paths.iter().any(|p| p == "untracked.txt"));
 }
 
@@ -730,6 +907,15 @@ fn case_merge_clean(fixture: &impl BackendFixture) {
 fn case_merge_conflict_abort(fixture: &impl BackendFixture) {
     let snap = build_snapshot(fixture);
     assert!(snap.conflict_paths.iter().any(|p| p == "shared.txt"));
+    assert!(snap.merge_in_progress_before_abort);
+    assert!(snap
+        .merge_conflicts_before_abort
+        .iter()
+        .any(|p| p == "shared.txt"));
+    assert!(snap.shared_has_conflict_markers);
+    assert!(!snap.merge_in_progress_after_abort);
+    assert_eq!(snap.shared_content_after_abort, "main side\n");
+    assert_eq!(snap.head_after_merge_abort, snap.main_head_at_conflict);
 }
 
 fn case_pick_and_revert(fixture: &impl BackendFixture) {
@@ -740,12 +926,19 @@ fn case_pick_and_revert(fixture: &impl BackendFixture) {
 fn case_blame(fixture: &impl BackendFixture) {
     let snap = build_snapshot(fixture);
     assert_eq!(snap.blame_commits.len(), 3);
+    let expected: Vec<_> = snap
+        .main_history
+        .iter()
+        .rev()
+        .map(|(oid, _, _)| *oid)
+        .collect();
+    assert_eq!(snap.blame_commits, expected);
 }
 
 fn case_rev_parse(fixture: &impl BackendFixture) {
     let snap = build_snapshot(fixture);
-    assert_eq!(snap.rev_parse_short.len(), 7);
-    assert!(!snap.change_id_prefix.is_empty());
+    assert_eq!(snap.short_oid_resolved, snap.main_history[1].0);
+    assert_eq!(snap.change_id_resolved, snap.main_history[0].0);
 }
 
 fn case_notes(fixture: &impl BackendFixture) {
@@ -756,17 +949,37 @@ fn case_notes(fixture: &impl BackendFixture) {
 fn case_stash(fixture: &impl BackendFixture) {
     let snap = build_snapshot(fixture);
     assert_ne!(snap.stash_tip, ObjectId::null(HashAlgo::Sha1));
+    assert_eq!(snap.stash_count_after_push, 1);
+    assert_eq!(snap.stash_count_after_pop, 0);
+    assert!(snap
+        .staged_paths_after_stash_pop
+        .iter()
+        .any(|p| p == "staged-only.txt"));
+    assert!(snap
+        .unstaged_paths_after_stash_pop
+        .iter()
+        .any(|p| p == "story.txt"));
+    assert!(snap.untracked_file_after_stash_pop);
+    assert!(snap.story_content_after_stash_pop.contains("wip"));
 }
 
 fn case_fetch(fixture: &impl BackendFixture) {
     let snap = build_snapshot(fixture);
+    let pushed = snap.pushed_main_tip.to_hex();
     assert_eq!(
-        snap.fetched_tip, snap.pushed_main_tip,
-        "fetch should match push"
+        snap.backend_fetch_refs
+            .get("refs/remotes/origin/main")
+            .map(String::as_str),
+        Some(pushed.as_str())
     );
-    assert!(snap
-        .refs_after_fetch
-        .contains_key("refs/remotes/origin/main"));
+    assert_eq!(
+        snap.files_fetch_refs
+            .get("refs/remotes/origin/main")
+            .map(String::as_str),
+        Some(pushed.as_str())
+    );
+    assert_eq!(snap.backend_fetch_object_set, snap.bare_object_set);
+    assert_eq!(snap.files_fetch_object_set, snap.bare_object_set);
 }
 
 fn case_fsck(fixture: &impl BackendFixture) {
