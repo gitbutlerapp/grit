@@ -1051,16 +1051,20 @@ impl Odb {
 
     #[cold]
     #[inline(never)]
-    fn try_read_primary_after_negative_revalidate(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn reread_primary_after_pack_recheck(&self, oid: &ObjectId) -> Result<Option<Object>> {
         self.invalidate_loose_negative_cache(self.objects_dir.as_path());
+        self.with_pack_store_for(&self.objects_dir, || {
+            crate::pack::pack_cache::untrust_pack_listing_for_miss(&self.objects_dir);
+            let _ = crate::pack::reprepare_pack_directory_on_miss(&self.objects_dir);
+        });
         let primary = self.primary_writable()?;
-        self.with_primary_read_context(|| primary.read(oid))
+        primary.read(oid)
     }
 
     #[cold]
     #[inline(never)]
     fn object_not_found_after_primary_revalidate(&self, oid: &ObjectId) -> Result<Object> {
-        if let Some(obj) = self.try_read_primary_after_negative_revalidate(oid)? {
+        if let Some(obj) = self.reread_primary_after_pack_recheck(oid)? {
             return Ok(obj);
         }
         Err(Error::ObjectNotFound(oid.to_hex()))
@@ -1073,8 +1077,12 @@ impl Odb {
         oid: &ObjectId,
     ) -> Result<Option<ObjectInfo>> {
         self.invalidate_loose_negative_cache(self.objects_dir.as_path());
+        self.with_pack_store_for(&self.objects_dir, || {
+            crate::pack::pack_cache::untrust_pack_listing_for_miss(&self.objects_dir);
+            let _ = crate::pack::reprepare_pack_directory_on_miss(&self.objects_dir);
+        });
         let primary = self.primary_writable()?;
-        self.with_primary_read_context(|| primary.read_info(oid))
+        primary.read_info(oid)
     }
 
     #[cold]
@@ -1085,8 +1093,12 @@ impl Odb {
         buf: &mut Vec<u8>,
     ) -> Result<Option<ObjectKind>> {
         self.invalidate_loose_negative_cache(self.objects_dir.as_path());
+        self.with_pack_store_for(&self.objects_dir, || {
+            crate::pack::pack_cache::untrust_pack_listing_for_miss(&self.objects_dir);
+            let _ = crate::pack::reprepare_pack_directory_on_miss(&self.objects_dir);
+        });
         let primary = self.primary_writable()?;
-        self.with_primary_read_context(|| primary.read_into(oid, buf))
+        primary.read_into(oid, buf)
     }
 
     #[cold]

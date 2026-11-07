@@ -678,6 +678,12 @@ pub(crate) mod pack_cache {
         });
     }
 
+    /// Drop thread-local listing trust before re-checking `objects_dir`/`pack/` on an object miss.
+    pub(crate) fn untrust_pack_listing_for_miss(objects_dir: &Path) {
+        PACK_DIR_LISTING_TRUSTED.set(false);
+        drop_thread_local_dir_listing(&objects_dir.join("pack"));
+    }
+
     fn drop_thread_local_pack_bytes(pack_path: &Path) {
         PACK_BYTES.with(|cell| {
             cell.borrow_mut().remove(pack_path);
@@ -1713,31 +1719,23 @@ pub(crate) mod pack_cache {
     ) -> Result<bool> {
         let pack_dir = objects_dir.join("pack");
         let dir_mt = dir_mtime(&pack_dir);
-        if store.with_catalog_read(|g| {
-            g.by_dir.get(&pack_dir).is_some_and(|c| {
-                c.idx_listing_verified && c.indexes.is_empty() && c.dir_mtime == dir_mt
-            })
-        }) {
-            return Ok(false);
-        }
         enum ReprepareDecision {
-            Fresh,
             Rescan,
             VerifyIdxSet,
         }
         let decision = store.with_catalog_read(|g| match g.by_dir.get(&pack_dir) {
             None => ReprepareDecision::Rescan,
             Some(c) if c.dir_mtime != dir_mt => ReprepareDecision::Rescan,
-            Some(c) if c.idx_listing_verified && !c.indexes.is_empty() => ReprepareDecision::Fresh,
             Some(_) => ReprepareDecision::VerifyIdxSet,
         });
         match decision {
-            ReprepareDecision::Fresh => return Ok(false),
             ReprepareDecision::Rescan => {
                 rescan_dir_indexes_for_store(store, objects_dir)?;
                 return Ok(true);
             }
-            ReprepareDecision::VerifyIdxSet => {}
+            ReprepareDecision::VerifyIdxSet => {
+                untrust_pack_listing_for_miss(objects_dir);
+            }
         }
         let cached_paths = store.with_catalog_read(|g| {
             g.by_dir.get(&pack_dir).map(|c| {
@@ -1798,33 +1796,23 @@ pub(crate) mod pack_cache {
         let pack_dir = objects_dir.join("pack");
         let dir_mt = dir_mtime(&pack_dir);
         let store = crate::pack_store::PackStore::active_for_reads();
-        if store.with_catalog_read(|g| {
-            g.by_dir.get(&pack_dir).is_some_and(|c| {
-                c.idx_listing_verified && c.indexes.is_empty() && c.dir_mtime == dir_mt
-            })
-        }) && crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir)
-            && PACK_DIR_LISTING_TRUSTED.get()
-        {
-            return Ok(false);
-        }
         enum ReprepareDecision {
-            Fresh,
             Rescan,
             VerifyIdxSet,
         }
         let decision = store.with_catalog_read(|g| match g.by_dir.get(&pack_dir) {
             None => ReprepareDecision::Rescan,
             Some(c) if c.dir_mtime != dir_mt => ReprepareDecision::Rescan,
-            Some(c) if c.idx_listing_verified && !c.indexes.is_empty() => ReprepareDecision::Fresh,
             Some(_) => ReprepareDecision::VerifyIdxSet,
         });
         match decision {
-            ReprepareDecision::Fresh => return Ok(false),
             ReprepareDecision::Rescan => {
                 rescan_dir_indexes(objects_dir)?;
                 return Ok(true);
             }
-            ReprepareDecision::VerifyIdxSet => {}
+            ReprepareDecision::VerifyIdxSet => {
+                untrust_pack_listing_for_miss(objects_dir);
+            }
         }
         let cached_paths = store.with_catalog_read(|g| {
             g.by_dir.get(&pack_dir).map(|c| {
@@ -8720,6 +8708,39 @@ mod tests {
 
         odb.read(&oid_b)
             .expect("new pack visible after idx-set compare on miss");
+    }
+
+    #[test]
+    fn loose_packed_away_visible_inside_pack_read_context_on_miss() {
+        use crate::odb::Odb;
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let pack_dir = objects.join("pack");
+        std::fs::create_dir_all(&pack_dir).expect("pack dir");
+        let odb = Odb::new(&objects);
+        let data = b"loose-then-pack\n";
+        let oid = odb
+            .write(crate::objects::ObjectKind::Blob, data)
+            .expect("write loose");
+        let hex = oid.to_hex();
+        let loose = objects.join(&hex[..2]).join(&hex[2..]);
+        assert!(loose.is_file());
+        odb.with_pack_read_context(|| {
+            assert!(odb.read(&oid).is_ok(), "prime loose read");
+            let saved_mt = filetime::FileTime::from_last_modification_time(
+                &std::fs::metadata(&pack_dir).expect("pack dir meta"),
+            );
+            let (pack, pack_oid, off) = single_blob_pack(data);
+            assert_eq!(pack_oid, oid);
+            install_synthetic_pack_no_clear(&objects, "repack", &pack, &[(oid, off)]);
+            std::fs::remove_file(&loose).expect("remove loose");
+            filetime::set_file_mtime(&pack_dir, saved_mt).expect("restore pack dir mtime");
+            odb.read(&oid)
+                .expect("repacked object visible inside read context");
+        });
     }
 
     #[test]
