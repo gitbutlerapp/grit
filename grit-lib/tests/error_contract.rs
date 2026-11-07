@@ -36,7 +36,6 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "worktree_path_io",
     "unsupported_object_store",
     "precious_objects_repository",
-    "odb_objects_dir_mismatch",
     "object_format_mismatch",
     "invalid_object_id",
     "hash_collision",

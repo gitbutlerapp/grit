@@ -15482,9 +15482,6 @@ pub grit_lib::prelude::RepositoryError::NotARepository(grit_lib::error::NotARepo
 pub grit_lib::prelude::RepositoryError::ObjectFormatMismatch
 pub grit_lib::prelude::RepositoryError::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
 pub grit_lib::prelude::RepositoryError::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
-pub grit_lib::prelude::RepositoryError::OdbObjectsDirMismatch
-pub grit_lib::prelude::RepositoryError::OdbObjectsDirMismatch::builder: std::path::PathBuf
-pub grit_lib::prelude::RepositoryError::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::prelude::RepositoryError::PreciousObjectsRepository
 pub grit_lib::prelude::RepositoryError::PreciousObjectsRepository::operation: &'static str
 pub grit_lib::prelude::RepositoryError::PromisorFetcherMissing
