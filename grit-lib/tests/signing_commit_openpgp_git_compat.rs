@@ -6,8 +6,8 @@ use std::process::Command;
 use grit_lib::commit::signing::{verify_commit, GpgConfig};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -118,33 +118,33 @@ fn create_commit_openpgp_uses_committer_default_without_signingkey() {
 
     std::fs::write(root.join("a"), b"a\n").expect("write");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
 
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
     let gnupg_path = gnupg_home.to_string_lossy().into_owned();
     let _gnupg = EnvVarGuard::set("GNUPGHOME", &gnupg_path);
-    create_commit(
-        &repo,
-        &{
-            let mut req = CommitRequest::new("openpgp default key".to_owned());
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req.allow_empty = false;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = false;
-            req
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("create_commit");
+    repo.commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("openpgp default key".to_owned());
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("create_commit");
 
     let head_hex = git_out(root, gnupg_home, &["rev-parse", "HEAD"]);
     let raw = repo

@@ -7,8 +7,8 @@ use grit_lib::gitbutler::{GitButlerWorkspace, WorkspaceStanding};
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::status::{
-    short_status_lines, status, status_options_from_config, ConflictGroup, IgnoredMode,
-    InterruptedRewrite, StatusAction, StatusGuidance, UntrackedMode,
+    short_status_lines, ConflictGroup, IgnoredMode, InterruptedRewrite, StatusAction,
+    StatusGuidance, UntrackedMode,
 };
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -18,6 +18,7 @@ use grit_lib::refs::branch_tracking::{
 };
 use grit_lib::revwalk::AbbrevLength;
 use grit_lib::state::{HeadState, InProgressOperation, NextStep};
+use grit_lib::status::StatusOptions;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -1094,7 +1095,8 @@ pub struct StatusCliArgs {
 pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     let (repo, sink) = context::discover_with_warnings()?;
     let config = repo.config().snapshot().context("could not load config")?;
-    let mut status_opts = status_options_from_config(&config)?;
+    let mut status_opts =
+        StatusOptions::from_config(&repo.config()).context("could not load config")?;
     if let Some(mode) = args.untracked {
         status_opts.untracked = mode.into_lib();
     }
@@ -1106,13 +1108,10 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     }
     status_opts.count_stash = true;
     let show_counts = !args.no_ahead_behind && status_ahead_behind_enabled(&config);
-    let model = status(
-        &repo,
-        &status_opts,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .context("could not compute status")?;
+    let model = repo
+        .status()
+        .run(&status_opts, &mut NullProgress, &CancelToken::never())
+        .context("could not compute status")?;
 
     let operations = repo.operation().in_progress();
     let merging = model.state.merge_in_progress;

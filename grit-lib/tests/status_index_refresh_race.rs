@@ -5,8 +5,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use grit_lib::porcelain::commit::create_commit;
-use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
+use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
 use grit_lib::progress::NullProgress;
 use grit_lib::test_support::status::set_before_opportunistic_index_write_hook;
 
@@ -43,7 +42,7 @@ fn status_skips_stale_opportunistic_write_after_concurrent_commit() {
     let hook = Arc::new(move || {
         let repo = open_grit_repo(&hook_dir);
         let req = grit_test_support::commit_request("race", "A <a@b.c> 1 +0000");
-        create_commit(&repo, &req, &mut NullProgress, &CancelToken::never())
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
             .expect("commit in hook");
     });
     set_before_opportunistic_index_write_hook(Some(hook));
@@ -52,7 +51,7 @@ fn status_skips_stale_opportunistic_write_after_concurrent_commit() {
     let mut opts = StatusOptions::default();
     opts.untracked = UntrackedMode::No;
     opts.ahead_behind = false;
-    status(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("status");
+    &repo.status().run(&opts, &mut NullProgress, &CancelToken::never()).expect("status");
     set_before_opportunistic_index_write_hook(None);
 
     assert!(

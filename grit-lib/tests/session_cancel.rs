@@ -9,8 +9,8 @@ use std::path::Path;
 use grit_lib::error::Error;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayRequest};
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
@@ -149,12 +149,7 @@ fn write_files(root: &Path, dir: &str, contents: &str) {
 
 /// Stage everything and commit it, with no progress and no cancel.
 fn commit_all(repo: &Repository, message: &str) -> ObjectId {
-    commit_with_scope(
-        repo,
-        &commit_req(message),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req(message), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -210,11 +205,7 @@ fn stage_reports_staging_progress() {
     let (tmp, repo) = init_repo();
     write_files(tmp.path(), "d", "new");
     let mut sink = CancelAfter::recorder();
-    let outcome = stage(
-        &repo,
-        &StageOptions::default(),
-        &mut sink,
-        &CancelToken::never(),
+    let outcome = repo.index().stage(&StageOptions::default(), &mut sink, &CancelToken::never(),
     )
     .expect("stage");
     assert_eq!(outcome.added.len(), FILES);
@@ -229,7 +220,7 @@ fn stage_stops_when_the_sink_asks() {
     let before = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 1);
     let cancel = sink.flag.clone();
-    assert_cancelled(stage(&repo, &StageOptions::default(), &mut sink, &cancel));
+    assert_cancelled(repo.index().stage(&StageOptions::default(), &mut sink, &cancel));
     assert_index_untouched(&repo, &before);
 }
 
@@ -238,11 +229,7 @@ fn stage_stops_on_cancel_argument() {
     let (_tmp, repo, _) = repo_with_modified_files();
     let before = index_bytes(&repo);
     let mut sink = CancelAfter::recorder();
-    assert_cancelled(stage(
-        &repo,
-        &StageOptions::default(),
-        &mut sink,
-        &cancelled_flag(),
+    assert_cancelled(repo.index().stage(&StageOptions::default(), &mut sink, &cancelled_flag(),
     ));
     assert_eq!(sink.seen, 0, "a cancelled stage hashes nothing");
     assert_index_untouched(&repo, &before);
@@ -258,11 +245,7 @@ fn stage_stops_on_cancel_argument() {
             .all(|e| !e.file_name().to_string_lossy().ends_with(".lock")),
         "no lock files under .git after cancelled stage"
     );
-    let outcome = stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let outcome = repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("stage after cancel");
     assert_eq!(outcome.modified.len(), FILES);
@@ -272,12 +255,7 @@ fn stage_stops_on_cancel_argument() {
 fn auto_stage_commit_reports_progress() {
     let (_tmp, repo, base) = repo_with_modified_files();
     let mut sink = CancelAfter::recorder();
-    let outcome = commit_with_scope(
-        &repo,
-        &commit_req("change"),
-        CommitScope::AutoStage,
-        &mut sink,
-        &CancelToken::never(),
+    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("change"), CommitScope::AutoStage), &mut sink, &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(outcome.parent, Some(base));
@@ -292,12 +270,7 @@ fn auto_stage_commit_stops_when_the_sink_asks() {
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
     let cancel = sink.flag.clone();
     assert_cancelled(
-        commit_with_scope(
-            &repo,
-            &commit_req("change"),
-            CommitScope::AutoStage,
-            &mut sink,
-            &cancel,
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("change"), CommitScope::AutoStage), &mut sink, &cancel,
         )
         .map_err(Error::from),
     );
@@ -308,11 +281,7 @@ fn auto_stage_commit_stops_when_the_sink_asks() {
 #[test]
 fn staged_and_path_commits_stop_on_cancel_argument() {
     let (_tmp, repo, base) = repo_with_modified_files();
-    stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("stage");
     let before = index_bytes(&repo);
@@ -324,10 +293,8 @@ fn staged_and_path_commits_stop_on_cancel_argument() {
         )),
     ] {
         assert_cancelled(
-            commit_with_scope(
-                &repo,
-                &commit_req("change"),
-                scope,
+            repo.commits().create(
+                &grit_lib::commits::CommitOptions::new(commit_req("change"), scope.clone()),
                 &mut NullProgress,
                 &cancelled_flag(),
             )
@@ -371,11 +338,7 @@ fn stash_push_pathspec_reset_stops_when_the_sink_asks() {
 #[test]
 fn stash_push_staged_only_reset_stops_when_the_sink_asks() {
     let (tmp, repo, _) = repo_with_modified_files();
-    stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("stage");
     let before = index_bytes(&repo);

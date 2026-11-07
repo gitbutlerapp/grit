@@ -7,7 +7,7 @@
 use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::porcelain::add::{StageOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use std::fs;
@@ -56,12 +56,8 @@ fn copy_tree(from: &Path, to: &Path) {
 
 fn grit_stage(root: &Path, pathspecs: &[&str]) {
     let specs: Vec<String> = pathspecs.iter().map(|s| (*s).to_owned()).collect();
-    stage(
-        &open_grit(root),
-        &StageOptions {
-            pathspecs: specs.clone(),
-            pathspec_sources: specs,
-            ..StageOptions::default()
+open_grit(root).index().stage(&StageOptions {
+            pathspecs: specs.clone(), pathspec_sources: specs, ..StageOptions::default()
         },
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),

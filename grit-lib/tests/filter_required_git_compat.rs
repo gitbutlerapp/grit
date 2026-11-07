@@ -10,8 +10,8 @@ use grit_lib::command_runner::{CommandRunner, CommandSpec, RunningCommand};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, FilterError, FilterPhase};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::status::{StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::crlf::{
@@ -171,11 +171,7 @@ fn failing_required_clean_filter_fails_stage_and_leaves_index_alone() {
     let repo = filtered_repo(root, "exit 3");
     fs::write(root.join("y.up"), "abc\n").expect("write");
 
-    let err = stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let err = repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect_err("stage must fail when a required clean filter fails");
     assert!(
@@ -205,12 +201,7 @@ fn working_filter_round_trips_with_git_and_status_is_clean() {
     git(root, &["add", "x.up", ".gitattributes"]);
     git(root, &["commit", "-qm", "base"]);
     fs::write(root.join("y.up"), "def\n").expect("write");
-
-    stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("stage");
     assert_eq!(git(root, &["cat-file", "-p", ":y.up"]), "DEF\n");
@@ -226,11 +217,7 @@ fn working_filter_round_trips_with_git_and_status_is_clean() {
     fs::remove_file(root.join(".git/index")).expect("drop index");
     git(root, &["read-tree", "HEAD"]);
     git(root, &["add", "y.up"]);
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut grit_lib::progress::NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(

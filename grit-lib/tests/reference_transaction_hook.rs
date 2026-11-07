@@ -14,8 +14,7 @@ use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{commit_with_scope, create_commit, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefNameRef, RefUpdate, RefUpdateFlags,
@@ -187,24 +186,17 @@ fn sha256_initial_commit_hook_uses_wide_null_old_id() {
     install_reference_transaction_hook(&repo, &log, false);
 
     fs::write(&log, "").expect("clear log");
-    stage_for_commit(
-        &repo,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.index().stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let ident = "T <t@e.x> 1700000000 +0000".to_string();
-    create_commit(
-        &repo,
-        &{
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new("c1");
             req.author = Some(ident.parse().expect("sig"));
             req.committer = Some(ident.parse().expect("sig"));
             req.allow_empty = false;
             req
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -397,12 +389,7 @@ fn memory_ref_store_second_commit_head_line_matches_branch_old_oid() {
         let mut req = CommitRequest::new(format!("c{i}"));
         req.author = Some(ident.clone());
         req.committer = Some(ident.clone());
-        commit_with_scope(
-            &repo,
-            &req,
-            CommitScope::AutoStage,
-            &mut NullProgress,
-            &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
         )
         .expect("commit");
         if i == 0 {

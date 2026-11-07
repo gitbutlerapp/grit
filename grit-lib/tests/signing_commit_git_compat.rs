@@ -4,8 +4,8 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -77,18 +77,12 @@ fn create_commit_ssh_signs_when_gpgsign_true() {
 
     std::fs::write(root.join("a"), b"a\n").expect("write");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
-    create_commit(
-        &repo,
-        &{
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new("grit signed".to_owned());
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -97,9 +91,7 @@ fn create_commit_ssh_signs_when_gpgsign_true() {
             req.amend = false;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("create_commit");
 
@@ -171,18 +163,12 @@ fn amend_unsigned_drops_signed_tip_signature() {
 
     std::fs::write(root.join("a"), b"a\n").expect("write");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
-    create_commit(
-        &repo,
-        &{
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new("signed tip".to_owned());
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -191,18 +177,13 @@ fn amend_unsigned_drops_signed_tip_signature() {
             req.amend = false;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("signed create");
 
     let before = git_out(root, &["cat-file", "-p", "HEAD"]);
     assert_eq!(count_commit_signature_headers(&before), 1);
-
-    create_commit(
-        &repo,
-        &{
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new("signed tip amended".to_owned());
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -211,9 +192,7 @@ fn amend_unsigned_drops_signed_tip_signature() {
             req.amend = true;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("unsigned amend");
 
@@ -271,18 +250,12 @@ fn amend_resigns_with_single_fresh_signature() {
 
     std::fs::write(root.join("a"), b"a\n").expect("write");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
-    create_commit(
-        &repo,
-        &{
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new("signed tip".to_owned());
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -291,23 +264,15 @@ fn amend_resigns_with_single_fresh_signature() {
             req.amend = false;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("signed create");
 
     std::fs::write(root.join("a"), b"b\n").expect("write");
-    stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
-    create_commit(
-        &repo,
-        &{
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new("signed amend".to_owned());
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -316,9 +281,7 @@ fn amend_resigns_with_single_fresh_signature() {
             req.amend = true;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("signed amend");
 

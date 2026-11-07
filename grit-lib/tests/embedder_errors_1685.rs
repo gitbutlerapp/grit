@@ -6,9 +6,8 @@ use grit_lib::error::Error;
 use grit_lib::error::RevisionError;
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::staging::stage_worktree_changes;
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::status::{StatusOptions};
 use grit_lib::porcelain::CommitError;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -35,15 +34,11 @@ fn bare_repo_common_failures_use_requires_work_tree() {
     .expect("init bare");
 
     assert_requires_work_tree(
-        status(
-            &bare,
-            &StatusOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+        bare.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .map(|_| ()),
     );
-    assert_requires_work_tree(stage_worktree_changes(&bare, &[]).map(|_| ()));
+    assert_requires_work_tree(bare.index().stage_worktree_paths(&[]).map(|_| ()));
 
     let mut idx = bare
         .index()
@@ -65,10 +60,10 @@ fn repo_with_one_commit() -> (tempfile::TempDir, Repository, ObjectId) {
     )
     .expect("init");
     std::fs::write(base.path().join("w/a"), "x\n").expect("write");
-    stage_worktree_changes(&repo, &[]).expect("stage");
+    &repo.index().stage_worktree_paths(&[]).expect("stage");
     let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
     let outcome =
-        create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never()).expect("commit");
     (base, repo, outcome.oid)
 }
 
@@ -123,9 +118,9 @@ fn deep_parent_navigation_is_revision_out_of_range() {
     )
     .expect("init");
     std::fs::write(base.path().join("w/a"), "x\n").expect("write");
-    stage_worktree_changes(&repo, &[]).expect("stage");
+    &repo.index().stage_worktree_paths(&[]).expect("stage");
     let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
-    create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never()).expect("commit");
 
     let err = repo
         .revwalk()
@@ -149,13 +144,13 @@ fn empty_commit_message_is_typed() {
     )
     .expect("init");
     std::fs::write(base.path().join("w/a"), "x\n").expect("write");
-    stage_worktree_changes(&repo, &[]).expect("stage");
+    &repo.index().stage_worktree_paths(&[]).expect("stage");
     let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
-    create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never()).expect("commit");
 
     let mut empty = CommitRequest::new("");
     empty.allow_empty = true;
-    let err = create_commit(&repo, &empty, &mut NullProgress, &CancelToken::never()).unwrap_err();
+    let err = repo.commits().create_staged(&empty, &mut NullProgress, &CancelToken::never()).unwrap_err();
     assert!(
         matches!(err, Error::Commit(CommitError::EmptyCommitMessage)),
         "got {err:?}"

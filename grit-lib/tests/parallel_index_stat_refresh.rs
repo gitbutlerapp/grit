@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
+use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
@@ -67,9 +67,7 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         let rel = format!("mix/{i:05}.txt");
         fs::write(root.join(&rel), format!("payload {i}\n")).expect("write");
     }
-    grit_lib::porcelain::add::stage(
-        &repo,
-        &grit_lib::porcelain::add::StageOptions::default(),
+    &repo.index().stage(&grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
         &CancelToken::never(),
     )
@@ -84,11 +82,7 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         req.assume_worktree_synced = false;
         req
     };
-    grit_lib::porcelain::commit::create_commit(
-        &repo,
-        &req,
-        &mut NullProgress,
-        &CancelToken::never(),
+    grit_lib::porcelain::commit::&repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit");
 
@@ -108,7 +102,7 @@ fn run_status(
     opts.untracked = UntrackedMode::No;
     opts.ahead_behind = false;
     opts.stat_parallel_threads = Some(threads);
-    let model = status(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("status");
+    let model = repo.status().run(&opts, &mut NullProgress, &CancelToken::never()).expect("status");
     let index_bytes = fs::read(repo.index().path()).expect("index bytes");
     (model, index_bytes)
 }

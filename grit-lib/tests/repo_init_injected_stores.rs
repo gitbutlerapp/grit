@@ -12,8 +12,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, create_commit, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::log::DecorationOptions;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
@@ -73,19 +73,10 @@ fn request(message: &str) -> CommitRequest {
 }
 
 fn commit_work_tree(repo: &Repository, message: &str) -> ObjectId {
-    stage(
-        repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("stage");
-    commit_with_scope(
-        repo,
-        &request(message),
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(request(message), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -94,7 +85,7 @@ fn commit_work_tree(repo: &Repository, message: &str) -> ObjectId {
 fn commit_empty(repo: &Repository, message: &str) -> ObjectId {
     let mut req = request(message);
     req.allow_empty = true;
-    create_commit(repo, &req, &mut NullProgress, &CancelToken::never())
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
         .expect("commit")
         .oid
 }

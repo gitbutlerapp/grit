@@ -13,8 +13,8 @@ use grit_lib::change_id::{find_commits_by_change_id_prefix, ChangeId};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::{Peel, ResolveOptions};
@@ -56,22 +56,13 @@ fn memory_repo() -> MemoryRepo {
 /// Write `file` and commit it, returning the commit and the change id grit stored in it.
 fn commit_one_file(repo: &MemoryRepo, file: &str, contents: &str) -> (ObjectId, ChangeId) {
     fs::write(repo.root.join(file), contents).expect("write file");
-    stage(
-        &repo.repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("stage");
     let mut req = CommitRequest::new(format!("add {file}"));
     req.author = Some(IDENT.parse().expect("signature"));
     req.committer = Some(IDENT.parse().expect("signature"));
-    let outcome = commit_with_scope(
-        &repo.repo,
-        &req,
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
+    let outcome = repo.repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit");
     let change_id = outcome.change_id.expect("grit stamps a change id");

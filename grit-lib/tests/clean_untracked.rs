@@ -6,8 +6,8 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::clean::{CleanOptions, CleanScope};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::clean::{clean_untracked, CleanOptions, CleanScope};
+use grit_lib::porcelain::commit::{CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -109,18 +109,12 @@ fn init_tracked_repo(root: &Path) -> Repository {
     git(root, &["config", "user.name", "Clean Test"]);
     fs::write(root.join("tracked.txt"), b"tracked\n").unwrap();
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    grit_lib::porcelain::add::stage(
-        &repo,
-        &grit_lib::porcelain::add::StageOptions::default(),
+    &repo.index().stage(&grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
-    create_commit(
-        &repo,
-        &commit_req("base"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.commits().create_staged(&commit_req("base"), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     repo
@@ -345,17 +339,13 @@ fn collapsed_dir_preserves_ignored_files_like_git() {
     let grit_root = tempfile::tempdir().expect("grit");
     init_tracked_repo(grit_root.path());
     fs::write(grit_root.path().join(".gitignore"), b"ignored.log\n").unwrap();
-    grit_lib::porcelain::add::stage(
-        &Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).unwrap(),
+    &Repository::discover(Some(grit_root.path()).index().stage(&RepositoryOptions::empty()).unwrap(),
         &grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
-    create_commit(
-        &Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).unwrap(),
-        &commit_req("ignore"),
-        &mut NullProgress,
+&Repository::discover(Some(grit_root.path()).commits().create_staged(&RepositoryOptions::empty()).unwrap(), &commit_req("ignore"), &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
@@ -479,17 +469,13 @@ fn empty_ignored_directory_preserves_collapsed_parent_like_git() {
     let grit_root = tempfile::tempdir().expect("grit");
     init_tracked_repo(grit_root.path());
     fs::write(grit_root.path().join(".gitignore"), b"cache/\n").unwrap();
-    grit_lib::porcelain::add::stage(
-        &Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).unwrap(),
+    &Repository::discover(Some(grit_root.path()).index().stage(&RepositoryOptions::empty()).unwrap(),
         &grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
-    create_commit(
-        &Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).unwrap(),
-        &commit_req("ignore cache dir"),
-        &mut NullProgress,
+&Repository::discover(Some(grit_root.path()).commits().create_staged(&RepositoryOptions::empty()).unwrap(), &commit_req("ignore cache dir"), &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();

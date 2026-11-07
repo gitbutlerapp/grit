@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::stat_matches;
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::status::{StatusOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -78,11 +78,7 @@ fn git_clone_index_stats_match_worktree_with_autocrlf() {
         .modified()
         .expect("index mtime");
 
-    let model = status(
-        &grit_repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = grit_repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("first status after git clone");
     assert!(
@@ -138,11 +134,7 @@ fn first_status_after_git_clone_is_bounded_with_autocrlf() {
     .expect("open grit repo");
 
     let start = Instant::now();
-    let model = status(
-        &grit_repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = grit_repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("first status after git clone");
     let elapsed = start.elapsed();

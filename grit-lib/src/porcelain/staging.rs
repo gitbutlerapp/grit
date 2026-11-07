@@ -38,7 +38,7 @@ pub struct StageWorktreeChangesOutcome {
 /// # Errors
 ///
 /// Propagates I/O, diff, and object-database failures.
-pub fn stage_worktree_changes(
+pub(crate) fn stage_worktree_changes(
     repo: &Repository,
     pathspecs: &[String],
 ) -> Result<StageWorktreeChangesOutcome> {

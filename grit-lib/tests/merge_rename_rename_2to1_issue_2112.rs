@@ -133,7 +133,7 @@ fn assert_tree_merge_matches_git(fx: &Fixture, context: &str) -> (ObjectId, Obje
         "{context}: git must report add/add:\n{}",
         oracle.stdout
     );
-    assert_merge_output_matches_oracle(&fx.repo, &merged, &oracle, context);
+    assert_merge_output_matches_oracle(fx.repo, &merged, &oracle, context);
     let stages: Vec<(u32, &str, ObjectId)> = oracle
         .unmerged
         .iter()

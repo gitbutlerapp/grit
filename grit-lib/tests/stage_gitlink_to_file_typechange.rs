@@ -10,8 +10,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::OdbBuilder;
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
@@ -63,32 +63,35 @@ fn gitlink_replaced_by_file(root: &Path) {
 }
 
 fn stage_and_commit(repo: &Repository) {
-    stage(
-        repo,
-        &StageOptions {
-            pathspecs: vec!["sub".to_owned()],
-            pathspec_sources: vec!["sub".to_owned()],
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage sub");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["sub".to_owned()],
+                pathspec_sources: vec!["sub".to_owned()],
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage sub");
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
-    commit_with_scope(
-        repo,
-        &{
-            let mut req = CommitRequest::new("replace with file".to_owned());
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req
-        },
-        CommitScope::Staged,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("the gitlink-to-file typechange must be committable");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                &{
+                    let mut req = CommitRequest::new("replace with file".to_owned());
+                    req.author = Some(ident.parse().expect("signature"));
+                    req.committer = Some(ident.parse().expect("signature"));
+                    req
+                }
+                .clone(),
+                CommitScope::Staged,
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("the gitlink-to-file typechange must be committable");
 }
 
 fn assert_committed_as_blob(root: &Path) {

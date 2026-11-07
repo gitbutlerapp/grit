@@ -11,7 +11,7 @@ use crate::support::{assert_git_fsck_strict, git, open_grit_repo};
 
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::integrate_branch;
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::revwalk::history::{
@@ -89,8 +89,8 @@ fn oid(root: &Path, spec: &str) -> ObjectId {
     ObjectId::from_hex(&rev(root, spec)).expect("oid")
 }
 
-fn status(root: &Path) -> String {
-    git(root, &["status", "--porcelain=v1"])
+fn root: &Path) -> String {
+    git(root.status().run(&["status", "--porcelain=v1"])
 }
 
 fn commit_req(message: &str) -> CommitRequest {
@@ -114,25 +114,14 @@ fn cancelled_auto_stage_commit_leaves_git_view_unchanged() {
     let repo = open_grit_repo(root);
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
     let cancel = sink.flag.clone();
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("change"),
-        CommitScope::AutoStage,
-        &mut sink,
-        &cancel,
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("change"), CommitScope::AutoStage), &mut sink, &cancel,
     )
     .expect_err("cancelled");
     assert!(err.is_cancelled(), "got {err:?}");
     assert_eq!(rev(root, "HEAD"), head);
     assert_eq!(status(root), status_before, "nothing became staged");
     assert_git_fsck_strict(root);
-
-    commit_with_scope(
-        &repo,
-        &commit_req("change"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("change"), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(rev(root, "HEAD~1"), head);

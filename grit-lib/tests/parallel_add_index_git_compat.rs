@@ -7,7 +7,7 @@ use std::process::Command;
 use filetime::FileTime;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::porcelain::add::{StageOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -66,11 +66,7 @@ fn reset_staging_area(repo: &Repository) {
 }
 
 fn stage_all(repo: &Repository) -> Vec<u8> {
-    stage(
-        repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     fs::read(repo.index().path()).expect("read index")

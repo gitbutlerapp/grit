@@ -5,7 +5,8 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 fn git(repo: &std::path::Path, args: &[&str]) -> String {
@@ -61,14 +62,9 @@ fn grit_add_honours_gitattributes_with_autocrlf_like_git() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-
-    stage(
-        &repo,
-        &StageOptions {
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
+repo.index().stage(&StageOptions {
+            mode: StageMode::All, ..StageOptions::default()
+        }, &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add");

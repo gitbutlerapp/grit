@@ -451,8 +451,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
 #[test]
 fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::porcelain::add::stage_for_commit;
-    use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+    use grit_lib::porcelain::commit::{CommitRequest};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
 
@@ -491,16 +490,11 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     fn grit_commit(repo: &Repository, filename: &str, message: &str) -> ObjectId {
         let wt = repo.work_tree().expect("worktree");
         std::fs::write(wt.join(filename), format!("{message}\n")).unwrap();
-        stage_for_commit(
-            repo,
-            &mut NullProgress,
-            &grit_lib::progress::CancelToken::never(),
+repo.index().stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never(),
         )
         .expect("stage");
         let ident = "Test <t@example.com> 1 +0000".to_string();
-        let out = create_commit(
-            repo,
-            &{
+        let out = repo.commits().create_staged(&{
                 let mut req = CommitRequest::new(message.to_owned());
                 req.author = Some(ident.parse().expect("signature"));
                 req.committer = Some(ident.parse().expect("signature"));
@@ -509,9 +503,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
                 req.amend = false;
                 req.assume_worktree_synced = false;
                 req
-            },
-            &mut NullProgress,
-            &grit_lib::progress::CancelToken::never(),
+            }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
         )
         .expect("commit");
         out.oid

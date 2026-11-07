@@ -16,8 +16,8 @@ use grit_lib::error::Error;
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::stage_tracked::IndexStagingThresholds;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -542,13 +542,9 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
     fs::create_dir_all(dir.path().join("sub")).expect("mkdir");
     fs::write(dir.path().join("sub/deep.txt"), "deep\n").expect("write");
 
-    let outcome = stage(
-        &repo,
-        &StageOptions {
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
+    let outcome = repo.index().stage(&StageOptions {
+            mode: StageMode::All, ..StageOptions::default()
+        }, &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("stage into custom primary");
@@ -568,25 +564,16 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
         req.committer = Some("T <t@example.com> 1 +0000".parse().expect("signature"));
         req
     };
-    let first = commit_with_scope(
-        &repo,
-        &req,
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
+    let first = repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit staged");
 
     // Force the parallel tracked-restage batch path for one modification.
     fs::write(dir.path().join("sub/deep.txt"), "deeper\n").expect("write");
-    stage(
-        &repo,
-        &grit_lib::test_support::knobs::stage_options_staging_thresholds(
+repo.index().stage(&grit_lib::test_support::knobs::stage_options_staging_thresholds(
             StageOptions {
-                mode: StageMode::Update,
-                ..StageOptions::default()
-            },
-            IndexStagingThresholds {
+                mode: StageMode::Update, ..StageOptions::default()
+            }, IndexStagingThresholds {
                 large_index_restage: 0,
                 parallel_tracked_restage: 0,
             },
@@ -605,12 +592,7 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
     let mut second_req = req;
     second_req.message = "second".into();
     let req = second_req;
-    let second = commit_with_scope(
-        &repo,
-        &req,
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+    let second = repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .expect("auto-stage commit into custom primary");
     assert_ne!(first.oid, second.oid);

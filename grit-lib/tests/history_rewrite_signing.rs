@@ -11,8 +11,8 @@ use std::sync::Arc;
 use grit_lib::command_runner::RecordingRunner;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -107,17 +107,11 @@ fn signed_tip_via_grit(root: &Path, gpgsign: bool) -> ObjectId {
     );
     std::fs::write(root.join("signed.txt"), b"signed\n").expect("write");
     let repo = open_grit(root);
-    stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("stage");
     let ident = "T <t@example.com> 1700000001 +0000".to_owned();
-    create_commit(
-        &repo,
-        &{
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new("signed subject\n".to_owned());
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -126,9 +120,7 @@ fn signed_tip_via_grit(root: &Path, gpgsign: bool) -> ObjectId {
             req.amend = false;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
+        }, &mut NullProgress, &CancelToken::never(),
     )
     .expect("create_commit")
     .oid

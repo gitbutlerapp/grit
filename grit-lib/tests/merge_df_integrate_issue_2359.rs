@@ -7,7 +7,7 @@ use grit_lib::error::Error;
 use grit_lib::index::IndexError;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::{CancelToken, NullProgress};
 
@@ -74,12 +74,7 @@ fn integrate_branch_df_conflict_parks_file_and_keeps_directory() {
         .iter()
         .any(|(path, stage, _, _)| path == "f/i" && *stage == 0));
 
-    let err = commit_with_scope(
-        &repo,
-        &CommitRequest::new("resolved"),
-        CommitScope::Staged,
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(CommitRequest::new("resolved"), CommitScope::Staged), &mut grit_lib::progress::NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("staged commit with unmerged paths");
     assert!(matches!(err, Error::Index(IndexError::Unmerged { .. })));

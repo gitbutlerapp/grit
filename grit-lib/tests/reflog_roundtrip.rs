@@ -282,7 +282,7 @@ fn t1410_expire_matches_git_byte_for_byte() {
 
             if backend == Backend::Files {
                 assert_reflog_tree_matches(
-                    &git_dir.path().join(".git"),
+                    git_dir.path().join(".git"),
                     &grit_dir.path().join(".git"),
                 );
             }
@@ -374,7 +374,7 @@ fn gc_reflog_expire_numeric_90000_and_100m_boundary_match_git() {
             );
             if backend == Backend::Files {
                 assert_reflog_tree_matches(
-                    &git_copy.path().join(".git"),
+                    git_copy.path().join(".git"),
                     &grit_copy.path().join(".git"),
                 );
             }
@@ -449,7 +449,7 @@ fn gc_per_ref_pattern_non_match_wildmatch_matches_git() {
 
         if backend == Backend::Files {
             assert_reflog_tree_matches(
-                &git_copy.path().join(".git"),
+                git_copy.path().join(".git"),
                 &grit_copy.path().join(".git"),
             );
         }
@@ -526,7 +526,7 @@ fn gc_per_ref_overlapping_pattern_precedence_matches_git() {
         git_expire(git_copy.path(), &["reflog", "expire", "refs/heads/main"]);
 
         assert_reflog_tree_matches(
-            &git_copy.path().join(".git"),
+            git_copy.path().join(".git"),
             &grit_copy.path().join(".git"),
         );
         let _ = backend;
@@ -831,7 +831,7 @@ fn t0600_expire_on_symref_not_referent() {
     grit_expire_simple(&grit_copy.path().join(".git"), sym, None);
 
     assert_reflog_tree_matches(
-        &git_copy.path().join(".git"),
+        git_copy.path().join(".git"),
         &grit_copy.path().join(".git"),
     );
 
@@ -993,7 +993,7 @@ fn delete_reflog_and_truncate_match_git() {
 
         if backend == Backend::Files {
             assert_reflog_tree_matches(
-                &git_copy.path().join(".git"),
+                git_copy.path().join(".git"),
                 &grit_copy.path().join(".git"),
             );
         }
@@ -1004,7 +1004,7 @@ fn delete_reflog_and_truncate_match_git() {
         git(git_copy.path(), &["reflog", "delete", "main@{0}"]);
         if backend == Backend::Files {
             assert_reflog_tree_matches(
-                &git_copy.path().join(".git"),
+                git_copy.path().join(".git"),
                 &grit_copy.path().join(".git"),
             );
         }
@@ -1043,7 +1043,7 @@ fn expire_unreachable_stalefix_and_mark_reachable() {
         );
         if backend == Backend::Files {
             assert_reflog_tree_matches(
-                &git_copy.path().join(".git"),
+                git_copy.path().join(".git"),
                 &grit_copy.path().join(".git"),
             );
         }
@@ -1087,7 +1087,7 @@ fn expire_unreachable_stalefix_and_mark_reachable() {
         );
         if backend == Backend::Files {
             assert_reflog_tree_matches(
-                &stale_git.path().join(".git"),
+                stale_git.path().join(".git"),
                 &stale_grit.path().join(".git"),
             );
         }
@@ -1300,7 +1300,7 @@ fn grit_expire_matches_git_expire_byte_for_byte_via_handle() {
 
         if backend == Backend::Files {
             assert_reflog_tree_matches(
-                &git_copy.path().join(".git"),
+                git_copy.path().join(".git"),
                 &grit_copy.path().join(".git"),
             );
         }

@@ -4,7 +4,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::ConflictKind;
-use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::porcelain::add::{StageOptions};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::paths::RemoveOptions;
 use grit_lib::progress::NullProgress;
@@ -80,13 +80,9 @@ fn modify_delete_conflict_materializes_incoming_version_and_resolves_with_add_or
     assert!(index.has_unmerged_entries());
 
     // grit add f — keep the file
-    let add_keep = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec!["f".into()],
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
+    let add_keep = repo.index().stage(&StageOptions {
+            pathspecs: vec!["f".into()], ..StageOptions::default()
+        }, &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("add keep");
@@ -154,12 +150,8 @@ fn modify_delete_merge_does_not_mark_unrelated_files_modified() {
     )
     .expect("merge");
 
-    use grit_lib::porcelain::status::{status, StatusOptions};
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    use grit_lib::porcelain::status::{StatusOptions};
+    let model = repo.status().run(&StatusOptions::default(), &mut grit_lib::progress::NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(

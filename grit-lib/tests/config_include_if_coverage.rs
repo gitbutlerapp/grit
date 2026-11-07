@@ -233,9 +233,9 @@ fn is_remote_url_in_hasconfig_error(err: &Error) -> bool {
 #[test]
 fn hasconfig_in_global_sees_remote_defined_in_repo_config() {
     let fx = HasconfigFixture::new();
-    fx.assert_email(&fx.env(), &[], PERSONAL_EMAIL);
+    fx.assert_email(fx.env(), &[], PERSONAL_EMAIL);
     fx.add_remote("origin", "https://github.com/work-org/app.git");
-    fx.assert_email(&fx.env(), &[], WORK_EMAIL);
+    fx.assert_email(fx.env(), &[], WORK_EMAIL);
 }
 
 #[test]
@@ -243,7 +243,7 @@ fn hasconfig_include_applies_in_place_so_later_local_email_wins() {
     let fx = HasconfigFixture::new();
     fx.add_remote("origin", "https://github.com/work-org/app.git");
     fx.append_local("[user]\n\temail = me@local.example\n");
-    fx.assert_email(&fx.env(), &[], "me@local.example");
+    fx.assert_email(fx.env(), &[], "me@local.example");
 }
 
 #[test]
@@ -251,7 +251,7 @@ fn hasconfig_skips_include_when_no_remote_url_matches() {
     let fx = HasconfigFixture::new();
     fx.add_remote("origin", "https://github.com/personal/app.git");
     fx.add_remote("fork", "https://gitlab.com/work-org/app.git");
-    fx.assert_email(&fx.env(), &[], PERSONAL_EMAIL);
+    fx.assert_email(fx.env(), &[], PERSONAL_EMAIL);
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn hasconfig_matches_any_remote_url_value_not_only_the_last() {
          \turl = https://mirror.example/app.git\n",
     );
     fx.add_remote("zzz", "https://other.example/x.git");
-    fx.assert_email(&fx.env(), &[], WORK_EMAIL);
+    fx.assert_email(fx.env(), &[], WORK_EMAIL);
 }
 
 #[test]
@@ -311,7 +311,7 @@ fn hasconfig_sees_remote_url_from_plain_include_in_later_file() {
     )
     .expect("remotes");
     fx.append_local(&format!("[include]\n\tpath = {}\n", remotes.display()));
-    fx.assert_email(&fx.env(), &[], WORK_EMAIL);
+    fx.assert_email(fx.env(), &[], WORK_EMAIL);
 }
 
 #[test]

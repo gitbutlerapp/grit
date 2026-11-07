@@ -200,6 +200,7 @@ pub(crate) mod commit_graph_file;
 pub(crate) mod commit_graph_write;
 pub(crate) mod commit_pretty;
 pub(crate) mod commit_trailers;
+pub mod commits;
 pub mod config;
 pub(crate) mod connectivity;
 pub(crate) mod credentials;
@@ -229,6 +230,7 @@ mod oid_abbrev;
 pub(crate) mod oid_abbrev_cache;
 pub(crate) mod pack_roll_delta;
 pub(crate) mod partial_clone;
+pub mod status;
 
 pub(crate) mod bitmap_walk;
 pub(crate) mod fetch;

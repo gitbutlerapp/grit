@@ -7,7 +7,11 @@ use grit_lib::diff::rerere::{repo_rerere, rerere_enabled, RerereAutoupdate, Rere
 use grit_lib::merge::{ContinueOptions, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::merge::{
+    continue_merge, integrate_branch, integrate_branch_with, ContinueOptions,
+    IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
+};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -402,7 +406,7 @@ fn issue_2468_squash_conflict_commit_records_rerere_postimage() {
     req.author = Some(ident());
     req.committer = Some(ident());
     let outcome =
-        create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never()).expect("commit");
     assert!(
         outcome
             .rerere

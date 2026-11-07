@@ -385,7 +385,7 @@ pub enum CommitPatchInput {
 /// # Errors
 ///
 /// Propagates config read failures from [`Repository::config`].
-pub fn default_commit_scope(repo: &Repository) -> Result<CommitScope> {
+pub(crate) fn default_commit_scope(repo: &Repository) -> Result<CommitScope> {
     let config = repo.config().snapshot()?;
     Ok(default_commit_scope_from_config(config.as_ref()))
 }
@@ -430,7 +430,7 @@ pub(crate) fn clear_squash_commit_state(git_dir: &std::path::Path) -> Result<()>
 /// # Errors
 ///
 /// Propagates I/O and merge-state read failures.
-pub fn pending_commit_message(repo: &Repository) -> Result<Option<String>> {
+pub(crate) fn pending_commit_message(repo: &Repository) -> Result<Option<String>> {
     let git_dir = repo.git_dir();
     let squash = git_dir.join("SQUASH_MSG");
     let merge_msg = git_dir.join("MERGE_MSG");
@@ -493,7 +493,7 @@ fn replay_blocks_partial_commit(git_dir: &std::path::Path) -> Result<bool> {
 ///   to the index, as from [`commit_with_patch`].
 ///
 /// Underlying repository, hook, index, and I/O failures are returned in their own areas.
-pub fn commit_with_scope(
+pub(crate) fn commit_with_scope(
     repo: &Repository,
     req: &CommitRequest,
     scope: CommitScope,
@@ -536,7 +536,7 @@ fn commit_patch_error(err: Error) -> Error {
 ///
 /// [`CommitError::HunkSelect`] for hunk id failures; [`CommitError::PatchApply`] for patch apply;
 /// same commit errors as [`create_commit`].
-pub fn commit_with_patch(
+pub(crate) fn commit_with_patch(
     repo: &Repository,
     req: &CommitRequest,
     input: CommitPatchInput,
@@ -630,7 +630,7 @@ fn commit_patch_scope(
 /// # Errors
 ///
 /// Same as [`commit_with_scope`].
-pub fn plan_commit(
+pub(crate) fn plan_commit(
     repo: &Repository,
     req: &CommitRequest,
     scope: CommitScope,
@@ -996,7 +996,7 @@ impl CommitOutcome {
 /// - [`IndexError::unmerged()`] when the index has conflict stages.
 /// - Index write or diff failures before the branch is updated; the branch tip is not advanced.
 /// - Ref/reflog failures from [`crate::refs::update_branch_for_commit_on_store`]; the branch tip is not left advanced without reflogs when logging is enabled.
-pub fn create_commit(
+pub(crate) fn create_commit(
     repo: &Repository,
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
@@ -1032,7 +1032,7 @@ pub fn create_commit(
 /// including [`crate::worktree::WorktreeError::UnmergedConflictMarkers`] when a path's conflict stages were dropped
 /// (after a merge, pick, revert, rebase or stash pop) while its worktree file still has
 /// a conflict-marker block that its `HEAD` version does not. Neither the index nor `HEAD` moves in that case.
-pub fn commit_worktree(
+pub(crate) fn commit_worktree(
     repo: &Repository,
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
@@ -2059,7 +2059,7 @@ pub(crate) fn stamp_change_id_on_new_commit(
 ///
 /// Propagates signing and config errors from [`GpgConfig::from_config`] and
 /// [`sign_serialized_commit`].
-pub fn prepare_commit_bytes(
+pub(crate) fn prepare_commit_bytes(
     repo: &Repository,
     data: &CommitData,
     sign_override: Option<bool>,
@@ -2086,7 +2086,7 @@ pub fn prepare_commit_bytes(
 /// # Errors
 ///
 /// Same as [`prepare_commit_bytes`], plus object-database write failures.
-pub fn write_commit_object(
+pub(crate) fn write_commit_object(
     repo: &Repository,
     data: &CommitData,
     sign_override: Option<bool>,

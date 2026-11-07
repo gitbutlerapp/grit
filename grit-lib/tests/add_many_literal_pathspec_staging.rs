@@ -2,7 +2,7 @@
 
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::prelude::RepositoryOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -72,11 +72,7 @@ fn stage_hundred_literal_paths_only_updates_those_files() {
         mode: StageMode::All,
         ..StageOptions::default()
     };
-    let outcome = stage(
-        &repo,
-        &opts,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let outcome = repo.index().stage(&opts, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage subset");
     assert_eq!(

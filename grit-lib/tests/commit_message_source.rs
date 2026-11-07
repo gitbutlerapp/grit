@@ -11,7 +11,7 @@ use std::sync::Arc;
 use grit_lib::command_runner::hooks::HookName;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
@@ -98,12 +98,7 @@ fn auto_stage_commit_uses_request_message_when_editmsg_is_clobbered() {
     fs::write(root.join("a.txt"), b"2\n").expect("edit");
     clobber_commit_editmsg(root);
 
-    let outcome = commit_with_scope(
-        &repo,
-        &commit_req("mine"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("mine"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -120,15 +115,13 @@ fn paths_commit_uses_request_message_when_editmsg_is_clobbered() {
     fs::write(root.join("a.txt"), b"2\n").expect("edit a");
     fs::write(root.join("b.txt"), b"2\n").expect("edit b");
     clobber_commit_editmsg(root);
-
-    commit_with_scope(
-        &repo,
-        &commit_req("msg-for-a"),
-        paths("a.txt"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("msg-for-a"), paths("a.txt").clone()),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 
     assert_eq!(head_subject(root), "msg-for-a");
     assert_eq!(
@@ -151,14 +144,14 @@ fn commit_msg_hook_edit_is_recorded() {
     fs::write(root.join("a.txt"), b"2\n").expect("edit a");
     fs::write(root.join("b.txt"), b"2\n").expect("edit b");
 
-    let outcome = commit_with_scope(
-        &repo,
-        &commit_req("original"),
-        paths("a.txt"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("original"), paths("a.txt").clone()),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 
     assert!(outcome.hooks_run.contains(&HookName::CommitMsg));
     assert_eq!(
@@ -176,12 +169,7 @@ fn commit_msg_hook_emptying_message_aborts_without_moving_branch() {
     fs::write(root.join("a.txt"), b"2\n").expect("edit");
     let before = git(root, &["rev-parse", "HEAD"]);
 
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("will be emptied"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("will be emptied"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("emptied message must abort");
 
@@ -217,10 +205,8 @@ fn commits_keep_their_message_while_editmsg_is_rewritten_concurrently() {
     for i in 0..40 {
         fs::write(root.join("a.txt"), format!("{i}\n")).expect("edit");
         let message = format!("round-{i}");
-        match commit_with_scope(
-            &repo,
-            &commit_req(&message),
-            paths("a.txt"),
+        match repo.commits().create(
+            &grit_lib::commits::CommitOptions::new(commit_req(&message), paths("a.txt").clone()),
             &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         ) {

@@ -3,9 +3,8 @@
 //! `GRIT_WORKTREE_SCAN_49K_NESTED=1 cargo test -p grit-lib --test worktree_scan_nested_49k_probe_git_compat -- --test-threads=1`
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::TreeDiffOptions;
-
-use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::diff::{diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions};
+use grit_lib::porcelain::add::{StageOptions};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -166,11 +165,7 @@ fn nested_49k_noop_add_metadata_probe_budget() {
     let repo = open_repo(root);
 
     let _probe = reset_worktree_metadata_probe(root);
-    let outcome = stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let outcome = repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("add");
     assert_eq!(outcome.total(), 0);

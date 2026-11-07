@@ -12,7 +12,10 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::stat_matches;
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -123,7 +126,7 @@ fn first_status_after_populated_checkout_does_not_rewrite_warm_index() {
 
     let first_start = Instant::now();
     let first =
-        status(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("first status");
+        repo.status().run(&opts, &mut NullProgress, &CancelToken::never()).expect("first status");
     let first_elapsed = first_start.elapsed();
     assert!(
         first.unstaged.is_empty(),
@@ -138,7 +141,7 @@ fn first_status_after_populated_checkout_does_not_rewrite_warm_index() {
 
     let second_start = Instant::now();
     let second =
-        status(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("second status");
+        repo.status().run(&opts, &mut NullProgress, &CancelToken::never()).expect("second status");
     let second_elapsed = second_start.elapsed();
     assert!(second.unstaged.is_empty());
 

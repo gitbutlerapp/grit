@@ -9,8 +9,6 @@ use std::path::Path;
 use grit_lib::error::Error;
 use grit_lib::objects::hash::hash_object;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
-use grit_lib::porcelain::commit::create_commit;
-use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
@@ -31,10 +29,10 @@ struct Fixture {
 }
 
 fn stage_and_commit_worktree(repo: &Repository, message: &str, time: i64) -> ObjectId {
-    stage_worktree_changes(repo, &[]).expect("stage");
+    repo.index().stage_worktree_paths(&[]).expect("stage");
     let ident = format!("A <a@example.com> {time} +0000");
     let req = grit_test_support::commit_request(message, &ident);
-    create_commit(repo, &req, &mut NullProgress, &CancelToken::never())
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
         .expect("commit")
         .oid
 }

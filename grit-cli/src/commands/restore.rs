@@ -1,9 +1,7 @@
 //! `grit restore` — restore working tree and/or index paths.
 
 use anyhow::{Context, Result};
-use grit_lib::porcelain::hunk_select::{
-    parse_hunk_id_list, restore_hunks, HunkSelectError, RestoreHunksOutcome,
-};
+use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError, RestoreHunksOutcome};
 use grit_lib::porcelain::restore::{ConflictSide, RestoreOptions, RestoreOutcome, RestoreSource};
 use grit_lib::revwalk::ResolveOptions;
 
@@ -145,7 +143,9 @@ pub fn run_hunks(
     let pathspecs = resolved.specs().to_vec();
     let mut selection = parse_hunk_id_list(hunks).map_err(super::add::map_hunk_error)?;
     selection.ranges = super::add::parse_line_range_list(lines)?;
-    let outcome = restore_hunks(&repo, &selection, &pathspecs, staged, worktree, dry_run)
+    let outcome = repo
+        .index()
+        .restore_hunks(&selection, &pathspecs, staged, worktree, dry_run)
         .map_err(super::add::map_hunk_error)?;
     Ok(RestoreCliOutcome::from(outcome).with_path_display(&repo))
 }

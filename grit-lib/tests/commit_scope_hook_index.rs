@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
@@ -138,12 +138,7 @@ fn paths_commit_pre_commit_failure_preserves_index() {
     let before_cached = cached_names(root);
 
     let repo = open_repo(root);
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("partial"),
-        CommitScope::Paths(paths_only()),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("partial"), CommitScope::Paths(paths_only()).clone(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("pre-commit must fail");
     assert!(
@@ -170,12 +165,7 @@ fn paths_commit_commit_msg_failure_preserves_index() {
     let before_cached = cached_names(root);
 
     let repo = open_repo(root);
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("partial"),
-        CommitScope::Paths(paths_only()),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("partial"), CommitScope::Paths(paths_only()).clone(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit-msg must fail");
     assert!(
@@ -212,12 +202,7 @@ fn auto_stage_pre_commit_failure_preserves_index() {
     let before_cached = cached_diff(root);
 
     let repo = open_repo(root);
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("try"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("try"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("pre-commit must fail");
     assert!(
@@ -244,12 +229,7 @@ fn auto_stage_commit_msg_failure_preserves_index() {
     let before_cached = cached_diff(root);
 
     let repo = open_repo(root);
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("try"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("try"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit-msg must fail");
     assert!(

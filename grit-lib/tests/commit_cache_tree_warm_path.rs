@@ -3,7 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::{cache_tree_extension_valid, cache_tree_fully_valid};
 use grit_lib::index::Index;
-use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
+use grit_lib::porcelain::commit::{CommitRequest};
 use grit_lib::porcelain::stage_tracked::{
     stage_tracked_modifications_with_thresholds, IndexStagingThresholds,
 };
@@ -114,11 +114,7 @@ fn allow_empty_commit_preserves_cache_tree_without_full_restage() {
     let before_idx =
         Index::parse(&before, &grit_lib::index::IndexParseOptions::default()).expect("parse");
     assert!(before_idx.cache_tree.is_some());
-
-    commit_worktree(
-        &repo,
-        &commit_worktree_req("empty", true),
-        &mut NullProgress,
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_worktree_req("empty".clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), true), &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("allow-empty commit");

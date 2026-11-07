@@ -166,7 +166,7 @@ fn git_cannot_write_a_bitmap_once_an_offloaded_repository_takes_a_push() {
     // And it lost nothing: both versions of the small file are still in main, the
     // large one in the LOP.
     assert_stored(
-        &tmp.path().join("work"),
+        tmp.path().join("work"),
         &main_dir,
         &["HEAD:small.txt", "HEAD~1:small.txt"],
         &tmp.path().join("lop.git"),

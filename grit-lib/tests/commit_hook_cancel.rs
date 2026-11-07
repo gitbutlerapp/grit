@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use grit_lib::error::Error;
 use grit_lib::ident::Signature;
-use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
+use grit_lib::porcelain::commit::{CommitRequest};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -51,11 +51,7 @@ fn cancelled_pre_commit_hook_leaves_no_index_lock() {
     )
     .expect("init");
     std::fs::write(dir.path().join("a"), "base\n").expect("write");
-    commit_worktree(
-        &repo,
-        &commit_req("base"),
-        &mut NullProgress,
-        &CancelToken::new(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("base"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::new(),
     )
     .expect("seed commit");
     let head_before = repo
@@ -77,7 +73,7 @@ fn cancelled_pre_commit_hook_leaves_no_index_lock() {
         thread::sleep(Duration::from_millis(300));
         cancel_worker.cancel();
     });
-    let result = commit_worktree(&repo, &commit_req("two"), &mut NullProgress, &cancel);
+    let result = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("two"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &cancel);
     kick.join().expect("join");
     assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
 
@@ -108,11 +104,7 @@ fn cancelled_pre_commit_hook_waits_for_child_to_exit() {
     )
     .expect("init");
     std::fs::write(dir.path().join("a"), "base\n").expect("write");
-    commit_worktree(
-        &repo,
-        &commit_req("base"),
-        &mut NullProgress,
-        &CancelToken::new(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("base"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::new(),
     )
     .expect("seed commit");
 
@@ -125,7 +117,7 @@ fn cancelled_pre_commit_hook_waits_for_child_to_exit() {
         thread::sleep(Duration::from_millis(100));
         cancel_worker.cancel();
     });
-    let result = commit_worktree(&repo, &commit_req("two"), &mut NullProgress, &cancel);
+    let result = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("two"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &cancel);
     kick.join().expect("join");
     assert!(matches!(result, Err(Error::Cancelled)));
     assert!(git_dir_lock_names(&repo).is_empty());

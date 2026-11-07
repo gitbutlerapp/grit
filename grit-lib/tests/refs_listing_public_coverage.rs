@@ -3,8 +3,7 @@
 #![allow(clippy::unwrap_used)]
 
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::commit::create_commit;
-use grit_lib::porcelain::tag::CreateTagRequest;
+use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::query_listings_on_store;
 use grit_lib::refs::listing::{
@@ -85,10 +84,7 @@ fn references_query_peels_annotated_tags() {
     let dir = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
-    let commit = create_commit(
-        &repo,
-        &grit_test_support::empty_commit_request("c", &ident),
-        &mut NullProgress,
+    let commit = repo.commits().create_staged(&grit_test_support::empty_commit_request("c", &ident), &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()
@@ -104,8 +100,9 @@ fn references_query_peels_annotated_tags() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 
     let query = RefQuery {
         namespaces: vec![RefNamespace::Tags],
@@ -162,10 +159,7 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
     let dir = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
-    let commit = create_commit(
-        &repo,
-        &grit_test_support::empty_commit_request("c", &ident),
-        &mut NullProgress,
+    let commit = repo.commits().create_staged(&grit_test_support::empty_commit_request("c", &ident), &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()
@@ -204,10 +198,7 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
     let dir = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
-    let commit = create_commit(
-        &repo,
-        &grit_test_support::empty_commit_request("c", &ident),
-        &mut NullProgress,
+    let commit = repo.commits().create_staged(&grit_test_support::empty_commit_request("c", &ident), &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()
@@ -278,10 +269,7 @@ fn date_sort_keeps_refs_with_missing_objects() {
     let dir = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
-    let commit = create_commit(
-        &repo,
-        &grit_test_support::empty_commit_request("c", &ident),
-        &mut NullProgress,
+    let commit = repo.commits().create_staged(&grit_test_support::empty_commit_request("c", &ident), &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()

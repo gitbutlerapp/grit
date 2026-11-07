@@ -11,7 +11,6 @@ use std::sync::OnceLock;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::create_commit;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_namespace::storage_ref_name;
 use grit_lib::repo::{InitOptions, Repository};
@@ -244,13 +243,14 @@ fn grit_empty_commit_with_message(worktree: &Path, message: &str) -> ObjectId {
     let repo =
         Repository::discover(Some(worktree), &RepositoryOptions::empty()).expect("discover repo");
     let ident = format!("{AUTHOR_NAME} <{AUTHOR_EMAIL}> {DETERMINISTIC_DATE}");
-    let outcome = create_commit(
-        &repo,
-        &grit_test_support::empty_commit_request(message, &ident),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit empty commit");
+    let outcome = repo
+        .commits()
+        .create_staged(
+            &grit_test_support::empty_commit_request(message, &ident),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit empty commit");
     outcome.oid
 }
 

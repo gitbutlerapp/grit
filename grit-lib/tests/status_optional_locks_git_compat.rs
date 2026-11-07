@@ -9,7 +9,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::porcelain::status::{status, InterruptedRewrite, StatusOptions};
+use grit_lib::porcelain::status::{InterruptedRewrite, StatusOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -66,16 +66,17 @@ fn status_write_index_false_leaves_index_bytes_and_mtime() {
         .modified()
         .expect("mtime");
 
-    let model = status(
-        &grit_repo,
-        &StatusOptions {
-            write_index: false,
-            ..StatusOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = grit_repo
+        .status()
+        .run(
+            &StatusOptions {
+                write_index: false,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(model.unstaged.is_empty());
 
     assert_eq!(index_digest(&index_path), digest_before);
@@ -117,13 +118,14 @@ fn status_honors_git_optional_locks_zero_in_environment() {
     let index_path = grit_repo.index().path();
     let digest_before = index_digest(&index_path);
 
-    let _model = status(
-        &grit_repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let _model = grit_repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
 
     assert_eq!(index_digest(&index_path), digest_before);
 }
@@ -279,16 +281,17 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     assert!(grit.history().apply_journal_active());
     assert_ne!(git_rev_parse(wt, "refs/heads/main"), Some(tip_before));
 
-    let model = status(
-        &grit,
-        &StatusOptions {
-            write_index: false,
-            ..StatusOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = grit
+        .status()
+        .run(
+            &StatusOptions {
+                write_index: false,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert_eq!(model.interrupted_rewrite, Some(InterruptedRewrite::Pending));
     assert!(grit.history().apply_journal_active());
 }

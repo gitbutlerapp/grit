@@ -333,7 +333,7 @@ fn rebase_session_conflict_stop_continue_and_abort() {
 #[test]
 fn continue_after_commit_during_rebase_conflict() {
     use grit_lib::change_id::change_id;
-    use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+    use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
@@ -367,16 +367,11 @@ fn continue_after_commit_during_rebase_conflict() {
     assert!(matches!(out, RebaseOutcome::Stopped(_)));
 
     std::fs::write(wt.join("f"), "1\nR\n3\n").expect("resolve");
-    commit_with_scope(
-        &grit,
-        &{
+grit.commits().create(&grit_lib::commits::CommitOptions::new(&{
             let mut req = CommitRequest::new("resolved o1\n");
             req.committer = Some(IDENT.parse().expect("IDENT"));
             req
-        },
-        CommitScope::AutoStage,
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }.clone(), CommitScope::AutoStage), &mut grit_lib::progress::NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit resolution");
 
@@ -498,7 +493,7 @@ fn strip_stopped_head_from_grit_plan(git_dir: &std::path::Path) {
 
 #[test]
 fn continue_after_commit_with_legacy_grit_plan_missing_stopped_head() {
-    use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+    use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
@@ -526,16 +521,11 @@ fn continue_after_commit_with_legacy_grit_plan_missing_stopped_head() {
         .expect("stop");
     strip_stopped_head_from_grit_plan(grit.git_dir());
     std::fs::write(wt.join("f"), "1\nR\n3\n").expect("resolve");
-    commit_with_scope(
-        &grit,
-        &{
+grit.commits().create(&grit_lib::commits::CommitOptions::new(&{
             let mut req = CommitRequest::new("resolved o1\n");
             req.committer = Some(IDENT.parse().expect("IDENT"));
             req
-        },
-        CommitScope::AutoStage,
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }.clone(), CommitScope::AutoStage), &mut grit_lib::progress::NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     let done = grit
@@ -726,7 +716,7 @@ fn continue_resolution_head_changed_leaves_rebase_state() {
 
 #[test]
 fn commit_during_rebase_conflict_uses_merge_msg_without_dash_m() {
-    use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+    use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
@@ -750,16 +740,11 @@ fn commit_during_rebase_conflict_uses_merge_msg_without_dash_m() {
         )
         .expect("stop");
     std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
-    commit_with_scope(
-        &grit,
-        &{
+grit.commits().create(&grit_lib::commits::CommitOptions::new(&{
             let mut req = CommitRequest::new("");
             req.committer = Some(IDENT.parse().expect("IDENT"));
             req
-        },
-        CommitScope::AutoStage,
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }.clone(), CommitScope::AutoStage), &mut grit_lib::progress::NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(git(wt, &["log", "-1", "--format=%s"]).trim(), "o1 subject");
@@ -2328,18 +2313,14 @@ fn switch_refuses_during_merge_conflict() {
 
 #[test]
 fn status_reports_git_started_rebase_with_branch_and_git_continue_step() {
-    use grit_lib::porcelain::status::{status, StatusOptions};
+    use grit_lib::porcelain::status::{StatusOptions};
     use grit_lib::progress::NullProgress;
     use grit_lib::refs::branch_tracking::{BranchStanding, StandingOptions, StatusHeader};
     use grit_lib::state::NextStep;
 
     let (repo, main_tip, _) = git_started_conflict_rebase();
     let grit = open_grit(repo.worktree());
-    let model = status(
-        &grit,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = grit.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     let standing = BranchStanding::compute(

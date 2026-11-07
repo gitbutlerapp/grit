@@ -176,7 +176,7 @@ fn sort_outcome_paths_lexicographic(outcome: &mut StageOutcome) {
 ///
 /// Same as [`stage`], plus [`crate::error::ConfigError::InvalidUntrackedFilesMode`] when
 /// `status.showUntrackedFiles` is invalid.
-pub fn stage_for_commit(
+pub(crate) fn stage_for_commit(
     repo: &Repository,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
@@ -233,7 +233,7 @@ pub(crate) fn stage_for_commit_on_index(
 /// Stage paths into a caller-owned index without writing it to disk.
 ///
 /// Same matching and validation rules as [`stage`].
-pub fn stage_on_index(
+pub(crate) fn stage_on_index(
     repo: &Repository,
     index: &mut Index,
     opts: &StageOptions,
@@ -301,7 +301,7 @@ pub(crate) fn validate_commit_staging_pathspecs(
 /// pathspec matches nothing,
 /// [`crate::worktree::WorktreeError::PathspecIgnored`] when a path exists but is excluded by ignore rules,
 /// or I/O / object-store failures while reading the work tree.
-pub fn stage(
+pub(crate) fn stage(
     repo: &Repository,
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,

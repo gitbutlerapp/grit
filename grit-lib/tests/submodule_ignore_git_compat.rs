@@ -6,8 +6,12 @@ use grit_lib::progress::NullProgress;
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{RenameDetection, TreeDiffOptions, UncommittedDiff};
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::diff::{
+    diff_index_to_worktree_with_options, diff_tree_to_worktree, DiffIndexToWorktreeOptions,
+    RenameDetection, UncommittedDiff,
+};
+use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::StashPushOptions;
 use grit_test_support::git;
@@ -96,11 +100,7 @@ fn dirty_submodule_only_reported_without_ignore() {
     );
 
     let repo = grit_repo(&main);
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -116,11 +116,7 @@ fn dirty_submodule_only_reported_without_ignore() {
     );
 
     let repo = grit_repo(&main);
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -198,11 +194,7 @@ fn moved_submodule_head_honors_ignore_dirty_not_all() {
         "git should report moved submodule HEAD with ignore=dirty: {git_dirty:?}"
     );
     let repo = grit_repo(&main);
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -217,11 +209,7 @@ fn moved_submodule_head_honors_ignore_dirty_not_all() {
         "git omits moved submodule HEAD from short status with ignore=all: {git_all:?}"
     );
     let repo = grit_repo(&main);
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -241,11 +229,7 @@ fn short_status_uses_lowercase_m_for_content_dirty_gitlink() {
     );
 
     let repo = grit_repo(&main);
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     let lines = grit_lib::porcelain::status::short_status_lines(&model);
@@ -354,11 +338,7 @@ fn gitmodules_duplicate_ignore_last_value_wins() {
     );
 
     let repo = grit_repo(&main);
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -397,11 +377,7 @@ fn gitmodules_logical_name_ignore_all_hides_dirty_submodule() {
     );
 
     let repo = grit_repo(&main);
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -444,11 +420,7 @@ fn staged_gitlink_visible_in_status_hidden_in_diff_with_ignore_all() {
     );
 
     let repo = grit_repo(&main);
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(

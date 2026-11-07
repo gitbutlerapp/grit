@@ -6,9 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
-use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
+use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::repo::Repository;
@@ -69,13 +69,9 @@ fn assert_git_fsck(root: &Path) {
 
 fn assert_grit_clean(root: &Path) {
     let repo = open_repo(root);
-    let model = status(
-        &repo,
-        &StatusOptions {
-            untracked: UntrackedMode::No,
-            ..StatusOptions::default()
-        },
-        &mut NullProgress,
+    let model = repo.status().run(&StatusOptions {
+            untracked: UntrackedMode::No, ..StatusOptions::default()
+        }, &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("grit status");

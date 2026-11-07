@@ -21,9 +21,9 @@ use grit_lib::ident::Signature;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::notes::NotesTreeEntry;
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::status::{StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::{InitOptions, Repository};
@@ -190,24 +190,14 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
 
         let path = fx.root.join(format!("file-{i}.txt"));
         fs::write(&path, format!("content {i}\n")).expect("write");
-        status(
-            &repo,
-            &StatusOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+        &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("status");
-        stage(
-            &repo,
-            &StageOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("stage");
         let ident = format!("{} <{}@example.com> 1 +0000", fx.author, fx.author);
-        create_commit(
-            &repo,
-            &{
+repo.commits().create_staged(&{
                 let mut req = CommitRequest::new(format!("commit {i}"));
                 req.author = Some(ident.parse().expect("signature"));
                 req.committer = Some(ident.parse().expect("signature"));
@@ -216,9 +206,7 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
                 req.amend = false;
                 req.assume_worktree_synced = false;
                 req
-            },
-            &mut NullProgress,
-            &CancelToken::never(),
+            }, &mut NullProgress, &CancelToken::never(),
         )
         .expect("commit");
     }
@@ -404,24 +392,14 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             rerere_enabled,
         };
         let repo = open_with_env(&fx);
-        status(
-            &repo,
-            &StatusOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+        &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("status");
-        stage(
-            &repo,
-            &StageOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("stage");
         let ident = Signature::new(name, email, repo.identity_now()).expect("signature");
-        create_commit(
-            &repo,
-            &{
+repo.commits().create_staged(&{
                 let mut req = CommitRequest::new("seed");
                 req.author = Some(ident.clone());
                 req.committer = Some(ident);
@@ -430,9 +408,7 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
                 req.amend = false;
                 req.assume_worktree_synced = false;
                 req
-            },
-            &mut NullProgress,
-            &CancelToken::never(),
+            }, &mut NullProgress, &CancelToken::never(),
         )
         .expect("seed commit");
         RepoFixture {

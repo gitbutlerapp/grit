@@ -15,8 +15,8 @@ use std::thread;
 use std::time::Duration;
 
 use grit_lib::error::Error;
-use grit_lib::porcelain::add::{stage, stage_on_index, StageOptions};
-use grit_lib::porcelain::paths::RemoveOptions;
+use grit_lib::porcelain::add::{stage_on_index, StageOptions};
+use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 
 use support::{assert_git_fsck_strict, git, git_ls_files_stage0_map, open_grit_repo};
@@ -77,11 +77,7 @@ fn run_parallel_stage(dir: &Path, writers: usize) -> Vec<(String, Result<(), Err
                 let path = format!("n{i}.txt");
                 let repo = open_grit_repo(&dir);
                 start.wait();
-                let res = stage(
-                    &repo,
-                    &stage_paths(&[&path]),
-                    &mut NullProgress,
-                    &grit_lib::progress::CancelToken::never(),
+                let res = repo.index().stage(&stage_paths(&[&path]), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
                 )
                 .map(|_| ());
                 (path, res)
@@ -155,11 +151,7 @@ fn stage_reads_index_after_waiting_for_lock() {
     let racer_dir = dir.to_path_buf();
     let racer = thread::spawn(move || {
         let repo = open_grit_repo(&racer_dir);
-        stage(
-            &repo,
-            &stage_paths(&["b.txt"]),
-            &mut NullProgress,
-            &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&stage_paths(&["b.txt"]), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
         )
         .map(|o| o.added)
     });
@@ -264,11 +256,7 @@ fn stage_fails_without_writing_when_lock_stays_held() {
 
     let repo = open_grit_repo(dir);
     let lock = repo.index().begin_update().expect("hold index.lock");
-    let err = stage(
-        &repo,
-        &stage_paths(&["a.txt"]),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.index().stage(&stage_paths(&["a.txt"]), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("stage must not proceed while index.lock is held");
     assert!(is_lock_contention(&err), "unexpected error {err}");

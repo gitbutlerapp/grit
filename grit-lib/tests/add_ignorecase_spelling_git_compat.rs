@@ -7,7 +7,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions, StageOutcome};
+use grit_lib::porcelain::add::{StageMode, StageOptions, StageOutcome};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -48,11 +48,7 @@ fn stage_with(root: &Path, mode: StageMode, dry_run: bool) -> StageOutcome {
         dry_run,
         ..StageOptions::default()
     };
-    stage(
-        &open(root),
-        &opts,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+&open(root).index().stage(&opts, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage")
 }

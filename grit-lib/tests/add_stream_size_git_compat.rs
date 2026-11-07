@@ -6,7 +6,8 @@ use grit_lib::progress::NullProgress;
 use std::fs;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 use tempfile::TempDir;
@@ -41,11 +42,7 @@ fn size_changed_stream_round_trips_with_system_git() {
             .expect("open");
             bytes.extend_from_slice(b"changed\r\n");
             fs::write(root.join("large.bin"), &bytes).expect("modify");
-            stage(
-                &repo,
-                &StageOptions::default(),
-                &mut NullProgress,
-                &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
             )
             .expect("stage");
             let expected = git(root, &["hash-object", "large.bin"]);

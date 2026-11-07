@@ -255,7 +255,7 @@ fn reset_hard_keeps_out_of_cone_paths_skip_worktree() {
     let repo = open(&pair.grit_dir);
     reset(&repo, rev(&pair.grit_dir, "HEAD~2"), ResetMode::Hard);
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_eq!(
         git(&pair.grit_dir, &["ls-files", "-t"]),
         "H a/f\nS b/f\nH top\n"
@@ -274,7 +274,7 @@ fn reset_hard_to_head_restores_in_cone_files_only() {
     let repo = open(&pair.grit_dir);
     reset(&repo, rev(&pair.grit_dir, "HEAD"), ResetMode::Hard);
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_matches_git(&pair);
 }
 
@@ -285,7 +285,7 @@ fn reset_mixed_carries_skip_worktree_bits() {
     let repo = open(&pair.grit_dir);
     reset(&repo, rev(&pair.grit_dir, "HEAD~2"), ResetMode::Mixed);
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_matches_git(&pair);
 }
 
@@ -309,7 +309,7 @@ fn switch_detach_keeps_out_of_cone_paths_skip_worktree() {
         )
         .expect("grit switch");
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_eq!(
         git(&pair.grit_dir, &["ls-files", "-t"]),
         "H a/f\nS b/f\nH top\n"
@@ -337,7 +337,7 @@ fn switch_branch_adds_out_of_cone_paths_as_skip_worktree() {
         )
         .expect("grit switch");
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_matches_git(&pair);
 }
 
@@ -364,7 +364,7 @@ fn fast_forward_merge_keeps_new_out_of_cone_paths_skip_worktree() {
         IntegrateBranchOutcome::FastForward { .. }
     ));
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_matches_git(&pair);
 }
 
@@ -385,7 +385,7 @@ fn three_way_merge_keeps_new_out_of_cone_paths_skip_worktree() {
     .expect("grit merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Merged { .. }));
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_eq!(
         rev(&pair.grit_dir, "HEAD^{tree}"),
         rev(&pair.git_dir, "HEAD^{tree}")
@@ -449,7 +449,7 @@ fn restore_from_source_matches_git() {
         )
         .expect("grit restore");
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_matches_git(&pair);
 }
 
@@ -511,7 +511,7 @@ fn pull_fast_forward_keeps_out_of_cone_paths_skip_worktree() {
     git(&pair.git_dir, &["pull", "-q", "--ff-only"]);
     grit_pull(&pair.grit_dir, PullMode::FfOnly);
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_matches_git(&pair);
 }
 
@@ -521,7 +521,7 @@ fn pull_rebase_keeps_out_of_cone_paths_skip_worktree() {
     git(&pair.git_dir, &["pull", "-q", "--rebase"]);
     grit_pull(&pair.grit_dir, PullMode::Rebase);
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_eq!(
         rev(&pair.grit_dir, "HEAD^{tree}"),
         rev(&pair.git_dir, "HEAD^{tree}")
@@ -555,7 +555,7 @@ fn sparse_index_survives_reset_hard_and_switch() {
         )
         .expect("grit switch");
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert!(git(&pair.grit_dir, &["ls-files", "--sparse"]).contains("b/\n"));
     assert_matches_git(&pair);
 }
@@ -680,7 +680,7 @@ fn switch_with_wholesale_deleted_directories_keeps_new_skip_worktree_rows() {
         )
         .expect("grit switch");
 
-    assert_b_not_materialized(&pair.grit_dir);
+    assert_b_not_materialized(pair.grit_dir);
     assert_eq!(
         git(&pair.grit_dir, &["ls-files", "-t"]),
         "S b/new\nH top\nS x/other/new\n"

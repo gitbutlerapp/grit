@@ -1128,6 +1128,20 @@ impl Repository {
         crate::merge::Merge::new(self)
     }
 
+    /// Working-tree status (staged, unstaged, untracked, ignored).
+    #[inline]
+    #[must_use]
+    pub fn status(&self) -> crate::status::Status<'_> {
+        crate::status::Status::new(self)
+    }
+
+    /// Create and plan commits.
+    #[inline]
+    #[must_use]
+    pub fn commits(&self) -> crate::commits::Commits<'_> {
+        crate::commits::Commits::new(self)
+    }
+
     /// Snapshot-checkout operations for this repository: making and projecting snapshots
     /// on a server, and refreshing and checking in from a checkout.
     #[must_use]

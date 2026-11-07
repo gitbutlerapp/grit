@@ -12,8 +12,8 @@ use grit_lib::config::ident_resolve::{
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::{parse_commit, ObjectKind};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -97,16 +97,16 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
 
     let repo = Repository::discover(Some(root), &options).expect("discover with environment");
     fs::write(root.join("f"), b"x\n").expect("worktree file");
-    stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec![".".to_owned()],
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec![".".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
     let config = repo.config().snapshot().expect("config");
     let now = repo.identity_now();
     assert_eq!(
@@ -119,22 +119,23 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
     let committer = resolve_identity_with(&env, config.as_ref(), IdentRole::Committer, now)
         .expect("committer identity");
 
-    let outcome = create_commit(
-        &repo,
-        &{
-            let mut req = CommitRequest::new("subject".to_owned());
-            req.author = Some(author.parse().expect("signature"));
-            req.committer = Some(committer.parse().expect("signature"));
-            req.allow_empty = false;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = false;
-            req
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("create_commit");
+    let outcome = repo
+        .commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("subject".to_owned());
+                req.author = Some(author.parse().expect("signature"));
+                req.committer = Some(committer.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("create_commit");
     let grit_oid = outcome.oid;
 
     let commit_obj = repo.odb().read(&grit_oid).expect("read commit");

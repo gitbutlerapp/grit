@@ -17,7 +17,11 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::merge::{ContinueOptions, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{create_commit, CommitOutcome, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{CommitOutcome, CommitRequest, HookPolicy};
+use grit_lib::porcelain::merge::{
+    continue_merge, integrate_branch_with, ContinueOptions, IntegrateBranchOutcome,
+    MergeCommitMode, MergeOptions,
+};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -153,7 +157,7 @@ fn request(message: &str) -> CommitRequest {
 }
 
 fn commit(repo: &Repository, req: &CommitRequest) -> grit_lib::error::Result<CommitOutcome> {
-    create_commit(repo, req, &mut NullProgress, &CancelToken::never())
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
 }
 
 fn hook_failed(err: &Error) -> Option<&str> {

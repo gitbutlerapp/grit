@@ -98,7 +98,7 @@ impl StageTrackedSummary {
 /// [`Error::LockHeld`] when another process holds `index.lock` past the
 /// `core.filesRefLockTimeout` wait, I/O failures, object write failures, or a missing index
 /// when one is required.
-pub fn stage_tracked_modifications(
+pub(crate) fn stage_tracked_modifications(
     repo: &Repository,
     work_tree: &Path,
 ) -> Result<StageTrackedSummary> {
@@ -110,7 +110,7 @@ pub fn stage_tracked_modifications(
 /// # Errors
 ///
 /// Same as [`stage_tracked_modifications`].
-pub fn stage_tracked_modifications_with_thresholds(
+pub(crate) fn stage_tracked_modifications_with_thresholds(
     repo: &Repository,
     work_tree: &Path,
     thresholds: IndexStagingThresholds,
@@ -166,7 +166,7 @@ pub fn stage_tracked_modifications_with_thresholds(
 ///
 /// # Errors
 /// I/O failures or object write failures while reading the worktree.
-pub fn stage_tracked_modifications_in_index(
+pub(crate) fn stage_tracked_modifications_in_index(
     repo: &Repository,
     work_tree: &Path,
     index_path: &Path,
@@ -182,7 +182,7 @@ pub fn stage_tracked_modifications_in_index(
 }
 
 /// Like [`stage_tracked_modifications_in_index`], with explicit staging thresholds.
-pub fn stage_tracked_modifications_in_index_with_thresholds(
+pub(crate) fn stage_tracked_modifications_in_index_with_thresholds(
     repo: &Repository,
     work_tree: &Path,
     index_path: &Path,

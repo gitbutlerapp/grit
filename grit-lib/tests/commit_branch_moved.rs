@@ -9,7 +9,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::repo::Repository;
@@ -97,14 +97,20 @@ fn paths_commit_fails_when_branch_moves_after_head_was_read() {
     let root = tmp.path();
     let (repo, other) = repo_with_racing_hook(root);
 
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("mine"),
-        CommitScope::Paths(Pathspec::scoped(["a.txt"], PathspecGlobalFlags::default())),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("moved branch must fail the commit");
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("mine"),
+                CommitScope::Paths(Pathspec::scoped(
+                    ["a.txt"],
+                    PathspecGlobalFlags::default(),
+                )),
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("moved branch must fail the commit");
 
     assert_branch_moved_error(&err);
     assert_eq!(git(root, &["rev-parse", "HEAD"]), other);
@@ -119,12 +125,7 @@ fn auto_stage_commit_fails_when_branch_moves_after_head_was_read() {
     let root = tmp.path();
     let (repo, other) = repo_with_racing_hook(root);
 
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("mine"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("mine"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("moved branch must fail the commit");
 

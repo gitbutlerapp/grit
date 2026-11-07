@@ -6,8 +6,9 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::MODE_GITLINK;
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-use grit_lib::porcelain::status::{status, IgnoredMode, StatusOptions, UntrackedMode};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
+use grit_lib::porcelain::status::{IgnoredMode, StatusOptions, UntrackedMode};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -45,12 +46,8 @@ fn status_lists_embedded_repository_before_staging() {
     fs::create_dir_all(&vendor).expect("mkdir");
     init_nested_git_repo(&vendor);
 
-    let model = status(
-        &repo,
-        &StatusOptions {
-            untracked: UntrackedMode::Normal,
-            ignored: IgnoredMode::No,
-            ..StatusOptions::default()
+    let model = repo.status().run(&StatusOptions {
+            untracked: UntrackedMode::Normal, ignored: IgnoredMode::No, ..StatusOptions::default()
         },
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -81,12 +78,8 @@ fn add_and_commit_report_new_embedded_gitlink() {
     fs::create_dir_all(&vendor).expect("mkdir");
     init_nested_git_repo(&vendor);
 
-    let stage_outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec!["vendor-hello".to_owned()],
-            pathspec_sources: vec!["vendor-hello".to_owned()],
-            mode: StageMode::All,
+    let stage_outcome = repo.index().stage(&StageOptions {
+            pathspecs: vec!["vendor-hello".to_owned()], pathspec_sources: vec!["vendor-hello".to_owned()], mode: StageMode::All,
             ..StageOptions::default()
         },
         &mut NullProgress,
@@ -123,12 +116,8 @@ fn symlink_to_repo_root_is_not_embedded_repository() {
     fs::write(root.join("a"), b"a\n").expect("top");
     std::os::unix::fs::symlink(".", root.join("loop")).expect("symlink");
 
-    let model = status(
-        &repo,
-        &StatusOptions {
-            untracked: UntrackedMode::Normal,
-            ignored: IgnoredMode::No,
-            ..StatusOptions::default()
+    let model = repo.status().run(&StatusOptions {
+            untracked: UntrackedMode::Normal, ignored: IgnoredMode::No, ..StatusOptions::default()
         },
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -140,12 +129,8 @@ fn symlink_to_repo_root_is_not_embedded_repository() {
         model.embedded_repositories
     );
 
-    let stage_outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec![".".to_owned()],
-            pathspec_sources: vec![".".to_owned()],
-            mode: StageMode::All,
+    let stage_outcome = repo.index().stage(&StageOptions {
+            pathspecs: vec![".".to_owned()], pathspec_sources: vec![".".to_owned()], mode: StageMode::All,
             ..StageOptions::default()
         },
         &mut NullProgress,
@@ -181,12 +166,8 @@ fn symlink_to_other_repository_directory_is_not_embedded() {
     init_nested_git_repo(&outside);
     std::os::unix::fs::symlink(&outside, root.join("ext")).expect("symlink");
 
-    let model = status(
-        &repo,
-        &StatusOptions {
-            untracked: UntrackedMode::Normal,
-            ignored: IgnoredMode::No,
-            ..StatusOptions::default()
+    let model = repo.status().run(&StatusOptions {
+            untracked: UntrackedMode::Normal, ignored: IgnoredMode::No, ..StatusOptions::default()
         },
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -194,12 +175,8 @@ fn symlink_to_other_repository_directory_is_not_embedded() {
     .expect("status");
     assert!(model.embedded_repositories.is_empty());
 
-    let stage_outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec!["ext".to_owned()],
-            pathspec_sources: vec!["ext".to_owned()],
-            mode: StageMode::All,
+    let stage_outcome = repo.index().stage(&StageOptions {
+            pathspecs: vec!["ext".to_owned()], pathspec_sources: vec!["ext".to_owned()], mode: StageMode::All,
             ..StageOptions::default()
         },
         &mut NullProgress,
@@ -230,12 +207,8 @@ fn real_directory_with_gitdir_symlink_still_counts_as_embedded() {
     fs::create_dir_all(&vendor).expect("mkdir");
     std::os::unix::fs::symlink(&bare_git, vendor.join(".git")).expect("gitdir symlink");
 
-    let model = status(
-        &repo,
-        &StatusOptions {
-            untracked: UntrackedMode::Normal,
-            ignored: IgnoredMode::No,
-            ..StatusOptions::default()
+    let model = repo.status().run(&StatusOptions {
+            untracked: UntrackedMode::Normal, ignored: IgnoredMode::No, ..StatusOptions::default()
         },
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),

@@ -301,8 +301,8 @@ fn assert_idx_matches_git(pack: &[u8], hash_algo: HashAlgo, threads: usize) {
 #[test]
 fn parallel_index_pack_matches_git_sha1_threads_1_and_8() {
     let fx = shared_fixture_sha1();
-    assert_idx_matches_git(&fx.pack, fx.hash_algo, 1);
-    assert_idx_matches_git(&fx.pack, fx.hash_algo, 8);
+    assert_idx_matches_git(fx.pack, fx.hash_algo, 1);
+    assert_idx_matches_git(fx.pack, fx.hash_algo, 8);
 }
 
 #[test]
@@ -311,8 +311,8 @@ fn parallel_index_pack_matches_git_sha256_threads_1_and_8() {
         eprintln!("skip: sha256 object format unavailable");
         return;
     };
-    assert_idx_matches_git(&fx.pack, fx.hash_algo, 1);
-    assert_idx_matches_git(&fx.pack, fx.hash_algo, 8);
+    assert_idx_matches_git(fx.pack, fx.hash_algo, 1);
+    assert_idx_matches_git(fx.pack, fx.hash_algo, 8);
 }
 
 /// Deep OFS + REF delta chain: `.idx` / `.rev` must match across thread counts.

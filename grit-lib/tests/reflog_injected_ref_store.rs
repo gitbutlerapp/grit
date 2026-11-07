@@ -12,8 +12,8 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::commit::{CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RefName, RefNameRef, RefStore};
 use grit_lib::repo::Repository;
@@ -54,17 +54,14 @@ fn commit_n(repo: &Repository, work_tree: &Path, n: usize) -> Vec<ObjectId> {
     (0..n)
         .map(|i| {
             fs::write(work_tree.join("a"), format!("{i}\n")).expect("write");
-            stage(
-                repo,
-                &StageOptions::default(),
-                &mut NullProgress,
-                &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
             )
             .expect("stage");
-            commit_with_scope(
-                repo,
-                &grit_test_support::commit_request(format!("c{i}"), IDENT_TS),
-                CommitScope::Staged,
+repo.commits().create(
+                &grit_lib::commits::CommitOptions::new(
+                    grit_test_support::commit_request(format!("c{i}"), IDENT_TS),
+                    CommitScope::Staged,
+                ),
                 &mut NullProgress,
                 &grit_lib::progress::CancelToken::never(),
             )

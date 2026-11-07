@@ -9,10 +9,11 @@ use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{entry_from_stat, Index, MODE_REGULAR};
 use grit_lib::objects::ObjectKind;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
-use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
@@ -123,12 +124,7 @@ fn populated_checkout_reports_collisions_and_auto_stage_skips_losers() {
         req.allow_empty = false;
         req
     };
-    commit_with_scope(
-        &repo,
-        &req,
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit");
 
@@ -194,12 +190,7 @@ fn auto_stage_unrelated_and_commit(repo: &Repository, dest: &Path) {
         req.allow_empty = false;
         req
     };
-    commit_with_scope(
-        repo,
-        &req,
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit");
 }
@@ -292,12 +283,7 @@ fn collision_clone_worktree(fx: &TestRepo) {
         pre.get(b"File.txt", 0).is_some() && pre.get(b"file.txt", 0).is_some(),
         "checkout index must keep both collision spellings"
     );
-    commit_with_scope(
-        &fx.repo,
-        &commit_request("base"),
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
+&fx.repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("base"), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
     )
     .expect("seed HEAD from collision index");
 }
@@ -331,13 +317,8 @@ fn collision_loser_path_commit_leaves_index_and_head_unchanged() {
     let file_loser_oid = before.get(b"File.txt", 0).expect("File.txt").oid;
     let head_before = head_oid(&fx.repo);
 
-    let err = commit_with_scope(
-        &fx.repo,
-        &commit_request("e"),
-        CommitScope::Paths(Pathspec::scoped(
-            ["File.txt"],
-            PathspecGlobalFlags::default(),
-        )),
+    let err = &fx.repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("e"), CommitScope::Paths(Pathspec::scoped(
+            ["File.txt"].clone()), PathspecGlobalFlags::default(),  )),
         &mut NullProgress,
         &CancelToken::never(),
     )
@@ -376,12 +357,7 @@ fn collision_loser_auto_stage_commit_is_noop() {
     let file_loser_oid = before.get(b"File.txt", 0).expect("File.txt").oid;
     let head_before = head_oid(&fx.repo);
 
-    let err = commit_with_scope(
-        &fx.repo,
-        &commit_request("e"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+    let err = &fx.repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("e"), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .expect_err("auto-stage must not commit phantom loser changes");
     assert!(
@@ -443,12 +419,7 @@ fn commit_directory_collision_head(
     fx: &TestRepo,
 ) -> (grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) {
     let oids = build_directory_name_collision_index(&fx.repo, &fx.dest);
-    commit_with_scope(
-        &fx.repo,
-        &commit_request("base"),
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
+&fx.repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("base"), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
     )
     .expect("seed HEAD");
     oids
@@ -499,11 +470,7 @@ fn directory_collision_winner_omitted_from_status_when_bytes_match_sibling() {
     let fx = init_collision_repo();
     commit_directory_collision_head(&fx);
 
-    let model = status(
-        &fx.repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = &fx.repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -543,11 +510,7 @@ fn collision_loser_omitted_from_status_unstaged() {
     let _ = fs::remove_file(fx.dest.join("file.txt"));
     let _ = fs::remove_file(fx.dest.join("dir/A.txt"));
 
-    let model = status(
-        &fx.repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = &fx.repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -586,23 +549,13 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
     let mut empty = commit_request("empty");
     empty.message = "empty".into();
     empty.allow_empty = true;
-    commit_with_scope(
-        &fx.repo,
-        &empty,
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
+&fx.repo.commits().create(&grit_lib::commits::CommitOptions::new(empty.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
     )
     .expect("empty main");
     let main_tip = head_oid(&fx.repo);
 
     build_flat_name_collision_tree(&fx.repo, &fx.dest);
-    commit_with_scope(
-        &fx.repo,
-        &commit_request("collide"),
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
+&fx.repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("collide"), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
     )
     .expect("collide commit");
     let collide_tip = head_oid(&fx.repo);
@@ -652,11 +605,7 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
         fs::write(fx.dest.join("a.txt"), b"twotwotwo\n").expect("a.txt");
     }
 
-    let model = status(
-        &fx.repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = &fx.repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert!(

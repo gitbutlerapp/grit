@@ -439,7 +439,7 @@ fn reads_find_pack_added_during_read_session() {
     odb.with_pack_read_context(|| {
         for _ in 0..3 {
             assert_same_object(
-                &odb.read(&first).expect("read first"),
+                odb.read(&first).expect("read first"),
                 &git_cat_file(root, &first),
             );
         }
@@ -452,15 +452,15 @@ fn reads_find_pack_added_during_read_session() {
         let second = git_rev_parse_blob(root, "HEAD");
 
         assert_same_object(
-            &odb.read(&second).expect("read second"),
+            odb.read(&second).expect("read second"),
             &git_cat_file(root, &second),
         );
         assert_same_object(
-            &odb.read(&first).expect("reread first"),
+            odb.read(&first).expect("reread first"),
             &git_cat_file(root, &first),
         );
         assert_same_object(
-            &odb.read(&second).expect("reread second"),
+            odb.read(&second).expect("reread second"),
             &git_cat_file(root, &second),
         );
     });
@@ -480,7 +480,7 @@ fn single_pack_reuse_is_scoped_to_its_repository() {
     for _ in 0..2 {
         odb_a.with_pack_read_context(|| {
             assert_same_object(
-                &odb_a.read(&tip_a).expect("a"),
+                odb_a.read(&tip_a).expect("a"),
                 &git_cat_file(dir_a.path(), &tip_a),
             );
             assert!(
@@ -490,7 +490,7 @@ fn single_pack_reuse_is_scoped_to_its_repository() {
         });
         odb_b.with_pack_read_context(|| {
             assert_same_object(
-                &odb_b.read(&tip_b).expect("b"),
+                odb_b.read(&tip_b).expect("b"),
                 &git_cat_file(dir_b.path(), &tip_b),
             );
             assert!(

@@ -9,7 +9,8 @@ use grit_lib::apply::{
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
 
@@ -225,11 +226,7 @@ fn index_apply_keeps_worktree_dirty_in_status() {
     .unwrap();
 
     let mut progress = NullProgress;
-    let st = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut progress,
-        &CancelToken::never(),
+    let st = repo.status().run(&StatusOptions::default(), &mut progress, &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -409,11 +406,7 @@ fn index_apply_git_diff_roundtrip_write_tree() {
         .expect("status");
     assert!(porcelain.status.success());
     let mut progress = NullProgress;
-    let grit_status = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut progress,
-        &CancelToken::never(),
+    let grit_status = repo.status().run(&StatusOptions::default(), &mut progress, &CancelToken::never(),
     )
     .unwrap();
     let git_p = String::from_utf8_lossy(&porcelain.stdout);

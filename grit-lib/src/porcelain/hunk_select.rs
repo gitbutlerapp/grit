@@ -186,7 +186,7 @@ impl StageHunksOutcome {
 /// # Errors
 ///
 /// Propagates diff and repository errors.
-pub fn unstaged_file_diffs(
+pub(crate) fn unstaged_file_diffs(
     repo: &Repository,
     pathspecs: &[String],
 ) -> std::result::Result<Vec<(FileDiff, Vec<StructuredHunk>)>, Error> {
@@ -231,7 +231,7 @@ pub fn parse_hunk_id_list(tokens: &[String]) -> crate::error::Result<HunkSelecti
 /// # Errors
 ///
 /// See [`HunkSelectError`].
-pub fn resolve_selection(
+pub(crate) fn resolve_selection(
     repo: &Repository,
     side: DiffSide,
     selection: &HunkSelection,
@@ -1129,7 +1129,7 @@ pub struct RestoreHunksOutcome {
 /// # Errors
 ///
 /// [`HunkSelectError`] for resolution failures; [`ApplyError`] for apply failures.
-pub fn restore_hunks(
+pub(crate) fn restore_hunks(
     repo: &Repository,
     selection: &HunkSelection,
     pathspecs: &[String],
@@ -1383,7 +1383,7 @@ pub struct WorktreeReverseApplyOptions {
 ///
 /// [`ApplyError`] when a patch cannot be reversed on the worktree, and
 /// [`ApplyError::Cancelled`] when `cancel` fired.
-pub fn reverse_apply_patches_to_worktree(
+pub(crate) fn reverse_apply_patches_to_worktree(
     repo: &Repository,
     patches: &[FilePatch],
     opts: &WorktreeReverseApplyOptions,
@@ -1511,7 +1511,9 @@ pub fn reverse_apply_patches_to_worktree(
 /// # Errors
 ///
 /// Returns repository config errors.
-pub fn diff_options_for_hunk_select(repo: &Repository) -> std::result::Result<DiffOptions, Error> {
+pub(crate) fn diff_options_for_hunk_select(
+    repo: &Repository,
+) -> std::result::Result<DiffOptions, Error> {
     let config = repo.config().snapshot()?;
     Ok(DiffOptions::from_config(config.as_ref()))
 }
@@ -1524,7 +1526,7 @@ pub fn diff_options_for_hunk_select(repo: &Repository) -> std::result::Result<Di
 /// # Errors
 ///
 /// [`HunkSelectError`] for resolution failures; [`ApplyError`] for index apply failures.
-pub fn stage_hunks(
+pub(crate) fn stage_hunks(
     repo: &Repository,
     side: DiffSide,
     selection: &HunkSelection,
@@ -1576,7 +1578,7 @@ fn map_parse_err(_err: Error) -> HunkSelectError {
 /// # Errors
 ///
 /// Propagates repository and diff errors.
-pub fn list_unstaged_hunk_ids(
+pub(crate) fn list_unstaged_hunk_ids(
     repo: &Repository,
     pathspecs: &[String],
     diff_options: DiffOptions,

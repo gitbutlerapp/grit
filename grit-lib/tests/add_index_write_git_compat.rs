@@ -12,7 +12,8 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 use support::{null_device_for_tests, AUTHOR_EMAIL, AUTHOR_NAME};
@@ -315,11 +316,7 @@ fn cache_tree_after_add_matches_git_write_tree() {
 
     let grit = open_grit(&repo_dir);
     let opts = StageOptions::default();
-    stage(
-        &grit,
-        &opts,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+grit.index().stage(&opts, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add");
 
@@ -360,11 +357,7 @@ fn add_untracked_path_keeps_index_entries_canonical() {
 
     let grit = open_grit(&repo_dir);
     let opts = StageOptions::default();
-    stage(
-        &grit,
-        &opts,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+grit.index().stage(&opts, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add");
 

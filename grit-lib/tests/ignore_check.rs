@@ -417,7 +417,7 @@ fn batch_over_many_nested_gitignores_matches_git_in_any_order() {
         let git = git_map
             .get(&result.path)
             .unwrap_or_else(|| panic!("git missing {}", result.path));
-        assert_match_eq(&result.path, git, result.ignored, &result.matched);
+        assert_match_eq(result.path, git, result.ignored, &result.matched);
         ignored += usize::from(result.ignored);
     }
     assert!(ignored > results.len() / 2, "corpus should mostly ignore");

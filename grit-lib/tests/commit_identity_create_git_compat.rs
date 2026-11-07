@@ -8,8 +8,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ident_resolve::{IdentRole, IdentityError};
 use grit_lib::error::Error;
 use grit_lib::ident::{Signature, SignatureError};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::staging::stage_worktree_changes;
+use grit_lib::porcelain::commit::{CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use time::OffsetDateTime;
@@ -70,7 +69,7 @@ fn create_commit_signature_passes_git_fsck_strict() {
     let root = td.path();
     let repo = init(root);
     std::fs::write(root.join("a.txt"), "hi\n").expect("file");
-    stage_worktree_changes(&repo, &[]).expect("stage");
+    &repo.index().stage_worktree_paths(&[]).expect("stage");
 
     let doc = Signature::new(
         "Doc",
@@ -84,11 +83,7 @@ fn create_commit_signature_passes_git_fsck_strict() {
         req.committer = Some(doc);
         req
     };
-    create_commit(
-        &repo,
-        &req,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("create_commit");
 
@@ -133,16 +128,12 @@ fn create_commit_defaults_to_repository_identity() {
     );
 
     std::fs::write(root.join("a.txt"), "hi\n").expect("file");
-    stage_worktree_changes(&repo, &[]).expect("stage");
+    &repo.index().stage_worktree_paths(&[]).expect("stage");
     let req = {
         let mut req = CommitRequest::new("first\n");
         req
     };
-    create_commit(
-        &repo,
-        &req,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("create_commit");
 
@@ -177,11 +168,7 @@ fn repository_identity_reports_missing_configuration() {
         req.allow_empty = true;
         req
     };
-    let err = create_commit(
-        &repo,
-        &req,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("no identity");
     assert!(
@@ -212,11 +199,7 @@ fn create_commit_rejects_unwritable_signatures() {
         req.allow_empty = true;
         req
     };
-    let err = create_commit(
-        &repo,
-        &bad,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create_staged(&bad, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("invalid identity");
     assert!(

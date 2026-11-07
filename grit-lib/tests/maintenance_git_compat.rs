@@ -18,8 +18,7 @@ use grit_lib::maintenance::{
 use grit_lib::objects::commit_graph::BloomFilterSettings;
 use grit_lib::objects::commit_graph::{build_commit_graph_bytes, CommitGraphChain};
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{CommitRequest};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::test_support::objects_pack::clear_pack_cache;
@@ -124,10 +123,8 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
         let idx = start + i;
         let path = wt.join(format!("k_{}.txt", idx % 9));
         std::fs::write(&path, format!("payload-{idx}\n")).expect("write");
-        stage_for_commit(repo, &mut NullProgress, &CancelToken::never()).expect("stage");
-        create_commit(
-            repo,
-            &{
+repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+repo.commits().create_staged(&{
                 let mut req = CommitRequest::new(format!("m {idx}"));
                 req.author = Some(ident.parse().expect("signature"));
                 req.committer = Some(ident.parse().expect("signature"));
@@ -136,9 +133,7 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
                 req.amend = false;
                 req.assume_worktree_synced = false;
                 req
-            },
-            &mut NullProgress,
-            &CancelToken::never(),
+            }, &mut NullProgress, &CancelToken::never(),
         )
         .expect("commit");
     }
@@ -353,7 +348,7 @@ fn gc_preserves_staged_only_blob() {
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("staged-only.txt"), b"staged payload\n").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
+repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
     let index = Index::load(&repo.git_dir().join("index")).expect("index");
     let staged_oid = index
         .entries()
@@ -387,7 +382,7 @@ fn fsck_skips_object_checks_when_check_objects_disabled() {
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("orphan-index.txt"), b"x").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
+repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
     let index = Index::load(&repo.git_dir().join("index")).expect("index");
     let staged_oid = index
         .entries()
@@ -425,7 +420,7 @@ fn fsck_reports_missing_index_blob_after_corruption() {
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("orphan-index.txt"), b"x").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
+repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
     let index = Index::load(&repo.git_dir().join("index")).expect("index");
     let staged_oid = index
         .entries()
@@ -2021,11 +2016,9 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let wt = repo.work_tree().expect("worktree");
     std::fs::write(wt.join("base"), b"v1").expect("write base");
-    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
+repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
     let ident = "Test <t@example.com> 1 +0000".to_string();
-    create_commit(
-        &repo,
-        &{
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new("base");
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -2034,9 +2027,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             req.amend = false;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
+        }, &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit");
     let mut base_repack = RepackOptions::default();
@@ -2046,10 +2037,8 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
         .expect("repack base");
 
     std::fs::write(wt.join("child"), b"v2").expect("write child");
-    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage child");
-    create_commit(
-        &repo,
-        &{
+repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage child");
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new("child");
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -2058,9 +2047,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             req.amend = false;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
+        }, &mut NullProgress, &CancelToken::never(),
     )
     .expect("child commit");
 
@@ -2913,11 +2900,9 @@ fn history_source_repo(n_commits: usize) -> TempDir {
 
 fn grit_commit_all(repo: &Repository, path: &Path, message: &str) {
     std::fs::write(path, format!("{message}\n")).expect("write");
-    stage_for_commit(repo, &mut NullProgress, &CancelToken::never()).expect("stage");
+repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
     let ident = "Test <t@example.com> 1 +0000".to_string();
-    create_commit(
-        repo,
-        &{
+repo.commits().create_staged(&{
             let mut req = CommitRequest::new(message.to_string());
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -2926,9 +2911,7 @@ fn grit_commit_all(repo: &Repository, path: &Path, message: &str) {
             req.amend = false;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
+        }, &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit");
 }

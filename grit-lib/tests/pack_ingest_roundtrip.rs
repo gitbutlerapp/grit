@@ -728,7 +728,7 @@ fn install_rejects_corrupt_trailer_with_skip_post_index_verify() {
 fn idx_and_rev_match_git_for_all_pack_shapes_sha1() {
     for shape in ALL_PACK_SHAPES {
         let fx = shared_pack(shape, HashAlgo::Sha1).expect("fixture");
-        assert_idx_rev_matches_git(&fx.bytes, fx.algo, shape);
+        assert_idx_rev_matches_git(fx.bytes, fx.algo, shape);
     }
 }
 
@@ -740,7 +740,7 @@ fn delta_pack_fixtures_contain_delta_entries() {
             shape.expects_delta_entries(),
             "test matrix mislabeled {shape:?}"
         );
-        assert_pack_contains_deltas(&fx.bytes, fx.algo, shape.label());
+        assert_pack_contains_deltas(fx.bytes, fx.algo, shape.label());
         git_verify_pack_reports_deltas(&fx.bytes, fx.algo);
     }
 }
@@ -752,7 +752,7 @@ fn idx_and_rev_match_git_for_all_pack_shapes_sha256() {
             eprintln!("skip: sha256 object format unavailable ({})", shape.label());
             continue;
         };
-        assert_idx_rev_matches_git(&fx.bytes, fx.algo, shape);
+        assert_idx_rev_matches_git(fx.bytes, fx.algo, shape);
     }
 }
 
@@ -1327,7 +1327,7 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
     )
     .expect("fix thin install");
     assert_installed_pack_consistent(
-        &installed.pack_path.as_deref().expect("installed pack"),
+        installed.pack_path.as_deref().expect("installed pack"),
         HashAlgo::Sha1,
     );
     let installed_count = pack_object_count(
@@ -1464,7 +1464,7 @@ fn fetched_thin_pack_installs_with_matching_idx_and_name() {
             "thin completion must append the base ({thin_count} -> {installed_count})"
         );
         assert_installed_pack_consistent(
-            &installed.pack_path.as_deref().expect("installed pack"),
+            installed.pack_path.as_deref().expect("installed pack"),
             HashAlgo::Sha1,
         );
         assert!(

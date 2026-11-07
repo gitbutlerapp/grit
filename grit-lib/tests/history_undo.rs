@@ -811,9 +811,7 @@ fn index_entry_size(wt: &std::path::Path, path: &str) -> u64 {
 }
 
 fn grit_status_paths(grit: &Repository) -> (Vec<String>, Vec<String>) {
-    let model = grit_lib::porcelain::status::status(
-        grit,
-        &grit_lib::porcelain::status::StatusOptions::default(),
+    let model = grit.status().run(&grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )

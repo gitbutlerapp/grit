@@ -11,10 +11,10 @@ use std::sync::Arc;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::branch::BranchCreateOptions;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::tag::CreateTagRequest;
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
+use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::{InitOptions, Repository};
@@ -65,24 +65,15 @@ fn files_repo(work_tree: &Path) -> Repository {
 }
 
 fn commit_all(repo: &Repository, message: &str) -> ObjectId {
-    stage(
-        repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
-    commit_with_scope(
-        repo,
-        &{
+repo.commits().create(&grit_lib::commits::CommitOptions::new(&{
             let mut req = CommitRequest::new(message);
             req.author = Some(IDENT_TS.parse().expect("signature"));
             req.committer = Some(IDENT_TS.parse().expect("signature"));
             req
-        },
-        CommitScope::Staged,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }.clone(), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit")
     .oid

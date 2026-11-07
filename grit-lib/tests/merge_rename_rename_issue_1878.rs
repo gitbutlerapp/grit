@@ -159,7 +159,7 @@ fn assert_tree_merge_matches_git(fx: &Fixture, context: &str) {
         "{context}: git must report rename/rename:\n{}",
         oracle.stdout
     );
-    assert_merge_output_matches_oracle(&fx.repo, &merged, &oracle, context);
+    assert_merge_output_matches_oracle(fx.repo, &merged, &oracle, context);
 }
 
 #[test]

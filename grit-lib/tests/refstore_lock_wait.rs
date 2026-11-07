@@ -22,9 +22,9 @@ use grit_lib::ident::Signature;
 use grit_lib::lockfile::LockWait;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind, TreeEntry};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::branch::{BranchCreateOptions, TrackMode};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions, TrackMode};
+use grit_lib::porcelain::commit::{CommitScope};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::RefName;
 use grit_lib::refs::store::{
@@ -276,19 +276,10 @@ fn stage_and_commit(
     content: &str,
 ) -> grit_lib::error::Result<()> {
     fs::write(work_tree.join("f.txt"), content)?;
-    stage(
-        repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )?;
     let request = grit_test_support::commit_request(content, IDENT_TS);
-    commit_with_scope(
-        repo,
-        &request,
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(request.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
     )?;
     Ok(())
 }

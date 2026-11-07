@@ -241,7 +241,7 @@ fn alternates_cycle_and_self_reference_finish_without_hang() {
         &cycle_git.join("objects"),
         &format!("{}\n", a_canon.display()),
     );
-    assert_alternate_order_matches_git(&cycle_git.join("objects"), &cycle_git, "cycle");
+    assert_alternate_order_matches_git(cycle_git.join("objects"), &cycle_git, "cycle");
 
     fs::write(
         a.join("info/alternates"),
@@ -254,7 +254,7 @@ fn alternates_cycle_and_self_reference_finish_without_hang() {
         &self_git.join("objects"),
         &format!("{}\n", a_canon.display()),
     );
-    assert_alternate_order_matches_git(&self_git.join("objects"), &self_git, "self-ref");
+    assert_alternate_order_matches_git(self_git.join("objects"), &self_git, "self-ref");
 }
 
 #[test]

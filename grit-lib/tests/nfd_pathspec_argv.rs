@@ -1,6 +1,6 @@
 //! NFD argv pathspecs match NFC index paths when precompose is enabled (issue #1007).
 
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{
     precompose_argv_pathspec, resolve_pathspec_with_argv_precompose, Pathspec, PathspecGlobalFlags,
@@ -57,12 +57,8 @@ fn library_nfd_resolved_pathspec_stages_nfc_index_entry() {
     let wt = repo.work_tree().expect("work tree");
     let nfd_resolved = resolve_pathspec_with_argv_precompose(&nfd_name, wt, None, true);
 
-    let outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec![nfd_resolved],
-            pathspec_sources: vec![nfd_name.clone()],
-            mode: StageMode::All,
+    let outcome = repo.index().stage(&StageOptions {
+            pathspecs: vec![nfd_resolved], pathspec_sources: vec![nfd_name.clone()], mode: StageMode::All,
             ..StageOptions::default()
         },
         &mut grit_lib::progress::NullProgress,

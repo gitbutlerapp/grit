@@ -226,4 +226,184 @@ impl<'repo> IndexFile<'repo> {
     pub fn try_write(&self, index: &mut Index) -> crate::error::Result<bool> {
         self.repo.try_write_index(index)
     }
+
+    /// Stage paths matching [`StageOptions`] into the index.
+    pub fn stage(
+        &self,
+        options: &crate::porcelain::add::StageOptions,
+        progress: &mut dyn crate::progress::ProgressSink,
+        cancel: &crate::progress::CancelToken,
+    ) -> crate::error::Result<crate::porcelain::add::StageOutcome> {
+        crate::porcelain::add::stage(self.repo, options, progress, cancel)
+    }
+
+    /// Stage worktree changes for commit auto-staging.
+    pub fn stage_for_commit(
+        &self,
+        progress: &mut dyn crate::progress::ProgressSink,
+        cancel: &crate::progress::CancelToken,
+    ) -> crate::error::Result<crate::porcelain::add::StageOutcome> {
+        crate::porcelain::add::stage_for_commit(self.repo, progress, cancel)
+    }
+
+    /// Stage paths into a caller-owned index without writing it to disk.
+    pub fn stage_on(
+        &self,
+        index: &mut Index,
+        options: &crate::porcelain::add::StageOptions,
+        progress: &mut dyn crate::progress::ProgressSink,
+        cancel: &crate::progress::CancelToken,
+    ) -> crate::error::Result<crate::porcelain::add::StageOutcome> {
+        crate::porcelain::add::stage_on_index(self.repo, index, options, progress, cancel)
+    }
+
+    /// Stage paths matching `pathspecs` without a full status pass.
+    pub fn stage_worktree_paths(
+        &self,
+        pathspecs: &[String],
+    ) -> crate::error::Result<crate::porcelain::staging::StageWorktreeChangesOutcome> {
+        crate::porcelain::staging::stage_worktree_changes(self.repo, pathspecs)
+    }
+
+    /// Refresh tracked modifications from the worktree into the index.
+    pub fn stage_tracked_modifications(
+        &self,
+        work_tree: &Path,
+    ) -> crate::error::Result<crate::porcelain::stage_tracked::StageTrackedSummary> {
+        let thresholds =
+            self.staging_thresholds_from_options(&crate::porcelain::add::StageOptions::default());
+        crate::porcelain::stage_tracked::stage_tracked_modifications_with_thresholds(
+            self.repo, work_tree, thresholds,
+        )
+    }
+
+    /// Like [`Self::stage_tracked_modifications`], updating a caller-owned index only.
+    pub fn stage_tracked_modifications_on(
+        &self,
+        work_tree: &Path,
+        index_path: &Path,
+        index: &mut Index,
+        options: &crate::porcelain::add::StageOptions,
+    ) -> crate::error::Result<crate::porcelain::stage_tracked::StageTrackedSummary> {
+        let thresholds = self.staging_thresholds_from_options(options);
+        crate::porcelain::stage_tracked::stage_tracked_modifications_in_index_with_thresholds(
+            self.repo, work_tree, index_path, index, thresholds,
+        )
+    }
+
+    fn staging_thresholds_from_options(
+        &self,
+        options: &crate::porcelain::add::StageOptions,
+    ) -> crate::porcelain::bulk_index::IndexStagingThresholds {
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            options.staging_thresholds.unwrap_or_default()
+        }
+        #[cfg(not(any(test, feature = "test-support")))]
+        {
+            options.staging_thresholds.unwrap_or_default()
+        }
+    }
+
+    /// Stage structured diff hunks by stable id.
+    pub fn stage_hunks(
+        &self,
+        side: crate::diff::DiffSide,
+        selection: &crate::porcelain::hunk_select::HunkSelection,
+        pathspecs: &[String],
+        diff_options: crate::diff::DiffOptions,
+        dry_run: bool,
+        cancel: &crate::progress::CancelToken,
+    ) -> crate::error::Result<crate::porcelain::hunk_select::StageHunksOutcome> {
+        crate::porcelain::hunk_select::stage_hunks(
+            self.repo,
+            side,
+            selection,
+            pathspecs,
+            diff_options,
+            dry_run,
+            cancel,
+        )
+    }
+
+    /// Discard or unstage hunks in `selection`.
+    pub fn restore_hunks(
+        &self,
+        selection: &crate::porcelain::hunk_select::HunkSelection,
+        pathspecs: &[String],
+        restore_staged: bool,
+        restore_worktree: bool,
+        dry_run: bool,
+    ) -> crate::error::Result<crate::porcelain::hunk_select::RestoreHunksOutcome> {
+        crate::porcelain::hunk_select::restore_hunks(
+            self.repo,
+            selection,
+            pathspecs,
+            restore_staged,
+            restore_worktree,
+            dry_run,
+        )
+    }
+
+    /// Diff options for hunk id resolution (same boundaries as `grit diff --json`).
+    pub fn hunk_diff_options(&self) -> crate::error::Result<crate::diff::DiffOptions> {
+        crate::porcelain::hunk_select::diff_options_for_hunk_select(self.repo).map_err(Into::into)
+    }
+
+    /// Unstaged file diffs with staged peer hunks on the same path.
+    pub fn unstaged_file_diffs(
+        &self,
+        pathspecs: &[String],
+    ) -> crate::error::Result<
+        Vec<(
+            crate::diff::FileDiff,
+            Vec<crate::diff::structured::StructuredHunk>,
+        )>,
+    > {
+        crate::porcelain::hunk_select::unstaged_file_diffs(self.repo, pathspecs)
+    }
+
+    /// Unstaged hunk ids per path (same rules as `grit diff --json` on `--unstaged`).
+    pub fn list_unstaged_hunk_ids(
+        &self,
+        pathspecs: &[String],
+        diff_options: crate::diff::DiffOptions,
+    ) -> crate::error::Result<std::collections::BTreeMap<String, Vec<crate::diff::HunkId>>> {
+        crate::porcelain::hunk_select::list_unstaged_hunk_ids(self.repo, pathspecs, diff_options)
+    }
+
+    /// Resolve a hunk selection to index-ready patches.
+    pub fn resolve_hunk_selection(
+        &self,
+        side: crate::diff::DiffSide,
+        selection: &crate::porcelain::hunk_select::HunkSelection,
+        pathspecs: &[String],
+        diff_options: crate::diff::DiffOptions,
+    ) -> crate::error::Result<Vec<crate::apply::FilePatch>> {
+        crate::porcelain::hunk_select::resolve_selection(
+            self.repo,
+            side,
+            selection,
+            pathspecs,
+            diff_options,
+        )
+    }
+
+    /// Whether `resolved` matches a known path in this repository.
+    pub fn pathspec_matches_known(&self, resolved: &str) -> crate::error::Result<bool> {
+        crate::porcelain::pathspec_match::pathspec_matches_known_in_repository(self.repo, resolved)
+    }
+
+    /// Require that `resolved` matches a known path, else return a pathspec error.
+    pub fn ensure_pathspec_matches_known(
+        &self,
+        display_spec: &str,
+        resolved: &str,
+    ) -> crate::error::Result<()> {
+        crate::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository(
+            self.repo,
+            display_spec,
+            resolved,
+        )
+    }
 }

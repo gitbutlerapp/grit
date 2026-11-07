@@ -14,7 +14,7 @@ use grit_lib::merge::{
     SequenceOutcome, SequencePrediction,
 };
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
@@ -323,12 +323,7 @@ fn commit_after_pick_conflict_finishes_sequence_issue_2262() {
         req
     };
     let mut progress = NullProgress;
-    commit_with_scope(
-        &repo,
-        &req,
-        CommitScope::AutoStage,
-        &mut progress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut progress, &CancelToken::never(),
     )
     .expect("commit finishes pick");
 

@@ -125,7 +125,7 @@ fn ensure_crlf_worktree_lf_index(root: &std::path::Path) {
 
 /// After stash push reset, HEAD version of `f.txt` should be CRLF on disk and clean in status.
 fn ensure_stash_reset_f_txt_crlf_clean(root: &std::path::Path) {
-    assert_worktree_bytes(&root.join("f.txt"), b"a\r\nb\r\n");
+    assert_worktree_bytes(root.join("f.txt"), b"a\r\nb\r\n");
     let porcelain = git_cmd(root, &["status", "--porcelain"]);
     assert!(
         porcelain.trim().is_empty(),
@@ -360,8 +360,8 @@ fn pop_stash_writes_crlf_worktree_bytes_for_tracked_and_untracked() {
         )
         .expect("pop");
 
-    assert_worktree_bytes(&dir.path().join("f.txt"), b"a\r\nb\r\nc\r\n");
-    assert_worktree_bytes(&dir.path().join("u.txt"), b"x\r\ny\r\n");
+    assert_worktree_bytes(dir.path().join("f.txt"), b"a\r\nb\r\nc\r\n");
+    assert_worktree_bytes(dir.path().join("u.txt"), b"x\r\ny\r\n");
     let eol = git_cmd(dir.path(), &["ls-files", "--eol", "f.txt"]);
     assert!(
         eol.contains("i/lf") && eol.contains("w/crlf"),

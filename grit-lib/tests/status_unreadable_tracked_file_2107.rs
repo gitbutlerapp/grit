@@ -15,9 +15,9 @@ mod unix {
     use grit_lib::error::{Error, OverwriteReason, WorktreePathOperation};
     use grit_lib::index::Index;
     use grit_lib::objects::ObjectId;
-    use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-    use grit_lib::porcelain::status::{status, StatusOptions};
-    use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+    use grit_lib::porcelain::add::{StageMode, StageOptions};
+    use grit_lib::porcelain::status::{StatusOptions};
+    use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::{forced_parallel_policy, git};
@@ -113,7 +113,7 @@ mod unix {
             stat_parallel_threads: Some(threads),
             ..StatusOptions::default()
         };
-        let model = status(repo, &opts, &mut NullProgress, &CancelToken::never())
+        let model = repo.status().run(&opts, &mut NullProgress, &CancelToken::never())
             .expect("status succeeds with an unreadable tracked file");
 
         assert!(model.staged.is_empty(), "staged: {:?}", model.staged);
@@ -156,31 +156,19 @@ mod unix {
     fn later_edit_after_unlock_is_still_reported() {
         let Some(fx) = setup(0) else { return };
         let repo = fx.open();
-        status(
-            &repo,
-            &StatusOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+        &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("status while locked");
         set_mode(&fx.root().join("a.txt"), 0o644);
         fs::write(fx.root().join("a.txt"), "ONE\n").expect("edit a");
-        let model = status(
-            &repo,
-            &StatusOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+        let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("status after unlock");
         let paths: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
         assert_eq!(paths, ["a.txt"]);
 
         fs::write(fx.root().join("a.txt"), "one\n").expect("restore a");
-        let model = status(
-            &repo,
-            &StatusOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+        let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("status after restore");
         assert!(model.unstaged.is_empty(), "unstaged: {:?}", model.unstaged);
@@ -228,7 +216,7 @@ mod unix {
             mode: StageMode::All,
             ..StageOptions::default()
         };
-        stage(repo, &opts, &mut NullProgress, &CancelToken::never()).map(|_| ())
+repo.index().stage(&opts, &mut NullProgress, &CancelToken::never()).map(|_| ())
     }
 
     #[test]

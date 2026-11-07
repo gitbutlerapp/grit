@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::status::{status, IgnoredMode, StatusOptions, UntrackedMode};
+use grit_lib::porcelain::status::{IgnoredMode, StatusOptions, UntrackedMode};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -48,12 +48,8 @@ fn git_lists(root: &Path, untracked_files: &str) -> (Vec<Vec<u8>>, Vec<Vec<u8>>)
 
 /// `(untracked, ignored)` raw paths from [`status`] with traditional ignored listing.
 fn grit_lists(repo: &Repository, mode: UntrackedMode) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-    let model = status(
-        repo,
-        &StatusOptions {
-            untracked: mode,
-            ignored: IgnoredMode::Traditional,
-            ..StatusOptions::default()
+    let model = repo.status().run(&StatusOptions {
+            untracked: mode, ignored: IgnoredMode::Traditional, ..StatusOptions::default()
         },
         &mut NullProgress,
         &CancelToken::never(),

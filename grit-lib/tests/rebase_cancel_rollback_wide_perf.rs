@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
+use grit_lib::porcelain::commit::{CommitScope};
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -104,10 +104,11 @@ fn repo_for_rebase() -> (
 const IDENT: &str = "T <t@t> 0 +0000";
 
 fn commit_all(repo: &Repository, msg: &str) -> grit_lib::objects::ObjectId {
-    commit_with_scope(
-        repo,
-        &grit_test_support::commit_request(msg, IDENT),
-        CommitScope::AutoStage,
+repo.commits().create(
+        &grit_lib::commits::CommitOptions::new(
+            grit_test_support::commit_request(msg, IDENT),
+            CommitScope::AutoStage,
+        ),
         &mut NullProgress,
         &CancelToken::never(),
     )

@@ -8,8 +8,7 @@ fn main() -> grit_lib::error::Result<()> {
     let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
     let mut opts = StageOptions::default();
     opts.mode = StageMode::All;
-    let outcome = stage(
-        &repo,
+    let outcome = repo.index().stage(
         &opts,
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),

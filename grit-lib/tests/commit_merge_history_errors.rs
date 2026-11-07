@@ -8,7 +8,11 @@ use grit_lib::error::RefError;
 use grit_lib::merge::{ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome, MergeOptions};
 use grit_lib::merge::{ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
+use grit_lib::porcelain::merge::{
+    continue_merge, integrate_branch, integrate_branch_with, ContinueOptions, FastForwardPolicy,
+    IntegrateBranchOutcome, MergeOptions,
+};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::{CommitError, MergeError};
 use grit_lib::progress::{CancelToken, NullProgress};
@@ -86,27 +90,33 @@ fn commit_error_variants() {
     git(root, &["add", "f"]);
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
 
-    let err = commit_with_scope(
-        &repo,
-        &CommitRequest::new("   \n".to_owned()),
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                CommitRequest::new("   \n".to_owned()),
+                CommitScope::Staged,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(matches!(
         err,
         grit_lib::error::Error::Commit(CommitError::EmptyCommitMessage)
     ));
 
-    let err = commit_with_scope(
-        &repo,
-        &CommitRequest::new("x".to_owned()),
-        CommitScope::Paths(Pathspec::entire_tree(PathspecGlobalFlags::default())),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                CommitRequest::new("x".to_owned()),
+                CommitScope::Paths(Pathspec::entire_tree(PathspecGlobalFlags::default())),
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(matches!(
         err,
         grit_lib::error::Error::Commit(CommitError::CommitPathsRequired)

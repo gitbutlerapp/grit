@@ -21,13 +21,16 @@ use std::collections::HashSet;
 /// # Errors
 ///
 /// Propagates object-store failures while reading `HEAD`'s tree.
-pub fn pathspec_matches_known_in_repository(repo: &Repository, resolved: &str) -> Result<bool> {
+pub(crate) fn pathspec_matches_known_in_repository(
+    repo: &Repository,
+    resolved: &str,
+) -> Result<bool> {
     KnownPathspecChecker::new(repo).matches(resolved)
 }
 
 /// Like [`pathspec_matches_known_in_repository`], but returns [`crate::worktree::WorktreeError::PathspecNoMatch`] when
 /// nothing matches.
-pub fn ensure_pathspec_matches_known_in_repository(
+pub(crate) fn ensure_pathspec_matches_known_in_repository(
     repo: &Repository,
     display_spec: &str,
     resolved: &str,

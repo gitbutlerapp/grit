@@ -10,9 +10,13 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::branch::{BranchCreateOptions, BranchDeleteMode, BranchError};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::tag::{CreateTagRequest, TagError, TagKind};
+use grit_lib::porcelain::branch::{
+    create_branch, delete_branch, list_branches, BranchError, CreateBranchOptions, DeleteMode,
+};
+use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::tag::{
+    create_tag, delete_tag, list_tags, CreateTagRequest, TagError, TagKind,
+};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefSort, SortKey};
 use grit_lib::refs::ref_storage::RefStorageFormat;
@@ -423,9 +427,7 @@ fn list_and_delete_on_reftable_backend() {
     )
     .unwrap();
     let ident = "T <t@example.com> 1700000000 +0000";
-    let tip = create_commit(
-        &repo,
-        &{
+    let tip = repo.commits().create_staged(&{
             let mut req = CommitRequest::new("one");
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
@@ -434,9 +436,7 @@ fn list_and_delete_on_reftable_backend() {
             req.amend = false;
             req.assume_worktree_synced = false;
             req
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .unwrap()
     .oid;

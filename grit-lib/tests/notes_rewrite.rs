@@ -3,7 +3,7 @@
 use grit_lib::command_runner::hooks::{HookName, PostOperationHooks};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{CommitRequest};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -338,7 +338,7 @@ fn amend_copies_note_when_post_rewrite_runs() {
         req
     };
     let outcome =
-        create_commit(&repo, &request, &mut NullProgress, &CancelToken::never()).expect("amend");
+repo.commits().create_staged(&request, &mut NullProgress, &CancelToken::never()).expect("amend");
     assert!(outcome.hooks_run.contains(&HookName::PostRewrite));
     assert_eq!(
         note_on_object(dir.path(), &outcome.oid).as_deref(),

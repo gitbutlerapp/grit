@@ -15,7 +15,10 @@ use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::replay_sequence::{
+    start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+};
+use grit_lib::porcelain::status::{StatusOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -71,11 +74,7 @@ fn open(root: &Path) -> Repository {
 }
 
 fn status_conflicts(repo: &Repository) -> Vec<Conflict> {
-    status(
-        repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status")
     .conflict_details
@@ -140,7 +139,7 @@ fn rebase_stop_and_status_report_the_same_conflict() {
     else {
         panic!("expected the rebase to stop on f");
     };
-    assert_one_model(&fx.root, &stop.conflicts);
+    assert_one_model(fx.root, &stop.conflicts);
 }
 
 #[test]
@@ -159,7 +158,7 @@ fn merge_conflicts_and_status_report_the_same_conflict() {
     .expect("merge") else {
         panic!("expected merge conflicts");
     };
-    assert_one_model(&fx.root, &details);
+    assert_one_model(fx.root, &details);
 }
 
 #[test]
@@ -177,7 +176,7 @@ fn pick_conflicts_and_status_report_the_same_conflict() {
     else {
         panic!("expected the pick to stop on f");
     };
-    assert_one_model(&fx.root, &conflicts);
+    assert_one_model(fx.root, &conflicts);
 }
 
 #[test]

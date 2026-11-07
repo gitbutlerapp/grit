@@ -251,7 +251,7 @@ fn assert_logs_text_match(git_side: &Path, grit_side: &Path, refnames: &[&str]) 
 /// Compare the logs of `refnames` as text, then every log file byte for byte.
 fn assert_logs_match(git_side: &Path, grit_side: &Path, refnames: &[&str]) {
     assert_logs_text_match(git_side, grit_side, refnames);
-    assert_reflog_tree_matches(&git_side.join(".git"), &grit_side.join(".git"));
+    assert_reflog_tree_matches(git_side.join(".git"), &grit_side.join(".git"));
 }
 
 /// A files-backend repository with `main` checked out and the generated history.

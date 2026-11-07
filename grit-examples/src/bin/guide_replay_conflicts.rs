@@ -130,8 +130,7 @@ fn demo_conflict_sequence(root: &Path) -> Result<()> {
     }
 
     fs::write(root.join("f"), "merged\n")?;
-    stage(
-        &repo,
+    repo.index().stage(
         &StageOptions::default(),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),

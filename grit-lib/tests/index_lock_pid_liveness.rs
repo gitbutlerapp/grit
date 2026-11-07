@@ -12,7 +12,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::index::IndexLock;
 use grit_lib::lockfile::{grit_lockfile_pid_enabled, pid_path_for_lock, LockHolder};
-use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 /// A pid above every platform's pid limit, so no process can be running with it.
@@ -192,11 +193,7 @@ fn stage_with_held_index_lock_returns_lock_held_and_git_sees_no_change() {
             pathspecs: vec!["n".into()],
             ..Default::default()
         };
-        let err = stage(
-            &repo,
-            &options,
-            &mut NullProgress,
-            &grit_lib::progress::CancelToken::never(),
+        let err = repo.index().stage(&options, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("index.lock is held");
         let (path, holder) = expect_lock_held(err);
@@ -223,11 +220,7 @@ fn stage_with_held_index_lock_returns_lock_held_and_git_sees_no_change() {
 
         fs::remove_file(&lock_path).expect("release lock for git");
         assert_eq!(git(wt, &["status", "--porcelain"]), "?? n\n");
-        stage(
-            &repo,
-            &options,
-            &mut NullProgress,
-            &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&options, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
         )
         .expect("retry after lock release");
         assert_eq!(git(wt, &["show", ":n"]), "n\n");

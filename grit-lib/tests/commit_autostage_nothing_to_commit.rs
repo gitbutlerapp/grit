@@ -8,7 +8,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
@@ -64,12 +64,7 @@ fn repo_with_initial_commit() -> tempfile::TempDir {
 
 fn assert_nothing_to_commit(root: &Path, req: &CommitRequest) {
     let head_before = git_out(root, &["rev-parse", "HEAD"]);
-    let err = commit_with_scope(
-        &open_grit(root),
-        req,
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = open_grit(root).commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("nothing to commit");
     assert!(

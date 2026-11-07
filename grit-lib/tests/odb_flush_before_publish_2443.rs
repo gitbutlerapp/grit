@@ -21,9 +21,9 @@ use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
 use grit_lib::objects::unpack_objects::{ingest_pack_into, UnpackOptions};
 use grit_lib::objects::CommitData;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, write_commit_object, CommitRequest};
-use grit_lib::porcelain::tag::CreateTagRequest;
+use grit_lib::porcelain::add::{StageMode, StageOptions};
+use grit_lib::porcelain::commit::{write_commit_object, CommitRequest};
+use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::reflog::ReflogEntry;
@@ -347,13 +347,9 @@ fn seed_commit(repo: &Repository) -> ObjectId {
         b"base\n",
     )
     .expect("write");
-    stage(
-        repo,
-        &StageOptions {
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
+repo.index().stage(&StageOptions {
+            mode: StageMode::All, ..StageOptions::default()
+        }, &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("stage seed");
@@ -361,7 +357,7 @@ fn seed_commit(repo: &Repository) -> ObjectId {
     req.author = Some(ident());
     req.committer = Some(ident());
     req.assume_worktree_synced = true;
-    create_commit(repo, &req, &mut NullProgress, &CancelToken::never())
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
         .expect("commit")
         .oid
 }
@@ -419,7 +415,7 @@ fn create_tag_flushes_before_ref_update() {
         store.durable(&tag_oid),
         "tag object must be flushed before ref update"
     );
-    assert_flush_before_first_ref_commit(&store.events());
+    assert_flush_before_first_ref_commit(store.events());
 }
 
 #[test]
@@ -448,7 +444,7 @@ fn notes_add_flushes_before_ref_update() {
         )
         .expect("notes ref");
     assert!(store.durable(&notes_tip));
-    assert_flush_before_first_ref_commit(&store.events());
+    assert_flush_before_first_ref_commit(store.events());
 }
 
 #[test]
@@ -494,7 +490,7 @@ fn reword_apply_flushes_before_ref_update() {
         .odb()
         .read(&main)
         .expect("main tip readable after simulated restart");
-    assert_flush_before_first_ref_commit(&store.events());
+    assert_flush_before_first_ref_commit(store.events());
 }
 
 #[test]
@@ -506,14 +502,9 @@ fn stage_flushes_before_index_write() {
     seed_commit(&repo);
     fs::write(repo.work_tree().expect("wt").join("new.txt"), b"new\n").expect("write");
     store.clear_events();
-
-    stage(
-        &repo,
-        &StageOptions {
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
+repo.index().stage(&StageOptions {
+            mode: StageMode::All, ..StageOptions::default()
+        }, &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("stage");
@@ -617,13 +608,9 @@ fn ingest_flush_failure_rolls_back_staged() {
 
 fn commit_file(repo: &Repository, wt: &Path, name: &str, message: &str) -> ObjectId {
     fs::write(wt.join(name), format!("{name}\n")).expect("write");
-    stage(
-        repo,
-        &StageOptions {
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
+repo.index().stage(&StageOptions {
+            mode: StageMode::All, ..StageOptions::default()
+        }, &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("stage");
@@ -631,7 +618,7 @@ fn commit_file(repo: &Repository, wt: &Path, name: &str, message: &str) -> Objec
     req.author = Some(ident());
     req.committer = Some(ident());
     req.assume_worktree_synced = true;
-    create_commit(repo, &req, &mut NullProgress, &CancelToken::never())
+repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
         .expect("commit")
         .oid
 }
@@ -670,7 +657,7 @@ fn rebase_exec_flushes_before_head_ref_update() {
         )
         .expect("rebase exec");
     assert_eq!(report.runs.len(), 2);
-    assert_flush_before_first_ref_commit(&store.events());
+    assert_flush_before_first_ref_commit(store.events());
     let replacement = plan.replacement(tips[1]).expect("replacement");
     assert!(store.durable(&replacement));
 }

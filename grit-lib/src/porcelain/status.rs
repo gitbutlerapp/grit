@@ -230,7 +230,7 @@ pub fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String
 ///
 /// Same as [`Pathspec::matches_change`](crate::pathspec::Pathspec::matches_change) (pathspec
 /// matcher construction or attribute resolution can fail).
-pub fn status_diff_entry_matches_pathspec_typed(
+pub(crate) fn status_diff_entry_matches_pathspec_typed(
     repo: &Repository,
     entry: &DiffEntry,
     pathspec: &crate::pathspec::Pathspec,
@@ -486,7 +486,7 @@ fn ignored_mode_to_untracked_cache(
 ///
 /// `ignored_mode` selects whether (and how) ignored paths are reported;
 /// `show_all` corresponds to `--untracked-files=all`. Results are sorted.
-pub fn collect_untracked_and_ignored(
+pub(crate) fn collect_untracked_and_ignored(
     repo: &Repository,
     index: &mut Index,
     work_tree: &Path,
@@ -509,7 +509,7 @@ pub fn collect_untracked_and_ignored(
 ///
 /// When `use_untracked_cache` is false, the index UNTR extension is not refreshed (used by
 /// staging/`git add`, which must not pay the full status-style cache rebuild).
-pub fn collect_untracked_and_ignored_with_cache(
+pub(crate) fn collect_untracked_and_ignored_with_cache(
     repo: &Repository,
     index: &mut Index,
     work_tree: &Path,
@@ -604,7 +604,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
 /// [`crate::worktree_rules::WorktreeRules`] so ignore and attribute files already loaded by the
 /// same operation are not read again, and checking `cancel` during the walk.
 #[allow(clippy::too_many_arguments)]
-pub fn collect_untracked_and_ignored_with_rules_and_cancel(
+pub(crate) fn collect_untracked_and_ignored_with_rules_and_cancel(
     repo: &Repository,
     index: &mut Index,
     work_tree: &Path,
@@ -871,7 +871,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
 ///
 /// [`collect_untracked_and_ignored`] with `show_all = false` reports directories as a single
 /// `dir/` entry; `git add` must stage the non-ignored files inside instead of a tree placeholder.
-pub fn expand_untracked_for_staging(
+pub(crate) fn expand_untracked_for_staging(
     repo: &Repository,
     index: &mut Index,
     work_tree: &Path,
@@ -898,7 +898,7 @@ pub fn expand_untracked_for_staging(
 /// untracked listing; files are kept only when they match `pathspecs`. Ignored directories are
 /// dropped and unregistered embedded repositories stay as `dir/` markers. The cost is linear
 /// in the size of the collapsed subtrees.
-pub fn expand_untracked_for_staging_with_rules(
+pub(crate) fn expand_untracked_for_staging_with_rules(
     repo: &Repository,
     index: &mut Index,
     work_tree: &Path,
@@ -2090,7 +2090,7 @@ fn has_tracked_under(
 
 /// Whether `dir` is the work tree of a nested submodule of the superproject at
 /// `super_git_dir` (its `.git` resolves under `super_git_dir/modules`).
-pub fn dir_is_nested_submodule_worktree(super_git_dir: &Path, dir: &Path) -> bool {
+pub(crate) fn dir_is_nested_submodule_worktree(super_git_dir: &Path, dir: &Path) -> bool {
     let gitfile = dir.join(".git");
     if gitfile.is_dir() {
         return true;
@@ -2403,7 +2403,7 @@ fn embedded_unregistered_git_repositories(
 /// concurrent commit), the opportunistic write is skipped so the fresher on-disk index is kept.
 /// Set `write_index` to `false` or capture `GIT_OPTIONAL_LOCKS=0` in the environment for
 /// read-only status that leaves the index file untouched.
-pub fn status(
+pub(crate) fn status(
     repo: &Repository,
     opts: &StatusOptions,
     progress: &mut dyn ProgressSink,

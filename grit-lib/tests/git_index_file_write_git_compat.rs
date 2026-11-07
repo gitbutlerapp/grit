@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope, HookPolicy};
-use grit_lib::porcelain::paths::RemoveOptions;
-use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope, HookPolicy};
+use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
+use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -90,14 +90,16 @@ fn commit_staged_with_git_index_file_leaves_default_index_unchanged() {
     assert_eq!(git_ls_files(&root, Some(&alt_index)), vec!["a", "b", "c"]);
 
     let repo = open_with_index(&root, &alt_index);
-    commit_with_scope(
-        &repo,
-        &commit_req("from temp index"),
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("commit staged");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("from temp index"),
+                CommitScope::Staged,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit staged");
 
     assert_eq!(
         fs::read(root.join(".git/index")).expect("read default index"),
@@ -118,14 +120,16 @@ fn commit_auto_stage_with_git_index_file_leaves_default_index_unchanged() {
 
     let default_before = fs::read(root.join(".git/index")).expect("read default index");
     let repo = open_with_index(&root, &alt_index);
-    commit_with_scope(
-        &repo,
-        &commit_req("auto stage temp"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("commit auto stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("auto stage temp"),
+                CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit auto stage");
 
     assert_eq!(
         fs::read(root.join(".git/index")).expect("read default index"),
@@ -225,14 +229,13 @@ fn pre_commit_hook_sees_git_index_file_not_default_index() {
     hook_req.author = Some("T <t@example.com> 1700000000 +0000".parse().expect("sig"));
     hook_req.committer = Some("T <t@example.com> 1700000000 +0000".parse().expect("sig"));
     hook_req.hooks = HookPolicy::Run;
-    commit_with_scope(
-        &repo,
-        &hook_req,
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("commit with hook");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(hook_req.clone(), CommitScope::Staged),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit with hook");
 
     let seen = fs::read_to_string(root.join("hook-index-path.txt")).expect("hook output");
     let alt_canon = alt_index

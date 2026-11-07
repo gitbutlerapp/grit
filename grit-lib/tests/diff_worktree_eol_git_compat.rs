@@ -3,10 +3,12 @@
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
-use grit_lib::diff::{read_worktree_side_bytes_for_diff, DiffStatus, TreeDiffOptions};
-use grit_lib::parallel::ThreadPolicy;
-use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::{CancelToken, NullProgress};
+use grit_lib::diff::{
+    diff_index_to_worktree_with_options, read_worktree_side_bytes_for_diff,
+    DiffIndexToWorktreeOptions, DiffStatus,
+};
+use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::worktree_rules::WorktreeRules;
 use std::fs;
@@ -226,11 +228,7 @@ fn assert_eol_only_rewrite_is_clean(
         ..StatusOptions::default()
     };
     for run in 0..2 {
-        let model = status(
-            &grit_repo,
-            &options,
-            &mut NullProgress,
-            &CancelToken::never(),
+        let model = grit_repo.status().run(&options, &mut NullProgress, &CancelToken::never(),
         )
         .expect("status");
         assert!(model.is_clean(), "{case} run {run}: {:?}", model.unstaged);
@@ -301,13 +299,9 @@ fn eol_crlf_real_size_change_is_still_modified() {
     fs::write(repo.join("n.txt"), "one\ntwo\nthree\n").expect("rewrite");
 
     let grit_repo = open(&repo);
-    let model = status(
-        &grit_repo,
-        &StatusOptions {
-            untracked: UntrackedMode::No,
-            ..StatusOptions::default()
-        },
-        &mut NullProgress,
+    let model = grit_repo.status().run(&StatusOptions {
+            untracked: UntrackedMode::No, ..StatusOptions::default()
+        }, &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("status");

@@ -16,7 +16,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -183,12 +183,13 @@ fn stage_child() {
     };
     let repo = Repository::discover(Some(Path::new(&root)), &RepositoryOptions::empty())
         .expect("open repository");
-    let outcome = stage(
-        &repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     assert_eq!(outcome.added.len(), FILES);
 }

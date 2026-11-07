@@ -8,7 +8,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -218,11 +219,7 @@ fn resolve_and_commit_matches_git_merge() {
     fs::write(root.join("a.txt"), format!("{resolved}\n")).expect("write resolved");
 
     git(root, &["add", "a.txt"]);
-    let outcome = create_commit(
-        &repo,
-        &commit_req("Merge feature-x"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let outcome = repo.commits().create_staged(&commit_req("Merge feature-x"), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge commit");
 
@@ -343,11 +340,7 @@ fn issue_1090_resolve_commit_keeps_non_conflict_files() {
 
     fs::write(root.join("a.txt"), "resolved\n").expect("resolve a.txt");
     git(root, &["add", "a.txt"]);
-    let outcome = create_commit(
-        &repo,
-        &commit_req("resolved"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let outcome = repo.commits().create_staged(&commit_req("resolved"), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge commit");
 

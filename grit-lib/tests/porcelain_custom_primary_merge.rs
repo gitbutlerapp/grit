@@ -8,9 +8,9 @@ use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{parse_commit, parse_tree};
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::branch::BranchCreateOptions;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
@@ -48,22 +48,13 @@ fn memory_primary_repo(
 }
 
 fn commit_all(repo: &Repository, message: &str) -> ObjectId {
-    stage(
-        repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("stage");
     let mut req = CommitRequest::new(message);
     req.author = Some(IDENT_TS.parse().expect("signature"));
     req.committer = Some(IDENT_TS.parse().expect("signature"));
-    commit_with_scope(
-        repo,
-        &req,
-        CommitScope::Staged,
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit")
     .oid

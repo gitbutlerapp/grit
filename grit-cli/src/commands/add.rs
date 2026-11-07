@@ -8,10 +8,9 @@ use anyhow::{bail, Result};
 use grit_lib::apply::{apply_patch_to_index_and_write, IndexApplyOptions};
 use grit_lib::diff::DiffSide;
 use grit_lib::error::Error as LibError;
-use grit_lib::porcelain::add::{stage as stage_paths, StageMode, StageOptions, StageOutcome};
+use grit_lib::porcelain::add::{StageMode, StageOptions, StageOutcome};
 use grit_lib::porcelain::hunk_select::{
-    diff_options_for_hunk_select, parse_hunk_id_list, stage_hunks, HunkSelectError, LineRange,
-    StageHunksOutcome,
+    parse_hunk_id_list, HunkSelectError, LineRange, StageHunksOutcome,
 };
 use grit_lib::porcelain::index_mode::StageExecutableHint;
 use grit_lib::progress::ProgressSink;
@@ -262,21 +261,25 @@ pub fn run_hunks(
     let pathspecs = resolved.specs().to_vec();
     let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_error)?;
     selection.ranges = parse_line_range_list(lines)?;
-    let mut diff_options = diff_options_for_hunk_select(&repo).map_err(anyhow::Error::new)?;
+    let mut diff_options = repo
+        .index()
+        .hunk_diff_options()
+        .map_err(anyhow::Error::new)?;
     diff_options.context_lines = HUNK_CONTEXT_LINES;
     if let Some(n) = unified_context {
         diff_options.context_lines = n;
     }
-    let outcome = stage_hunks(
-        &repo,
-        DiffSide::Unstaged,
-        &selection,
-        &pathspecs,
-        diff_options,
-        dry_run,
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(map_hunk_error)?;
+    let outcome = repo
+        .index()
+        .stage_hunks(
+            DiffSide::Unstaged,
+            &selection,
+            &pathspecs,
+            diff_options,
+            dry_run,
+            &crate::interrupt::process_cancel_token(),
+        )
+        .map_err(map_hunk_error)?;
     Ok(AddOutcome::from_hunks(outcome).with_path_display(&repo))
 }
 
@@ -404,7 +407,9 @@ fn stage_with_hint(
         o.force_ignored = force_ignored;
         o
     };
-    stage_paths(repo, &opts, progress, cancel).map_err(crate::error_map::map_stage_lib_error)
+    repo.index()
+        .stage(&opts, progress, cancel)
+        .map_err(crate::error_map::map_stage_lib_error)
 }
 
 fn map_apply_error(err: grit_lib::error::ApplyError) -> anyhow::Error {

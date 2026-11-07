@@ -5,7 +5,7 @@ use grit_lib::progress::NullProgress;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::porcelain::stage_tracked::{
     stage_tracked_modifications_with_thresholds, IndexStagingThresholds,
 };
@@ -69,11 +69,7 @@ fn bulk_deferred_untr_replay_after_mass_removal() {
     }
 
     let grit = open_grit(&repo_dir);
-    stage(
-        &grit,
-        &stage_opts_with_small_bulk(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+grit.index().stage(&stage_opts_with_small_bulk(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add");
 

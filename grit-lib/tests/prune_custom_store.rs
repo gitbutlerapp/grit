@@ -19,7 +19,6 @@ use grit_lib::objects::{
     serialize_tag, serialize_tree, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind, TagData,
     TreeEntry,
 };
-use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::gc::prune_loose_unreachable;
 use grit_lib::refs::store::{
@@ -214,7 +213,7 @@ pub(crate) fn build_history(repo: &Repository, work_tree: &Path) -> History {
     set_ref(repo, "refs/tags/v1", tag, Expected::Missing, "tag");
 
     std::fs::write(work_tree.join("staged.txt"), b"staged only\n").expect("write file");
-    stage_for_commit(repo, &mut NullProgress, &CancelToken::never()).expect("stage");
+repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
     let staged = repo
         .index()
         .load(&grit_lib::index::IndexLoadOptions::default())

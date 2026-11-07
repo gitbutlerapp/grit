@@ -367,8 +367,8 @@ fn cancelled_switch_rolls_back(shape: Shape) {
             before,
             "{context}: HEAD or index moved"
         );
-        assert_main_layout(&fx.root, shape, &context);
-        assert_clean(&fx.root, &context);
+        assert_main_layout(fx.root, shape, &context);
+        assert_clean(fx.root, &context);
     }
 
     let outcome = open(&fx.root)
@@ -384,7 +384,7 @@ fn cancelled_switch_rolls_back(shape: Shape) {
         git(&fx.root, &["rev-parse", "HEAD"]).trim(),
         fx.next.to_hex()
     );
-    assert_clean(&fx.root, &format!("{shape:?} retry"));
+    assert_clean(fx.root, &format!("{shape:?} retry"));
     assert_eq!(
         fs::read_to_string(fx.root.join("new/deep/n00.txt"))
             .ok()
@@ -433,8 +433,8 @@ fn cancelled_tree_to_tree_checkout_leaves_repository_unchanged() {
             .expect_err(&context);
         assert!(matches!(err, Error::Cancelled), "{context}: {err:?}");
         assert_eq!(repository_state(&fx.root), before, "{context}");
-        assert_main_layout(&fx.root, Shape::Mixed, &context);
-        assert_clean(&fx.root, &context);
+        assert_main_layout(fx.root, Shape::Mixed, &context);
+        assert_clean(fx.root, &context);
     }
 }
 
@@ -698,7 +698,7 @@ fn cancelled_cross_tree_hard_reset_keeps_dirty_tree_diff_paths() {
         &CancelToken::never(),
     )
     .expect("uncancelled reset");
-    assert_clean(&fx.root, "after reset --hard next");
+    assert_clean(fx.root, "after reset --hard next");
     assert_eq!(
         git(&fx.root, &["rev-parse", "HEAD"]).trim(),
         fx.next.to_hex()

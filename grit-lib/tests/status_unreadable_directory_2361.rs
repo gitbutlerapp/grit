@@ -9,8 +9,8 @@ mod unix {
 
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::diagnostics::{CollectingDiagnostics, DiagnosticsHandle, Warning};
-    use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
-    use grit_lib::porcelain::status::{status, StatusOptions};
+    use grit_lib::porcelain::commit::{CommitRequest};
+    use grit_lib::porcelain::status::{StatusOptions};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::git;
@@ -63,11 +63,7 @@ mod unix {
         fs::write(root.join("a"), "A\n").expect("edit sibling");
 
         let fx = open_repo(root);
-        let model = status(
-            &fx.repo,
-            &StatusOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+        let model = &fx.repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("status must succeed");
         assert!(
@@ -117,11 +113,7 @@ mod unix {
         }
 
         let fx = open_repo(root);
-        let model = status(
-            &fx.repo,
-            &StatusOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+        let model = &fx.repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("status must succeed");
         assert!(
@@ -157,7 +149,7 @@ mod unix {
 
         let fx = open_repo(root);
         let req = CommitRequest::new("second\n");
-        commit_worktree(&fx.repo, &req, &mut NullProgress, &CancelToken::never())
+&fx.repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never())
             .expect("commit must succeed");
 
         set_mode(&root.join("d"), 0o755);

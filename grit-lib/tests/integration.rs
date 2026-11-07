@@ -2058,6 +2058,9 @@ mod status_path_buffer_git_compat;
 #[path = "status_scan_memory.rs"]
 mod status_scan_memory;
 #[cfg(feature = "full-tests")]
+#[path = "status_staging_commit_handles.rs"]
+mod status_staging_commit_handles;
+#[cfg(feature = "full-tests")]
 #[path = "status_symlink_ancestor_git_compat.rs"]
 mod status_symlink_ancestor_git_compat;
 #[path = "status_system_autocrlf_git_compat.rs"]

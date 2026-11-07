@@ -3,7 +3,7 @@
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
+use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -178,12 +178,8 @@ fn status_literal_pathspec_matches_git_for_bracket_filename() {
             .expect("matches_change foo"),
         "literal pathspec must not match foo via matches_change"
     );
-    let model = status(
-        &repo,
-        &StatusOptions {
-            pathspec: pathspec.clone(),
-            untracked: UntrackedMode::No,
-            write_index: false,
+    let model = repo.status().run(&StatusOptions {
+            pathspec: pathspec.clone(), untracked: UntrackedMode::No, write_index: false,
             ..StatusOptions::default()
         },
         &mut NullProgress,

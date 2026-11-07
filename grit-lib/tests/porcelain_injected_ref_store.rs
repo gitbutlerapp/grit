@@ -13,9 +13,9 @@ use std::sync::Arc;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::branch::{BranchCreateOptions, BranchDeleteMode};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::branch::{create_branch, delete_branch, CreateBranchOptions, DeleteMode};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
@@ -64,24 +64,15 @@ fn init_repo_with(dir: &Path, format: RefStorageFormat) -> Repository {
 }
 
 fn commit_all(repo: &Repository, message: &str) -> ObjectId {
-    stage(
-        repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
-    commit_with_scope(
-        repo,
-        &{
+repo.commits().create(&grit_lib::commits::CommitOptions::new(&{
             let mut req = CommitRequest::new(message);
             req.author = Some(IDENT_TS.parse().expect("signature"));
             req.committer = Some(IDENT_TS.parse().expect("signature"));
             req
-        },
-        CommitScope::Staged,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        }.clone(), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -349,11 +340,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         detached
     );
     fs::remove_file(wt.join("d.txt")).expect("rm");
-    stage(
-        repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage rm");
     repo.checkout()

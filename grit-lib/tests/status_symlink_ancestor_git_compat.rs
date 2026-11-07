@@ -10,7 +10,7 @@ mod unix {
     use std::process::Command;
 
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::porcelain::status::{status, StatusOptions};
+    use grit_lib::porcelain::status::{StatusOptions};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::git;
@@ -55,11 +55,7 @@ mod unix {
             &RepositoryOptions::empty().with_work_tree(root),
         )
         .expect("open grit repo");
-        let model = status(
-            &repo,
-            &StatusOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+        let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("status");
         assert!(

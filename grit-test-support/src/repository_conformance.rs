@@ -39,6 +39,7 @@ use std::sync::Arc;
 use grit_lib::change_id::{
     resolve_commit_by_change_id_prefix, ChangeId, ChangeIdError, ChangeIdGenerator,
 };
+use grit_lib::commits::{CommitOptions, CommitOutcome, CommitRequest, CommitScope};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::{ConfigEditor, ConfigScope, ConfigWriteOptions};
 use grit_lib::diff::structured::{StructuredHunk, StructuredLineKind};
@@ -54,12 +55,9 @@ use grit_lib::objects::ObjectId;
 use grit_lib::operation::{
     conflict_kind_from_stagemask, conflicts_from_index, Conflict, ConflictKind,
 };
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{commit_worktree, CommitOutcome, CommitRequest};
-use grit_lib::porcelain::hunk_select::unstaged_file_diffs;
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::log::DecorationOptions;
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::RefName;
@@ -69,6 +67,7 @@ use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::NotesWriteOptions;
 use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
+use grit_lib::status::StatusOptions;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 use crate::system_git_version;
@@ -186,23 +185,23 @@ fn commit_path(
     epoch: i64,
 ) -> CommitOutcome {
     fs::write(work_tree(repo).join(path), contents).expect("write");
-    stage(
-        repo,
-        &StageOptions {
-            pathspecs: vec![path.into()],
-            ..Default::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
-    commit_worktree(
-        repo,
-        &commit_request(message, epoch),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("commit")
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec![path.into()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create(
+            &CommitOptions::new(commit_request(message, epoch), CommitScope::AutoStage),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit")
 }
 
 fn commit_history_row(out: &CommitOutcome) -> (ObjectId, String, ChangeId) {
@@ -250,7 +249,10 @@ fn pathspec_one(path: &str) -> Pathspec {
 }
 
 fn unstaged_hunk_hex_ids(repo: &Repository, path: &str) -> Vec<String> {
-    let files = unstaged_file_diffs(repo, &[path.to_owned()]).expect("unstaged diff");
+    let files = repo
+        .index()
+        .unstaged_file_diffs(&[path.to_owned()])
+        .expect("unstaged diff");
     if files.is_empty() {
         return Vec::new();
     }
@@ -759,13 +761,14 @@ fn run_snapshot_on_repo(
         IntegrateBranchOutcome::Conflicts { paths, .. } => paths,
         other => panic!("expected conflicts, got {other:?}"),
     };
-    let status_during_merge = status(
-        repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status during merge");
+    let status_during_merge = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status during merge");
     let merge_in_progress_before_abort = status_during_merge.state.merge_in_progress;
     let merge_conflicts_before_abort = status_during_merge.conflicts.clone();
     let conflict_details_before_abort = status_during_merge.conflict_details.clone();
@@ -788,13 +791,14 @@ fn run_snapshot_on_repo(
         .expect("shared")
         .contains("<<<<<<<");
     repo.merge().abort().expect("abort");
-    let status_after_abort = status(
-        repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status after abort");
+    let status_after_abort = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status after abort");
     let main_head_at_conflict = main_conflict;
     let head_after_merge_abort = head_oid(repo, "main");
     let merge_in_progress_after_abort = status_after_abort.state.merge_in_progress;
@@ -867,16 +871,16 @@ fn run_snapshot_on_repo(
     const STAGED_ONLY_BEFORE: &str = "staged\n";
     const UNTRACKED_BEFORE: &str = "new\n";
     fs::write(work_tree(repo).join("staged-only.txt"), STAGED_ONLY_BEFORE).expect("write");
-    stage(
-        repo,
-        &StageOptions {
-            pathspecs: vec!["staged-only.txt".into()],
-            ..Default::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage file");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["staged-only.txt".into()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage file");
     fs::write(work_tree(repo).join("untracked.txt"), UNTRACKED_BEFORE).expect("untracked");
     fs::write(
         work_tree(repo).join("story.txt"),
@@ -885,13 +889,14 @@ fn run_snapshot_on_repo(
     .expect("wip");
     let staged_hunk_ids = index_head_hunk_hex_ids(repo, "staged-only.txt");
     let unstaged_hunk_ids = unstaged_hunk_hex_ids(repo, "story.txt");
-    let model = status(
-        repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let staged_paths: Vec<_> = model.staged.iter().map(|e| e.path().to_owned()).collect();
     let unstaged_paths: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
     let untracked_paths_before_stash = model.untracked.clone();
@@ -921,13 +926,14 @@ fn run_snapshot_on_repo(
         fs::read_to_string(work_tree(repo).join("untracked.txt")).expect("untracked after pop");
     let story_content_after_stash_pop =
         fs::read_to_string(work_tree(repo).join("story.txt")).expect("story after pop");
-    let model_after_stash = status(
-        repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status after stash pop");
+    let model_after_stash = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status after stash pop");
     let staged_paths_after_stash_pop: Vec<_> = model_after_stash
         .staged
         .iter()

@@ -284,9 +284,7 @@ exit 0
 
     isolated_git(&repo_root, &["status", "-s"]);
 
-    let model = grit_lib::porcelain::status::status(
-        &grit_repo,
-        &grit_lib::porcelain::status::StatusOptions::default(),
+    let model = grit_repo.status().run(&grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )
@@ -348,9 +346,7 @@ fn grit_status_honors_fsmonitor_hook_v1_changed_paths() {
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open grit repo");
-    let model = grit_lib::porcelain::status::status(
-        &grit_repo,
-        &grit_lib::porcelain::status::StatusOptions::default(),
+    let model = grit_repo.status().run(&grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )
@@ -442,9 +438,7 @@ fn grit_status_v1_two_query_race_after_hook_modifies_during_first_query() {
     let mut opts = grit_lib::porcelain::status::StatusOptions::default();
     opts.fsmonitor_query_boundary = Some(boundary_first);
 
-    let first = grit_lib::porcelain::status::status(
-        &grit_repo,
-        &opts,
+    let first = grit_repo.status().run(&opts,
         &mut progress,
         &CancelToken::never(),
     )
@@ -461,9 +455,7 @@ fn grit_status_v1_two_query_race_after_hook_modifies_during_first_query() {
     );
 
     opts.fsmonitor_query_boundary = Some(boundary_second);
-    let second = grit_lib::porcelain::status::status(
-        &grit_repo,
-        &opts,
+    let second = grit_repo.status().run(&opts,
         &mut progress,
         &CancelToken::never(),
     )
@@ -568,9 +560,7 @@ fn grit_status_marks_fsmonitor_valid_after_clean_scan() {
     let opts = grit_lib::porcelain::status::StatusOptions::default();
     let mut progress = grit_lib::progress::NullProgress;
     for _ in 0..2 {
-        grit_lib::porcelain::status::status(
-            &grit_repo,
-            &opts,
+        &grit_repo.status().run(&opts,
             &mut progress,
             &CancelToken::never(),
         )
@@ -604,9 +594,7 @@ fn grit_status_marks_fsmonitor_valid_after_clean_scan() {
         "git ls-files -f must agree on valid bits: {flags:?}"
     );
 
-    let third = grit_lib::porcelain::status::status(
-        &grit_repo,
-        &opts,
+    let third = grit_repo.status().run(&opts,
         &mut progress,
         &CancelToken::never(),
     )
@@ -669,9 +657,7 @@ fn grit_status_does_not_mark_fsmonitor_valid_on_mode_change() {
     };
     let mut progress = grit_lib::progress::NullProgress;
     for _ in 0..2 {
-        grit_lib::porcelain::status::status(
-            &grit_repo,
-            &opts,
+        &grit_repo.status().run(&opts,
             &mut progress,
             &CancelToken::never(),
         )
@@ -695,9 +681,7 @@ fn grit_status_does_not_mark_fsmonitor_valid_on_mode_change() {
         ],
     );
 
-    let first = grit_lib::porcelain::status::status(
-        &grit_repo,
-        &opts,
+    let first = grit_repo.status().run(&opts,
         &mut progress,
         &CancelToken::never(),
     )
@@ -723,9 +707,7 @@ fn grit_status_does_not_mark_fsmonitor_valid_on_mode_change() {
         "untouched sibling stays fsmonitor-valid after hook reported only the target path"
     );
 
-    let second = grit_lib::porcelain::status::status(
-        &grit_repo,
-        &opts,
+    let second = grit_repo.status().run(&opts,
         &mut progress,
         &CancelToken::never(),
     )
@@ -774,9 +756,7 @@ fn grit_status_does_not_skip_stat_on_fsmn_bootstrap_with_stale_valid_bits() {
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open grit repo");
-    let model = grit_lib::porcelain::status::status(
-        &grit_repo,
-        &grit_lib::porcelain::status::StatusOptions::default(),
+    let model = grit_repo.status().run(&grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )
@@ -817,9 +797,7 @@ fn grit_git_fsmonitor_hook_round_trip_index_and_status() {
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open grit repo");
-    let model = grit_lib::porcelain::status::status(
-        &grit_repo,
-        &grit_lib::porcelain::status::StatusOptions::default(),
+    let model = grit_repo.status().run(&grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )

@@ -55,7 +55,7 @@ fn nul_mode_literal_spaces_and_quotes_match_git_add() {
         String::from_utf8_lossy(&git_out.stderr)
     );
 
-    use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
+    use grit_lib::porcelain::add::{StageMode, StageOptions};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::{InitOptions, Repository};
     use grit_lib::worktree::pathspec::{PathspecFile, PathspecGlobalFlags, PathspecOptions};
@@ -74,12 +74,8 @@ fn nul_mode_literal_spaces_and_quotes_match_git_add() {
     let resolved = repo
         .pathspec(std::iter::empty::<&str>(), &options)
         .expect("resolve");
-    let outcome = stage(
-        &repo,
-        &StageOptions {
-            pathspecs: resolved.specs().to_vec(),
-            pathspec_sources: resolved.iter().map(str::to_owned).collect(),
-            mode: StageMode::All,
+    let outcome = repo.index().stage(&StageOptions {
+            pathspecs: resolved.specs().to_vec(), pathspec_sources: resolved.iter().map(str::to_owned).collect(), mode: StageMode::All,
             ..Default::default()
         },
         &mut NullProgress,

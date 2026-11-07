@@ -13,8 +13,8 @@ use grit_lib::error::Error;
 use grit_lib::index::IndexError;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::progress::CancelToken;
@@ -172,12 +172,7 @@ fn assert_conflict_survives(root: &Path, repo: &Repository) {
     assert_eq!(fs::read(root.join("f")).expect("f"), worktree);
     assert_eq!(state_snapshot(root), state);
 
-    let err = commit_with_scope(
-        repo,
-        &commit_req(),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .unwrap_err();
     assert!(
@@ -240,12 +235,7 @@ fn assert_collapsed_markers_refused(root: &Path, repo: &Repository) {
     let index = git(root, &["ls-files", "-s"]);
     let state = state_snapshot(root);
 
-    let err = commit_with_scope(
-        repo,
-        &commit_req(),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .unwrap_err();
     let Error::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) = err else {
@@ -256,13 +246,9 @@ fn assert_collapsed_markers_refused(root: &Path, repo: &Repository) {
     assert_eq!(git(root, &["ls-files", "-s"]), index);
     assert_eq!(state_snapshot(root), state);
 
-    let err = stage(
-        repo,
-        &StageOptions {
-            pathspecs: vec!["f".into()],
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
+    let err = repo.index().stage(&StageOptions {
+            pathspecs: vec!["f".into()], ..StageOptions::default()
+        }, &mut NullProgress,
         &CancelToken::never(),
     )
     .unwrap_err();
@@ -286,12 +272,7 @@ fn commit_refuses_markers_after_git_drops_merge_stages() {
     assert_collapsed_markers_refused(root, &repo);
 
     fs::write(root.join("f"), "resolved\n").expect("resolve");
-    let outcome = commit_with_scope(
-        &repo,
-        &commit_req(),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .expect("commit resolved merge");
     assert_eq!(git(root, &["show", "HEAD:f"]), "resolved\n");
@@ -344,12 +325,7 @@ fn markers_already_committed_do_not_block_commit() {
     let doc = format!("{}appended\n", git(root, &["show", "HEAD:f"]));
     fs::write(root.join("f"), &doc).expect("edit around the committed block");
     let repo = open(root);
-    commit_with_scope(
-        &repo,
-        &commit_req(),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .expect("markers are already committed");
     assert_eq!(git(root, &["show", "HEAD:f"]), doc);
@@ -389,12 +365,7 @@ fn stale_resolve_undo_with_new_markers_is_refused() {
 
     fs::write(root.join("f"), "<<<<<<< a\nx\n=======\ny\n>>>>>>> b\n").expect("markers");
     let repo = open(root);
-    let err = commit_with_scope(
-        &repo,
-        &commit_req(),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .unwrap_err();
     assert!(

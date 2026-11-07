@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::status::{status, IgnoredMode, StatusOptions, UntrackedMode};
+use grit_lib::porcelain::status::{IgnoredMode, StatusOptions, UntrackedMode};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
@@ -66,7 +66,7 @@ fn grit_untracked_and_ignored(
         ahead_behind: false,
         ..StatusOptions::default()
     };
-    let model = status(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("status");
+    let model = repo.status().run(&opts, &mut NullProgress, &CancelToken::never()).expect("status");
     let mut untracked_paths = model.untracked;
     let mut ignored_paths = model.ignored;
     untracked_paths.sort();

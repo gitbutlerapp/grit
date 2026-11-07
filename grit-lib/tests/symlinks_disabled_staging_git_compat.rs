@@ -12,12 +12,12 @@ use filetime::{set_file_mtime, FileTime};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::structured::StructuredLineKind;
 use grit_lib::diff::{DiffOptions, DiffStatus, DiffTarget};
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::stage_tracked::{
     stage_tracked_modifications_with_thresholds, IndexStagingThresholds,
 };
-use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
+use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
@@ -167,12 +167,7 @@ fn append(root: &Path, rel: &str, text: &str) {
 
 fn autostage_commit(root: &Path, message: &str) -> grit_lib::porcelain::commit::CommitOutcome {
     let repo = open(root);
-    commit_with_scope(
-        &repo,
-        &commit_req(message),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req(message), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
     )
     .expect("grit commit")
 }
@@ -289,7 +284,7 @@ fn unstaged_status(root: &Path, threads: usize) -> Vec<(String, DiffStatus, Stri
         stat_parallel_threads: Some(threads),
         ..StatusOptions::default()
     };
-    let model = status(&repo, &options, &mut NullProgress, &CancelToken::never()).expect("status");
+    let model = repo.status().run(&options, &mut NullProgress, &CancelToken::never()).expect("status");
     model
         .unstaged
         .iter()
@@ -358,12 +353,8 @@ fn add_all_keeps_link_mode_and_matches_git_add() {
     let grit = clone_without_symlinks(&src, tmp.path(), "grit", true);
     fs::write(grit.join("link"), "b.txt").expect("write grit link");
     let repo = open(&grit);
-    stage(
-        &repo,
-        &StageOptions {
-            pathspecs: vec![".".to_owned()],
-            pathspec_sources: vec![".".to_owned()],
-            mode: StageMode::All,
+repo.index().stage(&StageOptions {
+            pathspecs: vec![".".to_owned()], pathspec_sources: vec![".".to_owned()], mode: StageMode::All,
             ..StageOptions::default()
         },
         &mut NullProgress,

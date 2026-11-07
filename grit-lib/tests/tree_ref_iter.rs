@@ -41,7 +41,7 @@ fn walk_trees_from_root(odb: &Odb, root: ObjectId) -> grit_lib::error::Result<()
     while let Some(tree_oid) = queue.pop_front() {
         let obj = odb.read(&tree_oid)?;
         assert_eq!(obj.kind, ObjectKind::Tree);
-        assert_tree_parsers_match(&obj.data);
+        assert_tree_parsers_match(obj.data);
         for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
             let entry = entry?;
             if entry.mode == 0o040000 {
@@ -97,7 +97,7 @@ fn tree_ref_iter_matches_parse_tree_sha256_repo() {
     let tree_obj = repo.odb().read(&commit.tree).expect("tree object");
     assert_eq!(tree_obj.kind, ObjectKind::Tree);
     assert!(!tree_obj.data.is_empty());
-    assert_tree_parsers_match(&tree_obj.data);
+    assert_tree_parsers_match(tree_obj.data);
     trees_from_repo_head(&repo).expect("walk");
 }
 

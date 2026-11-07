@@ -6,8 +6,8 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{Diff, DiffStatus, RenameDetection};
 use grit_lib::index::Index;
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -90,13 +90,14 @@ fn readonly_porcelain_keeps_git_sparse_index_shape() {
 
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
 
-    let model = status(
-        &grit_repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = grit_repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.unstaged.is_empty() && model.staged.is_empty(),
         "clean tree should report no changes"
@@ -118,17 +119,17 @@ fn readonly_porcelain_keeps_git_sparse_index_shape() {
         entries_before,
         "diff must not change sparse index entry count"
     );
-
-    stage(
-        &grit_repo,
-        &StageOptions {
-            mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("add");
+    grit_repo
+        .index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("add");
     assert_eq!(
         git_sparse_entries(wt),
         entries_before,
@@ -246,13 +247,14 @@ fn dirty_in_cone_file_still_reports_without_expanding_outside_cone() {
     let placeholders_before =
         sparse_directory_placeholder_count(&Index::load(&wt.join(".git/index")).expect("load"));
 
-    let model = status(
-        &grit_repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = grit_repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert_eq!(model.unstaged.len(), 1);
     assert_eq!(model.unstaged[0].path(), "svc00/mod00/pkg0/file0.txt");
 

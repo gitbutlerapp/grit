@@ -8,7 +8,7 @@ use std::process::Command;
 
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::status::{format_porcelain_v2, status, StatusOptions};
+use grit_lib::porcelain::status::{format_porcelain_v2, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
@@ -112,13 +112,14 @@ pub fn git_status_porcelain_v2_lines(worktree: &Path) -> Vec<String> {
 
 /// Grit status rendered as porcelain v2 (same subset git uses for ordinary repos).
 pub fn grit_status_porcelain_v2_lines(repo: &Repository) -> Vec<String> {
-    let model = status(
-        repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit status");
     format_porcelain_v2(&model, repo.odb(), repo.work_tree())
 }
 

@@ -2,7 +2,7 @@
 
 use grit_lib::error::Error;
 use grit_lib::index::Index;
-use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
+use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::WorktreeError;
@@ -25,8 +25,7 @@ fn stage_paths(repo: &Repository, pathspecs: &[&str]) -> grit_lib::error::Result
         mode: StageMode::All,
         ..StageOptions::default()
     };
-    stage(
-        repo,
+    repo.index().stage(
         &opts,
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),

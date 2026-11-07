@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
@@ -113,13 +113,7 @@ fn autostage_commit_skips_hidden_untracked_no() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     init_repo_with_untracked_hidden(root, "no");
-
-    commit_with_scope(
-        &open_grit(root),
-        &commit_req("tracked change"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+open_grit(root).commits().create(&grit_lib::commits::CommitOptions::new(commit_req("tracked change"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -138,13 +132,7 @@ fn autostage_commit_skips_hidden_untracked_false_synonym() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     init_repo_with_untracked_hidden(root, "false");
-
-    commit_with_scope(
-        &open_grit(root),
-        &commit_req("tracked change"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+open_grit(root).commits().create(&grit_lib::commits::CommitOptions::new(commit_req("tracked change"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -160,13 +148,7 @@ fn autostage_commit_still_includes_untracked_when_show_normal() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     init_repo_with_untracked_hidden(root, "normal");
-
-    commit_with_scope(
-        &open_grit(root),
-        &commit_req("everything"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+open_grit(root).commits().create(&grit_lib::commits::CommitOptions::new(commit_req("everything"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -207,9 +189,7 @@ fn dotfiles_git_dir_worktree_does_not_sweep_home() {
     let repo = Repository::open(&bare, &RepositoryOptions::empty().with_work_tree(&home))
         .expect("open dotfiles repo");
 
-    grit_lib::porcelain::add::stage(
-        &repo,
-        &grit_lib::porcelain::add::StageOptions {
+    &repo.index().stage(&grit_lib::porcelain::add::StageOptions {
             pathspecs: vec![".bashrc".to_owned()],
             pathspec_sources: vec![".bashrc".to_owned()],
             ..Default::default()
@@ -219,12 +199,7 @@ fn dotfiles_git_dir_worktree_does_not_sweep_home() {
     )
     .expect("stage bashrc");
 
-    let outcome = commit_with_scope(
-        &repo,
-        &commit_req("dotfiles"),
-        CommitScope::AutoStage,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("dotfiles"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 

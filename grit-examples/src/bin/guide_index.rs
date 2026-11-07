@@ -53,8 +53,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         .load(&grit_lib::index::IndexLoadOptions::default())?;
     println!("index_entries={}", index.entries().len());
 
-    let outcome = stage(
-        &repo,
+    let outcome = repo.index().stage(
         &StageOptions::default(),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),

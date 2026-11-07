@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::commit::{commit_worktree, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
@@ -69,11 +69,7 @@ fn grit_commit_on_detached_head_matches_git() {
     std::fs::write(root.path().join("d.txt"), b"d\n").unwrap();
 
     let repo = open_grit(root.path());
-    let outcome = commit_worktree(
-        &repo,
-        &commit_req("detached"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("detached"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     assert_eq!(outcome.branch, None);

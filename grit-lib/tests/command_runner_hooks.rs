@@ -10,7 +10,7 @@ use grit_lib::command_runner::{
 };
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::{Error, FilterError};
-use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::crlf::run_filter;
@@ -71,13 +71,16 @@ fn commit_second(repo: &Repository) -> grit_lib::error::Result<grit_lib::objects
         req.committer = Some(id.parse().expect("signature"));
         req
     };
-    commit_worktree(
-        repo,
-        &req,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .map(|o| o.oid)
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                req.clone(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .map(|o| o.oid)
 }
 
 fn expect_hook_failure(result: grit_lib::error::Result<grit_lib::objects::ObjectId>) -> HookError {

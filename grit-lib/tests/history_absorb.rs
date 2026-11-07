@@ -8,7 +8,7 @@ use std::fs;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::parse_commit;
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::status::{StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -158,11 +158,7 @@ fn absorb_leaves_ambiguous_hunk_staged() {
         .expect("plan");
     assert!(plan.assignments.is_empty());
     assert_eq!(plan.unassigned.len(), 1);
-    let st = status(
-        &grit,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let st = grit.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     assert_eq!(st.staged.len(), 1);

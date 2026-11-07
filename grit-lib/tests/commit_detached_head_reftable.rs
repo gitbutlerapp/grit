@@ -2,8 +2,8 @@
 
 use crate::support;
 
-use grit_lib::porcelain::commit::{commit_worktree, CommitRequest, HookPolicy};
-use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::porcelain::commit::{CommitRequest, HookPolicy};
+use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::HeadState;
@@ -41,11 +41,7 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
         &grit_lib::config::environment::RepositoryOptions::empty().with_work_tree(wt),
     )
     .expect("open");
-    commit_worktree(
-        &repo,
-        &commit_req("one"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("one"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("first commit");
     let main_tip = repo.references().resolve("refs/heads/main").unwrap();
@@ -70,11 +66,7 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
         .expect("detach");
 
     std::fs::write(wt.join("b.txt"), b"b\n").unwrap();
-    let outcome = commit_worktree(
-        &repo,
-        &commit_req("detached"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("detached"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("detached commit");
     assert_eq!(outcome.branch, None);
@@ -105,11 +97,7 @@ fn grit_amend_on_detached_reftable_head() {
         &grit_lib::config::environment::RepositoryOptions::empty().with_work_tree(wt),
     )
     .expect("open");
-    commit_worktree(
-        &repo,
-        &commit_req("one"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("one"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("first");
     let tip = match repo.references().head().expect("head before detach") {
@@ -133,11 +121,7 @@ fn grit_amend_on_detached_reftable_head() {
 
     let mut amend = commit_req("amended");
     amend.amend = true;
-    let outcome = commit_worktree(
-        &repo,
-        &amend,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(amend.clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect("amend detached");
     assert_eq!(outcome.branch, None);

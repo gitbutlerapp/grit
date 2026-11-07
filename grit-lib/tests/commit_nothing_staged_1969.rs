@@ -70,12 +70,7 @@ fn repo_with_autostage_off() -> (tempfile::TempDir, PathBuf) {
 fn staged_scope_reports_nothing_staged_when_worktree_dirty() {
     let (_tmp, root) = repo_with_autostage_off();
     let repo = open_grit(&root);
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("x"),
-        CommitScope::Staged,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("x"), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit");
     match err {
@@ -98,12 +93,7 @@ fn default_scope_with_autostage_off_is_staged_and_reports_nothing_staged() {
         default_commit_scope(&repo).expect("scope"),
         CommitScope::Staged
     );
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("x"),
-        default_commit_scope(&repo).expect("scope"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("x"), default_commit_scope(&repo).expect("scope").clone(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit");
     assert!(
@@ -129,12 +119,7 @@ fn paths_scope_with_other_paths_staged_reports_nothing_to_commit_not_false_unsta
 
     let repo = open_grit(root);
     let paths = Pathspec::scoped(["a.txt"], PathspecGlobalFlags::default());
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("nope"),
-        CommitScope::Paths(paths),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("nope"), CommitScope::Paths(paths))), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("path a.txt has nothing to commit");
     assert!(
@@ -156,12 +141,7 @@ fn clean_tree_still_reports_nothing_to_commit() {
     git_out(root, &["commit", "-q", "-m", "base"]);
     git_out(root, &["config", "commit.autoStage", "false"]);
     let repo = open_grit(root);
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("x"),
-        CommitScope::Staged,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("x"), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit");
     assert!(
@@ -203,12 +183,7 @@ fn staged_scope_counts_submodule_untracked_as_unstaged() {
     std::fs::write(inner.join("untracked.txt"), "new\n").expect("untracked in submodule");
 
     let repo = open_grit(root);
-    let err = commit_with_scope(
-        &repo,
-        &commit_req("x"),
-        CommitScope::Staged,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("x"), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit");
     match err {

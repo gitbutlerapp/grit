@@ -7,13 +7,10 @@ use grit_lib::revwalk::{Peel, ResolveOptions};
 use grit_lib::worktree::WorktreeError;
 
 use crate::message_input::parse_author_cli;
+use grit_lib::commits::{CommitOptions, CommitPatchInput, CommitRequest, CommitScope, HookPolicy};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::short_hex;
-use grit_lib::porcelain::commit::{
-    commit_with_patch, commit_with_scope, default_commit_scope, pending_commit_message,
-    CommitPatchInput, CommitRequest, CommitScope, HookPolicy,
-};
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
 use grit_lib::porcelain::CommitError;
 use grit_lib::progress::{NullProgress, ProgressSink};
@@ -235,15 +232,18 @@ pub fn run_hunks(
         allow_empty,
     )?;
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let outcome = commit_with_patch(
-        &repo,
-        &req,
-        CommitPatchInput::Hunks(selection),
-        &pathspecs,
-        &mut NullProgress,
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(map_patch_error)?;
+    let scope = CommitScope::Patch {
+        input: CommitPatchInput::Hunks(selection),
+        pathspecs,
+    };
+    let outcome = repo
+        .commits()
+        .create(
+            &CommitOptions::new(req.clone(), scope),
+            &mut NullProgress,
+            &crate::interrupt::process_cancel_token(),
+        )
+        .map_err(map_patch_error)?;
     finish_commit_outcome(req, outcome, CommitScopeJson::Patch, dry_run)
 }
 
@@ -290,15 +290,18 @@ pub fn run_patch_file(
         allow_empty,
     )?;
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let outcome = commit_with_patch(
-        &repo,
-        &req,
-        CommitPatchInput::Patches(patches),
-        &[],
-        &mut NullProgress,
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(map_patch_error)?;
+    let scope = CommitScope::Patch {
+        input: CommitPatchInput::Patches(patches),
+        pathspecs: Vec::new(),
+    };
+    let outcome = repo
+        .commits()
+        .create(
+            &CommitOptions::new(req.clone(), scope),
+            &mut NullProgress,
+            &crate::interrupt::process_cancel_token(),
+        )
+        .map_err(map_patch_error)?;
     finish_commit_outcome(req, outcome, CommitScopeJson::Patch, dry_run)
 }
 
@@ -361,14 +364,14 @@ pub fn run(
         allow_empty,
     )?;
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let outcome = commit_with_scope(
-        &repo,
-        &req,
-        scope,
-        progress,
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(map_commit_error)?;
+    let outcome = repo
+        .commits()
+        .create(
+            &CommitOptions::new(req.clone(), scope.clone()),
+            progress,
+            &crate::interrupt::process_cancel_token(),
+        )
+        .map_err(map_commit_error)?;
     finish_commit_outcome(req, outcome, scope_json, dry_run)
 }
 
@@ -403,7 +406,9 @@ fn build_commit_request(
     let message =
         resolve_commit_message(message, message_file, amend, reuse_message_from.is_some())?;
     let has_pending_message = || -> Result<bool> {
-        Ok(pending_commit_message(repo)
+        Ok(repo
+            .commits()
+            .pending_message()
             .context("could not read pending commit message")?
             .is_some_and(|m| !m.trim().is_empty()))
     };
@@ -604,7 +609,9 @@ fn resolve_commit_scope(
         let resolved = paths.resolve(repo)?;
         return Ok(CommitScope::Paths(resolved));
     }
-    default_commit_scope(repo).map_err(|e| anyhow::anyhow!("{e}"))
+    repo.commits()
+        .default_scope()
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn scope_json(scope: &CommitScope) -> CommitScopeJson {

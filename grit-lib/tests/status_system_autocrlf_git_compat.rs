@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use filetime::FileTime;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::status::{StatusOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -73,11 +73,7 @@ fn crlf_checkout() -> CrlfCheckout {
 
 fn unstaged_paths(work_tree: &std::path::Path, options: &RepositoryOptions) -> Vec<String> {
     let repo = Repository::discover(Some(work_tree), options).expect("discover");
-    let model = status(
-        &repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
+    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
     )
     .expect("status");
     model

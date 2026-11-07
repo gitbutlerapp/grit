@@ -13,8 +13,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::HashAlgo;
-use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
+use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::{Peel, ResolveOptions};
@@ -44,22 +44,13 @@ fn memory_store_change_ids_round_trip_through_git() {
     let mut commits = Vec::new();
     for name in ["a", "b", "c"] {
         fs::write(root.join(name), format!("{name}\n")).expect("write file");
-        stage(
-            &memory,
-            &StageOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
+memory.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
         )
         .expect("stage");
         let mut req = CommitRequest::new(format!("add {name}"));
         req.author = Some(IDENT.parse().expect("signature"));
         req.committer = Some(IDENT.parse().expect("signature"));
-        let outcome = commit_with_scope(
-            &memory,
-            &req,
-            CommitScope::Staged,
-            &mut NullProgress,
-            &CancelToken::never(),
+        let outcome = memory.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
         )
         .expect("commit");
         let change_id = outcome.change_id.expect("change id");
