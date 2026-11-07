@@ -10,9 +10,8 @@ use crate::repo::Repository;
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 
-use super::remote::{
-    has_local_remote_section, has_remote_section, is_valid_remote_name, RepositoryRemotes,
-};
+use super::remote::{has_local_remote_section, has_remote_section, RepositoryRemotes};
+use crate::remote::is_valid_remote_name;
 
 /// Result of [`RepositoryRemotes::rename`].
 #[derive(Debug, Clone, PartialEq, Eq)]

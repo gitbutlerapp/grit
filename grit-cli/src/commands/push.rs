@@ -771,7 +771,6 @@ fn push_once(
         atomic: wire.atomic,
         push_options: wire.push_options.to_vec(),
         remote_ref_tips: wire.remote_ref_tips.clone(),
-        tracking_remote: Some(remote_name.to_owned()),
         no_verify: wire.no_verify,
         ..Default::default()
     };

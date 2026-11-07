@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::Error;
 use crate::error::Result;
@@ -977,16 +976,6 @@ pub(crate) fn has_local_remote_section(config: &ConfigSet, name: &str) -> bool {
                 .and_then(|rest| rest.rsplit_once('.'))
                 .is_some_and(|(section, _key)| section == name)
     })
-}
-
-/// Whether `name` can name a remote: its tracking refs `refs/remotes/<name>/…` must be valid.
-pub(crate) fn is_valid_remote_name(name: &str) -> bool {
-    !name.is_empty()
-        && check_refname_format(
-            &format!("refs/remotes/{name}/test"),
-            &RefFormatOptions::default(),
-        )
-        .is_ok()
 }
 
 /// Collect remote subsection names that declare a `url` key.
