@@ -12,6 +12,7 @@ These pages walk through every stable domain in `grit-lib`: repository discovery
 | [Config](config/) | `Repository::config()` / `Config` get/set |
 | [Objects](objects/) | `Objects` read/write |
 | [Refs](refs/) | `References`, reflog, backends |
+| [Storage backends](storage-backends.md) | Custom object and ref stores, conformance suites |
 | [Index](staging/) | `IndexFile`, stage, write tree |
 | [Worktree](worktree/) | Linked worktrees, ignore, attributes |
 | [Diff](diff/) | `Diff` tree/index/worktree |

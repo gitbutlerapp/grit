@@ -280,24 +280,30 @@ impl ObjectStore for SqliteOdbStore {
     }
 
     fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
-        let guard = self
-            .db
-            .lock()
-            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
-        let mut stmt = guard
-            .conn
-            .prepare("SELECT oid FROM objects")
-            .map_err(sqlite_err)?;
-        let rows = stmt
-            .query_map([], |row| {
-                let oid_bytes: Vec<u8> = row.get(0)?;
-                Ok(oid_bytes)
-            })
-            .map_err(sqlite_err)?;
-        for row in rows {
-            let oid_bytes = row.map_err(sqlite_err)?;
-            let oid = parse_oid_blob(&oid_bytes, self.algo)?;
-            if f(&oid).is_break() {
+        let oids: Vec<ObjectId> = {
+            let guard = self
+                .db
+                .lock()
+                .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+            let mut stmt = guard
+                .conn
+                .prepare("SELECT oid FROM objects")
+                .map_err(sqlite_err)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let oid_bytes: Vec<u8> = row.get(0)?;
+                    Ok(oid_bytes)
+                })
+                .map_err(sqlite_err)?;
+            let mut oids = Vec::new();
+            for row in rows {
+                let oid_bytes = row.map_err(sqlite_err)?;
+                oids.push(parse_oid_blob(&oid_bytes, self.algo)?);
+            }
+            oids
+        };
+        for oid in &oids {
+            if f(oid).is_break() {
                 break;
             }
         }

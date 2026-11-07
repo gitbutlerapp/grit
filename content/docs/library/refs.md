@@ -217,33 +217,7 @@ if let Some(target) = standing.target.as_ref() {
 
 ## Writing a ref backend
 
-A custom [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) (a database, a network service, an in-process map) does not have to re-derive Git's ref-update rules. [`refs::store::backend`](rustdoc:grit_lib::refs::store::backend) has the helpers the built-in stores use:
-
-| Helper | What it does |
-| ------ | ------------ |
-| [`check_transaction`](rustdoc:grit_lib::refs::store::backend::check_transaction) | Every check `prepare` must make: ref names, directory/file conflicts (`a` vs `a/b`), compare-and-swap through symbolic refs, two updates writing the same ref. Cost is `O` of the transaction's names, symref depth, and directory probes—even when `RefBatchState` holds the whole store |
-| [`apply_transaction`](rustdoc:grit_lib::refs::store::backend::apply_transaction) | The refs and reflogs a commit stores, including the reflog line on both a symbolic ref and its target |
-| [`RefBatchState`](rustdoc:grit_lib::refs::store::backend::RefBatchState) | The ref and reflog maps both helpers work on |
-| [`resolve_symbolic`](rustdoc:grit_lib::refs::store::backend::resolve_symbolic) | Follow symbolic refs inside a `RefBatchState` (for `RefEntry::peeled`) |
-| `validate_storable_refname`, [`verify_create_conflicts`](rustdoc:grit_lib::refs::store::backend::verify_create_conflicts), [`expected_matches`](rustdoc:grit_lib::refs::store::backend::expected_matches) | The individual checks, for stores that only load part of their refs |
-
-The usual shape: in [`prepare_for`](rustdoc:grit_lib::refs::store::RefStore::prepare_for), call `validate_transaction` (names and null ids, before any lock), then take your writer slot. Cross-process lock files (the files backend) fail fast with `RefStoreError::LockHeld` so grit-lib can retry with backoff; a single in-process writer slot must wait fairly for the supplied [`LockWait`](rustdoc:grit_lib::lockfile::LockWait) using [`SingleWriterGate`](rustdoc:grit_lib::refs::store::SingleWriterGate) or equivalent FIFO queueing—do not spin on immediate `LockHeld` and expect exponential backoff to schedule you. Load the refs the transaction touches into a `RefBatchState`, call `check_transaction`, and return a prepared value that owns the slot until commit or abort. In `commit`, run `apply_transaction` in place on that map when you own it (clone only when iteration callbacks still share the state) and persist the difference. The prepared value must release its slot in `Drop` too, because callers bail out with `?` between prepare and commit. Implement [`rewrite_reflog`](rustdoc:grit_lib::refs::store::RefStore::rewrite_reflog) with the same writer exclusion for the ref being rewritten: read entries under the lock, run the transform, write back before releasing—never a separate `for_each_reflog_entry` plus `replace_reflog` without holding the lock, and do not re-enter the store from the transform closure. Iteration callbacks may call back into the store, so release internal locks before running them (iterate over a snapshot). In `for_each_ref`, treat a non-empty prefix as a literal name prefix (`"HEAD"` lists `HEAD`), but list only refs under `refs/` for the empty prefix, leaving out root refs such as `HEAD` and `ORIG_HEAD`, as `git for-each-ref` does. `MemoryRefStore` is written exactly this way. Report your own storage failures as [`RefStoreError::Backend`](rustdoc:grit_lib::refs::store::RefStoreError::Backend) (`RefStoreError::backend(err)` keeps the error downcastable) and return [`RefStorageFormat::Custom`](rustdoc:grit_lib::refs::store::RefStorageFormat::Custom) from `format()`. Your backend never sees an object database. Once you install it with [`Repository::with_ref_store`](rustdoc:grit_lib::repo::Repository::with_ref_store), the repository runs the missing-object and branch-kind checks described under [Transactions](#transactions) before it calls your `prepare`. Leave `RefStore::verify_update_targets` at its default; the repository's store supplies that check.
-
-Check the store with the conformance suite every built-in backend runs, `grit_test_support::refstore_conformance` (see [`grit-lib/tests/refstore_custom_backend.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/refstore_custom_backend.rs) for a complete map-backed store):
-
-```rust
-use std::sync::Arc;
-
-use grit_lib::refs::store::RefStore;
-use grit_test_support::refstore_conformance::run_suite;
-
-#[test]
-fn my_store_conforms() {
-    run_suite(|| Arc::new(MyStore::default()) as Arc<dyn RefStore>);
-}
-```
-
-To open a repository on your store, pass it to [`RepositoryOptions::with_ref_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_ref_store) and call [`Repository::open`](rustdoc:grit_lib::repo::Repository). The git directory then needs no `HEAD` or `refs/`, and [`RepositoryOptions::with_initial_branch`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_initial_branch) points `HEAD` at an unborn branch when the store has none. [`Repository::init`](rustdoc:grit_lib::repo::Repository::init) with the store in [`InitOptions::with_repository_options`](rustdoc:grit_lib::repo::InitOptions::with_repository_options) creates a repository whose `HEAD` and refs live only in the store. See [Object stores](object-stores.md) for opening with no git directory at all.
+Ref backend design, transaction helpers, conformance tests, and how init interacts with [`RepositoryOptions::with_ref_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_ref_store) are documented in [Writing storage backends](storage-backends.md) (see [Ref storage](storage-backends.md#ref-storage) and [Testing](storage-backends.md#testing)). The worked example remains [`grit-lib/tests/refstore_custom_backend.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/refstore_custom_backend.rs).
 
 ## Ref names (`RefName` / `RefNamePolicy`)
 

@@ -3,6 +3,8 @@ title: Object stores
 summary: Pluggable ObjectStore backends, RepositoryOptions::with_object_store, OdbBuilder layers, and the odb_conformance test suite.
 ---
 
+**Implementing a backend?** Start with [Writing storage backends](storage-backends.md) for traits, init, capabilities, conformance testing, and the SQLite walkthrough.
+
 By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-backed [`Odb`](rustdoc:grit_lib::objects::odb::Odb) (loose objects, packs, and optional MIDX). Embedders swap the **primary** store with [`RepositoryOptions::with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store), and add read-only layers, an attached commit-graph or an alternates override with an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) passed to [`RepositoryOptions::with_odb_builder`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_odb_builder). Neither takes a path: [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) resolves the `objects/` directory itself.
 
 ## Traits
@@ -74,17 +76,7 @@ The custom primary and every read source must hash with the repository's object 
 
 ## Creating a repository on your stores
 
-[`Repository::init`](rustdoc:grit_lib::repo::Repository::init) takes the same [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions) through [`InitOptions::with_repository_options`](rustdoc:grit_lib::repo::InitOptions::with_repository_options) and creates only what your stores do not own:
-
-| Injected | What init writes in the git directory |
-| -------- | ------------------------------------- |
-| Object store only | Everything except `objects/` (no `objects/info/`, no `objects/pack/`). |
-| Ref store only | Everything except `HEAD` and `refs/`. `HEAD` is seeded in your store at the initial branch. |
-| Both | Only `config` (and, for a non-bare repository, the work tree beside it). |
-
-The config holds `core.repositoryformatversion`, `core.bare` and, for a SHA-256 store, `extensions.objectformat`. You need not set [`InitOptions::object_format`](rustdoc:grit_lib::repo::InitOptions::object_format): init takes it from the store's `ObjectStore::hash_algo`. When you do set it, or when you reinitialize an existing repository, the formats must agree; otherwise init fails with [`RepositoryError::ObjectFormatMismatch`](rustdoc:grit_lib::error::RepositoryError::ObjectFormatMismatch) before anything is written. Asking for reftable together with an injected ref store fails with [`RepositoryError::InitRefStorageWithInjectedRefStore`](rustdoc:grit_lib::error::RepositoryError::InitRefStorageWithInjectedRefStore): the ref store you pass is the ref backend.
-
-The returned [`Repository`](rustdoc:grit_lib::repo::Repository) is already wired to your stores; there is no need to open it again.
+[`Repository::init`](rustdoc:grit_lib::repo::Repository::init) through [`InitOptions::with_repository_options`](rustdoc:grit_lib::repo::InitOptions::with_repository_options) seeds `HEAD` in an injected ref store and writes only the git-directory pieces your backends do not own (see the init table in [Writing storage backends](storage-backends.md#what-repositoryinit-writes)).
 
 <!-- include: grit-examples/src/bin/memory_primary.rs -->
 
@@ -320,7 +312,7 @@ With an override, committing one changed file costs a handful of store calls how
 
 ## Conformance tests
 
-The workspace crate `grit_test_support::odb_conformance` provides shared read/write suites (and `grit_test_support::refstore_conformance` does the same for ref stores, see [Refs](refs.md#writing-a-ref-backend)). Run them from an integration test in your crate (see [`grit-lib/tests/odb_conformance_memory.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs)) to validate a custom backend before wiring it through [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder).
+Object-store suites live in `grit_test_support::odb_conformance`; repository-level scenarios use `grit_test_support::repository_conformance`. See [Writing storage backends — Testing](storage-backends.md#testing) for `BackendFixture`, parity checks, and the SQLite example test.
 
 ## Example: append-only packfile KV store
 
@@ -330,6 +322,5 @@ The workspace crate `grit_test_support::odb_conformance` provides shared read/wr
 
 ## Example: SQLite object database
 
-For embedders who want indexed lookup without maintaining a separate `objects/` shard tree, `grit_examples::sqlite_odb` provides [`SqliteOdbStore`](https://github.com/gitbutlerapp/grit/blob/main/grit-examples/src/sqlite_odb.rs): each object is a row keyed by raw object id with zlib-compressed canonical store bytes (the same on-disk payload as a loose object file). The demo commits through a SQLite primary, walks history, then exports loose objects so system `git fsck` and `git log` succeed:
+See [Writing storage backends — SQLite example](storage-backends.md#example-sqlite-object-database) for the walkthrough and conformance test. Implementation: [`grit_examples::sqlite_odb::SqliteOdbStore`](https://github.com/gitbutlerapp/grit/blob/main/grit-examples/src/sqlite_odb.rs).
 
-<!-- include: grit-examples/examples/sqlite-object-store.rs -->
