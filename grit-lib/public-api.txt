@@ -18936,6 +18936,31 @@ pub fn grit_lib::remote::clone::clone_into(grit_lib::repo::Repository, grit_lib:
 pub fn grit_lib::remote::clone::derive_clone_dir(&str, bool) -> core::result::Result<alloc::string::String, grit_lib::remote::transport_path::NoDirectoryName>
 pub fn grit_lib::remote::clone::dest_preexisted_empty(&std::path::Path) -> bool
 pub mod grit_lib::remote::credentials
+#[non_exhaustive] pub enum grit_lib::remote::credentials::HelperValueError
+pub grit_lib::remote::credentials::HelperValueError::LineBreak
+pub grit_lib::remote::credentials::HelperValueError::LineBreak::word: alloc::string::String
+pub grit_lib::remote::credentials::HelperValueError::NonUnicodeProgram
+pub grit_lib::remote::credentials::HelperValueError::NonUnicodeProgram::path: std::path::PathBuf
+pub grit_lib::remote::credentials::HelperValueError::RelativeProgram
+pub grit_lib::remote::credentials::HelperValueError::RelativeProgram::path: std::path::PathBuf
+impl core::clone::Clone for grit_lib::remote::credentials::HelperValueError
+pub fn grit_lib::remote::credentials::HelperValueError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::credentials::HelperValueError
+impl core::cmp::PartialEq for grit_lib::remote::credentials::HelperValueError
+pub fn grit_lib::remote::credentials::HelperValueError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::remote::credentials::HelperValueError
+impl core::fmt::Debug for grit_lib::remote::credentials::HelperValueError
+pub fn grit_lib::remote::credentials::HelperValueError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::credentials::HelperValueError
+pub fn grit_lib::remote::credentials::HelperValueError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::credentials::HelperValueError
+impl core::marker::Freeze for grit_lib::remote::credentials::HelperValueError
+impl core::marker::Send for grit_lib::remote::credentials::HelperValueError
+impl core::marker::Sync for grit_lib::remote::credentials::HelperValueError
+impl core::marker::Unpin for grit_lib::remote::credentials::HelperValueError
+impl core::marker::UnsafeUnpin for grit_lib::remote::credentials::HelperValueError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::credentials::HelperValueError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::credentials::HelperValueError
 pub struct grit_lib::remote::credentials::Credential
 pub grit_lib::remote::credentials::Credential::extra: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
 pub grit_lib::remote::credentials::Credential::host: core::option::Option<alloc::string::String>
@@ -19000,6 +19025,7 @@ impl grit_lib::remote::credentials::CredentialProvider for grit_lib::remote::gri
 pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::approve(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::fill(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<grit_lib::remote::credentials::Credential>
 pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::reject(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
+pub fn grit_lib::remote::credentials::helper_config_value(&std::path::Path, &[&str]) -> core::result::Result<alloc::string::String, grit_lib::remote::credentials::HelperValueError>
 pub fn grit_lib::remote::credentials::use_http_path(&grit_lib::config::ConfigSet, core::option::Option<&str>) -> bool
 pub mod grit_lib::remote::fetch
 #[non_exhaustive] pub enum grit_lib::remote::fetch::FetchMilestone

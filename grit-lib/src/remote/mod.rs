@@ -49,8 +49,8 @@ pub mod credentials {
     #[cfg(windows)]
     pub use crate::credentials::windows_store;
     pub use crate::credentials::{
-        use_http_path, Credential, CredentialProvider, HelperCredentialProvider,
-        NON_INTERACTIVE_MESSAGE,
+        helper_config_value, use_http_path, Credential, CredentialProvider,
+        HelperCredentialProvider, HelperValueError, NON_INTERACTIVE_MESSAGE,
     };
 }
 pub mod github_auth {

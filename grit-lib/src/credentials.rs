@@ -15,6 +15,8 @@
 //!   configured `credential.helper` / `credential.<url>.helper` programs
 //!   (shell `!cmd`, the built-in `store`/`cache` helpers, and external
 //!   `git-credential-*` binaries), then falls back to an askpass program.
+//! - [`helper_config_value`] — formats a program path and arguments as a
+//!   `credential.helper` value that both Git and grit run directly.
 //!
 //! ## Askpass, never a terminal
 //!
@@ -1084,6 +1086,125 @@ fn invoke_helper(
     Ok(Credential::parse_bytes(&output.stdout))
 }
 
+/// Why [`helper_config_value`] cannot express a helper command as a
+/// `credential.helper` value.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum HelperValueError {
+    /// The program path is relative. Git expands a value that does not start
+    /// with an absolute path to `git credential-<value>`.
+    #[error("credential helper program `{}` is not an absolute path", path.display())]
+    RelativeProgram {
+        /// The program path that was passed.
+        path: PathBuf,
+    },
+    /// The program path is not valid Unicode, so it cannot be stored in config.
+    #[error("credential helper program `{}` is not valid Unicode", path.display())]
+    NonUnicodeProgram {
+        /// The program path that was passed.
+        path: PathBuf,
+    },
+    /// A word contains a line feed, which an escaped config value cannot carry
+    /// through shell word splitting.
+    #[error("credential helper word {word:?} contains a line break")]
+    LineBreak {
+        /// The program path or argument containing the line feed.
+        word: String,
+    },
+}
+
+/// Format `program` and `args` as a `credential.helper` value that Git and grit
+/// both run directly, without the value being taken as a helper name.
+///
+/// Git treats a helper value as a command only when it starts with `!` (run
+/// through `sh -c`) or with an absolute path; anything else becomes
+/// `git credential-<value>`. A value that wraps the path in quotes therefore
+/// fails, and a leading `!` needs a POSIX shell, which grit's own helper
+/// invocation avoids. This keeps the absolute path first and backslash-escapes
+/// every shell metacharacter instead, so Git's shell and grit's word splitting
+/// both recover exactly `[program, args...]`.
+///
+/// On Windows, `\` separators in `program` are written as `/`, which Git and
+/// Windows both accept, so the value starts with a drive prefix like `C:/`.
+///
+/// # Parameters
+///
+/// - `program`: absolute path of the helper executable.
+/// - `args`: arguments placed before the action (`get`, `store`, `erase`) that
+///   Git and grit append.
+///
+/// # Returns
+///
+/// The value to store under `credential.helper`.
+///
+/// # Errors
+///
+/// - [`HelperValueError::RelativeProgram`] when `program` is not absolute.
+/// - [`HelperValueError::NonUnicodeProgram`] when `program` is not valid Unicode.
+/// - [`HelperValueError::LineBreak`] when `program` or an argument contains `\n`.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(unix)] {
+/// use std::path::Path;
+/// use grit_lib::remote::credentials::helper_config_value;
+///
+/// let value = helper_config_value(Path::new("/opt/my tools/grit"), &["manager"])?;
+/// assert_eq!(value, r"/opt/my\ tools/grit manager");
+/// # }
+/// # Ok::<(), grit_lib::remote::credentials::HelperValueError>(())
+/// ```
+pub fn helper_config_value(
+    program: &Path,
+    args: &[&str],
+) -> std::result::Result<String, HelperValueError> {
+    if !program.is_absolute() {
+        return Err(HelperValueError::RelativeProgram {
+            path: program.to_path_buf(),
+        });
+    }
+    let program_str = program
+        .to_str()
+        .ok_or_else(|| HelperValueError::NonUnicodeProgram {
+            path: program.to_path_buf(),
+        })?;
+    let program_str: std::borrow::Cow<'_, str> = if cfg!(windows) {
+        program_str.replace('\\', "/").into()
+    } else {
+        program_str.into()
+    };
+
+    let mut value = String::with_capacity(program_str.len() + 16);
+    for (i, word) in std::iter::once(program_str.as_ref())
+        .chain(args.iter().copied())
+        .enumerate()
+    {
+        if word.contains('\n') {
+            return Err(HelperValueError::LineBreak {
+                word: word.to_owned(),
+            });
+        }
+        if i > 0 {
+            value.push(' ');
+        }
+        if word.is_empty() {
+            value.push_str("''");
+            continue;
+        }
+        for ch in word.chars() {
+            let plain = !ch.is_ascii()
+                || ch.is_ascii_alphanumeric()
+                || matches!(ch, '/' | '.' | '_' | '-' | ':' | '+' | ',' | '@' | '%');
+            if !plain {
+                value.push('\\');
+            }
+            value.push(ch);
+        }
+    }
+    Ok(value)
+}
+
 /// Run the askpass `program` with `prompt` as its argument and return its
 /// answer: stdout up to the first `\r` or `\n`.
 fn run_askpass(runner: &dyn CommandRunner, program: &Path, prompt: &str) -> Result<String> {
@@ -1361,6 +1482,112 @@ mod tests {
             helper_request(&url_only).serialize(),
             "url=https://example.com/\n"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn helper_config_value_escapes_metacharacters_and_splits_back() {
+        let cases: &[(&str, &[&str], &str)] = &[
+            ("/usr/bin/grit", &["manager"], "/usr/bin/grit manager"),
+            (
+                "/home/a b/bin/grit",
+                &["manager"],
+                r"/home/a\ b/bin/grit manager",
+            ),
+            ("/opt/R&D/grit", &[], r"/opt/R\&D/grit"),
+            (
+                r#"/tmp/it's "quoted"/grit"#,
+                &["manager"],
+                r#"/tmp/it\'s\ \"quoted\"/grit manager"#,
+            ),
+            ("/tmp/#1;$x/grit", &["a b"], r"/tmp/\#1\;\$x/grit a\ b"),
+            ("/tmp/back\\slash/grit", &[""], r"/tmp/back\\slash/grit ''"),
+            ("/tmp/caf\u{e9}/grit", &[], "/tmp/caf\u{e9}/grit"),
+        ];
+        for (program, args, expected) in cases {
+            let value = helper_config_value(Path::new(program), args).expect("formats");
+            assert_eq!(&value, expected, "{program} {args:?}");
+            assert!(
+                value.starts_with('/'),
+                "Git only runs a value as a command when it starts with an absolute path: {value}"
+            );
+            let mut words = vec![(*program).to_owned()];
+            words.extend(args.iter().map(|a| (*a).to_owned()));
+            assert_eq!(shell_words::split(&value).expect("splits"), words);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn helper_config_value_writes_forward_slashes_after_the_drive() {
+        let value = helper_config_value(Path::new(r"C:\Users\Jane Doe\bin\grit.exe"), &["manager"])
+            .expect("formats");
+        assert_eq!(value, r"C:/Users/Jane\ Doe/bin/grit.exe manager");
+        assert_eq!(
+            shell_words::split(&value).expect("splits"),
+            ["C:/Users/Jane Doe/bin/grit.exe", "manager"]
+        );
+    }
+
+    #[test]
+    fn helper_config_value_rejects_what_it_cannot_express() {
+        assert_eq!(
+            helper_config_value(Path::new("bin/grit"), &["manager"]),
+            Err(HelperValueError::RelativeProgram {
+                path: PathBuf::from("bin/grit")
+            })
+        );
+        let absolute = std::env::temp_dir().join("grit");
+        assert_eq!(
+            helper_config_value(&absolute, &["a\nb"]),
+            Err(HelperValueError::LineBreak {
+                word: "a\nb".into()
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn helper_config_value_non_unicode_program_is_rejected() {
+        use std::os::unix::ffi::OsStrExt;
+        let path = PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/\xff/grit"));
+        assert_eq!(
+            helper_config_value(&path, &[]),
+            Err(HelperValueError::NonUnicodeProgram { path })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn formatted_helper_value_runs_the_program_directly() {
+        let value =
+            helper_config_value(Path::new("/opt/my tools/grit"), &["manager"]).expect("formats");
+        let runner = RecordingRunner::default();
+        runner.push_response(RecordedResponse::Output {
+            stdout: b"username=u\npassword=p\n".to_vec(),
+            code: 0,
+        });
+        let filled = invoke_helper(
+            &runner,
+            &value,
+            "get",
+            &Credential {
+                protocol: Some("https".into()),
+                host: Some("example.com".into()),
+                ..Default::default()
+            },
+            &[],
+        )
+        .expect("helper runs");
+        assert_eq!(filled.password.as_deref(), Some("p"));
+        let specs = runner.specs();
+        assert_eq!(specs.len(), 1);
+        assert!(
+            specs[0].shell.is_none(),
+            "no shell between grit and the helper"
+        );
+        assert_eq!(specs[0].program, PathBuf::from("/opt/my tools/grit"));
+        assert_eq!(specs[0].args, [OsString::from("manager"), "get".into()]);
     }
 
     #[cfg(unix)]

@@ -24,9 +24,10 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Once;
 
-use grit_lib::config::ConfigSet;
+use grit_lib::config::{ConfigEditor, ConfigFile, ConfigScope, ConfigSet, ConfigWriteOptions};
 use grit_lib::remote::credentials::{
-    Credential, CredentialProvider, HelperCredentialProvider, NON_INTERACTIVE_MESSAGE,
+    helper_config_value, Credential, CredentialProvider, HelperCredentialProvider,
+    NON_INTERACTIVE_MESSAGE,
 };
 use grit_lib::remote::github_auth::{github_token_credential, TOKEN_USERNAME};
 
@@ -418,6 +419,84 @@ fn github_token_stored_by_grit_is_filled_and_erased_for_system_git() {
         "erase must remove the stored token"
     );
     assert_eq!(git_fill().password, None);
+}
+
+/// `grit auth` on Windows stored `"\"C:/…/grit.exe\" manager"`, which system
+/// Git expanded to `git credential-"C:/…"` and could never run. A value from
+/// [`helper_config_value`], written by grit's config writer, must run under
+/// system Git and grit alike, including paths that need shell escaping.
+#[test]
+fn helper_config_value_written_by_grit_runs_under_system_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    if !init_repo(dir) {
+        eprintln!("skipping: system git unavailable");
+        return;
+    }
+    let bin = dir.join("tools with space & #hash 'q'");
+    fs::create_dir_all(&bin).expect("mkdir");
+    let helper = bin.join("cred helper");
+    write_script(
+        &helper,
+        "#!/bin/sh\n\
+         [ \"$1\" = manager ] || exit 3\n\
+         if [ \"$2\" = get ]; then\n\
+           echo username=alice\n\
+           echo password=secret\n\
+         fi\n",
+    );
+    let value = helper_config_value(&helper, &["manager"]).expect("helper value");
+
+    let global = dir.join("global-config");
+    let env = grit_lib::config::environment::Environment::capture_process();
+    ConfigEditor::open(&env, global.clone(), ConfigScope::Global)
+        .set("credential.helper", &value, &ConfigWriteOptions::new())
+        .expect("write credential.helper");
+
+    let mut child = Command::new("git")
+        .current_dir(dir)
+        .args(["credential", "fill"])
+        .env("GIT_CONFIG_GLOBAL", &global)
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env_remove("GIT_ASKPASS")
+        .env_remove("SSH_ASKPASS")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn git credential fill");
+    std::io::Write::write_all(
+        child.stdin.as_mut().expect("stdin"),
+        b"protocol=https\nhost=example.com\n\n",
+    )
+    .expect("write fill input");
+    let out = child.wait_with_output().expect("git credential fill");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("is not a git command"),
+        "git took the helper for a name: {stderr}"
+    );
+    assert!(out.status.success(), "git credential fill failed: {stderr}");
+    let filled = Credential::parse_bytes(&out.stdout);
+    assert_eq!(filled.username.as_deref(), Some("alice"));
+    assert_eq!(filled.password.as_deref(), Some("secret"));
+
+    let file = ConfigFile::from_path(&global, ConfigScope::Global)
+        .expect("read config back")
+        .expect("config file exists");
+    let mut cfg = ConfigSet::new();
+    cfg.merge(&file);
+    assert_eq!(
+        cfg.get("credential.helper")
+            .expect("credential.helper is valid")
+            .as_deref(),
+        Some(value.as_str())
+    );
+    let filled = HelperCredentialProvider::new(cfg)
+        .fill(&sample_input())
+        .expect("grit runs the same helper");
+    assert_eq!(filled.password.as_deref(), Some("secret"));
 }
 
 #[test]
