@@ -31,6 +31,7 @@ use grit_lib::error::{Error, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
 use grit_lib::remote::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
@@ -535,7 +536,7 @@ impl<C: HttpClient> HttpClient for IoFailUploadPackClient<C> {
         git_protocol: Option<&str>,
     ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
         if url.contains("git-upload-pack") {
-            return Err(Error::Io(std::io::Error::new(
+            return Err(grit_lib::remote::RemoteError::from_io(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "failed to fill whole buffer",
             )));

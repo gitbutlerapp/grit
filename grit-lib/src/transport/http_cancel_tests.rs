@@ -14,7 +14,6 @@ use crate::config::ConfigSet;
 use crate::environment::Environment;
 use crate::error::Error;
 use crate::pkt_line::write_line_to_vec;
-use crate::progress::NullProgress;
 use crate::progress::{connect_cancel_arc, mirror_stack_cancel, CancelToken, HttpWaitGuard};
 use crate::remote::fetch::NoProgress;
 use crate::remote::transfer::FetchOptions;

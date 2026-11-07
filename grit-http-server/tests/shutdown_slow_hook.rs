@@ -85,6 +85,7 @@ fn server_run_returns_after_grace_while_pre_receive_sleeps() {
         ServeConfig {
             root: tmp.path().join("repos"),
             database,
+            limits: grit_http_server::server::ServeLimits::default(),
             repository_options: grit_protocol::repository_options_from_process(),
             bundles: BundleSettings {
                 enabled: false,

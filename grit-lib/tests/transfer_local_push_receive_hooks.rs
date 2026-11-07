@@ -12,7 +12,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::error::Error;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_plan::{open_push_destination, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;

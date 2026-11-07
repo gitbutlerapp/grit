@@ -35,6 +35,7 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::credentials::{Credential, CredentialProvider, HelperCredentialProvider};
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::transport::http::http_client_arc;
@@ -267,7 +268,7 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         .expect_err("fetch with no credentials against an authed server must fail");
         assert!(
             matches!(&err, Error::Remote(grit_lib::remote::RemoteError::Auth { reason, .. }) if !reason.is_rejected()),
-            "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth { .. }) without credentials, got: {err:?}"
+            "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth {{ .. }}) without credentials, got: {err:?}"
         );
     }
 
@@ -349,7 +350,7 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
                     ..
                 })
             ),
-            "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth { .. }) for wrong credentials, got: {err:?}"
+            "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth {{ .. }}) for wrong credentials, got: {err:?}"
         );
         let msg = err.to_string();
         assert!(
@@ -637,7 +638,7 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
         .expect_err("push with no credentials against an authed server must fail");
         assert!(
             matches!(&err, Error::Remote(grit_lib::remote::RemoteError::Auth { reason, .. }) if !reason.is_rejected()),
-            "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth { .. }) for an unauthenticated push, got: {err:?}"
+            "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth {{ .. }}) for an unauthenticated push, got: {err:?}"
         );
         assert!(
             resolve_ref(&bare, "refs/heads/main").is_err(),

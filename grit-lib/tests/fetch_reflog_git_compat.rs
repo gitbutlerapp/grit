@@ -5,7 +5,6 @@ use std::process::Command;
 
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 
 fn git(dir: &Path, args: &[&str]) -> String {

@@ -6,7 +6,6 @@ use grit_test_support::rev_parse;
 use std::path::{Path, PathBuf};
 
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, FetchOutcome, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, Service, SshTransport, Transport};

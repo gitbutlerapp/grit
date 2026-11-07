@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::bundle_uri::bundle_cache_path;
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::resumable::{download_resumable, ResumableError};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
 use grit_lib::remote::transport::http::{HttpClient, HttpRequest, HttpResponse};
@@ -250,7 +251,7 @@ impl HttpClient for Cut {
         self.inner.post(url, ct, accept, body, gp)
     }
 
-    fn send(&self, request: &HttpRequest<'_>) -> grit_lib::error::Result<HttpResponse> {
+    fn send(&self, request: &HttpRequest<'_>) -> grit_lib::remote::RemoteResult<HttpResponse> {
         let request = request
             .clone()
             .header("Authorization", format!("Bearer {}", self.token));

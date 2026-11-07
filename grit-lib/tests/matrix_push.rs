@@ -57,8 +57,8 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::{PushRefResult, PushRefStatus};
 use grit_lib::remote::transfer::{PushOptions, PushOutcome, PushRefSpec};
 use grit_lib::remote::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
@@ -573,7 +573,12 @@ fn run_unsupported_atomic_matrix(
         )
         .unwrap_err();
         assert!(
-            matches!(err, grit_lib::error::Error::PushAtomicUnsupported),
+            matches!(
+                err,
+                grit_lib::error::Error::Remote(
+                    grit_lib::remote::RemoteError::PushAtomicUnsupported
+                )
+            ),
             "{err:?}"
         );
     }

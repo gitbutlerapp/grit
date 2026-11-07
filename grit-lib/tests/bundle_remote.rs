@@ -5,8 +5,10 @@ use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{ProgressPhase, ProgressSink, ProgressUnit};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::{Remote, RemoteUrl};
 use grit_lib::repo::{InitOptions, Repository};
@@ -515,6 +517,8 @@ struct PhaseRecorder {
     active: Option<ProgressPhase>,
     current: u64,
 }
+
+impl grit_lib::remote::fetch::Progress for PhaseRecorder {}
 
 impl ProgressSink for PhaseRecorder {
     fn start(&mut self, phase: ProgressPhase, total: Option<u64>) {
