@@ -17,7 +17,7 @@ use crate::command_runner::{
 };
 use crate::config::{parse_bool, ConfigSet};
 use crate::crlf::{DiffAttr, FileAttrs};
-use crate::diff::{detect_renames, diff_trees, DiffStatus};
+use crate::diff::{detect_renames, diff_trees, DiffStatus, PathQuoting};
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::quote_path::format_diff_path_with_prefix;
@@ -735,12 +735,153 @@ fn push_combined_file_headers(
     }
 }
 
+/// Header word of a combined diff: `diff --combined` (`-c`) or `diff --cc`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CombinedDiffFormat {
+    /// `diff --combined <path>`.
+    #[default]
+    Combined,
+    /// `diff --cc <path>` (dense combined).
+    Cc,
+}
+
+/// Whether a path's `diff.<driver>.textconv` filter runs before its contents are diffed.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Textconv {
+    /// Diff the stored bytes.
+    #[default]
+    Skip,
+    /// Run the configured textconv filter on each side first (`--textconv`).
+    Apply,
+}
+
+/// Which paths the `---` lines of a combined patch name.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CombinedPathLabels {
+    /// One `---` line naming the merge path.
+    #[default]
+    MergePath,
+    /// One `---` line per parent, naming that parent's path (`--combined-all-paths`).
+    EachParent,
+}
+
+/// How [`format_combined_textconv_patch`] renders one merge path.
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct CombinedPatchOptions<'a> {
+    /// `diff --combined` or `diff --cc` header.
+    pub format: CombinedDiffFormat,
+    /// Hex digits for object ids on the `index` line (default 7).
+    pub abbrev: usize,
+    /// Unchanged lines kept around each change (default 3).
+    pub context_lines: usize,
+    /// Whether textconv filters run before diffing.
+    pub textconv: Textconv,
+    /// Whitespace rules for comparing lines.
+    pub whitespace: CombinedDiffWsOptions,
+    /// Which paths the `---` lines name.
+    pub path_labels: CombinedPathLabels,
+    /// Path to read from each parent's tree, in parent order (for per-parent renames).
+    /// `None` reads the merge path from every parent; a slice of the wrong length yields no
+    /// patch.
+    pub parent_blob_paths: Option<&'a [String]>,
+    /// Per-parent classification of the path (from the combined tree diff), used to show
+    /// `/dev/null` for parents that lack it.
+    pub parent_sides: &'a [CombinedParentSide],
+    /// Quoting for the `---` / `+++` path labels.
+    pub path_quoting: PathQuoting,
+}
+
+impl Default for CombinedPatchOptions<'_> {
+    fn default() -> Self {
+        Self {
+            format: CombinedDiffFormat::default(),
+            abbrev: 7,
+            context_lines: 3,
+            textconv: Textconv::default(),
+            whitespace: CombinedDiffWsOptions::default(),
+            path_labels: CombinedPathLabels::default(),
+            parent_blob_paths: None,
+            parent_sides: &[],
+            path_quoting: PathQuoting::default(),
+        }
+    }
+}
+
+impl<'a> CombinedPatchOptions<'a> {
+    /// Set the header word.
+    #[must_use]
+    pub fn with_format(mut self, format: CombinedDiffFormat) -> Self {
+        self.format = format;
+        self
+    }
+
+    /// Set the object id abbreviation length.
+    #[must_use]
+    pub fn with_abbrev(mut self, abbrev: usize) -> Self {
+        self.abbrev = abbrev;
+        self
+    }
+
+    /// Set the context line count.
+    #[must_use]
+    pub fn with_context_lines(mut self, context_lines: usize) -> Self {
+        self.context_lines = context_lines;
+        self
+    }
+
+    /// Set whether textconv filters run.
+    #[must_use]
+    pub fn with_textconv(mut self, textconv: Textconv) -> Self {
+        self.textconv = textconv;
+        self
+    }
+
+    /// Set the whitespace comparison rules.
+    #[must_use]
+    pub fn with_whitespace(mut self, whitespace: CombinedDiffWsOptions) -> Self {
+        self.whitespace = whitespace;
+        self
+    }
+
+    /// Set which paths the `---` lines name.
+    #[must_use]
+    pub fn with_path_labels(mut self, path_labels: CombinedPathLabels) -> Self {
+        self.path_labels = path_labels;
+        self
+    }
+
+    /// Read each parent's blob from its own path (one entry per parent).
+    #[must_use]
+    pub fn with_parent_blob_paths(mut self, paths: &'a [String]) -> Self {
+        self.parent_blob_paths = Some(paths);
+        self
+    }
+
+    /// Set the per-parent classification of the path.
+    #[must_use]
+    pub fn with_parent_sides(mut self, parent_sides: &'a [CombinedParentSide]) -> Self {
+        self.parent_sides = parent_sides;
+        self
+    }
+
+    /// Set the label quoting.
+    #[must_use]
+    pub fn with_path_quoting(mut self, path_quoting: PathQuoting) -> Self {
+        self.path_quoting = path_quoting;
+        self
+    }
+}
+
 /// Combined text diff with optional textconv (N parents, single merge path).
 ///
-/// `parent_blob_paths` — when set, length must match `parent_trees`; each entry is the path
-/// used to read that parent's blob (for `--combined-all-paths` rename cases). When `None`,
-/// every parent uses `path`.
-#[allow(clippy::too_many_arguments)]
+/// Returns `None` with fewer than two parents, when the merge path is missing from
+/// `result_tree`, or when [`CombinedPatchOptions::parent_blob_paths`] does not have one entry
+/// per parent. Binary content yields the `Binary files differ` form.
+#[must_use]
 pub fn format_combined_textconv_patch(
     git_dir: &Path,
     config: &ConfigSet,
@@ -748,20 +889,18 @@ pub fn format_combined_textconv_patch(
     path: &str,
     parent_trees: &[ObjectId],
     result_tree: &ObjectId,
-    abbrev: usize,
-    context: usize,
-    use_cc_word: bool,
-    use_textconv: bool,
-    ws: CombinedDiffWsOptions,
-    combined_all_paths: bool,
-    parent_blob_paths: Option<&[String]>,
-    parent_sides: &[CombinedParentSide],
-    quote_path_fully: bool,
+    options: &CombinedPatchOptions<'_>,
 ) -> Option<String> {
+    let abbrev = options.abbrev;
+    let use_cc_word = options.format == CombinedDiffFormat::Cc;
+    let use_textconv = options.textconv == Textconv::Apply;
+    let combined_all_paths = options.path_labels == CombinedPathLabels::EachParent;
+    let parent_sides = options.parent_sides;
+    let quote_path_fully = options.path_quoting == PathQuoting::EscapeNonAscii;
     if parent_trees.len() < 2 {
         return None;
     }
-    let parent_paths: Vec<&str> = if let Some(ps) = parent_blob_paths {
+    let parent_paths: Vec<&str> = if let Some(ps) = options.parent_blob_paths {
         if ps.len() != parent_trees.len() {
             return None;
         }
@@ -852,29 +991,42 @@ pub fn format_combined_textconv_patch(
     out.push_str(&format_combined_diff_body(
         &parent_texts,
         &tr,
-        context,
+        options.context_lines,
         use_cc_word,
-        ws,
+        options.whitespace,
     ));
     Some(out)
 }
 
+/// Index stages of one conflicted path: base (stage 1), ours (stage 2) and theirs (stage 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConflictStages {
+    /// Merge base blob (stage 1); the zero id when the path has no base. The rendered patch
+    /// compares the work tree with `ours` and `theirs` only, as Git's does.
+    pub base: ObjectId,
+    /// Our side's blob (stage 2).
+    pub ours: ObjectId,
+    /// Their side's blob (stage 3).
+    pub theirs: ObjectId,
+}
+
 /// `git diff` / `git diff --cc` during a conflict: worktree file with markers.
-#[allow(clippy::too_many_arguments)]
+///
+/// `abbrev` is the number of hex digits shown for object ids on the `index` line.
+#[must_use]
 pub fn format_worktree_conflict_combined(
     git_dir: &Path,
     config: &ConfigSet,
     odb: &Odb,
     path: &str,
-    stage1_oid: &ObjectId,
-    stage2_oid: &ObjectId,
-    stage3_oid: &ObjectId,
+    stages: &ConflictStages,
     worktree_bytes: &[u8],
     abbrev: usize,
 ) -> String {
+    let stage2_oid = &stages.ours;
+    let stage3_oid = &stages.theirs;
     let ours_blob = read_blob(odb, stage2_oid);
     let theirs_blob = read_blob(odb, stage3_oid);
-    let _base_blob = read_blob(odb, stage1_oid);
 
     let use_conv = !worktree_bytes.contains(&0);
     let textconv_cache_path = diff_textconv_active(git_dir, config, path);
@@ -1000,7 +1152,6 @@ fn abbrev_hex(oid: &ObjectId, abbrev: usize) -> String {
 #[cfg(test)]
 mod line_coverage_tests {
     use super::*;
-    use crate::combined_diff_patch::CombinedDiffWsOptions;
     use crate::combined_tree_diff::{CombinedDiffPath, CombinedParentSide, CombinedParentStatus};
     use crate::config::ConfigSet;
     use crate::objects::ObjectKind;
@@ -1081,6 +1232,7 @@ mod line_coverage_tests {
         };
         enrich_combined_path_renames(&odb, &mut path, &parents, &merge_tree, 50);
         let _ = format_combined_binary_header_n("f.txt", &[p1_oid], &merge_oid, 7, false);
+        let parent_blob_paths = ["f.txt".to_owned()];
         let _ = format_combined_textconv_patch(
             &git_dir,
             &cfg,
@@ -1088,15 +1240,9 @@ mod line_coverage_tests {
             "f.txt",
             &parents,
             &merge_tree,
-            7,
-            3,
-            false,
-            false,
-            CombinedDiffWsOptions::default(),
-            false,
-            Some(&["f.txt".to_owned()]),
-            &path.parents,
-            true,
+            &CombinedPatchOptions::default()
+                .with_parent_blob_paths(&parent_blob_paths)
+                .with_parent_sides(&path.parents),
         );
         let blob = read_blob_at_path(&odb, &merge_tree, "only-p2.txt").expect("blob");
         let _ = convert_blob_to_worktree_for_path(
@@ -1110,8 +1256,13 @@ mod line_coverage_tests {
             None,
         );
         let z = crate::diff::zero_oid();
+        let stages = ConflictStages {
+            base: z,
+            ours: p1_oid,
+            theirs: merge_oid,
+        };
         let _ = format_worktree_conflict_combined(
-            &git_dir, &cfg, &odb, "f.txt", &z, &p1_oid, &merge_oid, b"plain\n", 12,
+            &git_dir, &cfg, &odb, "f.txt", &stages, b"plain\n", 12,
         );
     }
 }

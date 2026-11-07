@@ -7,7 +7,6 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
-use grit_lib::diff::combined_diff_patch::CombinedDiffWsOptions;
 use grit_lib::diff::combined_tree_diff::{CombinedParentSide, CombinedParentStatus};
 use grit_lib::diff::merge_diff::{
     all_blob_paths_in_tree_order, blob_oid_at_path, blob_text_for_diff, combined_diff_paths,
@@ -16,7 +15,9 @@ use grit_lib::diff::merge_diff::{
     diff_textconv_active, diff_textconv_cmd_line, format_combined_binary,
     format_combined_binary_header, format_combined_binary_header_n, format_combined_textconv_patch,
     format_worktree_conflict_combined, is_binary_for_diff, read_blob_at_path, run_textconv,
+    CombinedPatchOptions, ConflictStages,
 };
+use grit_lib::diff::PathQuoting;
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::refs;
 use grit_lib::refs::ref_storage::RefStorageFormat;
@@ -132,15 +133,9 @@ fn merge_diff_and_textconv_matrix_on_merge_commit() -> grit_lib::error::Result<(
             path,
             &parsed.parents,
             &parsed.tree,
-            7,
-            3,
-            false,
-            false,
-            CombinedDiffWsOptions::default(),
-            false,
-            None,
-            &sides,
-            false,
+            &CombinedPatchOptions::default()
+                .with_parent_sides(&sides)
+                .with_path_quoting(PathQuoting::KeepNonAscii),
         );
         let stage1 = parsed.parents[0];
         let stage2 = parsed.parents[1];
@@ -150,9 +145,11 @@ fn merge_diff_and_textconv_matrix_on_merge_commit() -> grit_lib::error::Result<(
             config.as_ref(),
             repo.odb(),
             path,
-            &stage1,
-            &stage2,
-            &stage3,
+            &ConflictStages {
+                base: stage1,
+                ours: stage2,
+                theirs: stage3,
+            },
             b"<<<<<<< ours\nmerged\n=======\n",
             7,
         );

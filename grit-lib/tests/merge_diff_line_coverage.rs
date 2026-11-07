@@ -3,7 +3,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::config::ConfigSet;
-use grit_lib::diff::combined_diff_patch::CombinedDiffWsOptions;
 use grit_lib::diff::combined_tree_diff::{
     CombinedDiffPath, CombinedParentSide, CombinedParentStatus,
 };
@@ -15,9 +14,11 @@ use grit_lib::diff::merge_diff::{
     diff_textconv_active, diff_textconv_cmd_line, enrich_combined_path_renames,
     format_combined_binary, format_combined_binary_header, format_combined_textconv_patch,
     format_worktree_conflict_combined, is_binary_for_diff, read_blob_at_path, run_textconv,
-    run_textconv_raw,
+    run_textconv_raw, CombinedDiffFormat, CombinedPatchOptions, CombinedPathLabels, ConflictStages,
+    Textconv,
 };
 use grit_lib::diff::zero_oid;
+use grit_lib::diff::PathQuoting;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use tempfile::tempdir;
@@ -135,9 +136,11 @@ fn combined_paths_and_formatters() {
         &cfg,
         &odb,
         "file.txt",
-        &z,
-        &p1_oid,
-        &result_oid,
+        &ConflictStages {
+            base: z,
+            ours: p1_oid,
+            theirs: result_oid,
+        },
         wt_plain,
         7,
     );
@@ -147,9 +150,11 @@ fn combined_paths_and_formatters() {
         &cfg,
         &odb,
         "file.txt",
-        &z,
-        &p1_oid,
-        &result_oid,
+        &ConflictStages {
+            base: z,
+            ours: p1_oid,
+            theirs: result_oid,
+        },
         wt_conflict,
         7,
     );
@@ -174,14 +179,11 @@ fn combined_paths_and_formatters() {
         "file.txt",
         &parents,
         &merge_tree,
-        7,
-        3,
-        true,
-        true,
-        CombinedDiffWsOptions::default(),
-        true,
-        None,
-        &path.parents,
-        false,
+        &CombinedPatchOptions::default()
+            .with_format(CombinedDiffFormat::Cc)
+            .with_textconv(Textconv::Apply)
+            .with_path_labels(CombinedPathLabels::EachParent)
+            .with_parent_sides(&path.parents)
+            .with_path_quoting(PathQuoting::KeepNonAscii),
     );
 }

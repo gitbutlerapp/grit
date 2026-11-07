@@ -11,8 +11,9 @@ use grit_lib::diff::combined_tree_diff::{
 };
 use grit_lib::diff::merge_diff::{
     combined_diff_paths, enrich_combined_path_renames, format_combined_textconv_patch,
-    format_worktree_conflict_combined,
+    format_worktree_conflict_combined, CombinedDiffFormat, CombinedPatchOptions, ConflictStages,
 };
+use grit_lib::diff::PathQuoting;
 use grit_lib::objects::{parse_commit, ObjectId};
 
 use support::{git_output, git_quiet, git_raw_lines, DiffRepo};
@@ -298,15 +299,10 @@ fn t4038_combined_patch_matches_git() {
         "file",
         &parent_trees,
         &result_tree,
-        7,
-        3,
-        true,
-        false,
-        CombinedDiffWsOptions::default(),
-        false,
-        None,
-        &path.parents,
-        false,
+        &CombinedPatchOptions::default()
+            .with_format(CombinedDiffFormat::Cc)
+            .with_parent_sides(&path.parents)
+            .with_path_quoting(PathQuoting::KeepNonAscii),
     )
     .expect("combined patch");
     let grit_body = patch_body_lines(
@@ -387,15 +383,10 @@ fn t4048_combined_binary_matches_git() {
         "bin.dat",
         &parents,
         &result_tree,
-        7,
-        3,
-        true,
-        false,
-        CombinedDiffWsOptions::default(),
-        false,
-        None,
-        &side.parents,
-        false,
+        &CombinedPatchOptions::default()
+            .with_format(CombinedDiffFormat::Cc)
+            .with_parent_sides(&side.parents)
+            .with_path_quoting(PathQuoting::KeepNonAscii),
     );
     let grit = grit.unwrap_or_else(|| {
         grit_lib::diff::merge_diff::format_combined_binary(
@@ -582,9 +573,11 @@ fn format_worktree_conflict_combined_smoke() {
         &config,
         &dr.repo.odb(),
         "f",
-        &stage1,
-        &stage2,
-        &stage3,
+        &ConflictStages {
+            base: stage1,
+            ours: stage2,
+            theirs: stage3,
+        },
         wt_bytes,
         7,
     );
