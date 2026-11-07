@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::diff::TreeDiffOptions;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
 use std::fs;
@@ -70,7 +71,10 @@ fn repository_init_variants_and_handle_exercise() -> grit_lib::error::Result<()>
     let repo = Repository::open(&separate, &opts)?;
     let _ = repo.index().load()?;
     let _ = repo.revwalk().walk("HEAD", &RevListOptions::default()).ok();
-    let _ = repo.diff().tree_to_tree(None, None)?;
+    let _ = repo
+        .diff()
+        .tree_to_tree(None, None, &TreeDiffOptions::default())
+        .map(|r| r.entries)?;
 
     let bare = tempdir().map_err(grit_lib::error::Error::Io)?;
     Repository::init(

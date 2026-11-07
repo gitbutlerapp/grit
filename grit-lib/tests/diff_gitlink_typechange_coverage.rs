@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use grit_lib::diff::{diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions, DiffStatus};
+use grit_lib::diff::{DiffStatus, SubmoduleIgnoreMode, TreeDiffOptions};
 use grit_lib::index::{Index, IndexEntry, MODE_GITLINK, MODE_REGULAR};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
@@ -42,16 +42,13 @@ fn gitlink_replaced_by_regular_file_reports_typechange() -> grit_lib::error::Res
     std::fs::write(dir.path().join("submod"), b"now a file\n")
         .map_err(grit_lib::error::Error::Io)?;
 
-    let (diff, _) = diff_index_to_worktree_with_options(
-        repo.odb(),
-        &mut index,
-        dir.path(),
-        DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            simplify_gitlinks: true,
-            ..DiffIndexToWorktreeOptions::default()
-        },
-    )?;
+    let diff = repo
+        .diff()
+        .index_to_worktree(
+            &mut index,
+            &TreeDiffOptions::default().with_submodules(SubmoduleIgnoreMode::Dirty),
+        )?
+        .entries;
     assert!(
         diff.iter().any(|e| e.status == DiffStatus::TypeChanged && e.old_path.as_deref() == Some("submod")),
         "expected typechange for gitlink -> file, got {diff:?}"
@@ -78,15 +75,10 @@ fn gitlink_replaced_by_regular_file_reports_typechange() -> grit_lib::error::Res
     });
     std::fs::write(dir.path().join("submod"), b"still file\n")
         .map_err(grit_lib::error::Error::Io)?;
-    let (clean, _) = diff_index_to_worktree_with_options(
-        repo.odb(),
-        &mut index,
-        dir.path(),
-        DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            ..DiffIndexToWorktreeOptions::default()
-        },
-    )?;
+    let clean = repo
+        .diff()
+        .index_to_worktree(&mut index, &TreeDiffOptions::default())?
+        .entries;
     assert!(clean.is_empty(), "matching file should not diff: {clean:?}");
 
     index.entries_mut().clear();
@@ -94,16 +86,8 @@ fn gitlink_replaced_by_regular_file_reports_typechange() -> grit_lib::error::Res
         .entries_mut()
         .push(gitlink_entry("linked", submodule_tip));
     std::fs::create_dir_all(dir.path().join("linked")).map_err(grit_lib::error::Error::Io)?;
-    let _ = diff_index_to_worktree_with_options(
-        repo.odb(),
-        &mut index,
-        dir.path(),
-        DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            simplify_gitlinks: false,
-            ignore_submodule_untracked: false,
-            ..DiffIndexToWorktreeOptions::default()
-        },
-    )?;
+    let _ = repo
+        .diff()
+        .index_to_worktree(&mut index, &TreeDiffOptions::default())?;
     Ok(())
 }

@@ -3,7 +3,7 @@
 //! directory, not once per tracked file, and still report the same changes as `git`.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{diff_index_to_worktree, DiffStatus};
+use grit_lib::diff::{DiffStatus, TreeDiffOptions};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
@@ -56,24 +56,21 @@ fn open_repo(root: &std::path::Path) -> Repository {
 
 fn unstaged_name_status(repo: &Repository) -> Vec<String> {
     let mut index = repo.index().load().expect("index");
-    let mut lines: Vec<String> = diff_index_to_worktree(
-        repo.odb(),
-        &mut index,
-        repo.work_tree().expect("work tree"),
-        false,
-        false,
-    )
-    .expect("diff index to worktree")
-    .iter()
-    .map(|e| {
-        let letter = match e.status {
-            DiffStatus::Modified => "M",
-            DiffStatus::Deleted => "D",
-            other => panic!("unexpected status {other:?} for {}", e.path()),
-        };
-        format!("{letter}\t{}", e.path())
-    })
-    .collect();
+    let mut lines: Vec<String> = repo
+        .diff()
+        .index_to_worktree(&mut index, &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff index to worktree")
+        .iter()
+        .map(|e| {
+            let letter = match e.status {
+                DiffStatus::Modified => "M",
+                DiffStatus::Deleted => "D",
+                other => panic!("unexpected status {other:?} for {}", e.path()),
+            };
+            format!("{letter}\t{}", e.path())
+        })
+        .collect();
     lines.sort();
     lines
 }

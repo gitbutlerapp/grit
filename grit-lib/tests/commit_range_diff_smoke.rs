@@ -1,8 +1,7 @@
 //! Smoke test for parallel commit-tree structured diff (library path behind `grit diff A B`).
 
-use grit_lib::diff::{diff_trees, tree_diff_structured_parallel, DiffOptions};
+use grit_lib::diff::{DiffOptions, TreeDiffOptions};
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
-use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
 
 const FILE_COUNT: usize = 48;
@@ -45,29 +44,25 @@ fn commit_range_structured_diff_parallel_matches_serial() {
         .collect();
     let old_tree = write_tree(&repo, &old_refs);
     let new_tree = write_tree(&repo, &new_refs);
-    let entries = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "").expect("diff");
+    let entries = repo
+        .diff()
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
+        .expect("diff");
     assert_eq!(entries.len(), FILE_COUNT);
 
-    let config = repo.config().snapshot().expect("config");
     let opts = DiffOptions::default()
         .with_context_lines(3)
         .with_word_level_inline(false);
-    let serial = tree_diff_structured_parallel(
-        repo.odb(),
-        entries.clone(),
-        &config,
-        &ThreadPolicy::with_threads_override(Some(1)),
-        opts.clone(),
-    )
-    .expect("serial");
-    let parallel = tree_diff_structured_parallel(
-        repo.odb(),
-        entries,
-        &config,
-        &ThreadPolicy::with_threads_override(Some(4)),
-        opts,
-    )
-    .expect("parallel");
+    let serial = repo
+        .diff()
+        .structured(entries.clone(), &opts)
+        .expect("serial");
+    let parallel = repo.diff().structured(entries, &opts).expect("parallel");
     assert_eq!(serial, parallel);
     assert!(serial.iter().all(|f| !f.structured.hunks.is_empty()));
 }

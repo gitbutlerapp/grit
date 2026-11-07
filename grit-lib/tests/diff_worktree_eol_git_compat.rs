@@ -3,12 +3,10 @@
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
-use grit_lib::diff::{
-    diff_index_to_worktree_with_options, read_worktree_side_bytes_for_diff,
-    DiffIndexToWorktreeOptions, DiffStatus,
-};
+use grit_lib::diff::{read_worktree_side_bytes_for_diff, DiffStatus, TreeDiffOptions};
+use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::worktree_rules::WorktreeRules;
 use std::fs;
@@ -96,18 +94,11 @@ fn diff_index_to_worktree_eol_crlf_single_line_change() {
         ),
     )
     .expect("config");
-    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(
-        WorktreeRules::from_repository(&grit_repo, &index).expect("rules arc"),
-    ));
-    let opts = DiffIndexToWorktreeOptions {
-        repository_git_dir: Some(grit_repo.git_dir().to_path_buf()),
-        config: Some(rules.config_arc()),
-        worktree_rules: Some(rules_arc),
-        ..DiffIndexToWorktreeOptions::default()
-    };
-    let (entries, _) =
-        diff_index_to_worktree_with_options(grit_repo.odb(), &mut index, work_tree, opts)
-            .expect("diff");
+    let entries = grit_repo
+        .diff()
+        .index_to_worktree(&mut index, &TreeDiffOptions::default())
+        .expect("diff")
+        .entries;
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].status, DiffStatus::Modified);
 
@@ -211,18 +202,16 @@ fn assert_eol_only_rewrite_is_clean(
 
     let grit_repo = open(&repo);
     let mut index = grit_repo.index().load().expect("index");
-    let (entries, _) = diff_index_to_worktree_with_options(
-        grit_repo.odb(),
-        &mut index,
-        &repo,
-        DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(grit_repo.git_dir().to_path_buf()),
-            for_status: true,
-            stat_parallel_threads: Some(threads),
-            ..DiffIndexToWorktreeOptions::default()
-        },
-    )
-    .expect("diff");
+    let options = TreeDiffOptions::default()
+        .with_for_status(true)
+        .with_threads(Some(
+            ThreadPolicy::with_threads_override(Some(threads)).min_items_override(Some(0)),
+        ));
+    let entries = grit_repo
+        .diff()
+        .index_to_worktree(&mut index, &options)
+        .expect("diff")
+        .entries;
     assert!(entries.is_empty(), "{case}: phantom change {entries:?}");
 
     let options = StatusOptions {

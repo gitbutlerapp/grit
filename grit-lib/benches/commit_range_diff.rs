@@ -9,20 +9,18 @@ use std::hint::black_box;
 use std::sync::OnceLock;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use grit_lib::config::ConfigSet;
-use grit_lib::diff::{diff_trees, tree_diff_structured_parallel, DiffEntry, DiffOptions};
-use grit_lib::objects::odb::Odb;
+use grit_lib::diff::{DiffEntry, DiffOptions, TreeDiffOptions};
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
+use grit_lib::prelude::RepositoryOptions;
+use grit_lib::repo::{InitOptions, Repository};
 use tempfile::TempDir;
 
 const FILE_COUNT: usize = 128;
 
 struct CommitRangeFixture {
-    _root: TempDir,
-    odb: Odb,
+    root: TempDir,
     entries: Vec<DiffEntry>,
-    config: ConfigSet,
 }
 
 static FIXTURE: OnceLock<CommitRangeFixture> = OnceLock::new();
@@ -30,10 +28,8 @@ static FIXTURE: OnceLock<CommitRangeFixture> = OnceLock::new();
 fn fixture() -> &'static CommitRangeFixture {
     FIXTURE.get_or_init(|| {
         let root = TempDir::new().expect("tempdir");
-        let git_dir = root.path().join(".git");
-        std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
-        let odb = Odb::new(&git_dir.join("objects"));
-        let config = ConfigSet::new();
+        let (repo, _) = Repository::init(root.path(), &InitOptions::default()).expect("init");
+        let odb = repo.odb();
 
         let mut old_entries = Vec::with_capacity(FILE_COUNT);
         let mut new_entries = Vec::with_capacity(FILE_COUNT);
@@ -62,15 +58,18 @@ fn fixture() -> &'static CommitRangeFixture {
         let new_tree = odb
             .write(ObjectKind::Tree, &serialize_tree(&new_entries))
             .expect("new tree");
-        let raw = diff_trees(&odb, Some(&old_tree), Some(&new_tree), "").expect("diff trees");
+        let raw = repo
+            .diff()
+            .tree_to_tree(
+                Some(&old_tree),
+                Some(&new_tree),
+                &TreeDiffOptions::default(),
+            )
+            .expect("diff trees")
+            .entries;
         assert_eq!(raw.len(), FILE_COUNT);
 
-        CommitRangeFixture {
-            _root: root,
-            odb,
-            entries: raw,
-            config,
-        }
+        CommitRangeFixture { root, entries: raw }
     })
 }
 
@@ -84,17 +83,14 @@ fn bench_commit_range_structured(c: &mut Criterion) {
     for threads in [1usize, 0] {
         let label = if threads == 1 { "t1" } else { "auto" };
         group.bench_with_input(BenchmarkId::new("line_level", label), &threads, |b, &t| {
-            let policy = ThreadPolicy::with_threads_override(Some(t));
+            let repo = Repository::discover(Some(fx.root.path()), &RepositoryOptions::empty())
+                .expect("open")
+                .with_thread_policy(ThreadPolicy::with_threads_override(Some(t)));
             b.iter(|| {
                 black_box(
-                    tree_diff_structured_parallel(
-                        &fx.odb,
-                        fx.entries.clone(),
-                        &fx.config,
-                        &policy,
-                        opts.clone(),
-                    )
-                    .expect("structured diff"),
+                    repo.diff()
+                        .structured(fx.entries.clone(), &opts)
+                        .expect("structured diff"),
                 );
             });
         });

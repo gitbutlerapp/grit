@@ -14,16 +14,15 @@ use std::thread;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigFile;
 use grit_lib::config::ConfigScope;
-use grit_lib::diff::{
-    build_file_diffs, diff_commits_with_renames_and_policy, DiffDetail, DiffOptions,
-    RenameDetection,
-};
+use grit_lib::diff::{DiffDetail, DiffOptions, RenameDetection, TreeDiffOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone, CloneOptions};
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::DefaultHttpClientFactory;
 use grit_lib::repo::Repository;
@@ -225,7 +224,12 @@ fn tree_diff_entries_between_commits(
         .expect("parse new")
         .tree;
     repo.diff()
-        .tree_to_tree(Some(&old_tree), Some(&new_tree))
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
         .expect("tree diff")
 }
 
@@ -301,28 +305,27 @@ fn rename_detection_prefetch_batched_past_rename_limit() {
 
     let objects = repo.git_dir().join("objects");
     let packs_before = pack_file_count(&objects);
-    let config = repo.config().snapshot().expect("config");
-    let thread_policy = ThreadPolicy::default();
-    let entries = diff_commits_with_renames_and_policy(
-        repo.odb(),
-        &revision(&repo, "HEAD~1"),
-        &revision(&repo, "HEAD"),
-        50,
-        config.as_ref(),
-        &thread_policy,
-    )
-    .expect("commit diff with renames");
+    let renames = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(50))
+        .with_threads(Some(ThreadPolicy::default()));
+    let entries = repo
+        .diff()
+        .commits(
+            &revision(&repo, "HEAD~1"),
+            &revision(&repo, "HEAD"),
+            &renames,
+        )
+        .expect("commit diff with renames")
+        .entries;
     assert_eq!(entries.len(), file_count);
 
-    build_file_diffs(
-        repo.odb(),
-        entries,
-        DiffDetail::Stat,
-        DiffOptions::default().with_renames(RenameDetection::Off),
-        config.as_ref(),
-        &thread_policy,
-    )
-    .expect("stat");
+    repo.diff()
+        .files_for_entries(
+            entries,
+            DiffDetail::Stat,
+            &DiffOptions::default().with_renames(RenameDetection::Off),
+        )
+        .expect("stat");
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
@@ -346,28 +349,27 @@ fn tree_diff_prefetch_batched_past_rename_limit() {
 
     let objects = repo.git_dir().join("objects");
     let packs_before = pack_file_count(&objects);
-    let config = repo.config().snapshot().expect("config");
-    let thread_policy = ThreadPolicy::default();
-    let entries = diff_commits_with_renames_and_policy(
-        repo.odb(),
-        &revision(&repo, "HEAD~1"),
-        &revision(&repo, "HEAD"),
-        50,
-        config.as_ref(),
-        &thread_policy,
-    )
-    .expect("commit diff with renames");
+    let renames = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(50))
+        .with_threads(Some(ThreadPolicy::default()));
+    let entries = repo
+        .diff()
+        .commits(
+            &revision(&repo, "HEAD~1"),
+            &revision(&repo, "HEAD"),
+            &renames,
+        )
+        .expect("commit diff with renames")
+        .entries;
     assert_eq!(entries.len(), file_count);
 
-    build_file_diffs(
-        repo.odb(),
-        entries,
-        DiffDetail::Stat,
-        DiffOptions::default().with_renames(RenameDetection::Off),
-        config.as_ref(),
-        &thread_policy,
-    )
-    .expect("stat");
+    repo.diff()
+        .files_for_entries(
+            entries,
+            DiffDetail::Stat,
+            &DiffOptions::default().with_renames(RenameDetection::Off),
+        )
+        .expect("stat");
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
@@ -403,33 +405,23 @@ fn tree_diff_prefetch_uses_single_request() {
     let packs_before = pack_file_count(&objects);
     let entries = tree_diff_entries_between_commits(&repo, "HEAD~1", "HEAD");
     assert_eq!(entries.len(), file_count);
-    let config = repo.config().snapshot().expect("config");
-    let thread_policy = ThreadPolicy::default();
 
-    build_file_diffs(
-        repo.odb(),
-        entries.clone(),
-        DiffDetail::NameOnly,
-        DiffOptions::default().with_renames(RenameDetection::Off),
-        config.as_ref(),
-        &thread_policy,
-    )
-    .expect("name-only");
+    repo.diff()
+        .files_for_entries(
+            entries.clone(),
+            DiffDetail::NameOnly,
+            &DiffOptions::default().with_renames(RenameDetection::Off),
+        )
+        .expect("name-only");
     assert_eq!(
         calls.load(Ordering::SeqCst),
         0,
         "name-only must not promisor-fetch blobs"
     );
 
-    build_file_diffs(
-        repo.odb(),
-        entries.clone(),
-        DiffDetail::Stat,
-        DiffOptions::default(),
-        config.as_ref(),
-        &thread_policy,
-    )
-    .expect("stat");
+    repo.diff()
+        .files_for_entries(entries.clone(), DiffDetail::Stat, &DiffOptions::default())
+        .expect("stat");
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
@@ -437,15 +429,9 @@ fn tree_diff_prefetch_uses_single_request() {
     );
     assert_eq!(pack_file_count(&objects), packs_before + 1);
 
-    build_file_diffs(
-        repo.odb(),
-        entries,
-        DiffDetail::Patch,
-        DiffOptions::default(),
-        config.as_ref(),
-        &thread_policy,
-    )
-    .expect("patch");
+    repo.diff()
+        .files_for_entries(entries, DiffDetail::Patch, &DiffOptions::default())
+        .expect("patch");
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,

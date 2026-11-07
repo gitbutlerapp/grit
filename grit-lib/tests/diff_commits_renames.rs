@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{diff_commits_with_renames, DiffStatus};
+use grit_lib::diff::{DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -50,8 +50,15 @@ fn diff_commits_with_renames_reports_pure_rename() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let entries =
-        diff_commits_with_renames(repo.odb(), &base, &tip, 50).expect("diff_commits_with_renames");
+    let entries = repo
+        .diff()
+        .commits(
+            &base,
+            &tip,
+            &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+        )
+        .map(|r| r.entries)
+        .expect("diff_commits_with_renames");
     assert_eq!(
         entries.len(),
         1,

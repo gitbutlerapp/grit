@@ -2,7 +2,7 @@
 
 use grit_lib::blame::blame_file;
 use grit_lib::blame::BlameOptions;
-use grit_lib::diff::{commit_diff_files, DiffDetail, DiffMerges, DiffOptions};
+use grit_lib::diff::{DiffDetail, DiffMerges, DiffOptions};
 use grit_lib::error::Error;
 use grit_lib::error::RefError;
 use grit_lib::error::RevisionError;
@@ -71,16 +71,16 @@ fn shallow_boundary_commit_diff_is_against_empty_tree() {
 
     let config = repo.config().snapshot().unwrap().clone();
     let thread = repo.thread_policy();
-    let out = commit_diff_files(
-        &repo,
-        &tip,
-        DiffMerges::FirstParent,
-        DiffDetail::NameStatus,
-        &DiffOptions::default(),
-        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
-        &thread,
-    )
-    .unwrap();
+    let out = repo
+        .diff()
+        .commit_files(
+            &tip,
+            DiffMerges::FirstParent,
+            DiffDetail::NameStatus,
+            &DiffOptions::default(),
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+        )
+        .unwrap();
     assert!(
         !out.files.is_empty(),
         "boundary commit should diff whole tree as added"
@@ -143,16 +143,16 @@ fn depth_two_child_still_diffs_against_parent() {
         .expect("parent exists at depth 2");
     let config = repo.config().snapshot().unwrap().clone();
     let thread = repo.thread_policy();
-    let out = commit_diff_files(
-        &repo,
-        &tip,
-        DiffMerges::FirstParent,
-        DiffDetail::NameStatus,
-        &DiffOptions::default(),
-        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
-        &thread,
-    )
-    .unwrap();
+    let out = repo
+        .diff()
+        .commit_files(
+            &tip,
+            DiffMerges::FirstParent,
+            DiffDetail::NameStatus,
+            &DiffOptions::default(),
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+        )
+        .unwrap();
     assert!(
         !out.files.is_empty(),
         "tip at depth 2 should diff against stored parent {parent}"
@@ -162,16 +162,16 @@ fn depth_two_child_still_diffs_against_parent() {
         .odb()
         .read_commit(&parent)
         .expect("boundary commit object");
-    let boundary_diff = commit_diff_files(
-        &repo,
-        &parent,
-        DiffMerges::FirstParent,
-        DiffDetail::NameStatus,
-        &DiffOptions::default(),
-        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
-        &thread,
-    )
-    .unwrap();
+    let boundary_diff = repo
+        .diff()
+        .commit_files(
+            &parent,
+            DiffMerges::FirstParent,
+            DiffDetail::NameStatus,
+            &DiffOptions::default(),
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+        )
+        .unwrap();
     assert!(
         !boundary_diff.files.is_empty(),
         "shallow boundary parent should diff as root"

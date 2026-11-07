@@ -367,23 +367,23 @@ impl<'repo> super::handle::Diff<'repo> {
     pub fn has_changes(
         &self,
         target: &DiffTarget,
-        pathspecs: &[String],
-        opts: DiffOptions,
+        pathspec: &crate::pathspec::Pathspec,
+        opts: &DiffOptions,
     ) -> Result<bool> {
         crate::test_probe_hooks::hooks::has_changes_call();
         let repo = self.repository();
-        let matcher = repo.pathspec_matcher(pathspecs)?;
+        let matcher = repo.pathspec_matcher_with_globals(pathspec.specs(), pathspec.globals())?;
         match target {
             DiffTarget::WorktreeVsHead => {
                 let mut index = repo.index().load()?;
                 let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
-                worktree_has_changes(repo, &mut index, head_tree.as_ref(), &matcher, &opts)
+                worktree_has_changes(repo, &mut index, head_tree.as_ref(), &matcher, opts)
             }
-            DiffTarget::IndexVsHead => staged_has_changes(repo, &matcher, &opts),
-            DiffTarget::WorktreeVsIndex => unstaged_has_changes(repo, &matcher, &opts),
+            DiffTarget::IndexVsHead => staged_has_changes(repo, &matcher, opts),
+            DiffTarget::WorktreeVsIndex => unstaged_has_changes(repo, &matcher, opts),
             DiffTarget::WorktreeVsTree(tree) => {
                 let mut index = repo.index().load()?;
-                worktree_has_changes(repo, &mut index, Some(tree), &matcher, &opts)
+                worktree_has_changes(repo, &mut index, Some(tree), &matcher, opts)
             }
             DiffTarget::Commit(commit) => {
                 let obj = repo.odb().read(commit)?;
@@ -400,7 +400,7 @@ impl<'repo> super::handle::Diff<'repo> {
                     old_tree.as_ref(),
                     Some(&new_tree),
                     "",
-                    rename_threshold(&opts),
+                    rename_threshold(opts),
                     config.as_ref(),
                     &repo.thread_policy(),
                 )?;
@@ -412,7 +412,7 @@ impl<'repo> super::handle::Diff<'repo> {
                         repo.odb(),
                         &entry,
                         trust_filemode(config.as_ref()),
-                        &opts,
+                        opts,
                     )? {
                         return Ok(true);
                     }
@@ -420,7 +420,7 @@ impl<'repo> super::handle::Diff<'repo> {
                 Ok(false)
             }
             DiffTarget::Trees { old, new } => match old {
-                Some(base) => commit_trees_has_changes(repo, base, new, &matcher, &opts),
+                Some(base) => commit_trees_has_changes(repo, base, new, &matcher, opts),
                 None => {
                     let config = repo.config().snapshot()?;
                     let tip_tree = super::core::tree_oid_for_diff_side(repo.odb(), new)?;
@@ -429,7 +429,7 @@ impl<'repo> super::handle::Diff<'repo> {
                         None,
                         Some(&tip_tree),
                         "",
-                        rename_threshold(&opts),
+                        rename_threshold(opts),
                         config.as_ref(),
                         &repo.thread_policy(),
                     )?;
@@ -441,7 +441,7 @@ impl<'repo> super::handle::Diff<'repo> {
                             repo.odb(),
                             &entry,
                             trust_filemode(config.as_ref()),
-                            &opts,
+                            opts,
                         )? {
                             return Ok(true);
                         }

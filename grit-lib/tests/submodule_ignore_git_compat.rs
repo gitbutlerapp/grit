@@ -5,10 +5,7 @@
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{
-    diff_index_to_worktree_with_options, diff_tree_to_worktree, DiffIndexToWorktreeOptions,
-    RenameDetection, UncommittedDiff,
-};
+use grit_lib::diff::{RenameDetection, TreeDiffOptions, UncommittedDiff};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -132,7 +129,14 @@ fn dirty_submodule_only_reported_without_ignore() {
     );
 
     let index = repo.index().load().expect("index");
-    let diff = diff_tree_to_worktree(repo.odb(), model.head_tree.as_ref(), &main, &index)
+    let diff = repo
+        .diff()
+        .tree_to_worktree(
+            model.head_tree.as_ref(),
+            &index,
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
         .expect("tree diff");
     assert!(
         diff.is_empty(),
@@ -271,17 +275,11 @@ fn ignore_untracked_only_inside_submodule() {
 
     let repo = grit_repo(&main);
     let mut index = repo.index().load().expect("index");
-    let (diff, _) = diff_index_to_worktree_with_options(
-        repo.odb(),
-        &mut index,
-        &main,
-        DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            config: repo.config().snapshot().ok(),
-            ..DiffIndexToWorktreeOptions::default()
-        },
-    )
-    .expect("index diff");
+    let (diff, _) = repo
+        .diff()
+        .index_to_worktree(&mut index, &TreeDiffOptions::default())
+        .map(|r| (r.entries, r.index_stat_refreshed))
+        .expect("index diff");
     assert!(diff.is_empty(), "grit diff should honor ignore=untracked");
 }
 
@@ -363,7 +361,14 @@ fn gitmodules_duplicate_ignore_last_value_wins() {
     );
 
     let index = repo.index().load().expect("index");
-    let diff = diff_tree_to_worktree(repo.odb(), model.head_tree.as_ref(), &main, &index)
+    let diff = repo
+        .diff()
+        .tree_to_worktree(
+            model.head_tree.as_ref(),
+            &index,
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
         .expect("tree diff");
     assert!(
         !diff.is_empty(),

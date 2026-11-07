@@ -378,7 +378,7 @@ pub fn shell_git_apply_cached(git: &Path) -> String {
 /// Ensure `large.txt` (50k lines) exists and is committed, then write 500 one-line hunks and bench artifacts.
 pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+    use grit_lib::diff::{hunk_ids, DiffSide};
     use grit_lib::porcelain::hunk_select::{resolve_selection, unstaged_file_diffs, HunkSelection};
     use grit_lib::repo::Repository;
 
@@ -391,8 +391,7 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
     let (file, peer) = snapshots
         .first()
         .context("large.txt should appear in unstaged diff")?;
-    let ids =
-        hunk_ids_with_duplicate_peers(DiffSide::Unstaged, LARGE_HUNKS_FILE, &file.hunks, peer);
+    let ids = hunk_ids(DiffSide::Unstaged, LARGE_HUNKS_FILE, &file.hunks, peer);
     let half_len = ids.len() / 2;
     let half_ids: Vec<_> = ids.iter().take(half_len).cloned().collect();
     let id_line = half_ids

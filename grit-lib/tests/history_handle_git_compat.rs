@@ -13,7 +13,7 @@ use std::path::Path;
 use grit_lib::change_id::ChangeId;
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+use grit_lib::diff::{hunk_ids, DiffSide};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
 use grit_lib::progress::{CancelToken, NullProgress};
@@ -406,7 +406,7 @@ fn fixup_hunks_through_the_handle_fold_only_the_selected_hunk() {
     let history = grit.history();
     let files = unstaged_file_diffs(&grit, &[]).expect("diff");
     let (file, peer) = &files[0];
-    let ids = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &file.path, &file.hunks, peer);
+    let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
     assert_eq!(ids.len(), 2, "two separate hunks");
     let selection = HunkSelection {
         ids: vec![ids[0].clone()],

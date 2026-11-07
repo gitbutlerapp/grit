@@ -1,6 +1,7 @@
 //! Typed errors for common embedder failures (issue #1685).
 
 use grit_lib::blame::{self, compute_blame, BlameDiffAlgorithm};
+use grit_lib::diff::TreeDiffOptions;
 use grit_lib::error::Error;
 use grit_lib::error::RevisionError;
 use grit_lib::objects::ObjectId;
@@ -47,7 +48,8 @@ fn bare_repo_common_failures_use_requires_work_tree() {
     let mut idx = bare.index().load().expect("index");
     assert_requires_work_tree(
         bare.diff()
-            .worktree_to_index(&mut idx, false, false)
+            .index_to_worktree(&mut idx, &TreeDiffOptions::default())
+            .map(|r| r.entries)
             .map(|_| ()),
     );
 }

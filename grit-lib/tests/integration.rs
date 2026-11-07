@@ -586,6 +586,11 @@ mod diff_detail_git_compat;
 mod diff_git_mv_cache_tree;
 #[path = "diff_gitlink_typechange_coverage.rs"]
 mod diff_gitlink_typechange_coverage;
+#[path = "diff_handle_entry_points.rs"]
+mod diff_handle_entry_points;
+#[cfg(feature = "full-tests")]
+#[path = "diff_handle_git_compat.rs"]
+mod diff_handle_git_compat;
 #[path = "diff_harness_blob_sweep.rs"]
 mod diff_harness_blob_sweep;
 #[cfg(feature = "full-tests")]
@@ -601,9 +606,6 @@ mod diff_no_index;
 #[path = "diff_options_line_engine.rs"]
 mod diff_options_line_engine;
 #[cfg(feature = "full-tests")]
-#[path = "diff_parallel_symlinks_git_compat.rs"]
-mod diff_parallel_symlinks_git_compat;
-#[cfg(feature = "full-tests")]
 #[path = "diff_rename_basename_over_limit.rs"]
 mod diff_rename_basename_over_limit;
 #[path = "diff_rename_disjoint_repeated_basenames.rs"]
@@ -617,9 +619,6 @@ mod diff_rename_parallel;
 #[cfg(feature = "full-tests")]
 #[path = "diff_request.rs"]
 mod diff_request;
-#[cfg(feature = "full-tests")]
-#[path = "diff_skip_restrict_index_paths.rs"]
-mod diff_skip_restrict_index_paths;
 #[cfg(feature = "full-tests")]
 #[path = "diff_staged_renames.rs"]
 mod diff_staged_renames;

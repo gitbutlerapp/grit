@@ -6,7 +6,7 @@ use std::fs;
 
 use std::sync::Arc;
 
-use grit_lib::diff::{format_raw, DiffEntry};
+use grit_lib::diff::{format_raw, DiffEntry, SubmoduleIgnoreMode, TreeDiffOptions};
 use grit_lib::objects::ObjectKind;
 use grit_lib::refs::store::{MemoryRefStore, RefName, RefNameRef, RefStorageFormat};
 use grit_lib::repo::Repository;
@@ -188,7 +188,12 @@ fn diff_tree_to_tree_matches_git_diff_raw() {
 
     let entries = repo
         .diff()
-        .tree_to_tree(Some(&parent_tree), Some(&head_tree))
+        .tree_to_tree(
+            Some(&parent_tree),
+            Some(&head_tree),
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
         .expect("tree diff");
     let grit_raw = entries_raw(&entries);
 
@@ -223,7 +228,8 @@ fn diff_index_to_tree_matches_git_diff_cached_raw() {
 
     let entries = repo
         .diff()
-        .index_to_tree(&idx, head_tree.as_ref(), false)
+        .index_to_tree(&idx, head_tree.as_ref(), &TreeDiffOptions::default())
+        .map(|r| r.entries)
         .expect("index diff");
     let grit_raw = entries_raw(&entries);
 
@@ -253,7 +259,11 @@ fn diff_worktree_to_index_matches_git_diff_raw() {
     let mut idx = repo.index().load().expect("load");
     let entries = repo
         .diff()
-        .worktree_to_index(&mut idx, true, false)
+        .index_to_worktree(
+            &mut idx,
+            &TreeDiffOptions::default().with_submodules(SubmoduleIgnoreMode::Untracked),
+        )
+        .map(|r| r.entries)
         .expect("worktree diff");
     let grit_raw = entries_raw(&entries);
 

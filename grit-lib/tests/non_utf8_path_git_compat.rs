@@ -2,6 +2,7 @@
 
 #![cfg(unix)]
 
+use grit_lib::diff::TreeDiffOptions;
 use grit_lib::worktree::WorktreeError;
 use std::ffi::OsStr;
 use std::io::Write;
@@ -10,7 +11,6 @@ use std::process::Command;
 
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::diff_index_to_worktree;
 use grit_lib::index::untracked_cache::{parse_untracked_extension, UntrackedCacheDir};
 use grit_lib::objects::parse_commit;
 use grit_lib::objects::ObjectId;
@@ -505,14 +505,11 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
     );
 
     let mut index = repo.index().load().expect("index");
-    let diff = diff_index_to_worktree(
-        repo.odb(),
-        &mut index,
-        repo.work_tree().expect("work tree"),
-        false,
-        false,
-    )
-    .expect("diff index to worktree");
+    let diff = repo
+        .diff()
+        .index_to_worktree(&mut index, &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff index to worktree");
     assert!(
         diff.iter().any(|e| path_is_bad_name(e.path())),
         "diff must include non-UTF-8 path: {:?}",

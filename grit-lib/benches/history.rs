@@ -8,7 +8,7 @@ mod s7;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use grit_lib::diff::{count_changes_with_algorithm, diff_trees};
+use grit_lib::diff::{count_changes_with_algorithm, TreeDiffOptions};
 use grit_lib::refs::branch_tracking::TipComparison;
 use grit_lib::refs::write_ref;
 
@@ -507,7 +507,10 @@ fn bench_tree_diff(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(name), &(old, new), |b, pair| {
             b.iter(|| {
                 black_box(
-                    diff_trees(fx.repo.odb(), Some(&pair.0), Some(&pair.1), "").expect("tree diff"),
+                    fx.repo
+                        .diff()
+                        .tree_to_tree(Some(&pair.0), Some(&pair.1), &TreeDiffOptions::default())
+                        .expect("tree diff"),
                 )
             });
         });

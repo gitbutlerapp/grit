@@ -438,7 +438,7 @@ mod hunk_selection_restore_tests {
     use super::super::apply::apply_fixup_rewrite;
     use super::*;
     use crate::config::environment::RepositoryOptions;
-    use crate::diff::hunk_ids_with_duplicate_peers;
+    use crate::diff::hunk_ids;
     use crate::diff::DiffOptions;
     use crate::history::RefScope;
     use crate::objects::ObjectId;
@@ -508,7 +508,7 @@ mod hunk_selection_restore_tests {
         fs::write(wt.join("f.txt"), &edited).expect("edit");
         let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
         let files = unstaged_file_diffs(&grit, &[]).expect("diff");
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             &files[0].0.path,
             &files[0].0.hunks,

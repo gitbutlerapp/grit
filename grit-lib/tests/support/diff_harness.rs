@@ -11,17 +11,14 @@ use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::diff::merge_file;
 use grit_lib::diff::ws::ws_blank_line;
 use grit_lib::diff::{
-    anchored_unified_diff, count_git_lines, diff_commits, diff_index_to_tree,
-    diff_index_to_worktree, diff_tree_to_worktree, diff_trees, format_raw, format_raw_abbrev,
-    normalize_ignore_space_change, postprocess_diff_entries, tree_oid_of_commit,
+    anchored_unified_diff, count_git_lines, format_raw, format_raw_abbrev,
+    normalize_ignore_space_change, tree_oid_of_commit,
     unified_diff_histogram_ignore_with_prefix_and_funcname,
-    unified_diff_with_prefix_and_funcname_and_algorithm, DiffEntry, DiffPostprocessOptions,
-    DiffPostprocessWorktree,
+    unified_diff_with_prefix_and_funcname_and_algorithm, DiffEntry, TreeDiffOptions,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
 use similar::Algorithm;
@@ -760,29 +757,6 @@ pub fn assert_raw_matches_git(grit_lines: &[String], git_lines: &[String], conte
     );
 }
 
-pub fn postprocess(
-    odb: &Odb,
-    entries: Vec<DiffEntry>,
-    source_tree: Option<&ObjectId>,
-    work_root: Option<&Path>,
-    worktree: Option<&DiffPostprocessWorktree<'_>>,
-    config: &ConfigSet,
-    opts: &DiffPostprocessOptions,
-) -> Vec<DiffEntry> {
-    postprocess_diff_entries(
-        odb,
-        entries,
-        source_tree,
-        work_root,
-        worktree,
-        config,
-        &ThreadPolicy::default(),
-        opts,
-        None,
-    )
-    .expect("postprocess")
-}
-
 pub struct DiffRepo {
     _guard: tempfile::TempDir,
     pub worktree: PathBuf,
@@ -812,114 +786,81 @@ pub fn tree_diff_raw(
     repo: &Repository,
     old_tree: Option<&ObjectId>,
     new_tree: Option<&ObjectId>,
-    config: &ConfigSet,
-    opts: &DiffPostprocessOptions,
+    opts: &TreeDiffOptions,
 ) -> Vec<String> {
-    let raw = diff_trees(repo.odb(), old_tree, new_tree, "").expect("diff_trees");
-    let entries = postprocess(repo.odb(), raw, old_tree, None, None, config, opts);
-    grit_raw_lines(&entries)
+    let result = repo
+        .diff()
+        .tree_to_tree(old_tree, new_tree, opts)
+        .expect("tree_to_tree");
+    grit_raw_lines(&result.entries)
 }
 
 pub fn index_to_tree_raw(
     repo: &Repository,
     index: &Index,
     tree: &ObjectId,
-    config: &ConfigSet,
-    opts: &DiffPostprocessOptions,
+    opts: &TreeDiffOptions,
 ) -> Vec<String> {
-    let raw = diff_index_to_tree(repo.odb(), index, Some(tree), false).expect("diff_index_to_tree");
-    let entries = postprocess(repo.odb(), raw, Some(tree), None, None, config, opts);
-    grit_raw_lines(&entries)
+    let result = repo
+        .diff()
+        .index_to_tree(index, Some(tree), opts)
+        .expect("index_to_tree");
+    grit_raw_lines(&result.entries)
 }
 
 pub fn index_to_worktree_raw(
     repo: &Repository,
-    worktree: &Path,
     index: &mut Index,
-    head_tree: Option<&ObjectId>,
-    config: &ConfigSet,
-    opts: &DiffPostprocessOptions,
+    opts: &TreeDiffOptions,
 ) -> Vec<String> {
-    let raw = diff_index_to_worktree(repo.odb(), index, worktree, false, false)
-        .expect("diff_index_to_worktree");
-    let entries = postprocess(
-        repo.odb(),
-        raw,
-        head_tree,
-        Some(worktree),
-        None,
-        config,
-        opts,
-    );
-    grit_raw_lines(&entries)
-}
-
-fn tree_worktree_side<'a>(repo: &'a Repository, index: &'a Index) -> DiffPostprocessWorktree<'a> {
-    DiffPostprocessWorktree {
-        repository_git_dir: repo.git_dir(),
-        index,
-    }
+    let result = repo
+        .diff()
+        .index_to_worktree(index, opts)
+        .expect("index_to_worktree");
+    grit_raw_lines(&result.entries)
 }
 
 pub fn tree_to_worktree_raw(
     repo: &Repository,
-    worktree: &Path,
     index: &Index,
     tree: Option<&ObjectId>,
-    config: &ConfigSet,
-    opts: &DiffPostprocessOptions,
+    opts: &TreeDiffOptions,
 ) -> Vec<String> {
-    let raw =
-        diff_tree_to_worktree(repo.odb(), tree, worktree, index).expect("diff_tree_to_worktree");
-    let wctx = tree_worktree_side(repo, index);
-    let entries = postprocess(
-        repo.odb(),
-        raw,
-        tree,
-        Some(worktree),
-        Some(&wctx),
-        config,
-        opts,
-    );
-    grit_raw_lines(&entries)
+    let result = repo
+        .diff()
+        .tree_to_worktree(tree, index, opts)
+        .expect("tree_to_worktree");
+    grit_raw_lines(&result.entries)
 }
 
 /// Like [`tree_to_worktree_raw`], but abbreviates OIDs like `git diff <tree> --raw`.
 pub fn tree_to_worktree_raw_abbrev(
     repo: &Repository,
-    worktree: &Path,
     index: &Index,
     tree: Option<&ObjectId>,
-    config: &ConfigSet,
-    opts: &DiffPostprocessOptions,
+    opts: &TreeDiffOptions,
     abbrev: usize,
 ) -> Vec<String> {
-    let raw =
-        diff_tree_to_worktree(repo.odb(), tree, worktree, index).expect("diff_tree_to_worktree");
-    let wctx = tree_worktree_side(repo, index);
-    let entries = postprocess(
-        repo.odb(),
-        raw,
-        tree,
-        Some(worktree),
-        Some(&wctx),
-        config,
-        opts,
-    );
-    grit_raw_lines_abbrev(&entries, abbrev)
+    let result = repo
+        .diff()
+        .tree_to_worktree(tree, index, opts)
+        .expect("tree_to_worktree");
+    grit_raw_lines_abbrev(&result.entries, abbrev)
 }
 
 pub fn commits_diff_raw(
     repo: &Repository,
     base: &ObjectId,
     tip: &ObjectId,
-    config: &ConfigSet,
-    opts: &DiffPostprocessOptions,
+    opts: &TreeDiffOptions,
 ) -> Vec<String> {
-    let raw = diff_commits(repo.odb(), base, tip).expect("diff_commits");
-    let base_tree = tree_oid_of_commit(repo.odb(), base).expect("base tree");
-    let entries = postprocess(repo.odb(), raw, Some(&base_tree), None, None, config, opts);
-    grit_raw_lines(&entries)
+    let result = repo.diff().commits(base, tip, opts).expect("commits");
+    grit_raw_lines(&result.entries)
+}
+
+/// Set `key` to `value` in the repository's local config through the system `git`.
+pub fn set_repo_config(worktree: &Path, key: &str, value: &str) {
+    git_quiet(worktree, &["config", key, value]);
 }
 
 pub fn head_tree_oid(repo: &Repository) -> Option<ObjectId> {

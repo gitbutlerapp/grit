@@ -4,7 +4,7 @@ use grit_lib::objects::FileMode;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{diff_trees, DiffStatus};
+use grit_lib::diff::{DiffStatus, TreeDiffOptions};
 use grit_lib::error::Error;
 use grit_lib::index::MODE_GITLINK;
 use grit_lib::objects::ObjectId;
@@ -207,8 +207,15 @@ fn checkout_removes_uninitialized_gitlink_on_delete() {
         &RepositoryOptions::empty().with_work_tree(&wt),
     )
     .expect("open");
-    let changes =
-        diff_trees(repo.odb(), Some(&with_sub_tree), Some(&no_sub_tree), "").expect("diff");
+    let changes = repo
+        .diff()
+        .tree_to_tree(
+            Some(&with_sub_tree),
+            Some(&no_sub_tree),
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
+        .expect("diff");
     let sub_delete = changes
         .iter()
         .find(|c| c.status == DiffStatus::Deleted && c.old_path.as_deref() == Some("sub"))

@@ -3,7 +3,8 @@
 //! `GRIT_WORKTREE_SCAN_49K_NESTED=1 cargo test -p grit-lib --test worktree_scan_nested_49k_probe_git_compat -- --test-threads=1`
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions};
+use grit_lib::diff::TreeDiffOptions;
+
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::progress::NullProgress;
@@ -130,16 +131,11 @@ fn nested_49k_hundred_edits_diff_metadata_probe_budget() {
     let mut index = repo.index().load().expect("index");
 
     let _probe = reset_worktree_metadata_probe(root);
-    let (diffs, _) = diff_index_to_worktree_with_options(
-        repo.odb(),
-        &mut index,
-        root,
-        DiffIndexToWorktreeOptions {
-            refresh_index_stat_in_pass: false,
-            ..DiffIndexToWorktreeOptions::default()
-        },
-    )
-    .expect("diff");
+    let (diffs, _) = repo
+        .diff()
+        .index_to_worktree(&mut index, &TreeDiffOptions::default())
+        .map(|r| (r.entries, r.index_stat_refreshed))
+        .expect("diff");
     assert_eq!(diffs.len(), 100, "expected 100 modified paths");
     let meta = worktree_metadata_probe_count();
     assert!(

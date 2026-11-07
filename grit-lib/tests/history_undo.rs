@@ -7,7 +7,7 @@ use crate::support;
 use std::fs;
 use std::process::Command;
 
-use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+use grit_lib::diff::{hunk_ids, DiffSide};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
 use grit_lib::progress::CancelToken;
@@ -621,7 +621,7 @@ fn undo_after_hunk_selection_fixup_restores_the_work_tree() {
     let grit = open_grit(wt);
     let files = unstaged_file_diffs(&grit, &[]).expect("diff");
     let (file, peer) = &files[0];
-    let ids = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &file.path, &file.hunks, peer);
+    let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
     let selection = HunkSelection {
         ids: vec![ids[0].clone()],
         ranges: Vec::new(),

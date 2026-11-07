@@ -1,12 +1,12 @@
 //! Public custom [`Odb`](grit_lib::objects::odb::Odb) backends via
 //! [`RepositoryOptions::with_object_store`].
 
+use grit_lib::diff::TreeDiffOptions;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::diff_trees;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{serialize_tag, TagData};
@@ -271,7 +271,11 @@ fn memory_primary_revwalk_diff_without_loose_objects() {
         .odb()
         .write(ObjectKind::Tree, &tree2_body)
         .expect("tree2");
-    let diff = diff_trees(repo.odb(), Some(&tree2), Some(&tree), "").expect("diff");
+    let diff = repo
+        .diff()
+        .tree_to_tree(Some(&tree2), Some(&tree), &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
     assert!(!diff.is_empty());
 
     assert_eq!(

@@ -96,7 +96,7 @@ fn mixed_text_and_binary_patch_writes_git_compatible_index() {
 fn quoted_patch_paths_roundtrip_through_git_index() {
     use grit_lib::apply::{apply_patch_to_index_and_write, IndexApplyOptions};
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::diff::{write_patch, PatchTextOptions};
+    use grit_lib::diff::{write_patch, PatchTextOptions, TreeDiffOptions};
     use grit_lib::repo::Repository;
     use grit_test_support::git;
 
@@ -149,7 +149,12 @@ fn quoted_patch_paths_roundtrip_through_git_index() {
     let new_tree = grit_lib::objects::ObjectId::from_hex(expected_tree.trim()).unwrap();
     let entries = repo
         .diff()
-        .tree_to_tree(Some(&old_tree), Some(&new_tree))
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
         .unwrap();
     let options = PatchTextOptions::from_repo(&repo, Default::default()).unwrap();
     let mut grit_patch = Vec::new();

@@ -8,8 +8,8 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
-    write_commits_log_patch, DiffAlgorithm, DiffOptions, DiffPostprocessOptions,
-    LogPatchCommitHeader, LogPatchOptions,
+    write_commits_log_patch, DiffAlgorithm, DiffOptions, LogPatchCommitHeader, LogPatchOptions,
+    TreeDiffOptions,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -293,11 +293,7 @@ fn log_patch_git_git_diff_tree_no_renames_matches_git() {
         .trim()
         .parse()
         .expect("head oid");
-    let config = ConfigSet::new();
-    let opts = DiffPostprocessOptions {
-        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
-        ..Default::default()
-    };
+    let opts = TreeDiffOptions::default();
     let git_raw = git_raw_lines(
         corpus.as_path(),
         &[
@@ -310,7 +306,7 @@ fn log_patch_git_git_diff_tree_no_renames_matches_git() {
             &head.to_hex(),
         ],
     );
-    let grit_raw = tree_diff_raw(&repo, Some(&parent), Some(&head), &config, &opts);
+    let grit_raw = tree_diff_raw(&repo, Some(&parent), Some(&head), &opts);
     assert_raw_matches_git(&grit_raw, &git_raw, "git.git HEAD tree diff (no renames)");
 }
 

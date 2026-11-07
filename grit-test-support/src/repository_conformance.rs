@@ -41,9 +41,8 @@ use grit_lib::change_id::{
 };
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::{ConfigEditor, ConfigScope, ConfigWriteOptions};
-use grit_lib::diff::hunk_ids;
 use grit_lib::diff::structured::{StructuredHunk, StructuredLineKind};
-use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffOptions, DiffSide, DiffTarget};
+use grit_lib::diff::{hunk_ids, DiffOptions, DiffSide, DiffTarget};
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::HashAlgo;
@@ -257,7 +256,7 @@ fn unstaged_hunk_hex_ids(repo: &Repository, path: &str) -> Vec<String> {
         return Vec::new();
     }
     let (file, peer) = &files[0];
-    hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &file.path, &file.hunks, peer)
+    hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer)
         .into_iter()
         .map(|id| id.as_str().to_owned())
         .collect()
@@ -281,7 +280,7 @@ fn commit_file_hunks(repo: &Repository, commit: ObjectId, path: &str) -> Vec<Str
 
 fn commit_file_hunk_hex_ids(repo: &Repository, commit: ObjectId, path: &str) -> Vec<String> {
     let hunks = commit_file_hunks(repo, commit, path);
-    hunk_ids(DiffSide::Other, path, &hunks)
+    hunk_ids(DiffSide::Other, path, &hunks, &[])
         .into_iter()
         .map(|id| id.as_str().to_owned())
         .collect()
@@ -340,7 +339,7 @@ fn index_head_hunk_hex_ids(repo: &Repository, path: &str) -> Vec<String> {
     if files.is_empty() {
         return Vec::new();
     }
-    hunk_ids(DiffSide::Staged, &files[0].path, &files[0].hunks)
+    hunk_ids(DiffSide::Staged, &files[0].path, &files[0].hunks, &[])
         .into_iter()
         .map(|id| id.as_str().to_owned())
         .collect()

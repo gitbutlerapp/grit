@@ -202,44 +202,6 @@ impl From<ResolveDiffArgumentsError> for Error {
 
 type ResolveResult<T> = Result<T>;
 
-/// Parse `grit diff` flags and positionals into a [`DiffTarget`] and pathspecs.
-///
-/// Shorthand for [`resolve_diff_request`] without a pathspec file.
-///
-/// # Parameters
-///
-/// - `repo` - repository the revisions and paths belong to.
-/// - `cwd_prefix` - path from the work tree root to the process cwd (from
-///   [`pathdiff`](crate::worktree::pathspec::pathdiff)); `None` at the root, when unknown, or in
-///   a bare repository.
-/// - `staged`, `unstaged`, `against` - see [`DiffRequest`].
-/// - `positionals` - operands before `--`.
-/// - `explicit_paths` - paths after `--`.
-///
-/// # Errors
-///
-/// Returns [`ResolveDiffArgumentsError`] for flag conflicts, unresolvable revisions, or
-/// pathspecs that cannot be resolved.
-pub fn resolve_diff_arguments(
-    repo: &Repository,
-    cwd_prefix: Option<&str>,
-    staged: bool,
-    unstaged: bool,
-    against: Option<&str>,
-    positionals: &[String],
-    explicit_paths: &[String],
-) -> ResolveResult<DiffArguments> {
-    let request = DiffRequest {
-        staged,
-        unstaged,
-        against: against.map(str::to_owned),
-        positionals: positionals.to_vec(),
-        paths: explicit_paths.to_vec(),
-        pathspec_file: None,
-    };
-    resolve_diff_request(repo, cwd_prefix, &request)
-}
-
 /// Decide what `grit diff` compares and which paths it is limited to.
 ///
 /// Operands before `--` that are not revisions but name known paths (in the index, `HEAD`, or
@@ -278,7 +240,7 @@ pub fn resolve_diff_arguments(
 ///   the working tree in a bare repository.
 /// - Paths: [`Pathspec`](ResolveDiffArgumentsError::Pathspec), or
 ///   [`crate::worktree::WorktreeError::PathspecNoMatch`].
-pub fn resolve_diff_request(
+pub(crate) fn resolve_diff_request(
     repo: &Repository,
     cwd_prefix: Option<&str>,
     request: &DiffRequest,
@@ -778,7 +740,7 @@ fn pathspec_from_resolved_specs(specs: Vec<String>) -> Pathspec {
 ///
 /// Returns [`ResolveDiffArgumentsError::Pathspec`] when a pathspec cannot be parsed or lies
 /// outside the work tree.
-pub fn resolve_commit_diff_pathspecs(
+pub(crate) fn resolve_commit_diff_pathspecs(
     repo: &Repository,
     cwd_prefix: Option<&str>,
     raw_paths: &[String],
@@ -1393,7 +1355,7 @@ pub struct HunkDiffBundle {
 /// # Errors
 ///
 /// Propagates index, object database, and working tree read errors.
-pub fn hunk_diff_bundle(
+pub(crate) fn hunk_diff_bundle(
     repo: &Repository,
     pathspec: &Pathspec,
     opts: DiffOptions,
@@ -1549,7 +1511,7 @@ mod tests {
                 entry(DiffStatus::Deleted, "dir/b.txt"),
                 entry(DiffStatus::Modified, "dir/c.rs"),
             ],
-            inexact_rename_skipped: None,
+            ..Default::default()
         };
         let paths = |kept: Vec<DiffEntry>| -> Vec<String> {
             kept.iter()
@@ -1601,7 +1563,12 @@ mod tests {
         let (repo, _) =
             crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())
                 .expect("init");
-        let err = resolve_diff_arguments(&repo, None, true, true, None, &[], &[]).unwrap_err();
+        let request = DiffRequest {
+            staged: true,
+            unstaged: true,
+            ..DiffRequest::default()
+        };
+        let err = resolve_diff_request(&repo, None, &request).unwrap_err();
         assert!(matches!(
             err,
             crate::error::Error::Diff(DiffError::Arguments(

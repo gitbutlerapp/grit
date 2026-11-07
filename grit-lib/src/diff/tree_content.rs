@@ -1,8 +1,11 @@
 //! Parallel blob loads for tree-to-tree diffs (commit ranges, `grit diff A B`).
 
 use crate::config::ConfigSet;
+#[cfg(test)]
 use crate::diff_rename_parallel::parallel_map_indices;
-use crate::error::{Error, Result};
+#[cfg(test)]
+use crate::error::Error;
+use crate::error::Result;
 use crate::merge_diff::{diff_attr_forces_text, diff_driver_forces_text, diff_textconv_active};
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
@@ -107,7 +110,8 @@ pub struct TreeDiffStructured {
 
 /// One tree diff entry with both sides loaded for line-level diffing.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreeDiffContent {
+#[cfg(test)]
+pub(crate) struct TreeDiffContent {
     /// Tree diff metadata (paths, modes, oids, status).
     pub entry: DiffEntry,
     /// Old-side bytes prepared for structured text diffing.
@@ -126,7 +130,8 @@ pub struct TreeDiffContent {
 /// # Errors
 ///
 /// Propagates object database read failures.
-pub fn tree_diff_contents_parallel(
+#[cfg(test)]
+pub(crate) fn tree_diff_contents_parallel(
     odb: &Odb,
     entries: Vec<DiffEntry>,
     config: &ConfigSet,
@@ -164,7 +169,7 @@ pub(crate) type TreeDiffStatRow = (DiffEntry, bool, Option<LineStat>, u64, u64);
 /// # Errors
 ///
 /// Propagates object database read failures.
-pub fn tree_diff_stat_parallel(
+pub(crate) fn tree_diff_stat_parallel(
     odb: &Odb,
     entries: Vec<DiffEntry>,
     config: &ConfigSet,
@@ -300,7 +305,7 @@ pub fn tree_diff_structured_entry(
 /// # Errors
 ///
 /// Propagates object database read failures and callback errors.
-pub fn for_each_tree_diff_structured(
+pub(crate) fn for_each_tree_diff_structured(
     odb: &Odb,
     entries: &[DiffEntry],
     diff_options: DiffOptions,
@@ -346,7 +351,7 @@ pub fn for_each_tree_diff_structured(
 /// # Errors
 ///
 /// Propagates object database read failures.
-pub fn tree_diff_structured_parallel(
+pub(crate) fn tree_diff_structured_parallel(
     odb: &Odb,
     entries: Vec<DiffEntry>,
     config: &ConfigSet,
@@ -472,7 +477,7 @@ pub(crate) fn side_bytes_after_blob_read(
     let binary = crate::crlf::is_binary(&data);
     let size = data.len() as u64;
     if binary && !retain_binary_payload {
-        (SideBytes::empty_with_size(size), true)
+        (SideBytes::unread(size), true)
     } else {
         (SideBytes::from_bytes(data), binary)
     }
@@ -494,14 +499,14 @@ pub fn load_odb_blob_side_for_diff(
     force_read_content: bool,
 ) -> Result<(SideBytes, bool)> {
     if *oid == ObjectId::zero() {
-        return Ok((SideBytes::empty_with_size(0), false));
+        return Ok((SideBytes::unread(0), false));
     }
     if !force_read_content {
         let info = odb.read_info(oid)?;
         if info.kind == ObjectKind::Blob
             && treat_side_as_binary_without_reading(odb, info.size, path, false)?
         {
-            return Ok((SideBytes::empty_with_size(info.size), true));
+            return Ok((SideBytes::unread(info.size), true));
         }
     }
     note_blob_read();
@@ -516,7 +521,7 @@ pub fn load_odb_blob_side_for_diff(
 pub fn bytes_for_diff(data: Vec<u8>) -> (SideBytes, bool) {
     let size = data.len() as u64;
     if crate::crlf::is_binary(&data) {
-        (SideBytes::empty_with_size(size), true)
+        (SideBytes::unread(size), true)
     } else {
         (SideBytes::from_bytes(data), false)
     }

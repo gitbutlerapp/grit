@@ -8,11 +8,7 @@ mod support;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use grit_lib::config::ConfigSet;
-use grit_lib::diff::{
-    detect_copies_with_policy, detect_renames_with_policy, diff_trees, DetectRenamesOptions,
-    DiffStatus,
-};
+use grit_lib::diff::{CopyDetection, DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::parallel::ThreadPolicy;
 use support::{git_output, git_quiet, rev_parse_tree, DiffRepo};
 
@@ -86,40 +82,33 @@ fn inexact_document_renames_do_not_allocate_per_candidate_pair() {
     git_quiet(root, &["add", "-A"]);
     git_quiet(root, &["commit", "-qm", "review"]);
     let new_tree = rev_parse_tree(root, "HEAD^{tree}");
-    let raw = diff_trees(dr.repo.odb(), Some(&old_tree), Some(&new_tree), "").unwrap();
+    let raw = dr
+        .repo
+        .diff()
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
+        .unwrap();
     assert_eq!(raw.len(), FILES * 2);
-    let sources: Vec<_> = raw
-        .iter()
-        .filter(|entry| entry.status == DiffStatus::Deleted)
-        .map(|entry| {
-            (
-                entry.old_path.clone().unwrap(),
-                entry.old_mode.clone(),
-                entry.old_oid,
-            )
-        })
-        .collect();
     let added: Vec<_> = raw
         .iter()
         .filter(|entry| entry.status == DiffStatus::Added)
         .cloned()
         .collect();
-    let config = ConfigSet::new();
-    let policy = ThreadPolicy::with_threads_override(Some(1));
+    let serial =
+        TreeDiffOptions::default().with_threads(Some(ThreadPolicy::with_threads_override(Some(1))));
+    let renames = serial.clone().with_renames(RenameDetection::Similarity(50));
 
     let before = ALLOCATIONS.with(Cell::get);
-    let renamed = detect_renames_with_policy(
-        dr.repo.odb(),
-        None,
-        raw,
-        50,
-        &config,
-        &policy,
-        None,
-        DetectRenamesOptions::default(),
-    )
-    .unwrap()
-    .entries;
+    let renamed = dr
+        .repo
+        .diff()
+        .detect_renames(raw, None, &renames)
+        .unwrap()
+        .entries;
     let allocations = ALLOCATIONS.with(Cell::get) - before;
     eprintln!("{FILES} inexact renames: {allocations} allocations");
 
@@ -154,17 +143,13 @@ fn inexact_document_renames_do_not_allocate_per_candidate_pair() {
     );
 
     let before = ALLOCATIONS.with(Cell::get);
-    let copied = detect_copies_with_policy(
-        dr.repo.odb(),
-        None,
-        added,
-        50,
-        true,
-        &sources,
-        &config,
-        &policy,
-    )
-    .unwrap();
+    let copies = serial.with_copies(CopyDetection::FindHarder(50));
+    let copied = dr
+        .repo
+        .diff()
+        .detect_renames(added, Some(&old_tree), &copies)
+        .unwrap()
+        .entries;
     let allocations = ALLOCATIONS.with(Cell::get) - before;
     eprintln!("{FILES} inexact copies: {allocations} allocations");
     let mut copied_paths: Vec<_> = copied

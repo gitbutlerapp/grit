@@ -2,7 +2,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{
-    build_file_diffs, DiffDetail, DiffOptions, DiffStat, DiffStatus, DiffTarget, RenameDetection,
+    DiffDetail, DiffOptions, DiffStat, DiffStatus, DiffTarget, RenameDetection, TreeDiffOptions,
 };
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::Repository;
@@ -14,18 +14,14 @@ fn diffstat(repo: &Repository, detail: DiffDetail, options: DiffOptions) -> Diff
     let new = rev_parse(repo.work_tree().expect("work tree"), "HEAD^{tree}");
     let entries = repo
         .diff()
-        .tree_to_tree(Some(&old), Some(&new))
+        .tree_to_tree(Some(&old), Some(&new), &TreeDiffOptions::default())
+        .map(|r| r.entries)
         .expect("tree diff");
     let config = repo.config().snapshot().expect("config");
-    let out = build_file_diffs(
-        repo.odb(),
-        entries,
-        detail,
-        options,
-        config.as_ref(),
-        &ThreadPolicy::default(),
-    )
-    .expect("file diffs");
+    let out = repo
+        .diff()
+        .files_for_entries(entries, detail, &options)
+        .expect("file diffs");
     DiffStat::from_files(&out.files)
 }
 

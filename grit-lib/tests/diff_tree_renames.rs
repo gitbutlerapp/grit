@@ -5,33 +5,24 @@ use grit_lib::error::ObjectError;
 
 use std::fs;
 
-use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
-    diff_trees, diff_trees_show_tree_entries, diff_trees_with_renames, postprocess_diff_entries,
-    DiffPostprocessOptions, InexactRenameDetectionSkipped, GIT_DIFF_DEFAULT_BREAK_SCORE,
+    BreakRewrites, CopyDetection, InexactRenameDetectionSkipped, RenameDetection, TreeDiffOptions,
 };
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::parallel::ThreadPolicy;
 
 use support::{
-    assert_raw_matches_git, commits_diff_raw, config_with_kv, git_quiet, git_raw_lines,
-    grit_raw_lines_abbrev, head_tree_oid, index_to_tree_raw, index_to_worktree_raw, rev_parse_tree,
-    tree_diff_raw, tree_to_worktree_raw_abbrev, write_bogus_tree, DiffRepo,
+    assert_raw_matches_git, commits_diff_raw, git_quiet, git_raw_lines, grit_raw_lines_abbrev,
+    index_to_tree_raw, index_to_worktree_raw, rev_parse_tree, set_repo_config, tree_diff_raw,
+    tree_to_worktree_raw_abbrev, write_bogus_tree, DiffRepo,
 };
 
-fn default_opts() -> DiffPostprocessOptions {
-    DiffPostprocessOptions {
-        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
-        ..Default::default()
-    }
+fn default_opts() -> TreeDiffOptions {
+    TreeDiffOptions::default()
 }
 
-fn rename_opts(threshold: u32) -> DiffPostprocessOptions {
-    DiffPostprocessOptions {
-        rename_threshold: threshold,
-        ..Default::default()
-    }
+fn rename_opts(threshold: u8) -> TreeDiffOptions {
+    TreeDiffOptions::default().with_renames(RenameDetection::Similarity(threshold))
 }
 
 #[test]
@@ -48,8 +39,6 @@ fn t4002_tree_index_worktree_raw_matches_git() {
     fs::write(wt.join("c.txt"), "new\n").unwrap();
     git_quiet(wt, &["add", "a.txt", "c.txt"]);
     let tree_a: ObjectId = git_quiet(wt, &["write-tree"]).trim().parse().unwrap();
-
-    let config = ConfigSet::new();
     let opts = default_opts();
 
     let git_tree = git_raw_lines(
@@ -63,7 +52,7 @@ fn t4002_tree_index_worktree_raw_matches_git() {
             &tree_a.to_hex(),
         ],
     );
-    let grit_tree = tree_diff_raw(&dr.repo, Some(&tree_o), Some(&tree_a), &config, &opts);
+    let grit_tree = tree_diff_raw(&dr.repo, Some(&tree_o), Some(&tree_a), &opts);
     assert_raw_matches_git(&grit_tree, &git_tree, "tree↔tree");
 
     let git_index = git_raw_lines(
@@ -78,15 +67,13 @@ fn t4002_tree_index_worktree_raw_matches_git() {
         ],
     );
     let index = dr.load_index();
-    let grit_index = index_to_tree_raw(&dr.repo, &index, &tree_o, &config, &opts);
+    let grit_index = index_to_tree_raw(&dr.repo, &index, &tree_o, &opts);
     assert_raw_matches_git(&grit_index, &git_index, "index↔tree (cached)");
 
     fs::write(wt.join("b.txt"), "beta-worktree\n").unwrap();
     let git_files = git_raw_lines(wt, &["diff-files", "-r", "--raw"]);
     let mut index = dr.load_index();
-    let head_tree = head_tree_oid(&dr.repo);
-    let grit_files =
-        index_to_worktree_raw(&dr.repo, wt, &mut index, head_tree.as_ref(), &config, &opts);
+    let grit_files = index_to_worktree_raw(&dr.repo, &mut index, &opts);
     assert_raw_matches_git(&grit_files, &git_files, "index↔worktree");
 }
 
@@ -116,7 +103,6 @@ fn t4001_rename_detection_scores_match_git() {
 
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = ConfigSet::new();
     let opts = rename_opts(50);
 
     let git_lines = git_raw_lines(
@@ -131,7 +117,7 @@ fn t4001_rename_detection_scores_match_git() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4001 rename scores");
 }
 
@@ -151,14 +137,9 @@ fn t4007_copy_detection_matches_git() {
 
     fs::write(wt.join("path1/COPYING"), content).unwrap();
     git_quiet(wt, &["add", "path1/COPYING"]);
-
-    let config = ConfigSet::new();
-    let opts = DiffPostprocessOptions {
-        rename_threshold: 50,
-        copy_threshold: Some(50),
-        find_copies_harder: true,
-        ..Default::default()
-    };
+    let opts = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(50))
+        .with_copies(CopyDetection::FindHarder(50));
 
     let git_lines = git_raw_lines(
         wt,
@@ -173,7 +154,7 @@ fn t4007_copy_detection_matches_git() {
         ],
     );
     let index = dr.load_index();
-    let grit_lines = index_to_tree_raw(&dr.repo, &index, &tree, &config, &opts);
+    let grit_lines = index_to_tree_raw(&dr.repo, &index, &tree, &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4007 copy harder");
 }
 
@@ -199,19 +180,11 @@ fn t4008_break_rewrite_index_worktree_raw_matches_git() {
     let mut rewritten = original.clone();
     rewritten.replace_range(0..400, &"X".repeat(400));
     fs::write(wt.join("big.txt"), &rewritten).unwrap();
-
-    let config = ConfigSet::new();
-    let opts = DiffPostprocessOptions {
-        break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
-        ..Default::default()
-    };
+    let opts = TreeDiffOptions::default().with_break_rewrites(BreakRewrites::DEFAULT);
 
     let git_lines = git_raw_lines(wt, &["diff-files", "-r", "-B", "--raw"]);
     let mut index = dr.load_index();
-    let head_tree = head_tree_oid(&dr.repo);
-    let grit_lines =
-        index_to_worktree_raw(&dr.repo, wt, &mut index, head_tree.as_ref(), &config, &opts);
+    let grit_lines = index_to_worktree_raw(&dr.repo, &mut index, &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4008 break index↔worktree");
 }
 
@@ -236,14 +209,9 @@ fn t4008_break_rewrite_tree_worktree_rename_raw_matches_git() {
     let g_blob = fs::read_to_string(wt.join("g")).unwrap();
     fs::write(wt.join("f"), &g_blob).unwrap();
     fs::remove_file(wt.join("g")).unwrap();
-
-    let config = ConfigSet::new();
-    let opts = DiffPostprocessOptions {
-        break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: 50,
-        materialize_break_worktree_new_oid: true,
-        ..Default::default()
-    };
+    let opts = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(50))
+        .with_break_rewrites(BreakRewrites::DEFAULT);
 
     let git_lines = git_raw_lines(
         wt,
@@ -257,8 +225,7 @@ fn t4008_break_rewrite_tree_worktree_rename_raw_matches_git() {
         ],
     );
     let index = dr.load_index();
-    let grit_lines =
-        tree_to_worktree_raw_abbrev(&dr.repo, wt, &index, Some(&tree), &config, &opts, 7);
+    let grit_lines = tree_to_worktree_raw_abbrev(&dr.repo, &index, Some(&tree), &opts, 7);
     assert_raw_matches_git(
         &grit_lines,
         &git_lines,
@@ -284,22 +251,14 @@ fn t4008_break_rewrite_tree_worktree_raw_matches_git() {
     let mut rewritten = original.clone();
     rewritten.replace_range(100..500, &"Y".repeat(400));
     fs::write(wt.join("big.txt"), &rewritten).unwrap();
-
-    let config = ConfigSet::new();
-    let opts = DiffPostprocessOptions {
-        break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
-        materialize_break_worktree_new_oid: true,
-        ..Default::default()
-    };
+    let opts = TreeDiffOptions::default().with_break_rewrites(BreakRewrites::DEFAULT);
 
     let git_lines = git_raw_lines(
         wt,
         &["diff", "-r", "-B", "--raw", &format!("{}:", tree.to_hex())],
     );
     let index = dr.load_index();
-    let grit_lines =
-        tree_to_worktree_raw_abbrev(&dr.repo, wt, &index, Some(&tree), &config, &opts, 7);
+    let grit_lines = tree_to_worktree_raw_abbrev(&dr.repo, &index, Some(&tree), &opts, 7);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4008 break tree↔worktree");
 }
 
@@ -325,22 +284,14 @@ fn t4008_break_rewrite_tree_worktree_eol_lf_crlf_raw_matches_git() {
     }
     crlf.extend_from_slice(b"\r\n");
     fs::write(wt.join("f.txt"), &crlf).unwrap();
-
-    let config = ConfigSet::new();
-    let opts = DiffPostprocessOptions {
-        break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
-        materialize_break_worktree_new_oid: true,
-        ..Default::default()
-    };
+    let opts = TreeDiffOptions::default().with_break_rewrites(BreakRewrites::DEFAULT);
 
     let git_lines = git_raw_lines(
         wt,
         &["diff", "-r", "-B", "--raw", &format!("{}:", tree.to_hex())],
     );
     let index = dr.load_index();
-    let grit_lines =
-        tree_to_worktree_raw_abbrev(&dr.repo, wt, &index, Some(&tree), &config, &opts, 7);
+    let grit_lines = tree_to_worktree_raw_abbrev(&dr.repo, &index, Some(&tree), &opts, 7);
     assert_raw_matches_git(
         &grit_lines,
         &git_lines,
@@ -370,13 +321,7 @@ fn t4008_break_rewrite_matches_git() {
     fs::write(wt.join("file1"), body).unwrap();
     fs::remove_file(wt.join("file0")).unwrap();
     git_quiet(wt, &["add", "-u"]);
-
-    let config = ConfigSet::new();
-    let break_only = DiffPostprocessOptions {
-        break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: grit_lib::diff::RENAME_DETECTION_DISABLED,
-        ..Default::default()
-    };
+    let break_only = TreeDiffOptions::default().with_break_rewrites(BreakRewrites::DEFAULT);
     let git_b = git_raw_lines(
         wt,
         &[
@@ -390,14 +335,12 @@ fn t4008_break_rewrite_matches_git() {
         ],
     );
     let index = dr.load_index();
-    let grit_b = index_to_tree_raw(&dr.repo, &index, &reference, &config, &break_only);
+    let grit_b = index_to_tree_raw(&dr.repo, &index, &reference, &break_only);
     assert_raw_matches_git(&grit_b, &git_b, "t4008 break without rename");
 
-    let break_rename = DiffPostprocessOptions {
-        break_score: Some(GIT_DIFF_DEFAULT_BREAK_SCORE),
-        rename_threshold: 50,
-        ..Default::default()
-    };
+    let break_rename = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(50))
+        .with_break_rewrites(BreakRewrites::DEFAULT);
     let git_br = git_raw_lines(
         wt,
         &[
@@ -411,7 +354,7 @@ fn t4008_break_rewrite_matches_git() {
             &reference.to_hex(),
         ],
     );
-    let grit_br = index_to_tree_raw(&dr.repo, &index, &reference, &config, &break_rename);
+    let grit_br = index_to_tree_raw(&dr.repo, &index, &reference, &break_rename);
     assert_raw_matches_git(&grit_br, &git_br, "t4008 break with rename");
 }
 
@@ -434,8 +377,6 @@ fn t4023_typechange_matches_git() {
     }
     git_quiet(wt, &["add", "f"]);
     let commit: ObjectId = git_quiet(wt, &["write-tree"]).trim().parse().unwrap();
-
-    let config = ConfigSet::new();
     let opts = default_opts();
     let git_lines = git_raw_lines(
         wt,
@@ -448,7 +389,7 @@ fn t4023_typechange_matches_git() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4023 typechange");
 }
 
@@ -458,7 +399,11 @@ fn t4054_bogus_tree_typed_error() {
     git_quiet(&dr.worktree, &["commit", "--allow-empty", "-qm", "empty"]);
     let bogus = write_bogus_tree(&dr.repo.odb());
     let good = rev_parse_tree(&dr.worktree, "HEAD^{tree}");
-    let err = diff_trees(&dr.repo.odb(), Some(&good), Some(&bogus), "").unwrap_err();
+    let err = dr
+        .repo
+        .diff()
+        .tree_to_tree(Some(&good), Some(&bogus), &TreeDiffOptions::default())
+        .unwrap_err();
     assert!(
         matches!(err, Error::Object(ObjectError::Corrupt { .. })),
         "expected CorruptObject, got {err:?}"
@@ -485,7 +430,6 @@ fn rename_limit_wide_tree_matches_git() {
 
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = ConfigSet::new();
     let opts = rename_opts(50);
 
     let git_lines = git_raw_lines(
@@ -500,7 +444,7 @@ fn rename_limit_wide_tree_matches_git() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_eq!(git_lines.len(), N);
     assert_raw_matches_git(&grit_lines, &git_lines, "renameLimit wide tree");
 }
@@ -536,7 +480,6 @@ fn all_unique_basename_inexact_renames_over_default_limit_match_git() {
 
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = ConfigSet::new();
     let opts = rename_opts(50);
 
     let git_lines = git_raw_lines(
@@ -551,7 +494,7 @@ fn all_unique_basename_inexact_renames_over_default_limit_match_git() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_eq!(
         git_lines.len(),
         N,
@@ -583,8 +526,6 @@ fn t4011_symlink_tree_raw_matches_git() {
     std::os::unix::fs::symlink("target", wt.join("link2")).unwrap();
     git_quiet(wt, &["add", "-A"]);
     let child: ObjectId = git_quiet(wt, &["write-tree"]).trim().parse().unwrap();
-
-    let config = ConfigSet::new();
     let opts = default_opts();
     let git_lines = git_raw_lines(
         wt,
@@ -597,7 +538,7 @@ fn t4011_symlink_tree_raw_matches_git() {
             &child.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&child), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&child), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4011 symlink");
 }
 
@@ -620,7 +561,7 @@ fn rename_limit_config_matches_git() {
 
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = config_with_kv("diff", "renameLimit", "5");
+    set_repo_config(wt, "diff.renameLimit", "5");
     let opts = rename_opts(50);
 
     let git_lines = git_raw_lines(
@@ -635,7 +576,7 @@ fn rename_limit_config_matches_git() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "diff.renameLimit");
 }
 
@@ -646,7 +587,6 @@ fn t4000_root_tree_diff_raw_matches_git() {
     fs::write(wt.join("first"), "x\n").unwrap();
     git_quiet(wt, &["add", "first"]);
     let tree: ObjectId = git_quiet(wt, &["write-tree"]).trim().parse().unwrap();
-    let config = ConfigSet::new();
     let opts = default_opts();
     let empty_tree: ObjectId = "4b825dc642cb6eb9a060e54bf8d69288fbee4904".parse().unwrap();
     let git_lines = git_raw_lines(
@@ -660,7 +600,7 @@ fn t4000_root_tree_diff_raw_matches_git() {
             &tree.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&empty_tree), Some(&tree), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&empty_tree), Some(&tree), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4000 root tree");
 }
 
@@ -677,29 +617,21 @@ fn diff_tree_to_worktree_and_show_tree_entries() {
     git_quiet(wt, &["add", "new.txt"]);
 
     let index = dr.load_index();
-    let config = ConfigSet::new();
     let opts = default_opts();
     let git_lines = git_raw_lines(wt, &["diff", "-r", "--raw", &format!("{}:", tree.to_hex())]);
-    let raw = grit_lib::diff::diff_tree_to_worktree(&dr.repo.odb(), Some(&tree), wt, &index)
-        .expect("tree_to_worktree");
-    let wctx = grit_lib::diff::DiffPostprocessWorktree {
-        repository_git_dir: &dr.repo.git_dir(),
-        index: &index,
-    };
-    let entries = support::postprocess(
-        &dr.repo.odb(),
-        raw,
-        Some(&tree),
-        Some(wt),
-        Some(&wctx),
-        &config,
-        &opts,
-    );
-    let grit_lines = grit_raw_lines_abbrev(&entries, 7);
+    let grit_lines = tree_to_worktree_raw_abbrev(&dr.repo, &index, Some(&tree), &opts, 7);
     assert_raw_matches_git(&grit_lines, &git_lines, "tree↔worktree");
 
-    let show = diff_trees_show_tree_entries(&dr.repo.odb(), Some(&tree), Some(&tree), "")
-        .expect("show tree entries");
+    let show = dr
+        .repo
+        .diff()
+        .tree_to_tree(
+            Some(&tree),
+            Some(&tree),
+            &TreeDiffOptions::default().with_show_tree_entries(true),
+        )
+        .expect("show tree entries")
+        .entries;
     assert!(
         show.is_empty(),
         "identical trees produce no show-tree lines"
@@ -725,8 +657,6 @@ fn rename_similarity_trailing_newline_is_add_delete_not_rename_at_m50() {
         .trim()
         .parse()
         .unwrap();
-
-    let config = ConfigSet::new();
     let opts = rename_opts(50);
     let git_lines = git_raw_lines(
         wt,
@@ -755,7 +685,7 @@ fn rename_similarity_trailing_newline_is_add_delete_not_rename_at_m50() {
         }),
         "git must not classify as rename: {git_lines:?}"
     );
-    let grit_lines = commits_diff_raw(&dr.repo, &base, &tip, &config, &opts);
+    let grit_lines = commits_diff_raw(&dr.repo, &base, &tip, &opts);
     assert_raw_matches_git(
         &grit_lines,
         &git_lines,
@@ -780,8 +710,6 @@ fn diff_commits_rename_raw_matches_git() {
         .trim()
         .parse()
         .unwrap();
-
-    let config = ConfigSet::new();
     let opts = rename_opts(50);
     let git_lines = git_raw_lines(
         wt,
@@ -795,19 +723,17 @@ fn diff_commits_rename_raw_matches_git() {
             &tip.to_hex(),
         ],
     );
-    let grit_lines = commits_diff_raw(&dr.repo, &base, &tip, &config, &opts);
+    let grit_lines = commits_diff_raw(&dr.repo, &base, &tip, &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "diff_commits rename");
 
     let parent_tree = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit_tree = rev_parse_tree(wt, "HEAD^{tree}");
-    let with_renames = diff_trees_with_renames(
-        &dr.repo.odb(),
-        Some(&parent_tree),
-        Some(&commit_tree),
-        "",
-        50,
-    )
-    .expect("with_renames");
+    let with_renames = dr
+        .repo
+        .diff()
+        .tree_to_tree(Some(&parent_tree), Some(&commit_tree), &rename_opts(50))
+        .expect("with_renames")
+        .entries;
     assert!(
         with_renames
             .iter()
@@ -828,7 +754,6 @@ fn t4043_binary_rename_raw_matches_git() {
     git_quiet(wt, &["mv", "bin", "renamed.bin"]);
     git_quiet(wt, &["commit", "-qm", "mv"]);
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = ConfigSet::new();
     let opts = rename_opts(50);
     let git_lines = git_raw_lines(
         wt,
@@ -842,18 +767,14 @@ fn t4043_binary_rename_raw_matches_git() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4043 binary rename");
     let abbrev = grit_raw_lines_abbrev(
-        &support::postprocess(
-            &dr.repo.odb(),
-            diff_trees(&dr.repo.odb(), Some(&parent), Some(&commit), "").expect("trees"),
-            Some(&parent),
-            None,
-            None,
-            &config,
-            &opts,
-        ),
+        &dr.repo
+            .diff()
+            .tree_to_tree(Some(&parent), Some(&commit), &opts)
+            .expect("trees")
+            .entries,
         7,
     );
     assert_eq!(abbrev.len(), git_lines.len());
@@ -873,7 +794,6 @@ fn t4006_diff_mode_raw_matches_git() {
         .trim()
         .parse::<ObjectId>()
         .unwrap();
-    let config = ConfigSet::new();
     let opts = default_opts();
     let git_lines = git_raw_lines(
         wt,
@@ -886,7 +806,7 @@ fn t4006_diff_mode_raw_matches_git() {
             &new.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&old), Some(&new), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&old), Some(&new), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "t4006 mode");
 }
 
@@ -930,7 +850,6 @@ fn basename_preflight_shrinks_matrix_to_match_git() {
 
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = ConfigSet::new();
     let opts = rename_opts(50);
     let git_lines = git_raw_lines(
         wt,
@@ -944,7 +863,7 @@ fn basename_preflight_shrinks_matrix_to_match_git() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "basename shrink matrix");
 }
 
@@ -971,7 +890,6 @@ fn basename_dir_guess_pairs_readme_after_exact_dir_rename() {
 
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = ConfigSet::new();
     let opts = rename_opts(50);
     let git_lines = git_raw_lines(
         wt,
@@ -985,7 +903,7 @@ fn basename_dir_guess_pairs_readme_after_exact_dir_rename() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "dir rename guess");
 }
 
@@ -1011,7 +929,6 @@ fn medium_similarity_same_basename_stays_unpaired_when_matrix_over_limit() {
 
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = ConfigSet::new();
     let opts = rename_opts(50);
     let git_lines = git_raw_lines(
         wt,
@@ -1025,7 +942,7 @@ fn medium_similarity_same_basename_stays_unpaired_when_matrix_over_limit() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "medium similarity over limit");
 }
 
@@ -1043,12 +960,9 @@ fn break_rewrite_skips_basename_heuristic() {
 
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = ConfigSet::new();
-    let break_opts = DiffPostprocessOptions {
-        break_score: Some(50),
-        rename_threshold: 50,
-        ..Default::default()
-    };
+    let break_opts = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(50))
+        .with_break_rewrites(BreakRewrites::Score(50));
     let git_lines = git_raw_lines(
         wt,
         &[
@@ -1062,7 +976,7 @@ fn break_rewrite_skips_basename_heuristic() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &break_opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &break_opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "break skips basename");
 }
 
@@ -1085,7 +999,7 @@ fn post_basename_overflow_sets_notice_and_matches_git() {
 
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let config = config_with_kv("diff", "renameLimit", "1000");
+    set_repo_config(wt, "diff.renameLimit", "1000");
     let opts = rename_opts(50);
     let git_lines = git_raw_lines(
         wt,
@@ -1099,23 +1013,15 @@ fn post_basename_overflow_sets_notice_and_matches_git() {
             &commit.to_hex(),
         ],
     );
-    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &config, &opts);
+    let grit_lines = tree_diff_raw(&dr.repo, Some(&parent), Some(&commit), &opts);
     assert_raw_matches_git(&grit_lines, &git_lines, "post-basename overflow");
 
-    let raw = diff_trees(dr.repo.odb(), Some(&parent), Some(&commit), "").unwrap();
-    let mut notice = None;
-    let _ = postprocess_diff_entries(
-        dr.repo.odb(),
-        raw,
-        Some(&parent),
-        None,
-        None,
-        &config,
-        &ThreadPolicy::default(),
-        &opts,
-        Some(&mut notice),
-    )
-    .unwrap();
+    let notice = dr
+        .repo
+        .diff()
+        .tree_to_tree(Some(&parent), Some(&commit), &opts)
+        .unwrap()
+        .inexact_rename_skipped;
     assert!(
         matches!(
             notice,

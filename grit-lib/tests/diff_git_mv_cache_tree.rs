@@ -3,9 +3,7 @@
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{
-    build_file_diffs, diff_tree_to_worktree_with_git_dir, DiffDetail, DiffOptions,
-};
+use grit_lib::diff::{DiffDetail, DiffOptions, TreeDiffOptions};
 use grit_lib::repo::{InitOptions, Repository};
 
 fn git(dir: &std::path::Path, args: &[&str]) {
@@ -49,28 +47,21 @@ fn grit_diff_stat_after_git_mv_does_not_read_stale_cache_tree() {
     let config = repo.config().snapshot().expect("config");
     let policy = repo.thread_policy();
 
-    let raw = diff_tree_to_worktree_with_git_dir(
-        repo.odb(),
-        Some(&head_tree),
-        work_tree,
-        repo.git_dir(),
-        &index,
-        Some(config.as_ref()),
-    )
-    .expect("tree to worktree");
-    build_file_diffs(
-        repo.odb(),
-        raw,
-        DiffDetail::Stat,
-        DiffOptions::default(),
-        config.as_ref(),
-        &policy,
-    )
-    .expect("stat diff");
+    let raw = repo
+        .diff()
+        .tree_to_worktree(Some(&head_tree), &index, &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("tree to worktree");
+    repo.diff()
+        .files_for_entries(raw, DiffDetail::Stat, &DiffOptions::default())
+        .expect("stat diff");
 
     let head_tree2 = head_tree;
     let index2 = repo.index().load().expect("index");
-    let staged = grit_lib::diff::diff_index_to_tree(repo.odb(), &index2, Some(&head_tree2), false)
+    let staged = repo
+        .diff()
+        .index_to_tree(&index2, Some(&head_tree2), &TreeDiffOptions::default())
+        .map(|r| r.entries)
         .expect("index to tree");
     assert!(
         !staged.is_empty(),

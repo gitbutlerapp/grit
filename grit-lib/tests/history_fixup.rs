@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::DiffStatus;
-use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide, HunkId};
+use grit_lib::diff::{hunk_ids, DiffSide, HunkId};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::hunk_select::{
     unstaged_file_diffs, HunkSelectError, HunkSelection, LineRange,
@@ -610,7 +610,7 @@ fn unstaged_hunk_ids(repo: &Repository) -> Vec<HunkId> {
     let files = unstaged_file_diffs(repo, &[]).expect("diff");
     assert_eq!(files.len(), 1);
     let (file, peer) = &files[0];
-    hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &file.path, &file.hunks, peer)
+    hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer)
 }
 
 fn fixup_opts_with_selection(
@@ -1217,7 +1217,7 @@ fn fixup_hunk_selection_plans_against_index_worktree_base_non_head_target() {
     let grit = open_grit(wt);
     let files = unstaged_file_diffs(&grit, &[]).expect("diff");
     let (file, peer) = &files[0];
-    let ids = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &file.path, &file.hunks, peer);
+    let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
     let selection = HunkSelection {
         ids: vec![ids[0].clone()],
         ranges: Vec::new(),

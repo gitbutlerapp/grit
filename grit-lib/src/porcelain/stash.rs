@@ -4044,7 +4044,7 @@ mod hunk_push_tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
-    use crate::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+    use crate::diff::{hunk_ids, DiffSide};
     use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
     use crate::environment::RepositoryOptions;
     use crate::porcelain::hunk_select::{HunkSelection, LineRange};
@@ -4098,7 +4098,7 @@ mod hunk_push_tests {
     fn hunk_selection_for_first_hunk(repo: &Repository) -> HunkSelection {
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,

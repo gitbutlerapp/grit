@@ -2,8 +2,10 @@
 //! hashed: the parallel pass must report exactly the paths system git does, in index order.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions};
+use grit_lib::diff::TreeDiffOptions;
+
 use grit_lib::objects::ObjectId;
+use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::Repository;
 use std::fs;
 use std::path::Path;
@@ -84,18 +86,16 @@ fn stale_index_parallel_hash_reports_git_changes_in_index_order() {
     .expect("open");
     for threads in [1, 4] {
         let mut index = grit_repo.index().load().expect("index");
-        let (entries, _) = diff_index_to_worktree_with_options(
-            grit_repo.odb(),
-            &mut index,
-            &repo,
-            DiffIndexToWorktreeOptions {
-                repository_git_dir: Some(grit_repo.git_dir().to_path_buf()),
-                stat_parallel_threads: Some(threads),
-                refresh_index_stat_in_pass: false,
-                ..DiffIndexToWorktreeOptions::default()
-            },
-        )
-        .expect("diff");
+        let (entries, _) = grit_repo
+            .diff()
+            .index_to_worktree(
+                &mut index,
+                &TreeDiffOptions::default().with_threads(Some(
+                    ThreadPolicy::with_threads_override(Some(threads)).min_items_override(Some(0)),
+                )),
+            )
+            .map(|r| (r.entries, r.index_stat_refreshed))
+            .expect("diff");
         let paths: Vec<&str> = entries.iter().map(|e| e.path()).collect();
         assert_eq!(paths, git_paths, "threads={threads}");
         for entry in &entries {

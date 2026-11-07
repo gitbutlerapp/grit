@@ -2,12 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use grit_lib::config::ConfigSet;
-use grit_lib::diff::{
-    diff_commits_with_renames, diff_index_to_tree, diff_index_to_worktree_with_options,
-    diff_tree_to_worktree_with_git_dir, diff_trees, diff_trees_with_renames,
-    postprocess_diff_entries, DiffIndexToWorktreeOptions, DiffPostprocessOptions, DiffStatus,
-};
+use grit_lib::diff::{CopyDetection, DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -167,51 +162,29 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
     let new_tree = write_tree(repo.odb(), "other.txt", blob_b)?;
     let base = write_commit(repo.odb(), old_tree, &[], "base")?;
     let head = write_commit(repo.odb(), new_tree, &[base], "head")?;
-    let raw = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "")?;
+    let diff = repo.diff();
+    let raw = diff
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )?
+        .entries;
     assert!(raw.iter().any(|e| e.status == DiffStatus::Modified));
-    let _ = diff_trees_with_renames(repo.odb(), Some(&old_tree), Some(&new_tree), "", 50)?;
-    let _ = diff_commits_with_renames(repo.odb(), &base, &head, 50)?;
-    let config = ConfigSet::new();
-    let policy = ThreadPolicy::default();
-    let opts = DiffPostprocessOptions {
-        rename_threshold: 50,
-        copy_threshold: Some(50),
-        find_copies_harder: true,
-        ..DiffPostprocessOptions::default()
-    };
-    let _ = postprocess_diff_entries(
-        repo.odb(),
-        raw,
-        Some(&old_tree),
-        None,
-        None,
-        &config,
-        &policy,
-        &opts,
-        None,
-    )?;
+    let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
+    let _ = diff.tree_to_tree(Some(&old_tree), Some(&new_tree), &renames)?;
+    let _ = diff.commits(&base, &head, &renames)?;
+    let copies = renames
+        .with_copies(CopyDetection::FindHarder(50))
+        .with_threads(Some(ThreadPolicy::default()));
+    let _ = diff.tree_to_tree(Some(&old_tree), Some(&new_tree), &copies)?;
 
     let mut index = Index::new();
     index.entries_mut().push(index_entry("tracked.txt", blob_b));
     index.write_to_path(&repo.git_dir().join("index"), false)?;
     let head_tree = write_tree_from_index(repo.odb(), &index, "")?;
-    let _ = diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false)?;
-    let _ = diff_index_to_worktree_with_options(
-        repo.odb(),
-        &mut index.clone(),
-        dir.path(),
-        DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            ..DiffIndexToWorktreeOptions::default()
-        },
-    )?;
-    let _ = diff_tree_to_worktree_with_git_dir(
-        repo.odb(),
-        Some(&head_tree),
-        dir.path(),
-        repo.git_dir(),
-        &index,
-        Some(&config),
-    )?;
+    let _ = diff.index_to_tree(&index, Some(&head_tree), &TreeDiffOptions::default())?;
+    let _ = diff.index_to_worktree(&mut index.clone(), &TreeDiffOptions::default())?;
+    let _ = diff.tree_to_worktree(Some(&head_tree), &index, &TreeDiffOptions::default())?;
     Ok(())
 }

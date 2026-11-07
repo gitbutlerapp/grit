@@ -4,10 +4,9 @@
 
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
-    diff_commits_with_renames, diff_index_to_tree, diff_index_to_worktree_with_options,
-    diff_tree_to_worktree_with_git_dir, diff_trees, diff_trees_with_renames,
-    postprocess_diff_entries, DiffIndexToWorktreeOptions, DiffPostprocessOptions,
+    BreakRewrites, CopyDetection, RenameDetection, SubmoduleIgnoreMode, TreeDiffOptions,
 };
+
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::odb::Odb;
@@ -64,16 +63,15 @@ fn index_entry(path: &str, oid: ObjectId) -> IndexEntry {
 #[test]
 fn diff_core_many_tree_and_index_paths() -> grit_lib::error::Result<()> {
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let odb = Odb::new(dir.path());
-    let cfg = ConfigSet::new();
-    let policy = ThreadPolicy::default();
-    let opts = DiffPostprocessOptions {
-        rename_threshold: 50,
-        copy_threshold: Some(50),
-        find_copies_harder: true,
-        break_score: Some(50),
-        ..DiffPostprocessOptions::default()
-    };
+    let (repo0, _) = Repository::init(dir.path(), &InitOptions::default())?;
+    let odb = repo0.odb();
+    let diff = repo0.diff();
+    let opts = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(50))
+        .with_copies(CopyDetection::FindHarder(50))
+        .with_break_rewrites(BreakRewrites::Score(50))
+        .with_threads(Some(ThreadPolicy::default()));
+    let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
 
     let mut prev_tree: Option<ObjectId> = None;
     let mut prev_commit: Option<ObjectId> = None;
@@ -93,28 +91,28 @@ fn diff_core_many_tree_and_index_paths() -> grit_lib::error::Result<()> {
                 (h_name.as_str(), b_extra),
             ],
         );
-        let raw = diff_trees(&odb, prev_tree.as_ref(), Some(&new_tree), "")?;
-        let _ = diff_trees_with_renames(&odb, prev_tree.as_ref(), Some(&new_tree), "", 50)?;
-        let _ = postprocess_diff_entries(
-            &odb,
-            raw,
-            prev_tree.as_ref(),
-            None,
-            None,
-            &cfg,
-            &policy,
-            &opts,
-            None,
-        )?;
+        let raw = diff
+            .tree_to_tree(
+                prev_tree.as_ref(),
+                Some(&new_tree),
+                &TreeDiffOptions::default(),
+            )?
+            .entries;
+        let _ = diff.tree_to_tree(prev_tree.as_ref(), Some(&new_tree), &renames)?;
+        let _ = diff.detect_renames(raw, prev_tree.as_ref(), &opts)?;
         if let (Some(p_tree), Some(p_commit)) = (prev_tree, prev_commit) {
             let head = commit(&odb, new_tree, Some(p_commit), i);
-            let _ = diff_commits_with_renames(&odb, &p_commit, &head, 50)?;
+            let _ = diff.commits(&p_commit, &head, &renames)?;
             let mut index = Index::new();
             index.entries_mut().push(index_entry("shared.txt", b_new));
             index.entries_mut().push(index_entry(&f_name, b_old));
             let idx_tree = write_tree_from_index(&odb, &index, "")?;
-            let _ = diff_index_to_tree(&odb, &index, Some(&idx_tree), false)?;
-            let _ = diff_trees(&odb, Some(&p_tree), Some(&new_tree), "prefix/")?;
+            let _ = diff.index_to_tree(&index, Some(&idx_tree), &TreeDiffOptions::default())?;
+            let _ = diff.tree_to_tree(
+                Some(&p_tree),
+                Some(&new_tree),
+                &TreeDiffOptions::default().with_prefix("prefix/"),
+            )?;
         }
         prev_tree = Some(new_tree);
         prev_commit = Some(commit(&odb, new_tree, prev_commit, i));
@@ -128,25 +126,21 @@ fn diff_core_many_tree_and_index_paths() -> grit_lib::error::Result<()> {
     index.entries_mut().push(index_entry("wt.txt", wt_blob));
     let head_tree = write_tree_from_index(repo.odb(), &index, "")?;
     for simplify in [false, true] {
-        let _ = diff_index_to_worktree_with_options(
-            repo.odb(),
-            &mut index.clone(),
-            wt.path(),
-            DiffIndexToWorktreeOptions {
-                repository_git_dir: Some(repo.git_dir().to_path_buf()),
-                simplify_gitlinks: simplify,
-                refresh_index_stat_in_pass: simplify,
-                ..DiffIndexToWorktreeOptions::default()
-            },
-        )?;
-        let _ = diff_tree_to_worktree_with_git_dir(
-            repo.odb(),
-            Some(&head_tree),
-            wt.path(),
-            repo.git_dir(),
-            &index,
-            Some(&cfg),
-        )?;
+        let submodules = if simplify {
+            SubmoduleIgnoreMode::Dirty
+        } else {
+            SubmoduleIgnoreMode::None
+        };
+        let options = TreeDiffOptions::default()
+            .with_submodules(submodules)
+            .with_refresh_index_stat(simplify);
+        let _ = repo
+            .diff()
+            .index_to_worktree(&mut index.clone(), &options)?;
+        let _ = repo
+            .diff()
+            .tree_to_worktree(Some(&head_tree), &index, &TreeDiffOptions::default())
+            .map(|r| r.entries)?;
     }
 
     Ok(())

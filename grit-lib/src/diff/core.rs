@@ -2926,7 +2926,7 @@ pub fn empty_blob_oid() -> ObjectId {
 /// # Errors
 ///
 /// Returns errors from object database reads.
-pub fn diff_trees(
+pub(crate) fn diff_trees(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
@@ -3084,16 +3084,45 @@ pub(crate) fn diff_trees_for_pathspecs(
     pathspecs: &[String],
     pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
 ) -> Result<Vec<DiffEntry>> {
-    if pathspecs.is_empty() {
-        return diff_trees(odb, old_tree_oid, new_tree_oid, "");
-    }
+    diff_trees_for_pathspecs_at(
+        odb,
+        old_tree_oid,
+        new_tree_oid,
+        "",
+        false,
+        pathspecs,
+        pathspec_matcher,
+    )
+}
+
+/// [`diff_trees_for_pathspecs`] for subtrees at `prefix`, optionally reporting changed subtrees
+/// themselves (`show_trees`, Git `diff-tree -t`).
+pub(crate) fn diff_trees_for_pathspecs_at(
+    odb: &Odb,
+    old_tree_oid: Option<&ObjectId>,
+    new_tree_oid: Option<&ObjectId>,
+    prefix: &str,
+    show_trees: bool,
+    pathspecs: &[String],
+    pathspec_matcher: Option<&crate::pathspec::PathspecMatcher<'_>>,
+) -> Result<Vec<DiffEntry>> {
     crate::trace::trace_span!("grit.diff.tree");
+    if pathspecs.is_empty() {
+        return diff_trees_opts(odb, old_tree_oid, new_tree_oid, prefix, show_trees, None);
+    }
     let hint = DiffTreesWalkHint {
         pathspecs,
         pathspec_matcher,
         ..DiffTreesWalkHint::default()
     };
-    let mut entries = diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, Some(&hint))?;
+    let mut entries = diff_trees_opts(
+        odb,
+        old_tree_oid,
+        new_tree_oid,
+        prefix,
+        show_trees,
+        Some(&hint),
+    )?;
     entries.retain(|entry| diff_entry_matches_pathspecs(entry, pathspecs, pathspec_matcher));
     Ok(entries)
 }
@@ -3191,7 +3220,7 @@ pub(crate) fn diff_tree_path_change_count(
 /// # Errors
 ///
 /// Propagates errors from [`diff_trees`].
-pub fn diff_trees_with_renames(
+pub(crate) fn diff_trees_with_renames(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
@@ -3330,11 +3359,13 @@ pub(crate) fn diff_trees_with_renames_for_pathspecs_and_policy_result(
         return Ok(DiffEntriesResult {
             entries: out.entries,
             inexact_rename_skipped: out.inexact_skipped,
+            ..Default::default()
         });
     }
     Ok(DiffEntriesResult {
         entries,
         inexact_rename_skipped: None,
+        ..Default::default()
     })
 }
 
@@ -3391,17 +3422,6 @@ pub(crate) fn tree_oid_of_commit_in_repo(
     tree_oid_of_commit(repo.odb(), &effective)
 }
 
-/// Diff the trees recorded at two commits (`base` is the old side, `tip` the new side).
-///
-/// # Errors
-///
-/// Propagates object read errors and tree diff failures.
-pub fn diff_commits(odb: &Odb, base: &ObjectId, tip: &ObjectId) -> Result<Vec<DiffEntry>> {
-    let base_tree = tree_oid_of_commit(odb, base)?;
-    let tip_tree = tree_oid_of_commit(odb, tip)?;
-    diff_trees(odb, Some(&base_tree), Some(&tip_tree), "")
-}
-
 /// Diff the trees at two commits and pair deleted/added paths as renames when similar enough.
 ///
 /// `rename_threshold` is Git's `-M` percentage (`0`–`100`, inclusive). Use
@@ -3410,7 +3430,8 @@ pub fn diff_commits(odb: &Odb, base: &ObjectId, tip: &ObjectId) -> Result<Vec<Di
 /// # Errors
 ///
 /// Propagates object read errors and tree diff failures.
-pub fn diff_commits_with_renames(
+#[cfg(test)]
+pub(crate) fn diff_commits_with_renames(
     odb: &Odb,
     base: &ObjectId,
     tip: &ObjectId,
@@ -3426,6 +3447,7 @@ pub fn diff_commits_with_renames(
 /// # Errors
 ///
 /// Propagates object read errors and tree diff failures.
+#[cfg(test)]
 pub(crate) fn diff_commits_with_renames_and_policy(
     odb: &Odb,
     base: &ObjectId,
@@ -3453,7 +3475,8 @@ pub(crate) fn diff_commits_with_renames_and_policy(
 /// # Errors
 ///
 /// Returns errors from object database reads.
-pub fn diff_trees_show_tree_entries(
+#[cfg(test)]
+pub(crate) fn diff_trees_show_tree_entries(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
@@ -4030,7 +4053,7 @@ fn emit_added_opts(
 ///
 /// When `ignore_submodules` is true, gitlink (`160000`) paths are omitted from the diff, matching
 /// Git's `require_clean_work_tree(..., ignore_submodules=1)` used by `git rebase` / `git pull`.
-pub fn diff_index_to_tree(
+pub(crate) fn diff_index_to_tree(
     odb: &Odb,
     index: &Index,
     tree_oid: Option<&ObjectId>,
@@ -4136,7 +4159,7 @@ pub(crate) fn apply_rename_detection_to_diff_entries(
 /// # Errors
 ///
 /// Propagates errors from the index↔worktree diff or rename post-processing.
-pub fn diff_index_to_worktree_with_renames(
+pub(crate) fn diff_index_to_worktree_with_renames(
     repo: &Repository,
     index: &mut Index,
     work_tree: &Path,
@@ -5379,7 +5402,7 @@ fn hard_reset_append_entries_from_tree(
 /// # Errors
 ///
 /// Returns errors from I/O or hashing.
-pub fn diff_index_to_worktree(
+pub(crate) fn diff_index_to_worktree(
     odb: &Odb,
     index: &mut Index,
     work_tree: &Path,
@@ -5404,7 +5427,7 @@ pub(crate) type IndexPathSkipPredicate = std::sync::Arc<dyn Fn(&[u8]) -> bool + 
 
 /// Additional inputs for `diff_index_to_worktree_with_options`.
 #[derive(Clone)]
-pub struct DiffIndexToWorktreeOptions {
+pub(crate) struct DiffIndexToWorktreeOptions {
     /// Optional index mtime pair `(sec, nsec)` sampled when the index was read.
     ///
     /// When provided, entries with matching stat data are still considered dirty candidates if
@@ -6105,7 +6128,7 @@ fn push_index_blob_worktree_diff(
 /// # Errors
 ///
 /// Returns errors from I/O or hashing.
-pub fn diff_index_to_worktree_with_options(
+pub(crate) fn diff_index_to_worktree_with_options(
     odb: &Odb,
     index: &mut Index,
     work_tree: &Path,
@@ -6143,7 +6166,7 @@ pub(crate) fn diff_index_to_worktree_with_owner_poll(
 /// so staging can update the index without re-reading file contents.
 /// Symlinks store their target bytes. With [`DiffIndexToWorktreeOptions::hash_blobs_without_write`],
 /// returns the same blob IDs without writing objects, for staging previews.
-pub fn diff_index_to_worktree_for_staging(
+pub(crate) fn diff_index_to_worktree_for_staging(
     odb: &Odb,
     repository_git_dir: &Path,
     index: &mut Index,
@@ -8480,10 +8503,7 @@ pub(crate) fn load_worktree_side_for_diff(
     if !force_read_content
         && treat_side_as_binary_without_reading(odb, meta.len(), Some(rel_match.as_ref()), false)?
     {
-        return Ok((
-            super::structured::SideBytes::empty_with_size(meta.len()),
-            true,
-        ));
+        return Ok((super::structured::SideBytes::unread(meta.len()), true));
     }
     let data = if let Some(rules) = worktree_rules {
         worktree_blob_bytes(
@@ -8823,7 +8843,7 @@ fn worktree_file_oid(
 /// `filter.<driver>.required` clean filter fails or cannot be started; content is never
 /// stored or hashed unfiltered in that case.
 #[allow(clippy::too_many_arguments)]
-pub fn hash_worktree_file(
+pub(crate) fn hash_worktree_file(
     odb: &Odb,
     path: &Path,
     meta: &fs::Metadata,
@@ -8948,7 +8968,8 @@ pub fn mode_from_metadata(meta: &fs::Metadata) -> u32 {
 /// # Errors
 ///
 /// Returns errors from ODB reads or I/O.
-pub fn diff_tree_to_worktree(
+#[cfg(test)]
+pub(crate) fn diff_tree_to_worktree(
     odb: &Odb,
     tree_oid: Option<&ObjectId>,
     work_tree: &Path,
@@ -8967,7 +8988,8 @@ pub fn diff_tree_to_worktree(
 /// Like [`diff_tree_to_worktree`], but loads config from `repository_git_dir` (linked worktrees / gitfiles).
 ///
 /// Pass `config` when the caller already holds a repository config snapshot.
-pub fn diff_tree_to_worktree_with_git_dir(
+#[cfg(test)]
+pub(crate) fn diff_tree_to_worktree_with_git_dir(
     odb: &Odb,
     tree_oid: Option<&ObjectId>,
     work_tree: &Path,
@@ -8987,7 +9009,7 @@ pub fn diff_tree_to_worktree_with_git_dir(
 }
 
 /// Like [`diff_tree_to_worktree_with_git_dir`], with optional shared [`crate::worktree_rules::WorktreeRules`].
-pub fn diff_tree_to_worktree_with_git_dir_and_rules(
+pub(crate) fn diff_tree_to_worktree_with_git_dir_and_rules(
     odb: &Odb,
     tree_oid: Option<&ObjectId>,
     work_tree: &Path,
@@ -9475,18 +9497,35 @@ pub struct InexactRenameDetectionSkipped {
     pub suggested_limit: usize,
 }
 
-/// Tree or commit diff entries after rename detection, with an optional limit notice.
+/// Changed paths from a [`Diff`](super::Diff) metadata diff, after any rename, copy or break
+/// pairing, with what the diff noticed along the way.
+#[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiffEntriesResult {
-    /// Flat diff entries in path order.
+    /// Flat diff entries, one per changed path (renames and copies pair two paths).
     pub entries: Vec<DiffEntry>,
     /// Set when inexact rename detection was skipped due to `diff.renameLimit`.
     pub inexact_rename_skipped: Option<InexactRenameDetectionSkipped>,
+    /// Index-to-work-tree diffs with
+    /// [`TreeDiffOptions::refresh_index_stat`](super::TreeDiffOptions::refresh_index_stat):
+    /// whether the in-memory index adopted fresh stat data and is worth writing back.
+    pub index_stat_refreshed: bool,
+}
+
+impl DiffEntriesResult {
+    /// Entries with no rename-limit notice and no index refresh.
+    #[must_use]
+    pub fn new(entries: Vec<DiffEntry>) -> Self {
+        Self {
+            entries,
+            ..Self::default()
+        }
+    }
 }
 
 /// Result of [`detect_renames_with_policy`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RenameDetectionResult {
+pub(crate) struct RenameDetectionResult {
     /// Diff entries after rename pairing.
     pub entries: Vec<DiffEntry>,
     /// Set when inexact rename detection was skipped due to `diff.renameLimit`.
@@ -9495,7 +9534,7 @@ pub struct RenameDetectionResult {
 
 /// Options for [`detect_renames_with_policy`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DetectRenamesOptions {
+pub(crate) struct DetectRenamesOptions {
     /// Skip Git's basename pre-pass (break-rewrite and copy detection paths).
     pub skip_basename_heuristic: bool,
 }
@@ -9568,7 +9607,7 @@ fn poll_rename_cancel(cancel: Option<&crate::progress::CancelToken>) -> crate::e
 /// Returns object database errors from reading candidate blobs, and the cancellation
 /// error when `cancel` is set.
 #[allow(clippy::too_many_arguments)]
-pub fn detect_renames_with_policy(
+pub(crate) fn detect_renames_with_policy(
     odb: &Odb,
     work_root: Option<&Path>,
     entries: Vec<DiffEntry>,
@@ -10064,7 +10103,7 @@ fn detect_copies(
 ///
 /// Same as `detect_copies`.
 #[expect(clippy::too_many_arguments)]
-pub fn detect_copies_with_policy(
+pub(crate) fn detect_copies_with_policy(
     odb: &Odb,
     work_root: Option<&Path>,
     entries: Vec<DiffEntry>,
@@ -10402,7 +10441,7 @@ pub fn detect_copies_with_policy(
 
 /// Options for Git-style rename, copy, and break-rewrite post-processing on tree diffs.
 #[derive(Debug, Clone, Copy)]
-pub struct DiffPostprocessOptions {
+pub(crate) struct DiffPostprocessOptions {
     /// When set, `--break-rewrites` threshold on Git's internal 0–the internal max score (60_000) scale
     /// (`None` = off).
     pub break_score: Option<u64>,
@@ -10432,9 +10471,7 @@ impl Default for DiffPostprocessOptions {
 /// Index and git directory used to read canonical (clean) worktree bytes during break-rewrite
 /// post-processing on tree↔worktree diffs.
 #[derive(Debug, Clone, Copy)]
-pub struct DiffPostprocessWorktree<'a> {
-    /// Git directory for config and attributes (linked worktrees / gitfiles).
-    pub repository_git_dir: &'a Path,
+pub(crate) struct DiffPostprocessWorktree<'a> {
     /// Current index; stage-0 entries supply autocrlf index-guard blobs when needed.
     pub index: &'a Index,
 }
@@ -10636,7 +10673,7 @@ fn prune_break_deletions_obviated_by_renames(entries: Vec<DiffEntry>) -> Vec<Dif
 ///
 /// Propagates object read failures while evaluating break scores.
 #[allow(clippy::too_many_arguments)]
-pub fn postprocess_diff_entries(
+pub(crate) fn postprocess_diff_entries(
     odb: &Odb,
     entries: Vec<DiffEntry>,
     source_tree_oid: Option<&ObjectId>,
@@ -10646,6 +10683,31 @@ pub fn postprocess_diff_entries(
     thread_policy: &ThreadPolicy,
     opts: &DiffPostprocessOptions,
     inexact_notice: Option<&mut Option<InexactRenameDetectionSkipped>>,
+) -> Result<Vec<DiffEntry>> {
+    let entries = break_rewrites_for_postprocess(odb, entries, work_root, worktree, config, opts)?;
+    let source_tree_entries = source_tree_oid
+        .map(|t| flatten_tree_entries(odb, t))
+        .transpose()?
+        .unwrap_or_default();
+    pair_postprocessed_entries(
+        odb,
+        entries,
+        &source_tree_entries,
+        work_root,
+        config,
+        thread_policy,
+        opts,
+        inexact_notice,
+    )
+}
+
+fn break_rewrites_for_postprocess(
+    odb: &Odb,
+    entries: Vec<DiffEntry>,
+    work_root: Option<&Path>,
+    worktree: Option<&DiffPostprocessWorktree<'_>>,
+    config: &ConfigSet,
+    opts: &DiffPostprocessOptions,
 ) -> Result<Vec<DiffEntry>> {
     let mut entries = entries;
     if let Some(break_score) = opts.break_score {
@@ -10667,12 +10729,47 @@ pub fn postprocess_diff_entries(
             materialize_break_worktree_new_oids(odb, work_root, &mut entries, worktree, config)?;
         }
     }
+    Ok(entries)
+}
 
-    let source_tree_entries = source_tree_oid
-        .map(|t| flatten_tree_entries(odb, t))
-        .transpose()?
-        .unwrap_or_default();
+/// Like [`postprocess_diff_entries`] with the copy sources already listed as `(path, mode, oid)`
+/// (an index's stage-0 entries, say) instead of read from a source tree.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn postprocess_diff_entries_from_sources(
+    odb: &Odb,
+    entries: Vec<DiffEntry>,
+    source_entries: &[(String, FileMode, ObjectId)],
+    work_root: Option<&Path>,
+    worktree: Option<&DiffPostprocessWorktree<'_>>,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+    opts: &DiffPostprocessOptions,
+    inexact_notice: Option<&mut Option<InexactRenameDetectionSkipped>>,
+) -> Result<Vec<DiffEntry>> {
+    let entries = break_rewrites_for_postprocess(odb, entries, work_root, worktree, config, opts)?;
+    pair_postprocessed_entries(
+        odb,
+        entries,
+        source_entries,
+        work_root,
+        config,
+        thread_policy,
+        opts,
+        inexact_notice,
+    )
+}
 
+#[allow(clippy::too_many_arguments)]
+fn pair_postprocessed_entries(
+    odb: &Odb,
+    entries: Vec<DiffEntry>,
+    source_tree_entries: &[(String, FileMode, ObjectId)],
+    work_root: Option<&Path>,
+    config: &ConfigSet,
+    thread_policy: &ThreadPolicy,
+    opts: &DiffPostprocessOptions,
+    inexact_notice: Option<&mut Option<InexactRenameDetectionSkipped>>,
+) -> Result<Vec<DiffEntry>> {
     if opts.copy_threshold.is_some() || opts.find_copies_harder {
         let threshold = opts.copy_threshold.unwrap_or(opts.rename_threshold.min(99));
         detect_copies_with_policy(
@@ -10681,7 +10778,7 @@ pub fn postprocess_diff_entries(
             entries,
             threshold,
             opts.find_copies_harder,
-            &source_tree_entries,
+            source_tree_entries,
             config,
             thread_policy,
         )
@@ -12677,8 +12774,7 @@ const DIFF_MINIMUM_BREAK_SIZE: usize = 400;
 #[allow(dead_code)]
 const DIFF_DEFAULT_BREAK_SCORE: u64 = 30_000;
 /// Default break threshold (`DEFAULT_BREAK_SCORE` in `diffcore.h`), internal 0–the internal max score (60_000) scale.
-#[allow(dead_code)]
-const GIT_DIFF_DEFAULT_BREAK_SCORE: u64 = DIFF_DEFAULT_BREAK_SCORE;
+pub(crate) const GIT_DIFF_DEFAULT_BREAK_SCORE: u64 = DIFF_DEFAULT_BREAK_SCORE;
 const DIFF_HASHBASE: u32 = 107_927;
 
 #[derive(Clone, Copy, Default)]

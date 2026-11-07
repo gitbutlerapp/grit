@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide, HunkId};
+use grit_lib::diff::{hunk_ids, DiffSide, HunkId};
 use grit_lib::porcelain::hunk_select::{restore_hunks, unstaged_file_diffs, HunkSelection};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -61,7 +61,7 @@ fn unstaged_ids(repo: &Repository, path: &str) -> Vec<HunkId> {
     let pathspec = vec![path.to_string()];
     let diffs = unstaged_file_diffs(repo, &pathspec).expect("unstaged diffs");
     let (file, peer) = diffs.first().expect("path is modified");
-    hunk_ids_with_duplicate_peers(DiffSide::Unstaged, path, &file.hunks, peer)
+    hunk_ids(DiffSide::Unstaged, path, &file.hunks, peer)
 }
 
 fn restore(repo: &Repository, ids: Vec<HunkId>, path: &str) {

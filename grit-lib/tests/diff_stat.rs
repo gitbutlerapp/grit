@@ -1,11 +1,10 @@
 //! `grit_lib::diff::DiffStat`: per-file counts, totals and change bars from listed file diffs.
 
 use grit_lib::diff::{
-    build_file_diffs, DiffDetail, DiffOptions, DiffStat, DiffStatus, DiffTotals, FileStat,
-    LineStat, ListedFileDiff, StatBar,
+    DiffDetail, DiffOptions, DiffStat, DiffStatus, DiffTotals, FileStat, LineStat, ListedFileDiff,
+    StatBar, TreeDiffOptions,
 };
 use grit_lib::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
-use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn tree_with(repo: &Repository, entries: &[(&str, &[u8])]) -> ObjectId {
@@ -30,19 +29,13 @@ fn listed(
 ) -> Vec<ListedFileDiff> {
     let entries = repo
         .diff()
-        .tree_to_tree(Some(old), Some(new))
+        .tree_to_tree(Some(old), Some(new), &TreeDiffOptions::default())
+        .map(|r| r.entries)
         .expect("tree diff");
-    let config = repo.config().snapshot().expect("config");
-    build_file_diffs(
-        repo.odb(),
-        entries,
-        detail,
-        DiffOptions::default(),
-        config.as_ref(),
-        &ThreadPolicy::default(),
-    )
-    .expect("file diffs")
-    .files
+    repo.diff()
+        .files_for_entries(entries, detail, &DiffOptions::default())
+        .expect("file diffs")
+        .files
 }
 
 #[test]

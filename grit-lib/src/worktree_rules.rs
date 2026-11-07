@@ -275,6 +275,41 @@ impl WorktreeRules {
             &self.config,
         )
     }
+
+    /// Blob id the work-tree file at `path` gets when staged as `rel_path`, after this
+    /// context's clean conversion: attributes, `core.autocrlf`, and filter drivers, including
+    /// the repository's long-running process filters. Nothing is written to `odb`.
+    ///
+    /// # Parameters
+    ///
+    /// - `odb` - object database whose hash algorithm names the blob.
+    /// - `path` - the file on disk.
+    /// - `meta` - its `lstat` metadata (symlinks hash their target path).
+    /// - `rel_path` - its repository-relative path, for attribute lookup.
+    /// - `index_entry` - its index entry, when staged, for the `core.autocrlf` index guard.
+    ///
+    /// # Errors
+    ///
+    /// Returns read and filter errors.
+    pub fn hash_worktree_file(
+        &self,
+        odb: &Odb,
+        path: &Path,
+        meta: &std::fs::Metadata,
+        rel_path: &str,
+        index_entry: Option<&crate::index::IndexEntry>,
+    ) -> Result<ObjectId> {
+        crate::diff::hash_worktree_file(
+            odb,
+            path,
+            meta,
+            &self.conversion,
+            &self.file_attrs(rel_path, false),
+            rel_path,
+            index_entry,
+            Some(self.filter_process()),
+        )
+    }
 }
 
 impl AttributeState {

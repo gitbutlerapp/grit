@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{diff_index_to_tree, tree_oid_of_commit, DiffStatus};
+use grit_lib::diff::{tree_oid_of_commit, DiffStatus, TreeDiffOptions};
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
 
@@ -105,7 +105,11 @@ fn staged_diff_on_wide_git_written_cache_tree_matches_git() {
     let head = resolve_head(repo.git_dir()).expect("head");
     let head_tree = tree_oid_of_commit(repo.odb(), head.oid().expect("commit")).expect("tree");
 
-    let entries = diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false).expect("diff");
+    let entries = repo
+        .diff()
+        .index_to_tree(&index, Some(&head_tree), &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
     let grit_rows: BTreeSet<Row> = entries
         .iter()
         .map(|e| {

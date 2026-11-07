@@ -5,7 +5,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::diff::{detect_renames_with_policy, diff_trees, DetectRenamesOptions, DiffStatus};
+use grit_lib::diff::{DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_test_support::forced_parallel_policy;
@@ -104,23 +104,26 @@ fn inexact_unique_basenames_above_default_rename_limit_match_git() {
     let parent = rev_parse_tree(root, "HEAD~1^{tree}");
     let commit = rev_parse_tree(root, "HEAD^{tree}");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let raw = diff_trees(repo.odb(), Some(&parent), Some(&commit), "").expect("diff");
+    let raw = repo
+        .diff()
+        .tree_to_tree(Some(&parent), Some(&commit), &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
     let config = ConfigSet::new();
     let policy = forced_parallel_policy();
-    let result = detect_renames_with_policy(
-        repo.odb(),
-        None,
-        raw,
-        50,
-        &config,
-        &policy,
-        None,
-        DetectRenamesOptions::default(),
-    )
-    .expect("detect renames");
+    let result = repo
+        .diff()
+        .detect_renames(
+            raw,
+            None,
+            &TreeDiffOptions::default()
+                .with_renames(RenameDetection::Similarity(50))
+                .with_threads(Some(policy)),
+        )
+        .expect("detect renames");
 
     assert!(
-        result.inexact_skipped.is_none(),
+        result.inexact_rename_skipped.is_none(),
         "basename pre-pass should shrink matrix below renameLimit=1000"
     );
     let renames = result

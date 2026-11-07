@@ -2,12 +2,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use grit_lib::diff::{
-    build_file_diffs, build_file_diffs_streaming, diff_trees, DiffDetail, DiffOptions,
-};
+use grit_lib::diff::{DiffDetail, DiffOptions, TreeDiffOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
-use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn init_repo() -> (tempfile::TempDir, Repository) {
@@ -42,34 +39,29 @@ fn streaming_patch_rows_match_build_file_diffs() {
     let (_dir, repo) = init_repo();
     let old_tree = tree_with_files(&repo, "old");
     let new_tree = tree_with_files(&repo, "new");
-    let entries = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "").expect("diff");
-    let config = repo.config().snapshot().expect("config");
-    let thread_policy = ThreadPolicy::default();
+    let entries = repo
+        .diff()
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
+        .expect("diff");
     let opts = DiffOptions::default();
 
-    let bulk = build_file_diffs(
-        repo.odb(),
-        entries.clone(),
-        DiffDetail::Patch,
-        opts.clone(),
-        config.as_ref(),
-        &thread_policy,
-    )
-    .expect("bulk");
+    let bulk = repo
+        .diff()
+        .files_for_entries(entries.clone(), DiffDetail::Patch, &opts)
+        .expect("bulk");
 
     let mut streamed = Vec::new();
-    build_file_diffs_streaming(
-        repo.odb(),
-        entries,
-        opts,
-        config.as_ref(),
-        &thread_policy,
-        |row| {
+    repo.diff()
+        .for_each_file(entries, &opts, |row| {
             streamed.push(row);
             Ok(())
-        },
-    )
-    .expect("stream");
+        })
+        .expect("stream");
 
     assert_eq!(streamed.len(), bulk.files.len());
     for (a, b) in streamed.iter().zip(bulk.files.iter()) {
@@ -84,17 +76,20 @@ fn streaming_propagates_callback_errors() {
     let (_dir, repo) = init_repo();
     let old_tree = tree_with_files(&repo, "a");
     let new_tree = tree_with_files(&repo, "b");
-    let entries = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "").expect("diff");
-    let config = repo.config().snapshot().expect("config");
-    let thread_policy = ThreadPolicy::default();
-    let err = build_file_diffs_streaming(
-        repo.odb(),
-        entries,
-        DiffOptions::default(),
-        config.as_ref(),
-        &thread_policy,
-        |_| Err(Error::Cancelled),
-    )
-    .expect_err("callback error");
+    let entries = repo
+        .diff()
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
+        .expect("diff");
+    let err = repo
+        .diff()
+        .for_each_file(entries, &(DiffOptions::default()), |_| {
+            Err(Error::Cancelled)
+        })
+        .expect_err("callback error");
     assert!(matches!(err, Error::Cancelled));
 }

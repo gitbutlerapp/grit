@@ -1,9 +1,9 @@
 //! Init-time filesystem capability config (issue #916 / #910).
 
+use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::init_filesystem::FilesystemCapabilities;
-use grit_lib::diff::{diff_index_to_worktree, mode_from_metadata};
+use grit_lib::diff::{mode_from_metadata, SubmoduleIgnoreMode, TreeDiffOptions};
 use grit_lib::index::{Index, MODE_EXECUTABLE};
-use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
 use std::fs;
@@ -64,7 +64,7 @@ fn init_config_matches_full_capability_detection() {
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::refs::store::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = root.path().join(".git");
@@ -101,9 +101,11 @@ fn filemode_false_suppresses_executable_mode_only_diff() {
         "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n",
     )
     .expect("config");
+    fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
     fs::write(root.path().join("run.sh"), "x\n").expect("file");
 
-    let odb = Odb::new(&git_dir.join("objects"));
+    let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
+    let odb = repo.odb();
     let oid = odb.write(ObjectKind::Blob, b"x\n").expect("write blob");
 
     let meta = fs::symlink_metadata(root.path().join("run.sh")).expect("stat");
@@ -118,7 +120,14 @@ fn filemode_false_suppresses_executable_mode_only_diff() {
     let mut index = Index::new();
     index.entries_mut().push(entry);
 
-    let diff = diff_index_to_worktree(&odb, &mut index, root.path(), false, true).expect("diff");
+    let diff = repo
+        .diff()
+        .index_to_worktree(
+            &mut index,
+            &TreeDiffOptions::default().with_submodules(SubmoduleIgnoreMode::Dirty),
+        )
+        .expect("diff")
+        .entries;
     assert!(
         diff.is_empty(),
         "mode-only executable mismatch must be ignored when core.filemode=false: {diff:?}"
@@ -172,7 +181,6 @@ fn init_local_filemode_follows_detection_not_global() {
 
 #[test]
 fn separate_git_dir_honors_filemode_false_in_external_config() {
-    use grit_lib::diff::{diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions};
     use grit_lib::repo::{InitOptions, Repository};
 
     let work = TempDir::new().expect("worktree");
@@ -193,7 +201,12 @@ fn separate_git_dir_honors_filemode_false_in_external_config() {
     .expect("config");
     fs::write(work.path().join("run.sh"), "x\n").expect("file");
 
-    let odb = Odb::new(&git_dir.path().join("objects"));
+    let repo = Repository::discover(Some(work.path()), &RepositoryOptions::empty()).expect("open");
+    assert_eq!(
+        repo.git_dir().canonicalize().expect("git dir"),
+        git_dir.path().canonicalize().expect("git dir")
+    );
+    let odb = repo.odb();
     let oid = odb.write(ObjectKind::Blob, b"x\n").expect("write blob");
 
     let meta = fs::symlink_metadata(work.path().join("run.sh")).expect("stat");
@@ -208,18 +221,14 @@ fn separate_git_dir_honors_filemode_false_in_external_config() {
     let mut index = Index::new();
     index.entries_mut().push(entry);
 
-    let (diff, _) = diff_index_to_worktree_with_options(
-        &odb,
-        &mut index,
-        work.path(),
-        DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(git_dir.path().to_path_buf()),
-            ignore_submodule_untracked: false,
-            simplify_gitlinks: true,
-            ..DiffIndexToWorktreeOptions::default()
-        },
-    )
-    .expect("diff");
+    let diff = repo
+        .diff()
+        .index_to_worktree(
+            &mut index,
+            &TreeDiffOptions::default().with_submodules(SubmoduleIgnoreMode::Dirty),
+        )
+        .expect("diff")
+        .entries;
     assert!(
         diff.is_empty(),
         "separate git dir must load filemode from external config, not worktree/.git: {diff:?}"

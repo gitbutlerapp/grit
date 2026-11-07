@@ -3757,7 +3757,7 @@ mod tests {
     )]
     #[test]
     fn scope_patch_with_held_index_lock_creates_nothing() {
-        use crate::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{hunk_ids, DiffSide};
         use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
         use crate::porcelain::hunk_select::HunkSelection;
 
@@ -3766,7 +3766,7 @@ mod tests {
         let repo = git_repo_with_modified_file(root);
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f1.txt",
             &files[0].hunks,
@@ -4978,7 +4978,7 @@ mod tests {
 
     #[test]
     fn commit_hunks_only_selected_in_tree() {
-        use crate::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{hunk_ids, DiffSide};
         use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
         use crate::porcelain::hunk_select::HunkSelection;
 
@@ -5005,7 +5005,7 @@ mod tests {
 
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,
@@ -5043,7 +5043,7 @@ mod tests {
     )]
     #[test]
     fn commit_hunks_leaves_other_unstaged() {
-        use crate::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{hunk_ids, DiffSide};
         use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
         use crate::porcelain::hunk_select::HunkSelection;
 
@@ -5070,7 +5070,7 @@ mod tests {
 
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,
@@ -5169,7 +5169,7 @@ mod tests {
     )]
     #[test]
     fn commit_patch_file_matches_git_apply_cached_then_commit() {
-        use crate::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{hunk_ids, DiffSide};
         use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
         use crate::porcelain::hunk_select::{resolve_selection, HunkSelection};
 
@@ -5196,7 +5196,7 @@ mod tests {
 
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,
@@ -5257,7 +5257,7 @@ mod tests {
 
     #[test]
     fn commit_patch_dry_run_writes_no_loose_objects() {
-        use crate::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{hunk_ids, DiffSide};
         use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
         use crate::porcelain::hunk_select::{resolve_selection, HunkSelection};
 
@@ -5285,7 +5285,7 @@ mod tests {
         let before_loose = loose_object_count(&repo);
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,
@@ -5450,7 +5450,7 @@ mod tests {
 
     #[test]
     fn commit_with_scope_patch_apply_failure_is_typed() {
-        use crate::diff::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{hunk_ids, DiffSide};
         use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
         use crate::porcelain::hunk_select::{resolve_selection, HunkSelection};
 
@@ -5477,7 +5477,7 @@ mod tests {
 
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,

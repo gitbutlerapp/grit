@@ -7,8 +7,8 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{
-    load_object_changes, name_status_line, resolve_diff_request, DiffOptions, DiffRequest,
-    DiffSide, DiffTarget, FileChange, RenameDetection, ResolveDiffArgumentsError, UncommittedDiff,
+    name_status_line, DiffOptions, DiffRequest, DiffSide, DiffTarget, FileChange, RenameDetection,
+    ResolveDiffArgumentsError, UncommittedDiff,
 };
 use grit_lib::error::Error;
 use grit_lib::index::Index;
@@ -108,7 +108,7 @@ fn staged_entries_and_contents_match_git_diff_cached() {
         git_lines(dir.path(), &["diff", "--cached", "--name-status", "-M"])
     );
 
-    let changes = load_object_changes(&repo, &entries).expect("load");
+    let changes = repo.diff().object_changes(&entries).expect("load");
     assert_eq!(numstat(&changes), git_numstat(dir.path(), &["--cached"]));
     let both = changes.iter().find(|c| c.path == "both.txt").expect("both");
     assert_eq!(both.new_bytes.data, b"1\nTWO\n3\n4\n");
@@ -393,7 +393,7 @@ fn bare_repository_rejects_working_tree_diffs() {
         },
     ] {
         assert!(matches!(
-            resolve_diff_request(&repo, None, &request),
+            repo.diff().resolve_request(None, &request),
             Err(ResolveDiffArgumentsError::NoWorkTree)
         ));
     }
@@ -401,7 +401,10 @@ fn bare_repository_rejects_working_tree_diffs() {
         staged: true,
         ..DiffRequest::default()
     };
-    let arguments = resolve_diff_request(&repo, None, &staged).expect("staged works bare");
+    let arguments = repo
+        .diff()
+        .resolve_request(None, &staged)
+        .expect("staged works bare");
     assert_eq!(arguments.target, DiffTarget::IndexVsHead);
 
     let mut diff = UncommittedDiff::new(&repo, Index::default());

@@ -157,7 +157,10 @@ impl FileChange {
 /// # Errors
 ///
 /// Returns config load failures and object read errors.
-pub fn load_object_changes(repo: &Repository, entries: &[DiffEntry]) -> Result<Vec<FileChange>> {
+pub(crate) fn load_object_changes(
+    repo: &Repository,
+    entries: &[DiffEntry],
+) -> Result<Vec<FileChange>> {
     let config = repo.config().snapshot()?;
     let par_opts = repo
         .thread_policy()
@@ -226,22 +229,22 @@ fn old_side_without_payload(
         ));
     }
     if entry.old_mode == FileMode::ABSENT {
-        return Ok(SideBytes::empty_with_size(0));
+        return Ok(SideBytes::unread(0));
     }
     if let Some(side) = worktree {
         if let Some(path) = entry.old_path.as_deref().or(entry.new_path.as_deref()) {
             if let Some(ie) = side.index.get(&crate::repo_relpath::storage_bytes(path), 0) {
                 if ie.oid == entry.old_oid && !ie.stat_cache_unset() {
-                    return Ok(SideBytes::empty_with_size(u64::from(ie.size)));
+                    return Ok(SideBytes::unread(u64::from(ie.size)));
                 }
             }
         }
     }
     if entry.old_oid.is_zero() {
-        return Ok(SideBytes::empty_with_size(0));
+        return Ok(SideBytes::unread(0));
     }
     let info = odb.read_info(&entry.old_oid)?;
-    Ok(SideBytes::empty_with_size(info.size))
+    Ok(SideBytes::unread(info.size))
 }
 
 fn load_worktree_new_side(
@@ -652,6 +655,7 @@ impl<'repo> UncommittedDiff<'repo> {
                 super::core::DiffEntriesResult {
                     entries: self.staged_entries_for_paths(renames, restrict)?,
                     inexact_rename_skipped: None,
+                    ..Default::default()
                 }
             }
             DiffTarget::WorktreeVsIndex => {
@@ -660,6 +664,7 @@ impl<'repo> UncommittedDiff<'repo> {
                 super::core::DiffEntriesResult {
                     entries: self.unstaged_entries_for_paths(renames, restrict)?,
                     inexact_rename_skipped: None,
+                    ..Default::default()
                 }
             }
             DiffTarget::WorktreeVsHead => {
@@ -676,7 +681,7 @@ impl<'repo> UncommittedDiff<'repo> {
                         renames,
                         restrict,
                     )?,
-                    inexact_rename_skipped: None,
+                    ..Default::default()
                 }
             }
             DiffTarget::WorktreeVsTree(tree) => {
@@ -689,6 +694,7 @@ impl<'repo> UncommittedDiff<'repo> {
                 super::core::DiffEntriesResult {
                     entries: self.worktree_entries_for_paths(Some(tree), renames, restrict)?,
                     inexact_rename_skipped: None,
+                    ..Default::default()
                 }
             }
             DiffTarget::Commit(_) | DiffTarget::Trees { .. } => {
@@ -699,7 +705,7 @@ impl<'repo> UncommittedDiff<'repo> {
     }
 
     /// Changes on the other side of the index for the paths in `primary_paths`, which feed
-    /// [`hunk_ids_with_duplicate_peers`](crate::diff::hunk_ids_with_duplicate_peers) so hunk ids
+    /// [`hunk_ids`](crate::diff::hunk_ids) so hunk ids
     /// stay stable when an identical hunk moves between the staged and unstaged sides.
     ///
     /// For [`DiffSide::Staged`] primaries this loads the unstaged changes on those paths; for

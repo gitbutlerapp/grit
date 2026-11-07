@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{diff_index_to_worktree, unified_diff, DiffEntry, DiffStatus};
+use grit_lib::diff::{unified_diff, DiffEntry, DiffStatus, TreeDiffOptions};
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
 use std::path::{Path, PathBuf};
@@ -64,15 +64,24 @@ fn main() -> Result<()> {
     let old_tree = repo.objects().commit_tree(&parent)?;
     let new_tree = new_commit_data.tree;
 
-    let tree_changes = repo.diff().tree_to_tree(Some(&old_tree), Some(&new_tree))?;
+    let tree_changes = repo
+        .diff()
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )?
+        .entries;
     println!("tree_diff_begin");
     print_name_status(&tree_changes);
     println!("tree_diff_end");
 
-    if let Some(wt) = repo.work_tree() {
+    if repo.work_tree().is_some() {
         let mut index = repo.index().load()?;
-        let wt_changes = diff_index_to_worktree(repo.odb(), &mut index, wt, false, false)?;
-        println!("index_worktree_dirty={}", !wt_changes.is_empty());
+        let wt_changes = repo
+            .diff()
+            .index_to_worktree(&mut index, &TreeDiffOptions::default())?;
+        println!("index_worktree_dirty={}", !wt_changes.entries.is_empty());
     }
 
     if let (Some(entry),) = (tree_changes.first(),) {

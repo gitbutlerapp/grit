@@ -8,9 +8,8 @@ use grit_lib::apply::{materialize_binary_patch_forward, parse_patch};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::merge_diff::read_blob_at_path;
 use grit_lib::diff::{
-    diff_commits_with_renames_and_policy, tree_diff_structured_parallel, write_patch_resolved,
-    write_patch_structured, DiffEntry, DiffOptions, DiffStatus, PatchResolvedSide, PatchSide,
-    PatchTextOptions,
+    write_patch_resolved, write_patch_structured, DiffEntry, DiffOptions, DiffStatus,
+    PatchResolvedSide, PatchSide, PatchTextOptions, RenameDetection, TreeDiffOptions,
 };
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::repo::{Repository, RepositoryError};
@@ -71,27 +70,18 @@ fn grit_patch_structured(repo: &Repository, base: &str, tip: &str) -> Vec<u8> {
         .revwalk()
         .resolve(tip, &grit_lib::revwalk::ResolveOptions::default())
         .expect("tip");
-    let config = repo.config().snapshot().expect("config").clone();
-    let thread_policy = repo.thread_policy();
-    let mut entries = diff_commits_with_renames_and_policy(
-        repo.odb(),
-        &base_oid,
-        &tip_oid,
-        50,
-        &config,
-        &thread_policy,
-    )
-    .expect("diff");
+    let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
+    let mut entries = repo
+        .diff()
+        .commits(&base_oid, &tip_oid, &renames)
+        .expect("diff")
+        .entries;
     entries.sort_by(|a, b| a.path().cmp(b.path()));
     let diff_opts = DiffOptions::default();
-    let structured = tree_diff_structured_parallel(
-        repo.odb(),
-        entries,
-        &config,
-        &thread_policy,
-        diff_opts.clone(),
-    )
-    .expect("structured");
+    let structured = repo
+        .diff()
+        .structured(entries, &diff_opts)
+        .expect("structured");
     let patch_opts = PatchTextOptions::from_repo(repo, diff_opts).expect("patch opts");
     let mut out = Cursor::new(Vec::new());
     write_patch_structured(repo, &structured, &patch_opts, &mut out)

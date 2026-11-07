@@ -4,11 +4,11 @@
 //! but the entry mtime is at or after the index file's mtime ("racy"). These tests
 //! build repos with `git`, then compare `git diff` with [`grit_lib::diff::diff_index_to_worktree`].
 
+use grit_lib::diff::TreeDiffOptions;
 use std::path::Path;
 
 use filetime::FileTime;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::diff_index_to_worktree;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -71,7 +71,10 @@ fn racy_same_size_change_matches_git_diff() {
         Some(index_mtime),
         "source mtime preserved across reload"
     );
-    let diff = diff_index_to_worktree(grit_repo.odb(), &mut grit_index, repo, false, false)
+    let diff = grit_repo
+        .diff()
+        .index_to_worktree(&mut grit_index, &TreeDiffOptions::default())
+        .map(|r| r.entries)
         .expect("diff_index_to_worktree");
     assert_eq!(diff.len(), 1, "grit must re-hash racy entry");
     assert_eq!(diff[0].path(), "f.txt");
@@ -112,7 +115,10 @@ fn racy_unchanged_content_matches_git_clean_diff() {
     );
 
     let mut grit_index = grit_repo.index().load().expect("reload index");
-    let diff = diff_index_to_worktree(grit_repo.odb(), &mut grit_index, repo, false, false)
+    let diff = grit_repo
+        .diff()
+        .index_to_worktree(&mut grit_index, &TreeDiffOptions::default())
+        .map(|r| r.entries)
         .expect("diff_index_to_worktree");
     assert!(
         diff.is_empty(),

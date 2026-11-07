@@ -16,15 +16,13 @@
 
 use anyhow::{Context, Result};
 use grit_lib::diff::{
-    build_file_diffs, commit_diff_files, for_each_tree_diff_structured,
-    hunk_ids_with_duplicate_peers, load_object_changes, peer_hunks_by_primary_path,
-    resolve_diff_request, sort_entries_by_path,
+    hunk_ids, peer_hunks_by_primary_path, sort_entries_by_path,
     structured::{format_hunk_range, StructuredLineKind},
-    tree_diff_structured_parallel, write_commit_log_patch, write_commits_log_patch, write_patch,
-    write_patch_resolved, DiffArguments, DiffDetail, DiffEntry, DiffFilesOutput, DiffMerges,
-    DiffOptions, DiffRequest, DiffSide, DiffTarget, DiffTotals, FileChange, LineStat,
-    ListedFileDiff, LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchSide,
-    PatchTextOptions, ResolveDiffArgumentsError, TreeDiffStructured, UncommittedDiff,
+    write_commit_log_patch, write_commits_log_patch, write_patch, write_patch_resolved,
+    DiffArguments, DiffDetail, DiffEntry, DiffFilesOutput, DiffMerges, DiffOptions, DiffRequest,
+    DiffSide, DiffTarget, DiffTotals, FileChange, LineStat, ListedFileDiff, LogPatchCommitHeader,
+    LogPatchOptions, PatchResolvedSide, PatchSide, PatchTextOptions, ResolveDiffArgumentsError,
+    TreeDiffStructured, UncommittedDiff,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ParallelOp;
@@ -684,15 +682,10 @@ fn outcome_from_entries(
             .collect();
         return Ok(outcome_from_files(files, None, format));
     }
-    let config = repo.config().snapshot().context("could not load config")?;
-    let thread_policy = repo.thread_policy();
-    let output = build_file_diffs(
-        repo.odb(),
+    let output = repo.diff().files_for_entries(
         entries,
         detail,
-        diff_options.with_renames(grit_lib::diff::RenameDetection::Off),
-        config.as_ref(),
-        &thread_policy,
+        &diff_options.with_renames(grit_lib::diff::RenameDetection::Off),
     )?;
     Ok(outcome_from_lib(output, format, detail))
 }
@@ -953,7 +946,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 &pathspec,
                 &diff_options,
             )?;
-            let changes = load_object_changes(&repo, &diff_result.entries)?;
+            let changes = repo.diff().object_changes(&diff_result.entries)?;
             (diff_result.entries, Some((changes, PatchSide::Blob)))
         }
         DiffTarget::WorktreeVsIndex
@@ -1007,7 +1000,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     outcome_from_entries(&repo, entries, detail, diff_options, format)?
                 }
                 _ => {
-                    let staged = load_object_changes(&repo, &entries.entries)?;
+                    let staged = repo.diff().object_changes(&entries.entries)?;
                     let peer = if opts.emit_json_hunk_ids {
                         uncommitted
                             .peer_changes(
@@ -1123,7 +1116,9 @@ fn resolve_diff_target(
         pathspec_file: opts.pathspecs.pathspec_file_entries()?,
     };
     let cwd_prefix = pathspec_prefix_for_repo(repo)?;
-    resolve_diff_request(repo, cwd_prefix.as_deref(), &request).map_err(map_diff_arguments_error)
+    repo.diff()
+        .resolve_request(cwd_prefix.as_deref(), &request)
+        .map_err(map_diff_arguments_error)
 }
 
 /// Keep library failures downcastable to [`grit_lib::error::Error`] so revision messages, error
@@ -1157,7 +1152,6 @@ pub fn diff_for_commit(
     opts: CommitDiffOptions,
 ) -> Result<DiffOutcome> {
     let config = repo.config().snapshot().context("could not load config")?;
-    let thread_policy = repo.thread_policy();
     let pathspec = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
@@ -1165,15 +1159,9 @@ pub fn diff_for_commit(
     diff_options.word_level_inline = opts.word_level_inline;
     let detail = opts.format.detail();
     let format = opts.format;
-    let output = commit_diff_files(
-        repo,
-        oid,
-        opts.diff_merges,
-        detail,
-        &diff_options,
-        &pathspec,
-        &thread_policy,
-    )?;
+    let output =
+        repo.diff()
+            .commit_files(oid, opts.diff_merges, detail, &diff_options, &pathspec)?;
     Ok(finish_outcome(
         repo,
         format,
@@ -1187,7 +1175,7 @@ pub fn outcome_from_tree_entries(
     mut entries: Vec<DiffEntry>,
 ) -> Result<DiffOutcome> {
     sort_entries_by_path(&mut entries);
-    let changes = load_object_changes(repo, &entries)?;
+    let changes = repo.diff().object_changes(&entries)?;
     let config = repo.config().snapshot().context("could not load config")?;
     let thread_policy = repo.thread_policy();
     let mut diff_options = DiffOptions::from_config(config.as_ref());
@@ -1312,7 +1300,7 @@ fn hunk_assign_ids(
 ) -> Vec<Hunk> {
     let assign = assign_hunk_ids && matches!(side, DiffSide::Unstaged | DiffSide::Staged);
     let ids = if assign {
-        hunk_ids_with_duplicate_peers(side, path, &hunks, peer_hunks)
+        hunk_ids(side, path, &hunks, peer_hunks)
     } else {
         Vec::new()
     };
@@ -1473,7 +1461,8 @@ pub(crate) fn resolve_commit_diff_pathspecs(
     raw_paths: &[String],
 ) -> Result<grit_lib::worktree::pathspec::Pathspec> {
     let cwd_prefix = pathspec_prefix_for_repo(repo)?;
-    grit_lib::diff::resolve_commit_diff_pathspecs(repo, cwd_prefix.as_deref(), raw_paths)
+    repo.diff()
+        .resolve_pathspec(cwd_prefix.as_deref(), raw_paths)
         .map_err(map_diff_arguments_error)
 }
 
@@ -1537,6 +1526,7 @@ fn tree_diff_outcome(
     let grit_lib::diff::DiffEntriesResult {
         entries,
         inexact_rename_skipped,
+        ..
     } = diff_result;
     if let Some(skipped) = inexact_rename_skipped {
         emit_inexact_rename_notice(&skipped);
@@ -1556,25 +1546,14 @@ fn tree_diff_outcome(
                 stream_tree_patch_diff(repo, &entries, diff_options, format, mode)
             }
             DiffBodyDelivery::Collect => {
-                let config = repo.config().snapshot().context("could not load config")?;
-                let thread_policy = repo.thread_policy();
-                let structured = tree_diff_structured_parallel(
-                    repo.odb(),
-                    entries,
-                    config.as_ref(),
-                    &thread_policy,
-                    diff_options,
-                )?;
+                let structured = repo.diff().structured(entries, &diff_options)?;
                 Ok(outcome_from_tree_structured(structured, format))
             }
         }
     } else {
         outcome_from_entries(
             repo,
-            grit_lib::diff::DiffEntriesResult {
-                entries,
-                inexact_rename_skipped: None,
-            },
+            grit_lib::diff::DiffEntriesResult::new(entries),
             detail,
             diff_options,
             format,
@@ -1603,18 +1582,11 @@ fn stream_tree_patch_diff(
     }
     let path_display = PathDisplayOptions::from_repo(repo).ok();
     let color = diff_render::use_color();
-    let config = repo.config().snapshot().context("could not load config")?;
-    let thread_policy = repo.thread_policy();
     crate::output::with_streaming_stdout(|stdout| {
         let w: &mut dyn Write = stdout;
         let mut index = 0usize;
-        for_each_tree_diff_structured(
-            repo.odb(),
-            entries,
-            diff_options,
-            config.as_ref(),
-            &thread_policy,
-            |structured| {
+        repo.diff()
+            .for_each_structured(entries, &diff_options, |structured| {
                 let file = file_diff_from_tree_structured(structured);
                 let map_cli_err = |e: anyhow::Error| {
                     grit_lib::error::Error::Worktree(WorktreeError::Path {
@@ -1633,9 +1605,8 @@ fn stream_tree_patch_diff(
                 }
                 index += 1;
                 Ok(())
-            },
-        )
-        .context("structured diff")
+            })
+            .context("structured diff")
     })?;
     Ok(DiffOutcome {
         changed: true,
@@ -2047,8 +2018,8 @@ mod tests {
         use crate::markdown;
         use crate::output::OutputMode;
         use grit_lib::diff::{
-            diff_trees, for_each_tree_diff_structured, tree_diff_structured_parallel, write_patch,
-            write_patch_structured, DiffEntry, DiffOptions, PatchTextOptions,
+            write_patch, write_patch_structured, DiffEntry, DiffOptions, PatchTextOptions,
+            TreeDiffOptions,
         };
         use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
         use grit_lib::repo::{InitOptions, Repository};
@@ -2078,8 +2049,15 @@ mod tests {
             };
             let old_tree = tree("old");
             let new_tree = tree("new");
-            let entries =
-                diff_trees(odb, Some(&old_tree), Some(&new_tree), "").expect("diff entries");
+            let entries = repo
+                .diff()
+                .tree_to_tree(
+                    Some(&old_tree),
+                    Some(&new_tree),
+                    &TreeDiffOptions::default(),
+                )
+                .expect("diff entries")
+                .entries;
             (dir, repo, entries)
         }
 
@@ -2089,8 +2067,6 @@ mod tests {
             mode: OutputMode,
             stream: bool,
         ) -> Vec<u8> {
-            let config = repo.config().snapshot().expect("config");
-            let thread_policy = repo.thread_policy();
             let diff_options = DiffOptions::default().with_word_level_inline(false);
             let path_display = PathDisplayOptions::from_repo(repo).ok();
             let mut buf = Vec::new();
@@ -2109,28 +2085,18 @@ mod tests {
             };
             if stream {
                 let mut index = 0usize;
-                for_each_tree_diff_structured(
-                    repo.odb(),
-                    entries,
-                    diff_options,
-                    config.as_ref(),
-                    &thread_policy,
-                    |structured| {
+                repo.diff()
+                    .for_each_structured(entries, &diff_options, |structured| {
                         render_one(index, structured);
                         index += 1;
                         Ok(())
-                    },
-                )
-                .expect("stream render");
+                    })
+                    .expect("stream render");
             } else {
-                let rows = tree_diff_structured_parallel(
-                    repo.odb(),
-                    entries.to_vec(),
-                    config.as_ref(),
-                    &thread_policy,
-                    diff_options,
-                )
-                .expect("collect structured");
+                let rows = repo
+                    .diff()
+                    .structured(entries.to_vec(), &diff_options)
+                    .expect("collect structured");
                 for (index, row) in rows.into_iter().enumerate() {
                     render_one(index, row);
                 }
@@ -2177,20 +2143,14 @@ mod tests {
             }
 
             let (_dir, repo, entries) = repo_with_range();
-            let config = repo.config().snapshot().expect("config");
-            let thread_policy = repo.thread_policy();
             let diff_options = DiffOptions::default().with_word_level_inline(false);
-            let structured = tree_diff_structured_parallel(
-                repo.odb(),
-                entries,
-                config.as_ref(),
-                &thread_policy,
-                diff_options,
-            )
-            .expect("structured")
-            .into_iter()
-            .next()
-            .expect("one file");
+            let structured = repo
+                .diff()
+                .structured(entries, &diff_options)
+                .expect("structured")
+                .into_iter()
+                .next()
+                .expect("one file");
             let file = file_diff_from_tree_structured(structured);
             let sizes = Rc::new(RefCell::new(Vec::new()));
             let spy = SpyWriter {
@@ -2217,21 +2177,15 @@ mod tests {
         #[test]
         fn patch_text_pipeline_matches_collected() {
             let (_dir, repo, entries) = repo_with_range();
-            let config = repo.config().snapshot().expect("config");
-            let thread_policy = repo.thread_policy();
             let diff_options = DiffOptions::default();
             let patch_opts =
                 PatchTextOptions::from_repo(&repo, diff_options.clone()).expect("patch opts");
             let mut pipelined = Vec::new();
             write_patch(&repo, &entries, &patch_opts, &mut pipelined).expect("write_patch");
-            let structured = tree_diff_structured_parallel(
-                repo.odb(),
-                entries,
-                config.as_ref(),
-                &thread_policy,
-                diff_options,
-            )
-            .expect("structured");
+            let structured = repo
+                .diff()
+                .structured(entries, &diff_options)
+                .expect("structured");
             let mut collected = Vec::new();
             write_patch_structured(&repo, &structured, &patch_opts, &mut collected)
                 .expect("write_patch_structured");

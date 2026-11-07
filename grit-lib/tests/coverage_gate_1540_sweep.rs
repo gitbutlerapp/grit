@@ -9,10 +9,7 @@ use grit_lib::diff::merge_diff::{
     all_blob_paths_in_tree_order, blob_oid_at_path, combined_diff_paths,
     combined_merge_parent_blob_paths, enrich_combined_path_renames, read_blob_at_path,
 };
-use grit_lib::diff::{
-    diff_commits_with_renames, diff_index_to_tree, diff_trees, diff_trees_with_renames,
-    postprocess_diff_entries, DiffPostprocessOptions,
-};
+use grit_lib::diff::{BreakRewrites, CopyDetection, RenameDetection, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR, MODE_SYMLINK};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
@@ -235,29 +232,36 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
         .trim()
         .parse()
         .expect("ptree");
-    let raw = diff_trees(repo.odb(), Some(&parent_tree), Some(&tree), "")?;
-    let _ = diff_trees_with_renames(repo.odb(), Some(&parent_tree), Some(&tree), "", 50)?;
-    let _ = diff_commits_with_renames(repo.odb(), &old_main, &tip, 50)?;
+    let raw = repo
+        .diff()
+        .tree_to_tree(Some(&parent_tree), Some(&tree), &TreeDiffOptions::default())
+        .map(|r| r.entries)?;
+    let _ = repo
+        .diff()
+        .tree_to_tree(
+            Some(&parent_tree),
+            Some(&tree),
+            &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+        )
+        .map(|r| r.entries)?;
+    let _ = repo
+        .diff()
+        .commits(
+            &old_main,
+            &tip,
+            &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+        )
+        .map(|r| r.entries)?;
     let cfg = ConfigSet::new();
     let policy = grit_lib::parallel::ThreadPolicy::default();
-    let opts = DiffPostprocessOptions {
-        rename_threshold: 50,
-        copy_threshold: Some(50),
-        find_copies_harder: true,
-        break_score: Some(40),
-        ..DiffPostprocessOptions::default()
-    };
-    let _ = postprocess_diff_entries(
-        repo.odb(),
-        raw.clone(),
-        Some(&parent_tree),
-        None,
-        None,
-        &cfg,
-        &policy,
-        &opts,
-        None,
-    )?;
+    let opts = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(50))
+        .with_copies(CopyDetection::FindHarder(50))
+        .with_break_rewrites(BreakRewrites::Score(40));
+    let _ = repo
+        .diff()
+        .detect_renames(raw.clone(), Some(&parent_tree), &opts)
+        .map(|r| r.entries)?;
 
     let commit_obj = repo.odb().read(&tip)?;
     let parsed = parse_commit(&commit_obj.data)?;
@@ -319,7 +323,10 @@ fn index_symlink_and_merge_base_diff_errors() -> grit_lib::error::Result<()> {
         .push(index_entry("tracked.txt", blob, MODE_REGULAR));
     index.write_to_path(&repo.git_dir().join("index"), false)?;
     let head_tree = write_tree_from_index(repo.odb(), &index, "")?;
-    let _ = diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false)?;
+    let _ = repo
+        .diff()
+        .index_to_tree(&index, Some(&head_tree), &TreeDiffOptions::default())
+        .map(|r| r.entries)?;
 
     let same = repo
         .revwalk()

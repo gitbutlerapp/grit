@@ -1,9 +1,10 @@
 //! Index↔worktree diff must stat ordinary tracked paths (Git `diff-files` parity).
 
+use grit_lib::diff::TreeDiffOptions;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions};
+
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -11,21 +12,16 @@ fn grit_unstaged_paths(repo: &Repository, root: &std::path::Path) -> Vec<String>
     let mut index = repo.index().load().expect("index");
     let index_mtime = grit_lib::diff::index_mtime_for_diff(&index, None);
     let config = repo.config().snapshot().expect("config");
-    let (entries, _) = diff_index_to_worktree_with_options(
-        repo.odb(),
-        &mut index,
-        root,
-        DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            index_mtime,
-            refresh_index_stat_in_pass: false,
-            for_status: true,
-            config: Some(config),
-            thread_policy: Some(repo.thread_policy()),
-            ..DiffIndexToWorktreeOptions::default()
-        },
-    )
-    .expect("diff");
+    let (entries, _) = repo
+        .diff()
+        .index_to_worktree(
+            &mut index,
+            &TreeDiffOptions::default()
+                .with_for_status(true)
+                .with_threads(Some(repo.thread_policy())),
+        )
+        .map(|r| (r.entries, r.index_stat_refreshed))
+        .expect("diff");
     entries
         .into_iter()
         .filter_map(|e| e.old_path.or(e.new_path))

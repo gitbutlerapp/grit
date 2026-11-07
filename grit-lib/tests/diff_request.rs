@@ -6,10 +6,7 @@ use std::error::Error as _;
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{
-    resolve_commit_diff_pathspecs, resolve_diff_request, DiffArguments, DiffRequest, DiffTarget,
-    ResolveDiffArgumentsError,
-};
+use grit_lib::diff::{DiffArguments, DiffRequest, DiffTarget, ResolveDiffArgumentsError};
 use grit_lib::error::{Error, PathspecResolveError};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -62,11 +59,13 @@ fn positionals(items: &[&str]) -> DiffRequest {
 }
 
 fn resolve(repo: &Repository, request: &DiffRequest) -> DiffArguments {
-    resolve_diff_request(repo, None, request).expect("resolve")
+    repo.diff().resolve_request(None, request).expect("resolve")
 }
 
 fn resolve_err(repo: &Repository, request: &DiffRequest) -> ResolveDiffArgumentsError {
-    resolve_diff_request(repo, None, request).expect_err("should fail")
+    repo.diff()
+        .resolve_request(None, request)
+        .expect_err("should fail")
 }
 
 #[test]
@@ -399,14 +398,17 @@ fn worktree_pathspecs_in_a_bare_repository_need_a_work_tree() {
 #[test]
 fn commit_pathspecs_resolve_from_the_cwd_and_allow_missing_paths() {
     let (_dir, repo) = two_commit_repo();
-    let specs =
-        resolve_commit_diff_pathspecs(&repo, Some("sub"), &strings(&["deleted.txt", "../a.txt"]))
-            .expect("resolve");
+    let specs = repo
+        .diff()
+        .resolve_pathspec(Some("sub"), &strings(&["deleted.txt", "../a.txt"]))
+        .expect("resolve");
     assert_eq!(
         pathspec_specs(&specs),
         strings(&["sub/deleted.txt", "a.txt"])
     );
-    assert!(resolve_commit_diff_pathspecs(&repo, None, &[])
+    assert!(repo
+        .diff()
+        .resolve_pathspec(None, &[])
         .expect("empty")
         .is_empty());
 }

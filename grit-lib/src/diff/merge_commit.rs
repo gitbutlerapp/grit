@@ -96,7 +96,7 @@ fn filter_combined_paths(paths: Vec<String>, pathspecs: &[String]) -> Vec<String
 ///
 /// Propagates object read, tree walk, and diff errors.
 #[allow(clippy::too_many_arguments)]
-pub fn commit_diff_files(
+pub(crate) fn commit_diff_files(
     repo: &Repository,
     commit_oid: &ObjectId,
     merges: DiffMerges,

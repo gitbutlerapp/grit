@@ -13,7 +13,7 @@ use grit_lib::blame::{blame_file, BlameOptions};
 use grit_lib::bundle::BundleSpec;
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::{ConfigOverride, Environment, RepositoryOptions};
-use grit_lib::diff::DiffStatus;
+use grit_lib::diff::{DiffStatus, TreeDiffOptions};
 use grit_lib::ident::Signature;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
@@ -272,9 +272,14 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
     let new_tree = repo.objects().commit_tree(&theirs).expect("theirs tree");
     let changes = repo
         .diff()
-        .tree_to_tree(Some(&old_tree), Some(&new_tree))
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )
         .expect("diff");
     let summary = changes
+        .entries
         .iter()
         .map(|entry| (entry.path().to_owned(), entry.status))
         .collect::<Vec<_>>();

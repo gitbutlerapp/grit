@@ -44,9 +44,10 @@ impl SideBytes {
         }
     }
 
-    /// Empty payload with a known on-disk byte length (binary stat / skipped reads).
+    /// A side whose bytes were not read: an empty payload that keeps its known on-disk byte
+    /// length (binary stats, skipped reads).
     #[must_use]
-    pub fn empty_with_size(size: u64) -> Self {
+    pub fn unread(size: u64) -> Self {
         Self {
             data: Vec::new(),
             encoding_lossy: false,

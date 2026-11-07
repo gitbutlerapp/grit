@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::diff::hash_worktree_file;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::worktree_rules::WorktreeRules;
 
@@ -73,8 +72,6 @@ fn filter_process_reused_and_disable_persists_on_repository() {
     let repo = Repository::open(&git_dir, &filter_options(wt, &state_file)).expect("open");
     let index = repo.index().load().expect("index");
     let rules = WorktreeRules::from_repository(&repo, &index).expect("rules");
-    let filter_fp = Some(rules.filter_process());
-    let conv = rules.conversion().clone();
 
     let meta_a = fs::symlink_metadata(wt.join("a.txt")).expect("meta a");
     let attrs_a = rules.file_attrs("a.txt", false);
@@ -82,31 +79,15 @@ fn filter_process_reused_and_disable_persists_on_repository() {
         attrs_a.filter_process.is_some(),
         "expected filter.test.process on file attributes"
     );
-    let _ = hash_worktree_file(
-        repo.odb(),
-        &wt.join("a.txt"),
-        &meta_a,
-        &conv,
-        &attrs_a,
-        "a.txt",
-        None,
-        filter_fp,
-    )
-    .expect("hash a");
+    let _ = rules
+        .hash_worktree_file(repo.odb(), &wt.join("a.txt"), &meta_a, "a.txt", None)
+        .expect("hash a");
 
     let meta_b = fs::symlink_metadata(wt.join("b.txt")).expect("meta b");
     let attrs_b = rules.file_attrs("b.txt", false);
-    let oid_b = hash_worktree_file(
-        repo.odb(),
-        &wt.join("b.txt"),
-        &meta_b,
-        &conv,
-        &attrs_b,
-        "b.txt",
-        None,
-        filter_fp,
-    )
-    .expect("hash b");
+    let oid_b = rules
+        .hash_worktree_file(repo.odb(), &wt.join("b.txt"), &meta_b, "b.txt", None)
+        .expect("hash b");
 
     assert_eq!(
         count_state_lines(&state_file),
@@ -130,17 +111,9 @@ fn filter_process_reused_and_disable_persists_on_repository() {
         .expect("process filter configured");
     rules.filter_process().disable_process_filter(proc_cmd);
 
-    let oid_b_after = hash_worktree_file(
-        repo.odb(),
-        &wt.join("b.txt"),
-        &meta_b,
-        &conv,
-        &attrs_b,
-        "b.txt",
-        None,
-        filter_fp,
-    )
-    .expect("hash b after disable");
+    let oid_b_after = rules
+        .hash_worktree_file(repo.odb(), &wt.join("b.txt"), &meta_b, "b.txt", None)
+        .expect("hash b after disable");
     let raw_oid = repo
         .odb()
         .hash(grit_lib::objects::ObjectKind::Blob, b"world\n")

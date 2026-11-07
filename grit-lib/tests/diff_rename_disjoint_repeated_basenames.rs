@@ -1,20 +1,16 @@
 //! Disjoint repeated basenames must skip inexact rename work above renameLimit (issue #2436).
 
-use grit_lib::config::ConfigSet;
-use grit_lib::diff::{
-    detect_renames_with_policy, zero_oid, DetectRenamesOptions, DiffEntry, DiffStatus,
-};
-use grit_lib::objects::odb::Odb;
+use grit_lib::diff::{zero_oid, DiffEntry, DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectKind;
+use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::forced_parallel_policy;
 use tempfile::TempDir;
 
-fn disjoint_f_vs_g_entries(n: usize) -> (TempDir, Odb, Vec<DiffEntry>) {
+fn disjoint_f_vs_g_entries(n: usize) -> (TempDir, Repository, Vec<DiffEntry>) {
     let root = TempDir::new().expect("tempdir");
-    let git_dir = root.path().join(".git");
-    std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
-    let odb = Odb::new(&git_dir.join("objects"));
+    let (repo, _) = Repository::init(root.path(), &InitOptions::default()).expect("init");
+    let odb = repo.odb();
     let mut entries = Vec::with_capacity(n * 2);
     for i in 0..n {
         let old_oid = odb
@@ -44,29 +40,23 @@ fn disjoint_f_vs_g_entries(n: usize) -> (TempDir, Odb, Vec<DiffEntry>) {
             score: None,
         });
     }
-    (root, odb, entries)
+    (root, repo, entries)
 }
 
 #[test]
 fn disjoint_repeated_basenames_skip_inexact_rename_detection() {
     const N: usize = 2000;
-    let (_root, odb, entries) = disjoint_f_vs_g_entries(N);
-    let config = ConfigSet::new();
-    let policy = forced_parallel_policy();
-    let result = detect_renames_with_policy(
-        &odb,
-        None,
-        entries,
-        50,
-        &config,
-        &policy,
-        None,
-        DetectRenamesOptions::default(),
-    )
-    .expect("detect renames");
+    let (_root, repo, entries) = disjoint_f_vs_g_entries(N);
+    let options = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(50))
+        .with_threads(Some(forced_parallel_policy()));
+    let result = repo
+        .diff()
+        .detect_renames(entries, None, &options)
+        .expect("detect renames");
 
     assert!(
-        result.inexact_skipped.is_some(),
+        result.inexact_rename_skipped.is_some(),
         "expected inexact rename detection to be skipped above renameLimit"
     );
     let renames = result

@@ -95,9 +95,15 @@ fn index_line_abbrev_for_colliding_blobs_matches_git_show() {
     let head_commit = grit_lib::objects::parse_commit(&head_raw.data).unwrap();
     let parent_raw = odb.read(&head_commit.parents[0]).unwrap();
     let parent_commit = grit_lib::objects::parse_commit(&parent_raw.data).unwrap();
-    let entries =
-        grit_lib::diff::diff_trees(odb, Some(&parent_commit.tree), Some(&head_commit.tree), "")
-            .expect("tree diff");
+    let entries = repo
+        .diff()
+        .tree_to_tree(
+            Some(&parent_commit.tree),
+            Some(&head_commit.tree),
+            &grit_lib::diff::TreeDiffOptions::default(),
+        )
+        .expect("tree diff")
+        .entries;
     let file = entries
         .iter()
         .find(|e| e.new_path.as_deref() == Some("file.txt"))

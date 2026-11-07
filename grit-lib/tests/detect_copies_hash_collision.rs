@@ -3,11 +3,9 @@
 use grit_lib::objects::FileMode;
 use std::path::Path;
 
-use grit_lib::config::ConfigSet;
-use grit_lib::diff::{detect_copies_with_policy, zero_oid, DiffEntry, DiffStatus};
-use grit_lib::objects::odb::Odb;
+use grit_lib::diff::{zero_oid, CopyDetection, DiffEntry, DiffStatus, TreeDiffOptions};
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::parallel::ThreadPolicy;
+use grit_lib::repo::{InitOptions, Repository};
 
 fn shattered_prefix(which: u8) -> Vec<u8> {
     let name = format!("shattered-{which}-prefix.bin");
@@ -23,10 +21,8 @@ fn shattered_prefix(which: u8) -> Vec<u8> {
 fn detect_copies_accepts_shattered_modified_worktree_blob() {
     let td = tempfile::tempdir().expect("tempdir");
     let wt = td.path();
-    let objects = wt.join("objects");
-    std::fs::create_dir_all(&objects).expect("objects dir");
-
-    let odb = Odb::new(&objects);
+    let (repo, _) = Repository::init(wt, &InitOptions::default()).expect("init");
+    let odb = repo.odb();
     let src_oid = odb
         .write(ObjectKind::Blob, b"copy source payload\n")
         .expect("source blob");
@@ -55,19 +51,12 @@ fn detect_copies_accepts_shattered_modified_worktree_blob() {
         score: None,
     };
 
-    let config = ConfigSet::new();
-    let policy = ThreadPolicy::default();
-    let result = detect_copies_with_policy(
-        &odb,
-        Some(wt),
-        vec![source_entry, shattered_entry],
-        50,
-        false,
-        &[],
-        &config,
-        &policy,
-    )
-    .expect("copy detection accepts SHAttered payload as a blob");
+    let options = TreeDiffOptions::default().with_copies(CopyDetection::Similarity(50));
+    let result = repo
+        .diff()
+        .detect_renames(vec![source_entry, shattered_entry], None, &options)
+        .expect("copy detection accepts SHAttered payload as a blob")
+        .entries;
     assert_eq!(result.len(), 2);
     assert!(result
         .iter()

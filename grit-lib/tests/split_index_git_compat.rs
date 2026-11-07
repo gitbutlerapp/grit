@@ -1,10 +1,10 @@
 //! Split index (`link` + `sharedindex.<oid>`) compatibility with system `git` (t1700, t1701).
 
 use crate::support;
+use grit_lib::diff::TreeDiffOptions;
 
 use filetime::FileTime;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::diff_index_to_worktree;
 use grit_lib::index::split_index::{
     format_dump_split_index_file, resolve_split_index_if_needed, WriteSplitIndexRequest,
 };
@@ -350,8 +350,11 @@ fn t1701_racy_split_index_entries_rechecked() {
 
     let mut grit_index = repo.index().load().expect("reload");
     assert_eq!(grit_index.source_mtime, Some(index_mtime));
-    let diff =
-        diff_index_to_worktree(repo.odb(), &mut grit_index, root, false, false).expect("diff");
+    let diff = repo
+        .diff()
+        .index_to_worktree(&mut grit_index, &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
     assert_eq!(
         diff.len(),
         1,

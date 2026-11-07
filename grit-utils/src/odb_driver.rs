@@ -716,7 +716,7 @@ pub fn diff_rename_m(
     new_rev: &str,
     threshold: u32,
 ) -> Result<()> {
-    use grit_lib::diff::{detect_renames_with_policy, diff_trees, DetectRenamesOptions};
+    use grit_lib::diff::{RenameDetection, TreeDiffOptions};
     use grit_lib::objects::parse_commit;
     use grit_lib::parallel::ThreadPolicy;
 
@@ -726,24 +726,14 @@ pub fn diff_rename_m(
     let new_raw = repo.odb().read(&new_oid).context("read new commit")?;
     let old_commit = parse_commit(&old_raw.data).context("parse old commit")?;
     let new_commit = parse_commit(&new_raw.data).context("parse new commit")?;
-    let entries = diff_trees(
-        repo.odb(),
-        Some(&old_commit.tree),
-        Some(&new_commit.tree),
-        "",
-    )?;
-    let config = repo.config().snapshot().unwrap_or_default();
-    let entries = detect_renames_with_policy(
-        repo.odb(),
-        None,
-        entries,
-        threshold,
-        config.as_ref(),
-        &ThreadPolicy::default(),
-        None,
-        DetectRenamesOptions::default(),
-    )?
-    .entries;
+    let similarity = u8::try_from(threshold.min(100)).unwrap_or(100);
+    let options = TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(similarity))
+        .with_threads(Some(ThreadPolicy::default()));
+    let entries = repo
+        .diff()
+        .tree_to_tree(Some(&old_commit.tree), Some(&new_commit.tree), &options)?
+        .entries;
     let mut out = io::stdout().lock();
     for entry in entries {
         let path = entry

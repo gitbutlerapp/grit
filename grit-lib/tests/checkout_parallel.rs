@@ -3,7 +3,7 @@
 use filetime::FileTime;
 use grit_lib::command_runner::{CommandStdin, RecordedResponse, RecordingRunner};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::diff_trees;
+use grit_lib::diff::TreeDiffOptions;
 use grit_lib::error::ObjectError;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{
@@ -250,7 +250,11 @@ fn checkout_diff_with_policy(
             pin_worktree_mtrees(wt);
         }
     }
-    let changes = diff_trees(repo.odb(), from.as_ref(), Some(&to), "").expect("diff");
+    let changes = repo
+        .diff()
+        .tree_to_tree(from.as_ref(), Some(&to), &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
     checkout_tree_changes(&repo, &changes).expect("checkout");
     let wt = repo.work_tree().expect("wt");
     let snap = snapshot_worktree(wt);

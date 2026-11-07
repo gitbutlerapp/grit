@@ -6,10 +6,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::tree_oid_of_commit;
-use grit_lib::diff::{
-    apply_rename_detection_to_diff_entries, diff_index_to_tree_with_renames,
-    diff_tree_to_worktree_with_git_dir, DiffStatus,
-};
+use grit_lib::diff::{DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
 
@@ -57,19 +54,13 @@ fn diff_index_to_tree_with_renames_reports_staged_mv() {
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
     let index = repo.index().load().expect("index");
-    let config = repo.config().snapshot().expect("config");
-    let policy = repo.thread_policy();
+    let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
 
-    let entries = diff_index_to_tree_with_renames(
-        repo.odb(),
-        &index,
-        Some(&head_tree),
-        false,
-        50,
-        config.as_ref(),
-        &policy,
-    )
-    .expect("staged diff");
+    let entries = repo
+        .diff()
+        .index_to_tree(&index, Some(&head_tree), &renames)
+        .expect("staged diff")
+        .entries;
 
     let renames: Vec<_> = entries
         .iter()
@@ -108,13 +99,17 @@ fn apply_rename_detection_matches_git_cached_name_status() {
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
     let index = repo.index().load().expect("index");
-    let config = repo.config().snapshot().expect("config");
-    let policy = repo.thread_policy();
-    let raw = grit_lib::diff::diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false)
-        .expect("raw");
-    let entries =
-        apply_rename_detection_to_diff_entries(repo.odb(), raw, None, 50, config.as_ref(), &policy)
-            .expect("renames");
+    let raw = repo
+        .diff()
+        .index_to_tree(&index, Some(&head_tree), &TreeDiffOptions::default())
+        .expect("raw")
+        .entries;
+    let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
+    let entries = repo
+        .diff()
+        .detect_renames(raw, None, &renames)
+        .expect("renames")
+        .entries;
     assert!(
         entries.iter().any(|e| e.status == DiffStatus::Renamed),
         "grit should pair rename like git: {entries:?}"
@@ -151,28 +146,18 @@ fn worktree_rename_detection_with_small_unstaged_edit() {
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
     let index = repo.index().load().expect("index");
-    let config = repo.config().snapshot().expect("config");
-    let policy = repo.thread_policy();
-    let work_tree = repo.work_tree().expect("worktree");
 
-    let raw = diff_tree_to_worktree_with_git_dir(
-        repo.odb(),
-        Some(&head_tree),
-        work_tree,
-        repo.git_dir(),
-        &index,
-        Some(config.as_ref()),
-    )
-    .expect("tree to worktree");
-    let entries = apply_rename_detection_to_diff_entries(
-        repo.odb(),
-        raw,
-        Some(work_tree),
-        50,
-        config.as_ref(),
-        &policy,
-    )
-    .expect("renames");
+    let raw = repo
+        .diff()
+        .tree_to_worktree(Some(&head_tree), &index, &TreeDiffOptions::default())
+        .expect("tree to worktree")
+        .entries;
+    let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
+    let entries = repo
+        .diff()
+        .detect_renames(raw, None, &renames)
+        .expect("renames")
+        .entries;
 
     let renames: Vec<_> = entries
         .iter()
@@ -223,23 +208,13 @@ fn plain_filesystem_mv_pairs_via_untracked_worktree_candidate() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let mut index = repo.index().load().expect("index");
-    let work_tree = repo.work_tree().expect("worktree");
-    let rules = grit_lib::worktree::worktree_rules::WorktreeRules::from_repository(&repo, &index)
-        .expect("rules");
+    let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
 
-    let (entries, _) = grit_lib::diff::diff_index_to_worktree_with_renames(
-        &repo,
-        &mut index,
-        work_tree,
-        grit_lib::diff::DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            config: repo.config().snapshot().ok(),
-            worktree_rules: Some(std::sync::Arc::new(std::sync::Mutex::new(rules))),
-            ..grit_lib::diff::DiffIndexToWorktreeOptions::default()
-        },
-        50,
-    )
-    .expect("unstaged diff");
+    let entries = repo
+        .diff()
+        .index_to_worktree(&mut index, &renames)
+        .expect("unstaged diff")
+        .entries;
 
     assert!(
         !entries.iter().any(|e| e.status == DiffStatus::Renamed),
@@ -292,23 +267,13 @@ fn unrelated_untracked_not_listed_when_tracked_file_deleted() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let mut index = repo.index().load().expect("index");
-    let work_tree = repo.work_tree().expect("worktree");
-    let rules = grit_lib::worktree::worktree_rules::WorktreeRules::from_repository(&repo, &index)
-        .expect("rules");
+    let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
 
-    let (entries, _) = grit_lib::diff::diff_index_to_worktree_with_renames(
-        &repo,
-        &mut index,
-        work_tree,
-        grit_lib::diff::DiffIndexToWorktreeOptions {
-            repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            config: repo.config().snapshot().ok(),
-            worktree_rules: Some(std::sync::Arc::new(std::sync::Mutex::new(rules))),
-            ..grit_lib::diff::DiffIndexToWorktreeOptions::default()
-        },
-        50,
-    )
-    .expect("unstaged diff");
+    let entries = repo
+        .diff()
+        .index_to_worktree(&mut index, &renames)
+        .expect("unstaged diff")
+        .entries;
 
     assert!(
         !entries.iter().any(|e| e.path() == "unrelated.txt"),

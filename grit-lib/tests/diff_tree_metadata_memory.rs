@@ -4,8 +4,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::config::ConfigSet;
-use grit_lib::diff::{diff_trees_with_renames_and_policy, DiffEntry, RENAME_DETECTION_DISABLED};
+use grit_lib::diff::{DiffEntry, RenameDetection, TreeDiffOptions};
 use grit_lib::objects::{ObjectId, ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
@@ -137,7 +136,8 @@ fn peak_for_width(width: usize) -> usize {
     let start = LIVE.with(Cell::get);
     let (peak, entries) = peak_during(|| {
         repo.diff()
-            .tree_to_tree(Some(&old), Some(&new))
+            .tree_to_tree(Some(&old), Some(&new), &TreeDiffOptions::default())
+            .map(|r| r.entries)
             .expect("diff")
     });
     assert_eq!(entries.len(), DIRS);
@@ -174,26 +174,22 @@ fn rename_pass_without_pairs_adds_no_copy_of_the_metadata_list() {
     // The `grit diff --name-status A B` path: rename detection is on, but a diff of
     // modifications has nothing to pair and must hand back the list it was given.
     let (_dir, repo, old, new) = metadata_fixture(64, 25);
-    let config = ConfigSet::new();
-    let policy = ThreadPolicy::default();
-    let run = |threshold| {
+    let run = |renames| {
+        let options = TreeDiffOptions::default()
+            .with_renames(renames)
+            .with_threads(Some(ThreadPolicy::default()));
         peak_during(|| {
-            diff_trees_with_renames_and_policy(
-                repo.odb(),
-                Some(&old),
-                Some(&new),
-                "",
-                threshold,
-                &config,
-                &policy,
-            )
-            .expect("diff")
+            repo.diff()
+                .tree_to_tree(Some(&old), Some(&new), &options)
+                .expect("diff")
+                .entries
         })
     };
-    // Warm the ODB caches so both runs see the same tree reads.
-    drop(run(RENAME_DETECTION_DISABLED));
-    let (plain_peak, plain) = run(RENAME_DETECTION_DISABLED);
-    let (renames_peak, renamed) = run(50);
+    // Warm the ODB caches and the config snapshot so both runs see the same reads.
+    drop(run(RenameDetection::Off));
+    drop(run(RenameDetection::Similarity(50)));
+    let (plain_peak, plain) = run(RenameDetection::Off);
+    let (renames_peak, renamed) = run(RenameDetection::Similarity(50));
     assert_eq!(renamed, plain);
     assert_eq!(renamed.len(), DIRS * 25);
     let list_bytes = plain.capacity() * std::mem::size_of::<DiffEntry>();

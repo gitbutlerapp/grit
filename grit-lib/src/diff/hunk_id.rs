@@ -349,12 +349,6 @@ fn hunk_body_digest(hunk: &StructuredHunk) -> Vec<u8> {
     hasher.finalize()
 }
 
-/// Stable ids for `hunks` in file order (0-based index matches vector position).
-#[must_use]
-pub fn hunk_ids(side: DiffSide, path: &str, hunks: &[StructuredHunk]) -> Vec<HunkId> {
-    hunk_ids_with_duplicate_peers(side, path, hunks, &[])
-}
-
 /// True when a diff entry's displayed or old path is listed in the primary change set.
 ///
 /// Used to limit opposite-side peer loading to paths that can affect duplicate hunk ids.
@@ -387,11 +381,14 @@ pub fn peer_hunks_by_primary_path(
         .collect()
 }
 
-/// Like [`hunk_ids`], but `peer_hunks` on the same path (typically the other index/worktree
-/// side) participate in duplicate-body detection so ids stay stable when an earlier identical
-/// hunk moves to the staged side.
+/// Stable ids for `hunks` in file order (0-based index matches vector position).
+///
+/// `peer_hunks` are the hunks on the same path on the other side of the index (staged for an
+/// unstaged diff and the reverse); they take part in duplicate-body ranking so an id stays
+/// stable when an earlier identical hunk moves to the other side. Pass `&[]` when there are
+/// none.
 #[must_use]
-pub fn hunk_ids_with_duplicate_peers(
+pub fn hunk_ids(
     side: DiffSide,
     path: &str,
     hunks: &[StructuredHunk],
@@ -492,8 +489,8 @@ mod tests {
         let mut b = hunk(body);
         b.old_start = 20;
         b.new_start = 22;
-        let ids_a = hunk_ids(DiffSide::Unstaged, "file.txt", &[a]);
-        let ids_b = hunk_ids(DiffSide::Unstaged, "file.txt", &[b]);
+        let ids_a = hunk_ids(DiffSide::Unstaged, "file.txt", &[a], &[]);
+        let ids_b = hunk_ids(DiffSide::Unstaged, "file.txt", &[b], &[]);
         assert_eq!(ids_a, ids_b);
     }
 
@@ -501,17 +498,17 @@ mod tests {
     fn hunk_id_changes_on_content_change() {
         let a = hunk(vec![line(StructuredLineKind::Add, "one")]);
         let b = hunk(vec![line(StructuredLineKind::Add, "two")]);
-        let ids_a = hunk_ids(DiffSide::Unstaged, "f", &[a]);
-        let ids_b = hunk_ids(DiffSide::Unstaged, "f", &[b]);
+        let ids_a = hunk_ids(DiffSide::Unstaged, "f", &[a], &[]);
+        let ids_b = hunk_ids(DiffSide::Unstaged, "f", &[b], &[]);
         assert_ne!(ids_a[0], ids_b[0]);
     }
 
     #[test]
     fn hunk_id_differs_by_side_and_path() {
         let h = hunk(vec![line(StructuredLineKind::Add, "x")]);
-        let unstaged = hunk_ids(DiffSide::Unstaged, "a", &[h.clone()]);
-        let staged = hunk_ids(DiffSide::Staged, "a", &[h.clone()]);
-        let other_path = hunk_ids(DiffSide::Unstaged, "b", &[h]);
+        let unstaged = hunk_ids(DiffSide::Unstaged, "a", &[h.clone()], &[]);
+        let staged = hunk_ids(DiffSide::Staged, "a", &[h.clone()], &[]);
+        let other_path = hunk_ids(DiffSide::Unstaged, "b", &[h], &[]);
         assert_ne!(unstaged[0], staged[0]);
         assert_ne!(unstaged[0], other_path[0]);
     }
@@ -525,7 +522,7 @@ mod tests {
         let mut b = hunk(body);
         b.old_start = 5;
         b.new_start = 5;
-        let ids = hunk_ids(DiffSide::Staged, "x", &[a, b]);
+        let ids = hunk_ids(DiffSide::Staged, "x", &[a, b], &[]);
         assert_ne!(ids[0], ids[1]);
     }
 
@@ -547,11 +544,15 @@ mod tests {
         second.old_start = 10;
         second.new_start = 10;
 
-        let both = hunk_ids(DiffSide::Unstaged, "f", &[first.clone(), second.clone()]);
+        let both = hunk_ids(
+            DiffSide::Unstaged,
+            "f",
+            &[first.clone(), second.clone()],
+            &[],
+        );
         assert_ne!(both[0], both[1]);
 
-        let with_peer =
-            hunk_ids_with_duplicate_peers(DiffSide::Unstaged, "f", &[second.clone()], &[first]);
+        let with_peer = hunk_ids(DiffSide::Unstaged, "f", &[second.clone()], &[first]);
         assert_eq!(with_peer[0], both[1]);
     }
 
@@ -565,7 +566,12 @@ mod tests {
         second.old_start = 19;
         second.new_start = 20;
 
-        let both = hunk_ids(DiffSide::Unstaged, "f", &[first.clone(), second.clone()]);
+        let both = hunk_ids(
+            DiffSide::Unstaged,
+            "f",
+            &[first.clone(), second.clone()],
+            &[],
+        );
         assert_ne!(both[0], both[1]);
         let id_later = both[1].clone();
 
@@ -573,7 +579,7 @@ mod tests {
         shifted.old_start = 20;
         shifted.new_start = 20;
 
-        let after = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, "f", &[shifted], &[first]);
+        let after = hunk_ids(DiffSide::Unstaged, "f", &[shifted], &[first]);
         assert_eq!(after[0], id_later);
     }
 
@@ -612,7 +618,7 @@ mod tests {
                 )
             })
             .collect();
-        let from_structured = hunk_ids(DiffSide::Unstaged, "f.txt", &structured);
+        let from_structured = hunk_ids(DiffSide::Unstaged, "f.txt", &structured, &[]);
         assert_eq!(from_slices, from_structured);
     }
 
@@ -622,6 +628,7 @@ mod tests {
             DiffSide::Other,
             "p",
             &[hunk(vec![line(StructuredLineKind::Del, "z")])],
+            &[],
         )[0]
         .clone();
         let s = id.to_string();

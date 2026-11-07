@@ -171,7 +171,7 @@ pub struct DiffFilesOutput {
 /// # Errors
 ///
 /// Propagates object database and parallel diff errors.
-pub fn build_file_diffs(
+pub(crate) fn build_file_diffs(
     odb: &Odb,
     entries: Vec<DiffEntry>,
     detail: DiffDetail,
@@ -236,7 +236,7 @@ pub fn build_file_diffs(
 /// # Errors
 ///
 /// Propagates object database and parallel diff errors, and callback errors.
-pub fn build_file_diffs_streaming(
+pub(crate) fn build_file_diffs_streaming(
     odb: &Odb,
     entries: Vec<DiffEntry>,
     diff_options: DiffOptions,
@@ -399,8 +399,13 @@ mod tests {
         let new_tree = repo.odb().commit_tree(&_child).expect("tree");
         let entries = repo
             .diff()
-            .tree_to_tree(Some(&old_tree), Some(&new_tree))
-            .expect("diff");
+            .tree_to_tree(
+                Some(&old_tree),
+                Some(&new_tree),
+                &crate::diff::TreeDiffOptions::default(),
+            )
+            .expect("diff")
+            .entries;
         let config = ConfigSet::default();
         let with_renames = build_file_diffs(
             repo.odb(),

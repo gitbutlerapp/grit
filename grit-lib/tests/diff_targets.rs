@@ -1,7 +1,7 @@
 //! Git compatibility tests for diff target selection and `Diff::files`.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{resolve_diff_arguments, DiffTarget, ResolveDiffArgumentsError};
+use grit_lib::diff::{DiffRequest, DiffTarget, ResolveDiffArgumentsError};
 use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -41,7 +41,20 @@ fn resolve_diff_default_target_is_worktree_vs_head() {
     let repo = open_repo(dir.path());
     std::fs::write(dir.path().join("a.txt"), "y\n").expect("write");
 
-    let args = resolve_diff_arguments(&repo, None, false, false, None, &[], &[]).expect("resolve");
+    let args = repo
+        .diff()
+        .resolve_request(
+            None,
+            &DiffRequest {
+                staged: false,
+                unstaged: false,
+                against: None,
+                positionals: (&[]).to_vec(),
+                paths: (&[]).to_vec(),
+                ..DiffRequest::default()
+            },
+        )
+        .expect("resolve");
     assert_eq!(args.target, DiffTarget::WorktreeVsHead);
     assert!(args.pathspec.is_empty());
 }
@@ -51,7 +64,20 @@ fn resolve_diff_staged_and_unstaged_conflict() {
     let dir = TempDir::new().expect("tempdir");
     init_repo(dir.path());
     let repo = open_repo(dir.path());
-    let err = resolve_diff_arguments(&repo, None, true, true, None, &[], &[]).unwrap_err();
+    let err = repo
+        .diff()
+        .resolve_request(
+            None,
+            &DiffRequest {
+                staged: true,
+                unstaged: true,
+                against: None,
+                positionals: (&[]).to_vec(),
+                paths: (&[]).to_vec(),
+                ..DiffRequest::default()
+            },
+        )
+        .unwrap_err();
     assert!(matches!(err, ResolveDiffArgumentsError::StagedAndUnstaged));
 }
 
@@ -67,7 +93,20 @@ fn files_staged_matches_git_name_only() {
     let repo = open_repo(dir.path());
     let mut opts = grit_lib::diff::DiffOptions::default();
     opts.word_level_inline = false;
-    let args = resolve_diff_arguments(&repo, None, true, false, None, &[], &[]).expect("resolve");
+    let args = repo
+        .diff()
+        .resolve_request(
+            None,
+            &DiffRequest {
+                staged: true,
+                unstaged: false,
+                against: None,
+                positionals: (&[]).to_vec(),
+                paths: (&[]).to_vec(),
+                ..DiffRequest::default()
+            },
+        )
+        .expect("resolve");
     let files = repo
         .diff()
         .files(&args.target, &args.pathspec, &opts)
@@ -271,16 +310,20 @@ fn triple_dot_uses_merge_base_like_git() {
     let main_tip = commit_all(dir.path(), "main");
 
     let repo = open_repo(dir.path());
-    let args = resolve_diff_arguments(
-        &repo,
-        None,
-        false,
-        false,
-        None,
-        &["main...topic".into()],
-        &[],
-    )
-    .expect("resolve");
+    let args = repo
+        .diff()
+        .resolve_request(
+            None,
+            &DiffRequest {
+                staged: false,
+                unstaged: false,
+                against: None,
+                positionals: (&["main...topic".into()]).to_vec(),
+                paths: (&[]).to_vec(),
+                ..DiffRequest::default()
+            },
+        )
+        .expect("resolve");
     let grit = grit_raw(&repo, args.target);
     let git = git_raw(
         dir.path(),
@@ -326,16 +369,20 @@ fn resolve_diff_arguments_too_many_revisions() {
     std::fs::write(dir.path().join("f.txt"), "c\n").expect("write");
     commit_all(dir.path(), "c");
     let repo = open_repo(dir.path());
-    let err = resolve_diff_arguments(
-        &repo,
-        None,
-        false,
-        false,
-        None,
-        &["HEAD~2".into(), "HEAD~1".into(), "HEAD".into()],
-        &[],
-    )
-    .unwrap_err();
+    let err = repo
+        .diff()
+        .resolve_request(
+            None,
+            &DiffRequest {
+                staged: false,
+                unstaged: false,
+                against: None,
+                positionals: (&["HEAD~2".into(), "HEAD~1".into(), "HEAD".into()]).to_vec(),
+                paths: (&[]).to_vec(),
+                ..DiffRequest::default()
+            },
+        )
+        .unwrap_err();
     assert!(matches!(err, ResolveDiffArgumentsError::TooManyRevisions));
 }
 
@@ -397,16 +444,20 @@ fn resolve_diff_arguments_against_with_commits() {
     let dir = TempDir::new().expect("tempdir");
     init_repo(dir.path());
     let repo = open_repo(dir.path());
-    let err = resolve_diff_arguments(
-        &repo,
-        None,
-        false,
-        false,
-        Some("HEAD"),
-        &["HEAD~1".into()],
-        &[],
-    )
-    .unwrap_err();
+    let err = repo
+        .diff()
+        .resolve_request(
+            None,
+            &DiffRequest {
+                staged: false,
+                unstaged: false,
+                against: Some("HEAD").map(str::to_owned),
+                positionals: (&["HEAD~1".into()]).to_vec(),
+                paths: (&[]).to_vec(),
+                ..DiffRequest::default()
+            },
+        )
+        .unwrap_err();
     assert!(matches!(err, ResolveDiffArgumentsError::AgainstWithCommits));
 }
 

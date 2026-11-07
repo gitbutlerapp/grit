@@ -1,11 +1,7 @@
 //! Broad `rev_list` / `diff` API sweeps on synthetic repos (coverage-oriented).
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::config::ConfigSet;
-use grit_lib::diff::{
-    diff_commits, diff_trees, diff_trees_with_renames, postprocess_diff_entries,
-    DiffPostprocessOptions, DiffStatus,
-};
+use grit_lib::diff::{CopyDetection, DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -118,33 +114,32 @@ fn diff_postprocess_across_commit_pair() -> grit_lib::error::Result<()> {
     let base = write_commit(repo.odb(), old_tree, &[], "base")?;
     let tip = write_commit(repo.odb(), new_tree, &[base], "tip")?;
 
-    let raw = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "")?;
+    let diff = repo.diff();
+    let raw = diff
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )?
+        .entries;
     assert!(raw.iter().any(|e| e.status == DiffStatus::Deleted));
-    let renamed = diff_trees_with_renames(repo.odb(), Some(&old_tree), Some(&new_tree), "", 30)?;
+    let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(30));
+    let renamed = diff
+        .tree_to_tree(Some(&old_tree), Some(&new_tree), &renames)?
+        .entries;
     assert!(!renamed.is_empty());
 
-    let config = ConfigSet::new();
-    let policy = ThreadPolicy::default();
-    let opts = DiffPostprocessOptions {
-        rename_threshold: 30,
-        copy_threshold: Some(30),
-        find_copies_harder: true,
-        ..DiffPostprocessOptions::default()
-    };
-    let processed = postprocess_diff_entries(
-        repo.odb(),
-        raw,
-        Some(&old_tree),
-        None,
-        None,
-        &config,
-        &policy,
-        &opts,
-        None,
-    )?;
+    let opts = renames
+        .with_copies(CopyDetection::FindHarder(30))
+        .with_threads(Some(ThreadPolicy::default()));
+    let processed = diff
+        .tree_to_tree(Some(&old_tree), Some(&new_tree), &opts)?
+        .entries;
     assert!(!processed.is_empty());
 
-    let via_commits = diff_commits(repo.odb(), &base, &tip)?;
+    let via_commits = diff
+        .commits(&base, &tip, &TreeDiffOptions::default())?
+        .entries;
     assert!(!via_commits.is_empty());
     let _ = repo
         .revwalk()

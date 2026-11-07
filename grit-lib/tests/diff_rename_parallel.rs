@@ -6,15 +6,12 @@ use std::process::Command;
 
 use grit_lib::blame::{compute_blame, BlameDiffAlgorithm};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::diff::{
-    detect_copies_with_policy, detect_renames_with_policy, diff_trees, zero_oid,
-    DetectRenamesOptions, DiffEntry, DiffStatus,
+    zero_oid, CopyDetection, DiffEntry, DiffStatus, RenameDetection, TreeDiffOptions,
 };
-use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::repo::Repository;
+use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::forced_parallel_policy;
 
 fn git_run(dir: &Path, args: &[&str]) {
@@ -61,49 +58,33 @@ fn parallel_policy() -> ThreadPolicy {
     forced_parallel_policy()
 }
 
-fn config_with_rename_limit(limit: i64) -> ConfigSet {
-    let content = format!("[diff]\n\trenameLimit = {limit}\n");
-    let file = ConfigFile::parse(
-        std::path::Path::new("test.cfg"),
-        &content,
-        ConfigScope::Local,
-    )
-    .expect("parse config");
-    let mut set = ConfigSet::new();
-    set.merge(&file);
-    set
+fn rename_options(threshold: u8, policy: ThreadPolicy) -> TreeDiffOptions {
+    TreeDiffOptions::default()
+        .with_renames(RenameDetection::Similarity(threshold))
+        .with_threads(Some(policy))
 }
 
-fn assert_serial_parallel_rename_match(
-    odb: &grit_lib::objects::odb::Odb,
-    entries: Vec<DiffEntry>,
-    threshold: u32,
-    config: &ConfigSet,
-) {
-    let serial = detect_renames_with_policy(
-        odb,
-        None,
-        entries.clone(),
-        threshold,
-        config,
-        &serial_policy(),
-        None,
-        DetectRenamesOptions::default(),
-    )
-    .expect("serial rename detection")
-    .entries;
-    let parallel = detect_renames_with_policy(
-        odb,
-        None,
-        entries,
-        threshold,
-        config,
-        &parallel_policy(),
-        None,
-        DetectRenamesOptions::default(),
-    )
-    .expect("parallel rename detection")
-    .entries;
+fn copy_options(threshold: u8, policy: ThreadPolicy) -> TreeDiffOptions {
+    TreeDiffOptions::default()
+        .with_copies(CopyDetection::Similarity(threshold))
+        .with_threads(Some(policy))
+}
+
+fn assert_serial_parallel_rename_match(repo: &Repository, entries: Vec<DiffEntry>, threshold: u8) {
+    let serial = repo
+        .diff()
+        .detect_renames(
+            entries.clone(),
+            None,
+            &rename_options(threshold, serial_policy()),
+        )
+        .expect("serial rename detection")
+        .entries;
+    let parallel = repo
+        .diff()
+        .detect_renames(entries, None, &rename_options(threshold, parallel_policy()))
+        .expect("parallel rename detection")
+        .entries;
     assert_eq!(
         serial, parallel,
         "parallel rename detection must match serial output"
@@ -193,22 +174,18 @@ fn parallel_rename_matches_serial_exact_and_inexact() {
     let parent = rev_parse_tree(root, "HEAD~1^{tree}");
     let commit = rev_parse_tree(root, "HEAD^{tree}");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let raw = diff_trees(repo.odb(), Some(&parent), Some(&commit), "").expect("diff");
-    let config = ConfigSet::new();
-    assert_serial_parallel_rename_match(repo.odb(), raw.clone(), 50, &config);
+    let raw = repo
+        .diff()
+        .tree_to_tree(Some(&parent), Some(&commit), &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
+    assert_serial_parallel_rename_match(&repo, raw.clone(), 50);
 
-    let detected = detect_renames_with_policy(
-        repo.odb(),
-        None,
-        raw,
-        50,
-        &config,
-        &parallel_policy(),
-        None,
-        DetectRenamesOptions::default(),
-    )
-    .expect("detect renames")
-    .entries;
+    let detected = repo
+        .diff()
+        .detect_renames(raw, None, &rename_options(50, parallel_policy()))
+        .expect("detect renames")
+        .entries;
     let git_lines = git_rename_and_copy_lines(root, &parent, &commit);
     let grit_lines = rename_and_copy_lines(&detected);
     assert_eq!(
@@ -240,20 +217,16 @@ fn exact_renames_above_default_rename_limit_match_git() {
     let parent = rev_parse_tree(root, "HEAD~1^{tree}");
     let commit = rev_parse_tree(root, "HEAD^{tree}");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let raw = diff_trees(repo.odb(), Some(&parent), Some(&commit), "").expect("diff");
-    let config = ConfigSet::new();
-    let detected = detect_renames_with_policy(
-        repo.odb(),
-        None,
-        raw,
-        50,
-        &config,
-        &parallel_policy(),
-        None,
-        DetectRenamesOptions::default(),
-    )
-    .expect("detect renames")
-    .entries;
+    let raw = repo
+        .diff()
+        .tree_to_tree(Some(&parent), Some(&commit), &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
+    let detected = repo
+        .diff()
+        .detect_renames(raw, None, &rename_options(50, parallel_policy()))
+        .expect("detect renames")
+        .entries;
 
     let renames = detected
         .iter()
@@ -287,9 +260,8 @@ fn exact_renames_above_default_rename_limit_match_git() {
 #[test]
 fn asymmetric_matrix_exact_matches_still_pair() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let git_dir = tmp.path().join(".git");
-    std::fs::create_dir_all(git_dir.join("objects")).unwrap();
-    let odb = Odb::new(&git_dir.join("objects"));
+    let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+    let odb = repo.odb();
     let shared = b"shared exact payload\n";
     let oid = odb.write(ObjectKind::Blob, shared).expect("write");
 
@@ -319,19 +291,11 @@ fn asymmetric_matrix_exact_matches_still_pair() {
         });
     }
 
-    let config = ConfigSet::new();
-    let detected = detect_renames_with_policy(
-        &odb,
-        None,
-        entries,
-        50,
-        &config,
-        &serial_policy(),
-        None,
-        DetectRenamesOptions::default(),
-    )
-    .expect("detect renames")
-    .entries;
+    let detected = repo
+        .diff()
+        .detect_renames(entries, None, &rename_options(50, serial_policy()))
+        .expect("detect renames")
+        .entries;
     assert_eq!(
         detected
             .iter()
@@ -388,21 +352,16 @@ fn copy_mixed_exact_inexact_respects_rename_limit_like_git() {
     let parent = rev_parse_tree(root, "HEAD~1^{tree}");
     let commit = rev_parse_tree(root, "HEAD^{tree}");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let raw = diff_trees(repo.odb(), Some(&parent), Some(&commit), "").expect("diff");
-    let source_tree = flatten_tree(repo.odb(), &parent);
-    let config = config_with_rename_limit(3);
-
-    let detected = detect_copies_with_policy(
-        repo.odb(),
-        None,
-        raw,
-        50,
-        false,
-        &source_tree,
-        &config,
-        &parallel_policy(),
-    )
-    .expect("detect copies");
+    let raw = repo
+        .diff()
+        .tree_to_tree(Some(&parent), Some(&commit), &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
+    let detected = repo
+        .diff()
+        .detect_renames(raw, Some(&parent), &copy_options(50, parallel_policy()))
+        .expect("detect copies")
+        .entries;
 
     let git_lines = git_rename_and_copy_lines(root, &parent, &commit);
     let grit_lines = rename_and_copy_lines(&detected);
@@ -448,32 +407,25 @@ fn parallel_copy_many_to_one_matches_serial() {
     let parent = rev_parse_tree(root, "HEAD~1^{tree}");
     let commit = rev_parse_tree(root, "HEAD^{tree}");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let raw = diff_trees(repo.odb(), Some(&parent), Some(&commit), "").expect("diff");
-    let source_tree = flatten_tree(repo.odb(), &parent);
-
-    let config = ConfigSet::new();
-    let serial = detect_copies_with_policy(
-        repo.odb(),
-        None,
-        raw.clone(),
-        50,
-        false,
-        &source_tree,
-        &config,
-        &serial_policy(),
-    )
-    .expect("detect copies");
-    let parallel = detect_copies_with_policy(
-        repo.odb(),
-        None,
-        raw,
-        50,
-        false,
-        &source_tree,
-        &config,
-        &parallel_policy(),
-    )
-    .expect("detect copies");
+    let raw = repo
+        .diff()
+        .tree_to_tree(Some(&parent), Some(&commit), &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
+    let serial = repo
+        .diff()
+        .detect_renames(
+            raw.clone(),
+            Some(&parent),
+            &copy_options(50, serial_policy()),
+        )
+        .expect("detect copies")
+        .entries;
+    let parallel = repo
+        .diff()
+        .detect_renames(raw, Some(&parent), &copy_options(50, parallel_policy()))
+        .expect("detect copies")
+        .entries;
     assert_eq!(
         serial, parallel,
         "parallel copy detection must match serial"
@@ -490,38 +442,6 @@ fn parallel_copy_many_to_one_matches_serial() {
             >= 2,
         "remaining destinations should be copies: {serial:?}"
     );
-}
-
-fn flatten_tree(
-    odb: &grit_lib::objects::odb::Odb,
-    tree_oid: &ObjectId,
-) -> Vec<(String, FileMode, ObjectId)> {
-    use grit_lib::objects::parse_tree;
-    fn walk(
-        odb: &grit_lib::objects::odb::Odb,
-        tree_oid: &ObjectId,
-        prefix: &str,
-        out: &mut Vec<(String, FileMode, ObjectId)>,
-    ) {
-        let obj = odb.read(tree_oid).expect("tree");
-        let entries = parse_tree(&obj.data).expect("parse");
-        for e in entries {
-            let name = String::from_utf8_lossy(&e.name);
-            let path = if prefix.is_empty() {
-                name.to_string()
-            } else {
-                format!("{prefix}/{name}")
-            };
-            if e.mode == 0o040000 {
-                walk(odb, &e.oid, &path, out);
-            } else {
-                out.push((path, FileMode::new(e.mode), e.oid));
-            }
-        }
-    }
-    let mut out = Vec::new();
-    walk(odb, tree_oid, "", &mut out);
-    out
 }
 
 #[test]
@@ -615,7 +535,10 @@ fn parallel_rename_matrix_with_many_pairs() {
     let parent = rev_parse_tree(root, "HEAD~1^{tree}");
     let commit = rev_parse_tree(root, "HEAD^{tree}");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let raw = diff_trees(repo.odb(), Some(&parent), Some(&commit), "").expect("diff");
-    let config = ConfigSet::new();
-    assert_serial_parallel_rename_match(repo.odb(), raw, 50, &config);
+    let raw = repo
+        .diff()
+        .tree_to_tree(Some(&parent), Some(&commit), &TreeDiffOptions::default())
+        .map(|r| r.entries)
+        .expect("diff");
+    assert_serial_parallel_rename_match(&repo, raw, 50);
 }

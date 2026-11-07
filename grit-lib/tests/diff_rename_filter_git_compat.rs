@@ -3,8 +3,7 @@
 use crate::support;
 
 use grit_lib::diff::{
-    apply_diff_filter, diff_trees_with_renames, DiffEntry, DiffStatus, InvalidDiffFilter,
-    RenameDetection,
+    apply_diff_filter, DiffEntry, DiffStatus, InvalidDiffFilter, RenameDetection, TreeDiffOptions,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
@@ -90,9 +89,18 @@ fn rename_threshold_matches_git_m() {
             format!("-M{threshold}")
         };
         let git_lines = git_name_status(wt, &[&git_m, &parent.to_hex(), &commit.to_hex()]);
-        let grit_entries =
-            diff_trees_with_renames(dr.repo.odb(), Some(&parent), Some(&commit), "", threshold)
-                .expect("diff");
+        let grit_entries = dr
+            .repo
+            .diff()
+            .tree_to_tree(
+                Some(&parent),
+                Some(&commit),
+                &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(
+                    u8::try_from(threshold).unwrap(),
+                )),
+            )
+            .map(|r| r.entries)
+            .expect("diff");
         let grit_lines = grit_name_status(&grit_entries);
         assert_eq!(
             git_lines, grit_lines,
@@ -132,9 +140,18 @@ fn default_rename_threshold_matches_git_default() {
     let wt = &dr.worktree;
     let (p, c) = (parent.to_hex(), commit.to_hex());
     let grit_at = |threshold: u32| {
-        let entries =
-            diff_trees_with_renames(dr.repo.odb(), Some(&parent), Some(&commit), "", threshold)
-                .expect("diff");
+        let entries = dr
+            .repo
+            .diff()
+            .tree_to_tree(
+                Some(&parent),
+                Some(&commit),
+                &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(
+                    u8::try_from(threshold).unwrap(),
+                )),
+            )
+            .map(|r| r.entries)
+            .expect("diff");
         grit_name_status(&entries)
     };
 
@@ -166,14 +183,18 @@ fn no_renames_reports_add_and_delete() {
     let (dr, parent, commit) = t4001_rename_repo();
     let wt = &dr.worktree;
     let git_lines = git_name_status(wt, &["--no-renames", &parent.to_hex(), &commit.to_hex()]);
-    let grit_entries = diff_trees_with_renames(
-        dr.repo.odb(),
-        Some(&parent),
-        Some(&commit),
-        "",
-        grit_lib::diff::RENAME_DETECTION_DISABLED,
-    )
-    .expect("diff");
+    let grit_entries = dr
+        .repo
+        .diff()
+        .tree_to_tree(
+            Some(&parent),
+            Some(&commit),
+            &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(
+                u8::try_from(grit_lib::diff::RENAME_DETECTION_DISABLED).unwrap(),
+            )),
+        )
+        .map(|r| r.entries)
+        .expect("diff");
     let grit_lines = grit_name_status(&grit_entries);
     assert_eq!(git_lines, grit_lines);
     assert!(
@@ -216,8 +237,15 @@ fn diff_filter_matches_git() {
     for spec in ["A", "D", "M", "AD", "a", "d", "aD", "AM"] {
         let git_lines =
             git_name_status(wt, &["--diff-filter", spec, &base.to_hex(), &tip.to_hex()]);
-        let raw =
-            diff_trees_with_renames(repo.odb(), Some(&base), Some(&tip), "", 50).expect("diff");
+        let raw = repo
+            .diff()
+            .tree_to_tree(
+                Some(&base),
+                Some(&tip),
+                &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+            )
+            .map(|r| r.entries)
+            .expect("diff");
         let filter: grit_lib::diff::DiffFilter = spec.parse().expect("filter");
         let filtered = apply_diff_filter(raw, Some(filter));
         let grit_lines = grit_name_status(&filtered);
@@ -289,8 +317,15 @@ fn exact_rename_matches_git_m100_percent() {
         &grit_lib::config::environment::RepositoryOptions::empty(),
     )
     .expect("open");
-    let grit_entries =
-        diff_trees_with_renames(repo.odb(), Some(&parent), Some(&commit), "", 100).expect("diff");
+    let grit_entries = repo
+        .diff()
+        .tree_to_tree(
+            Some(&parent),
+            Some(&commit),
+            &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(100)),
+        )
+        .map(|r| r.entries)
+        .expect("diff");
     let grit_lines = grit_name_status(&grit_entries);
     assert_eq!(git_lines, grit_lines);
 }
@@ -343,8 +378,16 @@ fn span_hash_rename_similarity_matches_git() {
         "git score {git_score} should reflect partial span overlap"
     );
 
-    let grit_entries =
-        diff_trees_with_renames(dr.repo.odb(), Some(&parent), Some(&commit), "", 50).expect("diff");
+    let grit_entries = dr
+        .repo
+        .diff()
+        .tree_to_tree(
+            Some(&parent),
+            Some(&commit),
+            &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+        )
+        .map(|r| r.entries)
+        .expect("diff");
     let rename = grit_entries
         .iter()
         .find(|e| e.status == DiffStatus::Renamed)
@@ -394,8 +437,16 @@ fn crlf_partial_rename_repo() -> (DiffRepo, ObjectId, ObjectId, u32) {
 fn crlf_span_hash_rename_similarity_matches_git() {
     let (dr, parent, commit, git_score) = crlf_partial_rename_repo();
     let wt = &dr.worktree;
-    let grit_entries =
-        diff_trees_with_renames(dr.repo.odb(), Some(&parent), Some(&commit), "", 50).expect("diff");
+    let grit_entries = dr
+        .repo
+        .diff()
+        .tree_to_tree(
+            Some(&parent),
+            Some(&commit),
+            &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+        )
+        .map(|r| r.entries)
+        .expect("diff");
     let rename = grit_entries
         .iter()
         .find(|e| e.status == DiffStatus::Renamed)
@@ -424,8 +475,16 @@ fn no_trailing_newline_rename_similarity_matches_git() {
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
     let git_score = git_rename_score_raw(wt, &parent, &commit);
 
-    let grit_entries =
-        diff_trees_with_renames(dr.repo.odb(), Some(&parent), Some(&commit), "", 50).expect("diff");
+    let grit_entries = dr
+        .repo
+        .diff()
+        .tree_to_tree(
+            Some(&parent),
+            Some(&commit),
+            &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+        )
+        .map(|r| r.entries)
+        .expect("diff");
     let rename = grit_entries
         .iter()
         .find(|e| e.status == DiffStatus::Renamed)

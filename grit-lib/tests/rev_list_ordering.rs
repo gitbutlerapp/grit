@@ -769,7 +769,7 @@ fn assert_replace_graft_history_matches_git(
     label: &str,
 ) {
     use grit_lib::config::ConfigSet;
-    use grit_lib::diff::{commit_diff_files, DiffDetail, DiffMerges, DiffOptions};
+    use grit_lib::diff::{DiffDetail, DiffMerges, DiffOptions};
     let git_subjects: Vec<String> = git(wt, &["log", "--format=%s"])
         .lines()
         .map(str::trim)
@@ -802,16 +802,16 @@ fn assert_replace_graft_history_matches_git(
 
     let config = ConfigSet::default();
     let thread_policy = grit.thread_policy();
-    let diff = commit_diff_files(
-        grit,
-        &parent,
-        DiffMerges::FirstParent,
-        DiffDetail::NameOnly,
-        &DiffOptions::default(),
-        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
-        &thread_policy,
-    )
-    .expect("commit diff");
+    let diff = grit
+        .diff()
+        .commit_files(
+            &parent,
+            DiffMerges::FirstParent,
+            DiffDetail::NameOnly,
+            &DiffOptions::default(),
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+        )
+        .expect("commit diff");
     assert!(
         diff.files.iter().any(|f| f.path == "f"),
         "{label}: commit diff uses replaced tree"

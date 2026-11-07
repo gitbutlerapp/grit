@@ -24,7 +24,7 @@ use crate::diff::{
     unstaged_raw_changes_with_peer_hunks_in, DiffOptions, DiffStatus, DiffTarget, FileChange,
     FileDiff,
 };
-use crate::diff::{hunk_ids, hunk_ids_with_duplicate_peers, DiffSide, HunkId};
+use crate::diff::{hunk_ids, DiffSide, HunkId};
 use crate::error::{ApplyError, Error};
 use crate::index::{Index, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR};
 use crate::objects::FileMode;
@@ -641,7 +641,7 @@ fn find_id_on_staged_side(
         if file.binary {
             return None;
         }
-        hunk_ids(DiffSide::Staged, &file.path, &file.hunks)
+        hunk_ids(DiffSide::Staged, &file.path, &file.hunks, &[])
             .into_iter()
             .find(|id| requested.contains(id))
     }))
@@ -666,7 +666,7 @@ fn resolve_on_files(
             .get(&file.path)
             .map(|h| h.as_slice())
             .unwrap_or(&[]);
-        let ids = hunk_ids_with_duplicate_peers(side, &file.path, &file.hunks, peer);
+        let ids = hunk_ids(side, &file.path, &file.hunks, peer);
         let mut selected = Vec::new();
         let mut selected_ids = Vec::new();
         for (hunk, id) in file.hunks.iter().zip(ids.iter()) {
@@ -745,7 +745,7 @@ fn current_ids_for_stale(
         .get(&file.path)
         .map(|h| h.as_slice())
         .unwrap_or(&[]);
-    hunk_ids_with_duplicate_peers(side, &file.path, &file.hunks, peer)
+    hunk_ids(side, &file.path, &file.hunks, peer)
 }
 
 fn file_patch_from_hunks(
@@ -1043,7 +1043,7 @@ fn resolve_line_ranges_unstaged(
         }
         validate_line_ranges(&path, &intervals, new_side_line_count(change))?;
         let peer = peer_hunks.get(&path).map(|h| h.as_slice()).unwrap_or(&[]);
-        let ids = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &path, &file.hunks, peer);
+        let ids = hunk_ids(DiffSide::Unstaged, &path, &file.hunks, peer);
         let mut partial = Vec::new();
         let mut selected_any = false;
         for (hunk, id) in file.hunks.iter().zip(ids.iter()) {
@@ -1615,8 +1615,8 @@ pub fn list_unstaged_hunk_ids(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff::hunk_diff_bundle;
     use crate::diff::hunk_ids;
+    use crate::diff::targets::hunk_diff_bundle;
     use crate::error::RefError;
     use crate::index::write_tree::write_tree_from_index;
     use crate::porcelain::add::{stage, StageOptions};
@@ -1683,7 +1683,7 @@ mod tests {
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
         assert_eq!(files.len(), 1);
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,
@@ -1791,7 +1791,7 @@ mod tests {
 
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,
@@ -1849,7 +1849,7 @@ mod tests {
 
         let opts = DiffOptions::from_config(repo.config().snapshot().unwrap().as_ref());
         let (files, peers) = unstaged_file_diffs_with_peer_hunks(&repo, &[], opts.clone()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,
@@ -1891,7 +1891,7 @@ mod tests {
         std::fs::write(root.join("f.txt"), edited).unwrap();
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,
@@ -1983,7 +1983,7 @@ mod tests {
         let staged_files =
             collect_files_for_target(&repo, &DiffTarget::IndexVsHead, &[], DiffOptions::default())
                 .unwrap();
-        let staged_id = hunk_ids(DiffSide::Staged, "f.txt", &staged_files[0].hunks)[0].clone();
+        let staged_id = hunk_ids(DiffSide::Staged, "f.txt", &staged_files[0].hunks, &[])[0].clone();
         std::fs::write(root.join("f.txt"), b"three\n").unwrap();
         let err = stage_hunks(
             &repo,
@@ -2166,7 +2166,7 @@ mod tests {
             !new_file.hunks.is_empty(),
             "new file should have structured hunks"
         );
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "new.txt",
             &new_file.hunks,
@@ -2291,7 +2291,7 @@ mod tests {
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
         let file = files.iter().find(|f| f.path == "pkg/a.txt").expect("a.txt");
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "pkg/a.txt",
             &file.hunks,
@@ -2498,7 +2498,7 @@ mod tests {
         std::fs::write(root.join("f.txt"), b"two\n").unwrap();
         let (files, peers) =
             unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
-        let ids = hunk_ids_with_duplicate_peers(
+        let ids = hunk_ids(
             DiffSide::Unstaged,
             "f.txt",
             &files[0].hunks,

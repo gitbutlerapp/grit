@@ -7,16 +7,14 @@ mod s7;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
-    build_file_diffs, count_changes_git_histogram, count_changes_with_algorithm,
-    diff_index_to_tree, diff_trees, diff_trees_with_renames_and_policy, DiffDetail, DiffOptions,
+    count_changes_with_algorithm, DiffDetail, DiffOptions, RenameDetection, TreeDiffOptions,
 };
-use grit_lib::index::write_tree::{build_cache_tree_from_index, write_tree_from_index};
+use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{Index, IndexEntry};
-use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind, TreeEntry};
-use grit_lib::parallel::ThreadPolicy;
+use grit_lib::prelude::RepositoryOptions;
+use grit_lib::repo::{InitOptions, Repository};
 use similar::Algorithm;
 
 use s7::HistoryBenchFixtures;
@@ -31,7 +29,10 @@ fn bench_tree_diff_wide(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(name), &(old, new), |b, pair| {
             b.iter(|| {
                 black_box(
-                    diff_trees(fx.repo.odb(), Some(&pair.0), Some(&pair.1), "").expect("tree diff"),
+                    fx.repo
+                        .diff()
+                        .tree_to_tree(Some(&pair.0), Some(&pair.1), &TreeDiffOptions::default())
+                        .expect("tree diff"),
                 )
             });
         });
@@ -46,7 +47,8 @@ fn bench_tree_diff_siblings(c: &mut Criterion) {
     let mut group = c.benchmark_group("diff/tree_diff_siblings");
     for repeated in [false, true] {
         let temp = tempfile::tempdir().expect("tempdir");
-        let odb = Odb::new(temp.path());
+        let (repo, _) = Repository::init(temp.path(), &InitOptions::default()).expect("init");
+        let odb = repo.odb();
         let old_blob = odb.write(ObjectKind::Blob, b"old\n").expect("blob");
         let new_blob = odb.write(ObjectKind::Blob, b"new\n").expect("blob");
         let mut old_root = Vec::new();
@@ -99,35 +101,42 @@ fn bench_tree_diff_siblings(c: &mut Criterion) {
             .expect("root");
         let shape = if repeated { "repeated" } else { "distributed" };
         group.throughput(Throughput::Elements(120_000));
+        let reopen =
+            || Repository::discover(Some(temp.path()), &RepositoryOptions::empty()).expect("open");
+        let plain = TreeDiffOptions::default();
         group.bench_function(BenchmarkId::new(shape, "cold"), |b| {
             b.iter_batched(
-                || Odb::new(temp.path()),
-                |odb| black_box(diff_trees(&odb, Some(&old), Some(&new), "").expect("diff")),
+                reopen,
+                |repo| {
+                    black_box(
+                        repo.diff()
+                            .tree_to_tree(Some(&old), Some(&new), &plain)
+                            .expect("diff"),
+                    )
+                },
                 criterion::BatchSize::SmallInput,
             );
         });
         group.bench_function(BenchmarkId::new(shape, "warm"), |b| {
-            b.iter(|| black_box(diff_trees(&odb, Some(&old), Some(&new), "").expect("diff")));
+            b.iter(|| {
+                black_box(
+                    repo.diff()
+                        .tree_to_tree(Some(&old), Some(&new), &plain)
+                        .expect("diff"),
+                )
+            });
         });
         if !repeated {
             // `grit diff --name-status A B`: default rename detection over modifications only.
-            let config = ConfigSet::new();
-            let policy = ThreadPolicy::default();
+            let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
             group.bench_function(BenchmarkId::new(shape, "cold+renames"), |b| {
                 b.iter_batched(
-                    || Odb::new(temp.path()),
-                    |odb| {
+                    reopen,
+                    |repo| {
                         black_box(
-                            diff_trees_with_renames_and_policy(
-                                &odb,
-                                Some(&old),
-                                Some(&new),
-                                "",
-                                50,
-                                &config,
-                                &policy,
-                            )
-                            .expect("diff"),
+                            repo.diff()
+                                .tree_to_tree(Some(&old), Some(&new), &renames)
+                                .expect("diff"),
                         )
                     },
                     criterion::BatchSize::SmallInput,
@@ -143,15 +152,16 @@ fn bench_tree_diff_siblings(c: &mut Criterion) {
 fn bench_index_to_tree_wide_root(c: &mut Criterion) {
     const DIRS: usize = 5000;
     let temp = tempfile::tempdir().expect("tempdir");
-    let odb = Odb::new(temp.path());
+    let (repo, _) = Repository::init(temp.path(), &InitOptions::default()).expect("init");
+    let odb = repo.odb();
     let mut index = Index::new();
     for d in 0..DIRS {
         let path = format!("s{d:04x}/a/b/c/leaf.txt");
         let oid = odb.write(ObjectKind::Blob, path.as_bytes()).expect("blob");
         index.add_or_replace(index_entry(&path, oid));
     }
-    let head_tree = write_tree_from_index(&odb, &index, "").expect("tree");
-    index.set_cache_tree(build_cache_tree_from_index(&odb, &index).expect("cache-tree"));
+    let head_tree =
+        write_tree_update_index(odb, &mut index, "", WriteTreeFlags::default()).expect("tree");
     for d in (0..DIRS).step_by(DIRS / 50) {
         let path = format!("s{d:04x}/a/b/c/leaf.txt");
         index.invalidate_cache_tree_for_path(path.as_bytes());
@@ -160,7 +170,11 @@ fn bench_index_to_tree_wide_root(c: &mut Criterion) {
     }
     c.bench_function("diff/index_to_tree_wide_root", |b| {
         b.iter(|| {
-            black_box(diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("diff"))
+            black_box(
+                repo.diff()
+                    .index_to_tree(&index, Some(&head_tree), &TreeDiffOptions::default())
+                    .expect("diff"),
+            )
         });
     });
 }
@@ -202,52 +216,58 @@ fn bench_blob_myers_10k_lines(c: &mut Criterion) {
         });
     });
     group.bench_function("histogram", |b| {
-        b.iter(|| black_box(count_changes_git_histogram(old, new)));
+        b.iter(|| {
+            black_box(count_changes_with_algorithm(
+                old,
+                new,
+                Algorithm::Myers,
+                true,
+            ))
+        });
     });
     group.finish();
 }
 
 fn bench_diff_stat_vs_patch(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
-    let entries = diff_trees(
-        fx.repo.odb(),
-        Some(&fx.wide_tree),
-        Some(&fx.wide_tree_few_changes),
-        "",
-    )
-    .expect("tree diff");
+    let entries = fx
+        .repo
+        .diff()
+        .tree_to_tree(
+            Some(&fx.wide_tree),
+            Some(&fx.wide_tree_few_changes),
+            &TreeDiffOptions::default(),
+        )
+        .expect("tree diff")
+        .entries;
     let entry_count = entries.len();
-    let config = ConfigSet::new();
-    let policy = ThreadPolicy::default();
     let opts = DiffOptions::default();
     let mut group = c.benchmark_group("diff/stat_vs_patch");
     group.bench_function("stat", |b| {
         b.iter(|| {
             black_box(
-                build_file_diffs(
-                    fx.repo.odb(),
-                    entries[..entry_count.min(entries.len())].to_vec(),
-                    DiffDetail::Stat,
-                    opts.clone(),
-                    &config,
-                    &policy,
-                )
-                .expect("stat"),
+                fx.repo
+                    .diff()
+                    .files_for_entries(
+                        entries[..entry_count.min(entries.len())].to_vec(),
+                        DiffDetail::Stat,
+                        &opts,
+                    )
+                    .expect("stat"),
             )
         });
     });
     group.bench_function("patch", |b| {
         b.iter(|| {
             black_box(
-                build_file_diffs(
-                    fx.repo.odb(),
-                    entries[..entry_count.min(entries.len())].to_vec(),
-                    DiffDetail::Patch,
-                    opts.clone(),
-                    &config,
-                    &policy,
-                )
-                .expect("patch"),
+                fx.repo
+                    .diff()
+                    .files_for_entries(
+                        entries[..entry_count.min(entries.len())].to_vec(),
+                        DiffDetail::Patch,
+                        &opts,
+                    )
+                    .expect("patch"),
             )
         });
     });

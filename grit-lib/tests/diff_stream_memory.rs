@@ -6,9 +6,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use grit_lib::diff::{
-    diff_trees, for_each_tree_diff_structured, tree_diff_structured_parallel, DiffOptions,
-};
+use grit_lib::diff::{DiffOptions, TreeDiffOptions};
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
@@ -68,7 +66,15 @@ fn serial_structured_diff_peak_stays_bounded() {
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let old_tree = tree_with_version(&repo, 0);
     let new_tree = tree_with_version(&repo, 1);
-    let entries = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "").expect("diff trees");
+    let entries = repo
+        .diff()
+        .tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            &TreeDiffOptions::default(),
+        )
+        .map(|r| r.entries)
+        .expect("diff trees");
     assert_eq!(entries.len(), FILES);
     let config = repo.config().snapshot().expect("config");
     let thread_policy = ThreadPolicy::default();
@@ -78,28 +84,23 @@ fn serial_structured_diff_peak_stays_bounded() {
     let before_serial = peak_rss();
     let live = AtomicUsize::new(0);
     let max_live = AtomicUsize::new(0);
-    for_each_tree_diff_structured(
-        repo.odb(),
-        &entries,
-        diff_options.clone(),
-        &config,
-        &thread_policy,
-        |row| {
+    repo.diff()
+        .for_each_structured(&entries, &diff_options, |row| {
             let n = live.fetch_add(1, Ordering::Relaxed) + 1;
             max_live.fetch_max(n, Ordering::Relaxed);
             assert!(!row.structured.hunks.is_empty() || row.binary);
             live.fetch_sub(1, Ordering::Relaxed);
             Ok(())
-        },
-    )
-    .expect("serial structured diff");
+        })
+        .expect("serial structured diff");
     let serial_growth = peak_rss().saturating_sub(before_serial);
 
     reset_peak_rss();
     let before_parallel = peak_rss();
-    let _all =
-        tree_diff_structured_parallel(repo.odb(), entries, &config, &thread_policy, diff_options)
-            .expect("parallel structured diff");
+    let _all = repo
+        .diff()
+        .structured(entries, &diff_options)
+        .expect("parallel structured diff");
     let parallel_growth = peak_rss().saturating_sub(before_parallel);
 
     assert_eq!(
