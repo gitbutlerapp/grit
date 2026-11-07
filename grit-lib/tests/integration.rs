@@ -842,6 +842,9 @@ mod history_engine;
 #[path = "history_fixup.rs"]
 mod history_fixup;
 #[cfg(feature = "full-tests")]
+#[path = "history_handle_git_compat.rs"]
+mod history_handle_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "history_harness_smoke.rs"]
 mod history_harness_smoke;
 #[cfg(feature = "full-tests")]
