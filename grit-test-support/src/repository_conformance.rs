@@ -490,7 +490,7 @@ pub struct RepositorySnapshot {
     pub main_history: Vec<(ObjectId, String, ChangeId)>,
     /// The three `story.txt` commits recorded right after `c3` (must match [`Self::main_history`]).
     pub story_lineage: Vec<(ObjectId, String, ChangeId)>,
-    /// Same three commits from `commit_path` outcomes (newest-first), for log cross-check.
+    /// Same three commits from [`CommitOutcome`] values (newest-first), for log cross-check.
     pub story_commits_from_outcomes: Vec<(ObjectId, String, ChangeId)>,
     /// Tip of `feature` after its single commit.
     pub feature_tip: ObjectId,
