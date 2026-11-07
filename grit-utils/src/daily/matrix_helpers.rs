@@ -1,5 +1,6 @@
 //! Setup and argv helpers for daily matrix scenarios (branching, refs, maintenance, misc).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -1094,12 +1095,20 @@ pub fn verify_diff_stat(ctx: &DailyHeadlineContext) -> Result<()> {
     Ok(())
 }
 
-fn git_show_numstat_block(git: &Path, repo: &Path, oid: &str) -> Result<String> {
-    Ok(
-        tool_stdout(git, repo, &["show", "--numstat", "--format=", oid])?
-            .trim_end()
-            .to_string(),
-    )
+/// Split `git log --numstat --format=%x00%H` output into one numstat block per commit.
+///
+/// Uses the same walk and merge handling as the timed `git log --stat -50`: a merge commit
+/// gets an empty block, where `git show` would fall back to a first-parent stat.
+fn parse_git_log_numstat_blocks(text: &str) -> Result<HashMap<String, String>> {
+    text.split('\0')
+        .filter(|record| !record.trim().is_empty())
+        .map(|record| {
+            let (oid, rest) = record.split_once('\n').unwrap_or((record, ""));
+            let oid = oid.trim();
+            anyhow::ensure!(!oid.is_empty(), "git log numstat record without an oid");
+            Ok((oid.to_string(), rest.trim().to_string()))
+        })
+        .collect()
 }
 
 fn grit_log_commit_numstat_block(entry: &serde_json::Value) -> Result<String> {
@@ -1131,14 +1140,29 @@ pub fn verify_log_stat_n50(ctx: &DailyHeadlineContext) -> Result<()> {
         .get("commits")
         .and_then(|v| v.as_array())
         .context("log json commits")?;
+    let git_out = tool_stdout(
+        &ctx.git,
+        &ctx.repo,
+        &["log", "-50", "--numstat", "--format=%x00%H"],
+    )?;
+    let git_blocks = parse_git_log_numstat_blocks(&git_out)?;
+    if git_blocks.len() != commits.len() {
+        anyhow::bail!(
+            "log numstat commit count differs (git {} grit {})",
+            git_blocks.len(),
+            commits.len()
+        );
+    }
     for entry in commits {
         let oid = entry
             .get("oid")
             .and_then(|v| v.as_str())
             .context("log commit oid")?;
         let grit_block = grit_log_commit_numstat_block(entry)?;
-        let git_block = git_show_numstat_block(&ctx.git, &ctx.repo, oid)?;
-        if grit_block != git_block {
+        let git_block = git_blocks
+            .get(oid)
+            .with_context(|| format!("git log -50 does not list commit {oid}"))?;
+        if &grit_block != git_block {
             anyhow::bail!("log numstat mismatch for commit {oid}");
         }
     }
@@ -2130,6 +2154,18 @@ pub fn ref_query_merged_branches_bench(ctx: &DailyHeadlineContext) -> (BenchArgv
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_log_numstat_blocks_keep_merges_empty() -> Result<()> {
+        let text =
+            "\0aaa\n\n1\t1\tGIT-VERSION-GEN\n2\t0\tsrc/x.rs\n\0bbb\n\0ccc\n\n-\t-\timg.png\n";
+        let blocks = parse_git_log_numstat_blocks(text)?;
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks["aaa"], "1\t1\tGIT-VERSION-GEN\n2\t0\tsrc/x.rs");
+        assert_eq!(blocks["bbb"], "");
+        assert_eq!(blocks["ccc"], "-\t-\timg.png");
+        Ok(())
+    }
 
     #[cfg_attr(
         not(feature = "full-tests"),
