@@ -536,7 +536,7 @@ fn failure_text(err: &anyhow::Error) -> String {
 }
 
 /// Bring the checkout onto the target the merge made, in the order
-/// [`land_integration`] asks for: refresh as `grit pull` does, then move off
+/// [`land_integration`](grit_lib::repo_handles::RepositorySnapshotCheckouts::land_integration) asks for: refresh as `grit pull` does, then move off
 /// the integrated branch when the library says so ([`Landing::move_off`]).
 /// The merge stands whatever happens here, so failures are reported, not
 /// returned.
@@ -579,7 +579,7 @@ fn follow_up(co: &OpenCheckout, name: &str, landing: &Landing, mode: OutputMode)
 /// went into the branch this checkout follows, the branch's commits are in
 /// its next snapshot, so they are never replayed: when `HEAD` is on the
 /// branch it moves to the new snapshot, keeping uncommitted changes, and onto
-/// a fresh work branch ([`land_integration`] decides).
+/// a fresh work branch ([`land_integration`](grit_lib::repo_handles::RepositorySnapshotCheckouts::land_integration) decides).
 pub fn integrate(name: &str, without: &[String], mode: OutputMode) -> Result<IntegrateOutcome> {
     if crate::commands::checkout::open_checkout_here()?.is_none() {
         return integrate_hosted(name, without, mode);

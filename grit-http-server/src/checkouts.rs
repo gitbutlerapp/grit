@@ -26,7 +26,7 @@
 //!
 //! The repository's [`GraftLog`](grit_lib::remote::snapshot_checkout::GraftLog) records which real commit each checkout
 //! commit stands for: check-ins add the commits they graft, and showing a
-//! checkout one of the server's branches ([`project_branch`]) adds the
+//! checkout one of the server's branches ([`project_branch`](grit_lib::repo_handles::RepositorySnapshotCheckouts::project_branch)) adds the
 //! commits it projects, so work built on those grafts onto the real ones.
 //!
 //! Requests on one checkout take turns, and so do check-ins setting the
