@@ -4625,3 +4625,60 @@ Some rows are left out of the table:
 - `checkout_between_trees/H_0.1` (+4.3%) and `status/clean_100k` (+3.2%) each had one disturbed run. An eight-run rerun of just those two gave +0.2% for the checkout. The status benchmark stats 100,000 files and stayed within its own spread: its four baseline runs alone ranged from 26.3 to 30.9 ms. Callgrind counts 341.18M instructions before and 340.94M after for `grit status` on that tree.
 
 The `hot_paths` suite stops at its stash benchmark on this baseline too (`apply_stash` reports `WouldOverwriteLocalChanges`), so its last five benchmarks were not measured. A new test, `grit-lib/tests/odb_primary_read_allocations.rs` (`full-tests`), holds warm reads to the heap allocations both builds make: 1 per packed `read_into`, 2 per packed `read_info`, 10 per packed `contains`, none inside a pack read context, and 15, 14 and 3 for the loose equivalents.
+
+
+## Text diffs through one options struct (2026-11-08)
+
+[`unified_diff`](rustdoc:grit_lib::diff::unified_diff) and [`line_change_counts`](rustdoc:grit_lib::diff::line_change_counts) now take one [`UnifiedDiffOptions`](rustdoc:grit_lib::diff::UnifiedDiffOptions) and render every option through the engine `write_patch` uses. Before, each option had its own renderer: one per algorithm, a separate `-W` engine built on the `similar` crate, and an `--anchored` diff that split the file at exact-match lines.
+
+The rows come from three Criterion benches in `grit-lib/benches`:
+
+- `diff`:
+  - `diff/blob_myers_10k_lines` uses the shared fixture's 10,000-line blob plus one appended line.
+  - `diff/text_count` (line counts, the `--stat` path) and `diff/text_render` (full patches with `a/` / `b/` labels and function names) use a generated 10,000-line Rust file: 2,500 small functions, with an edit every 37, a re-indented body every 53 and an inserted function every 101.
+  - The pathological rows use the shared fixture's 4,000-line `x`/`y` alternation.
+- `userdiff_hunk_header` times one rust-driver funcname match.
+- `merge_content` times a 20,000-line three-way content merge.
+
+The baseline is main at `e1bbc8635`, running the same `diff` bench file with the calls routed through a local shim over the old public functions (`count_changes_with_algorithm`, `unified_diff_with_prefix_and_funcname_and_algorithm`, `anchored_unified_diff`, `line_diff_unified_hunk_body`). Both sides build the same inputs in the same order.
+
+Factory VM: Intel Xeon, 4 vCPUs, Rust 1.99.0, `bench` profile. Criterion took 40 samples per row (100 for `userdiff_hunk_header`) in three rounds, alternating baseline and branch binaries. The table shows the median of the three round medians. One branch round ran during a slow spell, where every row was 7–20% slower, including tree diffs this change does not touch. The rows near 3% got five more alternating rounds with 60 samples, noted below.
+
+| Benchmark | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| `userdiff_hunk_header_rust_match_line` | 282–294 ns | 270–277 ns | −4.5% |
+| `merge_trees_three_way/content_both_sides_20k` | 745.0 ms | 749.3 ms | +0.6% |
+| `diff/blob_myers_10k_lines/myers` | 315 µs | 315 µs | +0.2% |
+| `diff/blob_myers_10k_lines/histogram` | 407 µs | 411 µs | +0.9% |
+| `diff/text_count/code_myers` | 455 µs | 466 µs | +2.5% (five extra rounds) |
+| `diff/text_count/code_minimal` | 422 µs | 425 µs | +0.9% |
+| `diff/text_count/code_patience` | 1.891 ms | 1.853 ms | −2.0% |
+| `diff/text_count/code_histogram` | 1.511 ms | 1.502 ms | −0.6% |
+| `diff/text_count/pathological_myers` | 186 µs | 189 µs | +1.7% |
+| `diff/text_count/pathological_histogram` | 76.7 ms | 75.8 ms | −1.2% |
+| `diff/text_render/myers` | 703 µs | 601 µs | −14.4% |
+| `diff/text_render/minimal` | 673 µs | 574 µs | −14.8% |
+| `diff/text_render/patience` | 2.138 ms | 2.009 ms | −6.1% |
+| `diff/text_render/histogram` | 1.897 ms | 1.782 ms | −6.1% |
+| `diff/text_render/u0` | 705 µs | 600 µs | −14.8% |
+| `diff/text_render/inter_hunk_6` | 713 µs | 598 µs | −16.1% |
+| `diff/text_render/funcname_rust` | 802 µs | 686 µs | −14.5% |
+| `diff/text_render/function_context` (`-W`) | 2.483 ms | 719 µs | −71.0% |
+| `diff/text_render/anchored` | 2.592 ms | 2.199 ms | −15.2% |
+| `diff/text_render/ignore_space_change` (`-b`) | 1.728 ms | 1.799 ms | +4.1% (not like for like, see below) |
+| `diff/tree_diff_wide/few` | 345 µs | 350 µs | +1.4% (five extra rounds) |
+| `diff/tree_diff_siblings/distributed/warm` | 17.81 ms | 17.25 ms | −3.2% (five extra rounds) |
+
+**Funcname matching.** On the first rebased build, `userdiff_hunk_header` ran about 4% slower than main in every alternating round, though `FuncnameMatcher::match_line` had not changed. Callgrind showed the cause: after the consolidation, the compiler no longer inlined `regex::Regex::captures_at` into `match_line`, which added 34 instructions per call (4,610 against 4,576). `match_line` also did two avoidable things. It ran a second search (`is_match` after `captures` had already found no match, which cannot succeed), and it built the matched text twice (a `String` from `trim_end_matches(char::is_whitespace)`, then a second one from `trim_end`). One search and one trimmed copy return the same text in 4,405 instructions per call, 3.7% fewer than main. Wall time is now 4–6% faster than main, and all 31 built-in driver cases still match `git diff`'s hunk headers byte for byte.
+
+**Counting rows.** They move in both directions between rounds. Per call, callgrind measures the same or slightly less work than main: Myers counting 8.589M against 8.607–8.618M instructions, histogram 0.6% fewer, minimal 0.25% fewer. The wall-time spread follows branch mispredictions in the line interner's `foldhash` hashing, which `foldhash::fast::RandomState` seeds differently in every process. Two runs of the same main binary gave 35.0k and 37.9k mispredictions per Myers-count call, against 34.7k and 36.3k for the branch. Plain patience keeps its original recursion and longest-increasing-sequence code. An earlier struct-method version was slower for this same layout reason, and anchoring has its own variant of that code.
+
+**The `-b` row** does not compare like with like. The old API had no whitespace-aware renderer with labels, so the baseline is `line_diff_unified_hunk_body` (hunks only, no `---` / `+++` lines, no function names). The new row adds labels and the function-name pass on top of the same, unchanged body engine.
+
+For context, `git diff --no-index` on the same Rust files takes 3.0–3.5 ms per run on this VM across these options, while `git --version` alone takes 0.7 ms. That includes process start, reading both files and hashing them for the `index` line, so it does not compare directly with the in-process rows.
+
+```bash
+cargo bench -p grit-lib --bench diff
+cargo bench -p grit-lib --bench userdiff_hunk_header
+cargo bench -p grit-lib --bench merge_content
+```
