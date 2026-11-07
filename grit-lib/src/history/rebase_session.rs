@@ -93,7 +93,7 @@ pub enum RebaseOutcome {
         plan: Box<RewritePlan>,
         /// `HEAD` commit OIDs before this invocation and after completion, as `(old, new)`.
         ///
-        /// For [`continue_rebase`] and [`skip_rebase`], `old` is the stopped, detached
+        /// For [`History::continue_rebase`](super::History::continue_rebase) and [`History::skip_rebase`](super::History::skip_rebase), `old` is the stopped, detached
         /// `HEAD` at the start of that call and `new` is `applied.head` after branch
         /// reattachment. `None` means the OID is unchanged, including when only reattaching
         /// `HEAD`. Unlike [`RewritePlan::head_change`], this covers the entire session call.
@@ -101,22 +101,24 @@ pub enum RebaseOutcome {
         /// Rerere postimage events from concluding a conflicted step in this call.
         rerere: Vec<crate::rerere::RerereEvent>,
     },
-    /// `--exec` commands ran at every replayed commit (from [`start_rebase_with_exec`], or a
-    /// resumed exec stop) and the atomic plan was applied.
+    /// `--exec` commands ran at every replayed commit (from
+    /// [`History::start_rebase`](super::History::start_rebase) with
+    /// [`StartRebaseOptions::exec`], or a resumed exec stop) and the atomic plan was applied.
     ExecDone {
         /// Ref movements performed on completion.
         applied: AppliedRewrite,
         /// Final rewrite plan; boxed to keep the outcome small.
         plan: Box<RewritePlan>,
-        /// Invocations captured during this call ([`start_rebase_with_exec`], or a
-        /// continue/skip that resumed an exec stop).
+        /// Invocations captured during this call (an exec
+        /// [`History::start_rebase`](super::History::start_rebase), or a continue/skip that
+        /// resumed an exec stop).
         exec: super::ExecReport,
     },
     /// Replay stopped on conflicts; `.git/rebase-merge/` and grit state were written.
     Stopped(RebaseStop),
 }
 
-/// Result of [`abort_rebase`].
+/// Result of [`History::abort_rebase`](super::History::abort_rebase).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct RebaseAbort {
@@ -142,7 +144,7 @@ pub enum RebaseSessionError {
     /// A rebase that another tool (normally `git`) started is in progress: its state directory
     /// exists without grit's plan, so only that tool can continue or skip it.
     ///
-    /// [`abort_rebase`] also returns this when it cannot restore the rebase safely (an
+    /// [`History::abort_rebase`](super::History::abort_rebase) also returns this when it cannot restore the rebase safely (an
     /// autostash is recorded, or `orig-head` is unreadable).
     #[error("a rebase started by git is in progress")]
     ForeignRebaseInProgress,
@@ -179,7 +181,7 @@ pub enum RebaseSessionError {
 
     /// A ref the stopped exec rebase will move (the rebased branch or one of its planned
     /// updates) was moved by something else, so the saved plan can no longer be applied.
-    /// Nothing was changed; [`abort_rebase`] restores the pre-rebase state.
+    /// Nothing was changed; [`History::abort_rebase`](super::History::abort_rebase) restores the pre-rebase state.
     #[error(
         "ref {name} moved from {expected} to {} while the rebase was stopped; abort the rebase to restore it",
         .actual.map_or_else(|| "(deleted)".to_owned(), |oid| oid.to_hex())
@@ -193,7 +195,7 @@ pub enum RebaseSessionError {
         actual: Option<ObjectId>,
     },
 
-    /// The rebased branch moved again while [`abort_rebase`] was resetting it; the rebase is
+    /// The rebased branch moved again while [`History::abort_rebase`](super::History::abort_rebase) was resetting it; the rebase is
     /// still in progress and the abort can be retried.
     #[error("ref {name} moved while aborting the rebase; retry the abort")]
     AbortRefMoved {

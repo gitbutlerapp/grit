@@ -3,11 +3,11 @@
 //! `status`, `log`, `merge`, `checkout`, and related commands).
 //!
 //! Rebase is not a porcelain module: it lives with the other history rewrites in
-//! [`crate::revwalk::history`] ([`start_rebase`](crate::revwalk::history::start_rebase) with
-//! [`continue_rebase`](crate::revwalk::history::continue_rebase) /
-//! [`abort_rebase`](crate::revwalk::history::abort_rebase) for the stop-and-resume flow,
-//! [`plan_rebase`](crate::revwalk::history::plan_rebase) and
-//! [`rebase_onto`](crate::revwalk::history::rebase_onto) for planning).
+//! [`crate::revwalk::history`] ([`History::start_rebase`](crate::revwalk::history::History::start_rebase)
+//! with [`History::continue_rebase`](crate::revwalk::history::History::continue_rebase) /
+//! [`History::abort_rebase`](crate::revwalk::history::History::abort_rebase) for the
+//! stop-and-resume flow, [`History::plan_rebase`](crate::revwalk::history::History::plan_rebase)
+//! and [`History::rebase_onto`](crate::revwalk::history::History::rebase_onto) for planning).
 //!
 //! # The library/CLI contract
 //!

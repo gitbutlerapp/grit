@@ -67,7 +67,7 @@ pub enum CommitEdit {
 /// Pathspec strings passed to history helpers (same syntax as `git` pathspecs on the CLI).
 pub type Pathspec<'a> = &'a [String];
 
-/// Options for [`super::split`](crate::history::split).
+/// Options for [`History::split`](super::History::split).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SplitOptions {
     /// When set, replaces the remaining commit's message after the split.
@@ -104,7 +104,7 @@ pub enum EmptyPolicy {
     Abort,
 }
 
-/// Inputs for [`super::plan_rewrite`](crate::history::plan_rewrite).
+/// Inputs for [`History::plan_rewrite`](super::History::plan_rewrite) and the other history edits.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RewriteOptions {
     /// Which refs to consider when collecting tips and ref updates.
@@ -149,7 +149,7 @@ pub struct RewrittenCommit {
     pub reused: bool,
 }
 
-/// Planned movement of one ref (refs, index, and worktree are not updated by [`super::plan_rewrite`](crate::history::plan_rewrite)).
+/// Planned movement of one ref (refs, index, and worktree are not updated by [`History::plan_rewrite`](super::History::plan_rewrite)).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct PlannedRefUpdate {
@@ -181,7 +181,7 @@ pub struct HeadEffect {
     pub checkout_onto: Option<ObjectId>,
 }
 
-/// Result of [`super::plan_rewrite`](crate::history::plan_rewrite): new objects are already in the ODB.
+/// Result of [`History::plan_rewrite`](super::History::plan_rewrite): new objects are already in the ODB.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct RewritePlan {
@@ -246,7 +246,7 @@ impl RewritePlan {
     }
 }
 
-/// Identity and reflog text recorded when [`super::apply_rewrite`](crate::history::apply_rewrite) moves refs.
+/// Identity and reflog text recorded when [`History::apply`](super::History::apply) moves refs.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ApplyOptions {
     /// Committer identity for reflog entries (timestamp is taken from the signature).
@@ -297,7 +297,7 @@ pub struct UndoOutcome {
     pub dry_run: bool,
 }
 
-/// Result of [`super::apply_rewrite`](crate::history::apply_rewrite).
+/// Result of [`History::apply`](super::History::apply) and the fixup and absorb applies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct AppliedRewrite {

@@ -34,7 +34,7 @@ pub const DEFAULT_ABSORB_STACK_LIMIT: usize = 10;
 /// How far a pure insertion may sit from blamed context before it stays staged.
 const PURE_ADD_MAX_DISTANCE: usize = 3;
 
-/// Options for [`absorb`].
+/// Options for [`History::absorb`](super::History::absorb).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AbsorbOptions {
     /// Oldest commit boundary (exclusive). When `None`, [`default_absorb_base`] applies.
@@ -163,7 +163,7 @@ pub struct UnassignedHunk {
     pub detail: Option<String>,
 }
 
-/// Result of [`absorb`]: rewrite plan plus assignment detail.
+/// Result of [`History::absorb`](super::History::absorb): rewrite plan plus assignment detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AbsorbPlan {
     /// Combined rewrite for every assigned target.

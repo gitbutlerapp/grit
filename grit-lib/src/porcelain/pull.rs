@@ -3,9 +3,11 @@
 //! [`pull`] runs fetch, resolves the branch upstream via `resolve_pull_integration_base`, then
 //! fast-forwards, merges, rebases local commits onto the upstream tip, or refuses
 //! when `--ff-only` / `pull.ff=only` forbids a merge commit. Rebase conflicts stop a
-//! resumable rebase session ([`start_rebase`]) with Git-compatible `.git/rebase-merge/`
-//! state, finished with [`continue_rebase`](crate::history::continue_rebase),
-//! [`skip_rebase`](crate::history::skip_rebase) or [`abort_rebase`](crate::history::abort_rebase).
+//! resumable rebase session ([`History::start_rebase`](crate::revwalk::history::History::start_rebase))
+//! with Git-compatible `.git/rebase-merge/` state, finished with
+//! [`History::continue_rebase`](crate::revwalk::history::History::continue_rebase),
+//! [`History::skip_rebase`](crate::revwalk::history::History::skip_rebase) or
+//! [`History::abort_rebase`](crate::revwalk::history::History::abort_rebase).
 //! A caller that fetched the upstream itself passes it as [`PullOptions::upstream`].
 
 use crate::branch_tracking::resolve_pull_integration_base;
@@ -155,9 +157,10 @@ pub enum PullResult {
     ///
     /// A resumable rebase session is in progress (`.git/rebase-merge/`, conflict markers and
     /// unmerged index entries, as `git pull --rebase` leaves them); the branch ref still points
-    /// at its pre-pull tip. Finish it with [`continue_rebase`](crate::history::continue_rebase)
-    /// after staging the resolution, or [`skip_rebase`](crate::history::skip_rebase) /
-    /// [`abort_rebase`](crate::history::abort_rebase). With [`PullOptions::check`] this
+    /// at its pre-pull tip. Finish it with
+    /// [`History::continue_rebase`](crate::revwalk::history::History::continue_rebase) after
+    /// staging the resolution, or [`History::skip_rebase`](crate::revwalk::history::History::skip_rebase)
+    /// / [`History::abort_rebase`](crate::revwalk::history::History::abort_rebase). With [`PullOptions::check`] this
     /// predicts the stop without touching anything.
     RebaseConflicts,
     /// Integration succeeded but re-applying `--autostash` left conflicts (stash kept).

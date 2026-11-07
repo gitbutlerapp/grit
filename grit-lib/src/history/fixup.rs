@@ -29,7 +29,7 @@ use crate::porcelain::hunk_select::{
 use crate::porcelain::index_from_tree::index_from_tree;
 use crate::repo::Repository;
 
-/// Options for [`fixup`].
+/// Options for [`History::fixup`](super::History::fixup).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixupOptions {
     /// Replacement message for the target commit; `None` keeps the existing message.
@@ -133,7 +133,7 @@ pub(crate) fn fixup(
     plan_rewrite(repo, &edits, &rewrite_opts)
 }
 
-/// Repository-relative paths touched by a hunk selection (for [`apply_fixup_rewrite`](super::apply_fixup_rewrite)).
+/// Repository-relative paths touched by a hunk selection (for [`History::apply_fixup`](super::History::apply_fixup)).
 ///
 /// See [`History::fixup_selection_paths`](super::History::fixup_selection_paths).
 pub(crate) fn fixup_selection_paths(

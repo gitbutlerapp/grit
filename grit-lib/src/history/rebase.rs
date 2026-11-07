@@ -58,7 +58,7 @@ pub mod patch_id_inject {
     }
 }
 
-/// Inputs for [`plan_rebase`], matching `git rebase [--onto <base>] <upstream>` on a single branch tip.
+/// Inputs for [`History::plan_rebase`](super::History::plan_rebase), matching `git rebase [--onto <base>] <upstream>` on a single branch tip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RebaseRequest {
     /// Commits reachable from the branch tip but not from this commit are replayed (Git's upstream argument).
@@ -211,7 +211,7 @@ fn rebase_upstream_reflog_ref(
         .ok_or_else(|| HistoryError::Planning(PlanningError::NoUpstreamForBranch { branch }).into())
 }
 
-/// Result of [`plan_rebase`]: already current, a rewrite plan, or a conflict report (not an error).
+/// Result of [`History::plan_rebase`](super::History::plan_rebase): already current, a rewrite plan, or a conflict report (not an error).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RebasePlan {
     /// The branch is already based on the effective onto commit with nothing to replay.
@@ -232,7 +232,7 @@ pub enum RebasePlan {
     },
 }
 
-/// Options for [`rebase_onto`] and [`plan_rebase`].
+/// Options for [`History::rebase_onto`](super::History::rebase_onto) and [`History::plan_rebase`](super::History::plan_rebase).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RebaseOntoOptions {
     /// Scope, empty-commit policy, and committer ident for replayed commits.

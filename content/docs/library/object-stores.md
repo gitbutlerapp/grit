@@ -128,7 +128,7 @@ A bare repository opened this way never creates its git directory. [`grit-lib/te
 | Rev-parse, revwalk and log | Work. |
 | Tree diff, [`write_merge_tree`](rustdoc:grit_lib::porcelain::merge::write_merge_tree) and blame at a commit | Work. |
 | Notes, and bundles written to any `Write` ([`RepositoryBundles::write_to`](rustdoc:grit_lib::repo_handles::RepositoryBundles::write_to)) | Work. |
-| History edits ([`reword`](rustdoc:grit_lib::revwalk::history::reword), [`apply_rewrite`](rustdoc:grit_lib::revwalk::history::apply_rewrite)) | Work. |
+| History edits ([`History::reword`](rustdoc:grit_lib::revwalk::history::History::reword), [`History::apply`](rustdoc:grit_lib::revwalk::history::History::apply)) | Work. |
 | Fetch from a path or URL | Works. The pack is spooled in the system temp directory and removed after ingest, and `FETCH_HEAD` is not written. |
 | Hooks | A missing hooks directory means no hooks. |
 | The index, staging and worktree commits | Need the git directory: the index, `COMMIT_EDITMSG` and merge, revert and rebase state live there, and staging creates it. |

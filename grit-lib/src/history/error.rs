@@ -27,7 +27,7 @@ pub enum HistoryError {
     #[error("commit message cannot be empty")]
     EmptyMessage,
 
-    /// [`super::reword::reword_with`](crate::history::reword::reword_with) needs a message and/or author change.
+    /// [`History::reword`](super::History::reword) needs a message and/or author change.
     #[error("reword requires a new message or author")]
     NothingToReword,
 
@@ -193,8 +193,9 @@ pub enum HistoryError {
     /// Replaying a later commit onto one that an `--exec` command amended or extended
     /// produced conflicts. The conflicted replay is checked out with conflict markers on
     /// top of the rewritten commit, branch refs are unchanged, and recovery state is
-    /// persisted: resolve and stage, then [`super::continue_rebase`]; or
-    /// [`super::skip_rebase`] to drop the commit, or [`super::abort_rebase`].
+    /// persisted: resolve and stage, then [`History::continue_rebase`](super::History::continue_rebase);
+    /// or [`History::skip_rebase`](super::History::skip_rebase) to drop the commit, or
+    /// [`History::abort_rebase`](super::History::abort_rebase).
     #[error(
         "replay of commit {commit} onto the commit rewritten by rebase --exec produced conflicts"
     )]

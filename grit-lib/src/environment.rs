@@ -1266,7 +1266,7 @@ impl RepositoryOptions {
     /// | Rev-parse, revwalk and log | Work. |
     /// | Tree diff, [`write_merge_tree`](crate::porcelain::merge::write_merge_tree) and blame at a commit | Work. |
     /// | Notes, and bundles written to any [`std::io::Write`] ([`RepositoryBundles::write_to`](crate::repo_handles::RepositoryBundles::write_to)) | Work. |
-    /// | History edits ([`reword`](crate::revwalk::history::reword), [`apply_rewrite`](crate::revwalk::history::apply_rewrite)) | Work. |
+    /// | History edits ([`History::reword`](crate::revwalk::history::History::reword), [`History::apply`](crate::revwalk::history::History::apply)) | Work. |
     /// | Fetch from a path or URL | Works. The pack is spooled in the system temp directory and removed after ingest, and `FETCH_HEAD` is not written. |
     /// | Hooks | A missing hooks directory means no hooks. |
     /// | The index, staging and worktree commits | Out of scope: the index, `COMMIT_EDITMSG` and merge, revert and rebase state live in the git directory, which staging creates. |

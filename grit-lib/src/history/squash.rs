@@ -34,7 +34,7 @@ pub enum SquashMessage {
     Custom(String),
 }
 
-/// Inputs for [`squash`].
+/// Inputs for [`History::squash`](super::History::squash).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SquashOptions {
     /// Message mode for the folded commit.
