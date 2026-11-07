@@ -14,6 +14,7 @@ pub mod objects;
 pub mod odb_conformance;
 pub mod parallel;
 pub mod refstore_conformance;
+pub mod repository_conformance;
 pub mod sparse_scale;
 
 pub use binaries::{grit_http_server_binary, sibling_binary};

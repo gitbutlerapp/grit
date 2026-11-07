@@ -1688,6 +1688,12 @@ mod repository_config_hook_errors;
 #[cfg(feature = "full-tests")]
 #[path = "repository_config_hook_errors_git.rs"]
 mod repository_config_hook_errors_git;
+#[path = "repository_conformance_files.rs"]
+mod repository_conformance_files;
+#[path = "repository_conformance_memory.rs"]
+mod repository_conformance_memory;
+#[path = "repository_conformance_parity.rs"]
+mod repository_conformance_parity;
 #[path = "repository_injected_backends_no_layout.rs"]
 mod repository_injected_backends_no_layout;
 #[path = "repository_no_filesystem.rs"]
@@ -2003,6 +2009,7 @@ mod stash_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "stash_pathspec_git_compat.rs"]
 mod stash_pathspec_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "stash_pop_untracked_rollback.rs"]
 mod stash_pop_untracked_rollback;
 #[cfg(feature = "full-tests")]
