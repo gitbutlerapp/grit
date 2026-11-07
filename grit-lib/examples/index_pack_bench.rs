@@ -10,8 +10,8 @@ use std::time::Instant;
 
 use grit_lib::objects::hash::Parallelism;
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::write_v2_pack_index_with_trailer;
-use grit_lib::objects::unpack_objects::pack_index_records_with_threads;
+use grit_lib::objects::pack::write_v2_pack_index_from_trailer;
+use grit_lib::objects::unpack_objects::pack_index_records;
 
 fn main() -> grit_lib::error::Result<()> {
     let pack_path = env::var("GRIT_INDEX_PACK_BENCH_PACK").expect("set GRIT_INDEX_PACK_BENCH_PACK");
@@ -28,8 +28,7 @@ fn main() -> grit_lib::error::Result<()> {
     fs::create_dir_all(git_dir.join("objects"))?;
     let odb = Odb::new(git_dir.join("objects").as_path()).with_config_git_dir(git_dir);
     let start = Instant::now();
-    let records =
-        pack_index_records_with_threads(&pack, &odb, Parallelism::resolve(Some(threads)))?;
+    let records = pack_index_records(&pack, &odb, Parallelism::resolve(Some(threads)))?;
     if !records_only {
         let hb = odb.hash_algo().len();
         let trailer = &pack[pack.len() - hb..];
@@ -38,7 +37,7 @@ fn main() -> grit_lib::error::Result<()> {
             .map(|r| (r.oid, r.offset, r.crc32))
             .collect();
         let idx_path: PathBuf = scratch.path().join("out.idx");
-        write_v2_pack_index_with_trailer(&idx_path, &entries, trailer, hb, Some(threads))?;
+        write_v2_pack_index_from_trailer(&idx_path, &entries, trailer, hb, Some(threads))?;
     }
     eprintln!(
         "grit index-pack threads={threads}{}: {:.3}s",

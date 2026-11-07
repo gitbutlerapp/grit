@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 
 use grit_lib::error::Error;
-use grit_lib::objects::midx::{write_multi_pack_index_with_options, WriteMultiPackIndexOptions};
+use grit_lib::objects::midx::{write_multi_pack_index, WriteMultiPackIndexOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::ref_storage::RefStorageFormat;
@@ -127,8 +127,7 @@ fn odb_concurrent_reads() {
     .expect("alternates");
 
     let pack_dir = primary_objects.join("pack");
-    write_multi_pack_index_with_options(&pack_dir, &WriteMultiPackIndexOptions::default())
-        .expect("write midx");
+    write_multi_pack_index(&pack_dir, &WriteMultiPackIndexOptions::default()).expect("write midx");
     let probe = packed_blob_oids[0];
     grit_lib::objects::midx::try_read_object_via_midx(&primary_objects, &probe)
         .expect("midx read probe")

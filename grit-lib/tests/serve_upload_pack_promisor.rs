@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::maintenance::{offload_blobs, OffloadOptions};
+use grit_lib::maintenance::OffloadOptions;
 use grit_lib::objects::index_pack::{ingest_received_pack, IngestPackOptions};
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -110,7 +110,7 @@ impl Offloaded {
         let mut opts = OffloadOptions::new("lop", 1_700_000_000);
         opts.filter = Some(ObjectFilterSpec::BlobLimit(5 * 1024));
         opts.configure_lop = true;
-        let report = offload_blobs(&repo, &opts).expect("offload");
+        let report = repo.maintenance().offload_blobs(&opts).expect("offload");
         assert_eq!(report.dropped_from_main, 1);
         Self {
             _dir: dir,
@@ -647,18 +647,19 @@ fn environment_maps_git_no_lazy_fetch() {
 
 #[test]
 fn fsck_of_an_offloaded_repository_never_fetches() {
-    use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
+    use grit_lib::maintenance::repository_fsck::FsckOptions;
     let fx = Offloaded::new();
     // A fetcher is installed, as the CLI does for every command; fsck must not use it.
     let fetcher: Arc<dyn PromisorFetcher> = Arc::new(DefaultPromisorFetcher::new(Arc::new(NoHttp)));
     let repo = fx.open(Some(fetcher));
-    let report = fsck(
-        &repo,
-        &FsckOptions::default(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    let report = repo
+        .maintenance()
+        .fsck(
+            &FsckOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
     assert!(report.issues.is_empty(), "{:?}", report.issues);
     assert!(
         !repo.odb().exists_stored(&fx.big),
@@ -734,13 +735,14 @@ fn small_push_naming_an_offloaded_blob_is_accepted() {
     assert!(!repo.odb().exists_stored(&fx.big), "nothing was fetched");
 
     // fsck accepts the pushed tree's promised blob (Git's is_promisor_object).
-    let report = grit_lib::maintenance::repository_fsck::fsck(
-        &repo,
-        &grit_lib::maintenance::repository_fsck::FsckOptions::default(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    let report = repo
+        .maintenance()
+        .fsck(
+            &grit_lib::maintenance::repository_fsck::FsckOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
     assert!(report.issues.is_empty(), "{:?}", report.issues);
 
     // An accepting client still gets the new tip without the blob.

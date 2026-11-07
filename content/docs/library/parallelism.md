@@ -46,7 +46,7 @@ When `index.threads` is explicitly set to more than one worker, Git may also wri
 
 If those booleans are unset, they default to **on** when `index.threads` is explicitly configured and not serial (`1` / `false`).
 
-Use [`Index::parse_with_algo_and_config`](rustdoc:grit_lib::index::Index::parse_with_algo_and_config) with [`IndexParseContext`](rustdoc:grit_lib::index::IndexParseContext) (thread policy from [`Repository::thread_policy`](rustdoc:grit_lib::repo::Repository::thread_policy)) and the repository config. Invalid EOIE data falls back to the serial entry parse. Writes go through [`Index::write_with_config_and_policy`](rustdoc:grit_lib::index::Index::write_with_config_and_policy) so split indexes and sparse indexes keep working.
+[`repo.index().load`](rustdoc:grit_lib::index::IndexFile::load) parses with the repository config and the thread policy from [`Repository::thread_policy`](rustdoc:grit_lib::repo::Repository::thread_policy); [`IndexLoadOptions::with_parse_context`](rustdoc:grit_lib::index::IndexLoadOptions) overrides the policy. For bytes you already have, [`Index::parse`](rustdoc:grit_lib::index::Index::parse) takes the config and an [`IndexParseContext`](rustdoc:grit_lib::index::IndexParseContext) through [`IndexParseOptions`](rustdoc:grit_lib::index::IndexParseOptions). Invalid EOIE data falls back to the serial entry parse. Writes go through [`repo.index().write`](rustdoc:grit_lib::index::IndexFile::write), which emits the extensions with the repository's thread policy ([`Repository::with_thread_policy`](rustdoc:grit_lib::repo::Repository::with_thread_policy) changes it) so split indexes and sparse indexes keep working.
 
 ### `pack.threads` (index-pack / pack-objects)
 

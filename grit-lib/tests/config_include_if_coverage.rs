@@ -97,7 +97,10 @@ fn hasconfig_include_rejects_remote_url_in_included_file() {
     let mut set = ConfigSet::new();
     let env = Environment::empty();
     let err = set
-        .merge_file_with_includes(&file, true, &ctx(dir.path(), &env))
+        .merge_file(
+            &file,
+            &grit_lib::config::IncludeOptions::default().with_context(ctx(dir.path(), &env)),
+        )
         .expect_err("remote url in hasconfig include");
     assert!(matches!(
         err,
@@ -369,8 +372,11 @@ fn hasconfig_single_file_merge_scans_only_that_file() {
     let file = grit_file_from_content(&fx.global, &content, ConfigScope::Global);
     let mut set = ConfigSet::new();
     let env = fx.env();
-    set.merge_file_with_includes(&file, true, &ctx(&fx.git_dir, &env))
-        .expect("merge");
+    set.merge_file(
+        &file,
+        &grit_lib::config::IncludeOptions::default().with_context(ctx(&fx.git_dir, &env)),
+    )
+    .expect("merge");
     assert_eq!(
         set.get("user.email").unwrap().as_deref(),
         Some(PERSONAL_EMAIL)

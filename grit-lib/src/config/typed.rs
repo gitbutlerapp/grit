@@ -124,7 +124,7 @@ impl ConfigSet {
     /// # Errors
     ///
     /// Returns [`Error::Config`] when `prefix` is empty or invalid.
-    pub fn entries_with_prefix(&self, prefix: &str) -> Result<Vec<super::ConfigEntry>> {
+    pub fn entries_under(&self, prefix: &str) -> Result<Vec<super::ConfigEntry>> {
         let matcher = list_prefix_match(prefix)?;
         Ok(self
             .entries()

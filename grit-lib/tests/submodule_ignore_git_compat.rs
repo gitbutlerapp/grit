@@ -2,12 +2,12 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::NullProgress;
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{RenameDetection, TreeDiffOptions, UncommittedDiff};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::StashPushOptions;
 use grit_test_support::git;
@@ -128,7 +128,10 @@ fn dirty_submodule_only_reported_without_ignore() {
         "grit status should match git with diff.ignoreSubmodules=all"
     );
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let diff = repo
         .diff()
         .tree_to_worktree(
@@ -274,7 +277,10 @@ fn ignore_untracked_only_inside_submodule() {
     );
 
     let repo = grit_repo(&main);
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let (diff, _) = repo
         .diff()
         .index_to_worktree(&mut index, &TreeDiffOptions::default())
@@ -360,7 +366,10 @@ fn gitmodules_duplicate_ignore_last_value_wins() {
         "grit should list dirty gitlink when last .gitmodules ignore is none"
     );
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let diff = repo
         .diff()
         .tree_to_worktree(

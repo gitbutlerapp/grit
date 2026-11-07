@@ -389,7 +389,6 @@ fn upload_policy(repo: &Repository) -> UploadPackPolicy {
 /// reply with `ls-refs` only, so the `fetch` request carries no acceptance. Pass
 /// `None` for the wants themselves, which are sent whatever the filter says.
 fn missing_objects_mode(
-    repo: &Repository,
     config: &ConfigSet,
     policy: &UploadPackPolicy,
     opts: &ServeOptions,
@@ -398,7 +397,7 @@ fn missing_objects_mode(
     let omitted_by_filter = filter
         .is_some_and(|f| crate::promisor_remote::request_filter_omits_promised_blobs(config, f));
     missing_objects_policy(
-        crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config),
+        crate::promisor::repo_treats_promisor_packs(config),
         !opts.accepted_promisor_remotes.is_empty() || omitted_by_filter,
         opts.lazy_fetch.unwrap_or(policy.lazy_fetch),
     )
@@ -469,7 +468,7 @@ fn serve_v0(
     };
     // Wanted objects are sent whatever the filter says, so only acceptance (or
     // lazy fetch) covers a missing want.
-    if let Some(mode) = missing_objects_mode(repo, &config, &policy, opts, None) {
+    if let Some(mode) = missing_objects_mode(&config, &policy, opts, None) {
         if let Err(err) = resolve_missing_wants(repo, &mut request.wants, mode) {
             if let crate::error::Error::Remote(RemoteError::Serve(
                 serve @ ServeError::ObjectMissing { .. },
@@ -486,7 +485,7 @@ fn serve_v0(
             return Err(err);
         }
     }
-    let missing = missing_objects_mode(repo, &config, &policy, opts, request.filter.as_ref());
+    let missing = missing_objects_mode(&config, &policy, opts, request.filter.as_ref());
     if request.filter.is_some() {
         validate_wants_filtered(repo, &request.wants)?;
     } else {
@@ -1265,10 +1264,10 @@ fn fetch_v2(
 
     // Wanted objects are sent whatever the filter says, so only acceptance (or
     // lazy fetch) covers a missing want.
-    if let Some(mode) = missing_objects_mode(repo, &config, &policy, opts, None) {
+    if let Some(mode) = missing_objects_mode(&config, &policy, opts, None) {
         resolve_missing_wants(repo, &mut wants, mode)?;
     }
-    let missing = missing_objects_mode(repo, &config, &policy, opts, filter.as_ref());
+    let missing = missing_objects_mode(&config, &policy, opts, filter.as_ref());
     if filter.is_some() {
         validate_wants_filtered(repo, &wants)?;
     } else {
@@ -1466,11 +1465,11 @@ fn prepare_response_pack(input: &ResponsePackInput<'_>) -> Result<PreparedPack> 
         Vec::new()
     };
     let cfg = input.repo.config().snapshot().ok();
-    let pack_opts = PackBuildOptions::for_serve(
-        cfg.as_deref(),
-        input.caps.contains("thin-pack") && !input.common.is_empty(),
-        input.caps.contains("ofs-delta"),
-    );
+    let pack_opts = PackBuildOptions {
+        thin: input.caps.contains("thin-pack") && !input.common.is_empty(),
+        use_ofs_delta: input.caps.contains("ofs-delta"),
+        ..PackBuildOptions::for_serve(cfg.as_deref())
+    };
     let planned = match input.missing {
         None => None,
         Some(mode) => Some(plan_pack(

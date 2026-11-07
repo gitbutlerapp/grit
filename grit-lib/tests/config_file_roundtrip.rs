@@ -72,13 +72,12 @@ fn rename_and_remove_section() {
 #[test]
 fn parse_with_origin_and_include_origin() {
     let content = "[c]\n\tk = v\n";
-    let file = ConfigFile::parse_with_origin(
-        Path::new("-"),
-        content,
-        ConfigScope::Command,
-        ConfigIncludeOrigin::Stdin,
-    )
-    .expect("parse");
+    let file = ConfigFile::parse(Path::new("-"), content, ConfigScope::Command)
+        .map(|mut file| {
+            file.include_origin = ConfigIncludeOrigin::Stdin;
+            file
+        })
+        .expect("parse");
     assert_eq!(file.include_origin, ConfigIncludeOrigin::Stdin);
 }
 
@@ -143,11 +142,11 @@ fn write_api_comments_patterns_and_multivar() {
     let mut file = ConfigFile::from_path(&path, ConfigScope::Local)
         .expect("read")
         .expect("exists");
-    file.set_with_comment("sec.k", "new", Some("note"))
+    file.set_commented("sec.k", "new", "note")
         .expect("set comment");
-    file.replace_all_with_comment("remote.origin.url", "u", Some("u*"), Some("c"))
+    file.replace_all_commented("remote.origin.url", "u", Some("u*"), "c")
         .expect("replace pattern");
-    file.add_value_with_comment("sec.extra", "v", Some("added"))
+    file.add_value_commented("sec.extra", "v", "added")
         .expect("add comment");
     file.write().expect("persist");
     let again = ConfigFile::from_path(&path, ConfigScope::Local)

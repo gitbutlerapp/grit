@@ -77,7 +77,10 @@ fn t0090_cache_tree_matches_git_write_tree() {
 
     let grit_repo = Repository::discover(Some(repo_dir.as_path()), &RepositoryOptions::empty())
         .expect("open repo");
-    let mut index = grit_repo.index().load().expect("load index");
+    let mut index = grit_repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load index");
     assert!(
         index.cache_tree.is_some(),
         "git-produced index should carry a TREE extension"
@@ -95,7 +98,7 @@ fn t0090_cache_tree_matches_git_write_tree() {
 
     grit_repo
         .index()
-        .write(&mut index)
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("persist index with cache-tree");
     let git_tree_after_index = ObjectId::from_hex(&git_out(&repo_dir, &["write-tree"]))
         .expect("git write-tree after grit index write");

@@ -4,9 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::{
-    gc, write_commit_graph, CommitGraphOptions, CommitGraphSkipReason, GcOptions,
-};
+use grit_lib::maintenance::{CommitGraphOptions, CommitGraphSkipReason, GcOptions};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_commit_graph_verify, git_fsck};
 use tempfile::TempDir;
@@ -131,7 +129,14 @@ fn gc_in_shallow_clone_skips_commit_graph_and_git_fsck_passes() {
     let dst = shallow_clone(tmp.path(), &src);
 
     let repo = open(&dst);
-    let stats = gc(&repo, &GcOptions::full_run(false, 1_700_000_000)).expect("gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::full_run(false, 1_700_000_000),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("gc");
     let graph = stats
         .commit_graph
         .expect("gc reports the commit-graph task");
@@ -159,7 +164,9 @@ fn write_commit_graph_in_shallow_clone_removes_existing_graph() {
     );
 
     let repo = open(&dst);
-    let report = write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true))
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))
         .expect("write commit-graph");
     assert_eq!(report.skipped, Some(CommitGraphSkipReason::Shallow));
     assert!(report.removed_chain);
@@ -178,7 +185,9 @@ fn dry_run_in_shallow_clone_reports_skip_without_touching_graph() {
     let before = std::fs::read(graph_path(&dst)).expect("read seeded graph");
 
     let repo = open(&dst);
-    let report = write_commit_graph(&repo, &CommitGraphOptions::with_dry_run(true))
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_dry_run(true))
         .expect("dry-run commit-graph");
     assert_eq!(report.skipped, Some(CommitGraphSkipReason::Shallow));
     assert!(!report.removed_chain);
@@ -213,7 +222,10 @@ fn grafts_skip_commit_graph_write() {
     std::fs::write(dir.join(".git/info/grafts"), head).expect("write grafts");
 
     let repo = open(&dir);
-    let report = write_commit_graph(&repo, &CommitGraphOptions::default()).expect("write");
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::default())
+        .expect("write");
     assert_eq!(report.skipped, Some(CommitGraphSkipReason::Grafts));
     assert!(!graph_path(&dir).exists());
 }
@@ -225,7 +237,10 @@ fn comment_only_grafts_file_does_not_skip() {
     std::fs::write(dir.join(".git/info/grafts"), "# no grafts\n").expect("write grafts");
 
     let repo = open(&dir);
-    let report = write_commit_graph(&repo, &CommitGraphOptions::default()).expect("write");
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::default())
+        .expect("write");
     assert_eq!(report.skipped, None);
     assert_eq!(report.commit_count, 3);
 }
@@ -255,13 +270,19 @@ fn replace_refs_skip_commit_graph_write_unless_disabled() {
     );
 
     let repo = open(&dir);
-    let report = write_commit_graph(&repo, &CommitGraphOptions::default()).expect("write");
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::default())
+        .expect("write");
     assert_eq!(report.skipped, Some(CommitGraphSkipReason::ReplaceRefs));
     assert!(!graph_path(&dir).exists());
 
     git(&dir, &["config", "core.useReplaceRefs", "false"]);
     let repo = open(&dir);
-    let report = write_commit_graph(&repo, &CommitGraphOptions::default()).expect("write");
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::default())
+        .expect("write");
     assert_eq!(report.skipped, None);
     assert_eq!(report.commit_count, 4, "three commits plus the replacement");
     assert!(graph_path(&dir).exists());
@@ -274,7 +295,10 @@ fn full_clone_still_writes_a_graph_git_verifies() {
     let src = merge_source(tmp.path());
 
     let repo = open(&src);
-    let report = write_commit_graph(&repo, &CommitGraphOptions::default()).expect("write");
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::default())
+        .expect("write");
     assert_eq!(report.skipped, None);
     assert_eq!(report.commit_count, 4);
     assert!(graph_path(&src).exists());

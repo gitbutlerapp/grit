@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::config::ConfigSet;
 use crate::objects::{
-    parse_commit, parse_tree, serialize_commit, serialize_tree, tree_entry_cmp, CommitData,
+    parse_commit, parse_tree, serialize_commit, serialize_tree, tree_name_cmp, CommitData,
     ObjectId, ObjectKind, TreeEntry,
 };
 use crate::odb::Odb;
@@ -144,7 +144,7 @@ fn write_notes_subtree(odb: &Odb, entries: &[NotesEntry]) -> crate::error::Resul
         }
     }
     tree_entries
-        .sort_by(|a, b| tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
+        .sort_by(|a, b| tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
     let data = serialize_tree(&tree_entries);
     odb.write(ObjectKind::Tree, &data)
 }

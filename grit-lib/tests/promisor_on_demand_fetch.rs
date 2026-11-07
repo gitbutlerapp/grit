@@ -758,7 +758,10 @@ impl PromisorFetcher for ResetFetcher {
 }
 
 fn assert_clean_index_and_worktree(repo: &Repository, source: &Path, count: usize) {
-    let index = repo.index().load().unwrap();
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .unwrap();
     assert_eq!(index.entries().len(), count);
     for entry in index.entries() {
         assert_eq!(entry.stage(), 0);
@@ -924,7 +927,7 @@ fn hard_reset_prefetch_respects_sparse_scope_and_gitlinks() {
         assert!(!dest.path().join(path).exists());
         assert!(repo
             .index()
-            .load()
+            .load(&grit_lib::index::IndexLoadOptions::default())
             .unwrap()
             .get(path.as_bytes(), 0)
             .unwrap()
@@ -1004,7 +1007,9 @@ fn hard_reset_keeps_stat_clean_files_without_fetching_their_missing_blobs() {
         );
     }
     index.sort();
-    repo.index().write(&mut index).unwrap();
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .unwrap();
     hard_reset(&repo, revision(&repo, "HEAD")).unwrap();
     assert!(fetcher.requests.lock().unwrap().is_empty());
     assert!(!repo.odb().exists_local(&revision(&repo, "HEAD:a.txt")));
@@ -1053,7 +1058,10 @@ fn hard_reset_with_every_path_sparse_skipped_does_not_fetch_attributes() {
     hard_reset(&repo, revision(&repo, "HEAD")).unwrap();
     assert!(fetcher.requests.lock().unwrap().is_empty());
     assert_eq!(promisor_sidecar_count(&repo.git_dir().join("objects")), 1);
-    let index = repo.index().load().unwrap();
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .unwrap();
     assert_eq!(index.entries().len(), 5);
     assert!(index.entries().iter().all(|entry| entry.skip_worktree()));
     for entry in index.entries() {

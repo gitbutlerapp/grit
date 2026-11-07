@@ -2412,7 +2412,7 @@ pub fn collect_local_pack_info(objects_dir: &Path) -> Result<LocalPackInfo> {
 ///
 /// `sort_threads` controls OID-table sorting: `None` or `Some(1)` uses a single thread;
 /// `Some(n)` with `n > 1` may sort chunks on up to `n` workers (for large entry counts).
-pub fn write_v2_pack_index_with_trailer(
+pub fn write_v2_pack_index_from_trailer(
     idx_path: &Path,
     entries: &[(ObjectId, u64, u32)],
     pack_trailer: &[u8],
@@ -2442,7 +2442,7 @@ pub fn write_v2_pack_index(
         }));
     }
     let trailer = &pack_bytes[pack_bytes.len() - hash_bytes..];
-    write_v2_pack_index_with_trailer(idx_path, entries, trailer, hash_bytes, None)
+    write_v2_pack_index_from_trailer(idx_path, entries, trailer, hash_bytes, None)
 }
 
 const PARALLEL_INDEX_SORT_MIN: usize = 8_192;
@@ -7835,7 +7835,7 @@ mod tests {
             .iter()
             .map(|(oid, offset)| (*oid, *offset, 0))
             .collect();
-        write_v2_pack_index_with_trailer(&idx_path, &rows, trailer, 20, None).expect("write idx");
+        write_v2_pack_index_from_trailer(&idx_path, &rows, trailer, 20, None).expect("write idx");
         read_pack_index(&idx_path).expect("read idx")
     }
 
@@ -7915,7 +7915,7 @@ mod tests {
 
         let idx_path = pack_path.with_extension("idx");
         let trailer = &pack[pack.len() - 32..];
-        write_v2_pack_index_with_trailer(&idx_path, &[(wrong_oid, off, 0)], trailer, 32, None)
+        write_v2_pack_index_from_trailer(&idx_path, &[(wrong_oid, off, 0)], trailer, 32, None)
             .expect("write idx");
         let idx = read_pack_index(&idx_path).expect("read idx");
 
@@ -9054,7 +9054,7 @@ mod tests {
         assert!(file_len > object_offset);
 
         let idx_path = pack_path.with_extension("idx");
-        write_v2_pack_index_with_trailer(
+        write_v2_pack_index_from_trailer(
             &idx_path,
             &[(oid, object_offset, 0)],
             trailer.as_bytes(),

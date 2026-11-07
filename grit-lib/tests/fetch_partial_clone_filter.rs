@@ -2,17 +2,17 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions, FsckReport};
+use grit_lib::maintenance::repository_fsck::{FsckOptions, FsckReport};
 use grit_lib::objects::promisor::repo_treats_promisor_packs;
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
@@ -319,7 +319,10 @@ fn refetch_reapplies_stored_filter() {
 /// Object store, connectivity and refs, like `git fsck --no-dangling`.
 fn grit_fsck(repo: &Repository) -> (FsckReport, bool) {
     let opts = FsckOptions::full_repository(false).with_check_dangling(false);
-    let report = fsck(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck");
+    let report = repo
+        .maintenance()
+        .fsck(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit fsck");
     let ok = report.ok(&repo.config().snapshot().expect("config"), &opts);
     (report, ok)
 }
@@ -337,7 +340,6 @@ fn fsck_accepts_promised_missing_blobs() {
     )
     .expect("open");
     assert!(repo_treats_promisor_packs(
-        &git_dir,
         &repo.config().snapshot().expect("cfg")
     ));
     let (report, ok) = grit_fsck(&repo);
@@ -370,7 +372,10 @@ fn fsck_accepts_promised_missing_blobs_in_index_after_reset() {
         &RepositoryOptions::empty().with_work_tree(dest.path()),
     )
     .expect("open");
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(
         index
             .entries()

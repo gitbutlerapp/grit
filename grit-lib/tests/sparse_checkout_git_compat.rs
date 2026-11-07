@@ -5,7 +5,6 @@ use crate::support;
 use std::fs;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::index::sparse_checkout::apply_sparse_checkout_skip_worktree;
 use grit_lib::repo::Repository;
 
 use support::{
@@ -31,11 +30,18 @@ fn t1092_cone_patterns_match_git_skip_worktree() {
 
     let oracle = git_ls_files_tag_map(wt);
     let grit = open_grit(wt);
-    let mut index = grit.index().load().expect("load");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     clear_all_skip_worktree(&mut index);
-    apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
+    grit.index()
+        .apply_sparse_checkout(&mut index)
+        .expect("sparse checkout");
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);
-    grit.index().write(&mut index).expect("write");
+    grit.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write");
     assert_git_fsck_strict(wt);
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);
 }
@@ -58,9 +64,14 @@ fn t1091_non_cone_sparse_list_matches_git() {
     assert_eq!(list.trim(), file.trim());
 
     let oracle = git_ls_files_tag_map(wt);
-    let mut index = grit.index().load().expect("load");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     clear_all_skip_worktree(&mut index);
-    apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
+    grit.index()
+        .apply_sparse_checkout(&mut index)
+        .expect("sparse checkout");
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);
 }
 
@@ -79,9 +90,14 @@ fn t1011_read_tree_sparse_checkout_applies_skip_worktree() {
     let oracle = git_ls_files_tag_map(wt);
     assert!(oracle.values().any(|c| *c == 'S'));
     let grit = open_grit(wt);
-    let mut index = grit.index().load().expect("load");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     clear_all_skip_worktree(&mut index);
-    apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
+    grit.index()
+        .apply_sparse_checkout(&mut index)
+        .expect("sparse checkout");
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);
 }
 

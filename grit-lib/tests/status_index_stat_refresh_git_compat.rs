@@ -203,7 +203,10 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
         "status must write refreshed stat data to the index"
     );
 
-    let reloaded = grit_repo.index().load().expect("reload index");
+    let reloaded = grit_repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("reload index");
     for entry in reloaded.entries() {
         if entry.stage() != 0 {
             continue;

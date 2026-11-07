@@ -1,6 +1,7 @@
 //! Regression for campaign-scale UNTR deferral during tracked restage (task #1734).
 
 use crate::support;
+use grit_lib::progress::NullProgress;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
@@ -8,7 +9,6 @@ use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::stage_tracked::{
     stage_tracked_modifications_with_thresholds, IndexStagingThresholds,
 };
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::knobs::stage_options_staging_thresholds;
 use std::fs;
@@ -20,7 +20,8 @@ fn open_grit(wt: &std::path::Path) -> Repository {
 }
 
 fn untr_root_valid(index_bytes: &[u8]) -> bool {
-    let idx = Index::parse(index_bytes).expect("parse index");
+    let idx = Index::parse(index_bytes, &grit_lib::index::IndexParseOptions::default())
+        .expect("parse index");
     idx.untracked_cache
         .as_ref()
         .and_then(|uc| uc.root.as_ref())

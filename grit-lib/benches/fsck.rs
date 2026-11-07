@@ -4,12 +4,12 @@
 
 mod s7;
 
+use grit_lib::progress::NullProgress;
 use std::hint::black_box;
 
 use crate::progress::CancelToken;
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::maintenance::repository_fsck::FsckOptions;
 
 fn fsck_medium(c: &mut Criterion) {
     let fx = s7::HistoryBenchFixtures::global();
@@ -18,13 +18,14 @@ fn fsck_medium(c: &mut Criterion) {
     group.bench_function("full_repository", |b| {
         b.iter(|| {
             black_box(
-                fsck(
-                    &fx.repo,
-                    &FsckOptions::full_repository(false),
-                    &mut NullProgress,
-                    &CancelToken::never(),
-                )
-                .expect("fsck"),
+                fx.repo
+                    .maintenance()
+                    .fsck(
+                        &FsckOptions::full_repository(false),
+                        &mut NullProgress,
+                        &CancelToken::never(),
+                    )
+                    .expect("fsck"),
             )
         });
     });

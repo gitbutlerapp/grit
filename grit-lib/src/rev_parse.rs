@@ -734,7 +734,6 @@ impl<'repo> NavParentCache<'repo> {
             self.grafts.is_empty()
                 && self.shallow.is_empty()
                 && !crate::promisor::repo_treats_promisor_packs(
-                    self.repo.git_dir(),
                     &self.repo.config().snapshot().unwrap_or_default(),
                 )
         }) && self.repo.object_id_after_replace(&commit_oid) == commit_oid;
@@ -3435,12 +3434,17 @@ fn resolve_index_path_at_stage(repo: &Repository, path: &str, stage: u8) -> Resu
         repo.index_path()
     };
     let config = repo.config().snapshot()?;
-    let index =
-        Index::load_expand_sparse_with_config(&index_path, repo.odb(), &config).map_err(|_| {
-            Error::Object(ObjectError::NotFound {
-                name: format!(":{stage}:{path}"),
-            })
-        })?;
+    let index = Index::load_expand_sparse(
+        &index_path,
+        repo.odb(),
+        Some(&config),
+        crate::index::IndexParseContext::default(),
+    )
+    .map_err(|_| {
+        Error::Object(ObjectError::NotFound {
+            name: format!(":{stage}:{path}"),
+        })
+    })?;
     let lookup_path = if repo.pathspec_precompose_enabled() {
         crate::unicode_normalization::precompose_utf8_path(path).into_owned()
     } else {

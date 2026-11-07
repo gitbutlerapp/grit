@@ -4,7 +4,7 @@ use std::io::Write;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
+use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::objects::{
     extra_header_values, parse_tag, serialize_tag, set_extra_header, ObjectKind, TagData,
 };
@@ -198,7 +198,10 @@ fn grit_fsck_ignores_tag_extra_headers() {
     );
 
     let opts = FsckOptions::full_repository(false).with_check_dangling(false);
-    let report = fsck(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck");
+    let report = repo
+        .maintenance()
+        .fsck(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit fsck");
     let config = repo.config().snapshot().expect("config");
     assert!(
         report.ok(&config, &opts),

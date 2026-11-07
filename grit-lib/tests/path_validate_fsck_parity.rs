@@ -1,7 +1,7 @@
 //! Crafted tree objects: grit fsck vs system `git fsck` on hostile entry names.
 
 use grit_lib::maintenance::fsck::{fsck_object, FsckObjectOptions};
-use grit_lib::maintenance::repository_fsck::{fsck, issue_msg_id, FsckOptions};
+use grit_lib::maintenance::repository_fsck::{issue_msg_id, FsckOptions};
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
@@ -123,7 +123,10 @@ fn grit_repo_fsck_rejects(body: &[u8]) -> bool {
     )
     .expect("write tree");
     let opts = FsckOptions::full_repository(true).with_check_dangling(false);
-    let report = fsck(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("fsck");
+    let report = repo
+        .maintenance()
+        .fsck(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("fsck");
     !report.ok(&repo.config().snapshot().expect("config"), &opts)
         && report.issues.iter().any(|i| {
             PATH_FSCK_IDS

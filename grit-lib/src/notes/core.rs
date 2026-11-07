@@ -26,7 +26,7 @@ use crate::ident::parse_signature_times;
 use crate::ident_resolve::{IdentRole, IdentityEnv};
 use crate::merge_base::merge_bases_first_vs_rest;
 use crate::objects::{
-    parse_commit, parse_tree, serialize_commit, serialize_tree, tree_entry_cmp, CommitData,
+    parse_commit, parse_tree, serialize_commit, serialize_tree, tree_name_cmp, CommitData,
     ObjectId, ObjectKind, TreeEntry,
 };
 use crate::refs::list_refs_for_repository;
@@ -385,7 +385,7 @@ fn count_flat_note_entries(entries: &[TreeEntry]) -> usize {
 
 fn store_tree_entries(repo: &Repository, entries: &[TreeEntry]) -> Result<ObjectId> {
     let mut sorted = entries.to_vec();
-    sorted.sort_by(|a, b| tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
+    sorted.sort_by(|a, b| tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
     repo.odb().write(ObjectKind::Tree, &serialize_tree(&sorted))
 }
 
@@ -743,7 +743,7 @@ fn write_notes_subtree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<
     }
 
     tree_entries
-        .sort_by(|a, b| tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
+        .sort_by(|a, b| tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
 
     let tree_data = serialize_tree(&tree_entries);
     repo.odb().write(ObjectKind::Tree, &tree_data)

@@ -193,7 +193,7 @@ fn has_promisor_remotes(repo: &Repository) -> bool {
         Some(repo.git_dir()),
         &grit_lib::config::LoadConfigOptions::repo_local_only(repo.git_dir()),
     )
-    .is_ok_and(|cfg| grit_lib::objects::promisor::repo_treats_promisor_packs(repo.git_dir(), &cfg))
+    .is_ok_and(|cfg| grit_lib::objects::promisor::repo_treats_promisor_packs(&cfg))
 }
 
 /// Remove every bundle and the manifest, so nothing is offered any more.

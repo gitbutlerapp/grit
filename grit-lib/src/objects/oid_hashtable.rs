@@ -143,7 +143,7 @@ pub fn oid_hash_map<V>() -> OidHashMap<V> {
 
 /// Empty [`OidHashMap`] with room for at least `capacity` entries without rehashing.
 #[inline]
-pub fn oid_hash_map_with_capacity<V>(capacity: usize) -> OidHashMap<V> {
+pub(crate) fn oid_hash_map_with_capacity<V>(capacity: usize) -> OidHashMap<V> {
     HashMap::with_capacity_and_hasher(capacity, shared_oid_build_hasher())
 }
 
@@ -155,7 +155,7 @@ pub fn oid_hash_set() -> OidHashSet {
 
 /// Empty [`OidHashSet`] with room for at least `capacity` entries without rehashing.
 #[inline]
-pub fn oid_hash_set_with_capacity(capacity: usize) -> OidHashSet {
+pub(crate) fn oid_hash_set_with_capacity(capacity: usize) -> OidHashSet {
     HashSet::with_capacity_and_hasher(capacity, shared_oid_build_hasher())
 }
 

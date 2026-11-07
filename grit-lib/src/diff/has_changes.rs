@@ -293,7 +293,7 @@ fn staged_has_changes(
     opts: &DiffOptions,
 ) -> Result<bool> {
     let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
-    let index = repo.index().load()?;
+    let index = repo.load_index()?;
     let config = repo.config().snapshot()?;
     let mut entries = diff_index_to_tree_with_renames(
         repo.odb(),
@@ -320,7 +320,7 @@ fn unstaged_has_changes(
     matcher: &PathspecMatcher<'_>,
     opts: &DiffOptions,
 ) -> Result<bool> {
-    let mut index = repo.index().load()?;
+    let mut index = repo.load_index()?;
     worktree_has_changes(repo, &mut index, None, matcher, opts)
 }
 
@@ -375,14 +375,14 @@ impl<'repo> super::handle::Diff<'repo> {
         let matcher = repo.pathspec_matcher_with_globals(pathspec.specs(), pathspec.globals())?;
         match target {
             DiffTarget::WorktreeVsHead => {
-                let mut index = repo.index().load()?;
+                let mut index = repo.load_index()?;
                 let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
                 worktree_has_changes(repo, &mut index, head_tree.as_ref(), &matcher, opts)
             }
             DiffTarget::IndexVsHead => staged_has_changes(repo, &matcher, opts),
             DiffTarget::WorktreeVsIndex => unstaged_has_changes(repo, &matcher, opts),
             DiffTarget::WorktreeVsTree(tree) => {
-                let mut index = repo.index().load()?;
+                let mut index = repo.load_index()?;
                 worktree_has_changes(repo, &mut index, Some(tree), &matcher, opts)
             }
             DiffTarget::Commit(commit) => {

@@ -78,9 +78,14 @@ fn expanded_index_collapses_to_the_rows_git_writes() {
     );
 
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let mut index = Index::load_expand_sparse(&wt.join(".git/index"), &grit.odb()).expect("expand");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default().with_path(&wt.join(".git/index")))
+        .expect("expand");
     assert!(!index.has_sparse_directory_placeholders());
-    grit.index().write(&mut index).expect("write");
+    grit.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write");
 
     assert_eq!(raw_rows(wt), git_rows);
     assert_eq!(git(wt, &["status", "--porcelain"]), "");
@@ -95,7 +100,10 @@ fn changed_excluded_row_keeps_only_its_ancestors_expanded_for_git() {
     let repo = sparse_repo();
     let wt = repo.worktree();
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let mut index = Index::load_expand_sparse(&wt.join(".git/index"), &grit.odb()).expect("expand");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default().with_path(&wt.join(".git/index")))
+        .expect("expand");
     let edited = grit
         .odb()
         .write(ObjectKind::Blob, b"edited\n")
@@ -108,7 +116,9 @@ fn changed_excluded_row_keeps_only_its_ancestors_expanded_for_git() {
         .clone();
     row.oid = edited;
     index.add_or_replace(row);
-    grit.index().write(&mut index).expect("write");
+    grit.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write");
 
     let paths: Vec<String> = raw_rows(wt).into_iter().map(|(p, ..)| p).collect();
     assert_eq!(

@@ -196,6 +196,7 @@ fn open_custom(
 
 fn built_graph(repo: &Repository, changed_paths: bool) -> grit_lib::maintenance::BuiltCommitGraph {
     match repo
+        .maintenance()
         .build_commit_graph(&CommitGraphOptions::with_changed_paths(changed_paths))
         .expect("build commit-graph")
     {
@@ -392,6 +393,7 @@ fn built_graph_is_byte_identical_to_the_files_writer_and_verified_by_git() {
     for changed_paths in [false, true] {
         let built = built_graph(&custom, changed_paths);
         files
+            .maintenance()
             .write_commit_graph(&CommitGraphOptions::with_changed_paths(changed_paths))
             .expect("files write");
         assert_eq!(

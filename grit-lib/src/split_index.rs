@@ -537,7 +537,7 @@ fn load_shared_entries(
 ) -> Result<Vec<IndexEntry>> {
     let p = resolve_shared_index_file(git_dir, index_path, base_oid);
     let data = fs::read(&p).map_err(Error::Io)?;
-    let mut shared = Index::parse(&data)?;
+    let mut shared = Index::parse(&data, &crate::index::IndexParseOptions::default())?;
     for (i, e) in shared.entries.iter_mut().enumerate() {
         e.base_index_pos = (i + 1) as u32;
     }
@@ -957,7 +957,11 @@ pub fn resolve_split_index_if_needed(
         )));
     }
     freshen_shared_index(&shared_path);
-    let base_entries = Index::parse_with_algo(&data, index.hash_algo)?.entries;
+    let base_entries = Index::parse(
+        &data,
+        &crate::index::IndexParseOptions::default().with_hash_algo(index.hash_algo),
+    )?
+    .entries;
     merge_split_into_index(index, link, base_entries)?;
     index.split_link = Some(SplitIndexLink {
         base_oid,
@@ -1386,7 +1390,8 @@ mod tests {
                 main[main.len() - 20..].iter().all(|&b| b == 0),
                 "{key}: the main index keeps honoring skipHash"
             );
-            let reread = Index::parse(&main).expect("parse");
+            let reread =
+                Index::parse(&main, &crate::index::IndexParseOptions::default()).expect("parse");
             let link = reread.split_link.expect("index stays split");
             assert!(!link.base_oid.is_zero());
             let shared_name = format!("sharedindex.{}", link.base_oid.to_hex());

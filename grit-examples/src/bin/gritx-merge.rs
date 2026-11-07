@@ -39,7 +39,8 @@ fn run() -> Result<()> {
     for entry in grit_examples::entries_from_tree(&repo, target_tree)? {
         index.add_or_replace(entry);
     }
-    repo.index().write(&mut index)?;
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
     checkout_tree(&repo, target_tree)?;
 
     if let Some(target_ref) = repo

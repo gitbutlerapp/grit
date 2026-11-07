@@ -22,7 +22,7 @@ use crate::odb::Odb;
 /// `modules/<name>` by splitting only on `/` and `\\` (components like `..` are kept; no
 /// normalization).
 #[must_use]
-pub fn submodule_modules_git_dir(super_git_dir: &Path, submodule_relpath: &str) -> PathBuf {
+pub(crate) fn submodule_modules_git_dir(super_git_dir: &Path, submodule_relpath: &str) -> PathBuf {
     let mut out = super_git_dir.to_path_buf();
     out.push("modules");
     for seg in submodule_relpath.split(['/', '\\']) {
@@ -38,7 +38,7 @@ pub fn submodule_modules_git_dir(super_git_dir: &Path, submodule_relpath: &str) 
 ///
 /// `git_dir` should be the repository directory that holds `config` (the common git directory when
 /// using linked worktrees).
-pub fn submodule_path_config_enabled(git_dir: &Path) -> bool {
+pub(crate) fn submodule_path_config_enabled(git_dir: &Path) -> bool {
     let config_path = git_dir.join("config");
     let Ok(content) = fs::read_to_string(&config_path) else {
         return false;
@@ -211,39 +211,6 @@ fn last_modules_segment(git_dir_abs: &Path) -> Option<String> {
     last_start.map(|start| s[start..].to_string())
 }
 
-fn path_inside_other_gitdir(git_dir: &Path, submodule_name: &str) -> bool {
-    submodule_gitdir_outer_conflict(git_dir, submodule_name).is_some()
-}
-
-/// When a proposed `.git/modules/<name>` path would sit inside another submodule's git dir
-/// (e.g. names `hippo` and `hippo/hooks`), returns the outer git directory path (Git
-/// `validate_submodule_legacy_git_dir`).
-#[must_use]
-pub fn submodule_gitdir_outer_conflict(git_dir: &Path, submodule_name: &str) -> Option<PathBuf> {
-    let suffix = submodule_name.as_bytes();
-    let gd = git_dir.to_string_lossy();
-    let gd_bytes = gd.as_bytes();
-    if gd_bytes.len() <= suffix.len() {
-        return None;
-    }
-    let cut = gd_bytes.len() - suffix.len();
-    if gd_bytes[cut - 1] != b'/' {
-        return None;
-    }
-    if &gd_bytes[cut..] != suffix {
-        return None;
-    }
-    for i in cut..gd_bytes.len() {
-        if gd_bytes[i] == b'/' {
-            let prefix = Path::new(std::str::from_utf8(&gd_bytes[..i]).unwrap_or(""));
-            if is_git_directory(prefix) {
-                return Some(prefix.to_path_buf());
-            }
-        }
-    }
-    None
-}
-
 fn resolve_gitdir_value(work_tree: &Path, gitdir_cfg: &str) -> PathBuf {
     let p = Path::new(gitdir_cfg.trim());
     if p.is_absolute() {
@@ -333,30 +300,6 @@ fn check_casefolding_conflict(
     } else {
         taken_folded.contains(&folded_name) || taken_folded.contains(&folded_last)
     }
-}
-
-/// Validates a legacy submodule gitdir path (extension disabled): name suffix and no nesting clash.
-pub fn validate_legacy_submodule_git_dir(git_dir: &Path, submodule_name: &str) -> Result<()> {
-    let gd = git_dir.to_string_lossy();
-    let ends_with_name = gd
-        .strip_suffix(submodule_name)
-        .is_some_and(|head| head.ends_with('/'));
-    if !ends_with_name {
-        return Err(Error::Worktree(WorktreeError::Submodule(
-            SubmoduleError::GitDirNameMismatch {
-                name: submodule_name.to_owned(),
-                git_dir: git_dir.to_path_buf(),
-            },
-        )));
-    }
-    if path_inside_other_gitdir(git_dir, submodule_name) {
-        return Err(Error::Worktree(WorktreeError::Submodule(
-            SubmoduleError::GitDirNested {
-                name: submodule_name.to_owned(),
-            },
-        )));
-    }
-    Ok(())
 }
 
 /// Validates an encoded submodule gitdir path when `submodulePathConfig` is enabled.
@@ -774,8 +717,21 @@ pub fn init_submodule_head_from_gitlink(modules_dir: &Path, oid_hex: &str) -> Re
 
 #[cfg(test)]
 mod submodule_modules_git_dir_tests {
-    use super::submodule_modules_git_dir;
+    use super::{submodule_modules_git_dir, submodule_path_config_enabled};
     use std::path::Path;
+
+    #[test]
+    fn path_config_extension_is_read_from_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let git_dir = dir.path();
+        assert!(!submodule_path_config_enabled(git_dir));
+        std::fs::write(
+            git_dir.join("config"),
+            "[extensions]\n\tsubmodulePathConfig = true\n",
+        )
+        .unwrap();
+        assert!(submodule_path_config_enabled(git_dir));
+    }
 
     #[test]
     fn nested_path_under_single_modules_prefix() {

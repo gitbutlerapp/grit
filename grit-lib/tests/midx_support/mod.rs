@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 
 use grit_lib::objects::midx::{
     midx_lookup_pack_and_offset, read_midx_objects, try_read_info_via_midx,
-    try_read_object_via_midx, write_multi_pack_index_with_options, WriteMultiPackIndexOptions,
+    try_read_object_via_midx, write_multi_pack_index, WriteMultiPackIndexOptions,
 };
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -393,7 +393,7 @@ pub fn assert_git_midx_verify(repo: &RepoFixture) {
 /// Write a MIDX with grit using `opts` as given (an unset `version` exercises the
 /// library default), then drop cached pack state so later reads see the new file.
 pub fn grit_write_midx(pack_dir: &Path, opts: &WriteMultiPackIndexOptions) {
-    write_multi_pack_index_with_options(pack_dir, opts).expect("grit write MIDX");
+    write_multi_pack_index(pack_dir, opts).expect("grit write MIDX");
     clear_pack_cache();
 }
 

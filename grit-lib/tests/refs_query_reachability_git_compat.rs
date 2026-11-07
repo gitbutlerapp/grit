@@ -88,7 +88,8 @@ fn assert_same(worktree: &std::path::Path, repo: &Repository, git_args: &[&str],
 
 fn maybe_write_graph(worktree: &std::path::Path, repo: &Repository, with_graph: bool) {
     if with_graph {
-        repo.write_commit_graph(&CommitGraphOptions::default())
+        repo.maintenance()
+            .write_commit_graph(&CommitGraphOptions::default())
             .expect("write commit-graph");
         git(worktree, &["commit-graph", "write"]);
     }

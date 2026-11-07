@@ -1051,8 +1051,13 @@ fn v2_promisor_handshake(
             .remote_name
             .as_deref()
             .is_some_and(|name| crate::promisor_remote::is_promisor_remote(local_cfg, name));
-    let mut handshake =
-        PromisorHandshake::evaluate(local_cfg, &advertisement, partial_fetch, auto_filter);
+    let mut handshake = PromisorHandshake::evaluate(
+        local_cfg,
+        &advertisement,
+        &crate::promisor_remote::PromisorHandshakeOptions::default()
+            .with_partial_fetch(partial_fetch)
+            .with_auto_filter(auto_filter),
+    );
     if !opts.dry_run {
         handshake.store_fields(local.git_dir(), local_cfg)?;
     }

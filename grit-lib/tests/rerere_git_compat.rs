@@ -196,7 +196,10 @@ fn issue_2468_git_rr_cache_replayed_by_grit_merge() {
     );
     let content = std::fs::read_to_string(dir.path().join("f")).expect("f");
     assert_eq!(content, "l1\nRESOLVED\nl3\n");
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(
         index.has_unmerged_entries(),
         "replayed resolution stays unstaged without autoupdate"

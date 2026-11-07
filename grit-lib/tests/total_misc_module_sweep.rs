@@ -11,8 +11,7 @@ use grit_lib::config::gitmodules::{
     tree_entry_is_gitattributes_blob, tree_entry_is_gitmodules_blob, validate_gitmodules_blob_line,
 };
 use grit_lib::config::mailmap::{
-    load_mailmap, map_contact_table, parse_contact, parse_mailmap, render_contact,
-    table_from_entries,
+    map_contact_table, parse_contact, parse_mailmap, render_contact, table_from_entries,
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
@@ -47,7 +46,7 @@ fn gitmodules_mailmap_path_and_signing_helpers() -> grit_lib::error::Result<()> 
 
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-    let _ = load_mailmap(&repo).ok();
+    let _ = repo.config().mailmap().ok();
     let tree = repo.odb().write(ObjectKind::Tree, b"")?;
     let commit =
         format!("tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\nm\n");

@@ -16,10 +16,10 @@
 //! in an ordinary pack beside it would be deleted, with nothing to fetch it back
 //! from. The price is that a blob in a promisor pack no longer proves the promisor
 //! can supply it, so offload records the LOP's directory in `grit.lopGitDir`, and
-//! [`crate::maintenance::drop_promised_blobs`] drops a blob only once a promisor
+//! [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs) drops a blob only once a promisor
 //! it can read is seen to hold it.
 //!
-//! [`offload_blobs`] moves the blobs a filter leaves out (`blob:limit=<n>`: every
+//! [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs) moves the blobs a filter leaves out (`blob:limit=<n>`: every
 //! blob of `n` bytes or more) from the main repository to the LOP. It never removes
 //! anything from the main repository before the LOP holds it, and blobs any checkout
 //! of the main repository needs stay where they are. Running it again offloads blobs
@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
-use crate::index_pack::{install_pack_path, IngestPackOptions};
+use crate::index_pack::{install_pack_path_with_progress, IngestPackOptions};
 use crate::maintenance::{GcLock, GcLockAttempt, GcLockHolder, RepackOptions};
 use crate::objects::{
     oid_hash_set, CommitRef, HashAlgo, ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
@@ -46,16 +46,16 @@ use crate::repo::Repository;
 /// Message written into the `.keep` marker of every pack offload adds to a LOP.
 pub const LOP_KEEP_MESSAGE: &str = "grit offload: large-object promisor pack";
 
-/// Multi-valued config key [`offload_blobs`] adds to the main repository: the
+/// Multi-valued config key [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs) adds to the main repository: the
 /// absolute git directory of each LOP it moved blobs to.
 ///
 /// Its presence marks a repository whose promisor pack holds blobs only it has, so
-/// [`crate::maintenance::drop_promised_blobs`] drops a blob there only after seeing
+/// [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs) drops a blob there only after seeing
 /// it in a promisor it can read (one of these directories, or a promisor remote
 /// with a local URL).
 pub const LOP_GIT_DIR_KEY: &str = "grit.lopGitDir";
 
-/// Options for [`offload_blobs`].
+/// Options for [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct OffloadOptions {
@@ -98,7 +98,7 @@ impl OffloadOptions {
     }
 }
 
-/// Why [`offload_blobs`] refused to run.
+/// Why [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs) refused to run.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum OffloadError {
@@ -191,7 +191,7 @@ pub enum OffloadRepo {
     Lop,
 }
 
-/// One config value [`offload_blobs`] set.
+/// One config value [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs) set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OffloadConfigChange {
@@ -229,7 +229,7 @@ impl LopReadiness {
     }
 }
 
-/// What [`offload_blobs`] did (or, with [`OffloadOptions::dry_run`], would do).
+/// What [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs) did (or, with [`OffloadOptions::dry_run`], would do).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OffloadReport {
@@ -287,7 +287,7 @@ impl OffloadReport {
     }
 }
 
-/// Which of the packs [`offload_blobs`] writes an [`OffloadPack`] is.
+/// Which of the packs [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs) writes an [`OffloadPack`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OffloadPackRole {
@@ -297,7 +297,7 @@ pub enum OffloadPackRole {
     MainPromisor,
 }
 
-/// A pack [`offload_blobs`] wrote.
+/// A pack [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs) wrote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OffloadPack {
@@ -374,7 +374,7 @@ impl OffloadPack {
 ///
 /// [`crate::error::ObjectError::Offload`] for the [`OffloadError`] cases, [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore)
 /// without a files-backed object store, and read, write and config failures.
-pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
+pub(crate) fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
     let odb = repo.odb();
     odb.require_files_primary(FilesOnlyOperation::Offload)?;
     let config = repo.config().snapshot()?;
@@ -847,7 +847,7 @@ fn copy_to_lop(
         return Ok(None);
     };
     let trusted_rows = (!built.index_rows.is_empty()).then_some(built.index_rows);
-    let ingested = install_pack_path(
+    let ingested = install_pack_path_with_progress(
         staging,
         lop.odb(),
         &IngestPackOptions {
@@ -858,6 +858,8 @@ fn copy_to_lop(
             keep_message: Some(LOP_KEEP_MESSAGE.to_owned()),
             ..IngestPackOptions::default()
         },
+        None,
+        None,
     )?;
     let objects = ingested.object_ids.len();
     Ok(ingested.pack_path.map(|path| (path, objects)))

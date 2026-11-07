@@ -61,27 +61,32 @@ fn write_index_file(index: &Index, path: &Path) {
     index.write(path).expect("write index fixture");
 }
 
-fn ieot_write_config(base: &Path) -> ConfigSet {
+/// Bare repository whose config asks for EOIE/IEOT extensions, used to write IEOT fixtures.
+fn ieot_write_repo(base: &Path) -> Repository {
     let git_dir = base.join("ieot-config.git");
-    std::fs::create_dir_all(&git_dir).expect("ieot config dir");
+    let (repo, _) = Repository::init(&git_dir, &InitOptions::new().with_bare(true))
+        .expect("init ieot config repo");
     std::fs::write(
         git_dir.join("config"),
-        "[index]\n\tthreads = 4\n\trecordOffsetTable = true\n\trecordEndOfIndexEntries = true\n",
+        "[core]\n\trepositoryformatversion = 0\n\tbare = true\n[index]\n\tthreads = 4\n\trecordOffsetTable = true\n\trecordEndOfIndexEntries = true\n",
     )
     .expect("ieot config");
-    ConfigSet::load(
-        &Environment::empty(),
-        Some(&git_dir),
-        &LoadConfigOptions::standard(&Environment::empty(), Some(&git_dir)),
+    drop(repo);
+    Repository::open(
+        &git_dir,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
     )
-    .expect("load ieot config")
+    .expect("open ieot config repo")
+    .with_thread_policy(ThreadPolicy::with_threads_override(Some(4)))
 }
 
-fn write_index_file_ieot(index: &Index, path: &Path, cfg: &ConfigSet) {
-    let policy = ThreadPolicy::with_threads_override(Some(4));
+fn write_index_file_ieot(index: &Index, path: &Path, repo: &Repository) {
     let mut index = index.clone();
-    index
-        .write_with_config_and_policy(path, cfg, policy)
+    repo.index()
+        .write(
+            &mut index,
+            &grit_lib::index::IndexWriteOptions::default().with_path(path),
+        )
         .expect("write ieot index fixture");
 }
 
@@ -249,9 +254,9 @@ impl WorktreeBenchFixtures {
         write_index_file(&index_v4_10k, &index_v4_10k_path);
         write_index_file(&index_v4_100k, &index_v4_100k_path);
 
-        let ieot_cfg = ieot_write_config(base);
+        let ieot_repo = ieot_write_repo(base);
         let index_v4_100k_ieot_path = index_dir.join("index-v4-100k-ieot");
-        write_index_file_ieot(&index_v4_100k, &index_v4_100k_ieot_path, &ieot_cfg);
+        write_index_file_ieot(&index_v4_100k, &index_v4_100k_ieot_path, &ieot_repo);
 
         let index_v4_1m_ieot_path = std::env::var("GRIT_BENCH_INDEX_1M")
             .ok()
@@ -259,7 +264,7 @@ impl WorktreeBenchFixtures {
             .map(|_| {
                 let index_v4_1m = build_index(1_000_000, 4);
                 let path = index_dir.join("index-v4-1m-ieot");
-                write_index_file_ieot(&index_v4_1m, &path, &ieot_cfg);
+                write_index_file_ieot(&index_v4_1m, &path, &ieot_repo);
                 path
             });
 

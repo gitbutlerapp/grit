@@ -5,7 +5,6 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use clap::Args;
 use grit_lib::config::environment::Environment;
-use grit_lib::config::mailmap::load_mailmap_table;
 use grit_lib::config::parse_bool;
 use grit_lib::diff::{Pickaxe, PickaxeError};
 use grit_lib::repo::Repository;
@@ -309,7 +308,7 @@ impl RevSelectArgs {
             builder = builder.grep(pat.as_str());
         }
         if log_mailmap_enabled(repo, self.no_mailmap) {
-            if let Ok(table) = load_mailmap_table(repo) {
+            if let Ok(table) = repo.config().mailmap() {
                 if !table.is_empty() {
                     builder = builder.mailmap(table);
                 }

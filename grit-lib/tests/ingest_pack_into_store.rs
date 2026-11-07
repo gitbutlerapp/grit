@@ -554,9 +554,14 @@ fn received_pack_path_is_consumed_for_custom_primary() {
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
     let repo = custom_primary_repo(&scratch.path().join("custom.git"), Arc::clone(&store));
 
-    let ingested =
-        ingest_received_pack_path(spool.clone(), repo.odb(), &IngestPackOptions::default())
-            .expect("ingest path");
+    let ingested = ingest_received_pack_path(
+        spool.clone(),
+        repo.odb(),
+        &IngestPackOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )
+    .expect("ingest path");
     assert!(!spool.exists(), "the received pack file is consumed");
     assert_eq!(ingested.pack_bytes, pack.len() as u64);
     assert_store_holds(

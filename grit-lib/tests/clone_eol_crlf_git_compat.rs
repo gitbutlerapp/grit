@@ -1,12 +1,12 @@
 //! Clone checkout applies `.gitattributes` `eol=crlf` smudge like `git clone`.
 
+use grit_lib::progress::CancelToken;
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::repo::Repository;
 
@@ -129,7 +129,9 @@ fn empty_index_checkout_populated_tree_applies_eol_crlf() {
         Repository::discover(Some(dest.path()), &RepositoryOptions::empty()).expect("open clone");
 
     let mut index = Index::new();
-    repo.index().write(&mut index).expect("clear index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("clear index");
     std::fs::remove_file(dest.path().join("f.txt")).expect("remove f.txt");
     std::fs::remove_file(dest.path().join(".gitattributes")).expect("remove attrs");
 
@@ -149,7 +151,9 @@ fn checkout_populated_tree_smudge_when_gitattributes_sorts_before_target() {
         Repository::discover(Some(dest.path()), &RepositoryOptions::empty()).expect("open clone");
 
     let mut index = Index::new();
-    repo.index().write(&mut index).expect("clear index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("clear index");
     std::fs::remove_file(dest.path().join("f.txt")).expect("remove f.txt");
     std::fs::remove_file(dest.path().join(".gitattributes")).expect("remove attrs");
 
@@ -195,7 +199,9 @@ fn populated_tree_fallback_still_applies_eol_gitattributes() {
         Repository::discover(Some(dest.path()), &RepositoryOptions::empty()).expect("open clone");
 
     let mut index = Index::new();
-    repo.index().write(&mut index).expect("clear index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("clear index");
     std::fs::remove_file(dest.path().join("f.txt")).expect("remove f.txt");
     std::fs::remove_file(dest.path().join("link")).expect("remove link");
 

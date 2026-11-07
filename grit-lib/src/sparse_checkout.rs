@@ -499,21 +499,28 @@ pub(crate) fn path_in_sparse_checkout(
 
 /// Apply sparse-checkout rules to `index`: stage-0 entries get `skip-worktree` when excluded.
 ///
-/// Matches Git's sparse-checkout application used after building a new index from a tree
-/// (`read-tree`, branch checkout, fast-forward merge). When `core.sparseCheckout` is false or
-/// the sparse-checkout file is missing, this is a no-op.
-///
-/// # Parameters
-///
-/// - `git_dir` — repository git directory (reads `config` and `info/sparse-checkout`).
-/// - `work_tree` — when set, on-disk directories can match directory-only non-cone patterns.
-/// - `index` — index to update in place; bumped to version 3 when any entry is marked skip-worktree.
-/// - `skip_sparse_checkout` — when true (e.g. `read-tree --no-sparse-checkout`), do not set
-///   `skip-worktree` bits even if sparse checkout is enabled.
-///
-/// Returns cone-parse warnings when `core.sparseCheckoutCone` is set but the file is not a
-/// valid cone definition (matching then falls back to non-cone rules).
-pub fn apply_sparse_checkout_skip_worktree(
+/// Reads `info/sparse-checkout` under `git_dir`; `config` supplies `core.sparseCheckout` and
+/// `core.sparseCheckoutCone`. When `work_tree` is set, on-disk directories can match
+/// directory-only non-cone patterns. Returns cone-parse warnings. See
+/// [`crate::index::IndexFile::apply_sparse_checkout`].
+pub(crate) fn apply_sparse_checkout_with_config(
+    git_dir: &std::path::Path,
+    work_tree: Option<&std::path::Path>,
+    index: &mut crate::index::Index,
+    config: &crate::config::ConfigSet,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let Ok(Some(sparse)) =
+        SparseCheckout::from_config_with_warnings(git_dir, config, &mut warnings)
+    else {
+        return warnings;
+    };
+    sparse.mark_index_entries(index, work_tree);
+    warnings
+}
+
+#[cfg(test)]
+fn apply_sparse_checkout_skip_worktree(
     git_dir: &std::path::Path,
     work_tree: Option<&std::path::Path>,
     index: &mut crate::index::Index,
@@ -531,14 +538,7 @@ pub fn apply_sparse_checkout_skip_worktree(
         ),
     )
     .unwrap_or_else(|_| crate::config::ConfigSet::new());
-    let mut warnings = Vec::new();
-    let Ok(Some(sparse)) =
-        SparseCheckout::from_config_with_warnings(git_dir, &config, &mut warnings)
-    else {
-        return warnings;
-    };
-    sparse.mark_index_entries(index, work_tree);
-    warnings
+    apply_sparse_checkout_with_config(git_dir, work_tree, index, &config)
 }
 
 /// The active sparse-checkout definition of a repository, compiled once for path checks.

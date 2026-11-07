@@ -423,14 +423,15 @@ fn optional_includeif_and_git_config_override_file() {
         .expect("read")
         .expect("exists");
     let mut set = ConfigSet::new();
-    set.merge_file_with_includes(
+    set.merge_file(
         &file,
-        true,
-        &grit_lib::config::IncludeContext {
-            cwd: dir.path().to_path_buf(),
-            env: std::sync::Arc::new(env.clone()),
-            ..Default::default()
-        },
+        &grit_lib::config::IncludeOptions::default().with_context(
+            grit_lib::config::IncludeContext {
+                cwd: dir.path().to_path_buf(),
+                env: std::sync::Arc::new(env.clone()),
+                ..Default::default()
+            },
+        ),
     )
     .expect("optional include");
     assert_eq!(set.get("set.x").unwrap().as_deref(), Some("1"));

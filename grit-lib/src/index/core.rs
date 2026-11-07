@@ -476,12 +476,13 @@ impl IndexEntry {
 /// # Examples
 ///
 /// ```
+/// use grit_lib::index::IndexLoadOptions;
 /// use grit_lib::repo::{InitOptions, Repository};
 ///
 /// # fn main() -> grit_lib::error::Result<()> {
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-/// let index = repo.index().load()?;
+/// let index = repo.index().load(&IndexLoadOptions::default())?;
 /// assert!(index.entries().is_empty());
 /// # Ok(())
 /// # }
@@ -591,21 +592,68 @@ impl CacheTreeNode {
 
 pub use crate::index_eoie_ieot::IndexParseContext;
 
-/// Options for loading an index from disk.
-#[derive(Debug, Clone, Copy)]
-pub struct IndexLoadOptions {
-    /// If the index contains sparse directory placeholders, expand them to full file entries.
-    pub expand_sparse_directories: bool,
-    /// Thread policy for parallel index entry load (EOIE/IEOT).
+/// Options for [`Index::parse`].
+///
+/// The defaults detect the hash algorithm from the trailing checksum, read no config, attach
+/// no path to errors, and use the default thread policy for EOIE/IEOT entry loading.
+///
+/// # Examples
+///
+/// ```
+/// use grit_lib::index::{Index, IndexParseOptions};
+///
+/// # fn main() -> grit_lib::error::Result<()> {
+/// let dir = tempfile::tempdir()?;
+/// let path = dir.path().join("index");
+/// Index::new().write(&path)?;
+/// let bytes = std::fs::read(&path)?;
+/// let index = Index::parse(&bytes, &IndexParseOptions::default().with_source_path(&path))?;
+/// assert!(index.entries().is_empty());
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
+pub struct IndexParseOptions<'a> {
+    /// Object hash of the repository (`extensions.objectFormat`), which fixes the entry id
+    /// width and the trailing checksum width. `None` detects it from the checksum length.
+    pub hash_algo: Option<HashAlgo>,
+    /// Repository config, consulted for `index.threads` and the EOIE/IEOT extensions, and by
+    /// [`Index::empty_for`] for `index.version` / `feature.manyFiles`.
+    pub config: Option<&'a ConfigSet>,
+    /// File the bytes came from, attached to [`IndexError::Corrupt`] errors.
+    pub source_path: Option<&'a Path>,
+    /// Thread policy for parallel entry loading.
     pub parse_context: IndexParseContext,
 }
 
-impl Default for IndexLoadOptions {
-    fn default() -> Self {
-        Self {
-            expand_sparse_directories: true,
-            parse_context: IndexParseContext::default(),
-        }
+impl<'a> IndexParseOptions<'a> {
+    /// Sets [`hash_algo`](Self::hash_algo).
+    #[must_use]
+    pub fn with_hash_algo(mut self, hash_algo: HashAlgo) -> Self {
+        self.hash_algo = Some(hash_algo);
+        self
+    }
+
+    /// Sets [`config`](Self::config).
+    #[must_use]
+    pub fn with_config(mut self, config: &'a ConfigSet) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Sets [`source_path`](Self::source_path).
+    #[must_use]
+    pub fn with_source_path(mut self, source_path: &'a Path) -> Self {
+        self.source_path = Some(source_path);
+        self
+    }
+
+    /// Sets [`parse_context`](Self::parse_context).
+    #[must_use]
+    pub fn with_parse_context(mut self, parse_context: IndexParseContext) -> Self {
+        self.parse_context = parse_context;
+        self
     }
 }
 
@@ -961,29 +1009,25 @@ impl Index {
         }
     }
 
-    /// Create a new empty index, respecting config values for version.
+    /// New empty index for the repository `options` describe.
     ///
-    /// Priority matches Git's `prepare_repo_settings`: `feature.manyFiles` (implies
-    /// version 4), then `index.version` (overrides version).
-    pub fn new_with_config(
-        config_index_version: Option<&str>,
-        config_many_files: Option<&str>,
-    ) -> Self {
-        let many_files = config_truthy(config_many_files);
-        Self::empty(version_from_config(config_index_version, many_files))
-    }
-
-    /// New empty index using a loaded [`ConfigSet`] (includes `-c` / `GIT_CONFIG_PARAMETERS`).
-    ///
-    /// Same precedence as [`Self::new_with_config`], but reads `feature.manyFiles` and
-    /// `index.version` from `config`.
+    /// The version follows Git's `prepare_repo_settings` precedence: `feature.manyFiles`
+    /// (implies version 4), then `index.version` (overrides it), read from
+    /// [`IndexParseOptions::config`] (version 2 without config). The hash algorithm is
+    /// [`IndexParseOptions::hash_algo`] (SHA-1 when unset).
     #[must_use]
-    pub fn new_from_config(config: &ConfigSet) -> Self {
-        let many_files = config.bool_with_default("feature.manyFiles", false);
-        Self::empty(version_from_config(
-            config.value("index.version").as_deref(),
-            many_files,
-        ))
+    pub fn empty_for(options: &IndexParseOptions<'_>) -> Self {
+        let version = match options.config {
+            Some(config) => version_from_config(
+                config.value("index.version").as_deref(),
+                config.bool_with_default("feature.manyFiles", false),
+            ),
+            None => version_from_config(None, false),
+        };
+        Self {
+            hash_algo: options.hash_algo.unwrap_or(HashAlgo::Sha1),
+            ..Self::empty(version)
+        }
     }
 
     /// Load an index from the given file path without expanding sparse-directory placeholders.
@@ -996,14 +1040,8 @@ impl Index {
     pub fn load(path: &Path) -> crate::error::Result<Self> {
         match read_index_file(path) {
             Ok((data, mtime)) => {
-                let ctx = IndexParseContext::default();
-                let mut idx = Self::parse_with_algo_and_config(
-                    &data,
-                    detect_index_hash_algo(&data),
-                    None,
-                    ctx,
-                )
-                .map_err(|e| attach_corrupt_path(path, e))?;
+                let mut idx = Self::parse(&data, &IndexParseOptions::default())
+                    .map_err(|e| attach_corrupt_path(path, e))?;
                 record_loaded_index_identity(&mut idx, &data, mtime);
                 Ok(idx)
             }
@@ -1015,61 +1053,12 @@ impl Index {
         }
     }
 
-    /// Load an index and expand sparse-directory placeholders using the object database.
+    /// Load the index at `path` (empty when missing) and expand sparse-directory placeholders,
+    /// applying path protection from `config` while expanding.
     ///
-    /// After a successful return, [`Index::sparse_directories`] is cleared and every
-    /// placeholder is replaced by the blob entries from the referenced tree.
-    pub fn load_expand_sparse(path: &Path, odb: &Odb) -> crate::error::Result<Self> {
-        let ctx = IndexParseContext::default();
-        let mut idx = match read_index_file(path) {
-            Ok((data, mtime)) => {
-                let mut idx = Self::parse_with_algo_and_config(&data, odb.hash_algo(), None, ctx)
-                    .map_err(|e| attach_corrupt_path(path, e))?;
-                record_loaded_index_identity(&mut idx, &data, mtime);
-                idx
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Self {
-                sparse_directories: false,
-                hash_algo: odb.hash_algo(),
-                ..Self::new()
-            },
-            Err(e) => return Err(crate::error::Error::from(index_path_io(path, e))),
-        };
-        idx.expand_sparse_directory_placeholders(
-            odb,
-            crate::path_validate::ProtectOptions::default(),
-        )?;
-        Ok(idx)
-    }
-
-    /// Like [`Self::load_expand_sparse`], but applies path protection from `config` when expanding sparse directories.
-    pub fn load_expand_sparse_with_config(
-        path: &Path,
-        odb: &Odb,
-        config: &ConfigSet,
-    ) -> crate::error::Result<Self> {
-        Self::load_expand_sparse_optional_with_context(
-            path,
-            odb,
-            Some(config),
-            IndexParseContext::default(),
-        )
-    }
-
-    /// Like [`Index::load_expand_sparse`], but treats a missing index as an empty index.
-    ///
-    /// An index file too short to hold a header and checksum is an error, as in Git.
-    pub fn load_expand_sparse_optional(path: &Path, odb: &Odb) -> crate::error::Result<Self> {
-        Self::load_expand_sparse_optional_with_context(
-            path,
-            odb,
-            None,
-            IndexParseContext::default(),
-        )
-    }
-
-    /// Like [`Self::load_expand_sparse_optional`], but passes config and thread policy for EOIE/IEOT load.
-    pub fn load_expand_sparse_optional_with_context(
+    /// Repository callers go through [`crate::index::IndexFile::load`], which also resolves a
+    /// split index and clears skip-worktree bits for files present on disk.
+    pub(crate) fn load_expand_sparse(
         path: &Path,
         odb: &Odb,
         config: Option<&ConfigSet>,
@@ -1095,8 +1084,12 @@ impl Index {
         let algo = odb.hash_algo();
         let idx = match read_index_file(path) {
             Ok((data, mtime)) => {
-                let mut idx = Self::parse_with_algo_and_config(&data, algo, config, parse_context)
-                    .map_err(|e| attach_corrupt_path(path, e))?;
+                let mut options = IndexParseOptions::default()
+                    .with_hash_algo(algo)
+                    .with_parse_context(parse_context);
+                options.config = config;
+                let mut idx =
+                    Self::parse(&data, &options).map_err(|e| attach_corrupt_path(path, e))?;
                 record_loaded_index_identity(&mut idx, &data, mtime);
                 idx
             }
@@ -1158,24 +1151,22 @@ impl Index {
         Ok(())
     }
 
-    /// Collapse consecutive skip-worktree subtrees into sparse-directory placeholders when
-    /// `cone_mode` is true and each directory is outside the sparse cone.
+    /// Collapse skip-worktree subtrees outside the sparse cone into sparse-directory
+    /// placeholders (Git's sparse index).
     ///
-    /// `head_tree` is the tree OID at `HEAD`. When `enable_sparse_index` is false, clears
-    /// [`Index::sparse_directories`] and returns without collapsing.
+    /// `head_tree` is the tree OID at `HEAD` and `cone_patterns` the cone-mode
+    /// `info/sparse-checkout` lines. A directory collapses only when every row under it is a
+    /// skip-worktree stage-0 entry matching `head_tree`, with no gitlink. Callers that do not
+    /// use a cone-mode sparse index clear [`Index::sparse_directories`] instead.
     pub fn try_collapse_sparse_directories(
         &mut self,
         odb: &Odb,
         head_tree: &ObjectId,
-        patterns: &[String],
-        cone_mode: bool,
-        enable_sparse_index: bool,
+        cone_patterns: &[String],
         protect: crate::path_validate::ProtectOptions,
     ) -> Result<()> {
-        if !enable_sparse_index || !cone_mode {
-            self.sparse_directories = false;
-            return Ok(());
-        }
+        let patterns = cone_patterns;
+        let cone_mode = true;
 
         self.ensure_canonical_order();
         let mut prefixes = BTreeSet::<Vec<u8>>::new();
@@ -1309,37 +1300,27 @@ impl Index {
         Ok(())
     }
 
-    /// Parse index bytes (the whole file including trailing SHA-1).
+    /// Parse index bytes (the whole file including the trailing checksum).
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Index`](crate::error::Error::Index) on structural problems.
-    pub fn parse(data: &[u8]) -> crate::error::Result<Self> {
-        // The index file does not record its hash width; it is fixed by the
-        // repository. Detect it from the trailing checksum (callers with a
-        // repository should prefer [`Self::parse_with_algo`]).
-        Self::parse_with_algo(data, detect_index_hash_algo(data))
+    /// Returns [`IndexError::Corrupt`] on structural problems (with
+    /// [`IndexParseOptions::source_path`] attached when set).
+    pub fn parse(data: &[u8], options: &IndexParseOptions<'_>) -> crate::error::Result<Self> {
+        // The index file does not record its hash width; it is fixed by the repository.
+        let hash_algo = options
+            .hash_algo
+            .unwrap_or_else(|| detect_index_hash_algo(data));
+        Self::parse_bytes(
+            data,
+            hash_algo,
+            options.config,
+            options.source_path,
+            options.parse_context,
+        )
     }
 
-    /// Parse an index using a known hash algorithm (e.g. from the repository's
-    /// `extensions.objectformat`), which determines the entry OID width and the
-    /// trailing checksum width.
-    pub fn parse_with_algo(data: &[u8], hash_algo: HashAlgo) -> crate::error::Result<Self> {
-        Self::parse_with_algo_and_config(data, hash_algo, None, IndexParseContext::default())
-    }
-
-    /// Parse an index with optional repository config and thread policy for EOIE/IEOT load.
-    pub fn parse_with_algo_and_config(
-        data: &[u8],
-        hash_algo: HashAlgo,
-        config: Option<&ConfigSet>,
-        parse_context: IndexParseContext,
-    ) -> crate::error::Result<Self> {
-        Self::parse_with_algo_and_config_at(data, hash_algo, config, None, parse_context)
-    }
-
-    /// Like [`Self::parse_with_algo_and_config`], but attaches `source_path` to structured corrupt-index errors.
-    pub fn parse_with_algo_and_config_at(
+    fn parse_bytes(
         data: &[u8],
         hash_algo: HashAlgo,
         config: Option<&ConfigSet>,
@@ -1550,30 +1531,6 @@ impl Index {
         });
         let skip_hash = index_skip_hash_for_write(config.as_ref());
         self.write_to_path(path, skip_hash)
-    }
-
-    /// Write the index using an already-loaded config snapshot (avoids re-loading the cascade).
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Self::write`].
-    pub fn write_with_config(
-        &mut self,
-        path: &Path,
-        config: &ConfigSet,
-    ) -> crate::error::Result<()> {
-        self.write_with_config_and_policy(path, config, crate::parallel::ThreadPolicy::default())
-    }
-
-    /// Write the index using config and an explicit thread policy (EOIE/IEOT emission).
-    pub fn write_with_config_and_policy(
-        &mut self,
-        path: &Path,
-        config: &ConfigSet,
-        policy: crate::parallel::ThreadPolicy,
-    ) -> crate::error::Result<()> {
-        let skip_hash = index_skip_hash_for_write(Some(config));
-        self.write_to_path_with_config_and_policy(path, skip_hash, Some(config), policy)
     }
 
     /// Write this index to `path` with an explicit trailing-checksum policy.
@@ -3618,14 +3575,6 @@ fn synthetic_stage1_index_entry(mode: u32, path: &[u8], oid: ObjectId) -> IndexE
     }
 }
 
-fn config_truthy(raw: Option<&str>) -> bool {
-    let Some(val) = raw else {
-        return false;
-    };
-    let lowered = val.trim().to_lowercase();
-    matches!(lowered.as_str(), "true" | "yes" | "1" | "on")
-}
-
 /// Whether to write 20 zero bytes instead of the SHA-1 of the index body.
 ///
 /// Mirrors Git `prepare_repo_settings`: `feature.manyFiles` enables skip-hash unless
@@ -5219,7 +5168,7 @@ mod tests {
         index.serialize_into(&mut out).unwrap();
         let checksum = hash_index_body(index.hash_algo, &out);
         out.extend_from_slice(&checksum);
-        let reread = Index::parse(&out).unwrap();
+        let reread = Index::parse(&out, &crate::index::IndexParseOptions::default()).unwrap();
         assert_eq!(reread.version, 3);
         assert!(reread
             .entries
@@ -6437,7 +6386,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let idx = Index::new_from_config(&cfg);
+        let idx = Index::empty_for(&IndexParseOptions::default().with_config(&cfg));
         assert_eq!(idx.version, INDEX_CONFIG_INVALID_FALLBACK);
     }
 
@@ -6514,7 +6463,9 @@ mod tests {
     #[test]
     fn parse_rejects_truncated_headers() {
         for n in 0..12 {
-            assert!(Index::parse(&vec![0u8; n]).is_err());
+            assert!(
+                Index::parse(&vec![0u8; n], &crate::index::IndexParseOptions::default()).is_err()
+            );
         }
     }
 
@@ -6567,7 +6518,7 @@ mod tests {
                 }
                 let truncated = data[..cut].to_vec();
                 assert!(
-                    Index::parse(&truncated).is_err(),
+                    Index::parse(&truncated, &crate::index::IndexParseOptions::default()).is_err(),
                     "v{version}: truncated at {cut} must not parse"
                 );
             }
@@ -6575,7 +6526,7 @@ mod tests {
             for bogus in [0x1000_0000u32, 0x7fff_ffff] {
                 let patched = patch_index_entry_count(data.clone(), bogus);
                 assert!(
-                    Index::parse(&patched).is_err(),
+                    Index::parse(&patched, &crate::index::IndexParseOptions::default()).is_err(),
                     "v{version}: bogus entry count {bogus:#x} must fail fast"
                 );
             }
@@ -6586,7 +6537,7 @@ mod tests {
         idx.write(&path).unwrap();
         let valid = fs::read(&path).unwrap();
         assert!(Index::load(&path).is_ok());
-        assert!(Index::parse(&valid).is_ok());
+        assert!(Index::parse(&valid, &crate::index::IndexParseOptions::default()).is_ok());
     }
 
     #[test]
@@ -6733,12 +6684,13 @@ mod tests {
                 assert!(!path.with_extension("lock").exists());
 
                 let ctx = crate::index::IndexParseContext::from_policy(policy);
-                let loaded = Index::parse_with_algo_and_config_at(
+                let loaded = Index::parse(
                     &written,
-                    idx.hash_algo,
-                    Some(&cfg),
-                    Some(path.as_path()),
-                    ctx,
+                    &IndexParseOptions::default()
+                        .with_hash_algo(idx.hash_algo)
+                        .with_config(&cfg)
+                        .with_source_path(path.as_path())
+                        .with_parse_context(ctx),
                 )
                 .unwrap();
                 assert_eq!(loaded.entries.len(), idx.entries.len());
@@ -6823,8 +6775,13 @@ mod tests {
         let mut idx = Index::new();
         idx.add_or_replace(make_entry("p"));
         let cfg = crate::config::ConfigSet::new();
-        idx.write_with_config_and_policy(&path, &cfg, crate::parallel::ThreadPolicy::default())
-            .unwrap();
+        idx.write_to_path_with_config_and_policy(
+            &path,
+            index_skip_hash_for_write(Some(&cfg)),
+            Some(&cfg),
+            crate::parallel::ThreadPolicy::default(),
+        )
+        .unwrap();
         assert!(path.is_file());
     }
 
@@ -6858,14 +6815,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let odb = crate::odb::Odb::new(dir.path());
         let path = dir.path().join("index");
-        let missing = Index::load_expand_sparse_optional(&path, &odb).unwrap();
+        let missing =
+            Index::load_expand_sparse(&path, &odb, None, IndexParseContext::default()).unwrap();
         assert!(missing.entries.is_empty());
 
         for len in [0, 12, 31] {
             std::fs::write(&path, b"DIRC\0\0\0\x02\0\0\0\0".repeat(3)[..len].to_vec()).unwrap();
             assert!(
                 matches!(
-                    Index::load_expand_sparse_optional(&path, &odb),
+                    Index::load_expand_sparse(&path, &odb, None, IndexParseContext::default()),
                     Err(crate::error::Error::Index(IndexError::Corrupt { .. }))
                 ),
                 "len={len}"
@@ -6985,7 +6943,7 @@ mod tests {
                 .map(|(name, (mode, oid))| TreeEntry { mode, name, oid })
                 .collect();
             entries.sort_by(|a, b| {
-                crate::objects::tree_entry_cmp(
+                crate::objects::tree_name_cmp(
                     &a.name,
                     a.mode == MODE_TREE,
                     &b.name,
@@ -7029,8 +6987,6 @@ mod tests {
                     odb,
                     root,
                     &patterns(),
-                    true,
-                    true,
                     crate::path_validate::ProtectOptions::default(),
                 )
                 .unwrap();

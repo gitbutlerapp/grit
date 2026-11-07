@@ -84,11 +84,12 @@ An operation on a repository is a method on the handle that owns its area. Exten
 
 | Area | Accessor | Handle type | Owns |
 | --- | --- | --- | --- |
-| Objects and maintenance | `repo.objects()` | `objects::Objects` | Object read/write, packs, MIDX, commit-graph, gc, repack, fsck, promisor fetches |
+| Objects | `repo.objects()` | `objects::Objects` | Object read/write, tree and commit building, upload-pack streaming, promisor fetches |
+| Maintenance | `repo.maintenance()` | `maintenance::Maintenance` | gc, `gc --auto`, repack, prune, commit-graph and MIDX writes, pack-refs, offload and drop of large blobs, fsck, the `gc.pid` lock |
 | References | `repo.references()` | `refs::References` | Resolve, list and update refs; `HEAD` and symbolic refs; short-name expansion; branches and tags; ref transactions |
 | Reflogs | `repo.reflogs()` | `repo_handles::RepositoryReflogs` | Reflog read, append, expire |
 | Operation state | `repo.operation()` | `operation::Operations` | Paused merge, rebase, pick, revert and bisect state (`MERGE_HEAD`, `ORIG_HEAD`, sequencer), what blocks a switch, forgetting paused state |
-| Index and staging | `repo.index()` | `index::IndexFile` | Index read/write; add, rm and mv; sparse checkout |
+| Index and staging | `repo.index()` | `index::IndexFile` | Index load/write (`IndexLoadOptions`, `IndexWriteOptions`); add, rm and mv; sparse checkout |
 | Config | `repo.config()` | `config::Config` | Config cascade reads, edits and typed values |
 | Revisions | `repo.revwalk()` | `revwalk::RevWalk` | Rev-parse, rev-list, merge-base, log walks, ahead/behind |
 | Diff | `repo.diff()` | `diff::Diff` | Tree, index and work-tree diffs; text rendering; blame; patch-ids; apply |
@@ -151,7 +152,7 @@ pub enum RepackScope {
 - `#[non_exhaustive]` and `Default`, so new fields are additive and callers write `RepackOptions::default().with_window(Some(50))`.
 - One `with_<field>` setter per field. These setters are the only `with_` names in the API. A `_with_` after a prefix (`diff_trees_with_renames`) marks a variant to fold into an options struct, and the `pub_fn_with_in_name` ratchet counts it. Legitimate names that contain `_with_` are renamed, with no exemption list.
 - Use enums instead of bools whenever a choice has a name (`RepackScope::All`, not `all: bool`). One bare `bool` parameter is the most a public function takes.
-- The options struct is the last value parameter: `repo.objects().repack(&RepackOptions::default(), progress, cancel)`.
+- The options struct is the last value parameter: `repo.maintenance().repack(&RepackOptions::default(), progress, cancel)`.
 
 ### Progress and cancellation
 

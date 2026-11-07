@@ -326,7 +326,7 @@ pub(crate) fn prefetch_promisor_read_batch(
         return Ok(());
     };
     let config = repo_caches.load_config(env, Some(git_dir), true)?;
-    if !repo_treats_promisor_packs(git_dir, config.as_ref())
+    if !repo_treats_promisor_packs(config.as_ref())
         || !promisor_lazy_fetch_enabled(config.as_ref(), env)
     {
         return Ok(());
@@ -367,7 +367,7 @@ pub(crate) fn resolve_promisor_read_miss(
         operation: "lazy fetch",
     })?;
     let config = repo_caches.load_config(env, Some(git_dir), true)?;
-    if !repo_treats_promisor_packs(git_dir, config.as_ref()) {
+    if !repo_treats_promisor_packs(config.as_ref()) {
         return Ok(PromisorMissResolution::NotPromisorRepo);
     }
     if !promisor_lazy_fetch_enabled(config.as_ref(), env) {

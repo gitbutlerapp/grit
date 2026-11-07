@@ -1,15 +1,15 @@
 //! Change-id commit headers interoperate with the system `git` binary.
 
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use std::path::Path;
 use std::process::Command;
 
 use grit_lib::change_id::{set_change_id, ChangeId};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
+use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::commit::prepare_commit_bytes;
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -101,7 +101,10 @@ fn change_id_header_passes_git_and_grit_fsck() {
     );
 
     let opts = FsckOptions::full_repository(true).with_check_dangling(false);
-    let report = fsck(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck");
+    let report = repo
+        .maintenance()
+        .fsck(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit fsck");
     let config = repo.config().snapshot().expect("config");
     assert!(report.ok(&config, &opts), "{:?}", report.issues);
     let parsed = parse_commit(&repo.odb().read(&oid).expect("read").data).expect("parse");

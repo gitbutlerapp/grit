@@ -11,7 +11,7 @@ use crate::diff::{mode_from_metadata, worktree_blob_content, WorktreeBlobContent
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
 use crate::hash::{
-    hash_object, try_par_hash_with, try_par_hash_with_force, ParallelHashError, Parallelism,
+    hash_object, try_par_hash_forced, try_par_hash_with, ParallelHashError, Parallelism,
 };
 use crate::index::IndexEntry;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
@@ -66,7 +66,7 @@ impl PreparedBlobPayload {
                 odb.write_loose_zlib_prehashed(oid, zlib_store, options)?;
             }
             Self::Raw(data) => {
-                let written = odb.write_with_options(ObjectKind::Blob, data, options)?;
+                let written = odb.write_with(ObjectKind::Blob, data, options)?;
                 debug_assert_eq!(written, *oid);
             }
             Self::Stream(path) => {
@@ -299,7 +299,7 @@ pub(crate) fn prepare_and_store_worktree_blobs_parallel(
         ctx.prepare_and_store(odb, item, conv, filter_process, write_opts)
     };
     if items.len() >= crate::hash::PAR_HASH_MIN_ITEMS {
-        try_par_hash_with_force(items, threads, map_item)
+        try_par_hash_forced(items, threads, map_item)
     } else {
         let total_bytes = items.len().saturating_mul(4096);
         try_par_hash_with(items, threads, total_bytes, map_item)

@@ -55,7 +55,10 @@ fn open_repo(root: &std::path::Path) -> Repository {
 }
 
 fn unstaged_name_status(repo: &Repository) -> Vec<String> {
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let mut lines: Vec<String> = repo
         .diff()
         .index_to_worktree(&mut index, &TreeDiffOptions::default())

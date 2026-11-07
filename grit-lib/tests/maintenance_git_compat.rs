@@ -12,7 +12,6 @@ use grit_lib::error::Error;
 use grit_lib::index::Index;
 use grit_lib::maintenance::repository_fsck::{self, issue_msg_id, FsckOptions, FsckReport};
 use grit_lib::maintenance::{
-    auto_gc_needed, gc, gc_auto, pack_refs, prune_loose_objects, repack_all, write_commit_graph,
     AutoGcOutcome, AutoGcReason, CommitGraphOptions, GcOptions, PackRefsOptions, PruneOptions,
     RepackOptions,
 };
@@ -31,7 +30,9 @@ use time::OffsetDateTime;
 
 /// Run grit fsck and report whether it passed under `opts`.
 fn repo_fsck(repo: &Repository, opts: &FsckOptions) -> (FsckReport, bool) {
-    let report = repository_fsck::fsck(repo, opts, &mut NullProgress, &CancelToken::never())
+    let report = repo
+        .maintenance()
+        .fsck(opts, &mut NullProgress, &CancelToken::never())
         .expect("grit fsck");
     let ok = report.ok(&repo.config().snapshot().expect("config"), opts);
     (report, ok)
@@ -161,7 +162,14 @@ fn repack_after_many_commits_single_pack_and_git_fsck_clean() {
         "expected many loose objects, got {loose_before}"
     );
 
-    let stats = repack_all(&repo, &RepackOptions::default()).expect("repack");
+    let stats = repo
+        .maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("repack");
     assert!(stats.pack_path.is_some());
     assert!(stats.objects_packed.unwrap_or(0) > 0);
     clear_pack_cache_after_disk_maintenance();
@@ -191,7 +199,14 @@ fn gc_matches_repack_plus_prune_and_git_fsck() {
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 20);
 
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     assert!(stats.repack.pack_path.is_some());
     clear_pack_cache_after_disk_maintenance();
 
@@ -224,7 +239,14 @@ fn gc_pack_refs_packs_branch_refs() {
         "expected at least main and feature as loose refs/heads, got {loose_before}"
     );
 
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     let pack = stats.pack_refs.as_ref().expect("gc should run pack-refs");
     assert!(
         pack.refs_packed >= 2,
@@ -298,7 +320,10 @@ fn assert_packed_stash_repo_readable_by_git(dir: &Path, repo: &Repository) {
 #[test]
 fn pack_refs_keeps_refs_dir_after_packing_stash_issue_2191() {
     let (dir, repo) = repo_with_loose_stash_ref();
-    let report = pack_refs(&repo, &PackRefsOptions::with_all(true)).expect("pack-refs");
+    let report = repo
+        .maintenance()
+        .pack_refs(&PackRefsOptions::with_all(true))
+        .expect("pack-refs");
     assert_eq!(report.refs_pruned, 2, "{report:?}");
     assert_packed_stash_repo_readable_by_git(dir.path(), &repo);
 }
@@ -306,7 +331,13 @@ fn pack_refs_keeps_refs_dir_after_packing_stash_issue_2191() {
 #[test]
 fn gc_keeps_refs_dir_after_packing_stash_issue_2191() {
     let (dir, repo) = repo_with_loose_stash_ref();
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     assert_packed_stash_repo_readable_by_git(dir.path(), &repo);
 }
 
@@ -331,7 +362,13 @@ fn gc_preserves_staged_only_blob() {
         .expect("staged entry")
         .oid;
 
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     clear_pack_cache_after_disk_maintenance();
 
     assert!(
@@ -452,7 +489,13 @@ fn repack_keeps_reflog_only_commit_and_kept_pack() {
         .expect("pack");
     std::fs::write(old_pack.with_extension("keep"), b"keep").expect("keep");
 
-    repack_all(&repo, &RepackOptions::default()).expect("repack");
+    repo.maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("repack");
     clear_pack_cache_after_disk_maintenance();
 
     assert!(
@@ -486,9 +529,22 @@ fn gc_default_options_uses_wall_clock_for_reflog_expiry() {
             .expect("open");
 
     let wall = OffsetDateTime::now_utc().unix_timestamp();
-    let default_stats = gc(&repo_default, &GcOptions::default()).expect("default gc");
-    let explicit_stats =
-        gc(&repo_explicit, &GcOptions::with_reflog_policy(wall, true)).expect("explicit-now gc");
+    let default_stats = repo_default
+        .maintenance()
+        .gc(
+            &GcOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("default gc");
+    let explicit_stats = repo_explicit
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(wall, true),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("explicit-now gc");
 
     assert_eq!(
         default_stats.reflog_entries_pruned, explicit_stats.reflog_entries_pruned,
@@ -571,7 +627,13 @@ fn gc_invalid_prune_expire_rejects_before_deleting_loose() {
         "fixture must start with a three-entry HEAD reflog"
     );
 
-    let err = gc(&repo, &GcOptions::default())
+    let err = repo
+        .maintenance()
+        .gc(
+            &GcOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect_err("invalid gc.pruneExpire must fail before mutating");
     assert!(
         matches!(err, Error::Config(_)),
@@ -717,7 +779,14 @@ fn assert_grace_protected_packed_unreachable_gc_matches_git(fixture: &GraceProte
     let grit_repo = Repository::discover(Some(grit_fixture.path()), &RepositoryOptions::empty())
         .expect("open grit repo");
     let now_unix = 1_791_979_200_i64;
-    gc(&grit_repo, &GcOptions::with_reflog_policy(now_unix, false)).expect("grit gc");
+    grit_repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(now_unix, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     clear_pack_cache_after_disk_maintenance();
     assert!(
         cat_file_exists(grit_fixture.path(), &fixture.side_hex),
@@ -772,11 +841,14 @@ fn gc_aborts_before_pack_removal_when_stale_loose_mtime_update_fails() {
     let packs_before = pack_stems(&grit_fixture.path().join(".git"));
     assert_eq!(packs_before.len(), 1);
 
-    let err = gc(
-        &grit_repo,
-        &GcOptions::with_reflog_policy(1_791_979_200, false),
-    )
-    .expect_err("gc must fail when grace mtime cannot be applied to stale loose copy");
+    let err = grit_repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_791_979_200, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect_err("gc must fail when grace mtime cannot be applied to stale loose copy");
     assert!(
         matches!(err, Error::Io(_)),
         "expected I/O error from mtime update, got {err:?}"
@@ -809,7 +881,14 @@ fn gc_reports_kept_unreachable_loose_within_prune_grace() {
         .write_loose_materialize(ObjectKind::Blob, b"grace-protected orphan\n")
         .expect("write unreachable loose blob");
 
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     assert_eq!(
         stats.prune.pruned, 0,
         "recent orphan must survive grace window"
@@ -820,7 +899,10 @@ fn gc_reports_kept_unreachable_loose_within_prune_grace() {
     );
     assert!(stats.prune_ran);
 
-    let prune_only = prune_loose_objects(&repo, &PruneOptions::default()).expect("prune");
+    let prune_only = repo
+        .maintenance()
+        .prune_loose_objects(&PruneOptions::default())
+        .expect("prune");
     assert_eq!(prune_only.kept, stats.prune.kept);
 }
 
@@ -838,7 +920,14 @@ fn gc_prune_expire_never_preserves_unreachable_loose_blob() {
 
     git(dir.path(), &["config", "gc.pruneExpire", "never"]);
 
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     assert_eq!(
         stats.prune.pruned, 0,
         "gc.pruneExpire=never must disable loose prune"
@@ -992,7 +1081,13 @@ fn gc_packs_loose_objects_like_git() {
 
     let repo = Repository::discover(Some(grit_dir.path()), &RepositoryOptions::empty())
         .expect("open grit copy");
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
 
     git(git_dir.path(), &["gc", "--quiet"]);
 
@@ -1052,7 +1147,13 @@ fn gc_over_existing_pack_keeps_its_deltas_and_deltifies_new_blobs() {
 
     let repo =
         Repository::discover(Some(seed.path()), &RepositoryOptions::empty()).expect("open repo");
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     clear_pack_cache_after_disk_maintenance();
 
     assert_eq!(git_pack_count(&seed.path().join(".git")), 1);
@@ -1082,7 +1183,10 @@ fn gc_repacks_loose_after_existing_pack_issue_1320() {
     many_grit_commits(&repo, 5);
 
     let opts = GcOptions::with_reflog_policy(1_700_000_000, false);
-    let first = gc(&repo, &opts).expect("first gc");
+    let first = repo
+        .maintenance()
+        .gc(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("first gc");
     assert!(
         first.repack.objects_packed.unwrap_or(0) > 0,
         "first gc should pack initial loose objects"
@@ -1102,7 +1206,10 @@ fn gc_repacks_loose_after_existing_pack_issue_1320() {
     );
     assert_eq!(git_pack_count(&dir.path().join(".git")), 1);
 
-    let second = gc(&repo, &opts).expect("second gc");
+    let second = repo
+        .maintenance()
+        .gc(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("second gc");
     assert!(
         second.repack.objects_packed.unwrap_or(0) > 0,
         "second gc must repack loose objects even when a pack already exists (issue #1320)"
@@ -1138,7 +1245,13 @@ fn repack_consolidates_multiple_packs_like_git_repack_ad() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    repack_all(&repo, &RepackOptions::default()).expect("grit repack");
+    repo.maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit repack");
     git(git_copy.path(), &["repack", "-a", "-d"]);
 
     assert_eq!(
@@ -1160,8 +1273,13 @@ fn gc_twice_on_single_pack_keeps_loose_count_zero() {
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
     let opts = GcOptions::with_reflog_policy(1_700_000_000, false);
-    gc(&repo, &opts).expect("grit gc first");
-    let second = gc(&repo, &opts).expect("grit gc second");
+    repo.maintenance()
+        .gc(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit gc first");
+    let second = repo
+        .maintenance()
+        .gc(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit gc second");
     assert_eq!(
         second.repack.objects_packed, None,
         "second gc on a single-pack repo must skip repack like git gc"
@@ -1181,7 +1299,14 @@ fn explicit_repack_rewrites_single_pack_with_no_loose() {
     duplicate_repo_tree(dir.path(), grit_copy.path());
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = repack_all(&repo, &RepackOptions::default()).expect("repack");
+    let stats = repo
+        .maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("repack");
     assert!(
         stats.objects_packed.is_some_and(|n| n > 0),
         "explicit repack must rewrite into a new pack even with one pack and no loose objects"
@@ -1238,7 +1363,13 @@ fn gc_drops_expired_unreachable_packed_commit_like_git() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    gc(&repo, &GcOptions::with_reflog_policy(1_761_000_000, false)).expect("grit gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_761_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     clear_pack_cache_after_disk_maintenance();
     git(git_copy.path(), &["gc", "--quiet"]);
 
@@ -1266,7 +1397,14 @@ fn gc_skips_repack_when_single_pack_and_no_loose() {
         .path();
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     assert_eq!(
         stats.repack.objects_packed, None,
         "expected repack skip on single pack with no loose objects"
@@ -1320,7 +1458,14 @@ fn gc_with_write_bitmaps_on_single_pack_writes_bitmap_like_git() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     git(git_copy.path(), &["gc", "--quiet"]);
 
     assert!(
@@ -1353,7 +1498,14 @@ fn full_gc_auto_skips_repack_but_explicit_repack_runs_on_single_pack() {
     duplicate_repo_tree(dir.path(), grit_gc.path());
     let repo_gc =
         Repository::discover(Some(grit_gc.path()), &RepositoryOptions::empty()).expect("open");
-    let gc_stats = gc(&repo_gc, &GcOptions::full_run(false, 1_700_000_000)).expect("gc");
+    let gc_stats = repo_gc
+        .maintenance()
+        .gc(
+            &GcOptions::full_run(false, 1_700_000_000),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     assert!(
         gc_stats.repack.objects_packed.is_none(),
         "full grit gc must auto-skip repack on a single pack with no loose objects"
@@ -1363,7 +1515,14 @@ fn full_gc_auto_skips_repack_but_explicit_repack_runs_on_single_pack() {
     duplicate_repo_tree(dir.path(), grit_repack.path());
     let repo_repack =
         Repository::discover(Some(grit_repack.path()), &RepositoryOptions::empty()).expect("open");
-    let repack_stats = repack_all(&repo_repack, &RepackOptions::default()).expect("repack");
+    let repack_stats = repo_repack
+        .maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("repack");
     assert!(
         repack_stats.objects_packed.is_some_and(|n| n > 0),
         "explicit repack must run even when full gc would skip"
@@ -1394,7 +1553,14 @@ fn repack_with_existing_pack_and_loose_uses_rewrite_not_full_delta_search() {
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
     let start = std::time::Instant::now();
-    let stats = repack_all(&repo, &RepackOptions::default()).expect("repack");
+    let stats = repo
+        .maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("repack");
     let elapsed = start.elapsed();
     assert!(
         stats.objects_packed.is_some_and(|n| n > 0),
@@ -1542,7 +1708,9 @@ fn repack_materializes_delta_when_base_unreachable() {
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
     let mut opts = RepackOptions::default();
     opts.keep_unreachable = false;
-    repack_all(&repo, &opts).expect("grit repack");
+    repo.maintenance()
+        .repack_all(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit repack");
     clear_pack_cache_after_disk_maintenance();
     let cat = Command::new("git")
         .current_dir(grit_copy.path())
@@ -1577,7 +1745,14 @@ fn gc_full_run_skips_repack_on_single_pack_with_no_loose() {
         .expect("pack mtime");
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = gc(&repo, &GcOptions::full_run(false, 1_700_000_000)).expect("grit gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::full_run(false, 1_700_000_000),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     assert!(
         stats.repack.objects_packed.is_none(),
         "single-pack gc with auto_skip must not rewrite the pack"
@@ -1609,7 +1784,14 @@ fn gc_on_single_pack_with_no_loose_matches_git_gc_loose_count() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     git(git_copy.path(), &["gc", "--quiet"]);
 
     assert_eq!(
@@ -1648,7 +1830,13 @@ fn gc_autopacklimit_zero_keeps_two_packs_like_git_gc_auto() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     git(git_copy.path(), &["gc", "--quiet"]);
 
     assert_eq!(
@@ -1687,7 +1875,13 @@ fn gc_autopacklimit_ignores_kept_packs_like_git_gc_auto() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     git(git_copy.path(), &["gc", "--quiet"]);
 
     assert_eq!(
@@ -1716,7 +1910,13 @@ fn gc_autopacklimit_consolidates_packs_like_git() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     git(git_copy.path(), &["gc", "--quiet"]);
 
     assert_eq!(
@@ -1739,16 +1939,26 @@ fn gc_from_loose_objects_builds_delta_compressed_pack_like_repack() {
 
     let repo_gc = Repository::discover(Some(grit_gc.path()), &RepositoryOptions::empty())
         .expect("open gc copy");
-    let gc_stats = gc(
-        &repo_gc,
-        &GcOptions::with_reflog_policy(1_700_000_000, false),
-    )
-    .expect("grit gc");
+    let gc_stats = repo_gc
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     clear_pack_cache_after_disk_maintenance();
 
     let repo_repack = Repository::discover(Some(grit_repack.path()), &RepositoryOptions::empty())
         .expect("open repack copy");
-    let repack_stats = repack_all(&repo_repack, &RepackOptions::default()).expect("grit repack");
+    let repack_stats = repo_repack
+        .maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit repack");
     clear_pack_cache_after_disk_maintenance();
 
     let gc_bytes = gc_stats.repack.pack_bytes.expect("gc pack bytes");
@@ -1786,7 +1996,13 @@ fn index_gitlink_absent_commit_does_not_break_repack_or_fsck() {
         ],
     );
 
-    repack_all(&repo, &RepackOptions::default()).expect("grit repack");
+    repo.maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit repack");
     git(dir.path(), &["gc"]);
     clear_pack_cache_after_disk_maintenance();
     git(dir.path(), &["fsck", "--strict"]);
@@ -1825,7 +2041,9 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
     .expect("commit");
     let mut base_repack = RepackOptions::default();
     base_repack.keep_unreachable = false;
-    repack_all(&repo, &base_repack).expect("repack base");
+    repo.maintenance()
+        .repack_all(&base_repack, &mut NullProgress, &CancelToken::never())
+        .expect("repack base");
 
     std::fs::write(wt.join("child"), b"v2").expect("write child");
     stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage child");
@@ -1849,7 +2067,9 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
     let mut incr_repack = RepackOptions::default();
     incr_repack.incremental = true;
     incr_repack.write_bitmap = true;
-    repack_all(&repo, &incr_repack).expect("incremental repack with bitmap");
+    repo.maintenance()
+        .repack_all(&incr_repack, &mut NullProgress, &CancelToken::never())
+        .expect("incremental repack with bitmap");
 
     let git_dir = repo.git_dir();
     git(git_dir, &["multi-pack-index", "verify"]);
@@ -1892,7 +2112,12 @@ fn gc_replaces_readonly_commit_graph_like_git_on_windows() {
     std::fs::set_permissions(&graph_path, perms).expect("readonly");
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false))
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("grit gc must replace read-only commit-graph");
     git_fsck(dir.path(), true);
 }
@@ -1916,11 +2141,12 @@ fn prune_rejects_missing_root_with_empty_loose_store() {
         .expect("loose")
         .is_empty());
 
-    let err = prune_loose_objects(
-        &repo,
-        &PruneOptions::with_older_than(Some(std::time::SystemTime::now())),
-    )
-    .expect_err("prune must not accept a missing root");
+    let err = repo
+        .maintenance()
+        .prune_loose_objects(&PruneOptions::with_older_than(Some(
+            std::time::SystemTime::now(),
+        )))
+        .expect_err("prune must not accept a missing root");
     assert!(
         matches!(err, Error::Object(ObjectError::NotFound { .. })),
         "{err:?}"
@@ -1933,7 +2159,12 @@ fn prune_rejects_missing_root_with_empty_loose_store() {
         "{err:?}"
     );
 
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false))
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect_err("full gc must not accept a missing root");
 }
 
@@ -1957,11 +2188,12 @@ fn prune_keeps_aged_loose_blob_staged_in_main_index() {
     filetime::set_file_mtime(&loose, old).expect("age staged blob");
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = prune_loose_objects(
-        &repo,
-        &PruneOptions::with_older_than(Some(std::time::SystemTime::now())),
-    )
-    .expect("prune");
+    let stats = repo
+        .maintenance()
+        .prune_loose_objects(&PruneOptions::with_older_than(Some(
+            std::time::SystemTime::now(),
+        )))
+        .expect("prune");
     assert!(
         repo.odb().read(&blob).is_ok(),
         "staged blob must survive prune (stats={stats:?})"
@@ -1994,11 +2226,12 @@ fn prune_keeps_aged_loose_blob_staged_only_in_linked_worktree_index() {
     filetime::set_file_mtime(&loose, old).expect("age staged blob");
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = prune_loose_objects(
-        &repo,
-        &PruneOptions::with_older_than(Some(std::time::SystemTime::now())),
-    )
-    .expect("prune");
+    let stats = repo
+        .maintenance()
+        .prune_loose_objects(&PruneOptions::with_older_than(Some(
+            std::time::SystemTime::now(),
+        )))
+        .expect("prune");
     assert!(
         repo.odb().read(&blob).is_ok(),
         "linked-worktree staged blob must survive prune from main (stats={stats:?})"
@@ -2025,7 +2258,7 @@ fn prune_rejects_missing_reachable_blob() {
     std::fs::remove_file(repo.odb().objects_dir().join(&hex[..2]).join(&hex[2..]))
         .expect("drop blob");
 
-    let roots = grit_lib::maintenance::collect_maintenance_object_roots(&repo).expect("roots");
+    let roots = repo.maintenance().reachability_roots().expect("roots");
     let err = grit_lib::refs::gc::prune_loose_unreachable(repo.odb(), &roots, None)
         .expect_err("missing blob");
     assert!(
@@ -2115,11 +2348,12 @@ fn prune_with_no_loose_objects_skips_reachability_walk() {
     let _pack_guard = pack_cache_guard();
     let (_dir, repo, commit) = packed_repo_whose_tip_tree_is_missing();
 
-    let stats = prune_loose_objects(
-        &repo,
-        &PruneOptions::with_older_than(Some(std::time::SystemTime::now())),
-    )
-    .expect("prune with nothing loose must not walk the graph");
+    let stats = repo
+        .maintenance()
+        .prune_loose_objects(&PruneOptions::with_older_than(Some(
+            std::time::SystemTime::now(),
+        )))
+        .expect("prune with nothing loose must not walk the graph");
     assert_eq!(stats, grit_lib::refs::gc::PruneStats::default());
 
     let stats = grit_lib::refs::gc::prune_loose_unreachable(repo.odb(), &[commit], None)
@@ -2152,7 +2386,13 @@ fn gc_on_single_fresh_pack_skips_reachability_walk() {
     let (_dir, repo, _commit) = packed_repo_whose_tip_tree_is_missing();
     let now = OffsetDateTime::now_utc().unix_timestamp();
 
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(now, false))
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(now, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("gc of a packed repository must not walk the graph");
     assert_eq!(stats.repack.objects_packed, None, "{:?}", stats.repack);
     assert!(stats.prune_ran, "{stats:?}");
@@ -2179,7 +2419,13 @@ fn gc_commit_graph_keeps_existing_changed_path_choice_like_git() {
     git(dir.path(), &["commit", "-m", "one"]);
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
 
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("first gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("first gc");
     assert!(
         !top_commit_graph_has_bloom_filters(&repo),
         "gc must not add Bloom filters to a repository without them"
@@ -2192,7 +2438,13 @@ fn gc_commit_graph_keeps_existing_changed_path_choice_like_git() {
     );
     std::fs::write(dir.path().join("a.txt"), b"two\n").expect("write");
     git(dir.path(), &["commit", "-am", "two"]);
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("second gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("second gc");
     assert!(
         top_commit_graph_has_bloom_filters(&repo),
         "gc must keep the Bloom filters of an existing commit-graph"
@@ -2229,7 +2481,9 @@ fn gc_auto_packs_loose_objects_past_gc_auto_and_git_reads_the_result() {
     let mut commits = 0;
     while loose_in_fanout(&git_dir, "17") < 2 {
         assert_eq!(
-            gc_auto(&repo, &opts).expect("gc_auto below threshold"),
+            repo.maintenance()
+                .gc_auto(&opts, &mut NullProgress, &CancelToken::never())
+                .expect("gc_auto below threshold"),
             AutoGcOutcome::NotNeeded,
             "a sample at or below the threshold must not run maintenance"
         );
@@ -2240,7 +2494,10 @@ fn gc_auto_packs_loose_objects_past_gc_auto_and_git_reads_the_result() {
     let loose_before = git_loose_object_count(dir.path());
     assert!(loose_before > 20);
 
-    let outcome = gc_auto(&repo, &opts).expect("gc_auto");
+    let outcome = repo
+        .maintenance()
+        .gc_auto(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("gc_auto");
     let AutoGcOutcome::Ran { reason, stats } = outcome else {
         panic!("expected maintenance to run, got {outcome:?}");
     };
@@ -2267,9 +2524,11 @@ fn gc_auto_packs_loose_objects_past_gc_auto_and_git_reads_the_result() {
     let (_, ok) = repo_fsck(&repo, &objects_and_refs(true));
     assert!(ok, "grit fsck after gc_auto");
 
-    assert_eq!(auto_gc_needed(&repo).expect("recheck"), None);
+    assert_eq!(repo.maintenance().auto_gc_needed().expect("recheck"), None);
     assert_eq!(
-        gc_auto(&repo, &opts).expect("second gc_auto"),
+        repo.maintenance()
+            .gc_auto(&opts, &mut NullProgress, &CancelToken::never())
+            .expect("second gc_auto"),
         AutoGcOutcome::NotNeeded
     );
 }
@@ -2327,7 +2586,14 @@ fn gc_auto_delta_compresses_loose_versions_of_a_large_blob_issue_2158() {
     duplicate_repo_tree(dir.path(), repack_copy.path());
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let outcome = gc_auto(&repo, &GcOptions::full_run(false, now_unix())).expect("gc_auto");
+    let outcome = repo
+        .maintenance()
+        .gc_auto(
+            &GcOptions::full_run(false, now_unix()),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc_auto");
     let AutoGcOutcome::Ran { reason, stats } = outcome else {
         panic!("expected maintenance to run, got {outcome:?}");
     };
@@ -2357,7 +2623,14 @@ fn gc_auto_delta_compresses_loose_versions_of_a_large_blob_issue_2158() {
 
     let repack_repo = Repository::discover(Some(repack_copy.path()), &RepositoryOptions::empty())
         .expect("open repack copy");
-    let repack_stats = repack_all(&repack_repo, &RepackOptions::default()).expect("repack");
+    let repack_stats = repack_repo
+        .maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("repack");
     clear_pack_cache_after_disk_maintenance();
     let repack_bytes = repack_stats.pack_bytes.expect("repack pack bytes");
     assert!(
@@ -2418,10 +2691,17 @@ fn gc_auto_consolidates_packs_past_gc_auto_pack_limit_like_git() {
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
     assert_eq!(
-        auto_gc_needed(&repo).expect("check"),
+        repo.maintenance().auto_gc_needed().expect("check"),
         Some(AutoGcReason::TooManyPacks { count: 3, limit: 2 })
     );
-    let outcome = gc_auto(&repo, &GcOptions::full_run(false, now_unix())).expect("gc_auto");
+    let outcome = repo
+        .maintenance()
+        .gc_auto(
+            &GcOptions::full_run(false, now_unix()),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc_auto");
     assert!(
         matches!(outcome, AutoGcOutcome::Ran { .. }),
         "expected maintenance to run, got {outcome:?}"
@@ -2439,7 +2719,7 @@ fn gc_auto_consolidates_packs_past_gc_auto_pack_limit_like_git() {
         "grit must consolidate packs when git gc --auto does"
     );
     git_fsck(dir.path(), true);
-    assert_eq!(auto_gc_needed(&repo).expect("recheck"), None);
+    assert_eq!(repo.maintenance().auto_gc_needed().expect("recheck"), None);
 }
 
 #[test]
@@ -2452,7 +2732,13 @@ fn gc_auto_is_a_no_op_when_gc_auto_is_zero() {
     let loose_before = git_loose_object_count(dir.path());
     assert!(loose_before >= 1800);
     assert_eq!(
-        gc_auto(&repo, &GcOptions::full_run(false, now_unix())).expect("gc_auto"),
+        repo.maintenance()
+            .gc_auto(
+                &GcOptions::full_run(false, now_unix()),
+                &mut NullProgress,
+                &CancelToken::never()
+            )
+            .expect("gc_auto"),
         AutoGcOutcome::NotNeeded
     );
     assert_eq!(git_loose_object_count(dir.path()), loose_before);
@@ -2511,7 +2797,14 @@ fn grit_and_git_gc_auto(seed: &Path) -> (TempDir, TempDir) {
     duplicate_repo_tree(seed, git_copy.path());
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    let outcome = gc_auto(&repo, &GcOptions::full_run(false, now_unix())).expect("gc_auto");
+    let outcome = repo
+        .maintenance()
+        .gc_auto(
+            &GcOptions::full_run(false, now_unix()),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc_auto");
     assert!(
         matches!(
             outcome,
@@ -2671,11 +2964,14 @@ fn gc_on_shared_clone_packs_only_local_objects_like_git() {
         std::fs::read_to_string(grit_clone_dir.path().join(".git/objects/info/alternates"))
             .expect("alternates file");
 
-    gc(
-        &grit_repo,
-        &GcOptions::with_reflog_policy(1_700_000_000, false),
-    )
-    .expect("grit gc");
+    grit_repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     clear_pack_cache_after_disk_maintenance();
 
     git(git_clone_dir.path(), &["gc"]);
@@ -2710,7 +3006,10 @@ fn gc_shared_clone_dry_run_counts_local_objects_only() {
 
     let mut repack_opts = RepackOptions::default();
     repack_opts.dry_run = true;
-    let detail = repack_all(&repo, &repack_opts).expect("repack dry-run");
+    let detail = repo
+        .maintenance()
+        .repack_all(&repack_opts, &mut NullProgress, &CancelToken::never())
+        .expect("repack dry-run");
     git(clone_dir.path(), &["gc"]);
     let git_in_pack = git_count_objects_field(clone_dir.path(), "in-pack");
     assert_eq!(
@@ -2738,7 +3037,13 @@ fn gc_shared_clone_recovers_from_duplicated_alternate_pack() {
         "repack -a without --local should duplicate the alternate into the clone"
     );
 
-    repack_all(&repo, &RepackOptions::default()).expect("grit repack");
+    repo.maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit repack");
     clear_pack_cache_after_disk_maintenance();
 
     let after = git_count_objects_field(clone_dir.path(), "in-pack");
@@ -2841,11 +3146,14 @@ fn gc_preserves_loose_duplicate_when_alternate_holds_object_loose_only() {
     duplicate_alternate_loose_object_in_clone(git_clone.path(), &parent);
 
     git(git_clone.path(), &["gc", "--quiet"]);
-    gc(
-        &grit_repo,
-        &GcOptions::with_reflog_policy(1_700_000_000, false),
-    )
-    .expect("grit gc");
+    grit_repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     clear_pack_cache_after_disk_maintenance();
 
     assert!(
@@ -2892,11 +3200,14 @@ fn gc_prunes_loose_duplicate_when_alternate_holds_object_in_pack() {
     write_loose_materialize_duplicate(&git_repo, &parent);
 
     git(git_clone.path(), &["gc", "--quiet"]);
-    gc(
-        &grit_repo,
-        &GcOptions::with_reflog_policy(1_700_000_000, false),
-    )
-    .expect("grit gc");
+    grit_repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     clear_pack_cache_after_disk_maintenance();
 
     assert!(
@@ -2928,7 +3239,14 @@ fn gc_honors_write_commit_graph_false_like_git() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     git(git_copy.path(), &["gc", "--quiet"]);
 
     assert!(
@@ -2971,7 +3289,14 @@ fn gc_honors_pack_refs_false_and_notbare_like_git() {
     duplicate_repo_tree(dir.path(), grit_copy.path());
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     assert!(stats.pack_refs.is_none());
     let git_dir = grit_copy.path().join(".git");
     assert!(
@@ -2985,11 +3310,14 @@ fn gc_honors_pack_refs_false_and_notbare_like_git() {
     duplicate_repo_tree(dir.path(), notbare_copy.path());
     let notbare_repo =
         Repository::discover(Some(notbare_copy.path()), &RepositoryOptions::empty()).expect("open");
-    let notbare_stats = gc(
-        &notbare_repo,
-        &GcOptions::with_reflog_policy(1_700_000_000, false),
-    )
-    .expect("gc");
+    let notbare_stats = notbare_repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     assert!(notbare_stats.pack_refs.is_some());
     assert_eq!(
         count_loose_head_ref_files(&notbare_copy.path().join(".git")),
@@ -3012,11 +3340,14 @@ fn gc_honors_pack_refs_false_and_notbare_like_git() {
     );
     let bare_repo =
         Repository::discover(Some(bare.path()), &RepositoryOptions::empty()).expect("open");
-    let bare_stats = gc(
-        &bare_repo,
-        &GcOptions::with_reflog_policy(1_700_000_000, false),
-    )
-    .expect("gc");
+    let bare_stats = bare_repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     assert!(
         bare_stats.pack_refs.is_none(),
         "gc.packRefs=notbare must not pack refs in a bare repo"
@@ -3030,7 +3361,14 @@ fn gc_rejects_invalid_gc_pack_refs_config() {
     git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
     git(dir.path(), &["config", "gc.packRefs", "maybe"]);
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let err = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).unwrap_err();
+    let err = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(matches!(err, Error::Config(_)), "unexpected error: {err:?}");
 }
 
@@ -3053,7 +3391,13 @@ fn gc_honors_pack_write_bitmaps_synonym_and_scope_order() {
     duplicate_repo_tree(dir.path(), grit_copy.path());
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     assert!(
         pack_has_bitmap(&grit_copy.path().join(".git")),
         "pack.writeBitmaps alone must enable gc repack bitmaps"
@@ -3072,11 +3416,14 @@ fn gc_honors_pack_write_bitmaps_synonym_and_scope_order() {
     git(order_dir.path(), &["config", "pack.writeBitmaps", "true"]);
     let order_repo =
         Repository::discover(Some(order_dir.path()), &RepositoryOptions::empty()).expect("open");
-    gc(
-        &order_repo,
-        &GcOptions::with_reflog_policy(1_700_000_000, false),
-    )
-    .expect("gc");
+    order_repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     assert!(
         pack_has_bitmap(&order_dir.path().join(".git")),
         "later pack.writeBitmaps must override earlier repack.writeBitmaps=false"
@@ -3098,11 +3445,14 @@ fn gc_honors_pack_write_bitmaps_synonym_and_scope_order() {
     );
     let reverse_repo =
         Repository::discover(Some(reverse_dir.path()), &RepositoryOptions::empty()).expect("open");
-    gc(
-        &reverse_repo,
-        &GcOptions::with_reflog_policy(1_700_000_000, false),
-    )
-    .expect("gc");
+    reverse_repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     assert!(
         !pack_has_bitmap(&reverse_dir.path().join(".git")),
         "later repack.writeBitmaps=false must override earlier pack.writeBitmaps=true"
@@ -3167,7 +3517,13 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
     }
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    gc(&repo, &GcOptions::default()).expect("grit gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
     assert_eq!(git_garbage_count(dir.path()), 1, "fresh tmp_pack kept");
     assert!(!pack_dir.join("tmp_pack_old").exists());
     assert!(!pack_dir.join(".pack-deadbeef-install-1_0").exists());
@@ -3193,7 +3549,13 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
     filetime::set_file_mtime(&quarantine, three_weeks_ago).expect("mtime quarantine");
     filetime::set_file_mtime(quarantine.join("pack/tmp_pack_stale"), three_weeks_ago)
         .expect("mtime quarantine pack");
-    gc(&repo, &GcOptions::default()).expect("grit gc quarantine");
+    repo.maintenance()
+        .gc(
+            &GcOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc quarantine");
     assert!(!quarantine.exists());
     assert!(fresh_quarantine.exists());
 
@@ -3212,7 +3574,14 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
         three_weeks_ago,
     )
     .expect("mtime");
-    gc(&never_repo, &GcOptions::default()).expect("gc never");
+    never_repo
+        .maintenance()
+        .gc(
+            &GcOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc never");
     assert!(never_dir
         .path()
         .join(".git/objects/pack/tmp_pack_old")
@@ -3234,7 +3603,10 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
     .expect("mtime");
     let mut gc_opts = GcOptions::default();
     gc_opts.repack.dry_run = true;
-    gc(&dry_repo, &gc_opts).expect("gc dry-run");
+    dry_repo
+        .maintenance()
+        .gc(&gc_opts, &mut NullProgress, &CancelToken::never())
+        .expect("gc dry-run");
     assert!(dry_dir
         .path()
         .join(".git/objects/pack/tmp_pack_old")
@@ -3250,7 +3622,14 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
 fn gc_empty_history_writes_no_commit_graph_and_fsck_clean() {
     let dir = TempDir::new().expect("tempdir");
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
-    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    let stats = repo
+        .maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     let graph = stats.commit_graph.expect("commit-graph task");
     assert_eq!(graph.commit_count, 0);
     assert!(graph.skipped.is_none());
@@ -3308,7 +3687,13 @@ fn gc_after_one_commit_writes_commit_graph_both_fsck_clean() {
     let dir = TempDir::new().expect("tempdir");
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 1);
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::with_reflog_policy(1_700_000_000, false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
     let graph_path = dir.path().join(".git/objects/info/commit-graph");
     assert!(
         graph_path.is_file(),
@@ -3325,7 +3710,10 @@ fn gc_after_one_commit_writes_commit_graph_both_fsck_clean() {
 fn write_commit_graph_empty_history_is_no_op() {
     let dir = TempDir::new().expect("tempdir");
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
-    let report = write_commit_graph(&repo, &CommitGraphOptions::default()).expect("write");
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::default())
+        .expect("write");
     assert_eq!(report.commit_count, 0);
     assert!(report.skipped.is_none());
     assert!(

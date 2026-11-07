@@ -308,7 +308,7 @@ fn verify_v1_pack_names_out_of_order() {
         return;
     };
     let pack_dir = objects.join("pack");
-    grit_lib::objects::midx::write_multi_pack_index_with_options(
+    grit_lib::objects::midx::write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             version: Some(1),
@@ -554,7 +554,7 @@ fn load_reuse_tables_rejects_bad_ridx_entry() {
         return;
     };
     let pack_dir = objects.join("pack");
-    grit_lib::objects::midx::write_multi_pack_index_with_options(
+    grit_lib::objects::midx::write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             write_bitmap: true,

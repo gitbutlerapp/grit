@@ -232,7 +232,7 @@ pub enum ObjectError {
     Midx(#[from] MidxError),
 
     /// Offloading blobs to a large-object promisor was refused
-    /// ([`crate::maintenance::offload_blobs`]).
+    /// ([`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs)).
     #[error(transparent)]
     Offload(#[from] crate::offload::OffloadError),
 

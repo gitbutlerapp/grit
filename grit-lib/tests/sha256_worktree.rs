@@ -1,5 +1,7 @@
 //! SHA-256 worktree hashing, patch-ids, and prune-packed compatibility with system git.
 
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -11,8 +13,6 @@ use grit_lib::objects::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use grit_lib::objects::HashAlgo;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -133,7 +133,10 @@ fn sha256_stat_refresh_staging_patch_id_and_prune_packed() {
     let git_oid = git(repo_root, &["hash-object", "-w", "tracked.txt"])
         .trim()
         .to_string();
-    let index = grit_repo.index().load().expect("index");
+    let index = grit_repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entry = index
         .entries()
         .iter()

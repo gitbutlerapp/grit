@@ -1072,6 +1072,13 @@ impl Repository {
         crate::refs::References::new(self)
     }
 
+    /// Garbage collection, repack, commit-graph, MIDX, fsck and `gc.pid` lock handle.
+    #[inline]
+    #[must_use]
+    pub fn maintenance(&self) -> crate::maintenance::Maintenance<'_> {
+        crate::maintenance::Maintenance::new(self)
+    }
+
     /// Index load/write handle.
     #[inline]
     #[must_use]
@@ -1141,23 +1148,6 @@ impl Repository {
     #[must_use]
     pub fn hooks(&self) -> crate::repo_handles::RepositoryHooks<'_> {
         crate::repo_handles::RepositoryHooks::new(self)
-    }
-
-    /// Check object store connectivity, refs, and optional pack indexes.
-    ///
-    /// Progress is reported through `progress`; the library never prints.
-    ///
-    /// # Errors
-    ///
-    /// Propagates object-store, ref, or index failures that abort the run. A custom primary
-    /// object store is validated through the objects it lists (see [`crate::fsck::fsck`]).
-    pub fn fsck(
-        &self,
-        options: &crate::fsck::FsckOptions,
-        progress: &mut dyn crate::progress::ProgressSink,
-        cancel: &crate::progress::CancelToken,
-    ) -> crate::error::Result<crate::fsck::FsckReport> {
-        crate::fsck::fsck(self, options, progress, cancel)
     }
 
     /// SHA-256 content digest of a revision's tree ([tree-sha256] spec).
@@ -1284,18 +1274,6 @@ impl Repository {
     #[must_use]
     pub fn bundles(&self) -> crate::repo_handles::RepositoryBundles<'_> {
         crate::repo_handles::RepositoryBundles::new(self)
-    }
-
-    /// Repack reachable objects into a single pack and prune redundant storage.
-    ///
-    /// # Errors
-    ///
-    /// Propagates pack, prune, or unsupported-backend failures from [`crate::maintenance::repack`].
-    pub fn repack(
-        &self,
-        opts: &crate::maintenance::RepackOptions,
-    ) -> crate::error::Result<crate::maintenance::RepackReport> {
-        crate::maintenance::repack(self, opts)
     }
 
     /// Resolve `refname` through this repository's ref store.
@@ -2451,16 +2429,6 @@ impl Repository {
         self.write_index_at_with_post_index_change(path, index, false, false)
     }
 
-    /// Like [`Repository::write_index_at`], with explicit split-index emission control.
-    pub(crate) fn write_index_at_with_split(
-        &self,
-        path: &std::path::Path,
-        index: &mut Index,
-        split: WriteSplitIndexRequest,
-    ) -> crate::error::Result<()> {
-        self.write_index_at_split(path, index, split)
-    }
-
     /// Whether reading `index` under this repository's config would mark the cache changed solely to
     /// materialize a split index.
     ///
@@ -2713,13 +2681,12 @@ impl Repository {
             Some(tree) => Some(tree),
             None => crate::state::resolve_head_for_repository(self)?.tree(&self.odb)?,
         };
-        if let Some(t) = tree_oid {
-            let protect = crate::path_validate::ProtectOptions::from_config(cfg.as_ref());
-            index.try_collapse_sparse_directories(
-                &self.odb, &t, &patterns, cone, sparse_ix, protect,
-            )?;
-        } else {
-            index.sparse_directories = false;
+        match tree_oid {
+            Some(t) if cone && sparse_ix => {
+                let protect = crate::path_validate::ProtectOptions::from_config(cfg.as_ref());
+                index.try_collapse_sparse_directories(&self.odb, &t, &patterns, protect)?;
+            }
+            _ => index.sparse_directories = false,
         }
         Ok(())
     }

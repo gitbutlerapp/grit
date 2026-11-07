@@ -10,7 +10,7 @@ use crate::index::{
 };
 use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::{
-    oid_hash_set_with_capacity, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind,
+    oid_hash_set_with_capacity, parse_tree, serialize_tree, tree_name_cmp, ObjectId, ObjectKind,
     OidHashSet, TreeEntry,
 };
 use crate::odb::{Odb, WriteOptions};
@@ -501,7 +501,7 @@ fn rebuild_directory_node(
     members.sort_by(|a, b| {
         let a_tree = a.mode == MODE_TREE;
         let b_tree = b.mode == MODE_TREE;
-        tree_entry_cmp(&a.name, a_tree, &b.name, b_tree)
+        tree_name_cmp(&a.name, a_tree, &b.name, b_tree)
     });
 
     let payload = serialize_tree(&members);
@@ -575,7 +575,7 @@ fn store_tree_payload(
             #[cfg(test)]
             odb.hot_path_metrics().record_tree_write();
             Ok((
-                odb.write_with_options(ObjectKind::Tree, payload, write_opts)?,
+                odb.write_with(ObjectKind::Tree, payload, write_opts)?,
                 false,
             ))
         }
@@ -922,7 +922,7 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<O
     tree_entries.sort_by(|a, b| {
         let a_tree = a.mode == MODE_TREE;
         let b_tree = b.mode == MODE_TREE;
-        tree_entry_cmp(&a.name, a_tree, &b.name, b_tree)
+        tree_name_cmp(&a.name, a_tree, &b.name, b_tree)
     });
 
     let data = serialize_tree(&tree_entries);
@@ -995,7 +995,7 @@ fn build_cache_tree_node(
     tree_entries.sort_by(|a, b| {
         let a_tree = a.mode == MODE_TREE;
         let b_tree = b.mode == MODE_TREE;
-        tree_entry_cmp(&a.name, a_tree, &b.name, b_tree)
+        tree_name_cmp(&a.name, a_tree, &b.name, b_tree)
     });
     cache_children.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -1136,7 +1136,7 @@ pub(crate) fn write_tree_partial_from_index(
         out.sort_by(|a, b| {
             let a_tree = a.mode == MODE_TREE;
             let b_tree = b.mode == MODE_TREE;
-            tree_entry_cmp(&a.name, a_tree, &b.name, b_tree)
+            tree_name_cmp(&a.name, a_tree, &b.name, b_tree)
         });
         let data = serialize_tree(&out);
         odb.write(ObjectKind::Tree, &data)

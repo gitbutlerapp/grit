@@ -1225,7 +1225,7 @@ impl RepositoryOptions {
     ///
     /// Writes and primary reads go through this backend, including commits, staging
     /// ([`crate::porcelain::add::stage`]), merges, stash, notes, and bundle creation.
-    /// [`Repository::fsck`](crate::repo::Repository::fsck) validates the objects this store
+    /// [`Maintenance::fsck`](crate::maintenance::Maintenance::fsck) validates the objects this store
     /// lists. Received packs are written into it object by object:
     /// [`ingest_received_pack`](crate::index_pack::ingest_received_pack) and
     /// [`Bundle::unbundle`](crate::bundle::Bundle::unbundle) resolve every delta and call

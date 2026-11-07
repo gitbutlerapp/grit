@@ -668,7 +668,14 @@ mod tests {
         assert!(read_ieot_extension(body, ext_off, body.len()).is_some());
         PARALLEL_IEOT_ENTRY_LOADS.store(0, Ordering::Relaxed);
         let ctx = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(Some(4)));
-        Index::parse_with_algo_and_config(&bytes, algo, Some(&cfg), ctx).expect("parse");
+        Index::parse(
+            &bytes,
+            &crate::index::IndexParseOptions::default()
+                .with_hash_algo(algo)
+                .with_config(&cfg)
+                .with_parse_context(ctx),
+        )
+        .expect("parse");
         assert!(
             PARALLEL_IEOT_ENTRY_LOADS.load(Ordering::Relaxed) > 0,
             "IEOT parallel entry load must run when EOIE/IEOT are present"

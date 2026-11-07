@@ -148,9 +148,7 @@ fn identical_binary_rename_keeps_binary_flag_in_stat_mode() {
 }
 
 fn metadata_tree(repo: &Repository, mut entries: Vec<TreeEntry>) -> grit_lib::objects::ObjectId {
-    entries.sort_by(|a, b| {
-        grit_lib::objects::tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
-    });
+    entries.sort_by(|a, b| grit_lib::objects::tree_entry_cmp(&a.name, a.mode, &b.name, b.mode));
     repo.odb()
         .write(
             ObjectKind::Tree,

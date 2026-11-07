@@ -2138,8 +2138,13 @@ mod tests {
             format!("{new_tip}\n"),
         )
         .unwrap();
-        crate::maintenance::repack_all(&repo, &crate::maintenance::RepackOptions::default())
-            .unwrap();
+        crate::maintenance::repack_all(
+            &repo,
+            &crate::maintenance::RepackOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert!(repo.odb().commit_graph_chain().is_none());
         let mut header = Vec::new();
         assert!(repo

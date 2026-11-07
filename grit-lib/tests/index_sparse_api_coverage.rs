@@ -7,9 +7,8 @@ use std::fs;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::index::sparse_checkout::{
-    apply_sparse_checkout_skip_worktree, clear_skip_worktree_from_present_files,
-    parse_sparse_checkout_file, path_in_sparse_checkout_patterns, path_matches_sparse_patterns,
-    ConePatterns, NonConePatterns,
+    clear_skip_worktree_from_present_files, parse_sparse_checkout_file,
+    path_in_sparse_checkout_patterns, path_matches_sparse_patterns, ConePatterns, NonConePatterns,
 };
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
@@ -20,11 +19,11 @@ use support::{assert_git_fsck_strict, git, seed_multidir_repo, HistoryRepo};
 
 #[test]
 fn index_new_with_config_respects_version_and_many_files() {
-    let v2 = Index::new_with_config(Some("2"), None);
+    let v2 = index_for_config(Some("2"), None);
     assert_eq!(v2.version, 2);
-    let v4 = Index::new_with_config(Some("4"), Some("true"));
+    let v4 = index_for_config(Some("4"), Some("true"));
     assert_eq!(v4.version, 4);
-    let bad = Index::new_with_config(Some("9"), None);
+    let bad = index_for_config(Some("9"), None);
     assert_eq!(bad.version, 3, "invalid config falls back like git");
 }
 
@@ -37,11 +36,18 @@ fn sparse_apply_and_clear_skip_worktree_on_disk() {
     git(wt, &["sparse-checkout", "set", "a"]);
 
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let mut index = grit.index().load().expect("load");
-    let warnings =
-        apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
+    let warnings = grit
+        .index()
+        .apply_sparse_checkout(&mut index)
+        .expect("sparse checkout");
     assert!(warnings.is_empty() || warnings.iter().all(|w| !w.is_empty()));
-    grit.index().write(&mut index).expect("write");
+    grit.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write");
     assert_git_fsck_strict(wt);
 
     fs::write(wt.join("a/f0.txt"), "touch\n").expect("write");
@@ -94,7 +100,10 @@ fn write_tree_and_cache_tree_after_sparse_apply() {
     seed_multidir_repo(&repo);
     let wt = repo.worktree();
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let mut index = grit.index().load().expect("load");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let blob = grit
         .odb()
         .write(ObjectKind::Blob, b"extra\n")
@@ -118,6 +127,28 @@ fn write_tree_and_cache_tree_after_sparse_apply() {
     });
     let _tree = write_tree_update_index(&grit.odb(), &mut index, "", WriteTreeFlags::default())
         .expect("write-tree");
-    grit.index().write(&mut index).expect("write");
+    grit.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write");
     assert_git_fsck_strict(wt);
+}
+
+fn index_for_config(version: Option<&str>, many_files: Option<&str>) -> Index {
+    let mut text = String::new();
+    if let Some(v) = version {
+        text.push_str(&format!("[index]\n\tversion = {v}\n"));
+    }
+    if let Some(m) = many_files {
+        text.push_str(&format!("[feature]\n\tmanyFiles = {m}\n"));
+    }
+    let file = grit_lib::config::ConfigFile::parse(
+        std::path::Path::new("config"),
+        &text,
+        grit_lib::config::ConfigScope::Local,
+    )
+    .expect("parse config");
+    let mut cfg = grit_lib::config::ConfigSet::new();
+    cfg.merge_file(&file, &grit_lib::config::IncludeOptions::default())
+        .expect("merge config");
+    Index::empty_for(&grit_lib::index::IndexParseOptions::default().with_config(&cfg))
 }

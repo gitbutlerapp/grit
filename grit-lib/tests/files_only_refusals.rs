@@ -7,14 +7,14 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::maintenance::{
-    self, CommitGraphOptions, DropPromisedBlobsOptions, GcOptions, MidxOptions, OffloadOptions,
+    CommitGraphOptions, DropPromisedBlobsOptions, GcOptions, MidxOptions, OffloadOptions,
     PruneOptions, RepackOptions,
 };
 use grit_lib::objects::index_pack::{install_pack_bytes, install_pack_path, IngestPackOptions};
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
 use grit_lib::objects::odb::{Odb, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
-use grit_lib::progress::CancelToken;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::gc::prune_loose_unreachable;
 use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
@@ -110,11 +110,11 @@ fn odb_gc_without_prune_capability_refuses_with_prune() {
 fn maintenance_gc_without_prune_capability_refuses_with_prune() {
     let (_dir, repo) = unprunable_repo();
     assert_refused(
-        maintenance::gc(&repo, &GcOptions::default()),
-        FilesOnlyOperation::Prune,
-    );
-    assert_refused(
-        maintenance::gc_with_cancel(&repo, &GcOptions::default(), &CancelToken::never()),
+        repo.maintenance().gc(
+            &GcOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        ),
         FilesOnlyOperation::Prune,
     );
 }
@@ -123,7 +123,8 @@ fn maintenance_gc_without_prune_capability_refuses_with_prune() {
 fn prune_loose_objects_without_prune_capability_refuses_with_prune() {
     let (_dir, repo) = unprunable_repo();
     assert_refused(
-        maintenance::prune_loose_objects(&repo, &PruneOptions::default()),
+        repo.maintenance()
+            .prune_loose_objects(&PruneOptions::default()),
         FilesOnlyOperation::Prune,
     );
 }
@@ -141,7 +142,11 @@ fn prune_loose_unreachable_without_prune_capability_refuses_with_prune() {
 fn repack_refuses_with_repack() {
     let (_dir, repo) = memory_repo();
     assert_refused(
-        maintenance::repack(&repo, &RepackOptions::default()),
+        repo.maintenance().repack(
+            &RepackOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        ),
         FilesOnlyOperation::Repack,
     );
 }
@@ -150,13 +155,9 @@ fn repack_refuses_with_repack() {
 fn repack_all_refuses_with_repack() {
     let (_dir, repo) = memory_repo();
     assert_refused(
-        maintenance::repack_all(&repo, &RepackOptions::default()),
-        FilesOnlyOperation::Repack,
-    );
-    assert_refused(
-        maintenance::repack_all_with_cancel(
-            &repo,
+        repo.maintenance().repack_all(
             &RepackOptions::default(),
+            &mut NullProgress,
             &CancelToken::never(),
         ),
         FilesOnlyOperation::Repack,
@@ -171,7 +172,8 @@ fn commit_graph_write_refuses_with_commit_graph_write() {
         FilesOnlyOperation::CommitGraphWrite,
     );
     assert_refused(
-        maintenance::write_commit_graph(&repo, &CommitGraphOptions::default()),
+        repo.maintenance()
+            .write_commit_graph(&CommitGraphOptions::default()),
         FilesOnlyOperation::CommitGraphWrite,
     );
 }
@@ -180,7 +182,7 @@ fn commit_graph_write_refuses_with_commit_graph_write() {
 fn write_midx_refuses_with_midx_write() {
     let (_dir, repo) = memory_repo();
     assert_refused(
-        maintenance::write_midx(&repo, &MidxOptions::default()),
+        repo.maintenance().write_midx(&MidxOptions::default()),
         FilesOnlyOperation::MidxWrite,
     );
 }
@@ -213,7 +215,13 @@ fn install_pack_refuses_with_pack_install() {
     let pack = dir.path().join("empty.pack");
     std::fs::write(&pack, b"").expect("write pack");
     assert_refused(
-        install_pack_path(&pack, repo.odb(), &IngestPackOptions::default()),
+        install_pack_path(
+            &pack,
+            repo.odb(),
+            &IngestPackOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        ),
         FilesOnlyOperation::PackInstall,
     );
 }
@@ -251,7 +259,8 @@ fn primary_refuses_with_files_source() {
 fn offload_refuses_with_offload() {
     let (_dir, repo) = memory_repo();
     assert_refused(
-        maintenance::offload_blobs(&repo, &OffloadOptions::new("lop", 1024)),
+        repo.maintenance()
+            .offload_blobs(&OffloadOptions::new("lop", 1024)),
         FilesOnlyOperation::Offload,
     );
 }
@@ -261,11 +270,7 @@ fn drop_promised_blobs_refuses_with_drop_large_blobs() {
     let (_dir, repo) = memory_repo();
     let opts = DropPromisedBlobsOptions::new(OffsetDateTime::UNIX_EPOCH, 1024, None);
     assert_refused(
-        maintenance::drop_promised_blobs(&repo, &opts),
-        FilesOnlyOperation::DropLargeBlobs,
-    );
-    assert_refused(
-        repo.drop_promised_blobs(&opts),
+        repo.maintenance().drop_promised_blobs(&opts),
         FilesOnlyOperation::DropLargeBlobs,
     );
 }

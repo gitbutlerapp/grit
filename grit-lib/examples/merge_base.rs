@@ -35,8 +35,11 @@ fn commit_tree(
     };
     let mut index = Index::new();
     index.add_or_replace(entry);
-    repo.index().write(&mut index)?;
-    let index = repo.index().load()?;
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())?;
     let tree_oid = write_tree_from_index(repo.odb(), &index, "")?;
 
     let mut parents = Vec::new();

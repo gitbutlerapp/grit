@@ -1264,6 +1264,8 @@ mod oid_abbrev_alternate_pack_collision;
 mod oid_abbrev_separate_pack_collision;
 #[path = "oid_hashtable_api.rs"]
 mod oid_hashtable_api;
+#[path = "one_form_handles_git_compat.rs"]
+mod one_form_handles_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "orig_head_git_compat.rs"]
 mod orig_head_git_compat;

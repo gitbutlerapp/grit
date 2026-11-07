@@ -421,7 +421,7 @@ pub fn try_rev_positions_in_pack_order(data: &[u8], num_objects: usize) -> Optio
 mod coverage_tests {
     use super::*;
     use crate::objects::ObjectId;
-    use crate::pack::{read_pack_index, write_v2_pack_index_with_trailer};
+    use crate::pack::{read_pack_index, write_v2_pack_index_from_trailer};
 
     #[test]
     fn append_checksum_sha256_and_short_pack_trailer_padding() {
@@ -438,7 +438,7 @@ mod coverage_tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let idx_path = tmp.path().join("x.idx");
         let oid = ObjectId::from_hex("0102030405060708090a0b0c0d0e0f1011121314").expect("oid");
-        write_v2_pack_index_with_trailer(&idx_path, &[(oid, 12, 0)], &[0u8; 20], 20, None)
+        write_v2_pack_index_from_trailer(&idx_path, &[(oid, 12, 0)], &[0u8; 20], 20, None)
             .expect("write idx");
         let index = read_pack_index(&idx_path).expect("load idx");
         let rev_path = rev_path_for_index(&idx_path);
@@ -468,7 +468,7 @@ mod coverage_tests {
         let pack_checksum = [7u8; 20];
         let a = ObjectId::from_hex("0102030405060708090a0b0c0d0e0f1011121314").expect("oid");
         let b = ObjectId::from_hex("1102030405060708090a0b0c0d0e0f1011121314").expect("oid");
-        write_v2_pack_index_with_trailer(
+        write_v2_pack_index_from_trailer(
             &idx_path,
             &[(a, 40, 0), (b, 12, 0)],
             &pack_checksum,

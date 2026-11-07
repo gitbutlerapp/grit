@@ -10,9 +10,7 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, Result};
-use grit_lib::maintenance::{
-    gc, prune_loose_objects, repack_all, GcOptions, PruneOptions, RepackOptions,
-};
+use grit_lib::maintenance::{GcOptions, PruneOptions, RepackOptions};
 use grit_lib::objects::promisor::{promisor_pack_object_ids, PromisorFetcher};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
@@ -196,10 +194,26 @@ fn offline_partial_clone_full_forced_incremental_and_dry_run() {
             opts.force_recompress = force;
             opts.write_bitmap = true;
             opts.dry_run = true;
-            let preview = repack_all(&f.repo, &opts).expect("offline preview");
+            let preview = f
+                .repo
+                .maintenance()
+                .repack_all(
+                    &opts,
+                    &mut grit_lib::progress::NullProgress,
+                    &grit_lib::progress::CancelToken::never(),
+                )
+                .expect("offline preview");
             f.check();
             opts.dry_run = false;
-            let result = repack_all(&f.repo, &opts).expect("offline repack");
+            let result = f
+                .repo
+                .maintenance()
+                .repack_all(
+                    &opts,
+                    &mut grit_lib::progress::NullProgress,
+                    &grit_lib::progress::CancelToken::never(),
+                )
+                .expect("offline repack");
             assert_eq!(preview.objects_packed, result.objects_packed);
             let pack = result
                 .pack_path
@@ -237,7 +251,14 @@ fn offline_partial_clone_gc_and_prune() {
         let before = git(&f.path, &["reflog", "show", "--all", "--format=%H"]);
         let mut before: Vec<_> = before.lines().collect();
         before.sort_unstable();
-        gc(&f.repo, &opts).expect("offline gc");
+        f.repo
+            .maintenance()
+            .gc(
+                &opts,
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("offline gc");
         let after = git(&f.path, &["reflog", "show", "--all", "--format=%H"]);
         let mut after: Vec<_> = after.lines().collect();
         after.sort_unstable();
@@ -248,7 +269,10 @@ fn offline_partial_clone_gc_and_prune() {
         f.check();
         let mut prune = PruneOptions::default();
         prune.dry_run = dry_run;
-        prune_loose_objects(&f.repo, &prune).expect("offline prune");
+        f.repo
+            .maintenance()
+            .prune_loose_objects(&prune)
+            .expect("offline prune");
         assert_eq!(f.repo.odb().object_path(&garbage).exists(), dry_run);
         f.check();
     }
@@ -264,7 +288,15 @@ fn missing_local_objects_are_errors_without_fetching() {
             let mut opts = RepackOptions::default();
             opts.dry_run = dry_run;
             opts.keep_unreachable = false;
-            let err = repack_all(&f.repo, &opts).expect_err("missing local object must fail");
+            let err = f
+                .repo
+                .maintenance()
+                .repack_all(
+                    &opts,
+                    &mut grit_lib::progress::NullProgress,
+                    &grit_lib::progress::CancelToken::never(),
+                )
+                .expect_err("missing local object must fail");
             assert!(
                 matches!(err, Error::Object(ObjectError::NotFound { .. })),
                 "{spec}: {err:?}"
@@ -275,7 +307,7 @@ fn missing_local_objects_are_errors_without_fetching() {
                 std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_900_000_000),
             );
             assert!(matches!(
-                prune_loose_objects(&f.repo, &prune),
+                f.repo.maintenance().prune_loose_objects(&prune),
                 Err(Error::Object(ObjectError::NotFound { .. }))
             ));
             assert_eq!(f.fetcher.0.load(Ordering::SeqCst), 0);
@@ -350,7 +382,13 @@ fn missing_tree_promised_by_unreferenced_tag_stays_offline() {
         let mut opts = RepackOptions::default();
         opts.keep_unreachable = keep;
         opts.write_bitmap = true;
-        repack_all(&repo, &opts).expect("offline tree boundary");
+        repo.maintenance()
+            .repack_all(
+                &opts,
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("offline tree boundary");
         assert!(marker.is_file());
         assert!(marker.with_extension("pack").is_file());
         assert!(!repo.odb().object_path(&tag).exists());
@@ -358,7 +396,13 @@ fn missing_tree_promised_by_unreferenced_tag_stays_offline() {
         assert_eq!(fetcher.0.load(Ordering::SeqCst), 0);
         git(dir.path(), &["fsck", "--strict"]);
     }
-    gc(&repo, &GcOptions::full_run(false, 1_704_000_000)).expect("offline GC with missing tree");
+    repo.maintenance()
+        .gc(
+            &GcOptions::full_run(false, 1_704_000_000),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("offline GC with missing tree");
     assert_eq!(fetcher.0.load(Ordering::SeqCst), 0);
     git(dir.path(), &["fsck", "--strict"]);
 }
@@ -387,7 +431,15 @@ fn all_promisor_repack_writes_no_empty_pack_and_still_prunes() {
         .expect("blob");
     let mut opts = RepackOptions::default();
     opts.keep_unreachable = false;
-    let report = repack_all(&f.repo, &opts).expect("no local objects to pack");
+    let report = f
+        .repo
+        .maintenance()
+        .repack_all(
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("no local objects to pack");
     assert!(report.pack_path.is_none());
     assert!(report.objects_packed.is_none());
     assert!(!f.repo.odb().object_path(&garbage).exists());
@@ -527,7 +579,14 @@ fn gc_preserves_available_promised_blob_and_tree() {
         git(&control.path, &["gc"]);
         control.check();
         let f = AvailablePromiseFixture::new(promise_tree);
-        gc(&f.repo, &GcOptions::full_run(false, 1_704_000_000)).expect("gc");
+        f.repo
+            .maintenance()
+            .gc(
+                &GcOptions::full_run(false, 1_704_000_000),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("gc");
         f.check();
         git(&f.path, &["gc"]);
         f.check();
@@ -551,10 +610,24 @@ fn repack_preserves_available_promised_blob_and_tree() {
                 opts.force_recompress = force;
                 opts.keep_unreachable = keep_unreachable;
                 opts.dry_run = true;
-                repack_all(&f.repo, &opts).expect("preview");
+                f.repo
+                    .maintenance()
+                    .repack_all(
+                        &opts,
+                        &mut grit_lib::progress::NullProgress,
+                        &grit_lib::progress::CancelToken::never(),
+                    )
+                    .expect("preview");
                 f.check();
                 opts.dry_run = false;
-                repack_all(&f.repo, &opts).expect("repack");
+                f.repo
+                    .maintenance()
+                    .repack_all(
+                        &opts,
+                        &mut grit_lib::progress::NullProgress,
+                        &grit_lib::progress::CancelToken::never(),
+                    )
+                    .expect("repack");
                 f.check();
                 git(&f.path, &args);
                 f.check();

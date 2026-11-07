@@ -39,7 +39,8 @@ fn run() -> Result<()> {
     for entry in entries_from_tree(&repo, tree_oid)? {
         index.add_or_replace(entry);
     }
-    repo.index().write(&mut index)?;
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
     if cli.update_worktree {
         checkout_tree(&repo, tree_oid)?;
     }

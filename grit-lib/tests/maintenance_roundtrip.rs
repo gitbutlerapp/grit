@@ -2,20 +2,20 @@
 
 use crate::support;
 use grit_lib::error::ObjectError;
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::repository_fsck::{fsck, FsckIssue, FsckOptions};
-use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions, MidxOptions, PackRefsOptions};
+use grit_lib::maintenance::repository_fsck::{FsckIssue, FsckOptions};
+use grit_lib::maintenance::{CommitGraphOptions, MidxOptions, PackRefsOptions};
 use grit_lib::objects::commit_graph::CommitGraphChain;
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
-use grit_lib::progress::CancelToken;
 use support::{git_init_reftable_repo, git_refs_verify, require_reftable_git};
 
 fn git_available() -> bool {
@@ -120,7 +120,9 @@ fn commit_graph_git_verify_clean_without_changed_paths() {
     let dir = tempfile::tempdir().expect("tempdir");
     merge_history_repo(dir.path());
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(false)).expect("write graph");
+    repo.maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(false))
+        .expect("write graph");
     git_cmd(dir.path(), &["commit-graph", "verify"]);
     let chain = CommitGraphChain::load(repo.odb().objects_dir()).expect("load");
     assert!(chain.top_layer_bloom_settings().is_none());
@@ -135,7 +137,9 @@ fn commit_graph_git_verify_clean_with_changed_paths() {
     let dir = tempfile::tempdir().expect("tempdir");
     merge_history_repo(dir.path());
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let report = write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true))
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))
         .expect("write graph");
     assert!(report.bloom_stats.is_some());
     git_cmd(dir.path(), &["commit-graph", "verify"]);
@@ -152,7 +156,9 @@ fn git_log_uses_grit_bloom_filters() {
     let dir = tempfile::tempdir().expect("tempdir");
     merge_history_repo(dir.path());
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("write graph");
+    repo.maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))
+        .expect("write graph");
     let trace = dir.path().join("trace2.json");
     let _ = fs::remove_file(&trace);
     let out = Command::new("git")
@@ -195,6 +201,7 @@ fn commit_graph_write_is_atomic_and_replaces_chain() {
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
     let report = repo
+        .maintenance()
         .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))
         .expect("grit write");
     assert!(report.removed_chain);
@@ -211,6 +218,7 @@ fn commit_graph_write_is_atomic_and_replaces_chain() {
     let lock = dir.path().join(".git/objects/info/commit-graph.lock");
     fs::write(&lock, b"held").expect("lock");
     assert!(repo
+        .maintenance()
         .write_commit_graph(&CommitGraphOptions::with_changed_paths(false))
         .is_err());
     fs::remove_file(&lock).expect("unlock");
@@ -232,13 +240,16 @@ fn midx_git_verify_clean() {
     git_cmd(dir.path(), &["commit", "-q", "-m", "extra"]);
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
     let report = repo
+        .maintenance()
         .write_midx(&MidxOptions::with_bitmap(false))
         .expect("write midx");
     assert!(report.path.is_file());
     assert!(report.pack_count >= 1);
     let fsck_opts = FsckOptions::connectivity_and_refs(true);
-    let report_fsck =
-        fsck(&repo, &fsck_opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck midx");
+    let report_fsck = repo
+        .maintenance()
+        .fsck(&fsck_opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit fsck midx");
     assert!(
         !report_fsck
             .issues
@@ -282,7 +293,7 @@ fn midx_header_version(root: &Path) -> u8 {
 
 fn write_midx_with(root: &Path, opts: &MidxOptions) -> grit_lib::error::Result<()> {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    repo.write_midx(opts).map(|_| ())
+    repo.maintenance().write_midx(opts).map(|_| ())
 }
 
 /// Issue #1876: `Repository::write_midx` writes v1 unless asked otherwise, so the stock
@@ -579,7 +590,9 @@ fn commit_graph_write_reftable_includes_reachable_commits() {
     let head_oid =
         ObjectId::from_hex(git_out(dir.path(), &["rev-parse", "HEAD"]).trim()).expect("head");
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let report = write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(false))
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(false))
         .expect("write graph");
     assert_eq!(
         report.commit_count, expected_count,
@@ -629,7 +642,9 @@ fn commit_graph_write_linked_worktree_includes_common_refs() {
 
     let repo =
         Repository::discover(Some(&linked), &RepositoryOptions::empty()).expect("open linked");
-    let report = write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(false))
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(false))
         .expect("write graph");
     assert_eq!(
         report.commit_count, expected_count,
@@ -696,7 +711,9 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
         tip
     );
 
-    let report = write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(false))
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(false))
         .expect("write graph");
     assert_eq!(
         report.commit_count, 1,

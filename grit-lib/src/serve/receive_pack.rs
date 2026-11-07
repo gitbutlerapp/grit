@@ -17,7 +17,7 @@ use crate::config::ConfigSet;
 use crate::fsck_msg_policy::{ObjectFsckPolicy, SkipListError};
 use crate::fsck_standalone::FsckError;
 use crate::hooks::{run_hook_in_git_dir_with_cancel, HookResult};
-use crate::index_pack::{install_pack_path, IngestPackOptions};
+use crate::index_pack::{install_pack_path_with_progress, IngestPackOptions};
 use crate::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
 use crate::objects::odb::OdbBuilder;
 use crate::objects::pack_stream_scan::{PackStreamScanError, PackStreamScanner};
@@ -850,7 +850,7 @@ pub(crate) fn receive_pack(
 
     // A partial repository (one offloaded to a large-object promisor, say) lacks
     // the objects its promisor remotes have; a pushed tree may still name them.
-    let promises = if crate::promisor::repo_treats_promisor_packs(repo.git_dir(), cfg.as_ref()) {
+    let promises = if crate::promisor::repo_treats_promisor_packs(cfg.as_ref()) {
         Some(super::promised_objects::PromisorObjects::new(repo)?)
     } else {
         None
@@ -2010,7 +2010,7 @@ fn ingest_spooled_pack(
         return Ok(None);
     }
     let path = pack.file.into_temp_path();
-    let installed = install_pack_path(
+    let installed = install_pack_path_with_progress(
         &path,
         odb,
         &IngestPackOptions {
@@ -2021,6 +2021,8 @@ fn ingest_spooled_pack(
             merged_config: Some(cfg.clone()),
             ..Default::default()
         },
+        None,
+        None,
     )?;
     Ok(Some(installed.object_ids))
 }

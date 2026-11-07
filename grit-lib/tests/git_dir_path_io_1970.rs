@@ -4,7 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, GitDirPathOperation};
-use grit_lib::maintenance::{gc, GcOptions};
+use grit_lib::maintenance::GcOptions;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, create_commit, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
@@ -187,13 +187,26 @@ fn read_only_existing_pack_dir_on_gc_names_git_path() {
     let repo = init_repo(dir.path());
     seed_commit(&repo, dir.path(), "base");
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    gc(&repo, &GcOptions::full_run(false, now)).expect("initial gc creates pack");
+    repo.maintenance()
+        .gc(
+            &GcOptions::full_run(false, now),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("initial gc creates pack");
     let pack_dir = repo.git_dir().join("objects/pack");
     assert!(pack_dir.is_dir(), "expected pack directory after gc");
 
     seed_commit(&repo, dir.path(), "more");
     chmod_tree_readonly(&pack_dir);
-    let err = gc(&repo, &GcOptions::full_run(false, now)).expect_err("gc should fail");
+    let err = repo
+        .maintenance()
+        .gc(
+            &GcOptions::full_run(false, now),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("gc should fail");
     match &err {
         Error::Repository(RepositoryError::GitDirPathIo(io)) => {
             let path = git_dir_path_io_path(&err);

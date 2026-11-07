@@ -141,29 +141,26 @@ impl PackBuildOptions {
     /// Like Git, `pack.depth = 0` only disables new deltas: existing on-disk deltas are
     /// still sent.
     ///
+    /// The result is not thin and uses `OFS_DELTA`. Set [`Self::thin`] only when the client
+    /// negotiated `thin-pack` *and* holds objects (sent `have`s), since a thin pack against
+    /// nothing gains nothing, and clear [`Self::use_ofs_delta`] when the client did not
+    /// negotiate `ofs-delta`.
+    ///
     /// # Parameters
     /// - `cfg` — repository config, or `None` for Git's defaults.
-    /// - `thin` — build a thin pack; pass `true` only when the client negotiated
-    ///   `thin-pack` *and* holds objects (sent `have`s), since a thin pack against
-    ///   nothing gains nothing.
-    /// - `use_ofs_delta` — whether the client negotiated `ofs-delta`.
     #[must_use]
-    pub fn for_serve(
-        cfg: Option<&crate::config::ConfigSet>,
-        thin: bool,
-        use_ofs_delta: bool,
-    ) -> Self {
+    pub fn for_serve(cfg: Option<&crate::config::ConfigSet>) -> Self {
         let (window, max_depth) = Self::window_and_depth_from_config(cfg);
         let window_memory = cfg
             .map(crate::config::ConfigSet::pack_window_memory_bytes)
             .filter(|&bytes| bytes > 0)
             .unwrap_or(SERVE_WINDOW_MEMORY);
         Self {
-            thin,
+            thin: false,
             delta: true,
             window,
             max_depth,
-            use_ofs_delta,
+            use_ofs_delta: true,
             reuse_deltas: true,
             reuse_objects: true,
             use_bitmaps: true,
@@ -598,31 +595,6 @@ pub(crate) fn write_pack_for_push_with_cancel(
     })
 }
 
-/// Build a pack for upload-pack with optional shallow grafts and object filter.
-///
-/// When `filter` is set, objects are selected the way `pack-objects --filter` does:
-/// `wants` and the objects their tags point at are always sent.
-pub fn build_pack_with_shallow_and_filter(
-    odb: &Odb,
-    wants: &[ObjectId],
-    haves: &[ObjectId],
-    have_shallow: &HashSet<ObjectId>,
-    source_shallow: &HashSet<ObjectId>,
-    filter: Option<&ObjectFilter>,
-    opts: &PackBuildOptions,
-) -> Result<Vec<u8>> {
-    build_pack_with_shallow_filter_and_boundary(
-        odb,
-        wants,
-        haves,
-        have_shallow,
-        source_shallow,
-        filter,
-        opts,
-        HaveBoundary::CommitClosure,
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 fn build_pack_with_shallow_filter_and_boundary(
     odb: &Odb,
@@ -652,7 +624,7 @@ fn build_pack_with_shallow_filter_and_boundary(
     Ok(pack)
 }
 
-/// Streaming form of [`build_pack_with_shallow_and_filter`]; `include_tags` are added
+/// Streaming form of [`UploadPackStream::build`]; `include_tags` are added
 /// when the objects they peel to are selected.
 #[allow(clippy::too_many_arguments)]
 fn write_pack_with_shallow_and_filter(
@@ -861,6 +833,52 @@ impl<'a> UploadPackStream<'a> {
             progress,
             out,
             &CancelSignal::never(),
+        )
+    }
+
+    /// Only the bitmap pack-reuse path of [`Self::write`]: `None` when reuse is not possible.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn write_reused_only(
+        &self,
+        repo: &Repository,
+        progress: &mut dyn crate::progress::ProgressSink,
+        out: &mut dyn Write,
+    ) -> Result<Option<PackStats>> {
+        let none = HashSet::new();
+        crate::pack_reuse::try_write_streaming_pack_including_tags(
+            repo,
+            self.wants,
+            self.haves,
+            self.source_shallow.unwrap_or(&none),
+            self.have_shallow.unwrap_or(&none),
+            self.filter,
+            &[],
+            &self.options,
+            progress,
+            out,
+            &CancelSignal::never(),
+        )
+    }
+
+    /// Build the same pack in memory from `odb` instead of streaming it.
+    ///
+    /// Objects are selected the way the streamed pack selects them (a filter keeps the wants
+    /// and the objects their tags point at), but without bitmap pack reuse.
+    ///
+    /// # Errors
+    ///
+    /// Missing wants, corrupt objects, or pack encoding failures.
+    pub fn build(&self, odb: &Odb) -> Result<Vec<u8>> {
+        let none = HashSet::new();
+        build_pack_with_shallow_filter_and_boundary(
+            odb,
+            self.wants,
+            self.haves,
+            self.have_shallow.unwrap_or(&none),
+            self.source_shallow.unwrap_or(&none),
+            self.filter,
+            &self.options,
+            HaveBoundary::CommitClosure,
         )
     }
 }
@@ -2386,7 +2404,7 @@ pub(crate) mod tests {
     #[test]
     fn serve_plan_reuses_on_disk_deltas() {
         let (_tmp, repo, selection) = packed_selection(80);
-        let opts = PackBuildOptions::for_serve(None, false, true);
+        let opts = PackBuildOptions::for_serve(None);
         let plan = plan_deltas(
             repo.odb(),
             &selection.send,
@@ -2529,7 +2547,11 @@ pub(crate) mod tests {
         .unwrap();
         let mut cfg = ConfigSet::new();
         cfg.merge(&file);
-        let opts = PackBuildOptions::for_serve(Some(&cfg), true, false);
+        let opts = PackBuildOptions {
+            thin: true,
+            use_ofs_delta: false,
+            ..PackBuildOptions::for_serve(Some(&cfg))
+        };
         assert_eq!((opts.window, opts.max_depth), (4, 0));
         assert!(opts.thin && !opts.use_ofs_delta && opts.delta);
         assert!(
@@ -2537,7 +2559,7 @@ pub(crate) mod tests {
             "like git upload-pack, depth 0 stops new deltas but still sends on-disk deltas"
         );
 
-        let defaults = PackBuildOptions::for_serve(None, false, true);
+        let defaults = PackBuildOptions::for_serve(None);
         assert_eq!(
             (defaults.window, defaults.max_depth),
             (10, crate::pack::DEFAULT_PACK_DEPTH)
@@ -2629,7 +2651,10 @@ pub(crate) mod tests {
                 &self.send,
                 &self.peer_commits,
                 None,
-                &PackBuildOptions::for_serve(None, true, true),
+                &PackBuildOptions {
+                    thin: true,
+                    ..PackBuildOptions::for_serve(None)
+                },
                 &self.name_hashes,
                 Some(1),
                 &CancelSignal::never(),
@@ -2662,7 +2687,10 @@ pub(crate) mod tests {
     fn thin_pack_with_held_sent_blob_completes_in_git() {
         let fx = PeerHoldsSentBlob::new();
         let plan = fx.thin_plan();
-        let opts = PackBuildOptions::for_serve(None, true, true);
+        let opts = PackBuildOptions {
+            thin: true,
+            ..PackBuildOptions::for_serve(None)
+        };
         let pack = crate::pack_delta::serialize_pack_with_deltas(
             fx.repo.odb(),
             &plan.entries,

@@ -294,7 +294,10 @@ fn restore_removes_path_missing_in_source() {
     use grit_lib::index::IndexEntry;
     use grit_lib::objects::ObjectKind;
     let blob = repo.odb().write(ObjectKind::Blob, b"g\n").unwrap();
-    let mut index = repo.index().load().unwrap();
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .unwrap();
     index.stage_file(IndexEntry {
         ctime_sec: 0,
         ctime_nsec: 0,
@@ -312,7 +315,9 @@ fn restore_removes_path_missing_in_source() {
         path: b"gone.txt".to_vec(),
         base_index_pos: 0,
     });
-    repo.index().write(&mut index).unwrap();
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .unwrap();
     fs::write(dir.path().join("gone.txt"), "orphan\n").unwrap();
 
     restore_paths(
@@ -647,7 +652,10 @@ fn restore_symlink_and_executable() {
         .symlink_metadata()
         .unwrap()
         .is_symlink());
-    let idx = repo.index().load().unwrap();
+    let idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .unwrap();
     let run = idx.get(b"run.sh", 0).unwrap();
     let link = idx.get(b"link.sh", 0).unwrap();
     assert_eq!(run.mode, MODE_EXECUTABLE);

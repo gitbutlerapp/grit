@@ -582,7 +582,7 @@ fn upload_pack_stream_writes_the_objects_a_client_lacks() {
     let repo = init(&tmp.path().join("r.git"), true);
     let c1 = commit(&repo, "a.txt", "one\n", None);
     let c2 = commit(&repo, "b.txt", "two\n", Some(c1));
-    let options = PackBuildOptions::for_serve(None, false, true);
+    let options = PackBuildOptions::for_serve(None);
 
     let mut full = Vec::new();
     let stats = UploadPackStream::new(&[c2], options)

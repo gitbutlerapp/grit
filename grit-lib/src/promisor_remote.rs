@@ -916,29 +916,57 @@ pub struct PromisorHandshake {
     pub warnings: Vec<PromisorConfigWarning>,
 }
 
+/// Options for [`PromisorHandshake::evaluate`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PromisorHandshakeOptions {
+    /// The fetch is filtered or is from a promisor remote; otherwise nothing is accepted.
+    pub partial_fetch: bool,
+    /// Resolve the fetch's filter from the accepted remotes (`--filter=auto`).
+    pub auto_filter: bool,
+}
+
+impl PromisorHandshakeOptions {
+    /// Sets [`partial_fetch`](Self::partial_fetch).
+    #[must_use]
+    pub fn with_partial_fetch(mut self, partial_fetch: bool) -> Self {
+        self.partial_fetch = partial_fetch;
+        self
+    }
+
+    /// Sets [`auto_filter`](Self::auto_filter).
+    #[must_use]
+    pub fn with_auto_filter(mut self, auto_filter: bool) -> Self {
+        self.auto_filter = auto_filter;
+        self
+    }
+}
+
 impl PromisorHandshake {
     /// Decide the client side of the exchange.
     ///
     /// Reads the client's policy from `cfg`, decides against its configured promisor remotes,
     /// and declines everything with [`PromisorRejection::NotPartialFetch`] unless
-    /// `partial_fetch`: a client that is not doing a partial fetch needs every object from
-    /// this server. With `auto_filter`, also picks the filter for the fetch from the accepted
-    /// remotes ([`PromisorDecision::combined_filter`]). Writes nothing; see
-    /// [`Self::store_fields`].
+    /// [`PromisorHandshakeOptions::partial_fetch`]: a client that is not doing a partial fetch
+    /// needs every object from this server. With [`PromisorHandshakeOptions::auto_filter`],
+    /// also picks the filter for the fetch from the accepted remotes
+    /// ([`PromisorDecision::combined_filter`]). Writes nothing; see [`Self::store_fields`].
     ///
     /// # Parameters
     ///
     /// - `cfg`: the client's merged config.
     /// - `advertisement`: what the server advertised.
-    /// - `partial_fetch`: whether the fetch is filtered or is from a promisor remote.
-    /// - `auto_filter`: whether to resolve the filter from the accepted remotes.
+    /// - `options`: what kind of fetch this is.
     #[must_use]
     pub fn evaluate(
         cfg: &ConfigSet,
         advertisement: &PromisorAdvertisement,
-        partial_fetch: bool,
-        auto_filter: bool,
+        options: &PromisorHandshakeOptions,
     ) -> Self {
+        let PromisorHandshakeOptions {
+            partial_fetch,
+            auto_filter,
+        } = *options;
         let (policy, mut warnings) = PromisorAcceptPolicy::from_config(cfg);
         let local = configured_promisor_remotes(cfg, &policy.check_fields);
         let mut decision = PromisorDecision::decide(&policy, &local, advertisement);
@@ -1628,25 +1656,49 @@ mod tests {
         let c = cfg(&client);
         let a = adv("name=lop,url=file:///lop,partialCloneFilter=blob:limit=5k");
 
-        let h = PromisorHandshake::evaluate(&c, &a, false, true);
+        let h = PromisorHandshake::evaluate(
+            &c,
+            &a,
+            &PromisorHandshakeOptions::default()
+                .with_partial_fetch(false)
+                .with_auto_filter(true),
+        );
         assert_eq!(
             rejection(&h.decision),
             Some(PromisorRejection::NotPartialFetch)
         );
         assert_eq!(h.resolved_filter, None);
 
-        let h = PromisorHandshake::evaluate(&c, &a, true, true);
+        let h = PromisorHandshake::evaluate(
+            &c,
+            &a,
+            &PromisorHandshakeOptions::default()
+                .with_partial_fetch(true)
+                .with_auto_filter(true),
+        );
         assert!(h.decision.any_accepted());
         assert_eq!(
             h.resolved_filter,
             Some(ObjectFilterSpec::BlobLimit(5 * 1024))
         );
 
-        let h = PromisorHandshake::evaluate(&c, &a, true, false);
+        let h = PromisorHandshake::evaluate(
+            &c,
+            &a,
+            &PromisorHandshakeOptions::default()
+                .with_partial_fetch(true)
+                .with_auto_filter(false),
+        );
         assert_eq!(h.resolved_filter, None);
 
         let a = adv("name=lop,url=file:///lop,partialCloneFilter=tree:0");
-        let h = PromisorHandshake::evaluate(&c, &a, true, true);
+        let h = PromisorHandshake::evaluate(
+            &c,
+            &a,
+            &PromisorHandshakeOptions::default()
+                .with_partial_fetch(true)
+                .with_auto_filter(true),
+        );
         assert_eq!(
             h.warnings,
             [PromisorConfigWarning::UnusableAutoFilter("tree:0".into())]
@@ -1661,7 +1713,13 @@ mod tests {
         );
         let c = load(dir.path());
         let a = adv("name=lop,url=file:///lop,partialCloneFilter=blob:none");
-        let mut h = PromisorHandshake::evaluate(&c, &a, true, false);
+        let mut h = PromisorHandshake::evaluate(
+            &c,
+            &a,
+            &PromisorHandshakeOptions::default()
+                .with_partial_fetch(true)
+                .with_auto_filter(false),
+        );
         h.store_fields(dir.path(), &c).unwrap();
         assert_eq!(h.stored.len(), 1);
         assert_eq!(

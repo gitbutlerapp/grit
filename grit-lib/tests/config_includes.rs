@@ -52,8 +52,11 @@ fn t1305_include_and_includeif_match_git_show_origin() {
     let mut set = ConfigSet::new();
     let env = Environment::empty();
     let ctx = include_ctx(&gd, &env);
-    set.merge_file_with_includes(&file, true, &ctx)
-        .expect("merge includes");
+    set.merge_file(
+        &file,
+        &grit_lib::config::IncludeOptions::default().with_context(ctx.clone()),
+    )
+    .expect("merge includes");
 
     let git_corpus = normalize_config_corpus(&git_lines);
     let grit_corpus = normalize_config_corpus(&grit_list_lines(&set));
@@ -111,7 +114,10 @@ fn include_cycle_is_typed_error() {
     let env = Environment::empty();
     let ctx = include_ctx(dir.path(), &env);
     let err = set
-        .merge_file_with_includes(&file, true, &ctx)
+        .merge_file(
+            &file,
+            &grit_lib::config::IncludeOptions::default().with_context(ctx.clone()),
+        )
         .expect_err("cycle");
     match err {
         Error::Config(ConfigError::IncludeDepthExceeded { depth, limit }) => {
@@ -131,8 +137,11 @@ fn missing_include_is_ignored() {
     let file = grit_file_from_content(&cfg, &content, ConfigScope::Local);
     let mut set = ConfigSet::new();
     let env = Environment::empty();
-    set.merge_file_with_includes(&file, true, &include_ctx(dir.path(), &env))
-        .expect("missing include ok");
+    set.merge_file(
+        &file,
+        &grit_lib::config::IncludeOptions::default().with_context(include_ctx(dir.path(), &env)),
+    )
+    .expect("missing include ok");
     assert_eq!(set.get("ok.y").unwrap().as_deref(), Some("1"));
     assert!(git_file_get(&cfg, "ok.y").as_deref() == Some("1"));
 }
@@ -307,8 +316,11 @@ fn optional_include_git_parity() {
     let file = grit_file_from_content(&cfg, &content, ConfigScope::Local);
     let mut set = ConfigSet::new();
     let env = Environment::empty();
-    set.merge_file_with_includes(&file, true, &include_ctx(dir.path(), &env))
-        .expect("optional include");
+    set.merge_file(
+        &file,
+        &grit_lib::config::IncludeOptions::default().with_context(include_ctx(dir.path(), &env)),
+    )
+    .expect("optional include");
     assert_eq!(set.get("set.x").unwrap().as_deref(), git_val.as_deref());
 }
 
@@ -335,8 +347,11 @@ fn show_origin_order_matches_git_for_simple_include() {
     );
     let mut set = ConfigSet::new();
     let env = Environment::empty();
-    set.merge_file_with_includes(&file, true, &include_ctx(dir.path(), &env))
-        .expect("merge");
+    set.merge_file(
+        &file,
+        &grit_lib::config::IncludeOptions::default().with_context(include_ctx(dir.path(), &env)),
+    )
+    .expect("merge");
     let grit_lines: Vec<_> = grit_list_lines(&set)
         .into_iter()
         .filter(|l| !l.key.starts_with("include"))

@@ -492,7 +492,7 @@ fn odb_exists_local_freshen_and_write_options() {
     assert!(after >= before);
 
     let again = odb
-        .write_with_options(
+        .write_with(
             ObjectKind::Blob,
             b"opts",
             WriteOptions {
@@ -529,7 +529,7 @@ fn write_trust_new_loose_and_assume_loose_only_existence() {
     let odb = Odb::new(&repo.objects_dir());
     let data = b"trust-new";
     let oid = odb
-        .write_with_options(
+        .write_with(
             ObjectKind::Blob,
             data,
             WriteOptions {
@@ -541,7 +541,7 @@ fn write_trust_new_loose_and_assume_loose_only_existence() {
     assert_eq!(odb.read(&oid).unwrap().data, data);
 
     let oid2 = odb
-        .write_with_options(
+        .write_with(
             ObjectKind::Blob,
             data,
             WriteOptions {
@@ -756,7 +756,7 @@ fn bulk_trust_new_loose_materializes_loose_when_object_only_in_cruft_pack() {
     assert!(odb.exists_local(&oid));
 
     let again = odb
-        .write_with_options(ObjectKind::Blob, data, BULK_NEW_LOOSE_WRITE)
+        .write_with(ObjectKind::Blob, data, BULK_NEW_LOOSE_WRITE)
         .expect("bulk write after cruft repack");
     assert_eq!(again, oid);
     assert!(
@@ -831,7 +831,7 @@ fn bulk_stage_write_skips_blob_already_in_regular_pack_and_freshens_it() {
     filetime::set_file_mtime(&pack, old).unwrap();
 
     let again = odb
-        .write_with_options(ObjectKind::Blob, data, opts)
+        .write_with(ObjectKind::Blob, data, opts)
         .expect("bulk stage write of packed blob");
     assert_eq!(again, oid);
     assert!(
@@ -860,7 +860,7 @@ fn bulk_stage_write_skips_blob_already_in_regular_pack_and_freshens_it() {
     );
 
     let new_oid = odb
-        .write_with_options(ObjectKind::Blob, b"brand new\n", opts)
+        .write_with(ObjectKind::Blob, b"brand new\n", opts)
         .expect("bulk stage write of new blob");
     assert!(odb.object_path(&new_oid).is_file());
     assert!(git_fsck(repo.path(), true).ok, "git fsck --strict");
@@ -878,7 +878,7 @@ fn bulk_stage_write_materializes_loose_when_object_only_in_cruft_pack() {
 
     let opts = odb.bulk_stage_write_options();
     assert!(opts.freshen_existing);
-    odb.write_with_options(ObjectKind::Blob, data, opts)
+    odb.write_with(ObjectKind::Blob, data, opts)
         .expect("bulk stage write after cruft repack");
     assert!(
         odb.object_path(&oid).is_file(),
@@ -896,7 +896,7 @@ fn bulk_stage_write_treats_promisor_pack_object_as_present() {
     std::fs::write(pack.with_extension("promisor"), b"").unwrap();
     odb.invalidate_packs();
 
-    odb.write_with_options(ObjectKind::Blob, data, odb.bulk_stage_write_options())
+    odb.write_with(ObjectKind::Blob, data, odb.bulk_stage_write_options())
         .expect("bulk stage write of promisor-packed blob");
     assert!(
         !odb.object_path(&oid).is_file(),

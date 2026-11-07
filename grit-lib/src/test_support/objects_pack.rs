@@ -13,7 +13,7 @@ pub use crate::pack::{
     read_pack_bytes_cached, read_pack_index, read_pack_index_cached, read_pack_index_no_verify,
     read_packed_delta_dependency, reprepare_pack_directory_on_miss, skip_one_pack_object,
     slice_one_pack_object, verify_pack_and_collect, write_v2_pack_index,
-    write_v2_pack_index_with_trailer, PackIndex, PackIndexEntryRef, PackedDeltaDependency,
+    write_v2_pack_index_from_trailer, PackIndex, PackIndexEntryRef, PackedDeltaDependency,
     PackedType, SingleLocalPackReader, VerifyObjectRecord, DEFAULT_PACK_DEPTH,
 };
 pub use crate::pack_index::{
@@ -22,4 +22,18 @@ pub use crate::pack_index::{
 };
 
 pub use crate::pack::pack_cache::revalidate_stale_pack_bytes;
-pub use crate::pack_reuse_root::try_write_streaming_pack;
+
+/// Run only upload-pack's bitmap reuse path for `stream`, returning `None` when reuse is not
+/// possible (the full upload path then falls back to pack-objects).
+///
+/// # Errors
+///
+/// Bitmap, pack read, or write failures.
+pub fn try_write_streaming_pack(
+    repo: &crate::repo::Repository,
+    stream: &crate::pack_objects::UploadPackStream<'_>,
+    progress: &mut dyn crate::progress::ProgressSink,
+    out: &mut dyn std::io::Write,
+) -> crate::error::Result<Option<crate::pack_objects::PackStats>> {
+    stream.write_reused_only(repo, progress, out)
+}

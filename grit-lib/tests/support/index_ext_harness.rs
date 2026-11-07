@@ -88,7 +88,10 @@ pub fn fsck_strict(repo_dir: &Path) {
 }
 
 pub fn grit_index_stage_rows(repo: &Repository) -> Vec<(String, u32, String, ObjectId)> {
-    let idx = repo.index().load().expect("load index");
+    let idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load index");
     let mut rows: Vec<(String, u32, String, ObjectId)> = idx
         .entries()
         .iter()

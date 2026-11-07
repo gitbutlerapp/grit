@@ -992,7 +992,13 @@ fn issue_2345_large_edited_blob_single_base_in_pack() {
         .expect("open repo");
         let mut repack_opts = RepackOptions::default();
         repack_opts.force_recompress = force;
-        repo.repack(&repack_opts).expect("repack");
+        repo.maintenance()
+            .repack(
+                &repack_opts,
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("repack");
         let pack_dir = dir.join(".git/objects/pack");
         let pack_path = std::fs::read_dir(&pack_dir)
             .expect("pack dir")
@@ -1038,7 +1044,13 @@ fn issue_1011_sed_line_edits_pack_near_git_size() {
         &RepositoryOptions::empty().with_work_tree(dir),
     )
     .expect("open repo");
-    repo.repack(&RepackOptions::default()).expect("repack");
+    repo.maintenance()
+        .repack(
+            &RepackOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("repack");
     let pack_dir = dir.join(".git/objects/pack");
     let grit_pack_bytes: usize = std::fs::read_dir(&pack_dir)
         .expect("pack dir")
@@ -1096,7 +1108,13 @@ fn issue_1011_sixty_commit_pack_near_git_size() {
     .expect("open repo");
     let mut repack_opts = RepackOptions::default();
     repack_opts.threads = Some(1);
-    repo.repack(&repack_opts).expect("repack");
+    repo.maintenance()
+        .repack(
+            &repack_opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("repack");
     let pack_dir = dir.join(".git/objects/pack");
     let pack_path = std::fs::read_dir(&pack_dir)
         .expect("pack dir")

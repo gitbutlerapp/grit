@@ -7,7 +7,8 @@ mod s7;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use grit_lib::maintenance::{repack, RepackOptions};
+use grit_lib::maintenance::RepackOptions;
+use grit_lib::progress::{CancelToken, NullProgress};
 use s7::HistoryBenchFixtures;
 
 fn repack_medium(c: &mut Criterion) {
@@ -16,7 +17,16 @@ fn repack_medium(c: &mut Criterion) {
     group.throughput(Throughput::Elements(fx.commit_count as u64));
     group.bench_function("all_into_one", |b| {
         b.iter(|| {
-            black_box(repack(&fx.repo, &RepackOptions::default()).expect("repack"));
+            black_box(
+                fx.repo
+                    .maintenance()
+                    .repack(
+                        &RepackOptions::default(),
+                        &mut NullProgress,
+                        &CancelToken::never(),
+                    )
+                    .expect("repack"),
+            );
         });
     });
     group.finish();

@@ -526,6 +526,7 @@ fn fsck_on_custom_primary_validates_the_store() {
     commit_into(&repo, b"x\n");
     let options = FsckOptions::default();
     let report = repo
+        .maintenance()
         .fsck(&options, &mut NullProgress, &CancelToken::never())
         .expect("fsck reads objects through the custom primary");
     assert!(report.objects_checked > 0);

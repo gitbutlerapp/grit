@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{write_commits_log_patch, LogPatchCommitHeader, LogPatchOptions};
 use grit_lib::error::Error;
-use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+use grit_lib::maintenance::CommitGraphOptions;
 use grit_lib::objects::pack::{
     read_object_from_pack_at_offset, read_pack_index_cached, PackIndex, SingleLocalPackReader,
 };
@@ -665,7 +665,7 @@ pub fn index_pack_records(
     threads: Option<usize>,
 ) -> Result<()> {
     use grit_lib::objects::hash::Parallelism;
-    use grit_lib::objects::unpack_objects::pack_index_records_with_threads;
+    use grit_lib::objects::unpack_objects::pack_index_records;
 
     let pack =
         std::fs::read(pack_path).with_context(|| format!("read pack {}", pack_path.display()))?;
@@ -677,8 +677,7 @@ pub fn index_pack_records(
             .map(|cfg| cfg.pack_index_parallelism())
             .unwrap_or_else(|_| Parallelism::resolve(None)),
     };
-    let _records =
-        pack_index_records_with_threads(&pack, repo.odb(), parallelism).context("index-pack")?;
+    let _records = pack_index_records(&pack, repo.odb(), parallelism).context("index-pack")?;
     Ok(())
 }
 
@@ -770,7 +769,8 @@ fn resolve_rev(repo: &Repository, rev: &str) -> Result<ObjectId> {
 
 /// Write a reachable commit-graph with changed-path Bloom filters (maintenance API).
 pub fn commit_graph_write(repo: &Repository) -> Result<()> {
-    write_commit_graph(repo, &CommitGraphOptions::with_changed_paths(true))?;
+    repo.maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))?;
     Ok(())
 }
 

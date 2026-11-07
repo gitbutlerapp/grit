@@ -1095,7 +1095,7 @@ mod tests {
                 (*oid, offset, 0)
             })
             .collect();
-        crate::pack::write_v2_pack_index_with_trailer(path, &entries, &[0u8; 20], 20, None)
+        crate::pack::write_v2_pack_index_from_trailer(path, &entries, &[0u8; 20], 20, None)
             .unwrap();
         crate::pack::read_pack_index(path).unwrap()
     }
@@ -1284,7 +1284,7 @@ mod tests {
             .iter()
             .map(|(bytes, offset)| (ObjectId::from_bytes(bytes).expect("oid"), *offset, 0))
             .collect();
-        crate::pack::write_v2_pack_index_with_trailer(
+        crate::pack::write_v2_pack_index_from_trailer(
             &path,
             &entries,
             &vec![0; hash_bytes],
@@ -1426,7 +1426,7 @@ mod tests {
 
     #[test]
     fn duplicate_oid_rows_parse_and_resolve_first_offset() {
-        use crate::pack::write_v2_pack_index_with_trailer;
+        use crate::pack::write_v2_pack_index_from_trailer;
         use std::fs;
 
         let oid = ObjectId::from_bytes(&[0x05; 20]).unwrap();
@@ -1434,7 +1434,7 @@ mod tests {
         let idx_path = dir.path().join("dup-oid.idx");
         let pack_path = dir.path().join("dup-oid.pack");
         fs::write(&pack_path, b"PACK\x00\x00\x00\x02\x00\x00\x00\x00").expect("pack stub");
-        write_v2_pack_index_with_trailer(
+        write_v2_pack_index_from_trailer(
             &idx_path,
             &[(oid, 100, 0), (oid, 200, 0)],
             &[0u8; 20],
@@ -1453,13 +1453,13 @@ mod tests {
 
     #[test]
     fn verified_open_reports_idx_trailer_mismatch_as_typed_error() {
-        use crate::pack::write_v2_pack_index_with_trailer;
+        use crate::pack::write_v2_pack_index_from_trailer;
         use std::fs;
 
         let oid = ObjectId::from_bytes(&[0x07; 20]).unwrap();
         let dir = tempfile::tempdir().expect("tempdir");
         let idx_path = dir.path().join("trailer.idx");
-        write_v2_pack_index_with_trailer(&idx_path, &[(oid, 12, 0)], &[0u8; 20], 20, None)
+        write_v2_pack_index_from_trailer(&idx_path, &[(oid, 12, 0)], &[0u8; 20], 20, None)
             .expect("write idx");
         open_pack_index_file(&idx_path, true).expect("intact trailer verifies");
 
@@ -1527,7 +1527,7 @@ mod tests {
 
     #[test]
     fn v2_large_offset_table_direct_index_many_rows() {
-        use crate::pack::write_v2_pack_index_with_trailer;
+        use crate::pack::write_v2_pack_index_from_trailer;
         use std::time::Instant;
 
         const N: u32 = 20_000;
@@ -1543,7 +1543,7 @@ mod tests {
         let last_offset = rows.last().expect("row").1;
         let tmp = tempfile::tempdir().expect("tempdir");
         let idx_path = tmp.path().join("many-large.idx");
-        write_v2_pack_index_with_trailer(&idx_path, &rows, &[0u8; 20], 20, None).expect("write");
+        write_v2_pack_index_from_trailer(&idx_path, &rows, &[0u8; 20], 20, None).expect("write");
         let bytes = std::fs::read(&idx_path).expect("read");
         let lazy = parse_pack_index_bytes(&idx_path, bytes.clone(), false).expect("lazy");
         let last_row = (N - 1) as usize;
@@ -1581,7 +1581,7 @@ mod tests {
 
     #[test]
     fn find_position_large_fanout_bucket_sha256_v2_no_panic() {
-        use crate::pack::write_v2_pack_index_with_trailer;
+        use crate::pack::write_v2_pack_index_from_trailer;
         let mut rows: Vec<(ObjectId, u64, u32)> = Vec::new();
         for i in 0..64u8 {
             let mut bytes = [0u8; 32];
@@ -1592,7 +1592,7 @@ mod tests {
         }
         let tmp = tempfile::tempdir().expect("tempdir");
         let idx_path = tmp.path().join("big-v2.idx");
-        write_v2_pack_index_with_trailer(&idx_path, &rows, &[0u8; 32], 32, None).expect("write v2");
+        write_v2_pack_index_from_trailer(&idx_path, &rows, &[0u8; 32], 32, None).expect("write v2");
         let bytes = std::fs::read(&idx_path).expect("read idx");
         let idx = parse_pack_index_bytes(&idx_path, bytes, false).expect("parse v2 idx");
         assert_eq!(idx.len(), 64);

@@ -773,7 +773,10 @@ fn conflicting_rebase_stop_completes_once_published_and_continue_needs_resolutio
         sink.flag.is_cancelled(),
         "the sink asked to stop during the stop checkout"
     );
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(
         index.has_unmerged_entries(),
         "conflict stages are installed"

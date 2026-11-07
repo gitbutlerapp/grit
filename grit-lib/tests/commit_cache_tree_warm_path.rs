@@ -55,7 +55,11 @@ fn noop_tracked_restage_preserves_cache_tree_at_campaign_scale() {
 
     let repo = open_repo(root);
     let index_path = root.join(".git/index");
-    let before = Index::parse(&std::fs::read(&index_path).expect("read index")).expect("parse");
+    let before = Index::parse(
+        &std::fs::read(&index_path).expect("read index"),
+        &grit_lib::index::IndexParseOptions::default(),
+    )
+    .expect("parse");
     assert!(
         before.cache_tree.is_some(),
         "git commit should leave a TREE extension on the index"
@@ -69,8 +73,11 @@ fn noop_tracked_restage_preserves_cache_tree_at_campaign_scale() {
         "clean worktree should not restage"
     );
 
-    let index =
-        Index::parse(&std::fs::read(&index_path).expect("read index after")).expect("parse");
+    let index = Index::parse(
+        &std::fs::read(&index_path).expect("read index after"),
+        &grit_lib::index::IndexParseOptions::default(),
+    )
+    .expect("parse");
     assert!(
         index.cache_tree.is_some(),
         "no-op tracked scan must not drop cache-tree upfront (issue #1184)"
@@ -104,7 +111,8 @@ fn allow_empty_commit_preserves_cache_tree_without_full_restage() {
     let repo = open_repo(root);
     let index_path = root.join(".git/index");
     let before = std::fs::read(&index_path).expect("index bytes");
-    let before_idx = Index::parse(&before).expect("parse");
+    let before_idx =
+        Index::parse(&before, &grit_lib::index::IndexParseOptions::default()).expect("parse");
     assert!(before_idx.cache_tree.is_some());
 
     commit_worktree(
@@ -116,7 +124,8 @@ fn allow_empty_commit_preserves_cache_tree_without_full_restage() {
     .expect("allow-empty commit");
 
     let after = std::fs::read(&index_path).expect("index after");
-    let after_idx = Index::parse(&after).expect("parse after");
+    let after_idx =
+        Index::parse(&after, &grit_lib::index::IndexParseOptions::default()).expect("parse after");
     assert!(
         after_idx.cache_tree.is_some(),
         "allow-empty on clean tree should keep cache-tree for incremental write-tree"

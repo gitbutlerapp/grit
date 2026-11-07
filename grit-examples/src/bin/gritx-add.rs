@@ -24,10 +24,13 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
-    let mut index = repo.index().load()?;
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())?;
     for file in cli.files {
         add_path(&repo, &mut index, &file)?;
     }
-    repo.index().write(&mut index)?;
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
     Ok(())
 }

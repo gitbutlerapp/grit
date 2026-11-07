@@ -33,9 +33,10 @@ pub use extra_headers::{
 pub use handle::Objects;
 pub use oid_hashtable::{
     empty_object_id_hash_set, empty_oid_byte_filter_map, empty_oid_set, oid_hash_map,
-    oid_hash_map_from, oid_hash_map_with_capacity, oid_hash_set, oid_hash_set_from,
-    oid_hash_set_with_capacity, OidBuildHasher, OidHashMap, OidHashSet, OidHasher,
+    oid_hash_map_from, oid_hash_set, oid_hash_set_from, OidBuildHasher, OidHashMap, OidHashSet,
+    OidHasher,
 };
+pub(crate) use oid_hashtable::{oid_hash_map_with_capacity, oid_hash_set_with_capacity};
 pub use write::{NewCommit, TreeEntryError, WriteTreeOptions};
 
 pub mod odb {
@@ -55,7 +56,7 @@ pub mod pack {
         read_idx_object_ids, read_local_pack_indexes, read_object_from_pack_at_offset,
         read_object_from_packs, read_pack_index, read_pack_index_cached,
         read_packed_delta_dependency, skip_one_pack_object, write_v2_pack_index,
-        write_v2_pack_index_with_trailer, PackIndex, PackIndexEntryRef, SingleLocalPackReader,
+        write_v2_pack_index_from_trailer, PackIndex, PackIndexEntryRef, SingleLocalPackReader,
         DEFAULT_PACK_DEPTH,
     };
     pub use crate::pack_reuse_root::*;
@@ -75,7 +76,7 @@ pub mod midx {
     pub use crate::midx::{
         clear_pack_midx_state, midx_lookup_pack_and_offset, read_midx_btmp_ranges,
         read_midx_objects, try_read_info_via_midx, try_read_object_via_midx,
-        write_multi_pack_index_with_options, MidxBitmapWriteOutcome, WriteMultiPackIndexOptions,
+        write_multi_pack_index, MidxBitmapWriteOutcome, WriteMultiPackIndexOptions,
     };
 }
 
@@ -83,7 +84,7 @@ pub mod hash {
     //! Object-id hashing, file checksums, and hash algorithm selection.
     pub use crate::hash::{
         backend, hash_object, hash_objects_parallel, par_hash_with, parallel_hash_worthwhile,
-        try_par_hash_with, try_par_hash_with_force, verify_trailer, Backend, ChecksumHasher,
+        try_par_hash_forced, try_par_hash_with, verify_trailer, Backend, ChecksumHasher,
         HashingWriter, ObjectHasher, ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS,
         PAR_HASH_MIN_TOTAL_BYTES,
     };
@@ -116,8 +117,7 @@ pub mod index_pack {
     //! Index-pack and thin-pack handling.
     pub use crate::index_pack::{
         build_pack_index_records, ingest_received_pack, ingest_received_pack_path,
-        ingest_received_pack_path_with_progress, install_pack_bytes, install_pack_path,
-        install_pack_path_with_progress, IngestPackOptions, IngestedPack, ObjectKindCounts,
+        install_pack_bytes, install_pack_path, IngestPackOptions, IngestedPack, ObjectKindCounts,
     };
 }
 
@@ -133,8 +133,7 @@ pub mod pack_store {
 pub mod unpack_objects {
     //! Unpack loose objects from pack streams.
     pub use crate::unpack_objects::{
-        apply_delta, apply_delta_into, ingest_pack_into, pack_index_records_with_threads,
-        UnpackOptions,
+        apply_delta, apply_delta_into, ingest_pack_into, pack_index_records, UnpackOptions,
     };
 }
 
@@ -153,16 +152,15 @@ pub mod promisor_remote {
     pub use crate::promisor_remote::{
         configured_promisor_remotes, lazy_fetch_order, PromisorAcceptPolicy, PromisorAdvertisement,
         PromisorConfigWarning, PromisorDecision, PromisorField, PromisorHandshake,
-        PromisorRejection, PromisorReplyError,
+        PromisorHandshakeOptions, PromisorRejection, PromisorReplyError,
     };
 }
 
 pub mod pack_objects {
     //! Pack-objects negotiation and encoding.
     pub use crate::pack_objects::{
-        build_pack, build_pack_from_send_list, build_pack_with_shallow_and_filter,
-        write_pack_for_push, PackBuildOptions, PackObjects, PackObjectsOptions, PackStats,
-        UploadPackStream, SERVE_WINDOW_MEMORY,
+        build_pack, build_pack_from_send_list, write_pack_for_push, PackBuildOptions, PackObjects,
+        PackObjectsOptions, PackStats, UploadPackStream, SERVE_WINDOW_MEMORY,
     };
 }
 

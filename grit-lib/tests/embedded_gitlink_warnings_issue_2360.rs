@@ -1,5 +1,6 @@
 //! Issue #2360: warn when nested repositories are recorded as gitlinks.
 
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::process::Command;
 
@@ -7,7 +8,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::MODE_GITLINK;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::status::{status, IgnoredMode, StatusOptions, UntrackedMode};
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -99,7 +99,10 @@ fn add_and_commit_report_new_embedded_gitlink() {
         vec!["vendor-hello".to_owned()]
     );
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entry = index.get(b"vendor-hello", 0).expect("gitlink indexed");
     assert_eq!(entry.mode, MODE_GITLINK);
 
@@ -151,7 +154,10 @@ fn symlink_to_repo_root_is_not_embedded_repository() {
     .expect("stage");
     assert!(stage_outcome.embedded_gitlinks.is_empty());
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entry = index.get(b"loop", 0).expect("symlink indexed");
     assert_eq!(entry.mode, grit_lib::index::MODE_SYMLINK);
 
@@ -202,7 +208,10 @@ fn symlink_to_other_repository_directory_is_not_embedded() {
     .expect("stage");
     assert!(stage_outcome.embedded_gitlinks.is_empty());
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entry = index.get(b"ext", 0).expect("symlink indexed");
     assert_eq!(entry.mode, grit_lib::index::MODE_SYMLINK);
 }

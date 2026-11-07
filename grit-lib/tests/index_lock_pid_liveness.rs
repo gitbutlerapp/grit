@@ -3,6 +3,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -12,7 +13,6 @@ use grit_lib::error::Error;
 use grit_lib::index::IndexLock;
 use grit_lib::lockfile::{grit_lockfile_pid_enabled, pid_path_for_lock, LockHolder};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 /// A pid above every platform's pid limit, so no process can be running with it.
@@ -235,7 +235,10 @@ fn stage_with_held_index_lock_returns_lock_held_and_git_sees_no_change() {
 
         fs::write(wt.join("n"), "written by git\n").expect("modify n");
         git(wt, &["add", "n"]);
-        let index = repo.index().load().expect("read Git-written index");
+        let index = repo
+            .index()
+            .load(&grit_lib::index::IndexLoadOptions::default())
+            .expect("read Git-written index");
         let entry = index.get(b"n", 0).expect("Git-staged path");
         assert_eq!(entry.oid.to_hex(), git(wt, &["rev-parse", ":n"]).trim());
     }

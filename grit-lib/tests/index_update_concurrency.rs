@@ -6,6 +6,7 @@
 //! system `git`.
 
 use crate::support;
+use grit_lib::progress::NullProgress;
 
 use std::fs;
 use std::path::Path;
@@ -17,7 +18,6 @@ use grit_lib::error::Error;
 use grit_lib::porcelain::add::{stage, stage_on_index, StageOptions};
 use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
-use grit_lib::progress::NullProgress;
 
 use support::{assert_git_fsck_strict, git, git_ls_files_stage0_map, open_grit_repo};
 
@@ -48,7 +48,9 @@ fn is_lock_contention(err: &Error) -> bool {
 fn write_entry_under_lock(dir: &Path, path: &str, lock: &mut grit_lib::index::IndexLock) {
     let repo = open_grit_repo(dir);
     let handle = repo.index();
-    let mut index = handle.load().expect("load index under lock");
+    let mut index = handle
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load index under lock");
     stage_on_index(
         &repo,
         &mut index,

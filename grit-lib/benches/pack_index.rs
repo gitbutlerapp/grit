@@ -6,7 +6,7 @@ use std::hint::black_box;
 use std::path::PathBuf;
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use grit_lib::objects::pack::{read_pack_index_no_verify, write_v2_pack_index_with_trailer};
+use grit_lib::objects::pack::{read_pack_index_no_verify, write_v2_pack_index_from_trailer};
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 
 fn bench_pack_index(c: &mut Criterion) {
@@ -23,7 +23,7 @@ fn bench_pack_index(c: &mut Criterion) {
                     (oid, 12 + u64::from(i) * 40, 0)
                 })
                 .collect();
-            write_v2_pack_index_with_trailer(&path, &entries, &[0; 20], 20, None)
+            write_v2_pack_index_from_trailer(&path, &entries, &[0; 20], 20, None)
                 .expect("write benchmark index");
             path
         }

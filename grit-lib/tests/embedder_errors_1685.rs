@@ -45,7 +45,10 @@ fn bare_repo_common_failures_use_requires_work_tree() {
     );
     assert_requires_work_tree(stage_worktree_changes(&bare, &[]).map(|_| ()));
 
-    let mut idx = bare.index().load().expect("index");
+    let mut idx = bare
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert_requires_work_tree(
         bare.diff()
             .index_to_worktree(&mut idx, &TreeDiffOptions::default())

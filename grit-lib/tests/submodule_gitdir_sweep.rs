@@ -2,8 +2,7 @@
 
 use grit_lib::config::gitmodules::gitdir::{
     compute_default_submodule_gitdir, ensure_submodule_gitdir_config,
-    submodule_gitdir_filesystem_path, submodule_gitdir_outer_conflict, submodule_modules_git_dir,
-    submodule_path_config_enabled, validate_submodule_path,
+    submodule_gitdir_filesystem_path, validate_submodule_path,
 };
 use grit_lib::config::{ConfigFile, ConfigScope};
 use grit_lib::repo::{InitOptions, Repository};
@@ -21,11 +20,7 @@ fn submodule_gitdir_path_matrix() -> grit_lib::error::Result<()> {
         "[extensions]\n\tsubmodulePathConfig = true\n",
     )
     .map_err(grit_lib::error::Error::Io)?;
-    assert!(submodule_path_config_enabled(&git_dir));
-    let modules = submodule_modules_git_dir(&git_dir, "nested/sub");
-    assert!(modules.to_string_lossy().contains("modules"));
     validate_submodule_path(wt, "nested/sub")?;
-    let _ = submodule_gitdir_outer_conflict(&git_dir, "nested/sub");
     let cfg = ConfigFile::parse(
         git_dir.join("config").as_path(),
         "[submodule \"nested/sub\"]\n\tpath = nested/sub\n\turl = https://example.com/x.git\n",

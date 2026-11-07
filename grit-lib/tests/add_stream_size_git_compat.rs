@@ -2,11 +2,11 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::progress::NullProgress;
 use std::fs;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 use tempfile::TempDir;
@@ -55,11 +55,13 @@ fn size_changed_stream_round_trips_with_system_git() {
             bytes.extend_from_slice(b"git update\n");
             fs::write(root.join("large.bin"), &bytes).expect("modify again");
             git(root, &["add", "large.bin"]);
-            let index = grit_lib::index::Index::load_expand_sparse(
-                &repo.git_dir().join("index"),
-                repo.odb(),
-            )
-            .expect("read Git index");
+            let index = repo
+                .index()
+                .load(
+                    &grit_lib::index::IndexLoadOptions::default()
+                        .with_path(&repo.git_dir().join("index")),
+                )
+                .expect("read Git index");
             let entry = index
                 .entries()
                 .iter()

@@ -32,8 +32,8 @@ use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 mod parallel;
 
 pub use parallel::{
-    hash_objects_parallel, par_hash_with, parallel_hash_worthwhile, try_par_hash_with,
-    try_par_hash_with_force, ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS,
+    hash_objects_parallel, par_hash_with, parallel_hash_worthwhile, try_par_hash_forced,
+    try_par_hash_with, ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS,
     PAR_HASH_MIN_TOTAL_BYTES,
 };
 

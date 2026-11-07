@@ -84,9 +84,27 @@ impl<'repo> Config<'repo> {
         Ok(self.snapshot()?.get_color(key)?)
     }
 
-    /// Entries whose canonical key starts with `prefix`.
-    pub fn entries_with_prefix(&self, prefix: &str) -> Result<Vec<crate::config::ConfigEntry>> {
-        self.snapshot()?.entries_with_prefix(prefix)
+    /// Entries whose canonical key starts with `prefix` (a full key, a section such as
+    /// `remote.origin`, or a section prefix ending in `.`).
+    ///
+    /// # Errors
+    ///
+    /// Config load failures, and [`crate::error::ConfigError`] when `prefix` is empty or
+    /// invalid.
+    pub fn entries_under(&self, prefix: &str) -> Result<Vec<crate::config::ConfigEntry>> {
+        self.snapshot()?.entries_under(prefix)
+    }
+
+    /// The repository's mailmap, merged in Git's source order: `.mailmap` in the work tree,
+    /// then `mailmap.blob` (`HEAD:.mailmap` by default in a bare repository), then
+    /// `mailmap.file`.
+    ///
+    /// # Errors
+    ///
+    /// Config load failures and unreadable `mailmap.file` paths; a `mailmap.blob` that does
+    /// not resolve to a blob is skipped with a diagnostic.
+    pub fn mailmap(&self) -> Result<crate::mailmap::MailmapTable> {
+        crate::mailmap::load_mailmap_table(self.repo)
     }
 
     /// Set a key in the repository-local config file and reload the in-memory snapshot.

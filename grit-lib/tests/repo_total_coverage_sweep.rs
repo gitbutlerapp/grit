@@ -28,7 +28,9 @@ fn repository_handles_and_discovery_sweep() -> grit_lib::error::Result<()> {
     let _ = repo.ref_store();
     let _ = repo.objects();
     let _ = repo.references();
-    let _ = repo.index().load()?;
+    let _ = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())?;
     let _ = repo.config();
     let _ = repo.revwalk();
     let _ = repo.diff();
@@ -69,7 +71,9 @@ fn repository_init_variants_and_handle_exercise() -> grit_lib::error::Result<()>
     let mut opts = RepositoryOptions::empty();
     opts.work_tree = Some(wt.path().to_path_buf());
     let repo = Repository::open(&separate, &opts)?;
-    let _ = repo.index().load()?;
+    let _ = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())?;
     let _ = repo.revwalk().walk("HEAD", &RevListOptions::default()).ok();
     let _ = repo
         .diff()

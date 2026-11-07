@@ -126,38 +126,10 @@ impl StreamingReuse {
     }
 }
 
-/// Write a PACK stream to `w` using bitmap reachability and verbatim reuse when possible.
-///
-/// Returns [`None`] when reuse is unavailable (caller should stream via [`crate::pack_objects::PackObjects`]).
-#[allow(clippy::too_many_arguments)]
-pub fn try_write_streaming_pack(
-    repo: &Repository,
-    wants: &[ObjectId],
-    haves: &[ObjectId],
-    source_shallow: &HashSet<ObjectId>,
-    have_shallow: &HashSet<ObjectId>,
-    filter: Option<&ObjectFilter>,
-    opts: &PackBuildOptions,
-    progress: &mut dyn crate::progress::ProgressSink,
-    w: &mut dyn Write,
-) -> Result<Option<PackStats>> {
-    try_write_streaming_pack_including_tags(
-        repo,
-        wants,
-        haves,
-        source_shallow,
-        have_shallow,
-        filter,
-        &[],
-        opts,
-        progress,
-        w,
-        &crate::progress::CancelSignal::never(),
-    )
-}
-
-/// [`try_write_streaming_pack`] that also packs each of `include_tags` whose peeled
-/// object the bitmap send set holds (`include-tag`).
+/// Write a PACK stream to `w` using bitmap reachability and verbatim reuse when possible,
+/// also packing each of `include_tags` whose peeled object the bitmap send set holds
+/// (`include-tag`). Returns [`None`] when reuse is unavailable (the caller streams via
+/// [`crate::pack_objects::PackObjects`]).
 ///
 /// Added tags are planned like any object outside the reuse bitmap, so they are
 /// written whole and never duplicate an object the client asked for.

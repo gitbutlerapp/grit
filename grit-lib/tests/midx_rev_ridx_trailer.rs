@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::objects::midx::{
-    read_midx_objects, write_multi_pack_index_with_options, WriteMultiPackIndexOptions,
+    read_midx_objects, write_multi_pack_index, WriteMultiPackIndexOptions,
 };
 use grit_lib::objects::pack_rev::hashfile_checksum_valid;
 use grit_lib::objects::HashAlgo;
@@ -63,7 +63,7 @@ fn grit_write_midx_rev(pack_dir: &Path) {
         version: Some(1),
         ..WriteMultiPackIndexOptions::default()
     };
-    write_multi_pack_index_with_options(pack_dir, &opts).expect("write MIDX");
+    write_multi_pack_index(pack_dir, &opts).expect("write MIDX");
 }
 
 fn find_midx_rev_sidecar(pack_dir: &Path) -> Option<PathBuf> {

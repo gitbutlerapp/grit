@@ -7,7 +7,7 @@ use grit_lib::diff::tree_oid_of_commit;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{
-    parse_tree, parse_tree_with_oid_len, HashAlgo, ObjectId, ObjectKind, TreeEntry, TreeRefIter,
+    parse_tree, parse_tree_for_algo, HashAlgo, ObjectId, ObjectKind, TreeEntry, TreeRefIter,
 };
 use grit_lib::repo::Repository;
 use grit_lib::test_support::fixtures::synth::{generate_synth_repo_with_spec, RepoShape};
@@ -109,7 +109,7 @@ fn tree_ref_iter_malformed_matches_parse_tree_errors() {
     assert_eq!(format!("{parse_err}"), format!("{iter_err}"));
 
     let truncated = b"100644 file\0\x01\x02";
-    let parse_err = parse_tree_with_oid_len(truncated, HashAlgo::Sha1.len()).expect_err("trunc");
+    let parse_err = parse_tree_for_algo(truncated, HashAlgo::Sha1).expect_err("trunc");
     let iter_err = TreeRefIter::with_oid_len(truncated, HashAlgo::Sha1.len())
         .collect::<Result<Vec<_>, _>>()
         .expect_err("iter trunc");

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::objects::hash;
-use grit_lib::objects::midx::{write_multi_pack_index_with_options, WriteMultiPackIndexOptions};
+use grit_lib::objects::midx::{write_multi_pack_index, WriteMultiPackIndexOptions};
 use grit_lib::objects::odb::store::{
     MidxObjects, MidxObjectsStatus, ObjectStore, ObjectStream, PackedObjects,
 };
@@ -171,8 +171,7 @@ fn install_specs_only_pack(objects: &Path, specs: &[(ObjectKind, Vec<u8>)], algo
     fs::write(&pack_path, &pack).expect("write pack");
     write_v2_pack_index(&idx_path, &pack_path, &entries, hash_bytes).expect("write idx");
     clear_pack_cache();
-    write_multi_pack_index_with_options(&pack_dir, &WriteMultiPackIndexOptions::default())
-        .expect("write midx");
+    write_multi_pack_index(&pack_dir, &WriteMultiPackIndexOptions::default()).expect("write midx");
     clear_pack_cache();
 }
 
@@ -349,7 +348,7 @@ fn grit_two_layer_incremental_fixture(
 ) -> Option<(midx_support::RepoFixture, PathBuf, ObjectId, ObjectId)> {
     let (repo, objects, base_oids) = multi_pack_repo(FixtureHashAlgo::Sha1, 2)?;
     let pack_dir = objects.join("pack");
-    write_multi_pack_index_with_options(
+    write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             version: Some(1),
@@ -365,7 +364,7 @@ fn grit_two_layer_incremental_fixture(
     if !pack_objects_layer(repo.path(), 50) {
         return None;
     }
-    write_multi_pack_index_with_options(
+    write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             incremental: true,

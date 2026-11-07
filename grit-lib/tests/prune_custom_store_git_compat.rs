@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::maintenance::{self, PruneOptions};
+use grit_lib::maintenance::PruneOptions;
 use grit_lib::objects::ObjectId;
 
 use crate::prune_custom_store::{
@@ -73,8 +73,14 @@ fn memory_primary_keeps_what_git_prune_keeps() {
     );
 
     let opts = PruneOptions::default().with_now(fixed_now());
-    maintenance::prune_loose_objects(&files, &opts).expect("files prune");
-    maintenance::prune_loose_objects(&memory, &opts).expect("memory prune");
+    files
+        .maintenance()
+        .prune_loose_objects(&opts)
+        .expect("files prune");
+    memory
+        .maintenance()
+        .prune_loose_objects(&opts)
+        .expect("memory prune");
 
     let survivors = stored(store.as_ref());
     assert_eq!(

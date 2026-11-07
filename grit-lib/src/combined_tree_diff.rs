@@ -6,7 +6,7 @@
 
 use crate::diff::zero_oid;
 use crate::error::Result;
-use crate::objects::{parse_commit, parse_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{parse_commit, parse_tree, tree_name_cmp, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 
 /// One character per parent for raw / name-status combined output (`A`/`M`/`D`).
@@ -163,7 +163,7 @@ fn tree_entry_pathcmp(a: Option<&TreeEntry>, b: Option<&TreeEntry>) -> std::cmp:
         (None, None) => std::cmp::Ordering::Equal,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (Some(_), None) => std::cmp::Ordering::Less,
-        (Some(e1), Some(e2)) => tree_entry_cmp(
+        (Some(e1), Some(e2)) => tree_name_cmp(
             &e1.name,
             is_tree_mode(e1.mode),
             &e2.name,
@@ -360,7 +360,7 @@ fn ll_diff_tree_paths(
                                 continue;
                             }
                             if let Some(pe) = tp_entries[i].get(tp_idx[i]) {
-                                if tree_entry_cmp(
+                                if tree_name_cmp(
                                     &pe.name,
                                     is_tree_mode(pe.mode),
                                     &te.name,

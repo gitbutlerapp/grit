@@ -468,8 +468,13 @@ fn load_with_includes_disabled() {
         env: std::sync::Arc::new(env),
         ..Default::default()
     };
-    set.merge_file_with_includes(&file, false, &ctx)
-        .expect("merge no includes");
+    set.merge_file(
+        &file,
+        &grit_lib::config::IncludeOptions::default()
+            .with_context(ctx.clone())
+            .with_mode(grit_lib::config::IncludeMode::Ignore),
+    )
+    .expect("merge no includes");
     assert!(set.get("u.name").unwrap().is_none());
     assert!(set.get("include.path").unwrap().is_some());
 }

@@ -396,7 +396,7 @@ pub(crate) fn compose_merged_tree_oid(
     }
 
     out_entries.sort_by(|a, b| {
-        crate::objects::tree_entry_cmp(&a.name, a.mode == MODE_DIR, &b.name, b.mode == MODE_DIR)
+        crate::objects::tree_name_cmp(&a.name, a.mode == MODE_DIR, &b.name, b.mode == MODE_DIR)
     });
 
     if out_entries.is_empty() {

@@ -1131,7 +1131,7 @@ fn snapshot_checkouts_of_offloaded_blobs_follow_lazy_fetch() {
         let mut opts = grit_lib::maintenance::OffloadOptions::new("lop", 4_000_000_000);
         opts.filter = Some(grit_lib::remote::partial_clone::ObjectFilterSpec::BlobLimit(10 * 1024));
         opts.configure_lop = true;
-        let report = grit_lib::maintenance::offload_blobs(&repo, &opts).expect("offload");
+        let report = repo.maintenance().offload_blobs(&opts).expect("offload");
         assert_eq!(report.dropped_from_main, 1);
         grit_lib::objects::pack::clear_pack_cache();
     }

@@ -1,19 +1,18 @@
 //! Repository-wide integrity checks (object store, connectivity, refs, MIDX, commit-graph).
 //!
 //! Validates loose and packed objects (in parallel when worthwhile), walks reachability from
-//! [`reachability_roots`], optionally reports dangling objects, and runs ref/MIDX/graph checks.
+//! [`Maintenance::reachability_roots`](crate::maintenance::Maintenance::reachability_roots), optionally reports dangling objects, and runs ref/MIDX/graph checks.
 //! Progress is reported through [`ProgressSink`]; the library never prints.
 //!
 //! ```rust
-//! use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
+//! use grit_lib::maintenance::repository_fsck::FsckOptions;
 //! use grit_lib::progress::{CancelToken, NullProgress};
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //! let config = repo.config().snapshot()?;
-//! let report = fsck(
-//!     &repo,
+//! let report = repo.maintenance().fsck(
 //!     &FsckOptions::connectivity_and_refs(false),
 //!     &mut NullProgress,
 //!     &CancelToken::never(),
@@ -44,8 +43,8 @@ use crate::index::MODE_GITLINK;
 use crate::midx::verify_midx;
 use crate::objects::{
     oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit,
-    parse_commit_tree_and_parents_lenient, parse_tag, parse_tree_with_oid_len, HashAlgo, ObjectId,
-    ObjectKind, OidHashMap, OidHashSet, TreeEntryRef, TreeRefIter,
+    parse_commit_tree_and_parents_lenient, parse_tag, HashAlgo, ObjectId, ObjectKind, OidHashMap,
+    OidHashSet, TreeEntryRef, TreeRefIter,
 };
 use crate::odb::{read_loose_object_info, Odb};
 use crate::pack::{
@@ -59,7 +58,8 @@ use crate::refs_fsck::{refs_fsck, RefsFsckIssue};
 use crate::repo::Repository;
 
 pub use diagnostics::{FsckDiagnostic, FsckSummary};
-pub use roots::{index_object_roots, reachability_roots};
+pub use roots::index_object_roots;
+pub(crate) use roots::reachability_roots;
 
 /// Controls which fsck phases run and how strictly diagnostics are treated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,7 +231,7 @@ pub struct FsckReport {
     pub objects_checked: usize,
     /// All recorded findings in discovery order.
     pub issues: Vec<FsckIssue>,
-    /// Objects present in the object database but not reachable from [`reachability_roots`].
+    /// Objects present in the object database but not reachable from [`Maintenance::reachability_roots`](crate::maintenance::Maintenance::reachability_roots).
     pub dangling: Vec<(ObjectKind, ObjectId)>,
 }
 
@@ -459,7 +459,7 @@ fn pack_file_name(pack: &Path) -> String {
 /// With a custom primary object store, store validation lists the primary's objects and
 /// re-hashes each one instead of reading loose files; pack, MIDX and commit-graph checks
 /// only apply to the files backend.
-pub fn fsck(
+pub(crate) fn fsck(
     repo: &Repository,
     options: &FsckOptions,
     progress: &mut dyn ProgressSink,
@@ -510,7 +510,7 @@ pub fn fsck(
         let index_roots_set = index_object_roots(repo)?;
         let index_roots = oid_hash_set_from(&index_roots_set);
         let roots = reachability_roots(repo)?;
-        let treats_promisor = crate::promisor::repo_treats_promisor_packs(repo.git_dir(), &config);
+        let treats_promisor = crate::promisor::repo_treats_promisor_packs(&config);
         // Git's `is_promisor_object`: a missing object is fine when an object in a
         // promisor pack names it, whatever holds the object that led the walk there.
         let promised = if treats_promisor {
@@ -705,7 +705,7 @@ fn record_referenced_from_object(
             }
         }
         ObjectKind::Tree => {
-            if let Ok(entries) = parse_tree_with_oid_len(data, algo.hex_len()) {
+            if let Ok(entries) = crate::objects::collect_tree_with_oid_len(data, algo.hex_len()) {
                 for entry in entries {
                     referenced.insert(entry.oid);
                 }

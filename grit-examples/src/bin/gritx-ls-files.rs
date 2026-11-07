@@ -17,7 +17,9 @@ fn main() {
 fn run() -> Result<()> {
     let _cli = Cli::parse();
     let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
-    let index = repo.index().load()?;
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())?;
     for entry in index.entries() {
         println!("{}", String::from_utf8_lossy(&entry.path));
     }

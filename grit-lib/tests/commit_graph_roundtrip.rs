@@ -700,7 +700,7 @@ fn setup_mixed_storage_repo(root: &Path) {
 
 #[test]
 fn write_commit_graph_matches_git_for_packed_loose_and_tagged_commits() {
-    use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+    use grit_lib::maintenance::CommitGraphOptions;
     if !git_available() {
         eprintln!("SKIP: git unavailable");
         return;
@@ -716,8 +716,10 @@ fn write_commit_graph_matches_git_for_packed_loose_and_tagged_commits() {
     expected.sort();
     assert_eq!(sorted_commit_set(&repo), expected);
 
-    let report =
-        write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("write");
+    let report = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))
+        .expect("write");
     assert_eq!(report.commit_count, expected.len());
     git_cmd(dir.path(), &["commit-graph", "verify"]);
     let graph_path = repo.git_dir().join("objects/info/commit-graph");
@@ -752,8 +754,10 @@ fn write_commit_graph_matches_git_for_packed_loose_and_tagged_commits() {
         );
     }
 
-    let rewritten =
-        write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("rewrite");
+    let rewritten = repo
+        .maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))
+        .expect("rewrite");
     let stats = rewritten.bloom_stats.expect("bloom stats");
     assert_eq!(stats.filter_computed, 0, "git's filters are reused");
     assert_eq!(stats.filter_not_computed as usize, expected.len());
@@ -823,7 +827,7 @@ fn inflatable_prefix(entry: &[u8]) -> Vec<u8> {
 
 #[test]
 fn write_commit_graph_rejects_packed_commit_with_corrupt_body() {
-    use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+    use grit_lib::maintenance::CommitGraphOptions;
     if !git_available() {
         eprintln!("SKIP: git unavailable");
         return;
@@ -854,7 +858,9 @@ fn write_commit_graph_rejects_packed_commit_with_corrupt_body() {
 
         let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
         assert!(repo.odb().read(&commit).is_err(), "a whole read fails");
-        let result = write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true));
+        let result = repo
+            .maintenance()
+            .write_commit_graph(&CommitGraphOptions::with_changed_paths(true));
         assert!(
             result.is_err(),
             "wrote a graph over a corrupt commit ({from_end} bytes from the end): {result:?}"

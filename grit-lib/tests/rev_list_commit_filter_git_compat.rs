@@ -6,7 +6,6 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use grit_lib::config::mailmap::load_mailmap_table;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{MissingAction, RevListOptions};
@@ -543,7 +542,7 @@ fn mailmap_author_matches_git() {
     );
     git(wt, &["update-ref", "refs/heads/main", &tip.to_hex()]);
     let repo = open_grit_repo(wt);
-    let table = load_mailmap_table(&repo).expect("mailmap");
+    let table = repo.config().mailmap().expect("mailmap");
     let filter = Arc::new(
         CommitFilterBuilder::new()
             .author("Proper Name")

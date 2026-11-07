@@ -38,9 +38,12 @@ fn main() -> grit_lib::error::Result<()> {
 
     let mut index = Index::new();
     index.add_or_replace(entry);
-    repo.index().write(&mut index)?;
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
 
-    let round_trip = repo.index().load()?;
+    let round_trip = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())?;
     println!("index entries: {}", round_trip.entries().len());
     let first = &round_trip.entries()[0];
     println!(

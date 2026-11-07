@@ -131,7 +131,7 @@ fn core_bare_with_worktree_reaches_each_fresh_sink() {
 
 #[test]
 fn mailmap_blob_naming_a_tree_warns_and_still_loads_other_sources() {
-    use grit_lib::config::mailmap::{load_mailmap_table, read_mailmap_blob};
+    use grit_lib::config::mailmap::read_mailmap_blob;
     use grit_lib::objects::ObjectKind;
 
     let tmp = TempDir::new().expect("tempdir");
@@ -154,7 +154,10 @@ fn mailmap_blob_naming_a_tree_warns_and_still_loads_other_sources() {
         .with_work_tree(tmp.path().to_path_buf());
     let repo = Repository::open(&tmp.path().join(".git"), &options).expect("open");
 
-    let table = load_mailmap_table(&repo).expect("non-blob mailmap.blob is not fatal");
+    let table = repo
+        .config()
+        .mailmap()
+        .expect("non-blob mailmap.blob is not fatal");
     let (name, email) = table.map_user("Old".into(), "old@example.com".into());
     assert_eq!(
         (name.as_str(), email.as_str()),
@@ -177,6 +180,8 @@ fn mailmap_blob_naming_a_tree_warns_and_still_loads_other_sources() {
     sink.clear();
     git(&tmp, &["config", "mailmap.blob", "no-such-rev"]);
     repo.reload_config().expect("reload");
-    load_mailmap_table(&repo).expect("unresolvable mailmap.blob is skipped");
+    repo.config()
+        .mailmap()
+        .expect("unresolvable mailmap.blob is skipped");
     assert!(sink.warnings().is_empty(), "{:?}", sink.warnings());
 }

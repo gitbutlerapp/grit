@@ -9,7 +9,21 @@ See also the [Repository](../repository/) and [Objects](../objects/) pages for o
 
 ## Reading the index
 
-`IndexFile::load` reads `index` from disk and expands every sparse-directory placeholder (full in-memory materialization). Read-mostly porcelain such as `status` and `diff` use [`IndexFile::load_preserving_sparse`](rustdoc:grit_lib::index::IndexFile::load_preserving_sparse) instead so cone sparse-index repos stay on Git's compact index shape. Entries are `IndexEntry` values with path, mode, object id, and stage.
+[`IndexFile::load`](rustdoc:grit_lib::index::IndexFile::load) reads the index (`GIT_INDEX_FILE` or `.git/index`), resolves a split index, and by default expands every sparse-directory placeholder (full in-memory materialization). [`IndexLoadOptions`](rustdoc:grit_lib::index::IndexLoadOptions) selects another file (`with_path`), keeps placeholders for read-mostly work such as `status` and `diff` on cone sparse-index checkouts (`with_sparse(SparseIndexLoad::Preserve)`), or sets the entry-loading thread policy (`with_parse_context`). Entries are `IndexEntry` values with path, mode, object id, and stage.
+
+```rust
+use grit_lib::index::{IndexLoadOptions, IndexWriteOptions, SparseIndexLoad};
+
+let mut index = repo.index().load(&IndexLoadOptions::default())?;
+// ... edit entries ...
+repo.index().write(&mut index, &IndexWriteOptions::default())?;
+
+let compact = repo
+    .index()
+    .load(&IndexLoadOptions::default().with_sparse(SparseIndexLoad::Preserve))?;
+```
+
+[`IndexFile::write`](rustdoc:grit_lib::index::IndexFile::write) collapses skip-worktree subtrees back into sparse-directory entries when `index.sparse` is on, writes a split index when [`IndexWriteOptions::split`](rustdoc:grit_lib::index::IndexWriteOptions) or `core.splitIndex` asks for one, and runs the `post-index-change` hook. To parse index bytes you already have, use [`Index::parse`](rustdoc:grit_lib::index::Index::parse) with [`IndexParseOptions`](rustdoc:grit_lib::index::IndexParseOptions) (hash algorithm, config for EOIE/IEOT, source path for errors, thread policy); [`Index::empty_for`](rustdoc:grit_lib::index::Index::empty_for) makes an empty index whose version follows `index.version` and `feature.manyFiles`.
 
 ## Staging paths
 
@@ -28,6 +42,8 @@ Some checkouts cannot show every mode Git records. With `core.filemode=false` th
 ## Sparse checkout
 
 [`SparseCheckout::load`](rustdoc:grit_lib::index::sparse_checkout::SparseCheckout::load) compiles the repository's sparse-checkout definition (`core.sparseCheckout`, `core.sparseCheckoutCone` and `info/sparse-checkout`, cone or non-cone) once, and returns `None` when sparse checkout is off. [`SparseCheckout::includes`](rustdoc:grit_lib::index::sparse_checkout::SparseCheckout::includes) answers whether a path belongs in the work tree.
+
+[`IndexFile::apply_sparse_checkout`](rustdoc:grit_lib::index::IndexFile::apply_sparse_checkout) marks the excluded stage-0 entries of an index built from a tree as skip-worktree, as Git does after `read-tree` or a branch checkout.
 
 Every operation that updates the work tree from a tree consults it: `reset --hard` and `--mixed`, `switch`, `merge`, `pull` (merge and rebase), stash and the history engine. A path outside the definition that is skip-worktree (or new to the index) gets an index row with the `skip-worktree` bit and nothing is written to disk, the same as `git`. Conflicted paths are written out with conflict markers, also like `git`. When `index.sparse` is on, the index is collapsed back into sparse-directory entries when it is written. [`SparseCheckout::carry_skip_worktree`](rustdoc:grit_lib::index::sparse_checkout::SparseCheckout::carry_skip_worktree) keeps the bits on an index rebuilt from a tree without touching the work tree.
 

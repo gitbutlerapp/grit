@@ -5,7 +5,6 @@ use crate::support;
 use std::fs;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::index::sparse_checkout::apply_sparse_checkout_skip_worktree;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::Repository;
 
@@ -38,15 +37,22 @@ fn t7012_skip_worktree_bits_match_git_ls_files_v() {
     );
 
     let grit = open_grit(wt);
-    let mut index = grit.index().load().expect("load");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     clear_all_skip_worktree(&mut index);
     assert!(
         index.entries().iter().all(|e| !e.skip_worktree()),
         "cleared index must not yet match sparse cone"
     );
-    apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
+    grit.index()
+        .apply_sparse_checkout(&mut index)
+        .expect("sparse checkout");
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);
-    grit.index().write(&mut index).expect("write");
+    grit.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write");
     assert_git_fsck_strict(wt);
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);
 }
@@ -57,7 +63,10 @@ fn t7011_assume_unchanged_seen_by_git_ls_files_v() {
     seed_multidir_repo(&repo);
     let wt = repo.worktree();
     let grit = open_grit(wt);
-    let mut index = grit.index().load().expect("load");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     for entry in index.entries_mut() {
         entry.set_assume_unchanged(false);
     }
@@ -67,7 +76,9 @@ fn t7011_assume_unchanged_seen_by_git_ls_files_v() {
         .find(|e| e.path.ends_with(b"a/f0.txt"))
         .expect("entry");
     entry.set_assume_unchanged(true);
-    grit.index().write(&mut index).expect("write");
+    grit.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write");
     assert_git_fsck_strict(wt);
 
     let tags = git_ls_files_verbose_map(wt);
@@ -87,9 +98,14 @@ fn t2104_skip_worktree_excluded_from_status_like_git() {
     git(wt, &["read-tree", "-mu", "HEAD"]);
 
     let grit = open_grit(wt);
-    let mut index = grit.index().load().expect("load");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     clear_all_skip_worktree(&mut index);
-    apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
+    grit.index()
+        .apply_sparse_checkout(&mut index)
+        .expect("sparse checkout");
 
     fs::write(wt.join("a/f0.txt"), "changed\n").expect("touch included");
     let blob = grit
@@ -105,6 +121,8 @@ fn t2104_skip_worktree_excluded_from_status_like_git() {
     );
     excluded.oid = blob;
 
-    grit.index().write(&mut index).expect("write");
+    grit.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write");
     assert_porcelain_v2_matches_git(wt, &grit);
 }

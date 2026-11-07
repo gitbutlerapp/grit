@@ -5,6 +5,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, dead_code)]
 
+use grit_lib::progress::NullProgress;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -21,7 +22,6 @@ use grit_lib::objects::pack::{
 };
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 use grit_lib::repo::{InitOptions, Repository};
@@ -182,9 +182,12 @@ fn grit_record_commit(
     parent: Option<ObjectId>,
     message: &str,
 ) -> Result<ObjectId> {
-    let mut index = repo.index().load()?;
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())?;
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())?;
-    repo.index().write(&mut index)?;
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
     let commit_data = CommitData {
         tree,
         parents: parent.into_iter().collect(),

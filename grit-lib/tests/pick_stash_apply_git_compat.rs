@@ -86,9 +86,9 @@ fn grit_pick(repo: &Repository, source_hex: &str) -> grit_lib::error::Result<()>
     )?;
     let new_tree = merged.result_tree;
     let index_handle = repo.index();
-    let mut index = index_handle.load()?;
+    let mut index = index_handle.load(&grit_lib::index::IndexLoadOptions::default())?;
     grit_lib::diff::merge_trees::apply_tree_merge_output_to_index(&mut index, &merged);
-    index_handle.write(&mut index)?;
+    index_handle.write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
     checkout_between_trees(repo, Some(&head_tree), &new_tree)?;
     let commit_data = CommitData {
         tree: new_tree,

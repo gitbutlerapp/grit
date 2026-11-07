@@ -35,7 +35,7 @@ use crate::config::ConfigSet;
 use crate::diff::submodule_embedded_git_dir;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result, SubmoduleError};
-use crate::hash::{try_par_hash_with, try_par_hash_with_force, PAR_HASH_MIN_ITEMS};
+use crate::hash::{try_par_hash_forced, try_par_hash_with, PAR_HASH_MIN_ITEMS};
 use crate::objects::{
     iter_extra_headers, parse_commit, parse_tree, remove_header_lines, HashAlgo, ObjectId,
     ObjectKind, TagData, TreeEntry,
@@ -444,7 +444,7 @@ impl ComputeCtx<'_> {
             Ok(hex_sha256_content(&obj.data))
         };
         let hashed: Vec<String> = if self.blob_jobs.len() >= PAR_HASH_MIN_ITEMS {
-            try_par_hash_with_force(&self.blob_jobs, threads, hash_one)
+            try_par_hash_forced(&self.blob_jobs, threads, hash_one)
         } else {
             let mut total_bytes = 0_usize;
             for job in &self.blob_jobs {

@@ -60,10 +60,15 @@ fn commit_tree(repo: &Repository, message: &str) -> ObjectId {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index().write(&mut index).expect("write index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
     let parent = repo.references().resolve("HEAD").ok();
     let commit_data = CommitData {
         tree,
@@ -173,8 +178,10 @@ fn assert_index_bytes_equal(a: &[u8], b: &[u8]) {
 }
 
 fn assert_index_semantically_equal(a: &[u8], b: &[u8]) {
-    let left = Index::parse(a).expect("parse index a");
-    let right = Index::parse(b).expect("parse index b");
+    let left =
+        Index::parse(a, &grit_lib::index::IndexParseOptions::default()).expect("parse index a");
+    let right =
+        Index::parse(b, &grit_lib::index::IndexParseOptions::default()).expect("parse index b");
     assert_eq!(
         left.entries().len(),
         right.entries().len(),
@@ -332,7 +339,10 @@ fn parallel_matches_serial_gitlink_and_replacements() {
         .expect("oid");
     fs::create_dir_all(wt.join("sub")).expect("sub");
     fs::write(wt.join("file"), b"v1\n").expect("file");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     index.add_or_replace(
         entry_from_stat(
             &wt.join("file"),
@@ -371,7 +381,10 @@ fn parallel_matches_serial_gitlink_and_replacements() {
         .odb()
         .write(ObjectKind::Blob, b"target\n")
         .expect("blob");
-    index = repo.index().load().expect("reload");
+    index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("reload");
     index.remove(b"sub");
     index.remove(b"file");
     index.add_or_replace(
@@ -425,7 +438,10 @@ fn external_smudge_filter_runs_once_via_recording_runner() {
     let wt = repo.work_tree().expect("wt");
     fs::write(wt.join("filtered"), b"blob\n").expect("write");
     let blob = repo.odb().write(ObjectKind::Blob, b"blob\n").expect("blob");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     index.add_or_replace(
         entry_from_stat(&wt.join("filtered"), b"filtered", blob, MODE_REGULAR).expect("e"),
     );
@@ -485,7 +501,10 @@ fn ignorecase_collision_uses_serial_path_and_matches() {
     repo.reload_config().expect("reload");
     let wt = repo.work_tree().expect("wt");
     let empty = repo.odb().write(ObjectKind::Blob, b"").expect("empty");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     for name in ["FILE_x", "file_x", "other.txt"] {
         let path = wt.join(name);
         fs::write(&path, b"").expect("write");

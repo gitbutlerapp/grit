@@ -91,7 +91,7 @@ mod tests {
 
     fn write_tree(odb: &Odb, mut entries: Vec<TreeEntry>) -> ObjectId {
         entries.sort_by(|a, b| {
-            crate::objects::tree_entry_cmp(
+            crate::objects::tree_name_cmp(
                 &a.name,
                 a.mode == MODE_TREE,
                 &b.name,

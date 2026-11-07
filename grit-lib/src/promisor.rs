@@ -68,7 +68,7 @@ pub fn write_promisor_marker(git_dir: &Path, oids: &HashSet<ObjectId>) -> Result
 /// `repo_has_promisor_remote`): `extensions.partialclone` is set or some
 /// `remote.*.promisor=true`.
 #[must_use]
-pub fn repo_treats_promisor_packs(_git_dir: &Path, config: &ConfigSet) -> bool {
+pub fn repo_treats_promisor_packs(config: &ConfigSet) -> bool {
     if config.value("extensions.partialclone").is_some() {
         return true;
     }

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::error::Result;
-use crate::objects::{parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{parse_tree, serialize_tree, tree_name_cmp, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 
 pub(crate) const TREE_MODE: u32 = 0o040000;
@@ -147,7 +147,7 @@ pub(crate) fn edit(
         .into_iter()
         .map(|(name, (mode, oid))| TreeEntry { mode, name, oid })
         .collect();
-    list.sort_by(|a, b| tree_entry_cmp(&a.name, a.mode == TREE_MODE, &b.name, b.mode == TREE_MODE));
+    list.sort_by(|a, b| tree_name_cmp(&a.name, a.mode == TREE_MODE, &b.name, b.mode == TREE_MODE));
     odb.write(ObjectKind::Tree, &serialize_tree(&list))
 }
 

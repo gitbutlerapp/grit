@@ -75,7 +75,10 @@ fn add_dot_stages_resolved_and_unrelated_while_naming_marked_conflicts() {
     };
     assert_eq!(paths, vec!["b.txt".to_owned()]);
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(index.get(b"a.txt", 0).is_some());
     assert!(index.get(b"c.txt", 0).is_some());
     assert!(index.get(b"b.txt", 0).is_none());

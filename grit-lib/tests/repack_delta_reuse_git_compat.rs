@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::{repack_all, RepackOptions};
+use grit_lib::maintenance::RepackOptions;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
 
@@ -222,7 +223,10 @@ fn open(dir: &Path) -> Repository {
 fn grit_repack(dir: &Path, force: bool) {
     let mut opts = RepackOptions::default();
     opts.force_recompress = force;
-    let stats = repack_all(&open(dir), &opts).expect("repack");
+    let stats = open(dir)
+        .maintenance()
+        .repack_all(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("repack");
     assert!(stats.objects_packed.is_some_and(|n| n > 0), "{stats:?}");
 }
 
@@ -462,7 +466,10 @@ fn repack_keeps_ofs_delta_whose_base_an_older_pack_also_holds() {
     let mut build = grit_lib::objects::pack_objects::PackBuildOptions::for_local_copy(None);
     build.window = 0;
     opts.pack_build = Some(build);
-    repack_all(&open(&dir), &opts).expect("repack");
+    open(&dir)
+        .maintenance()
+        .repack_all(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("repack");
 
     assert_git_reads(&dir, &objects);
     let after = PackStats::of(&dir);

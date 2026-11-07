@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::process::Command;
 
@@ -10,7 +11,6 @@ use grit_lib::index::Index;
 use grit_lib::porcelain::status::{
     collect_untracked_and_ignored, status, IgnoredMode, StatusOptions,
 };
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::unique_tmp;
 
@@ -43,7 +43,10 @@ fn backslash_escaped_literal_matches_git_check_ignore_and_status() {
         &RepositoryOptions::empty().with_work_tree(&root),
     )
     .expect("open");
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let check = repo
         .ignore_check(&["foo bar".into()], &index)
         .expect("ignore_check");
@@ -100,7 +103,10 @@ fn slash_containing_prefix_glob_respects_pathname_boundaries() {
         &RepositoryOptions::empty().with_work_tree(&root),
     )
     .expect("open");
-    let mut index: Index = repo.index().load().expect("index");
+    let mut index: Index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let work_tree = repo.work_tree().expect("work tree");
     let (untracked, _) =
         collect_untracked_and_ignored(&repo, &mut index, work_tree, IgnoredMode::No, true, &[])

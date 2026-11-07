@@ -339,12 +339,9 @@ fn reuse_skips_when_have_shallow_grafts_present() {
     let mut progress = |_ev: PackProgress| {};
     let out = grit_lib::test_support::objects_pack::try_write_streaming_pack(
         &repo,
-        &[tip],
-        &[parent],
-        &HashSet::new(),
-        &have_shallow,
-        None,
-        &opts,
+        &UploadPackStream::new(&[tip], opts)
+            .with_haves(&[parent])
+            .with_have_shallow(&have_shallow),
         &mut grit_lib::progress::NullProgress,
         &mut buf,
     )

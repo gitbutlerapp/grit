@@ -7,6 +7,7 @@
 //! file is still the indexed blob does not block remove, while a real change does.
 //! On Windows, an additional test exercises the real post-commit path.
 
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -19,7 +20,6 @@ use grit_lib::index::IndexEntry;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefNameRef;
 use grit_lib::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use grit_lib::repo::Repository;
@@ -96,7 +96,10 @@ fn git_diff_files_quiet(worktree: &Path) -> bool {
 /// Issue #1001 on Windows: index OID matches the worktree but cached stat size is stale
 /// after write-tree commit persistence. Force the same shape on every platform.
 fn apply_stale_index_stat_size_mismatch(repo: &Repository, rel_path: &str, wrong_size: u32) {
-    let mut index = repo.index().load().expect("load index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load index");
     let path_bytes = rel_path.as_bytes();
     let mut found = false;
     for entry in index.entries_mut() {
@@ -108,12 +111,17 @@ fn apply_stale_index_stat_size_mismatch(repo: &Repository, rel_path: &str, wrong
         }
     }
     assert!(found, "missing index entry for {rel_path}");
-    repo.index().write(&mut index).expect("write stale index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write stale index");
 }
 
 fn refresh_index_stat_on_disk(repo: &Repository) {
     let work_tree = repo.work_tree().expect("work tree");
-    let mut index = repo.index().load().expect("load index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load index");
     let rules = WorktreeRules::from_repository(repo, &index).ok();
     let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
     let config = repo.config().snapshot().ok();
@@ -129,7 +137,7 @@ fn refresh_index_stat_on_disk(repo: &Repository) {
     )
     .expect("refresh index stat");
     repo.index()
-        .write(&mut index)
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write refreshed index");
 }
 
@@ -147,7 +155,10 @@ fn commit_staged_without_index_stat_refresh(
         } => (refname, short_name, oid),
         _ => panic!("expected branch head"),
     };
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("write tree");
     let commit_data = CommitData {
@@ -167,7 +178,9 @@ fn commit_staged_without_index_stat_refresh(
         .odb()
         .write(ObjectKind::Commit, &bytes)
         .expect("write commit");
-    repo.index().write(&mut index).expect("write index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
     let config = repo.config().snapshot().expect("config");
     update_branch_for_commit_with_config(
         repo.git_dir(),
@@ -185,7 +198,10 @@ fn commit_staged_without_index_stat_refresh(
 }
 
 fn index_entry(repo: &Repository, rel_path: &str) -> IndexEntry {
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let path_bytes = rel_path.as_bytes();
     index
         .entries()

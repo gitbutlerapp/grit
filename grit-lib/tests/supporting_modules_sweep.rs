@@ -1,7 +1,7 @@
 //! Exercise supporting-module APIs for line coverage (crlf, gitmodules, submodule, state).
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::config::gitmodules::gitdir::{submodule_modules_git_dir, validate_submodule_path};
+use grit_lib::config::gitmodules::gitdir::validate_submodule_path;
 use grit_lib::config::gitmodules::{
     check_submodule_name, check_submodule_url, validate_gitmodules_blob_line,
 };
@@ -41,8 +41,6 @@ fn gitmodules_and_submodule_gitdir_helpers() {
     let dir = TempDir::new().expect("tempdir");
     let git_dir = dir.path().join(".git");
     std::fs::create_dir_all(&git_dir).unwrap();
-    let modules = submodule_modules_git_dir(&git_dir, "sub/path");
-    assert!(modules.to_string_lossy().contains("modules"));
     validate_submodule_path(dir.path(), "sub").expect("validate path");
 }
 

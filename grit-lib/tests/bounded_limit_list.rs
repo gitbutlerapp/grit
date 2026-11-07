@@ -62,11 +62,9 @@ fn deep_range_count_with_git_and_grit_commit_graphs_matches_git() {
 
     for grit_graph in [false, true] {
         if grit_graph {
-            grit_lib::maintenance::write_commit_graph(
-                &repo,
-                &grit_lib::maintenance::CommitGraphOptions::default(),
-            )
-            .expect("grit commit-graph");
+            repo.maintenance()
+                .write_commit_graph(&grit_lib::maintenance::CommitGraphOptions::default())
+                .expect("grit commit-graph");
         } else {
             support::git(dir.path(), &["commit-graph", "write", "--reachable"]);
         }

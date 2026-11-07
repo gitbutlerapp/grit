@@ -1,5 +1,6 @@
 //! Checkout applies `core.autocrlf` smudge (LF→CRLF) like Git checkout.
 
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::process::Command;
 
@@ -7,7 +8,6 @@ use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn git_eol(repo: &std::path::Path, path: &str) -> String {
@@ -49,10 +49,15 @@ fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index().write(&mut index).expect("write index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
     let parent = repo.references().resolve("HEAD").ok();
     let commit_data = CommitData {
         tree,

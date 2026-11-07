@@ -45,8 +45,11 @@ fn relative_gitdir_include_from_disk_file() {
         .expect("read")
         .expect("exists");
     let mut set = ConfigSet::new();
-    set.merge_file_with_includes(&file, true, &ctx)
-        .expect("merge includes");
+    set.merge_file(
+        &file,
+        &grit_lib::config::IncludeOptions::default().with_context(ctx.clone()),
+    )
+    .expect("merge includes");
     assert_eq!(set.get("hit.k").unwrap().as_deref(), Some("yes"));
 }
 

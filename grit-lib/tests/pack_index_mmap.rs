@@ -5,14 +5,14 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::error::ObjectError;
-use grit_lib::maintenance::{repack_all, RepackOptions};
+use grit_lib::maintenance::RepackOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::objects_pack::{
     clear_pack_cache, parse_pack_index_bytes, read_object_from_pack, read_pack_index,
     read_pack_index_cached, read_pack_index_no_verify, verify_pack_and_collect,
-    write_v2_pack_index_with_trailer,
+    write_v2_pack_index_from_trailer,
 };
 use grit_lib::test_support::pack::pack_cache_guard;
 use grit_test_support::objects::{
@@ -172,7 +172,7 @@ fn corrupt_large_offset_read_object_from_pack_propagates_error() {
     let pack_path = tmp.path().join("c.pack");
     std::fs::write(&pack_path, b"PACK\x00\x00\x00\x02\x00\x00\x00\x00").expect("pack");
     let oid = ObjectId::from_bytes(&[0x01; 20]).expect("oid");
-    write_v2_pack_index_with_trailer(&idx_path, &[(oid, 0x8000_0000u64, 0)], &[0u8; 20], 20, None)
+    write_v2_pack_index_from_trailer(&idx_path, &[(oid, 0x8000_0000u64, 0)], &[0u8; 20], 20, None)
         .expect("write");
     let mut raw = std::fs::read(&idx_path).expect("read");
     let hb = 20;
@@ -262,7 +262,14 @@ fn repack_with_cached_mmap_index_succeeds() {
     });
     let grit_repo = Repository::open(&repo.path().join(".git"), &RepositoryOptions::default())
         .expect("open repo");
-    repack_all(&grit_repo, &RepackOptions::default()).expect("repack");
+    grit_repo
+        .maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("repack");
     clear_pack_cache();
     git_fsck(repo.path());
 }

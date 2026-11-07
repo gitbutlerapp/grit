@@ -13,9 +13,7 @@ use grit_lib::objects::commit_graph::{
 };
 use grit_lib::objects::hash::{verify_trailer, TrailerMismatch};
 use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
-use grit_lib::objects::midx::{
-    verify_midx, write_multi_pack_index_with_options, WriteMultiPackIndexOptions,
-};
+use grit_lib::objects::midx::{verify_midx, write_multi_pack_index, WriteMultiPackIndexOptions};
 use grit_lib::objects::pack_rev::{
     build_pack_rev_bytes_from_index_order_offsets_and_checksum, rev_path_for_index,
 };
@@ -110,7 +108,7 @@ fn grit_write_trailer_artifacts(repo: &Repository) {
     std::fs::write(rev_path_for_index(&idx_path), rev_bytes).expect("write rev");
 
     // Match the on-disk MIDX format version system `git` writes (v1 on Git 2.43).
-    write_multi_pack_index_with_options(
+    write_multi_pack_index(
         &pack_dir(repo.git_dir()),
         &WriteMultiPackIndexOptions {
             version: Some(1),
@@ -149,7 +147,10 @@ fn grit_write_trailer_artifacts(repo: &Repository) {
     std::fs::create_dir_all(&info_dir).expect("info dir");
     std::fs::write(info_dir.join("commit-graph"), graph_bytes).expect("write commit-graph");
 
-    let mut index = repo.index().load().expect("load index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load index");
     index
         .write_to_path(&repo.git_dir().join("index"), false)
         .expect("write index");
@@ -176,7 +177,11 @@ fn grit_verify_git_artifacts(repo: &Repository) {
     let (_, idx_path) = find_pack_and_idx(&pack_dir(repo.git_dir()));
     read_pack_index(&idx_path).expect("grit verify pack idx trailer");
     let index_bytes = std::fs::read(repo.git_dir().join("index")).expect("read index");
-    Index::parse_with_algo(&index_bytes, repo.odb().hash_algo()).expect("grit parse index trailer");
+    Index::parse(
+        &index_bytes,
+        &grit_lib::index::IndexParseOptions::default().with_hash_algo(repo.odb().hash_algo()),
+    )
+    .expect("grit parse index trailer");
     verify_midx(&repo.git_dir().join("objects")).expect("grit verify midx");
     let graph_path = repo.git_dir().join("objects/info/commit-graph");
     let graph_bytes = std::fs::read(&graph_path).expect("read commit-graph");
@@ -247,5 +252,9 @@ fn corrupt_trailer_byte_yields_typed_checksum_error() {
     corrupt_last_trailer_byte(&index_path);
     let index_bytes = std::fs::read(&index_path).expect("read index");
     assert!(verify_trailer(algo, &index_bytes).is_err());
-    assert!(Index::parse_with_algo(&index_bytes, algo).is_err());
+    assert!(Index::parse(
+        &index_bytes,
+        &grit_lib::index::IndexParseOptions::default().with_hash_algo(algo)
+    )
+    .is_err());
 }

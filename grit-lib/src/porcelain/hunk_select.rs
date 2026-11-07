@@ -1174,7 +1174,7 @@ pub fn restore_hunks(
         } else {
             Some(handle.begin_update()?)
         };
-        let mut index = handle.load()?;
+        let mut index = handle.load(&crate::index::IndexLoadOptions::default())?;
         let resolved = resolve_selection_in(
             repo,
             Some(&mut index),
@@ -1544,7 +1544,7 @@ pub fn stage_hunks(
     crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)?;
     let resolved = resolve_selection_in(repo, None, side, selection, pathspecs, diff_options)?;
     crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)?;
-    let mut index = handle.load()?;
+    let mut index = handle.load(&crate::index::IndexLoadOptions::default())?;
     let apply = apply_patch_to_index(
         repo,
         &mut index,
@@ -1712,8 +1712,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap();
-        let grit_tree =
-            write_tree_from_index(repo.odb(), &repo.index().load().unwrap(), "").unwrap();
+        let grit_tree = write_tree_from_index(repo.odb(), &repo.load_index().unwrap(), "").unwrap();
 
         git(root, &["read-tree", "HEAD"]);
         let patch_path = root.join("partial.diff");
@@ -1936,7 +1935,7 @@ mod tests {
         git(root, &["add", "f.txt"]);
         git(root, &["commit", "-qm", "init"]);
         std::fs::write(root.join("f.txt"), b"two\n").unwrap();
-        let before = repo.index().load().unwrap();
+        let before = repo.load_index().unwrap();
         let stale = HunkId::from_str("000000000001").unwrap();
         let err = stage_hunks(
             &repo,
@@ -1957,7 +1956,7 @@ mod tests {
                 HunkSelectError::StaleId { .. }
             ))
         ));
-        let after = repo.index().load().unwrap();
+        let after = repo.load_index().unwrap();
         assert_eq!(before.entries.len(), after.entries.len());
     }
 
@@ -2185,7 +2184,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap();
-        assert!(repo.index().load().unwrap().get(b"new.txt", 0).is_some());
+        assert!(repo.load_index().unwrap().get(b"new.txt", 0).is_some());
         git(root, &["fsck"]);
     }
 
@@ -2223,8 +2222,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap();
-        let grit_tree =
-            write_tree_from_index(repo.odb(), &repo.index().load().unwrap(), "").unwrap();
+        let grit_tree = write_tree_from_index(repo.odb(), &repo.load_index().unwrap(), "").unwrap();
         std::fs::write(&index_path, index_before).unwrap();
         let patch_path = root.join("partial.diff");
         std::fs::write(&patch_path, patch_text).unwrap();
@@ -2269,7 +2267,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            repo.index().load().unwrap().get(b"gone.txt", 0).is_none(),
+            repo.load_index().unwrap().get(b"gone.txt", 0).is_none(),
             "index entry removed after staging delete hunk"
         );
     }
@@ -2707,7 +2705,7 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.staged_lines["f.txt"], ["1-15"]);
         assert!(!root.join(".git/index.lock").exists());
-        let index = repo.index().load().unwrap();
+        let index = repo.load_index().unwrap();
         let staged = repo
             .odb()
             .read(&index.get(b"f.txt", 0).unwrap().oid)
@@ -2875,8 +2873,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap();
-        let grit_tree =
-            write_tree_from_index(repo.odb(), &repo.index().load().unwrap(), "").unwrap();
+        let grit_tree = write_tree_from_index(repo.odb(), &repo.load_index().unwrap(), "").unwrap();
         git(root, &["read-tree", "HEAD"]);
         let patch_path = root.join("partial.diff");
         std::fs::write(&patch_path, patch_text).unwrap();

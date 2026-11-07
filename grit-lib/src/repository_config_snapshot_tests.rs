@@ -526,7 +526,12 @@ mod tests {
             let mut index = repo.load_index().unwrap();
             let path = repo.index_path();
             index
-                .write_with_config(&path, cfg.as_ref())
+                .write_to_path_with_config_and_policy(
+                    &path,
+                    crate::index::index_skip_hash_for_write(Some(cfg.as_ref())),
+                    Some(cfg.as_ref()),
+                    crate::parallel::ThreadPolicy::default(),
+                )
                 .expect("write index");
 
             let status = Command::new("git")

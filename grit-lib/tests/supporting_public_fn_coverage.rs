@@ -20,8 +20,8 @@ use grit_lib::config::git_path::{
     abspath_part_inside_repo, longest_ancestor_length, prefix_path_gently,
 };
 use grit_lib::config::precompose_config::{
-    argv_precompose_enabled, effective_core_precomposeunicode, filesystem_nfd_nfc_aliases,
-    locate_git_dir_from_environment, pathspec_precompose_enabled,
+    argv_precompose_enabled, effective_core_precomposeunicode, locate_git_dir_from_environment,
+    pathspec_precompose_enabled,
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::diagnostics::{warn, CollectingDiagnostics, DiagnosticsHandle, Warning};
@@ -115,7 +115,10 @@ fn crlf_and_pathspec_helpers() {
 
     let _ = parse_gitattributes_content("*.bin binary\n");
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let odb = repo.odb();
     let _ = load_gitattributes_from_index(&index, &odb);
     fs::write(dir.path().join(".gitattributes"), "* text=auto\n").expect("ga");
@@ -165,7 +168,6 @@ fn git_path_precompose_ident_objects() {
 
     let git_dir = dir.path().join(".git");
     let _ = effective_core_precomposeunicode(Some(&git_dir));
-    let _ = filesystem_nfd_nfc_aliases(&git_dir);
     let _ = argv_precompose_enabled(Some(&git_dir));
     let _ = pathspec_precompose_enabled();
     let env = Environment::empty();

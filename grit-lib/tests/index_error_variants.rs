@@ -89,7 +89,11 @@ fn index_error_variants() {
         let len = bytes.len();
         bytes[4..8].copy_from_slice(&5u32.to_be_bytes());
         bytes[len - hash_len..].fill(0);
-        let err = Index::parse_with_algo(&bytes, algo).unwrap_err();
+        let err = Index::parse(
+            &bytes,
+            &grit_lib::index::IndexParseOptions::default().with_hash_algo(algo),
+        )
+        .unwrap_err();
         assert!(matches!(
             &err,
             Error::Index(IndexError::Corrupt {
@@ -121,7 +125,11 @@ fn index_error_variants() {
         let body_len = bytes.len() - hash_len;
         let digest = algo.checksum_digest(&bytes[..body_len]);
         bytes[body_len..].copy_from_slice(&digest);
-        let err = Index::parse_with_algo(&bytes, algo).unwrap_err();
+        let err = Index::parse(
+            &bytes,
+            &grit_lib::index::IndexParseOptions::default().with_hash_algo(algo),
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 err,

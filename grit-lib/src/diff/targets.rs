@@ -422,7 +422,7 @@ pub(crate) fn collect_files_for_target(
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::IndexVsHead => {
-            let index = repo.index().load()?;
+            let index = repo.load_index()?;
             let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
             let restrict =
                 pathspec_restrict_paths_for_scan(repo, &index, pathspecs, head_tree.as_ref())?;
@@ -808,7 +808,7 @@ fn unstaged_changes(
     rename_threshold: u32,
     pathspecs: &[String],
 ) -> Result<Vec<FileChange>> {
-    let mut index = repo.index().load()?;
+    let mut index = repo.load_index()?;
     let restrict = pathspec_restrict_paths_for_scan(repo, &index, pathspecs, None)?;
     unstaged_changes_inner(repo, &mut index, rename_threshold, restrict)
 }
@@ -910,7 +910,7 @@ fn staged_changes(
     rename_threshold: u32,
     restrict_to_paths: Option<Arc<BTreeSet<String>>>,
 ) -> Result<Vec<FileChange>> {
-    let index = repo.index().load()?;
+    let index = repo.load_index()?;
     let entries = staged_entries_in(repo, &index, rename_threshold, restrict_to_paths.as_deref())?;
     load_object_changes(repo, &entries)
 }
@@ -922,7 +922,7 @@ fn worktree_changes(
     pathspecs: &[String],
 ) -> Result<Vec<FileChange>> {
     let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
-    let mut index = repo.index().load()?;
+    let mut index = repo.load_index()?;
     let restrict = pathspec_restrict_paths_for_scan(repo, &index, pathspecs, base_tree)?;
     let rules = Arc::new(Mutex::new(WorktreeRules::from_repository(repo, &index)?));
     let entries = worktree_entries_in(
@@ -1183,7 +1183,7 @@ pub(crate) fn unstaged_raw_changes_with_peer_hunks(
     pathspecs: &[String],
     opts: DiffOptions,
 ) -> Result<UnstagedRawWithPeers> {
-    let mut index = repo.index().load()?;
+    let mut index = repo.load_index()?;
     unstaged_raw_changes_with_peer_hunks_in(repo, &mut index, pathspecs, opts)
 }
 

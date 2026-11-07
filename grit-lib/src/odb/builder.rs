@@ -111,13 +111,13 @@ impl OdbBuilder {
     ///
     /// History walks never read commit-graph files from `objects/` for a custom primary store:
     /// such a file describes the files layout, not that store. Build one with
-    /// [`crate::maintenance::build_commit_graph`], persist its bytes in the store, and attach
+    /// [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph), persist its bytes in the store, and attach
     /// it here when opening the repository.
     ///
     /// An attached graph replaces any graph file under `objects/info/`. It is trusted, not
     /// checked against the store: every commit it lists must be in this database with exactly
     /// the parents and tree it records, which holds for a graph
-    /// [`crate::maintenance::build_commit_graph`] built from this repository. Build it with
+    /// [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph) built from this repository. Build it with
     /// [`CommitGraphChain::from_bytes`].
     ///
     /// The graph's [`CommitGraphChain::hash_algo`] must match the repository's object format,
@@ -290,13 +290,13 @@ impl Odb {
     /// Write `objects/info/commit-graph` from reachable commits (files primary only).
     ///
     /// A custom primary has no `objects/info/` to install a graph in: build it in memory with
-    /// [`crate::maintenance::build_commit_graph`] and attach it with
+    /// [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph) and attach it with
     /// [`OdbBuilder::commit_graph`] instead.
     ///
     /// Writes nothing when there are no reachable commits (existing graph unchanged) and
     /// deletes any existing graph in a repository that rewrites parent lists (shallow,
     /// `info/grafts`, or replace refs unless `core.useReplaceRefs=false`), as
-    /// [`crate::maintenance::write_commit_graph`] does.
+    /// [`Maintenance::write_commit_graph`](crate::maintenance::Maintenance::write_commit_graph) does.
     ///
     /// # Errors
     ///

@@ -484,7 +484,11 @@ fn midx_public_api_smoke_sha1_and_sha256() {
             let _ = midx_oid_listed_in_tip(&objects, &entry.oid).expect("listed?");
             let _ = try_read_info_via_midx(&objects, &entry.oid).expect("info");
         }
-        write_multi_pack_index(&pack_dir).expect("rewrite");
+        write_multi_pack_index(
+            &pack_dir,
+            &grit_lib::objects::midx::WriteMultiPackIndexOptions::default(),
+        )
+        .expect("rewrite");
         evict_midx_read_cache_for_pack_dir(&pack_dir);
         grit_write_midx(
             &pack_dir,
@@ -521,7 +525,7 @@ fn grit_incremental_chain_compact_roundtrip() {
         repo.git(&["add", &format!("grit-incr-{i}.txt")]);
         repo.git(&["commit", "-q", "-m", &format!("grit incr {i}")]);
         assert!(midx_support::pack_objects_layer(repo.path(), 100 + i));
-        grit_lib::objects::midx::write_multi_pack_index_with_options(
+        grit_lib::objects::midx::write_multi_pack_index(
             &pack_dir,
             &WriteMultiPackIndexOptions {
                 incremental: true,
@@ -609,12 +613,16 @@ fn midx_write_rejects_empty_and_bad_preferred() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let pack_dir = tmp.path().join("pack");
     std::fs::create_dir_all(&pack_dir).expect("mkdir");
-    assert!(write_multi_pack_index(&pack_dir).is_err());
+    assert!(write_multi_pack_index(
+        &pack_dir,
+        &grit_lib::objects::midx::WriteMultiPackIndexOptions::default()
+    )
+    .is_err());
     let Some((_, objects, _)) = multi_pack_repo(HashAlgo::Sha1, 1) else {
         return;
     };
     let pack_dir = objects.join("pack");
-    let err = grit_lib::objects::midx::write_multi_pack_index_with_options(
+    let err = grit_lib::objects::midx::write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             preferred_pack_idx: Some(99),
@@ -641,8 +649,7 @@ fn grit_incremental_write_layer() {
         version: Some(1),
         ..Default::default()
     };
-    grit_lib::objects::midx::write_multi_pack_index_with_options(&pack_dir, &opts)
-        .expect("grit incremental");
+    grit_lib::objects::midx::write_multi_pack_index(&pack_dir, &opts).expect("grit incremental");
     if let Some(chain) = read_chain_hashes(&pack_dir) {
         assert!(!chain.is_empty());
         for h in chain {

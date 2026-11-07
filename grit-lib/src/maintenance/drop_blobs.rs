@@ -3,7 +3,7 @@
 //! A partial clone fetches blobs on demand, and over time keeps every large blob it
 //! ever needed. The promisor remote still has them, so the local copies can go once
 //! nothing needs them nearby: they come back through the ordinary lazy fetch the
-//! next time something reads them. [`drop_promised_blobs`] does that for blobs
+//! next time something reads them. [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs) does that for blobs
 //! stored in promisor packs, at or above a size, and not needed recently.
 //!
 //! A blob is dropped only when all of these hold:
@@ -20,9 +20,9 @@
 //!   cutoff (a lazy fetch writes a new pack, so this is when it was last fetched).
 //!
 //! In a partial clone, a blob in a promisor pack came from the promisor remote, so
-//! it can be fetched again. That stops being true once [`offload_blobs`] has run:
+//! it can be fetched again. That stops being true once [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs) has run:
 //! the promisor pack it writes also holds the blobs only this repository has (Git
-//! would delete them anywhere else; see [`offload_blobs`]). So the promisors this
+//! would delete them anywhere else; see [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs)). So the promisors this
 //! machine can read are checked directly: promisor remotes with a local URL (a path
 //! or `file://`) and the LOP directories offload recorded in
 //! [`LOP_GIT_DIR_KEY`]. A blob one of them stores in its own object directory (not
@@ -38,7 +38,7 @@
 //! remotes only, the promisor pack is trusted as Git does, and nothing extra is
 //! read.
 //!
-//! [`offload_blobs`]: crate::maintenance::offload_blobs
+//! [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs): crate::maintenance::offload_blobs
 //!
 //! Git 2.56 has a manual version of the same operation,
 //! `git repack -a -d --filter=blob:limit=<n> --drop-filtered`: the same candidates,
@@ -58,7 +58,7 @@ use crate::config::ConfigSet;
 use crate::environment::RepositoryOptions;
 use crate::error::{BadNumericSource, ConfigError, Error, Result};
 use crate::git_date::approx::approxidate_careful_at;
-use crate::index_pack::{install_pack_path, IngestPackOptions};
+use crate::index_pack::{install_pack_path_with_progress, IngestPackOptions};
 use crate::objects::{
     oid_hash_map, oid_hash_set, CommitRef, ObjectId, ObjectKind, OidHashMap, OidHashSet,
     TreeRefIter,
@@ -95,7 +95,7 @@ const EXPIRE_KEY: &str = "maintenance.drop-large-blobs.expire";
 /// The operation name used in errors.
 const OPERATION: &str = "drop-large-blobs";
 
-/// Options for [`drop_promised_blobs`].
+/// Options for [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DropPromisedBlobsOptions {
@@ -134,30 +134,14 @@ impl DropPromisedBlobsOptions {
     }
 
     /// Options from `maintenance.drop-large-blobs.minSize` and
-    /// `maintenance.drop-large-blobs.expire`, at time `now`.
+    /// `maintenance.drop-large-blobs.expire`, at time `now`, with values the caller gives
+    /// (a command line's `--min-size` and `--older-than`) in place of the config ones.
     ///
     /// `minSize` takes Git's `k`/`m`/`g` suffixes. When unset it is the smallest
     /// `blob:limit` among the promisor remotes' `partialCloneFilter`, or
     /// [`DEFAULT_DROP_MIN_SIZE`]. `expire` is read with [`DropExpiry::parse`]
-    /// ([`DEFAULT_DROP_EXPIRE`] when unset).
-    ///
-    /// # Returns
-    ///
-    /// `None` when `expire` is [`DropExpiry::Never`].
-    ///
-    /// # Errors
-    ///
-    /// [`ConfigError::BadNumericValue`] for a `minSize` that is not a non-negative
-    /// size, and [`ConfigError::InvalidDate`] for an `expire` that is not a date.
-    pub fn from_config(config: &ConfigSet, now: OffsetDateTime) -> Result<Option<Self>> {
-        Self::from_config_with_overrides(config, now, None, None)
-    }
-
-    /// [`Self::from_config`] with values the caller gives (a command line's
-    /// `--min-size` and `--older-than`) in place of the config ones.
-    ///
-    /// A config key that is overridden is not read, so an invalid value there does
-    /// not matter. The other one still comes from config, with the same defaults.
+    /// ([`DEFAULT_DROP_EXPIRE`] when unset). A config key that is overridden is not read,
+    /// so an invalid value there does not matter.
     ///
     /// # Parameters
     ///
@@ -170,8 +154,10 @@ impl DropPromisedBlobsOptions {
     ///
     /// # Errors
     ///
-    /// As [`Self::from_config`], for the keys that are read.
-    pub fn from_config_with_overrides(
+    /// [`ConfigError::BadNumericValue`] for a `minSize` that is not a non-negative
+    /// size, and [`ConfigError::InvalidDate`] for an `expire` that is not a date, for the
+    /// keys that are read.
+    pub fn from_config(
         config: &ConfigSet,
         now: OffsetDateTime,
         min_size: Option<u64>,
@@ -295,7 +281,7 @@ fn configured_min_size(config: &ConfigSet) -> Result<u64> {
     )
 }
 
-/// One blob [`drop_promised_blobs`] dropped (or, on a dry run, would drop).
+/// One blob [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs) dropped (or, on a dry run, would drop).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DroppedBlob {
@@ -371,7 +357,7 @@ pub enum DropPromisedBlobsSkip {
     NoCurrentTime,
 }
 
-/// What [`drop_promised_blobs`] did, or with [`DropPromisedBlobsOptions::dry_run`]
+/// What [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs) did, or with [`DropPromisedBlobsOptions::dry_run`]
 /// would do.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -411,7 +397,7 @@ impl DropPromisedBlobsReport {
 /// exact rules).
 ///
 /// A blob stays unless a promisor can supply it again: after
-/// [`crate::maintenance::offload_blobs`] has run, or when a promisor remote has a
+/// [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs) has run, or when a promisor remote has a
 /// local URL, that is checked in the promisor's own object directory
 /// ([`KeptBlobCounts::not_in_promisor`], [`KeptBlobCounts::unverified`]).
 ///
@@ -438,7 +424,7 @@ impl DropPromisedBlobsReport {
 ///   rebase, cherry-pick, revert, am or bisect;
 /// - [`crate::repo::RepositoryError::MaintenanceRunning`] when another process holds `gc.pid`;
 /// - pack read, write and removal failures.
-pub fn drop_promised_blobs(
+pub(crate) fn drop_promised_blobs(
     repo: &Repository,
     opts: &DropPromisedBlobsOptions,
 ) -> Result<DropPromisedBlobsReport> {
@@ -461,20 +447,6 @@ pub fn drop_promised_blobs(
         }
     };
     run(repo, &config, opts)
-}
-
-impl Repository {
-    /// Drop large promised blobs not needed recently; see [`drop_promised_blobs`].
-    ///
-    /// # Errors
-    ///
-    /// See [`drop_promised_blobs`].
-    pub fn drop_promised_blobs(
-        &self,
-        opts: &DropPromisedBlobsOptions,
-    ) -> Result<DropPromisedBlobsReport> {
-        drop_promised_blobs(self, opts)
-    }
 }
 
 /// What the `gc` drop phase will do, settled from config before `gc` changes
@@ -505,10 +477,12 @@ pub(crate) fn plan_drop_for_gc(config: &ConfigSet, now_unix: i64) -> Result<GcDr
         configured_min_size(config)?;
         return Ok(GcDropPlan::Skip(DropPromisedBlobsSkip::NoCurrentTime));
     };
-    Ok(match DropPromisedBlobsOptions::from_config(config, now)? {
-        Some(opts) => GcDropPlan::Run(opts),
-        None => GcDropPlan::Skip(DropPromisedBlobsSkip::Disabled),
-    })
+    Ok(
+        match DropPromisedBlobsOptions::from_config(config, now, None, None)? {
+            Some(opts) => GcDropPlan::Run(opts),
+            None => GcDropPlan::Skip(DropPromisedBlobsSkip::Disabled),
+        },
+    )
 }
 
 /// The `gc` phase: runs a [`GcDropPlan::Run`], and reports a skip instead of
@@ -569,7 +543,7 @@ fn gate(repo: &Repository, config: &ConfigSet) -> Result<Option<Refusal>> {
     if config.bool_with_default("extensions.preciousobjects", false) {
         return Ok(Some(Refusal::PreciousObjects));
     }
-    if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config) {
+    if !crate::promisor::repo_treats_promisor_packs(config) {
         return Ok(Some(Refusal::NoPromisorRemote));
     }
     for wt in crate::worktree::list_worktrees(repo)? {
@@ -1319,7 +1293,7 @@ fn rewrite_packs(
             continue;
         };
         let trusted_rows = (!built.index_rows.is_empty()).then_some(built.index_rows);
-        let ingested = install_pack_path(
+        let ingested = install_pack_path_with_progress(
             staging,
             odb,
             &IngestPackOptions {
@@ -1331,6 +1305,8 @@ fn rewrite_packs(
                 mark_promisor_pack: true,
                 ..IngestPackOptions::default()
             },
+            None,
+            None,
         )?;
         let Some(new_pack) = ingested.pack_path else {
             continue;
@@ -1400,7 +1376,7 @@ mod tests {
 
     #[test]
     fn defaults_are_one_mebibyte_and_two_weeks() {
-        let opts = DropPromisedBlobsOptions::from_config(&config(""), now())
+        let opts = DropPromisedBlobsOptions::from_config(&config(""), now(), None, None)
             .unwrap()
             .unwrap();
         assert_eq!(opts.min_size, DEFAULT_DROP_MIN_SIZE);
@@ -1417,6 +1393,8 @@ mod tests {
                     "[maintenance \"drop-large-blobs\"]\n\tminSize = {v}\n"
                 )),
                 now(),
+                None,
+                None,
             )
             .map(|o| o.unwrap().min_size)
         };
@@ -1441,14 +1419,14 @@ mod tests {
              [remote \"lop\"]\n\turl = /l\n\tpromisor = true\n\tpartialclonefilter = blob:limit=50k\n\
              [remote \"none\"]\n\turl = /n\n\tpromisor = true\n\tpartialclonefilter = blob:none\n",
         );
-        let opts = DropPromisedBlobsOptions::from_config(&cfg, now())
+        let opts = DropPromisedBlobsOptions::from_config(&cfg, now(), None, None)
             .unwrap()
             .unwrap();
         assert_eq!(opts.min_size, 50 * 1024);
         let blobless = config(
             "[remote \"origin\"]\n\turl = /o\n\tpromisor = true\n\tpartialclonefilter = blob:none\n",
         );
-        let opts = DropPromisedBlobsOptions::from_config(&blobless, now())
+        let opts = DropPromisedBlobsOptions::from_config(&blobless, now(), None, None)
             .unwrap()
             .unwrap();
         assert_eq!(opts.min_size, DEFAULT_DROP_MIN_SIZE);
@@ -1462,6 +1440,8 @@ mod tests {
                     "[maintenance \"drop-large-blobs\"]\n\texpire = {v}\n"
                 )),
                 now(),
+                None,
+                None,
             )
         };
         assert_eq!(expire("now").unwrap().unwrap().keep_newer_than, None);
@@ -1503,21 +1483,19 @@ mod tests {
     #[test]
     fn overrides_replace_only_their_own_key() {
         let cfg = config("[maintenance \"drop-large-blobs\"]\n\texpire = never\n\tminSize = 10m\n");
-        assert!(DropPromisedBlobsOptions::from_config(&cfg, now())
-            .unwrap()
-            .is_none());
+        assert!(
+            DropPromisedBlobsOptions::from_config(&cfg, now(), None, None)
+                .unwrap()
+                .is_none()
+        );
         // An expiry override runs the task, and minSize still comes from config.
-        let opts = DropPromisedBlobsOptions::from_config_with_overrides(
-            &cfg,
-            now(),
-            None,
-            Some(DropExpiry::Immediately),
-        )
-        .unwrap()
-        .unwrap();
+        let opts =
+            DropPromisedBlobsOptions::from_config(&cfg, now(), None, Some(DropExpiry::Immediately))
+                .unwrap()
+                .unwrap();
         assert_eq!(opts.min_size, 10 << 20);
         assert_eq!(opts.keep_newer_than, None);
-        let opts = DropPromisedBlobsOptions::from_config_with_overrides(
+        let opts = DropPromisedBlobsOptions::from_config(
             &cfg,
             now(),
             Some(5),
@@ -1526,7 +1504,7 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!((opts.min_size, opts.keep_newer_than), (5, Some(now())));
-        assert!(DropPromisedBlobsOptions::from_config_with_overrides(
+        assert!(DropPromisedBlobsOptions::from_config(
             &cfg,
             now(),
             Some(5),
@@ -1538,7 +1516,7 @@ mod tests {
         // An overridden key is not read, so its bad value does not matter.
         let bad =
             config("[maintenance \"drop-large-blobs\"]\n\texpire = bogus\n\tminSize = lots\n");
-        let opts = DropPromisedBlobsOptions::from_config_with_overrides(
+        let opts = DropPromisedBlobsOptions::from_config(
             &bad,
             now(),
             Some(7),
@@ -1548,16 +1526,11 @@ mod tests {
         .unwrap();
         assert_eq!(opts.min_size, 7);
         assert!(matches!(
-            DropPromisedBlobsOptions::from_config_with_overrides(
-                &bad,
-                now(),
-                None,
-                Some(DropExpiry::Immediately)
-            ),
+            DropPromisedBlobsOptions::from_config(&bad, now(), None, Some(DropExpiry::Immediately)),
             Err(Error::Config(ConfigError::BadNumericValue { .. }))
         ));
         assert!(matches!(
-            DropPromisedBlobsOptions::from_config_with_overrides(&bad, now(), Some(7), None),
+            DropPromisedBlobsOptions::from_config(&bad, now(), Some(7), None),
             Err(Error::Config(ConfigError::InvalidDate { .. }))
         ));
     }

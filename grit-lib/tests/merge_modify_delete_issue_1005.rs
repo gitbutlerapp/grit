@@ -71,7 +71,10 @@ fn modify_delete_conflict_materializes_incoming_version_and_resolves_with_add_or
         "base\nfeat\n"
     );
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(index.has_unmerged_entries());
 
     // grit add f — keep the file
@@ -86,7 +89,10 @@ fn modify_delete_conflict_materializes_incoming_version_and_resolves_with_add_or
     )
     .expect("add keep");
     assert_eq!(add_keep.modified.len(), 1);
-    let index = repo.index().load().expect("index after add");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index after add");
     assert!(!index.has_unmerged_entries());
     assert!(index.get(b"f", 0).is_some());
 }
@@ -119,7 +125,10 @@ fn modify_delete_conflict_resolves_by_accepting_deletion() {
     )
     .expect("rm f");
     assert_eq!(rm_out.removed, vec!["f".to_owned()]);
-    let index = repo.index().load().expect("index after rm");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index after rm");
     assert!(!index.has_unmerged_entries());
     assert!(index.get(b"f", 0).is_none());
     assert!(!root.join("f").exists());
@@ -138,7 +147,7 @@ fn modify_delete_merge_does_not_mark_unrelated_files_modified() {
         feat_oid,
         "feat",
         &mut NullProgress,
-        &CancelToken::never(),
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
 
@@ -146,8 +155,8 @@ fn modify_delete_merge_does_not_mark_unrelated_files_modified() {
     let model = status(
         &repo,
         &StatusOptions::default(),
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
+        &mut NullProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status");
     assert!(

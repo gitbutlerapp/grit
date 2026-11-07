@@ -69,7 +69,10 @@ fn dump_cache_tree_and_format_dump() {
     seed_multidir_repo(&repo);
     let wt = repo.worktree();
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let index = grit.index().load().expect("load");
+    let index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     assert!(index.cache_tree.is_some());
     let _ = index.format_cache_tree_dump();
     let dump = index.dump_cache_tree(&grit.odb()).expect("dump");
@@ -83,7 +86,10 @@ fn overlay_tree_on_index_from_head() {
     let wt = repo.worktree();
     fs::write(wt.join("a/f0.txt"), "dirty\n").expect("modify");
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let mut index = grit.index().load().expect("load");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     index
         .overlay_tree_on_index(&grit, "HEAD", b"")
         .expect("overlay");
@@ -103,7 +109,10 @@ fn overlay_tree_on_index_peels_nested_tags_and_rejects_blobs() {
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
 
     let overlaid = |treeish: &str| {
-        let mut index = grit.index().load().expect("load");
+        let mut index = grit
+            .index()
+            .load(&grit_lib::index::IndexLoadOptions::default())
+            .expect("load");
         index.overlay_tree_on_index(&grit, treeish, b"").map(|()| {
             index
                 .entries()
@@ -149,21 +158,23 @@ fn load_expand_sparse_optional_and_collapse_roundtrip() {
         .expect("parse")
         .tree;
     let patterns = vec!["/*".to_string(), "!/*/".to_string(), "/a/".to_string()];
-    let mut index =
-        Index::load_expand_sparse_optional(&grit.index().path(), &grit.odb()).expect("load");
+    let mut index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default().with_path(&grit.index().path()))
+        .expect("load");
     index
         .try_collapse_sparse_directories(
             &grit.odb(),
             &head,
             &patterns,
-            true,
-            true,
             grit_lib::path_validate::ProtectOptions::default(),
         )
         .expect("collapse");
     if index.has_sparse_directory_placeholders() {
-        let expanded =
-            Index::load_expand_sparse(&grit.index().path(), &grit.odb()).expect("expand");
+        let expanded = grit
+            .index()
+            .load(&grit_lib::index::IndexLoadOptions::default().with_path(&grit.index().path()))
+            .expect("expand");
         assert!(!expanded.has_sparse_directory_placeholders());
     }
 }
@@ -201,7 +212,8 @@ fn git_index_v4_long_paths_parse_and_rewrite() {
         .status()
         .expect("git add");
     let bytes = fs::read(wt.join(".git/index")).expect("read index");
-    let mut parsed = Index::parse(&bytes).expect("parse v4");
+    let mut parsed =
+        Index::parse(&bytes, &grit_lib::index::IndexParseOptions::default()).expect("parse v4");
     assert_eq!(parsed.version, 4);
     parsed.write(&wt.join("out-index")).expect("rewrite");
     let reload = Index::load(&wt.join("out-index")).expect("reload");
@@ -213,6 +225,26 @@ fn git_index_v4_long_paths_parse_and_rewrite() {
 
 #[test]
 fn new_with_config_honors_many_files_and_version() {
-    let idx = Index::new_with_config(Some("3"), Some("true"));
+    let idx = index_for_config(Some("3"), Some("true"));
     assert_eq!(idx.version, 3);
+}
+
+fn index_for_config(version: Option<&str>, many_files: Option<&str>) -> Index {
+    let mut text = String::new();
+    if let Some(v) = version {
+        text.push_str(&format!("[index]\n\tversion = {v}\n"));
+    }
+    if let Some(m) = many_files {
+        text.push_str(&format!("[feature]\n\tmanyFiles = {m}\n"));
+    }
+    let file = grit_lib::config::ConfigFile::parse(
+        std::path::Path::new("config"),
+        &text,
+        grit_lib::config::ConfigScope::Local,
+    )
+    .expect("parse config");
+    let mut cfg = grit_lib::config::ConfigSet::new();
+    cfg.merge_file(&file, &grit_lib::config::IncludeOptions::default())
+        .expect("merge config");
+    Index::empty_for(&grit_lib::index::IndexParseOptions::default().with_config(&cfg))
 }

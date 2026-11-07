@@ -8,9 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack_objects::{
-    build_pack, build_pack_with_shallow_and_filter, PackBuildOptions,
-};
+use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions, UploadPackStream};
 use grit_lib::objects::unpack_objects::pack_bytes_to_object_map;
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_list::ObjectFilter;
@@ -154,12 +152,16 @@ fn bitmap_and_walk_honor_explicit_shallow_boundary() {
         delta: false,
         ..PackBuildOptions::default()
     };
-    let pack_on =
-        build_pack_with_shallow_and_filter(&odb, &[head], &[], &shallow, &shallow, None, &opts_on)
-            .expect("bitmap");
-    let pack_off =
-        build_pack_with_shallow_and_filter(&odb, &[head], &[], &shallow, &shallow, None, &opts_off)
-            .expect("walk");
+    let pack_on = UploadPackStream::new(&[head], opts_on)
+        .with_source_shallow(&shallow)
+        .with_have_shallow(&shallow)
+        .build(&odb)
+        .expect("bitmap");
+    let pack_off = UploadPackStream::new(&[head], opts_off)
+        .with_source_shallow(&shallow)
+        .with_have_shallow(&shallow)
+        .build(&odb)
+        .expect("walk");
     let on_set = pack_object_set(&pack_on, &odb);
     let off_set = pack_object_set(&pack_off, &odb);
     assert_eq!(
@@ -260,16 +262,12 @@ fn filters_respected_with_bitmaps() {
         delta: false,
         ..PackBuildOptions::default()
     };
-    let pack = build_pack_with_shallow_and_filter(
-        &odb,
-        &[head],
-        &[],
-        &empty,
-        &empty,
-        Some(&filter),
-        &opts,
-    )
-    .expect("filtered pack");
+    let pack = UploadPackStream::new(&[head], opts)
+        .with_source_shallow(&empty)
+        .with_have_shallow(&empty)
+        .with_filter(&filter)
+        .build(&odb)
+        .expect("filtered pack");
     let map = pack_bytes_to_object_map(&pack, &odb).expect("parse");
     assert!(
         map.values()

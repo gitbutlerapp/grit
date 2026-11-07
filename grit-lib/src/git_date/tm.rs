@@ -134,7 +134,7 @@ pub fn local_tzoffset(time: u64) -> TzHhmm {
 /// specs (e.g. `EST5`, `EST5EDT`) are resolved from the tzdata / POSIX rules without
 /// mutating the process environment.
 #[must_use]
-pub fn local_tzoffset_with_tz(time: u64, tz: Option<&str>) -> TzHhmm {
+pub(crate) fn local_tzoffset_with_tz(time: u64, tz: Option<&str>) -> TzHhmm {
     if date_overflows(time) {
         return 0;
     }

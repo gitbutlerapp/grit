@@ -25,7 +25,7 @@ use std::sync::Arc;
 /// # Errors
 ///
 /// Propagates ref, reflog, index, or worktree enumeration failures.
-pub fn reachability_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
+pub(crate) fn reachability_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
     let git_dir = repo.git_dir();
     let mut roots: HashSet<ObjectId> = HashSet::new();
 
@@ -182,8 +182,9 @@ mod tests {
 
     use super::*;
     use crate::config::environment::RepositoryOptions;
+    use crate::fsck::fsck;
     use crate::ident::Signature;
-    use crate::maintenance::repository_fsck::{fsck, FsckOptions};
+    use crate::maintenance::repository_fsck::FsckOptions;
     use crate::maintenance::{prune_loose_objects, PruneOptions};
     use crate::objects::odb::store::MemoryStore;
     use crate::objects::{HashAlgo, NewCommit, ObjectKind};

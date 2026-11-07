@@ -199,8 +199,11 @@ fn bundle_and_maintenance_dry_run_public_apis_smoke() {
     let _ = PackRefsOptions::with_dry_run(true);
     let mut prune = PruneOptions::default();
     prune.dry_run = true;
-    let _ = grit_lib::maintenance::prune_loose_objects(&repo, &prune).expect("prune dry-run");
-    let roots = grit_lib::maintenance::collect_maintenance_object_roots(&repo).expect("roots");
+    let _ = repo
+        .maintenance()
+        .prune_loose_objects(&prune)
+        .expect("prune dry-run");
+    let roots = repo.maintenance().reachability_roots().expect("roots");
     let _ =
         grit_lib::refs::gc::prune_loose_unreachable_with_dry_run(repo.odb(), &roots, None, true)
             .expect("prune_loose dry-run");

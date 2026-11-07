@@ -107,12 +107,17 @@ fn index_handle_load_write_matches_git_ls_files() {
     fs::write(wt.join("tracked.txt"), "index handle\n").expect("write file");
     git(wt, &["add", "tracked.txt"]);
 
-    let mut idx = repo.index().load().expect("load index");
+    let mut idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load index");
     assert!(idx
         .entries()
         .iter()
         .any(|e| e.path.as_slice() == b"tracked.txt"));
-    repo.index().write(&mut idx).expect("write index");
+    repo.index()
+        .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
 
     let git_stages = git(wt, &["ls-files", "-s"]);
     assert!(git_stages.contains("tracked.txt"));
@@ -219,7 +224,10 @@ fn diff_index_to_tree_matches_git_diff_cached_raw() {
     fs::write(wt.join("staged.txt"), "cached\n").expect("write");
     git(wt, &["add", "staged.txt"]);
 
-    let idx = repo.index().load().expect("load");
+    let idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let head_tree = repo
         .revwalk()
         .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
@@ -256,7 +264,10 @@ fn diff_worktree_to_index_matches_git_diff_raw() {
     git(wt, &["add", "dirty.txt"]);
     fs::write(wt.join("dirty.txt"), "dirty\n").expect("modify");
 
-    let mut idx = repo.index().load().expect("load");
+    let mut idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let entries = repo
         .diff()
         .index_to_worktree(

@@ -251,6 +251,7 @@ fn memory_store_author_groups_match_the_files_backend() {
     );
 
     let graph = match memory
+        .maintenance()
         .build_commit_graph(&CommitGraphOptions::default())
         .expect("build commit-graph")
     {
@@ -272,7 +273,14 @@ fn memory_store_author_groups_match_the_files_backend() {
     let mut repack = RepackOptions::default();
     repack.write_bitmap = true;
     repack.write_commit_graph = true;
-    files.repack(&repack).expect("repack");
+    files
+        .maintenance()
+        .repack(
+            &repack,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("repack");
     let files = fixture.open_files();
     let packs = file_names(&objects.join("pack"));
     assert!(

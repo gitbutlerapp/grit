@@ -24,7 +24,8 @@ fn open_grit(wt: &Path) -> Repository {
 }
 
 fn untr_root_valid(index_bytes: &[u8]) -> bool {
-    let idx = Index::parse(index_bytes).expect("parse index");
+    let idx = Index::parse(index_bytes, &grit_lib::index::IndexParseOptions::default())
+        .expect("parse index");
     idx.untracked_cache
         .as_ref()
         .and_then(|uc| uc.root.as_ref())
@@ -110,7 +111,8 @@ fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
     );
 
     let grit_index = fs::read(grit_root.join(".git/index")).expect("grit index");
-    let grit_parsed = Index::parse(&grit_index).expect("parse grit index");
+    let grit_parsed = Index::parse(&grit_index, &grit_lib::index::IndexParseOptions::default())
+        .expect("parse grit index");
     let final_count = grit_parsed.entries().len();
     assert_eq!(final_count, ENTRIES - REMOVE);
     assert!(

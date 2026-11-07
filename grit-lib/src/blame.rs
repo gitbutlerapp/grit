@@ -6310,7 +6310,7 @@ mod tests {
 
     #[test]
     fn blame_file_resolves_nested_path_in_wide_root_tree() -> Result<()> {
-        use crate::objects::{serialize_tree, tree_entry_cmp, ObjectKind, TreeEntry};
+        use crate::objects::{serialize_tree, tree_name_cmp, ObjectKind, TreeEntry};
         use crate::repo::init_repository;
         use crate::RefStorageFormat;
         use std::fs;
@@ -6336,7 +6336,7 @@ mod tests {
             oid: sub_tree,
         });
         entries.sort_by(|a, b| {
-            tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
+            tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
         });
         let root_tree = repo
             .odb()

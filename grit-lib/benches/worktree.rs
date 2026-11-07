@@ -4,6 +4,7 @@
 
 mod worktree_fixture;
 
+use grit_lib::progress::NullProgress;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -16,7 +17,6 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::status::{
     collect_untracked_and_ignored, status, IgnoredMode, StatusOptions,
 };
-use grit_lib::progress::NullProgress;
 use grit_lib::worktree::attributes::collect_attrs_for_path;
 use grit_lib::worktree::ignore::IgnoreMatcher;
 
@@ -66,8 +66,14 @@ fn bench_index_read(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(label), &data, |b, bytes| {
             b.iter(|| {
                 black_box(
-                    Index::parse_with_algo_and_config(bytes, HashAlgo::Sha1, Some(&ieot_cfg), ctx)
-                        .expect("parse ieot index"),
+                    Index::parse(
+                        bytes,
+                        &grit_lib::index::IndexParseOptions::default()
+                            .with_hash_algo(HashAlgo::Sha1)
+                            .with_config(&ieot_cfg)
+                            .with_parse_context(ctx),
+                    )
+                    .expect("parse ieot index"),
                 )
             });
         });
@@ -81,11 +87,12 @@ fn bench_index_read(c: &mut Criterion) {
             group.bench_with_input(BenchmarkId::from_parameter(label), &data, |b, bytes| {
                 b.iter(|| {
                     black_box(
-                        Index::parse_with_algo_and_config(
+                        Index::parse(
                             bytes,
-                            HashAlgo::Sha1,
-                            Some(&ieot_cfg),
-                            ctx,
+                            &grit_lib::index::IndexParseOptions::default()
+                                .with_hash_algo(HashAlgo::Sha1)
+                                .with_config(&ieot_cfg)
+                                .with_parse_context(ctx),
                         )
                         .expect("parse 1m ieot index"),
                     )

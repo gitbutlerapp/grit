@@ -487,7 +487,7 @@ fn read_configured_mailmap_blob(repo: &Repository, spec: &str) -> Result<Option<
 }
 
 /// Load mailmap from the repository using Git's source order and merge rules.
-pub fn load_mailmap_table(repo: &Repository) -> Result<MailmapTable> {
+pub(crate) fn load_mailmap_table(repo: &Repository) -> Result<MailmapTable> {
     let mut table = MailmapTable::default();
     load_mailmap_into(repo, &mut table)?;
     Ok(table)
@@ -524,12 +524,6 @@ pub(crate) fn load_mailmap_into(repo: &Repository, table: &mut MailmapTable) -> 
     }
 
     Ok(())
-}
-
-/// Parsed mailmap for the repository (default `.mailmap` + config).
-pub fn load_mailmap(repo: &Repository) -> Result<Vec<MailmapEntry>> {
-    let table = load_mailmap_table(repo)?;
-    Ok(table_to_entries(&table))
 }
 
 /// Rewrite `author ` / `committer ` / `tagger ` header lines in a commit or tag object buffer.

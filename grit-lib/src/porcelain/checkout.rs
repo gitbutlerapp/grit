@@ -7043,7 +7043,7 @@ mod tests {
         }
         let tree = commit_all(&repo, "many");
         let mut index = crate::index::Index::new();
-        repo.index().write(&mut index).expect("clear index");
+        repo.write_index(&mut index).expect("clear index");
         for i in 0..=POPULATED_TREE_CHECKOUT_CHUNK {
             std::fs::remove_file(wt.join(format!("f{i:05}.txt"))).expect("remove");
         }
@@ -7074,7 +7074,7 @@ mod tests {
         }
         let tree = commit_all(&repo, "many");
         let mut index = Index::new();
-        repo.index().write(&mut index).expect("clear index");
+        repo.write_index(&mut index).expect("clear index");
         for i in 0..count {
             fs::remove_file(wt.join(format!("f{i:05}.txt"))).expect("remove");
         }

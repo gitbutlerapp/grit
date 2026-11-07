@@ -107,7 +107,10 @@ mod parallel_symlinks {
     fn check_scans(root: &Path) {
         let expected = git_statuses(root);
         let repo = open(root);
-        let original = repo.index().load().expect("index");
+        let original = repo
+            .index()
+            .load(&crate::index::IndexLoadOptions::default())
+            .expect("index");
         let index_bytes = fs::read(root.join(".git/index")).expect("disk index");
         for state in [StatState::Unset, StatState::Stale, StatState::Racy] {
             for refresh in [false, true] {
@@ -344,7 +347,10 @@ mod skip_restrict_index_paths {
             &RepositoryOptions::empty().with_work_tree(root),
         )
         .expect("open");
-        let mut index = repo.index().load().expect("index");
+        let mut index = repo
+            .index()
+            .load(&crate::index::IndexLoadOptions::default())
+            .expect("index");
         let index_mtime = crate::diff::index_mtime_for_diff(&index, None);
         let config = repo.config().snapshot().expect("config");
         let (entries, _) = diff_index_to_worktree_with_options(

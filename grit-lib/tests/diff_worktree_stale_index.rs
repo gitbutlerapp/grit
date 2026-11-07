@@ -85,7 +85,10 @@ fn stale_index_parallel_hash_reports_git_changes_in_index_order() {
     )
     .expect("open");
     for threads in [1, 4] {
-        let mut index = grit_repo.index().load().expect("index");
+        let mut index = grit_repo
+            .index()
+            .load(&grit_lib::index::IndexLoadOptions::default())
+            .expect("index");
         let (entries, _) = grit_repo
             .diff()
             .index_to_worktree(

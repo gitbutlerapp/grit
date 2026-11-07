@@ -3132,7 +3132,7 @@ mod tests {
         grit_test_support::git(dir.path(), &["add", "tracked.txt"]);
         let repo =
             Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("repo");
-        let mut index = repo.index().load().expect("index");
+        let mut index = repo.load_index().expect("index");
         let row = index.get(b"tracked.txt", 0).expect("row").clone();
         let oid = row.oid;
         let mut indexed = row.clone();
@@ -3178,7 +3178,7 @@ mod tests {
         grit_test_support::git(dir.path(), &["add", "tracked.txt"]);
         let repo =
             Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("repo");
-        let mut index = repo.index().load().expect("index");
+        let mut index = repo.load_index().expect("index");
         let old_oid = index.get(b"tracked.txt", 0).expect("row").oid;
         let mut indexed = index.get(b"tracked.txt", 0).expect("row").clone();
         indexed.set_fsmonitor_valid(true);

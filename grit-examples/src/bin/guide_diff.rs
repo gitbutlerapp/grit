@@ -77,7 +77,9 @@ fn main() -> Result<()> {
     println!("tree_diff_end");
 
     if repo.work_tree().is_some() {
-        let mut index = repo.index().load()?;
+        let mut index = repo
+            .index()
+            .load(&grit_lib::index::IndexLoadOptions::default())?;
         let wt_changes = repo
             .diff()
             .index_to_worktree(&mut index, &TreeDiffOptions::default())?;

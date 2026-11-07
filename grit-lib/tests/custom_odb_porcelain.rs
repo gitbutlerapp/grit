@@ -168,7 +168,7 @@ fn assert_merge_commit_in_store(repo: &Repository, store: &MemoryStore, merge_oi
 
 fn index_oid(repo: &Repository, path: &str) -> ObjectId {
     repo.index()
-        .load()
+        .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index")
         .get(path.as_bytes(), 0)
         .unwrap_or_else(|| panic!("{path} staged"))
@@ -374,6 +374,7 @@ fn fsck_is_clean_on_healthy_custom_primary_repo() {
 
     let options = FsckOptions::full_repository(true);
     let report = repo
+        .maintenance()
         .fsck(&options, &mut NullProgress, &CancelToken::never())
         .expect("fsck on custom primary");
     let config = repo.config().snapshot().expect("config");
@@ -393,6 +394,7 @@ fn fsck_reports_bad_object_in_custom_primary() {
 
     let options = FsckOptions::full_repository(false);
     let report = repo
+        .maintenance()
         .fsck(&options, &mut NullProgress, &CancelToken::never())
         .expect("fsck on custom primary");
     assert_eq!(report.objects_checked, 1);
@@ -770,6 +772,7 @@ fn fsck_is_clean_on_healthy_custom_primary_repo() {
 
     let options = FsckOptions::full_repository(true);
     let report = repo
+        .maintenance()
         .fsck(&options, &mut NullProgress, &CancelToken::never())
         .expect("fsck on custom primary");
     let config = repo.config().snapshot().expect("config");
@@ -789,6 +792,7 @@ fn fsck_reports_bad_object_in_custom_primary() {
 
     let options = FsckOptions::full_repository(false);
     let report = repo
+        .maintenance()
         .fsck(&options, &mut NullProgress, &CancelToken::never())
         .expect("fsck on custom primary");
     assert_eq!(report.objects_checked, 1);

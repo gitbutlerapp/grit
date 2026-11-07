@@ -21,7 +21,7 @@ fn config_file_mutators_roundtrip_on_disk() {
         .expect("exists");
     file.set("sec.c", "3").expect("set");
     file.add_value("sec.a", "1b").expect("add");
-    file.add_value_with_comment("sec.d", "4", Some("added"))
+    file.add_value_commented("sec.d", "4", "added")
         .expect("add c");
     file.unset_last("sec.b").expect("unset last");
     assert_eq!(file.count("sec.a").expect("count"), 2);
@@ -75,13 +75,12 @@ fn parse_gitmodules_and_parse_with_origin() {
     assert!(bad_line.is_none());
     assert!(entries.iter().any(|e| e.key.contains("submodule")));
 
-    let file = ConfigFile::parse_with_origin(
-        Path::new("c"),
-        "[k]\n\tv = 1\n",
-        ConfigScope::Local,
-        grit_lib::config::ConfigIncludeOrigin::Disk,
-    )
-    .expect("origin parse");
+    let file = ConfigFile::parse(Path::new("c"), "[k]\n\tv = 1\n", ConfigScope::Local)
+        .map(|mut file| {
+            file.include_origin = grit_lib::config::ConfigIncludeOrigin::Disk;
+            file
+        })
+        .expect("origin parse");
     assert_eq!(file.get("k.v").as_deref(), Some("1"));
 }
 
@@ -116,13 +115,13 @@ fn config_file_replace_all_pattern_and_comments() {
         ConfigScope::Local,
     )
     .expect("parse");
-    file.replace_all_with_comment("remote.origin.url", "new", Some("drop"), Some("cmt"))
+    file.replace_all_commented("remote.origin.url", "new", Some("drop"), "cmt")
         .expect("pattern replace");
-    file.replace_all_with_comment("remote.origin.url", "z", Some("!keep"), None)
+    file.replace_all("remote.origin.url", "z", Some("!keep"))
         .expect("negated");
     file.replace_all("missing.key", "added", None)
         .expect("add via replace");
-    file.set_with_comment("core.bare", "true", Some("inline"))
+    file.set_commented("core.bare", "true", "inline")
         .expect("set c");
     assert!(file.count("remote.origin.url").expect("count") >= 1);
     file.unset_matching("core.filemode", None, true)

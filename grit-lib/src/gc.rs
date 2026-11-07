@@ -248,7 +248,7 @@ fn prune_files_unreachable(
 /// Includes annotated tag objects, blob/tree tips, and detached-HEAD oids when `HEAD` is not
 /// symbolic. Does not walk reflogs, indexes, stash, or linked worktrees. Embedders pruning loose
 /// objects should use [`crate::maintenance::collect_maintenance_object_roots`] and
-/// [`crate::maintenance::prune_loose_objects`] instead; pass extra roots to
+/// [`Maintenance::prune_loose_objects`](crate::maintenance::Maintenance::prune_loose_objects) instead; pass extra roots to
 /// [`prune_loose_unreachable`] only when unioning with that set (for example Jujutsu).
 ///
 /// Pack bitmap generation uses this narrower set so unreachable blobs staged only in an index do
@@ -993,7 +993,13 @@ mod prune_walk_tests {
             format!("{}\n", commit.to_hex()),
         )
         .expect("ref");
-        repack(&repo, &RepackOptions::default()).expect("repack");
+        repack(
+            &repo,
+            &RepackOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("repack");
         assert!(odb
             .enumerate_local_loose_objects()
             .expect("loose")

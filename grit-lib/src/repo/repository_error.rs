@@ -79,20 +79,19 @@ pub enum FilesOnlyOperation {
     Gc,
     /// Deleting unreachable objects from a custom primary that cannot delete
     /// ([`WritableObjectStore::as_prunable`](crate::odb::store::WritableObjectStore::as_prunable)
-    /// is `None`): [`maintenance::prune_loose_objects`](crate::maintenance::prune_loose_objects),
+    /// is `None`): [`Maintenance::prune_loose_objects`](crate::maintenance::Maintenance::prune_loose_objects),
     /// [`refs::gc::prune_loose_unreachable`](crate::gc::prune_loose_unreachable),
-    /// [`Odb::gc`](crate::odb::Odb::gc), [`maintenance::gc`](crate::maintenance::gc) and
-    /// [`maintenance::gc_with_cancel`](crate::maintenance::gc_with_cancel). Implement
+    /// [`Odb::gc`](crate::odb::Odb::gc), [`Maintenance::gc`](crate::maintenance::Maintenance::gc). Implement
     /// [`PrunableObjectStore`](crate::odb::store::PrunableObjectStore) to support them.
     Prune,
-    /// Repacking into `objects/pack/`: [`maintenance::repack`](crate::maintenance::repack), [`maintenance::repack_all`](crate::maintenance::repack_all)
-    /// and [`maintenance::repack_all_with_cancel`](crate::maintenance::repack_all_with_cancel).
+    /// Repacking into `objects/pack/`: [`Maintenance::repack`](crate::maintenance::Maintenance::repack)
+    /// and [`Maintenance::repack_all`](crate::maintenance::Maintenance::repack_all).
     Repack,
     /// Writing `objects/info/commit-graph`: [`Odb::write_commit_graph`](crate::odb::Odb::write_commit_graph) and
-    /// [`maintenance::write_commit_graph`](crate::maintenance::write_commit_graph). A custom store builds its graph in memory with
-    /// [`maintenance::build_commit_graph`](crate::maintenance::build_commit_graph) instead.
+    /// [`Maintenance::write_commit_graph`](crate::maintenance::Maintenance::write_commit_graph). A custom store builds its graph in memory with
+    /// [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph) instead.
     CommitGraphWrite,
-    /// Writing `objects/pack/multi-pack-index`: [`maintenance::write_midx`](crate::maintenance::write_midx).
+    /// Writing `objects/pack/multi-pack-index`: [`Maintenance::write_midx`](crate::maintenance::Maintenance::write_midx).
     MidxWrite,
     /// The files backend's pack and MIDX read cache: [`Odb::pack_store`](crate::odb::Odb::pack_store).
     PackStore,
@@ -109,7 +108,7 @@ pub enum FilesOnlyOperation {
     /// The files-backed primary source itself: [`Odb::primary`](crate::odb::Odb::primary). Use [`Odb::primary_writable`](crate::odb::Odb::primary_writable)
     /// for the primary of any kind.
     FilesSource,
-    /// Moving blobs to a large-object promisor: [`maintenance::offload_blobs`](crate::maintenance::offload_blobs), for the main
+    /// Moving blobs to a large-object promisor: [`Maintenance::offload_blobs`](crate::maintenance::Maintenance::offload_blobs), for the main
     /// repository and for the promisor repository.
     Offload,
     /// Rewriting packs to leave out promised objects, as offload and dropping promised
@@ -120,7 +119,7 @@ pub enum FilesOnlyOperation {
     /// The receive-pack quarantine directory under `objects/`. A custom primary receives
     /// pushes through an in-memory overlay instead.
     ReceiveQuarantine,
-    /// Dropping promised blobs from promisor packs: [`maintenance::drop_promised_blobs`](crate::maintenance::drop_promised_blobs).
+    /// Dropping promised blobs from promisor packs: [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs).
     DropLargeBlobs,
 }
 

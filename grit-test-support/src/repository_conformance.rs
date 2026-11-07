@@ -377,7 +377,13 @@ fn remote_tracking_refs(map: &BTreeMap<String, String>) -> BTreeMap<String, Stri
 }
 
 fn path_tracked_in_index(repo: &Repository, path: &str) -> bool {
-    let index = repo.index().load_preserving_sparse().expect("index");
+    let index = repo
+        .index()
+        .load(
+            &grit_lib::index::IndexLoadOptions::default()
+                .with_sparse(grit_lib::index::SparseIndexLoad::Preserve),
+        )
+        .expect("index");
     let path_bytes = path.as_bytes();
     index
         .entries()
@@ -386,7 +392,13 @@ fn path_tracked_in_index(repo: &Repository, path: &str) -> bool {
 }
 
 fn unmerged_stages_for_path(repo: &Repository, path: &str) -> Vec<u8> {
-    let index = repo.index().load_preserving_sparse().expect("index");
+    let index = repo
+        .index()
+        .load(
+            &grit_lib::index::IndexLoadOptions::default()
+                .with_sparse(grit_lib::index::SparseIndexLoad::Preserve),
+        )
+        .expect("index");
     let path_bytes = path.as_bytes();
     let mut stages: Vec<u8> = index
         .entries()
@@ -750,7 +762,10 @@ fn run_snapshot_on_repo(
     let index_conflicts_before_abort = conflicts_from_index(
         &repo
             .index()
-            .load_preserving_sparse()
+            .load(
+                &grit_lib::index::IndexLoadOptions::default()
+                    .with_sparse(grit_lib::index::SparseIndexLoad::Preserve),
+            )
             .expect("index during merge"),
     );
     let shared_has_conflict_markers = fs::read_to_string(work_tree(repo).join("shared.txt"))
@@ -770,7 +785,10 @@ fn run_snapshot_on_repo(
     let index_conflicts_after_abort = conflicts_from_index(
         &repo
             .index()
-            .load_preserving_sparse()
+            .load(
+                &grit_lib::index::IndexLoadOptions::default()
+                    .with_sparse(grit_lib::index::SparseIndexLoad::Preserve),
+            )
             .expect("index after abort"),
     );
     let merge_conflicts_after_abort = status_after_abort.conflicts.clone();
@@ -999,6 +1017,7 @@ fn run_snapshot_on_repo(
     let files_fetch_refs = ref_map(&files_fetch);
 
     let fsck = repo
+        .maintenance()
         .fsck(
             &FsckOptions::full_repository(true),
             &mut NullProgress,

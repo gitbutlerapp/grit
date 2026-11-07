@@ -22,7 +22,7 @@ use grit_lib::diff::{
 use grit_lib::ident::SignatureTimestamp;
 use grit_lib::ident::{fsck_commit_idents, timestamp_for_at_ct};
 use grit_lib::lockfile::{LockFile, LockWait, SystemLockJitter};
-use grit_lib::objects::hash::try_par_hash_with_force;
+use grit_lib::objects::hash::try_par_hash_forced;
 use grit_lib::objects::pack_receive::copy_reader_to_writer;
 use grit_lib::objects::promisor_remote::parse_advertisement;
 use grit_lib::objects::{CommitData, HashAlgo, ObjectId};
@@ -117,7 +117,7 @@ author A <a@b> 0 +0000\ncommitter C <c@d> 0 +0000\n\nm\n";
 
     let items = [1u8, 2, 3];
     let threads = NonZeroUsize::new(2).expect("nz");
-    let _ = try_par_hash_with_force(&items, threads, |x| {
+    let _ = try_par_hash_forced(&items, threads, |x| {
         Ok::<u32, std::convert::Infallible>(*x as u32)
     });
 
@@ -215,7 +215,10 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
 
     assert!(commits_to_revert(&repo, &[]).expect("no specs").is_empty());
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let _ = builtin_objectmode_index(&index, "README.md");
 }
 

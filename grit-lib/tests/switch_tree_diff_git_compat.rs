@@ -708,7 +708,10 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
         &RepositoryOptions::empty().with_work_tree(tmp.path()),
     )
     .expect("open grit repo");
-    let loaded = grit_repo.index().load().expect("index");
+    let loaded = grit_repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entry = loaded.get(b"hot.txt", 0).expect("hot.txt indexed");
     let index_mtime = loaded.source_mtime.expect("index source mtime");
     let entry_mtime = (entry.mtime_sec, entry.mtime_nsec);
@@ -1031,7 +1034,10 @@ fn switch_refuses_racy_second_path_when_first_has_stat_drift_only_like_git() {
         &RepositoryOptions::empty().with_work_tree(tmp.path()),
     )
     .expect("open grit repo");
-    let loaded = grit_repo.index().load().expect("index");
+    let loaded = grit_repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entry_a = loaded.get(b"a.txt", 0).expect("a indexed").clone();
     let entry_b = loaded.get(b"b.txt", 0).expect("b indexed");
     let index_mtime = loaded.source_mtime.expect("index source mtime");

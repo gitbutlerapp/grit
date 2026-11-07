@@ -145,7 +145,7 @@ pub enum MidxBitmapWriteOutcome {
     SkippedIncrementalLayer,
 }
 
-/// Result of [`write_multi_pack_index_with_options`].
+/// Result of [`write_multi_pack_index`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WriteMultiPackIndexResult {
     /// Whether and how a reachability bitmap was handled.
@@ -710,14 +710,14 @@ pub(crate) mod midx_cache {
         #[test]
         fn shared_layer_replays_load_warnings_for_the_other_view() {
             use crate::diagnostics::{CollectingDiagnostics, NullDiagnostics, Warning};
-            use crate::midx::{write_multi_pack_index_with_options, WriteMultiPackIndexOptions};
+            use crate::midx::{write_multi_pack_index, WriteMultiPackIndexOptions};
             use crate::objects::HashAlgo;
             use crate::pack_store::PackStore;
             use std::sync::Arc;
             let (root, _) = crate::midx::tests::midx_fixture(false).expect("fixture");
             let objects = root.path().join(".git/objects");
             let pack_dir = objects.join("pack");
-            write_multi_pack_index_with_options(
+            write_multi_pack_index(
                 &pack_dir,
                 &WriteMultiPackIndexOptions {
                     preferred_pack_idx: Some(0),
@@ -3036,11 +3036,6 @@ pub fn clear_pack_midx_state(pack_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `write_multi_pack_index` function.
-pub fn write_multi_pack_index(pack_dir: &Path) -> Result<WriteMultiPackIndexResult> {
-    write_multi_pack_index_with_options(pack_dir, &WriteMultiPackIndexOptions::default())
-}
-
 fn repository_for_pack_dir(pack_dir: &Path) -> Result<Repository> {
     let objects = pack_dir.parent().ok_or_else(|| {
         Error::Io(std::io::Error::new(
@@ -3112,7 +3107,7 @@ fn write_midx_reachability_bitmap_with_options(
 }
 
 /// Write `multi-pack-index` with optional preferred pack, bitmap sidecars, and incremental chain.
-pub fn write_multi_pack_index_with_options(
+pub fn write_multi_pack_index(
     pack_dir: &Path,
     opts: &WriteMultiPackIndexOptions,
 ) -> Result<WriteMultiPackIndexResult> {
@@ -3812,7 +3807,11 @@ mod tests {
         git(dir, &["repack", "-adf"]);
         let pack_dir = dir.join(".git/objects/pack");
         if with_midx {
-            write_multi_pack_index(&pack_dir).ok()?;
+            write_multi_pack_index(
+                &pack_dir,
+                &crate::midx::WriteMultiPackIndexOptions::default(),
+            )
+            .ok()?;
         }
         let hex = Command::new("git")
             .current_dir(dir)
@@ -3893,7 +3892,11 @@ mod tests {
             .expect("read after clear")
             .is_none());
 
-        write_multi_pack_index(&pack_dir).expect("rewrite midx");
+        write_multi_pack_index(
+            &pack_dir,
+            &crate::midx::WriteMultiPackIndexOptions::default(),
+        )
+        .expect("rewrite midx");
         assert!(
             try_read_object_via_midx(&objects, &oid)
                 .expect("read after rewrite")
@@ -4364,11 +4367,15 @@ mod tests {
         };
         let pack_dir = tmp.path().join(".git/objects/pack");
         let midx_path = pack_dir.join("multi-pack-index");
-        write_multi_pack_index(&pack_dir).expect("default write");
+        write_multi_pack_index(
+            &pack_dir,
+            &crate::midx::WriteMultiPackIndexOptions::default(),
+        )
+        .expect("default write");
         assert_eq!(fs::read(&midx_path).expect("read midx")[4], 1);
 
         fs::remove_file(&midx_path).expect("remove midx");
-        let err = super::write_multi_pack_index_with_options(
+        let err = super::write_multi_pack_index(
             &pack_dir,
             &super::WriteMultiPackIndexOptions {
                 version: Some(3),

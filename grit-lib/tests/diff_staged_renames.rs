@@ -52,7 +52,10 @@ fn diff_index_to_tree_with_renames_reports_staged_mv() {
     let head = repo.references().head().expect("head");
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
 
     let entries = repo
@@ -97,7 +100,10 @@ fn apply_rename_detection_matches_git_cached_name_status() {
     let head = repo.references().head().expect("head");
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let raw = repo
         .diff()
         .index_to_tree(&index, Some(&head_tree), &TreeDiffOptions::default())
@@ -144,7 +150,10 @@ fn worktree_rename_detection_with_small_unstaged_edit() {
     let head = repo.references().head().expect("head");
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
 
     let raw = repo
         .diff()
@@ -206,7 +215,10 @@ fn plain_filesystem_mv_pairs_via_untracked_worktree_candidate() {
     }
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
 
     let entries = repo
@@ -265,7 +277,10 @@ fn unrelated_untracked_not_listed_when_tracked_file_deleted() {
     );
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
 
     let entries = repo

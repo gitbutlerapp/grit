@@ -8,9 +8,9 @@ use std::sync::OnceLock;
 use grit_lib::objects::hash::Parallelism;
 use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::unpack_objects::pack_index_records_with_threads;
+use grit_lib::objects::unpack_objects::pack_index_records;
 use grit_lib::objects::HashAlgo;
-use grit_lib::test_support::objects_pack::write_v2_pack_index_with_trailer;
+use grit_lib::test_support::objects_pack::write_v2_pack_index_from_trailer;
 
 const GIT_ENV: &[(&str, &str)] = &[
     ("GIT_CONFIG_GLOBAL", "/dev/null"),
@@ -227,7 +227,7 @@ fn git_index_pack_idx(pack: &[u8], hash_algo: HashAlgo, threads: usize) -> (Vec<
 
 fn grit_index_bytes(pack: &[u8], odb: &Odb, threads: usize) -> Vec<u8> {
     let parallelism = Parallelism::resolve(Some(threads));
-    let records = pack_index_records_with_threads(pack, odb, parallelism).expect("grit index");
+    let records = pack_index_records(pack, odb, parallelism).expect("grit index");
     let hb = odb.hash_algo().len();
     let trailer = &pack[pack.len() - hb..];
     let entries: Vec<_> = records
@@ -236,7 +236,7 @@ fn grit_index_bytes(pack: &[u8], odb: &Odb, threads: usize) -> Vec<u8> {
         .collect();
     let dir = tempfile::tempdir().expect("idx scratch");
     let idx_path = dir.path().join("grit.idx");
-    write_v2_pack_index_with_trailer(&idx_path, &entries, trailer, hb, Some(threads))
+    write_v2_pack_index_from_trailer(&idx_path, &entries, trailer, hb, Some(threads))
         .expect("write idx");
     std::fs::read(&idx_path).expect("read grit idx")
 }

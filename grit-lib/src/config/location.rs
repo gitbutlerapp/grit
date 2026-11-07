@@ -8,7 +8,7 @@ use crate::error::{ConfigError, Error, Result};
 
 use super::{
     global_config_paths_pub, resolve_config_override_path, system_config_path, ConfigFile,
-    ConfigScope, ConfigSet, IncludeContext,
+    ConfigScope, ConfigSet, IncludeContext, IncludeOptions,
 };
 
 /// Which config file(s) to read or write.
@@ -73,19 +73,19 @@ impl ConfigLocation {
     /// read mode.
     pub fn load_single(&self, env: &Environment, git_dir: Option<&Path>) -> Result<ConfigSet> {
         let mut set = ConfigSet::new();
-        let ctx = IncludeContext {
+        let includes = IncludeOptions::default().with_context(IncludeContext {
             git_dir: git_dir.map(Path::to_path_buf),
             command_line_relative_include_is_error: false,
             cwd: env.cwd.clone(),
             pwd: env.pwd.clone(),
             env: std::sync::Arc::new(env.clone()),
-        };
+        });
 
         match self {
             Self::Global => {
                 for path in global_config_paths_pub(env) {
                     if let Some(f) = ConfigFile::from_path(&path, ConfigScope::Global)? {
-                        set.merge_file_with_includes(&f, true, &ctx)?;
+                        set.merge_file(&f, &includes)?;
                     }
                 }
             }
@@ -93,13 +93,13 @@ impl ConfigLocation {
                 let gd = git_dir.ok_or_else(|| Error::Config(ConfigError::RepositoryRequired))?;
                 let local_path = crate::repo::local_config_write_path(gd);
                 if let Some(f) = ConfigFile::from_path(&local_path, ConfigScope::Local)? {
-                    set.merge_file_with_includes(&f, true, &ctx)?;
+                    set.merge_file(&f, &includes)?;
                 }
             }
             Self::System => {
                 let system_path = system_config_path(env);
                 if let Some(f) = ConfigFile::from_path(&system_path, ConfigScope::System)? {
-                    set.merge_file_with_includes(&f, true, &ctx)?;
+                    set.merge_file(&f, &includes)?;
                 }
             }
             Self::Worktree => {
@@ -110,14 +110,14 @@ impl ConfigLocation {
                 }
                 let wt_path = gd.join("config.worktree");
                 if let Some(f) = ConfigFile::from_path(&wt_path, ConfigScope::Worktree)? {
-                    set.merge_file_with_includes(&f, true, &ctx)?;
+                    set.merge_file(&f, &includes)?;
                 }
             }
             Self::File(path) => {
                 let s = path.to_string_lossy();
                 let path = resolve_config_override_path(env, s.as_ref());
                 if let Some(f) = ConfigFile::from_path(&path, ConfigScope::Command)? {
-                    set.merge_file_with_includes(&f, true, &ctx)?;
+                    set.merge_file(&f, &includes)?;
                 }
             }
         }

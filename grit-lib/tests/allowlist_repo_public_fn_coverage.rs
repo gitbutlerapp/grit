@@ -20,9 +20,8 @@ use grit_lib::config::gitmodules::gitdir::{
     ensure_submodule_gitdir_config, hash_blob_sha1_hex, init_submodule_head_from_gitlink,
     is_git_directory, migrate_gitdir_configs, path_inside_indexed_submodule,
     path_inside_registered_submodule, path_inside_registered_submodule_name,
-    set_submodule_repo_worktree, submodule_gitdir_filesystem_path, submodule_gitdir_outer_conflict,
-    submodule_path_config_enabled, validate_encoded_submodule_git_dir,
-    validate_legacy_submodule_git_dir, write_submodule_gitfile,
+    set_submodule_repo_worktree, submodule_gitdir_filesystem_path,
+    validate_encoded_submodule_git_dir, write_submodule_gitfile,
 };
 use grit_lib::config::gitmodules::{oids_from_copied_object_paths, verify_gitmodules_for_commit};
 use grit_lib::config::mailmap::{
@@ -142,11 +141,19 @@ fn bundle_pack_odb_and_midx_paths() {
     let ingested = install_pack_bytes(pack.clone(), repo.odb(), &IngestPackOptions::default())
         .expect("install");
     let installed_pack = ingested.pack_path.clone().expect("installed pack path");
-    let _ = install_pack_path(&installed_pack, repo.odb(), &IngestPackOptions::default());
+    let _ = install_pack_path(
+        &installed_pack,
+        repo.odb(),
+        &IngestPackOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    );
     let _ = ingest_received_pack_path(
         installed_pack.clone(),
         repo.odb(),
         &IngestPackOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
     );
 
     let pack_dir = repo.odb().objects_dir().join("pack");
@@ -233,7 +240,9 @@ fn index_handle_begin_and_commit_update() {
     let repo = init_repo(dir.path());
     let handle = repo.index();
     let mut lock = handle.begin_update().expect("lock");
-    let mut index = handle.load().expect("index");
+    let mut index = handle
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     handle
         .commit_update(&mut lock, &mut index, false)
         .expect("commit index");
@@ -338,7 +347,10 @@ fn porcelain_stash_tag_status_and_worktree() {
     let dir = tempdir().expect("tempdir");
     fs::write(dir.path().join("tracked.txt"), b"hi\n").expect("file");
     let repo = init_repo(dir.path());
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let work_tree = dir.path();
     let _ = expand_untracked_for_staging(&repo, &mut index, work_tree, Vec::new(), &[]);
 
@@ -465,10 +477,7 @@ fn mailmap_gitmodules_submodule_and_write_tree() {
     let mut cfg_file = ConfigFile::from_path(&git_dir.join("config"), ConfigScope::Local)
         .expect("cfg path")
         .expect("cfg file");
-    let _ = submodule_path_config_enabled(git_dir.as_path());
     let _ = is_git_directory(git_dir.as_path());
-    let _ = submodule_gitdir_outer_conflict(git_dir.as_path(), "sub");
-    let _ = validate_legacy_submodule_git_dir(git_dir.as_path(), "sub").ok();
     let modules_path = git_dir.join("modules").join("sub");
     let _ = validate_encoded_submodule_git_dir(
         dir.path(),
@@ -480,7 +489,10 @@ fn mailmap_gitmodules_submodule_and_write_tree() {
     .ok();
     let _ = compute_default_submodule_gitdir(dir.path(), git_dir.as_path(), &cfg_file, "sub");
     let _ = ensure_submodule_gitdir_config(dir.path(), git_dir.as_path(), &mut cfg_file, "sub");
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let _ = path_inside_indexed_submodule(&index, "sub/file");
     let _ = path_inside_registered_submodule(dir.path(), "sub/file");
     let _ = path_inside_registered_submodule_name(dir.path(), "sub/file");

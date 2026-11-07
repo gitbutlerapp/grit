@@ -33,7 +33,10 @@ fn commit_file(
 ) -> ObjectId {
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join(path), contents).expect("write");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let oid = repo
         .odb()
         .write(objects::ObjectKind::Blob, contents.as_bytes())
@@ -49,7 +52,9 @@ fn commit_file(
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index().write(&mut index).expect("write index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
     let commit = objects::CommitData {
         tree,
         parents: parent.into_iter().collect(),

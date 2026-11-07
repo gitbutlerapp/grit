@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::NullProgress;
 use grit_lib::worktree::WorktreeError;
 use std::io::Write;
 use std::path::Path;
@@ -18,7 +19,6 @@ use grit_lib::porcelain::merge::integrate_detached_head;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{git_hash_object_literally, HashAlgo as FixtureAlgo};
 
@@ -209,7 +209,10 @@ fn legacy_tree_modes_worktree_diff_empty_after_git_checkout() {
 
     let head = repo.head_commit().expect("head commit");
     let head_tree = repo.odb().commit_tree(&head).expect("commit tree");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     // Force tree↔worktree diff (not index↔worktree fast path) so legacy tree modes are tested.
     index.cache_tree_root = None;
     index.cache_tree = None;

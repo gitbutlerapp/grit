@@ -12,7 +12,7 @@ use crate::error::Error;
 use crate::fsck_standalone::{tree_entry_mode_allowed, MAX_TREE_ENTRY_LEN};
 use crate::gitmodules::tree_entry_reserved_dot_symlink;
 use crate::ident::Signature;
-use crate::objects::{tree_entry_cmp, CommitData, HashAlgo, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{tree_name_cmp, CommitData, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 use crate::path_validate::{audit_tree_entry_name, PathComponentError, ProtectOptions};
 
@@ -119,7 +119,7 @@ pub(crate) fn canonical_tree_entries(
         validate_tree_entry(entry, algo)?;
     }
     entries
-        .sort_by(|a, b| tree_entry_cmp(&a.name, a.mode == MODE_TREE, &b.name, b.mode == MODE_TREE));
+        .sort_by(|a, b| tree_name_cmp(&a.name, a.mode == MODE_TREE, &b.name, b.mode == MODE_TREE));
     let mut seen = HashSet::with_capacity(entries.len());
     if let Some(dup) = entries.iter().find(|e| !seen.insert(e.name.as_slice())) {
         return Err(TreeEntryError::DuplicateName {

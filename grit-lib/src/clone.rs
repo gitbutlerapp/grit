@@ -1038,7 +1038,7 @@ fn perform_clone_checkout(
     let checkout = crate::porcelain::checkout::checkout_between_trees_with_progress(
         repo, None, &tree, progress, cancel,
     )?;
-    let index = repo.index().load()?;
+    let index = repo.load_index()?;
     let ignorecase = repo.config().snapshot()?.ignore_case();
     let (files, worktree_bytes) =
         crate::path_icase::icase_worktree_file_stats(&index, repo.work_tree(), ignorecase);

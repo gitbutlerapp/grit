@@ -796,7 +796,10 @@ fn write_bundle_pack_with_cancel(
     haves.sort();
     haves.dedup();
     let cfg = repo.config().snapshot().ok();
-    let pack_opts = PackBuildOptions::for_serve(cfg.as_deref(), !haves.is_empty(), true);
+    let pack_opts = PackBuildOptions {
+        thin: !haves.is_empty(),
+        ..PackBuildOptions::for_serve(cfg.as_deref())
+    };
     let no_shallow = HashSet::new();
     let Some(filter) = spec.filter.as_ref() else {
         let stats = crate::pack_objects::write_upload_pack_stream_with_cancel(

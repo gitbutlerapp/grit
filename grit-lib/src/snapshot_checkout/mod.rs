@@ -122,7 +122,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fetch::Progress;
 use crate::objects::{
-    parse_commit, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry,
+    parse_commit, parse_tree, serialize_tree, tree_name_cmp, ObjectId, ObjectKind, TreeEntry,
 };
 use crate::odb::Odb;
 use crate::progress::CancelToken;
@@ -862,7 +862,7 @@ impl Dir {
             entries.push(TreeEntry { mode, name, oid });
         }
         entries.sort_by(|a, b| {
-            tree_entry_cmp(&a.name, a.mode == TREE_MODE, &b.name, b.mode == TREE_MODE)
+            tree_name_cmp(&a.name, a.mode == TREE_MODE, &b.name, b.mode == TREE_MODE)
         });
         odb.write(ObjectKind::Tree, &serialize_tree(&entries))
     }
@@ -1056,7 +1056,7 @@ pub(crate) fn fetch_promised_blobs(repo: &Repository, snapshot: ObjectId) -> Res
 /// [`fetch_promised_blobs`] for the snapshot tree `tree`.
 fn fetch_promised_tree_blobs(repo: &Repository, tree: ObjectId) -> Result<usize> {
     let config = repo.config().snapshot()?;
-    if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config.as_ref()) {
+    if !crate::promisor::repo_treats_promisor_packs(config.as_ref()) {
         return Ok(0);
     }
     let odb = repo.odb();
@@ -1649,7 +1649,7 @@ pub fn materialize(
     crate::porcelain::checkout::checkout_between_trees_with_progress(
         &repo, None, &tree, progress, cancel,
     )?;
-    let files = u64::try_from(repo.index().load()?.entries().len()).unwrap_or(u64::MAX);
+    let files = u64::try_from(repo.load_index()?.entries().len()).unwrap_or(u64::MAX);
     Ok(Materialized {
         repo,
         work: work.to_owned(),

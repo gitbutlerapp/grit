@@ -139,7 +139,7 @@ Hooks still run, but there is nothing on disk for another program to open. They 
 
 Object reads and writes go through your store, so commits, staging (`porcelain::add::stage` and auto-staging commits), log, diff, merge (including cherry-pick and revert), stash, notes, bundle creation and unbundling all work.
 
-[`Repository::fsck`](rustdoc:grit_lib::repo::Repository::fsck) works too: it lists the store's objects with `ObjectStore::for_each_object`, re-hashes each one against its id and runs the usual object and connectivity checks. Read or hash failures are reported as `FsckIssue::BadObject`, since there is no loose file path to name.
+[`Maintenance::fsck`](rustdoc:grit_lib::maintenance::Maintenance::fsck) works too: it lists the store's objects with `ObjectStore::for_each_object`, re-hashes each one against its id and runs the usual object and connectivity checks. Read or hash failures are reported as `FsckIssue::BadObject`, since there is no loose file path to name.
 
 [`Remote::fetch`](rustdoc:grit_lib::remote::Remote::fetch), [`Remote::push`](rustdoc:grit_lib::remote::Remote::push), pull, bundle fetch, [`clone_into`](rustdoc:grit_lib::remote::clone::clone_into), and smart HTTP serving ([`UploadPack`](rustdoc:grit_lib::remote::serve::UploadPack) / [`ReceivePack`](rustdoc:grit_lib::remote::serve::ReceivePack)) read and write objects through the custom primary (pack bytes are resolved into the store with [`ingest_received_pack`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack) or the receive-pack overlay described below). Partial-clone filters are not supported yet.
 
@@ -204,7 +204,7 @@ A commit-graph lets walks skip reading commit objects entirely. Parents, root tr
 
 Graph files under `objects/info/` describe the files layout, not your store, so grit never reads them for a custom primary: a stale or foreign graph there cannot make a walk report commits your store does not have. Instead:
 
-1. Build the graph through any `Odb` with [`build_commit_graph`](rustdoc:grit_lib::maintenance::build_commit_graph) (or `Repository::build_commit_graph`). It walks every commit reachable from the repository's refs and returns a [`CommitGraphBuild`](rustdoc:grit_lib::maintenance::CommitGraphBuild): either a [`BuiltCommitGraph`](rustdoc:grit_lib::maintenance::BuiltCommitGraph) or, in a shallow repository or one with grafts or replace refs, the [`CommitGraphSkipReason`](rustdoc:grit_lib::maintenance::CommitGraphSkipReason) no graph may be built.
+1. Build the graph through any `Odb` with [`repo.maintenance().build_commit_graph`](rustdoc:grit_lib::maintenance::Maintenance::build_commit_graph). It walks every commit reachable from the repository's refs and returns a [`CommitGraphBuild`](rustdoc:grit_lib::maintenance::CommitGraphBuild): either a [`BuiltCommitGraph`](rustdoc:grit_lib::maintenance::BuiltCommitGraph) or, in a shallow repository or one with grafts or replace refs, the [`CommitGraphSkipReason`](rustdoc:grit_lib::maintenance::CommitGraphSkipReason) no graph may be built.
 2. Store `BuiltCommitGraph::bytes` wherever your backend keeps its data. They are byte for byte the file Git writes to `objects/info/commit-graph`, and `git commit-graph verify` accepts them.
 3. When you open the repository, turn stored bytes into a chain with [`BuiltCommitGraph::to_chain`](rustdoc:grit_lib::maintenance::BuiltCommitGraph::to_chain) (or build fresh from step 1 and call `to_chain` on the result) and attach it with [`OdbBuilder::commit_graph`](rustdoc:grit_lib::objects::odb::OdbBuilder::commit_graph).
 
@@ -237,7 +237,10 @@ fn open(
 }
 
 fn refresh_graph(repo: &Repository) -> grit_lib::error::Result<Option<Vec<u8>>> {
-    match repo.build_commit_graph(&CommitGraphOptions::with_changed_paths(true))? {
+    match repo
+        .maintenance()
+        .build_commit_graph(&CommitGraphOptions::with_changed_paths(true))?
+    {
         CommitGraphBuild::Built(graph) => Ok(Some(graph.bytes)),
         CommitGraphBuild::Skipped(_) => Ok(None),
     }

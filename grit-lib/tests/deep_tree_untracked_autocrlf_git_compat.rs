@@ -1,5 +1,7 @@
 //! Deep-chain untracked siblings and autocrlf staging (issue #959 review).
 
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::process::Command;
 
@@ -8,8 +10,6 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -63,7 +63,10 @@ fn status_and_add_see_interior_untracked_on_indexed_chain() {
     .expect("add all");
     assert!(outcome.total() >= 1, "add must stage untracked sibling");
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(
         index.get(b"a/b/untracked.txt", 0).is_some(),
         "index must contain staged untracked sibling"
@@ -109,7 +112,7 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
 
     let grit_staged_oid = repo
         .index()
-        .load()
+        .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("idx")
         .get(b"f.txt", 0)
         .expect("f.txt staged")

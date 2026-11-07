@@ -68,6 +68,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "repository_conformance_memory"),
     ("grit-lib", "repository_conformance_parity"),
     ("grit-lib", "stash_pop_untracked_rollback"),
+    ("grit-lib", "one_form_handles_git_compat"),
 }
 MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {
     ("grit-cli", "rebase_exec_interrupt"): "unix",

@@ -96,7 +96,7 @@ where
 }
 
 /// Like [`try_par_hash_with`], but ignores batch thresholds.
-pub fn try_par_hash_with_force<T, R, E, F>(
+pub fn try_par_hash_forced<T, R, E, F>(
     items: &[T],
     threads: NonZeroUsize,
     f: F,

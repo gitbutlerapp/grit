@@ -5,7 +5,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::{repack_all, RepackOptions};
+use grit_lib::maintenance::RepackOptions;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
 
@@ -48,7 +48,14 @@ fn repack_rewrite_single_pack_bounded_in_release() {
     seed_single_pack_repo(dir.path(), 120);
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
     let start = Instant::now();
-    let stats = repack_all(&repo, &RepackOptions::default()).expect("repack");
+    let stats = repo
+        .maintenance()
+        .repack_all(
+            &RepackOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("repack");
     let elapsed = start.elapsed();
     assert!(
         stats.objects_packed.is_some_and(|n| n > 0),

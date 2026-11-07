@@ -3620,7 +3620,7 @@ fn diff_tree_entries_count(
     while oi < old.len() || ni < new.len() {
         match (old.get(oi), new.get(ni)) {
             (Some(o), Some(n)) => {
-                let cmp = crate::objects::tree_entry_cmp(
+                let cmp = crate::objects::tree_name_cmp(
                     &o.name,
                     is_tree_mode(o.mode),
                     &n.name,
@@ -3747,7 +3747,7 @@ fn diff_tree_entries_opts(
         poll_tree_diff_cancel(index_hint, &mut cancel_stride)?;
         match (&old_entry, &new_entry) {
             (Some(o), Some(n)) => {
-                let cmp = crate::objects::tree_entry_cmp(
+                let cmp = crate::objects::tree_name_cmp(
                     o.name,
                     is_tree_mode(o.mode),
                     n.name,
@@ -4625,7 +4625,7 @@ fn diff_index_tree_at(
                     IndexLevelKind::Tree { name } => (*name, true),
                 };
                 let t_is_tree = is_tree_mode(t_entry.mode);
-                let cmp = crate::objects::tree_entry_cmp(t_name, t_is_tree, i_name, i_is_tree);
+                let cmp = crate::objects::tree_name_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 match cmp {
                     std::cmp::Ordering::Less => {
                         emit_index_tree_deleted(
@@ -5035,7 +5035,7 @@ fn rebuild_hard_reset_cache_tree_at(
                     IndexLevelKind::Tree { name } => (*name, true),
                 };
                 let t_is_tree = is_tree_mode(t_entry.mode);
-                let cmp = crate::objects::tree_entry_cmp(t_name, t_is_tree, i_name, i_is_tree);
+                let cmp = crate::objects::tree_name_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 if cmp != std::cmp::Ordering::Equal {
                     return Err(IndexError::corrupt(IndexCorrupt::new(
                         IndexCorruptReason::HardResetCacheTreeOutOfSync,
@@ -5160,7 +5160,7 @@ fn hard_reset_align_index_tree_at(
                     IndexLevelKind::Tree { name } => (*name, true),
                 };
                 let t_is_tree = is_tree_mode(t_entry.mode);
-                let cmp = crate::objects::tree_entry_cmp(t_name, t_is_tree, i_name, i_is_tree);
+                let cmp = crate::objects::tree_name_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 match cmp {
                     std::cmp::Ordering::Less => {
                         hard_reset_plan_tree_only(walk, t_entry, dir_prefix)?;
@@ -8582,7 +8582,7 @@ impl WorktreeBlobContent {
     /// Store the content as a blob and return its id.
     pub fn store(self, odb: &Odb, options: crate::odb::WriteOptions) -> Result<ObjectId> {
         match self {
-            Self::Bytes(data) => odb.write_with_options(ObjectKind::Blob, &data, options),
+            Self::Bytes(data) => odb.write_with(ObjectKind::Blob, &data, options),
             Self::Stream { mut file, size } => {
                 odb.write_stream(ObjectKind::Blob, size, &mut file, options)
             }

@@ -261,7 +261,8 @@ fn describe_merge_ladder_commit_graph_and_tag_modes() {
     let annotated = DescribeOptions::default();
     assert_describe_matches_git_rev_list(wt, &repo, "main", &annotated);
 
-    repo.write_commit_graph(&CommitGraphOptions::default())
+    repo.maintenance()
+        .write_commit_graph(&CommitGraphOptions::default())
         .expect("commit-graph");
     assert_describe_matches_git_rev_list(wt, &repo, "main", &annotated);
 

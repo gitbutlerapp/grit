@@ -3,6 +3,8 @@
 #![cfg(unix)]
 
 use grit_lib::diff::TreeDiffOptions;
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::worktree::WorktreeError;
 use std::ffi::OsStr;
 use std::io::Write;
@@ -21,9 +23,6 @@ use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::NullProgress;
-use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::repo::Repository;
 use grit_lib::repo_relpath;
@@ -278,7 +277,10 @@ fn non_utf8_untracked_directory_component_with_untr() {
     )
     .expect("stage must not fail on collapsed non-UTF-8 directory path");
 
-    let staged = repo.index().load().expect("index after stage");
+    let staged = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index after stage");
     assert!(
         staged.get(UNTRACKED_NON_UTF8_DIR_FILE, 0).is_some(),
         "index must record the file under raw bytes, not only a directory placeholder"
@@ -389,7 +391,10 @@ fn non_utf8_gitlink_added_by_checkout_between_trees() {
         "non-UTF-8 gitlink path must exist as directory: {:?}",
         gitlink_dir
     );
-    let loaded = repo.index().load().expect("index");
+    let loaded = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(
         loaded.get(BAD_GITLINK, 0).is_some(),
         "index must record gitlink at raw byte path"
@@ -458,7 +463,7 @@ fn non_utf8_file_deleted_by_checkout_between_trees() {
     );
     assert!(
         repo.index()
-            .load()
+            .load(&grit_lib::index::IndexLoadOptions::default())
             .expect("index")
             .get(BAD_NAME, 0)
             .is_none(),
@@ -504,7 +509,10 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
         "deleted ok.txt must appear: {unstaged_paths:?}"
     );
 
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let diff = repo
         .diff()
         .index_to_worktree(&mut index, &TreeDiffOptions::default())
@@ -595,7 +603,10 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
         porcelain.lines().count() >= 2,
         "both paths should be staged: {porcelain}"
     );
-    let staged = r1b_repo.index().load().expect("index");
+    let staged = r1b_repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(
         staged.get(BAD_NAME, 0).is_some(),
         "non-UTF-8 filename must stage under its raw bytes, not the hex-encoded spelling"
@@ -624,7 +635,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
     assert!(
         r1b_repo
             .index()
-            .load()
+            .load(&grit_lib::index::IndexLoadOptions::default())
             .expect("index")
             .get(RESERVED_LITERAL.as_bytes(), 0)
             .is_some(),

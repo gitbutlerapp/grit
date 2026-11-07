@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::error::ObjectError;
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::process::Command;
 use std::sync::Arc;
@@ -10,19 +11,17 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::ident::Signature;
 use grit_lib::index::Index;
-use grit_lib::maintenance::repository_fsck::reachability_roots;
 use grit_lib::maintenance::repository_fsck::{self as fsck, FsckIssue, FsckOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_lib::test_support::objects_pack::{
-    read_pack_index, verify_pack_and_collect, write_v2_pack_index_with_trailer, PackedType,
+    read_pack_index, verify_pack_and_collect, write_v2_pack_index_from_trailer, PackedType,
 };
 use grit_test_support::objects::{
     write_pack_and_index, DeltaOps, IndexPackOptions, ObjectKind as PackKind, PackBuilder,
@@ -142,7 +141,9 @@ fn one_commit(repo: &Repository) -> ObjectId {
 }
 
 fn grit_fsck(repo: &Repository, opts: &FsckOptions) -> fsck::FsckReport {
-    fsck::fsck(repo, opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck")
+    repo.maintenance()
+        .fsck(opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit fsck")
 }
 
 fn git_dangling_set(root: &std::path::Path) -> Vec<(ObjectKind, ObjectId)> {
@@ -822,7 +823,7 @@ fn idx_oid_content_mismatch_returns_fsck_report_not_error() {
         perms.set_readonly(false);
         fs::set_permissions(path, perms).expect("chmod");
     }
-    write_v2_pack_index_with_trailer(&idx_path, &rows, trailer, 20, None).expect("rewrite idx");
+    write_v2_pack_index_from_trailer(&idx_path, &rows, trailer, 20, None).expect("rewrite idx");
     repo.odb().invalidate_packs();
 
     let git_text = git(dir.path(), &["fsck", "--no-dangling"]);
@@ -1620,7 +1621,7 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
             .commit()
             .expect("commit side");
 
-        let roots = reachability_roots(repo).expect("roots");
+        let roots = repo.maintenance().reachability_roots().expect("roots");
         assert!(
             roots.contains(&c1),
             "{label}: reflog-only commit must be a root"

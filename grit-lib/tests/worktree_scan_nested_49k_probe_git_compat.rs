@@ -128,7 +128,10 @@ fn nested_49k_hundred_edits_diff_metadata_probe_budget() {
     build_fixture(root);
     touch_hundred_files(root);
     let repo = open_repo(root);
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
 
     let _probe = reset_worktree_metadata_probe(root);
     let (diffs, _) = repo

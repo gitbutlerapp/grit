@@ -1,5 +1,6 @@
 //! FSMN index extension compatibility with the system `git` binary and fsmonitor hook v2.
 
+use grit_lib::progress::CancelToken;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -8,7 +9,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
-use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
 use grit_test_support::git;
@@ -175,7 +175,10 @@ fn grit_fsmn_index_round_trips_with_git() {
         &RepositoryOptions::empty().with_work_tree(&repo_root),
     )
     .expect("open grit repo");
-    let mut index = grit_repo.index().load().expect("load index");
+    let mut index = grit_repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load index");
     assert_eq!(
         index.fsmonitor_last_update.as_deref(),
         Some(token_before.as_str())
@@ -195,7 +198,10 @@ fn grit_fsmn_index_round_trips_with_git() {
         index.add_or_replace(entry);
     }
     index.sort();
-    grit_repo.index().write(&mut index).expect("write index");
+    grit_repo
+        .index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
 
     let tracked = isolated_git(&repo_root, &["ls-files"]).lines().count();
     let flags = ls_files_fsmonitor_flags(&repo_root);
@@ -227,8 +233,14 @@ fn git_fsmn_index_rewritten_by_grit_preserves_token() {
         &RepositoryOptions::empty().with_work_tree(&repo_root),
     )
     .expect("open grit repo");
-    let mut index = grit_repo.index().load().expect("load");
-    grit_repo.index().write(&mut index).expect("rewrite index");
+    let mut index = grit_repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
+    grit_repo
+        .index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("rewrite index");
 
     let token_after = fsmn_token(&repo_root);
     assert_eq!(token_after, token_before);

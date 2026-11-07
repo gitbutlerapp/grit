@@ -253,7 +253,7 @@ fn symlinks_from_git_config_parameters(env: &Environment) -> Option<bool> {
 /// # Errors
 ///
 /// Returns [`Error::Io`](crate::error::Error::Io) or config parse/write failures.
-pub fn apply_init_filesystem_config(
+pub(crate) fn apply_init_filesystem_config(
     git_dir: &Path,
     opts: InitFilesystemConfigOptions,
     environment: &Environment,

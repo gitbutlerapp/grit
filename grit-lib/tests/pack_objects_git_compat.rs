@@ -728,12 +728,18 @@ fn upload_pack_thin(repo_dir: &Path, want: ObjectId, have: ObjectId) -> Vec<u8> 
     use grit_lib::repo::Repository;
     let repo = Repository::open(&repo_dir.join(".git"), &RepositoryOptions::empty()).unwrap();
     let mut pack = Vec::new();
-    UploadPackStream::new(&[want], PackBuildOptions::for_serve(None, true, true))
-        .with_haves(&[have])
-        .with_source_shallow(&HashSet::new())
-        .with_have_shallow(&HashSet::new())
-        .write(&repo, &mut |_| {}, &mut pack)
-        .expect("upload-pack stream");
+    UploadPackStream::new(
+        &[want],
+        PackBuildOptions {
+            thin: true,
+            ..PackBuildOptions::for_serve(None)
+        },
+    )
+    .with_haves(&[have])
+    .with_source_shallow(&HashSet::new())
+    .with_have_shallow(&HashSet::new())
+    .write(&repo, &mut grit_lib::progress::NullProgress, &mut pack)
+    .expect("upload-pack stream");
     pack
 }
 

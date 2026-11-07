@@ -1754,7 +1754,7 @@ fn merge_abort_finalize_index_stats(
         return Ok(());
     };
     let changed = merge_abort_changed_paths(changes);
-    let mut index = repo.index().load()?;
+    let mut index = repo.load_index()?;
     crate::porcelain::index_from_tree::reseed_stage0_stat_data_excluding_paths(
         &mut index, old_index, &changed,
     );
@@ -1772,7 +1772,7 @@ fn merge_abort_finalize_index_stats(
             repo, work_tree, &mut index, &unset,
         )?;
     }
-    repo.index().write(&mut index)?;
+    repo.write_index(&mut index)?;
     Ok(())
 }
 

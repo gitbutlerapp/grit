@@ -7,8 +7,8 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use grit_lib::objects::{
-    hash::ObjectHasher, oid_hash_map, oid_hash_map_with_capacity, oid_hash_set, HashAlgo, ObjectId,
-    OidHashMap, OidHashSet,
+    hash::ObjectHasher, oid_hash_map, oid_hash_set, HashAlgo, ObjectId, OidBuildHasher, OidHashMap,
+    OidHashSet,
 };
 
 const COUNT: usize = 1_000_000;
@@ -42,7 +42,8 @@ fn bench_insert_presized(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::new("oid_hasher", COUNT), &ids, |b, ids| {
         b.iter(|| {
-            let mut map: OidHashMap<u32> = oid_hash_map_with_capacity(COUNT);
+            let mut map: OidHashMap<u32> =
+                OidHashMap::with_capacity_and_hasher(COUNT, OidBuildHasher::default());
             for (i, id) in ids.iter().enumerate() {
                 map.insert(black_box(*id), black_box(i as u32));
             }

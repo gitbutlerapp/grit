@@ -1,8 +1,8 @@
 //! Annotated tag creation round-trips with system `git`.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
-use grit_lib::maintenance::{gc, GcOptions};
+use grit_lib::maintenance::repository_fsck::FsckOptions;
+use grit_lib::maintenance::GcOptions;
 use grit_lib::objects::{parse_tag, ObjectKind};
 use grit_lib::porcelain::tag::{
     create_tag, list_tags_with_detail, tag_ref_metadata, CreateTagRequest, TagDetail, TagKind,
@@ -103,13 +103,10 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
     let host_repo =
         Repository::discover(Some(host.as_path()), &RepositoryOptions::empty()).expect("discover");
     let fsck_opts = FsckOptions::full_repository(false).with_check_dangling(false);
-    let report = fsck(
-        &host_repo,
-        &fsck_opts,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit fsck");
+    let report = host_repo
+        .maintenance()
+        .fsck(&fsck_opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit fsck");
     let config = host_repo.config().snapshot().expect("config");
     assert!(
         report.ok(&config, &fsck_opts),
@@ -126,7 +123,14 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
     let ann = tags[0].annotation.as_ref().expect("annotation");
     assert!(ann.message.contains('\u{FFFD}'));
 
-    gc(&host_repo, &GcOptions::default()).expect("grit gc");
+    host_repo
+        .maintenance()
+        .gc(
+            &GcOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit gc");
 
     let clone_dest = tmp.path().join("clone");
     clone_repo(
@@ -138,13 +142,10 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
     .expect("grit clone");
     let cloned = Repository::discover(Some(clone_dest.as_path()), &RepositoryOptions::empty())
         .expect("discover clone");
-    let clone_report = fsck(
-        &cloned,
-        &fsck_opts,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit fsck clone");
+    let clone_report = cloned
+        .maintenance()
+        .fsck(&fsck_opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit fsck clone");
     let clone_config = cloned.config().snapshot().expect("config");
     assert!(
         clone_report.ok(&clone_config, &fsck_opts),

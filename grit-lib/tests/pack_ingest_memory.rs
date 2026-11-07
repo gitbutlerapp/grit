@@ -238,6 +238,8 @@ fn ingest_child() {
             skip_post_index_verify: true,
             ..Default::default()
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("install pack");
     assert!(!ingested.object_ids.is_empty());

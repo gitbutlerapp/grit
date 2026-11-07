@@ -138,7 +138,10 @@ fn assert_all_modes(dir: &Path, path: &str, expected: DiffStatus) {
         "work tree vs HEAD"
     );
 
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let (entries, _) = repo
         .diff()
         .index_to_worktree(&mut index, &TreeDiffOptions::default())
@@ -173,7 +176,10 @@ fn assert_all_modes(dir: &Path, path: &str, expected: DiffStatus) {
         without_worktree_oid(git_raw(dir, &["HEAD"])),
         "staged: work tree vs HEAD"
     );
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entries = repo
         .diff()
         .index_to_tree(&index, Some(&base_tree), &TreeDiffOptions::default())
@@ -300,7 +306,10 @@ fn assert_mixed_state(dir: &Path, path: &str, expected_vs_head: DiffStatus) {
         without_worktree_oid(git_raw(dir, &["HEAD"])),
         "work tree vs HEAD"
     );
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let base_tree = head_tree(dir, "HEAD");
     let entries = repo
         .diff()

@@ -10,7 +10,7 @@ use std::process::Command;
 use grit_lib::objects::commit_graph::{CommitGraphChain, CommitGraphLayer};
 use grit_lib::objects::midx::{
     load_midx_reuse_tables_from_path, midx_lookup_pack_and_offset_opt, read_midx_objects,
-    read_midx_pack_idx_names, try_read_object_via_midx, write_multi_pack_index_with_options,
+    read_midx_pack_idx_names, try_read_object_via_midx, write_multi_pack_index,
     WriteMultiPackIndexOptions,
 };
 use grit_lib::test_support::commit_graph::chain_from_layers;
@@ -103,7 +103,7 @@ fn write_large_single_pack_midx(dir: &Path) -> (PathBuf, PathBuf) {
             s.starts_with("pack-") && s.ends_with(".idx")
         })
         .expect("pack index");
-    write_multi_pack_index_with_options(
+    write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             preferred_pack_name: Some(preferred_idx.to_string_lossy().into_owned()),

@@ -44,7 +44,7 @@ macro_rules! replay_targets {
 fn index_parse_rejects_twenty_zero_byte_file_without_panic() {
     let zeros = [0u8; 20];
     grit_lib::test_support::fuzz::index_parse(&zeros);
-    assert!(Index::parse(&zeros).is_err());
+    assert!(Index::parse(&zeros, &grit_lib::index::IndexParseOptions::default()).is_err());
 }
 
 replay_targets! {

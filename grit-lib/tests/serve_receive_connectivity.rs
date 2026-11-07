@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::maintenance::{offload_blobs, OffloadOptions};
+use grit_lib::maintenance::OffloadOptions;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::serve::{
@@ -231,7 +231,13 @@ fn a_large_push_naming_an_offloaded_blob_is_accepted() {
         let repo = Repository::open(&server, &RepositoryOptions::empty()).unwrap();
         let mut opts = OffloadOptions::new("lop", 4_000_000_000);
         opts.filter = Some(ObjectFilterSpec::BlobLimit(10 * 1024));
-        assert_eq!(offload_blobs(&repo, &opts).unwrap().dropped_from_main, 1);
+        assert_eq!(
+            repo.maintenance()
+                .offload_blobs(&opts)
+                .unwrap()
+                .dropped_from_main,
+            1
+        );
         clear_pack_cache();
     }
 

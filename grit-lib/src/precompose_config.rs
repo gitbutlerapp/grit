@@ -224,7 +224,7 @@ pub(crate) fn effective_core_precomposeunicode_with_config(
 /// `core.precomposeunicode` on Linux; argv and directory walks must still use the bytes the shell
 /// passed when the FS does not alias.
 #[must_use]
-pub fn filesystem_nfd_nfc_aliases(git_dir: &Path) -> bool {
+pub(crate) fn filesystem_nfd_nfc_aliases(git_dir: &Path) -> bool {
     FilesystemCapabilities::detect_precomposes_unicode(git_dir).unwrap_or(false)
 }
 

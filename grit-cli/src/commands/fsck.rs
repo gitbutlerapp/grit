@@ -229,7 +229,9 @@ pub fn run(options: FsckRunOptions) -> Result<FsckOutcome> {
 
     let progress_enabled = options.mode == OutputMode::Human && stderr_progress_enabled();
     let mut progress = TerminalProgress::new(progress_enabled);
-    let report = repo.fsck(&fsck_opts, &mut progress, &CancelToken::never())?;
+    let report = repo
+        .maintenance()
+        .fsck(&fsck_opts, &mut progress, &CancelToken::never())?;
     progress.finish();
 
     Ok(FsckOutcome::from_report(

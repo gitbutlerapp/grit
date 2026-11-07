@@ -1,7 +1,8 @@
 //! Repository maintenance: repack, fsck, and garbage collection orchestration.
 //!
-//! These APIs wrap existing pack, prune, and fsck primitives for embedders and the
-//! `grit` CLI. They never shell out to the system `git` binary.
+//! Every operation runs through [`Repository::maintenance`], which returns a
+//! [`Maintenance`] handle; this module holds its options and result types. Nothing here
+//! shells out to the system `git` binary.
 //!
 //! Library guide: [maintenance](https://grit-scm.com/docs/library/maintenance)
 //!
@@ -9,7 +10,9 @@
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! let (_repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+//! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+//! // A fresh repository is below every `gc.auto` threshold.
+//! assert!(repo.maintenance().auto_gc_needed()?.is_none());
 //! # Ok(())
 //! # }
 //! ```
@@ -36,13 +39,11 @@ use crate::fsck as repo_fsck;
 use crate::gc::{prune_loose_unreachable_with, LazyReachable, PruneStats, S_IFDIR, S_IFMT};
 use crate::git_date::approx::approxidate_careful_at;
 use crate::index_pack::{
-    install_pack_bytes_with_progress, install_pack_path, install_pack_path_with_progress,
-    IngestPackOptions,
+    install_pack_bytes_with_progress, install_pack_path_with_progress, IngestPackOptions,
 };
 use crate::midx::{
-    clear_pack_midx_state, midx_version_from_config, midx_write_version,
-    write_multi_pack_index_with_options, MidxBitmapWriteOutcome, WriteMultiPackIndexOptions,
-    WriteMultiPackIndexResult,
+    clear_pack_midx_state, midx_version_from_config, midx_write_version, write_multi_pack_index,
+    MidxBitmapWriteOutcome, WriteMultiPackIndexOptions, WriteMultiPackIndexResult,
 };
 use crate::objects::{
     oid_hash_map, tag_object_line_oid, CommitRef, FileMode, ObjectId, ObjectKind, OidHashMap,
@@ -58,7 +59,7 @@ use crate::pack_object_select::{
 };
 use crate::pack_objects::{PackBuildOptions, SerializedDeltaPack};
 use crate::pack_rev::write_pack_rev_sidecar_for_index_path;
-use crate::progress::{poll_cancel, CancelToken, NullProgress};
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use crate::reflog::{
     expire_reflog_git_with_cache, load_gc_reflog_expire_config, reflog_refs_on_store,
@@ -72,18 +73,21 @@ use crate::shallow::load_shallow_boundaries;
 use time::OffsetDateTime;
 
 mod drop_blobs;
+mod handle;
+
+pub use handle::Maintenance;
 
 pub use crate::offload::{
-    offload_blobs, LopReadiness, OffloadConfigChange, OffloadError, OffloadOptions, OffloadPack,
-    OffloadPackRole, OffloadRepo, OffloadReport, LOP_GIT_DIR_KEY, LOP_KEEP_MESSAGE,
+    LopReadiness, OffloadConfigChange, OffloadError, OffloadOptions, OffloadPack, OffloadPackRole,
+    OffloadRepo, OffloadReport, LOP_GIT_DIR_KEY, LOP_KEEP_MESSAGE,
 };
 pub use drop_blobs::{
-    drop_large_blobs_enabled, drop_promised_blobs, DropExpiry, DropPromisedBlobsOptions,
-    DropPromisedBlobsReport, DropPromisedBlobsSkip, DroppedBlob, KeptBlobCounts,
-    DEFAULT_DROP_EXPIRE, DEFAULT_DROP_MIN_SIZE, DROP_LARGE_BLOBS_TASK,
+    drop_large_blobs_enabled, DropExpiry, DropPromisedBlobsOptions, DropPromisedBlobsReport,
+    DropPromisedBlobsSkip, DroppedBlob, KeptBlobCounts, DEFAULT_DROP_EXPIRE, DEFAULT_DROP_MIN_SIZE,
+    DROP_LARGE_BLOBS_TASK,
 };
 
-/// Options for [`repack_all()`].
+/// Options for [`Maintenance::repack_all`](crate::maintenance::Maintenance::repack_all).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RepackOptions {
@@ -121,9 +125,9 @@ pub struct RepackOptions {
     /// written via a multi-pack-index sidecar instead of a per-pack `.bitmap` on the new pack alone.
     /// Bitmaps are omitted when known promises prevent a complete closure.
     pub incremental: bool,
-    /// When true, [`gc()`] may skip repack on a single pack with no loose objects when every
+    /// When true, [`Maintenance::gc`](crate::maintenance::Maintenance::gc) may skip repack on a single pack with no loose objects when every
     /// packed object is still reachable and none would be dropped by the active prune policy.
-    /// Explicit [`repack_all`] / [`repack`] leave this false so maintenance still runs.
+    /// Explicit [`Maintenance::repack_all`](crate::maintenance::Maintenance::repack_all) / [`Maintenance::repack`](crate::maintenance::Maintenance::repack) leave this false so maintenance still runs.
     pub auto_skip: bool,
     /// When true, recompute every delta instead of keeping the ones stored in packs
     /// (`git repack -f`, `grit repack --force`). Whole objects that stay whole are
@@ -171,7 +175,7 @@ struct RepackDetail {
     unreachable_prune_ran: bool,
 }
 
-/// Counters produced by [`repack`].
+/// Counters produced by [`Maintenance::repack`](crate::maintenance::Maintenance::repack).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RepackReport {
@@ -185,7 +189,7 @@ pub struct RepackReport {
     pub objects: usize,
 }
 
-/// Extended counters and paths produced by [`repack_all`].
+/// Extended counters and paths produced by [`Maintenance::repack_all`](crate::maintenance::Maintenance::repack_all).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RepackStats {
@@ -215,7 +219,7 @@ pub struct RepackStats {
     pub unreachable_prune_ran: bool,
 }
 
-/// Options for [`Repository::write_commit_graph`].
+/// Options for [`Maintenance::write_commit_graph`](crate::maintenance::Maintenance::write_commit_graph).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CommitGraphOptions {
@@ -262,7 +266,7 @@ pub struct CommitGraphWriteReport {
     pub skipped: Option<CommitGraphSkipReason>,
 }
 
-/// Why [`write_commit_graph`] wrote no graph.
+/// Why [`Maintenance::write_commit_graph`](crate::maintenance::Maintenance::write_commit_graph) wrote no graph.
 ///
 /// A commit-graph stores each commit's parents as recorded in the commit object. When the
 /// repository overrides those parents, a graph would disagree with what Git sees: Git
@@ -320,7 +324,7 @@ impl CommitGraphSkipReason {
     }
 }
 
-/// Options for [`Repository::write_midx`].
+/// Options for [`Maintenance::write_midx`](crate::maintenance::Maintenance::write_midx).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MidxOptions {
@@ -408,7 +412,7 @@ pub struct PackRefsReport {
     pub refs_pruned: usize,
 }
 
-/// Options for [`gc()`].
+/// Options for [`Maintenance::gc`](crate::maintenance::Maintenance::gc).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct GcOptions {
@@ -426,7 +430,7 @@ pub struct GcOptions {
     /// added otherwise, matching `git gc`.
     pub write_commit_graph: bool,
     /// When true (the default), run the drop-large-blobs phase after repack if
-    /// `maintenance.drop-large-blobs.enabled` is set (see [`drop_promised_blobs`]).
+    /// `maintenance.drop-large-blobs.enabled` is set (see [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs)).
     /// False never runs it. The phase takes its recency cutoff from
     /// [`Self::now_unix`] and is skipped ([`DropPromisedBlobsSkip::NoCurrentTime`])
     /// when that is 0.
@@ -537,7 +541,7 @@ fn precious_objects(config: &ConfigSet) -> bool {
 /// # Errors
 ///
 /// Propagates ref, reflog, or index load failures.
-pub fn collect_maintenance_object_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
+pub(crate) fn collect_maintenance_object_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
     repo_fsck::reachability_roots(repo)
 }
 
@@ -582,7 +586,7 @@ pub(crate) fn commit_graph_writes_generation_data(config: &ConfigSet) -> bool {
         .unwrap_or(true)
 }
 
-/// A commit-graph file built in memory by [`build_commit_graph`].
+/// A commit-graph file built in memory by [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct BuiltCommitGraph {
@@ -607,7 +611,7 @@ impl BuiltCommitGraph {
     }
 }
 
-/// Outcome of [`build_commit_graph`].
+/// Outcome of [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommitGraphBuild {
     /// The graph of every commit reachable from the repository's refs.
@@ -624,7 +628,7 @@ pub enum CommitGraphBuild {
 /// written: a custom store persists [`BuiltCommitGraph::bytes`] in its own storage and attaches
 /// the graph when it next opens the repository, with
 /// [`OdbBuilder::commit_graph`](crate::odb::OdbBuilder::commit_graph) and
-/// [`CommitGraphChain::from_bytes`]. For a files-backed repository [`write_commit_graph`] builds
+/// [`CommitGraphChain::from_bytes`]. For a files-backed repository [`Maintenance::write_commit_graph`](crate::maintenance::Maintenance::write_commit_graph) builds
 /// the same bytes and installs them under `objects/info/`.
 ///
 /// With [`CommitGraphOptions::changed_paths`], changed-path Bloom filters are added, reusing
@@ -637,7 +641,7 @@ pub enum CommitGraphBuild {
 /// # Errors
 ///
 /// Propagates ref, object read and config errors.
-pub fn build_commit_graph(
+pub(crate) fn build_commit_graph(
     repo: &Repository,
     opts: &CommitGraphOptions,
 ) -> Result<CommitGraphBuild> {
@@ -722,13 +726,13 @@ pub(crate) fn build_commit_graph_for_commits(
 /// [`CommitGraphOptions::dry_run`]).
 ///
 /// Only a files-backed repository has an `objects/info/` directory to install the graph in.
-/// A custom primary builds the same graph with [`build_commit_graph`] and stores it itself.
+/// A custom primary builds the same graph with [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph) and stores it itself.
 ///
 /// # Errors
 ///
 /// Returns [`RepositoryError::UnsupportedObjectStore`] for non-files ODB backends, or errors from graph
 /// generation and atomic I/O.
-pub fn write_commit_graph(
+pub(crate) fn write_commit_graph(
     repo: &Repository,
     opts: &CommitGraphOptions,
 ) -> Result<CommitGraphWriteReport> {
@@ -809,7 +813,7 @@ pub fn write_commit_graph(
 /// Returns [`RepositoryError::UnsupportedObjectStore`] for non-files backends, [`Error::Config`] when
 /// `midx.version` is not an integer, [`crate::error::MidxError::UnknownWriteVersion`] (as
 /// [`crate::error::ObjectError::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
-pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteReport> {
+pub(crate) fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteReport> {
     let odb = repo.odb();
     odb.require_files_primary(FilesOnlyOperation::MidxWrite)?;
     let requested = match opts.version {
@@ -845,8 +849,7 @@ pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteRepo
         version,
         ..WriteMultiPackIndexOptions::default()
     };
-    let WriteMultiPackIndexResult { bitmap } =
-        write_multi_pack_index_with_options(&pack_dir, &write_opts)?;
+    let WriteMultiPackIndexResult { bitmap } = write_multi_pack_index(&pack_dir, &write_opts)?;
     Ok(MidxWriteReport {
         path,
         pack_count,
@@ -854,7 +857,7 @@ pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteRepo
     })
 }
 
-/// Options for [`prune_loose_objects`].
+/// Options for [`Maintenance::prune_loose_objects`](crate::maintenance::Maintenance::prune_loose_objects).
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct PruneOptions {
@@ -869,11 +872,11 @@ pub struct PruneOptions {
     pub now: Option<OffsetDateTime>,
 }
 
-/// Wall-clock milliseconds for each phase of [`gc`].
+/// Wall-clock milliseconds for each phase of [`Maintenance::gc`](crate::maintenance::Maintenance::gc).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct GcPhaseTimings {
-    /// [`pack_refs`] when run as part of gc.
+    /// [`Maintenance::pack_refs`](crate::maintenance::Maintenance::pack_refs) when run as part of gc.
     pub pack_refs_ms: u64,
     /// Reflog expiry before repack.
     pub reflog_ms: u64,
@@ -887,7 +890,7 @@ pub struct GcPhaseTimings {
     pub drop_large_blobs_ms: u64,
 }
 
-/// Result of [`gc`].
+/// Result of [`Maintenance::gc`](crate::maintenance::Maintenance::gc).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GcStats {
     /// Loose refs packed during gc (`None` when skipped).
@@ -912,7 +915,7 @@ pub struct GcStats {
 
 /// Repack local objects into a single new pack and drop redundant storage.
 ///
-/// Mirrors a minimal `git repack -ad`: one pack for [`reachability_roots`](crate::fsck::reachability_roots), optional `.rev` /
+/// Mirrors a minimal `git repack -ad`: one pack for [`reachability_roots`](crate::maintenance::Maintenance::reachability_roots), optional `.rev` /
 /// `.bitmap` sidecars, delete other packs, [`prune_packed_objects`], and optional unreachable
 /// loose-object pruning. Existing promisor packs and all their sidecars are retained
 /// separately, as are ordinary packs holding promised objects unavailable in those
@@ -923,16 +926,22 @@ pub struct GcStats {
 /// # Errors
 ///
 /// Propagates pack build/install failures, unsupported custom ODB backends, and I/O errors.
-pub fn repack(repo: &Repository, opts: &RepackOptions) -> Result<RepackReport> {
-    Ok(repack_detail(repo, opts, &CancelToken::never())?.report)
+pub(crate) fn repack(
+    repo: &Repository,
+    opts: &RepackOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<RepackReport> {
+    Ok(repack_detail(repo, opts, progress, cancel)?.report)
 }
 
 fn repack_detail(
     repo: &Repository,
     opts: &RepackOptions,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<RepackDetail> {
-    poll_cancel(&mut NullProgress, cancel)?;
+    poll_cancel(progress, cancel)?;
     let odb = repo.odb();
     odb.require_files_primary(FilesOnlyOperation::Repack)?;
     let objects_dir = odb
@@ -1007,9 +1016,9 @@ fn repack_detail(
     }
     let promised = reachable.promised()?;
     let partial_clone = !promised.is_empty()
-        || cfg.as_ref().is_some_and(|config| {
-            crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config)
-        });
+        || cfg
+            .as_ref()
+            .is_some_and(crate::promisor::repo_treats_promisor_packs);
     if partial_clone {
         // Validate local reachability without giving the pack enumerator a chance to
         // lazy-fetch genuinely missing local objects in a partial clone.
@@ -1046,7 +1055,7 @@ fn repack_detail(
     } else {
         packs_holding_available_promises(odb, promised)?
     };
-    poll_cancel(&mut NullProgress, cancel)?;
+    poll_cancel(progress, cancel)?;
     let built_pack = if run_incremental {
         let (loose, name_hashes) = named_reachable_loose_objects(odb, &reachable, &roots)?;
         write_staged_repack_pack(
@@ -1082,7 +1091,7 @@ fn repack_detail(
     let mut installed_pack = None;
     let pack_trailer_len = 12 + odb.hash_algo().len();
     if pack_bytes_len > pack_trailer_len {
-        poll_cancel(&mut NullProgress, cancel)?;
+        poll_cancel(progress, cancel)?;
         clear_pack_midx_state(&pack_dir)?;
 
         let trusted_rows = (!built_pack.index_rows.is_empty()).then_some(built_pack.index_rows);
@@ -1096,13 +1105,12 @@ fn repack_detail(
             trusted_index_rows: trusted_rows,
             ..IngestPackOptions::default()
         };
-        let mut progress = NullProgress;
         let ingested = if let Some(staging) = built_pack.staging_path.as_ref() {
             install_pack_path_with_progress(
                 staging,
                 odb,
                 &ingest_opts,
-                Some(&mut progress),
+                Some(&mut *progress),
                 Some(cancel),
             )?
         } else {
@@ -1110,7 +1118,7 @@ fn repack_detail(
                 built_pack.bytes,
                 odb,
                 &ingest_opts,
-                Some(&mut progress),
+                Some(&mut *progress),
                 Some(cancel),
             )?
         };
@@ -1145,7 +1153,7 @@ fn repack_detail(
                     ..WriteMultiPackIndexOptions::default()
                 };
                 let WriteMultiPackIndexResult { bitmap: _ } =
-                    write_multi_pack_index_with_options(&pack_dir, &midx_opts)?;
+                    write_multi_pack_index(&pack_dir, &midx_opts)?;
             } else {
                 let bitmap_opts = PackBitmapWriteOptions {
                     reachability_roots: Some(roots.clone()),
@@ -1239,15 +1247,12 @@ fn repack_detail(
     })
 }
 
-/// Like [`repack`], with legacy [`RepackStats`] fields for the CLI.
-pub fn repack_all(repo: &Repository, opts: &RepackOptions) -> Result<RepackStats> {
-    repack_all_with_cancel(repo, opts, &CancelToken::never())
-}
-
-/// Like [`repack_all`], but returns [`Error::Cancelled`] before publishing a new pack.
-pub fn repack_all_with_cancel(
+/// Like [`Maintenance::repack`](crate::maintenance::Maintenance::repack), with detailed [`RepackStats`]; returns [`Error::Cancelled`] before
+/// publishing a new pack.
+pub(crate) fn repack_all(
     repo: &Repository,
     opts: &RepackOptions,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<RepackStats> {
     let odb = repo.odb();
@@ -1263,11 +1268,11 @@ pub fn repack_all_with_cancel(
         ..RepackStats::default()
     };
     if opts.dry_run {
-        let count = repack_detail(repo, opts, cancel)?.report.objects;
+        let count = repack_detail(repo, opts, progress, cancel)?.report.objects;
         stats.objects_packed = (count > 0).then_some(count);
         return Ok(stats);
     }
-    let detail = repack_detail(repo, opts, cancel)?;
+    let detail = repack_detail(repo, opts, progress, cancel)?;
     let report = detail.report;
     stats.objects_packed = (report.packs_written > 0).then_some(report.objects);
     stats.removed_pack_files = report.packs_removed;
@@ -1445,7 +1450,7 @@ fn named_reachable_loose_objects(
 
 /// Whether maintenance should skip rebuilding packs when [`RepackOptions::auto_skip`] is set.
 ///
-/// Used by [`gc`]: skip when a single pack already holds all objects and nothing is loose.
+/// Used by [`Maintenance::gc`](crate::maintenance::Maintenance::gc): skip when a single pack already holds all objects and nothing is loose.
 /// Multiple packs never skip (consolidation required), even when `gc.autoPackLimit` is zero.
 fn should_auto_skip_repack(
     loose_objects: usize,
@@ -1533,7 +1538,7 @@ fn skipping_repack_would_retain_prunable_packed_objects(
 /// - [`RepositoryError::PreciousObjectsRepository`] (`operation: "prune"`) when
 ///   `extensions.preciousObjects` is set;
 /// - config parse failures, store failures and I/O errors.
-pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<PruneStats> {
+pub(crate) fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<PruneStats> {
     let odb = repo.odb();
     let target = odb.prune_target()?;
     let cfg = repo.config().snapshot()?;
@@ -1698,15 +1703,12 @@ fn duration_ms(d: std::time::Duration) -> u64 {
 /// [`crate::repo::RepositoryError::MaintenanceRunning`] when another process holds the `gc.pid`
 /// lock, [`RepositoryError::UnsupportedObjectStore`] with [`FilesOnlyOperation::Prune`] for a
 /// custom primary without the prune capability, plus failures from each maintenance step.
-pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
-    gc_with_cancel(repo, opts, &CancelToken::never())
-}
-
-/// Like [`gc`], but returns [`Error::Cancelled`] between maintenance phases and before
-/// publishing a new pack.
-pub fn gc_with_cancel(
+///
+/// Returns [`Error::Cancelled`] between maintenance phases and before publishing a new pack.
+pub(crate) fn gc(
     repo: &Repository,
     opts: &GcOptions,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<GcStats> {
     let target = repo.odb().prune_target()?;
@@ -1724,8 +1726,8 @@ pub fn gc_with_cancel(
         }
     };
     match target {
-        PruneTarget::Files => gc_locked(repo, opts, now, cancel),
-        PruneTarget::Store(_) => gc_store_locked(repo, opts, now, cancel),
+        PruneTarget::Files => gc_locked(repo, opts, now, progress, cancel),
+        PruneTarget::Store(_) => gc_store_locked(repo, opts, now, progress, cancel),
     }
 }
 
@@ -1739,15 +1741,16 @@ fn gc_store_locked(
     repo: &Repository,
     opts: &GcOptions,
     now: i64,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<GcStats> {
-    poll_cancel(&mut NullProgress, cancel)?;
+    poll_cancel(progress, cancel)?;
     let mut stats = GcStats::default();
     let dry_run = opts.repack.dry_run;
     let _ = crate::porcelain::commit::reap_stale_next_index_files(repo, dry_run)?;
     let cfg = repo.config().snapshot()?;
     let prune_policy = gc_loose_prune_policy(&cfg, now)?;
-    gc_ref_phases(repo, opts, &cfg, now, cancel, &mut stats)?;
+    gc_ref_phases(repo, opts, &cfg, now, progress, cancel, &mut stats)?;
 
     let GcLoosePrunePolicy::Enabled { keep_newer_than } = prune_policy else {
         return Ok(stats);
@@ -1755,7 +1758,7 @@ fn gc_store_locked(
     if precious_objects(&cfg) {
         return Ok(stats);
     }
-    poll_cancel(&mut NullProgress, cancel)?;
+    poll_cancel(progress, cancel)?;
     let start = Instant::now();
     let odb = repo.odb();
     let roots = collect_maintenance_object_roots(repo)?;
@@ -1777,12 +1780,13 @@ fn gc_ref_phases(
     opts: &GcOptions,
     cfg: &ConfigSet,
     now: i64,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     stats: &mut GcStats,
 ) -> Result<()> {
     let dry_run = opts.repack.dry_run;
     if opts.pack_refs && gc_should_pack_refs(repo, cfg)? && !dry_run {
-        poll_cancel(&mut NullProgress, cancel)?;
+        poll_cancel(progress, cancel)?;
         let start = Instant::now();
         stats.pack_refs = Some(pack_refs(repo, &PackRefsOptions::with_all(true))?);
         stats.phase_timings.pack_refs_ms = duration_ms(start.elapsed());
@@ -1796,10 +1800,10 @@ fn gc_ref_phases(
     Ok(())
 }
 
-/// Why automatic maintenance is due, as decided by [`auto_gc_needed`].
+/// Why automatic maintenance is due, as decided by [`Maintenance::auto_gc_needed`](crate::maintenance::Maintenance::auto_gc_needed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoGcReason {
-    /// The loose-object estimate is above `gc.auto`. [`gc_auto`] packs the reachable loose
+    /// The loose-object estimate is above `gc.auto`. [`Maintenance::gc_auto`](crate::maintenance::Maintenance::gc_auto) packs the reachable loose
     /// objects into one new pack and leaves existing packs alone.
     TooManyLoose {
         /// Loose objects in the sampled fan-out directory (`objects/17`) times 256.
@@ -1807,7 +1811,7 @@ pub enum AutoGcReason {
         /// Effective `gc.auto` threshold.
         limit: usize,
     },
-    /// There are more non-`.keep` packs than `gc.autoPackLimit`. [`gc_auto`] consolidates
+    /// There are more non-`.keep` packs than `gc.autoPackLimit`. [`Maintenance::gc_auto`](crate::maintenance::Maintenance::gc_auto) consolidates
     /// every pack into one.
     TooManyPacks {
         /// Local packs without a `.keep` marker.
@@ -1834,7 +1838,7 @@ const AUTO_GC_SAMPLE_FANOUT: &str = "17";
 /// # Errors
 ///
 /// Config load failures and I/O errors other than a missing directory.
-pub fn auto_gc_needed(repo: &Repository) -> Result<Option<AutoGcReason>> {
+pub(crate) fn auto_gc_needed(repo: &Repository) -> Result<Option<AutoGcReason>> {
     let cfg = repo.config().snapshot()?;
     let Some(threshold) = cfg.gc_auto_threshold() else {
         return Ok(None);
@@ -1876,7 +1880,7 @@ fn count_loose_in_fanout(dir: &Path, name_len: usize) -> Result<usize> {
         .count())
 }
 
-/// Result of [`gc_auto`].
+/// Result of [`Maintenance::gc_auto`](crate::maintenance::Maintenance::gc_auto).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AutoGcOutcome {
@@ -1900,14 +1904,14 @@ pub enum AutoGcOutcome {
     },
 }
 
-/// Run maintenance only when Git's `gc --auto` heuristics say it is due ([`auto_gc_needed`]).
+/// Run maintenance only when Git's `gc --auto` heuristics say it is due ([`Maintenance::auto_gc_needed`](crate::maintenance::Maintenance::auto_gc_needed)).
 ///
 /// When too many loose objects triggered the run, the reachable ones are packed into one new
 /// pack without rewriting existing packs and without a bitmap, so the cost scales with the
 /// loose objects rather than the repository. Unreachable loose objects stay loose until
-/// `gc.pruneExpire` lets the prune step delete them, as in Git. Too many packs runs a full consolidating [`gc`]. Either way the
+/// `gc.pruneExpire` lets the prune step delete them, as in Git. Too many packs runs a full consolidating [`Maintenance::gc`](crate::maintenance::Maintenance::gc). Either way the
 /// other `opts` steps (pack-refs, reflog expiry, unreachable prune under `gc.pruneExpire`,
-/// commit-graph) run as in [`gc`].
+/// commit-graph) run as in [`Maintenance::gc`](crate::maintenance::Maintenance::gc).
 ///
 /// Before doing any work this takes the `gc.pid` lock ([`GcLock`]) and runs the `pre-auto-gc`
 /// hook; a held lock or a failing hook ends the call without changes. With
@@ -1919,7 +1923,12 @@ pub enum AutoGcOutcome {
 /// # Errors
 ///
 /// Config, hook spawn, lock and I/O failures, and any error from the maintenance steps.
-pub fn gc_auto(repo: &Repository, opts: &GcOptions) -> Result<AutoGcOutcome> {
+pub(crate) fn gc_auto(
+    repo: &Repository,
+    opts: &GcOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<AutoGcOutcome> {
     let Some(reason) = auto_gc_needed(repo)? else {
         return Ok(AutoGcOutcome::NotNeeded);
     };
@@ -1945,7 +1954,7 @@ pub fn gc_auto(repo: &Repository, opts: &GcOptions) -> Result<AutoGcOutcome> {
         run_opts.repack.incremental = true;
         run_opts.repack.write_bitmap = false;
     }
-    let stats = gc_locked(repo, &run_opts, now, &CancelToken::never())?;
+    let stats = gc_locked(repo, &run_opts, now, progress, cancel)?;
     Ok(AutoGcOutcome::Ran {
         reason,
         stats: Box::new(stats),
@@ -1961,7 +1970,7 @@ pub struct GcLockHolder {
     pub host: Option<String>,
 }
 
-/// Outcome of [`GcLock::try_acquire`].
+/// Outcome of [`Maintenance::try_lock`](crate::maintenance::Maintenance::try_lock).
 #[derive(Debug)]
 #[must_use]
 pub enum GcLockAttempt {
@@ -1992,7 +2001,7 @@ impl GcLock {
     /// # Errors
     ///
     /// I/O failures while creating, writing or renaming the lock file.
-    pub fn try_acquire(repo: &Repository, now_unix: i64) -> Result<GcLockAttempt> {
+    pub(crate) fn try_acquire(repo: &Repository, now_unix: i64) -> Result<GcLockAttempt> {
         let path = repo.common_git_dir().join("gc.pid");
         let mut lock = match crate::lockfile::LockFile::acquire(
             &path.with_extension("pid.lock"),
@@ -2029,7 +2038,7 @@ impl GcLock {
     /// most likely succeed. Lets a caller avoid starting a process that would only find the
     /// lock held.
     #[must_use]
-    pub fn current_holder(repo: &Repository, now_unix: i64) -> Option<GcLockHolder> {
+    pub(crate) fn current_holder(repo: &Repository, now_unix: i64) -> Option<GcLockHolder> {
         let path = repo.common_git_dir().join("gc.pid");
         live_gc_pid_holder(&path, &local_host_name(), now_unix)
     }
@@ -2108,9 +2117,10 @@ fn gc_locked(
     repo: &Repository,
     opts: &GcOptions,
     now: i64,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<GcStats> {
-    poll_cancel(&mut NullProgress, cancel)?;
+    poll_cancel(progress, cancel)?;
     let mut stats = GcStats::default();
     let dry_run = opts.repack.dry_run;
     let _ = crate::porcelain::commit::reap_stale_next_index_files(repo, dry_run)?;
@@ -2122,7 +2132,7 @@ fn gc_locked(
     } else {
         None
     };
-    gc_ref_phases(repo, opts, &cfg, now, cancel, &mut stats)?;
+    gc_ref_phases(repo, opts, &cfg, now, progress, cancel, &mut stats)?;
 
     let mut repack_opts = opts.repack.clone();
     apply_gc_prune_policy_to_repack(&mut repack_opts, &prune_policy);
@@ -2135,9 +2145,9 @@ fn gc_locked(
     if !repack_opts.write_bitmap && !repack_opts.incremental {
         repack_opts.write_bitmap = gc_repack_writes_bitmap(repo, &cfg)?;
     }
-    poll_cancel(&mut NullProgress, cancel)?;
+    poll_cancel(progress, cancel)?;
     let repack_start = Instant::now();
-    stats.repack = repack_all_with_cancel(repo, &repack_opts, cancel)?;
+    stats.repack = repack_all(repo, &repack_opts, progress, cancel)?;
     let repack_total_ms = duration_ms(repack_start.elapsed());
     stats.phase_timings.prune_ms = stats.repack.unreachable_prune_ms;
     stats.phase_timings.repack_ms = repack_total_ms.saturating_sub(stats.phase_timings.prune_ms);
@@ -2192,7 +2202,7 @@ fn gc_locked(
     Ok(stats)
 }
 
-/// How [`gc`] applies loose-object pruning for `gc.pruneExpire`.
+/// How [`Maintenance::gc`](crate::maintenance::Maintenance::gc) applies loose-object pruning for `gc.pruneExpire`.
 enum GcLoosePrunePolicy {
     /// `gc.pruneExpire=never` — do not delete unreachable loose objects.
     Disabled,
@@ -2616,7 +2626,7 @@ pub(crate) enum PromisorRewriteWhen {
 /// and `gc` keep only those promised objects that sit in a promisor pack, so a
 /// kept blob in an ordinary pack beside it would be deleted. Maintenance that
 /// drops promised blobs must therefore check the promisor holds each one (see
-/// [`drop_promised_blobs`]). `.keep` packs and alternates are left alone, so
+/// [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs)). `.keep` packs and alternates are left alone, so
 /// objects stored there stay. That is not enough for an object only an ordinary
 /// (not `.promisor`) `.keep` pack holds when the new pack names it: Git then
 /// counts it as promised and deletes it once the marker goes, and leaves a copy
@@ -2712,7 +2722,7 @@ pub(crate) fn rewrite_local_objects_without(
     };
     if let Some(staging) = built.staging_path.as_ref() {
         let trusted_rows = (!built.index_rows.is_empty()).then_some(built.index_rows);
-        let ingested = install_pack_path(
+        let ingested = install_pack_path_with_progress(
             staging,
             odb,
             &IngestPackOptions {
@@ -2724,6 +2734,8 @@ pub(crate) fn rewrite_local_objects_without(
                 mark_promisor_pack: true,
                 ..IngestPackOptions::default()
             },
+            None,
+            None,
         )?;
         rewrite.objects = ingested.object_ids.len();
         if let Some(pack_path) = &ingested.pack_path {
@@ -2800,7 +2812,7 @@ fn pack_has_keep_marker(pack_dir: &Path, pack_path: &Path) -> bool {
 /// # Errors
 ///
 /// Propagates ref-store, locking, and I/O failures.
-pub fn pack_refs(repo: &Repository, opts: &PackRefsOptions) -> Result<PackRefsReport> {
+pub(crate) fn pack_refs(repo: &Repository, opts: &PackRefsOptions) -> Result<PackRefsReport> {
     let (path, refs_packed, refs_pruned) =
         crate::refs::pack_refs_for_repository(repo, opts.all, opts.dry_run)?;
     Ok(PackRefsReport {
@@ -2808,35 +2820,6 @@ pub fn pack_refs(repo: &Repository, opts: &PackRefsOptions) -> Result<PackRefsRe
         refs_packed,
         refs_pruned,
     })
-}
-
-impl Repository {
-    /// Write a reachable commit-graph file for this repository.
-    ///
-    /// # Errors
-    ///
-    /// See [`write_commit_graph`].
-    pub fn write_commit_graph(&self, opts: &CommitGraphOptions) -> Result<CommitGraphWriteReport> {
-        write_commit_graph(self, opts)
-    }
-
-    /// Build a reachable commit-graph in memory, for any object store.
-    ///
-    /// # Errors
-    ///
-    /// See [`build_commit_graph`].
-    pub fn build_commit_graph(&self, opts: &CommitGraphOptions) -> Result<CommitGraphBuild> {
-        build_commit_graph(self, opts)
-    }
-
-    /// Write or refresh the multi-pack index for this repository's pack directory.
-    ///
-    /// # Errors
-    ///
-    /// See [`write_midx`].
-    pub fn write_midx(&self, opts: &MidxOptions) -> Result<MidxWriteReport> {
-        write_midx(self, opts)
-    }
 }
 
 /// Standalone object fsck helpers (single-object checks).
@@ -2850,9 +2833,8 @@ pub mod fsck {
 /// Repository-wide fsck (object store, connectivity, refs).
 pub mod repository_fsck {
     pub use crate::fsck::{
-        format_fsck_line, fsck, issue_msg_id, issue_severity, issue_visible_by_default,
-        reachability_roots, FsckDiagnostic, FsckIssue, FsckOptions, FsckReport, FsckSeverity,
-        FsckSummary, MissingObjectReferrer,
+        format_fsck_line, issue_msg_id, issue_severity, issue_visible_by_default, FsckDiagnostic,
+        FsckIssue, FsckOptions, FsckReport, FsckSeverity, FsckSummary, MissingObjectReferrer,
     };
 }
 
@@ -3190,7 +3172,13 @@ mod tests {
         fs::write(pack_dir.join("pack-bbb.pack"), b"PACK").unwrap();
         assert_eq!(auto_gc_needed(&repo).unwrap(), None);
         assert_eq!(
-            gc_auto(&repo, &GcOptions::default()).unwrap(),
+            gc_auto(
+                &repo,
+                &GcOptions::default(),
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never()
+            )
+            .unwrap(),
             AutoGcOutcome::NotNeeded
         );
     }
@@ -3262,7 +3250,12 @@ mod tests {
         }
         assert_eq!(GcLock::current_holder(&repo, now), Some(recorded));
         assert!(matches!(
-            gc(&repo, &GcOptions::default()),
+            gc(
+                &repo,
+                &GcOptions::default(),
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never()
+            ),
             Err(Error::Repository(
                 RepositoryError::MaintenanceRunning { .. }
             ))
@@ -3314,7 +3307,13 @@ mod tests {
         let (_dir, repo) = repo_with_config("[gc]\n\tauto = 1\n");
         fake_loose(&repo, "17", &[NAME_A, NAME_B]);
         fs::write(repo.git_dir().join("gc.pid"), "4242 some-other-host").unwrap();
-        let outcome = gc_auto(&repo, &GcOptions::default()).unwrap();
+        let outcome = gc_auto(
+            &repo,
+            &GcOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert!(
             matches!(&outcome, AutoGcOutcome::AlreadyRunning(holder) if holder.pid == Some(4242)),
             "{outcome:?}"
@@ -3332,7 +3331,13 @@ mod tests {
         fs::create_dir_all(hook.parent().unwrap()).unwrap();
         fs::write(&hook, "#!/bin/sh\nexit 3\n").unwrap();
         fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
-        let outcome = gc_auto(&repo, &GcOptions::default()).unwrap();
+        let outcome = gc_auto(
+            &repo,
+            &GcOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert!(
             matches!(outcome, AutoGcOutcome::DeclinedByHook { status: 3, .. }),
             "{outcome:?}"
@@ -3422,6 +3427,8 @@ mod tests {
                 keep_unreachable: false,
                 ..RepackOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("repack base");
         let pack_dir = repo.git_dir().join("objects/pack");
@@ -3457,6 +3464,8 @@ mod tests {
                 write_bitmap: true,
                 ..RepackOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("incremental repack with bitmap must not fail after installing a pack");
 
@@ -3521,6 +3530,8 @@ mod tests {
                 keep_unreachable: false,
                 ..RepackOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("repack");
         let pack_dir = repo.git_dir().join("objects/pack");
@@ -3554,6 +3565,8 @@ mod tests {
                 write_bitmap: false,
                 ..RepackOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("incremental repack");
         assert!(
@@ -3593,6 +3606,8 @@ mod tests {
         let stats = gc(
             &repo,
             &GcOptions::full_run(false, OffsetDateTime::now_utc().unix_timestamp()),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("gc");
         let t = stats.phase_timings;
@@ -3681,6 +3696,8 @@ mod tests {
                 write_bitmap: false,
                 ..RepackOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("repack");
         assert!(
@@ -3730,6 +3747,8 @@ mod tests {
                 keep_unreachable: false,
                 ..RepackOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("repack");
         assert!(
@@ -3854,6 +3873,8 @@ mod tests {
                 write_bitmap: false,
                 ..RepackOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("repack");
 
@@ -3911,7 +3932,13 @@ mod tests {
         ] {
             filetime::set_file_mtime(&path, FileTime::from(cutoff)).unwrap();
         }
-        gc(&repo, &GcOptions::default()).expect("gc");
+        gc(
+            &repo,
+            &GcOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("gc");
         assert!(!pack_dir.join("tmp_pack_old").exists());
         assert!(!pack_dir.join(".pack-deadbeef-install-9_0").exists());
         assert!(pack_dir.join("tmp_pack_fresh").exists());
@@ -3930,6 +3957,8 @@ mod tests {
                 },
                 ..GcOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("dry-run gc");
         assert!(stats.prune.pruned >= 1);
@@ -3950,7 +3979,13 @@ mod tests {
         filetime::set_file_mtime(&stale, FileTime::from(cutoff)).unwrap();
         filetime::set_file_mtime(stale.join("pack/tmp_pack_stale"), FileTime::from(cutoff))
             .unwrap();
-        gc(&repo, &GcOptions::default()).expect("gc");
+        gc(
+            &repo,
+            &GcOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("gc");
         assert!(!stale.exists(), "stale receive quarantine should be pruned");
         assert!(fresh.exists(), "fresh receive quarantine should be kept");
     }
@@ -4021,7 +4056,13 @@ mod tests {
         )
         .unwrap();
 
-        gc(&repo, &GcOptions::default()).expect("gc");
+        gc(
+            &repo,
+            &GcOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("gc");
         assert!(!main_git.join(format!("next-index-{dead_pid}")).exists());
         assert!(main_git.join(format!("next-index-{live_pid}")).exists());
         assert!(!linked_git.join(format!("next-index-{dead_pid}")).exists());
@@ -4036,10 +4077,18 @@ mod tests {
                 },
                 ..GcOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )
         .expect("dry-run gc");
         assert!(main_git.join(format!("next-index-{dead_pid}")).exists());
-        gc(&repo, &GcOptions::default()).expect("gc again");
+        gc(
+            &repo,
+            &GcOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("gc again");
         assert!(!main_git.join(format!("next-index-{dead_pid}")).exists());
     }
 }

@@ -3240,7 +3240,7 @@ impl<'r> CommitGraphCache<'r> {
         // commits, gc works"). Missing parents are already handled by
         // `parents_of` returning no parents on `ObjectNotFound`, so we only need
         // to record the OIDs the partial clone knows are absent.
-        let promisor_stop = if repo_treats_promisor_packs(repo.git_dir(), &cfg) {
+        let promisor_stop = if repo_treats_promisor_packs(&cfg) {
             read_promisor_missing_oids(repo.git_dir())
                 .into_iter()
                 .collect::<OidHashSet>()
@@ -5558,7 +5558,8 @@ mod tests {
         for (name, oid) in refs {
             crate::refs::write_ref(repo.git_dir(), name, oid)?;
         }
-        repo.write_commit_graph(&crate::maintenance::CommitGraphOptions::default())?;
+        repo.maintenance()
+            .write_commit_graph(&crate::maintenance::CommitGraphOptions::default())?;
         drop(repo);
         Repository::open(dir.path(), &RepositoryOptions::empty())
     }
@@ -5893,7 +5894,12 @@ mod tests {
             }),
             ..crate::maintenance::RepackOptions::default()
         };
-        crate::maintenance::repack(&repo, &opts)?;
+        crate::maintenance::repack(
+            &repo,
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
         drop(repo);
         Repository::open(dir.path(), &RepositoryOptions::empty())
     }

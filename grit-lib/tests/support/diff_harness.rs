@@ -777,7 +777,10 @@ impl DiffRepo {
     }
 
     pub fn load_index(&self) -> Index {
-        self.repo.index().load().expect("index")
+        self.repo
+            .index()
+            .load(&grit_lib::index::IndexLoadOptions::default())
+            .expect("index")
     }
 }
 

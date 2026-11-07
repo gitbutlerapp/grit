@@ -121,7 +121,7 @@ fn promisor_partial_clone_pack_markers_and_config() {
     )
     .expect("config");
 
-    let treats = repo_treats_promisor_packs(&git_dir, &cfg);
+    let treats = repo_treats_promisor_packs(&cfg);
     assert!(
         treats,
         "partial clone should enable promisor semantics via extensions.partialclone or remote.promisor"
@@ -213,7 +213,7 @@ fn promisor_remote_dot_promisor_config_enables_treatment() {
         ),
     )
     .expect("load");
-    assert!(repo_treats_promisor_packs(&git_dir, &cfg));
+    assert!(repo_treats_promisor_packs(&cfg));
 }
 
 #[test]

@@ -539,7 +539,7 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
         index.add_or_replace(index_conflict_entry(path, 2, ours));
         index.add_or_replace(index_conflict_entry(path, 3, theirs));
         repo.index()
-            .write(&mut index)
+            .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
             .expect("write conflict index");
         let rerere_events = repo_rerere(&repo, RerereAutoupdate::No).expect("rerere");
         let rerere_preimage = rerere_events

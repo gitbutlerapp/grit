@@ -11,9 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::objects::pack_objects::{
-    build_pack_with_shallow_and_filter, PackBuildOptions, PackStats, UploadPackStream,
-};
+use grit_lib::objects::pack_objects::{PackBuildOptions, PackStats, UploadPackStream};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::ObjectFilter;
@@ -192,7 +190,7 @@ fn grit_filtered_pack(
     filter: &ObjectFilter,
     use_bitmaps: bool,
 ) -> (Vec<u8>, PackStats) {
-    let mut opts = PackBuildOptions::for_serve(None, false, true);
+    let mut opts = PackBuildOptions::for_serve(None);
     opts.use_bitmaps = use_bitmaps;
     let empty = std::collections::HashSet::new();
     let mut pack = Vec::new();
@@ -323,24 +321,18 @@ fn in_memory_filtered_pack_matches_git() {
     let empty = std::collections::HashSet::new();
     for spec in ["blob:none", "tree:1"] {
         let filter = ObjectFilter::parse(spec).unwrap();
-        let pack = build_pack_with_shallow_and_filter(
-            repo.odb(),
-            &wants,
-            &haves,
-            &empty,
-            &empty,
-            Some(&filter),
-            &PackBuildOptions::for_serve(None, false, true),
-        )
-        .expect("filtered pack");
+        let pack = UploadPackStream::new(&wants, PackBuildOptions::for_serve(None))
+            .with_haves(&haves)
+            .with_source_shallow(&empty)
+            .with_have_shallow(&empty)
+            .with_filter(&filter)
+            .build(repo.odb())
+            .expect("filtered pack");
         let ours = pack_object_ids(&tmp.path().join("ours.git"), &pack);
         let theirs = pack_object_ids(
             &tmp.path().join("theirs.git"),
             &git_filtered_pack(&bare, &wants, &haves, spec, false),
         );
-        assert_eq!(
-            ours, theirs,
-            "build_pack_with_shallow_and_filter --filter={spec}"
-        );
+        assert_eq!(ours, theirs, "UploadPackStream::build --filter={spec}");
     }
 }

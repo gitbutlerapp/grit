@@ -1,6 +1,7 @@
 //! Untracked cache (UNTR index extension) compatibility with system `git` (t7063).
 
 use crate::support;
+use grit_lib::progress::NullProgress;
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -18,7 +19,6 @@ use grit_lib::index::untracked_cache::{
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 use support::{
@@ -86,7 +86,10 @@ fn normal_refresh_check_only_subtree_records_nested_files() {
     git(root, &["commit", "-qm", "c"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let idx = repo.index().load().expect("load");
+    let idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let wt = repo.work_tree().expect("wt");
     let cfg = repo.config().snapshot().expect("config");
     let mut uc = UntrackedCache::new_shell(
@@ -161,7 +164,7 @@ fn issue_1227_new_file_in_git_warmed_check_only_collapsed_dir() {
     stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage for commit");
     let staged: BTreeSet<String> = repo
         .index()
-        .load()
+        .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index")
         .entries()
         .iter()
@@ -183,7 +186,10 @@ fn try_untracked_from_valid_cache_rejects_invalid_root() {
     git(root, &["commit", "-qm", "c"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let idx = repo.index().load().expect("load");
+    let idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = UntrackedCache::new_shell(
@@ -324,7 +330,10 @@ fn t7063_untracked_cache_reused_by_git_status() {
     git(root, &["commit", "-qm", "c"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut idx = repo.index().load().expect("load");
+    let mut idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("work tree");
     let mut uc = UntrackedCache::new_shell(
@@ -343,7 +352,9 @@ fn t7063_untracked_cache_reused_by_git_status() {
     )
     .expect("refresh cache");
     idx.untracked_cache = Some(uc);
-    repo.index().write(&mut idx).expect("persist UNTR");
+    repo.index()
+        .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
+        .expect("persist UNTR");
 
     let before = extension_payload(&read_index_bytes(&repo), b"UNTR").expect("UNTR");
     assert!(!before.is_empty(), "grit must write UNTR extension payload");
@@ -397,7 +408,10 @@ fn t7063_git_untracked_cache_read_by_grit_status() {
     git_update_index_untracked_cache(root);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let idx = repo.index().load().expect("load");
+    let idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     assert!(
         idx.untracked_cache.is_some(),
         "git UNTR must parse into grit index"
@@ -430,16 +444,26 @@ fn t7063_invalidation_matches_git() {
     assert_ne!(before_git, after_add_git);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut idx = repo.index().load().expect("load");
+    let mut idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     idx.invalidate_untracked_cache_for_path("new.txt");
-    repo.index().write(&mut idx).expect("persist invalidation");
+    repo.index()
+        .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
+        .expect("persist invalidation");
     let grit_after = grit_untracked_paths(&repo);
     assert!(grit_after.iter().any(|p| p == "new.txt"));
 
     fs::remove_file(root.join("new.txt")).expect("remove");
-    let mut idx = repo.index().load().expect("reload");
+    let mut idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("reload");
     idx.invalidate_untracked_cache_for_path("new.txt");
-    repo.index().write(&mut idx).expect("persist after remove");
+    repo.index()
+        .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
+        .expect("persist after remove");
     let grit_removed = grit_untracked_paths(&repo);
     assert!(!grit_removed.iter().any(|p| p == "new.txt"));
 }
@@ -477,7 +501,10 @@ fn t7063_dir_flags_from_config_modes() {
     git(root, &["commit", "-qm", "c"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut idx = repo.index().load().expect("load");
+    let mut idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = UntrackedCache::new_shell(0, untracked_cache_ident(wt));
@@ -495,7 +522,9 @@ fn t7063_dir_flags_from_config_modes() {
     let from_cache = collect_untracked_from_cache(&uc);
     assert!(from_cache.iter().any(|p| p == "u.txt"));
     idx.untracked_cache = Some(uc);
-    repo.index().write(&mut idx).expect("write");
+    repo.index()
+        .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write");
 
     let grit_paths = grit_untracked_paths(&repo);
     assert!(grit_paths.iter().any(|p| p == "u.txt"));
@@ -511,10 +540,15 @@ fn t7063_ident_mismatch_discards_stale_cache() {
     git(root, &["commit", "-qm", "c"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut idx = repo.index().load().expect("load");
+    let mut idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let uc = UntrackedCache::new_shell(6, b"wrong-ident\x00".to_vec());
     idx.untracked_cache = Some(uc);
-    repo.index().write(&mut idx).expect("write stale cache");
+    repo.index()
+        .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write stale cache");
 
     fs::write(root.join("fresh.txt"), "f\n").expect("write untracked");
     let paths = grit_untracked_paths(&repo);
@@ -562,7 +596,10 @@ fn t7063_collect_untracked_matches_git_deep_tree() {
     let grit_set: BTreeSet<String> = grit_untracked_paths(&repo).into_iter().collect();
     assert_eq!(git_set, grit_set);
 
-    let mut idx = repo.index().load().expect("load");
+    let mut idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = idx.untracked_cache.take().expect("untr");

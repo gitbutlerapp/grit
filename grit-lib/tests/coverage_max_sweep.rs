@@ -207,7 +207,6 @@ fn diff_index_worktree_and_patch_parse_sweep() -> grit_lib::error::Result<()> {
 fn supporting_and_submodule_gitdir_sweep() -> grit_lib::error::Result<()> {
     use grit_lib::config::gitmodules::gitdir::{
         ensure_submodule_gitdir_config, submodule_gitdir_filesystem_path,
-        submodule_path_config_enabled,
     };
     use grit_lib::config::gitmodules::{check_submodule_name, validate_gitmodules_blob_line};
     use grit_lib::config::{ConfigFile, ConfigScope};
@@ -223,7 +222,6 @@ fn supporting_and_submodule_gitdir_sweep() -> grit_lib::error::Result<()> {
         "[extensions]\n\tsubmodulePathConfig = true\n[core]\n\tautocrlf = true\n",
     )
     .map_err(grit_lib::error::Error::Io)?;
-    assert!(submodule_path_config_enabled(git_dir));
     assert!(check_submodule_name("lib/foo"));
     assert!(validate_gitmodules_blob_line(b"[submodule \"x\"]\n").is_none());
     let cfg = ConfigFile::parse(

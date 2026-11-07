@@ -80,8 +80,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         path: b"base.txt".to_vec(),
         base_index_pos: 0,
     });
-    repo.index().write(&mut index)?;
-    let index = repo.index().load()?;
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())?;
     let tree_a = write_tree_from_index(repo.odb(), &index, "")?;
     let commit_a = commit_from_tree(&repo, tree_a, &[], "initial\n")?;
     repo.references().update("refs/heads/main", &commit_a)?;
@@ -123,8 +126,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         path: b"picked.txt".to_vec(),
         base_index_pos: 0,
     });
-    repo.index().write(&mut index)?;
-    let index = repo.index().load()?;
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())?;
     let tree_b = write_tree_from_index(repo.odb(), &index, "")?;
     let commit_b = commit_from_tree(&repo, tree_b, &[commit_a], "add picked file\n")?;
     repo.references().update("refs/heads/topic", &commit_b)?;

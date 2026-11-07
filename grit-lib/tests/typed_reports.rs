@@ -282,7 +282,9 @@ fn rerere_records_then_reuses_resolution() {
     index.add_or_replace(index_conflict_entry(path, 1, base));
     index.add_or_replace(index_conflict_entry(path, 2, ours));
     index.add_or_replace(index_conflict_entry(path, 3, theirs));
-    repo.index().write(&mut index).expect("write index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
 
     let events = repo_rerere(&repo, RerereAutoupdate::No).expect("rerere");
     assert!(
@@ -306,7 +308,9 @@ fn rerere_records_then_reuses_resolution() {
     index.add_or_replace(index_conflict_entry(path, 1, base));
     index.add_or_replace(index_conflict_entry(path, 2, ours));
     index.add_or_replace(index_conflict_entry(path, 3, theirs));
-    repo.index().write(&mut index).expect("write index again");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index again");
 
     let events = repo_rerere(&repo, RerereAutoupdate::No).expect("rerere3");
     assert!(

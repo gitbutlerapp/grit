@@ -93,13 +93,13 @@ fn lookup_prefix_finds_loose_collision_when_pack_object_is_also_loose() {
 
     assert_eq!(
         repo.odb()
-            .write_with_options(ObjectKind::Blob, &packed_data, BULK_NEW_LOOSE_WRITE)
+            .write_with(ObjectKind::Blob, &packed_data, BULK_NEW_LOOSE_WRITE)
             .expect("materialize packed blob loose"),
         packed_oid
     );
     assert_eq!(
         repo.odb()
-            .write_with_options(ObjectKind::Blob, &collision_data, BULK_NEW_LOOSE_WRITE)
+            .write_with(ObjectKind::Blob, &collision_data, BULK_NEW_LOOSE_WRITE)
             .expect("write collision loose"),
         collision_oid
     );

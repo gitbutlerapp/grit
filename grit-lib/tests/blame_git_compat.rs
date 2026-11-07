@@ -499,7 +499,7 @@ fn blame_merge_and_rename_parent_path_matches_git() {
 /// After a rename, Bloom skips must query the renamed path (not a stale pathspec).
 #[test]
 fn blame_bloom_skip_after_rename_matches_git() {
-    use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+    use grit_lib::maintenance::CommitGraphOptions;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
@@ -523,7 +523,9 @@ fn blame_bloom_skip_after_rename_matches_git() {
     }
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("graph");
+    repo.maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))
+        .expect("graph");
     let dir = repo.work_tree().expect("worktree");
     assert_blame_matches(&repo, dir, "after.txt", None, None);
 }
@@ -910,7 +912,7 @@ fn blame_consecutive_and_trailing_blank_lines_match_git() {
 /// Bloom must still skip when a sibling file in the same directory changed.
 #[test]
 fn blame_bloom_skip_when_sibling_in_directory_changed_matches_git() {
-    use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+    use grit_lib::maintenance::CommitGraphOptions;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
@@ -936,13 +938,15 @@ fn blame_bloom_skip_when_sibling_in_directory_changed_matches_git() {
     }
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("graph");
+    repo.maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))
+        .expect("graph");
     assert_blame_matches(&repo, root, "builtin/target.c", None, None);
 }
 
 #[test]
 fn blame_respects_graft_over_commit_graph_bloom() {
-    use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+    use grit_lib::maintenance::CommitGraphOptions;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
@@ -975,7 +979,9 @@ fn blame_respects_graft_over_commit_graph_bloom() {
     .expect("graft");
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("graph");
+    repo.maintenance()
+        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))
+        .expect("graph");
 
     assert_blame_matches(&repo, root, "f.txt", Some(&child), None);
 }

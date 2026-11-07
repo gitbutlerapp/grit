@@ -1,12 +1,12 @@
 //! Issue #1006: nested `git init` under a grit repo must stage as gitlink, not flat blobs.
 
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::MODE_GITLINK;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -63,7 +63,10 @@ fn add_stages_unregistered_embedded_repo_as_gitlink() {
     )
     .expect("grit add all");
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entry = index
         .get(b"inner", 0)
         .expect("index must contain inner gitlink, not inner/i blob");
@@ -150,7 +153,10 @@ fn add_does_not_treat_placeholder_dot_git_as_embedded_repo() {
     )
     .expect("grit add all");
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(
         index.get(b"inner", 0).is_none(),
         "placeholder inner/.git must not create a gitlink at inner"
@@ -223,7 +229,10 @@ fn add_stages_nested_linked_worktree_as_gitlink() {
     )
     .expect("grit add all");
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entry = index
         .get(b"inner", 0)
         .expect("linked nested worktree must stage as gitlink at inner");

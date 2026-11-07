@@ -403,12 +403,12 @@ fn config_list_prefix_filters_canonical_keys() {
     let file = grit_file(&path, content);
     let mut set = ConfigSet::new();
     set.merge(&file);
-    let filtered = set.entries_with_prefix("remote.").expect("prefix");
+    let filtered = set.entries_under("remote.").expect("prefix");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].key, "remote.o.url");
 
-    let core_lower = set.entries_with_prefix("core").expect("core");
-    let core_upper = set.entries_with_prefix("CORE").expect("CORE");
+    let core_lower = set.entries_under("core").expect("core");
+    let core_upper = set.entries_under("CORE").expect("CORE");
     assert_eq!(core_lower.len(), 1);
     assert_eq!(core_upper.len(), 1);
     assert_eq!(core_lower[0].key, "core.b");

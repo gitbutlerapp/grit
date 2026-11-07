@@ -116,7 +116,7 @@ struct FileAlternatesCache {
     snapshot: Option<Arc<Vec<PathBuf>>>,
 }
 
-/// Options for [`Odb::write_with_options`].
+/// Options for [`Odb::write_with`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WriteOptions {
     /// When set, do not touch mtimes on existing objects (Git `WRITE_OBJECT_SILENT`).
@@ -681,11 +681,11 @@ impl Odb {
         let parsed = match self.session_tree(oid) {
             Some(SessionTree::Parsed(entries)) => return Ok(entries),
             Some(SessionTree::Raw(data)) => {
-                crate::objects::parse_tree_with_oid_len(&data, self.hash_algo().len())?
+                crate::objects::parse_tree_for_algo(&data, self.hash_algo())?
             }
-            None => crate::objects::parse_tree_with_oid_len(
+            None => crate::objects::parse_tree_for_algo(
                 &self.read_tree_payload(oid)?,
-                self.hash_algo().len(),
+                self.hash_algo(),
             )?,
         };
         let arc = Arc::new(parsed);
@@ -2641,7 +2641,7 @@ impl Odb {
             .flatten()
     }
 
-    /// Whether an object is already stored for [`Self::write_with_options`] deduplication.
+    /// Whether an object is already stored for [`Self::write_with`] deduplication.
     ///
     /// Like [`Self::exists`], but the well-known empty tree counts as present only when
     /// materialized on disk (see [`Self::write_local`]).
@@ -3710,7 +3710,7 @@ impl Odb {
     /// Store `size` payload bytes of `kind` read from `reader` and return the object id.
     ///
     /// Payloads below 1 MiB (`stream::STREAMED_WRITE_MIN_SIZE`) are read into memory and
-    /// written like [`Self::write_with_options`]. From 1 MiB up to (but not including)
+    /// written like [`Self::write_with`]. From 1 MiB up to (but not including)
     /// [`Self::big_file_threshold`] they are hashed and deflated in fixed-size chunks into a
     /// loose object. At or above the threshold they go into a new single-object pack (at
     /// [`ConfigSet::pack_objects_zlib_level`]), as Git does for big files, so memory use does
@@ -3759,7 +3759,7 @@ impl Odb {
                     actual: read as u64,
                 }));
             }
-            return self.write_with_options(kind, &data, options);
+            return self.write_with(kind, &data, options);
         }
         if size < self.big_file_threshold()? {
             let loose = self.local_loose()?;
@@ -3818,7 +3818,7 @@ impl Odb {
     /// - [`Error::Io`] — could not create the directory or write the file.
     /// - [`crate::error::ObjectError::Zlib`] — compression failed.
     pub fn write(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
-        self.write_with_options(kind, data, WriteOptions::default())
+        self.write_with(kind, data, WriteOptions::default())
     }
 
     /// Persist batched writes on a custom primary store.
@@ -3957,7 +3957,7 @@ impl Odb {
         if self.custom_primary.is_some() {
             let raw = decompress_zlib_loose_bytes(zlib_store)?;
             let obj = parse_object_bytes(&raw)?;
-            return self.write_with_options(obj.kind, &obj.data, options);
+            return self.write_with(obj.kind, &obj.data, options);
         }
         let primary = self.primary()?;
         if let Some(existing) = primary.try_finish_duplicate_write(oid, options)? {
@@ -3994,7 +3994,7 @@ impl Odb {
     ///
     /// On a files primary the content is deflated straight into the loose object file, so
     /// no compressed copy is held in memory; a custom primary gets
-    /// [`Self::write_with_options`].
+    /// [`Self::write_with`].
     pub(crate) fn write_blob_prehashed(
         &self,
         oid: &ObjectId,
@@ -4002,7 +4002,7 @@ impl Odb {
         options: WriteOptions,
     ) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return self.write_with_options(ObjectKind::Blob, data, options);
+            return self.write_with(ObjectKind::Blob, data, options);
         }
         let primary = self.primary()?;
         if let Some(existing) = primary.try_finish_duplicate_write(oid, options)? {
@@ -4038,7 +4038,7 @@ impl Odb {
     /// files primary). [`WriteOptions::trust_new_loose`] and
     /// [`WriteOptions::assume_loose_only_existence`] apply only to the files-backed
     /// primary path.
-    pub fn write_with_options(
+    pub fn write_with(
         &self,
         kind: ObjectKind,
         data: &[u8],
@@ -5953,7 +5953,7 @@ mod tests {
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
         let again = odb
-            .write_with_options(
+            .write_with(
                 ObjectKind::Blob,
                 b"stable",
                 WriteOptions {
@@ -5967,7 +5967,7 @@ mod tests {
         assert_eq!(before, after);
 
         let touched = odb
-            .write_with_options(
+            .write_with(
                 ObjectKind::Blob,
                 b"stable",
                 WriteOptions {

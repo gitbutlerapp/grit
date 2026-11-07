@@ -138,7 +138,7 @@ impl fmt::Display for ConfigScope {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigValueOrigin {
     /// String value, or `"true"` for a bare boolean key. Only `None` when the key is missing
-    /// (this struct is not used for missing keys — see [`ConfigSet::get_with_origin`]).
+    /// (this struct is not used for missing keys — see [`ConfigSet::origin_of`]).
     pub value: Option<String>,
     /// Config layer that supplied the value.
     pub scope: ConfigScope,
@@ -241,6 +241,43 @@ impl Default for IncludeContext {
             pwd: None,
             env: std::sync::Arc::new(Environment::empty()),
         }
+    }
+}
+
+/// Whether [`ConfigSet::merge_file`] expands `[include]` / `[includeIf]` directives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IncludeMode {
+    /// Read the files `include.path` / `includeIf.<cond>.path` name, like Git's cascade.
+    #[default]
+    Follow,
+    /// Keep include directives as ordinary entries (`git config -f <file> --no-includes`).
+    Ignore,
+}
+
+/// Options for [`ConfigSet::merge_file`].
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct IncludeOptions {
+    /// Whether include directives are expanded.
+    pub mode: IncludeMode,
+    /// Context for resolving include paths and evaluating `[includeIf]` conditions.
+    pub context: IncludeContext,
+}
+
+impl IncludeOptions {
+    /// Sets [`mode`](Self::mode).
+    #[must_use]
+    pub fn with_mode(mut self, mode: IncludeMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Sets [`context`](Self::context).
+    #[must_use]
+    pub fn with_context(mut self, context: IncludeContext) -> Self {
+        self.context = context;
+        self
     }
 }
 
@@ -1183,18 +1220,6 @@ impl ConfigFile {
             .map(|e| e.value.clone().unwrap_or_else(|| "true".to_owned()))
     }
 
-    /// Parse like [`Self::parse`] but record a non-disk include origin (blob, stdin, command line).
-    pub fn parse_with_origin(
-        path: &Path,
-        content: &str,
-        scope: ConfigScope,
-        include_origin: ConfigIncludeOrigin,
-    ) -> Result<Self> {
-        let mut f = Self::parse(path, content, scope)?;
-        f.include_origin = include_origin;
-        Ok(f)
-    }
-
     /// Build a synthetic [`ConfigFile`] from `GIT_CONFIG_PARAMETERS` / `git -c` payloads.
     ///
     /// Unlike [`Self::parse`], this accepts flat `key=value` assignments without `[section]`
@@ -1272,16 +1297,19 @@ impl ConfigFile {
     /// - `key` — canonical key (e.g. `core.bare`).
     /// - `value` — the value to set.
     pub fn set(&mut self, key: &str, value: &str) -> Result<()> {
-        self.set_with_comment(key, value, None)
+        self.set_value(key, value, None)
     }
 
-    /// Set a value in this config file, optionally appending an inline comment.
-    pub fn set_with_comment(
-        &mut self,
-        key: &str,
-        value: &str,
-        comment: Option<&str>,
-    ) -> Result<()> {
+    /// Like [`Self::set`], appending `comment` inline after the value (`git config --comment`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::set`], plus [`ConfigError`] for a comment containing a newline.
+    pub fn set_commented(&mut self, key: &str, value: &str, comment: &str) -> Result<()> {
+        self.set_value(key, value, Some(comment))
+    }
+
+    fn set_value(&mut self, key: &str, value: &str, comment: Option<&str>) -> Result<()> {
         let canon = canonical_key(key)?;
         if self.entries.iter().filter(|e| e.key == canon).count() > 1 {
             return Err(Error::Config(ConfigError::MultipleValues {
@@ -1349,14 +1377,28 @@ impl ConfigFile {
         value: &str,
         value_pattern: Option<&str>,
     ) -> Result<()> {
-        self.replace_all_with_comment(key, value, value_pattern, None)
+        self.replace_all_values(key, value, value_pattern, None)
     }
 
-    /// Replace all occurrences, optionally appending an inline comment.
+    /// Like [`Self::replace_all`], appending `comment` inline after the new value.
     ///
     /// Value patterns starting with `!` are treated as negated regex
     /// (matching values that do NOT match the pattern).
-    pub fn replace_all_with_comment(
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::replace_all`], plus [`ConfigError`] for a comment containing a newline.
+    pub fn replace_all_commented(
+        &mut self,
+        key: &str,
+        value: &str,
+        value_pattern: Option<&str>,
+        comment: &str,
+    ) -> Result<()> {
+        self.replace_all_values(key, value, value_pattern, Some(comment))
+    }
+
+    fn replace_all_values(
         &mut self,
         key: &str,
         value: &str,
@@ -1395,7 +1437,7 @@ impl ConfigFile {
 
         let Some(&target_idx) = matching_indices.last() else {
             // No matching entries — add a new one at the end of the section
-            return self.add_value_with_comment(key, value, comment);
+            return self.append_value(key, value, comment);
         };
 
         let raw_var = raw_variable_name(key);
@@ -1679,16 +1721,19 @@ impl ConfigFile {
     /// This is the behaviour of `git config --add section.key value`.
     /// If the section doesn't exist, it is created.
     pub fn add_value(&mut self, key: &str, value: &str) -> Result<()> {
-        self.add_value_with_comment(key, value, None)
+        self.append_value(key, value, None)
     }
 
-    /// Append a new value with an optional inline comment.
-    pub fn add_value_with_comment(
-        &mut self,
-        key: &str,
-        value: &str,
-        comment: Option<&str>,
-    ) -> Result<()> {
+    /// Like [`Self::add_value`], appending `comment` inline after the value.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::add_value`], plus [`ConfigError`] for a comment containing a newline.
+    pub fn add_value_commented(&mut self, key: &str, value: &str, comment: &str) -> Result<()> {
+        self.append_value(key, value, Some(comment))
+    }
+
+    fn append_value(&mut self, key: &str, value: &str, comment: Option<&str>) -> Result<()> {
         let canon = canonical_key(key)?;
         let raw_var = raw_variable_name(key);
         let comment_suffix = format_comment_suffix(comment)?;
@@ -1997,7 +2042,7 @@ impl ConfigSet {
     /// # Errors
     ///
     /// Returns [`Error::Config`] when `key` is not a valid Git config key.
-    pub fn get_with_origin(&self, key: &str) -> Result<Option<ConfigValueOrigin>> {
+    pub fn origin_of(&self, key: &str) -> Result<Option<ConfigValueOrigin>> {
         let _canon = canonical_key(key)?;
         Ok(self.get_last_entry(key).map(|e| ConfigValueOrigin {
             value: e.value.clone().or_else(|| Some("true".to_owned())),
@@ -2012,7 +2057,7 @@ impl ConfigSet {
     /// # Errors
     ///
     /// Returns [`Error::Config`] when `key` is not a valid Git config key.
-    pub fn get_all_with_origin(&self, key: &str) -> Result<Vec<ConfigValueOrigin>> {
+    pub fn origins_of(&self, key: &str) -> Result<Vec<ConfigValueOrigin>> {
         let canon = canonical_key(key)?;
         Ok(self
             .entries
@@ -2795,15 +2840,11 @@ impl ConfigSet {
     ///
     /// Unreadable or unparsable include targets, include recursion past Git's depth limit,
     /// and [`ConfigError::RemoteUrlInHasconfigInclude`].
-    pub fn merge_file_with_includes(
-        &mut self,
-        file: &ConfigFile,
-        process_includes: bool,
-        ctx: &IncludeContext,
-    ) -> Result<()> {
+    pub fn merge_file(&mut self, file: &ConfigFile, options: &IncludeOptions) -> Result<()> {
+        let ctx = &options.context;
         self.merge_layers(
             &[ConfigLayer::File(Cow::Borrowed(file))],
-            process_includes,
+            options.mode == IncludeMode::Follow,
             ctx,
             &mut Vec::new(),
         )

@@ -7,7 +7,7 @@ use crate::midx_support;
 use grit_lib::objects::midx::{
     compact_multi_pack_index, midx_lookup_pack_and_offset, read_midx_objects,
     read_midx_pack_idx_names, read_midx_preferred_idx_name, resolve_midx_layer_path,
-    resolve_tip_midx_path, verify_midx, write_multi_pack_index_with_options, CompactError,
+    resolve_tip_midx_path, verify_midx, write_multi_pack_index, CompactError,
     WriteMultiPackIndexOptions,
 };
 use grit_lib::objects::ObjectId;
@@ -114,7 +114,7 @@ fn incremental_write_without_new_packs_is_noop() {
         .expect("midx exists")
         .modified()
         .ok();
-    write_multi_pack_index_with_options(
+    write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             incremental: true,
@@ -160,8 +160,7 @@ fn rewrite_fails_when_existing_midx_references_missing_pack() {
     let idx = pack_idx_paths(&objects)[0].clone();
     let stem = idx.file_stem().unwrap().to_string_lossy();
     fs::remove_file(pack_dir.join(format!("{stem}.pack"))).expect("remove pack");
-    let err =
-        write_multi_pack_index_with_options(&pack_dir, &WriteMultiPackIndexOptions::default());
+    let err = write_multi_pack_index(&pack_dir, &WriteMultiPackIndexOptions::default());
     assert!(err.is_err(), "expected could not load pack error");
     let _ = repo;
 }
@@ -200,7 +199,7 @@ fn incremental_write_links_root_midx_into_chain() {
     repo.git(&["commit", "-q", "-m", "chain layer"]);
     assert!(midx_support::pack_objects_layer(repo.path(), 50));
 
-    write_multi_pack_index_with_options(
+    write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             incremental: true,
@@ -232,7 +231,7 @@ fn non_incremental_write_clears_incremental_chain() {
     repo.git(&["add", "inc.txt"]);
     repo.git(&["commit", "-q", "-m", "inc"]);
     assert!(midx_support::pack_objects_layer(repo.path(), 51));
-    write_multi_pack_index_with_options(
+    write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             incremental: true,
@@ -275,7 +274,7 @@ fn compact_with_bitmaps_and_rev_sidecars() {
         repo.git(&["add", &format!("cb-{i}.txt")]);
         repo.git(&["commit", "-q", "-m", &format!("cb {i}")]);
         assert!(midx_support::pack_objects_layer(repo.path(), 110 + i));
-        write_multi_pack_index_with_options(
+        write_multi_pack_index(
             &pack_dir,
             &WriteMultiPackIndexOptions {
                 incremental: true,
@@ -317,7 +316,7 @@ fn compact_missing_to_endpoint() {
     repo.git(&["add", "ce.txt"]);
     repo.git(&["commit", "-q", "-m", "ce"]);
     assert!(midx_support::pack_objects_layer(repo.path(), 52));
-    write_multi_pack_index_with_options(
+    write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             incremental: true,
@@ -401,7 +400,7 @@ fn many_lookups_exercise_chain_and_info_paths() {
         repo.git(&["add", &format!("lk-{i}.txt")]);
         repo.git(&["commit", "-q", "-m", &format!("lk {i}")]);
         assert!(midx_support::pack_objects_layer(repo.path(), 120 + i));
-        write_multi_pack_index_with_options(
+        write_multi_pack_index(
             &pack_dir,
             &WriteMultiPackIndexOptions {
                 incremental: true,
@@ -471,7 +470,7 @@ fn incremental_layer_with_bitmap_and_rev_sidecars_v2() {
     repo.git(&["add", "side.txt"]);
     repo.git(&["commit", "-q", "-m", "side"]);
     assert!(midx_support::pack_objects_layer(repo.path(), 77));
-    let result = write_multi_pack_index_with_options(
+    let result = write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             incremental: true,
@@ -528,7 +527,7 @@ fn non_incremental_rewrite_retains_identical_midx_bytes() {
     grit_write_midx(&pack_dir, &opts);
     let path = pack_dir.join("multi-pack-index");
     let before = fs::read(&path).expect("midx bytes");
-    write_multi_pack_index_with_options(&pack_dir, &opts).expect("rewrite identical");
+    write_multi_pack_index(&pack_dir, &opts).expect("rewrite identical");
     let after = fs::read(&path).expect("midx still there");
     assert_eq!(before, after);
     let _ = repo;
@@ -542,7 +541,7 @@ fn write_default_v2_midx_roundtrip() {
     };
     let pack_dir = objects.join("pack");
     grit_lib::objects::midx::clear_pack_midx_state(&pack_dir).expect("clear");
-    write_multi_pack_index_with_options(&pack_dir, &WriteMultiPackIndexOptions::default())
+    write_multi_pack_index(&pack_dir, &WriteMultiPackIndexOptions::default())
         .expect("default v2 write");
     verify_midx(&objects).expect("verify grit v2");
     for oid in &oids {

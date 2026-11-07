@@ -54,14 +54,14 @@ fn load_grit(path: &Path, text: &str) -> ConfigFile {
 fn apply_grit(cfg: &mut ConfigFile, op: Op) -> Result<(), Error> {
     match op {
         Op::Set(k, v) => cfg.set(k, v),
-        Op::SetWithComment(k, v, c) => cfg.set_with_comment(k, v, Some(c)),
+        Op::SetWithComment(k, v, c) => cfg.set_commented(k, v, c),
         Op::AddValue(k, v) => cfg.add_value(k, v),
-        Op::AddValueWithComment(k, v, c) => cfg.add_value_with_comment(k, v, Some(c)),
+        Op::AddValueWithComment(k, v, c) => cfg.add_value_commented(k, v, c),
         Op::ReplaceAll(k, v) => cfg.replace_all(k, v, None),
         Op::ReplaceAllPattern(k, v, pat) => cfg.replace_all(k, v, Some(pat)),
-        Op::ReplaceAllWithComment(k, v, c) => cfg.replace_all_with_comment(k, v, None, Some(c)),
+        Op::ReplaceAllWithComment(k, v, c) => cfg.replace_all_commented(k, v, None, c),
         Op::ReplaceAllPatternWithComment(k, v, pat, c) => {
-            cfg.replace_all_with_comment(k, v, Some(pat), Some(c))
+            cfg.replace_all_commented(k, v, Some(pat), c)
         }
         Op::UnsetLast(k) => {
             cfg.unset_last(k)?;
@@ -414,13 +414,13 @@ fn comment_rejects_multiline_and_normalizes_leading_whitespace() {
     fs::write(&path, "[a]\n\tx = 1\n").unwrap();
     let mut cfg = load_grit(&path, "[a]\n\tx = 1\n");
 
-    let err = cfg.set_with_comment("a.x", "2", Some("a\nb")).unwrap_err();
+    let err = cfg.set_commented("a.x", "2", "a\nb").unwrap_err();
     assert!(matches!(
         err,
         Error::Config(ConfigError::MultilineCommentNotAllowed)
     ));
 
-    cfg.set_with_comment("a.x", "2", Some(" note"))
+    cfg.set_commented("a.x", "2", " note")
         .expect("set with normalized comment");
     cfg.write().expect("write");
     let text = fs::read_to_string(&path).unwrap();

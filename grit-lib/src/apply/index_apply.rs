@@ -137,7 +137,9 @@ pub fn apply_patch_to_index_and_write(
     let mut lock = handle.begin_update().map_err(|e| library_err_path("", e))?;
     crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
         .map_err(|e| library_err_path("", e))?;
-    let mut index = handle.load().map_err(|e| library_err_path("", e))?;
+    let mut index = handle
+        .load(&crate::index::IndexLoadOptions::default())
+        .map_err(|e| library_err_path("", e))?;
     let outcome = apply_patch_to_index(repo, &mut index, patches, opts)?;
     crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
         .map_err(|e| library_err_path("", e))?;
@@ -495,7 +497,7 @@ mod tests {
         )
         .unwrap();
         let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
-        let mut index = repo.index().load().unwrap();
+        let mut index = repo.load_index().unwrap();
         apply_patch_to_index(&repo, &mut index, &patch, &IndexApplyOptions::default()).unwrap();
         let entry = index.get(b"f.txt", 0).unwrap();
         let blob = repo.odb().read(&entry.oid).unwrap();

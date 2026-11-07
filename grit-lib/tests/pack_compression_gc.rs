@@ -7,7 +7,7 @@ use std::process::Command;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::maintenance::{gc, GcOptions};
+use grit_lib::maintenance::GcOptions;
 use grit_lib::objects::HashAlgo;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
@@ -148,7 +148,13 @@ fn gc_with_compression_config(dir: &Path, config_lines: &[&str]) {
         Repository::discover(Some(dir), &RepositoryOptions::with_environment(env)).expect("open");
     let mut opts = GcOptions::with_reflog_policy(1_700_000_000, false);
     opts.repack.threads = Some(1);
-    gc(&repo, &opts).expect("grit gc");
+    repo.maintenance()
+        .gc(
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit gc");
     git(dir, &["fsck", "--strict"]);
     let pack = std::fs::read(pack_path(&dir.join(".git"))).expect("read pack");
     assert_pack_uses_level_zero_zlib(&pack);

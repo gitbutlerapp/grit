@@ -452,7 +452,7 @@ fn pack_signature_not_restatted_per_object() {
     let warm_data = format!("pack:{warm_rel}");
     let _ = repo
         .odb()
-        .write_with_options(ObjectKind::Blob, warm_data.as_bytes(), Default::default())
+        .write_with(ObjectKind::Blob, warm_data.as_bytes(), Default::default())
         .unwrap();
 
     let index = repo.load_index().unwrap();
@@ -466,7 +466,7 @@ fn pack_signature_not_restatted_per_object() {
         let data = format!("pack:{rel}");
         let _ = repo
             .odb()
-            .write_with_options(ObjectKind::Blob, data.as_bytes(), Default::default())
+            .write_with(ObjectKind::Blob, data.as_bytes(), Default::default())
             .unwrap();
     }
     metrics.set_stamp_counting(false);

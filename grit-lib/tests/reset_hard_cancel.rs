@@ -63,7 +63,10 @@ fn commit_file(
 ) -> ObjectId {
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join(path), contents).expect("write");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let oid = repo
         .odb()
         .write(objects::ObjectKind::Blob, contents.as_bytes())
@@ -79,7 +82,9 @@ fn commit_file(
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index().write(&mut index).expect("write index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
     let commit = objects::CommitData {
         tree,
         parents: parent.into_iter().collect(),
@@ -186,7 +191,7 @@ fn hard_reset_returns_cancelled_and_stops_checkout_early() {
         &repo,
         &ResetOptions::new(first, ResetMode::Hard, reset_identity(), "reset"),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("reset to first");
 
@@ -286,7 +291,10 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
 
 fn commit_tree(repo: &Repository, updates: &[(&str, &str)], parent: Option<ObjectId>) -> ObjectId {
     let wt = repo.work_tree().expect("wt");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     for (path, contents) in updates {
         let abs = wt.join(path);
         if let Some(parent) = abs.parent() {
@@ -309,7 +317,9 @@ fn commit_tree(repo: &Repository, updates: &[(&str, &str)], parent: Option<Objec
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index().write(&mut index).expect("write index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
     let commit = objects::CommitData {
         tree,
         parents: parent.into_iter().collect(),

@@ -1051,7 +1051,7 @@ impl CommitGraphChain {
     /// Parse a complete, self-contained commit-graph file held in memory.
     ///
     /// `bytes` is what Git stores at `objects/info/commit-graph`, for example the output of
-    /// [`crate::maintenance::build_commit_graph`] that a custom object store persisted in its
+    /// [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph) that a custom object store persisted in its
     /// own storage. Attach the result with
     /// [`OdbBuilder::commit_graph`](crate::odb::OdbBuilder::commit_graph) so history walks
     /// read parents, committer dates, generation numbers and changed-path Bloom filters from
@@ -2092,7 +2092,8 @@ mod tests {
     #[test]
     fn from_bytes_parses_a_written_graph_and_rejects_bad_files() {
         let (_dir, repo, commit) = one_commit_repo();
-        repo.write_commit_graph(&crate::maintenance::CommitGraphOptions::default())
+        repo.maintenance()
+            .write_commit_graph(&crate::maintenance::CommitGraphOptions::default())
             .expect("write graph");
         let bytes =
             std::fs::read(repo.odb().objects_dir().join("info/commit-graph")).expect("graph file");
@@ -2144,7 +2145,8 @@ mod tests {
         let side_b = commit(vec![], "b\n");
         let octopus = commit(vec![root, side_a, side_b], "octopus\n");
         crate::refs::write_ref(&repo.git_dir(), "refs/heads/main", &octopus).expect("ref");
-        repo.write_commit_graph(&crate::maintenance::CommitGraphOptions::default())
+        repo.maintenance()
+            .write_commit_graph(&crate::maintenance::CommitGraphOptions::default())
             .expect("write graph");
         let bytes =
             std::fs::read(repo.odb().objects_dir().join("info/commit-graph")).expect("graph file");
@@ -2174,6 +2176,7 @@ mod tests {
     fn custom_primary_ignores_graph_files_and_uses_the_attached_graph() {
         let (dir, files, commit) = one_commit_repo();
         files
+            .maintenance()
             .write_commit_graph(&crate::maintenance::CommitGraphOptions::default())
             .expect("write graph");
         assert!(files.odb().commit_graph_chain().is_some());
@@ -2185,6 +2188,7 @@ mod tests {
         );
 
         let crate::maintenance::CommitGraphBuild::Built(built) = custom
+            .maintenance()
             .build_commit_graph(&crate::maintenance::CommitGraphOptions::default())
             .expect("build")
         else {

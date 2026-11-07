@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use anyhow::Result;
-use grit_lib::maintenance::{repack_all_with_cancel, RepackOptions, RepackStats};
+use grit_lib::maintenance::{RepackOptions, RepackStats};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -99,7 +99,13 @@ pub fn run(force: bool, dry_run: bool, quiet: bool) -> Result<RepackOutcome> {
     let mut opts = RepackOptions::with_dry_run(dry_run);
     opts.force_recompress = force;
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let stats = repack_all_with_cancel(&repo, &opts, &crate::interrupt::process_cancel_token())
+    let stats = repo
+        .maintenance()
+        .repack_all(
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &crate::interrupt::process_cancel_token(),
+        )
         .map_err(crate::json_error::map_lib_error)?;
     Ok((stats, dry_run, quiet).into())
 }

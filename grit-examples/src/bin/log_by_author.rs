@@ -7,7 +7,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::config::mailmap::load_mailmap_table;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::revwalk::CommitFilterBuilder;
@@ -29,7 +28,7 @@ fn main() -> Result<()> {
 
     let repo = open_repo(&repo_root)?;
     let mut builder = CommitFilterBuilder::new().author(author);
-    if let Ok(table) = load_mailmap_table(&repo) {
+    if let Ok(table) = repo.config().mailmap() {
         if !table.is_empty() {
             builder = builder.mailmap(table);
         }

@@ -4,13 +4,13 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::NullProgress;
+use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
 
@@ -97,13 +97,14 @@ fn fsck_peak_memory_does_not_follow_uncompressed_pack_size() {
         return;
     }
     let before = peak_rss();
-    let report = fsck(
-        &repo,
-        &FsckOptions::full_repository(false),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("fsck");
+    let report = repo
+        .maintenance()
+        .fsck(
+            &FsckOptions::full_repository(false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("fsck");
     let growth = peak_rss().saturating_sub(before);
 
     assert!(report.issues.is_empty(), "{:?}", report.issues);

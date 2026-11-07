@@ -499,7 +499,11 @@ fn commits_diff_their_trees_and_reject_non_commits() {
 #[test]
 fn index_to_tree_renames_pathspec_and_submodules() {
     let fx = handle_fixture();
-    let index = fx.repo.index().load().expect("index");
+    let index = fx
+        .repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let diff = fx.repo.diff();
     let plain = diff
         .index_to_tree(&index, Some(&fx.base_tree), &TreeDiffOptions::default())
@@ -568,7 +572,11 @@ fn index_to_worktree_modifications_pathspec_status_and_refresh() {
     let fx = handle_fixture();
     let work_tree = fx.repo.work_tree().expect("work tree").to_path_buf();
     let diff = fx.repo.diff();
-    let mut index = fx.repo.index().load().expect("index");
+    let mut index = fx
+        .repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let clean = diff
         .index_to_worktree(&mut index, &TreeDiffOptions::default())
         .expect("diff");
@@ -596,7 +604,11 @@ fn index_to_worktree_modifications_pathspec_status_and_refresh() {
     assert_eq!(summary(&result.entries), ["D moved.txt", "M dir/b.txt"]);
 
     // Same content, stale stat: only a refreshing scan adopts the new stat data.
-    let mut stale = fx.repo.index().load().expect("index");
+    let mut stale = fx
+        .repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     for entry in stale.entries_mut() {
         if entry.path == b"keep.txt" {
             entry.mtime_sec = 1;
@@ -642,7 +654,11 @@ fn worktree_diffs_require_a_work_tree() {
 fn tree_to_worktree_pairs_against_the_old_tree() {
     let fx = handle_fixture();
     let work_tree = fx.repo.work_tree().expect("work tree").to_path_buf();
-    let index = fx.repo.index().load().expect("index");
+    let index = fx
+        .repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let diff = fx.repo.diff();
     let clean = diff
         .tree_to_worktree(Some(&fx.tip_tree), &index, &TreeDiffOptions::default())

@@ -44,11 +44,11 @@
 //! ```
 //!
 //! - [`Repository`](repo::Repository) exposes typed handles for objects, refs, the
-//!   index, config, revision walking, and diffs ([`objects::Objects`],
+//!   index, config, revision walking, diffs, and maintenance ([`objects::Objects`],
 //!   [`refs::References`], [`index::IndexFile`],
 //!   [`config::Config`], [`revwalk::RevWalk`],
-//!   [`diff::Diff`]), plus [`repo_handles`] for remotes, worktrees, stash,
-//!   notes, reflogs, and bundles.
+//!   [`diff::Diff`], [`maintenance::Maintenance`]), plus [`repo_handles`] for remotes,
+//!   worktrees, stash, notes, reflogs, and bundles.
 //! - [`prelude`] re-exports the types most call sites need.
 //! - [`porcelain`] holds user-facing operations that return structured result
 //!   *models* (the CLI renders them).

@@ -1193,7 +1193,7 @@ fn try_parse_tree_oid_len(data: &[u8], oid_len: usize) -> Result<()> {
     Ok(())
 }
 
-fn collect_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEntry>> {
+pub(crate) fn collect_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEntry>> {
     let mut pos = 0usize;
     let mut entries = Vec::with_capacity(data.len() / 32);
     while let Some(entry) = parse_tree_entry_at(data, &mut pos, oid_len)? {
@@ -1225,12 +1225,16 @@ pub fn parse_tree(data: &[u8]) -> Result<Vec<TreeEntry>> {
     }
 }
 
-/// Parse a tree blob assuming a fixed raw OID width (`oid_len` bytes).
+/// Parse a tree blob whose entry ids use `algo` (the repository's object format).
 ///
-/// Returns an error if the data does not parse cleanly into whole entries of
-/// that width (used by [`parse_tree`] to detect the hash algorithm).
-pub fn parse_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEntry>> {
-    collect_tree_with_oid_len(data, oid_len)
+/// Unlike [`parse_tree`], which tries SHA-1 and then SHA-256 widths, this fails when the
+/// data does not parse cleanly into whole entries of `algo`'s width.
+///
+/// # Errors
+///
+/// Returns [`crate::error::ObjectError::Corrupt`] if the data is malformed for `algo`.
+pub fn parse_tree_for_algo(data: &[u8], algo: HashAlgo) -> Result<Vec<TreeEntry>> {
+    collect_tree_with_oid_len(data, algo.len())
 }
 
 /// Build the raw bytes of a tree object from a slice of entries.
@@ -1272,20 +1276,29 @@ fn push_tree_mode(out: &mut Vec<u8>, mode: u32) {
     out.extend_from_slice(&digits[start..]);
 }
 
-/// Git's tree-entry sort comparator.
+/// Compare two tree entries in Git's canonical tree order.
 ///
 /// Trees are sorted byte-by-byte by `"<name>"` for blobs and `"<name>/"` for
 /// sub-trees, so a directory `foo` sorts after a file `foo-bar` but before
-/// `fooz`.  This matches `base_name_compare` in `tree.c`.
+/// `fooz`. An entry is a sub-tree when its mode is `040000`.
 ///
 /// # Parameters
 ///
-/// - `a_name`: name bytes of the first entry
-/// - `a_is_tree`: whether the first entry is a sub-tree (`mode == 0o040000`)
-/// - `b_name`: name bytes of the second entry
-/// - `b_is_tree`: whether the second entry is a sub-tree
+/// - `a_name`, `a_mode`: name bytes and mode of the first entry
+/// - `b_name`, `b_mode`: name bytes and mode of the second entry
 #[must_use]
+#[inline]
 pub fn tree_entry_cmp(
+    a_name: &[u8],
+    a_mode: u32,
+    b_name: &[u8],
+    b_mode: u32,
+) -> std::cmp::Ordering {
+    tree_name_cmp(a_name, a_mode == 0o040000, b_name, b_mode == 0o040000)
+}
+
+/// [`tree_entry_cmp`] with each entry's sub-tree flag already computed.
+pub(crate) fn tree_name_cmp(
     a_name: &[u8],
     a_is_tree: bool,
     b_name: &[u8],
@@ -1367,7 +1380,7 @@ pub(crate) fn find_tree_entry_by_name_in_data(
                 oid: ObjectId::from_bytes(&rest[oid_start..oid_end])?,
             }));
         }
-        if tree_entry_cmp(entry_name, mode == 0o040000, name, name_is_tree)
+        if tree_name_cmp(entry_name, mode == 0o040000, name, name_is_tree)
             == std::cmp::Ordering::Greater
         {
             return Ok(None);
@@ -2304,7 +2317,7 @@ mod commit_parse_tests {
         let oid = ObjectId::from_bytes(&oid_bytes).expect("oid");
         let mut raw = b"100644 file\0".to_vec();
         raw.extend_from_slice(oid.as_bytes());
-        let entries = parse_tree_with_oid_len(&raw, HashAlgo::Sha256.len()).expect("tree");
+        let entries = parse_tree_for_algo(&raw, HashAlgo::Sha256).expect("tree");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].oid, oid);
     }
@@ -2463,7 +2476,7 @@ mod commit_parse_tests {
             oid: dummy,
         });
         entries.sort_by(|a, b| {
-            tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
+            tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
         });
         let data = serialize_tree(&entries);
         assert!(entries.len() >= 48);
@@ -2476,7 +2489,7 @@ mod commit_parse_tests {
 
     fn sorted_tree_data(entries: &mut [TreeEntry]) -> Vec<u8> {
         entries.sort_by(|a, b| {
-            tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
+            tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
         });
         serialize_tree(entries)
     }

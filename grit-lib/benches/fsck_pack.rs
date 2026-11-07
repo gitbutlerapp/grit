@@ -4,13 +4,13 @@
 
 mod fixture;
 
+use grit_lib::progress::NullProgress;
 use std::hint::black_box;
 
 use crate::progress::CancelToken;
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::repo::Repository;
 
 fn fsck_pack_100k(c: &mut Criterion) {
@@ -24,13 +24,13 @@ fn fsck_pack_100k(c: &mut Criterion) {
             || (),
             |_| {
                 black_box(
-                    fsck(
-                        &repo,
-                        &FsckOptions::full_repository(false),
-                        &mut NullProgress,
-                        &CancelToken::never(),
-                    )
-                    .expect("fsck"),
+                    repo.maintenance()
+                        .fsck(
+                            &FsckOptions::full_repository(false),
+                            &mut NullProgress,
+                            &CancelToken::never(),
+                        )
+                        .expect("fsck"),
                 )
             },
             BatchSize::SmallInput,

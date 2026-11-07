@@ -60,11 +60,22 @@ fn load_config(repo: &Repository) -> ConfigSet {
 
 fn grit_parse_parallel(bytes: &[u8], algo: HashAlgo, cfg: &ConfigSet, threads: usize) -> Index {
     let ctx = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(Some(threads)));
-    Index::parse_with_algo_and_config(bytes, algo, Some(cfg), ctx).expect("parallel parse")
+    Index::parse(
+        bytes,
+        &grit_lib::index::IndexParseOptions::default()
+            .with_hash_algo(algo)
+            .with_config(cfg)
+            .with_parse_context(ctx),
+    )
+    .expect("parallel parse")
 }
 
 fn grit_parse_serial(bytes: &[u8], algo: HashAlgo) -> Index {
-    Index::parse_with_algo(bytes, algo).expect("serial parse")
+    Index::parse(
+        bytes,
+        &grit_lib::index::IndexParseOptions::default().with_hash_algo(algo),
+    )
+    .expect("serial parse")
 }
 
 fn assert_entries_match(a: &Index, b: &Index) {
@@ -185,9 +196,9 @@ fn grit_write_git_accepts(version: u32) {
         });
     }
 
-    let cfg = load_config(&repo);
-    let policy = ThreadPolicy::with_threads_override(Some(4));
-    idx.write_with_config_and_policy(&repo.index().path(), &cfg, policy)
+    let repo = repo.with_thread_policy(ThreadPolicy::with_threads_override(Some(4)));
+    repo.index()
+        .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
         .expect("write");
 
     assert!(run_git(&["-C", root.to_str().expect("p"), "fsck"]).success());
@@ -249,9 +260,9 @@ fn grit_write_v4_ieot_git_reads_with_one_index_thread() {
         });
     }
 
-    let cfg = load_config(&repo);
-    let policy = ThreadPolicy::with_threads_override(Some(4));
-    idx.write_with_config_and_policy(&repo.index().path(), &cfg, policy)
+    let repo = repo.with_thread_policy(ThreadPolicy::with_threads_override(Some(4)));
+    repo.index()
+        .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
         .expect("write v4 ieot index");
 
     let root_s = root.to_str().expect("path");
@@ -317,9 +328,9 @@ fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
     idx.set_fsmonitor_last_update(Some("builtin:fake".to_owned()));
     idx.sync_fsmonitor_dirty_bitmap();
 
-    let cfg = load_config(&repo);
-    let policy = ThreadPolicy::with_threads_override(Some(4));
-    idx.write_with_config_and_policy(&repo.index().path(), &cfg, policy)
+    let repo = repo.with_thread_policy(ThreadPolicy::with_threads_override(Some(4)));
+    repo.index()
+        .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
         .expect("write ieot index");
 
     let bytes = fs::read(repo.index().path()).expect("read index");
@@ -328,6 +339,7 @@ fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
     assert!(body.windows(4).any(|w| w == b"EOIE"));
 
     let serial = grit_parse_serial(&bytes, algo);
+    let cfg = load_config(&repo);
     let parallel = grit_parse_parallel(&bytes, algo, &cfg, 4);
     assert_fsmonitor_flags_match(&serial, &parallel);
     assert!(!serial.entries().iter().all(|e| e.fsmonitor_valid()));
@@ -372,8 +384,14 @@ fn invalid_eoie_falls_back_to_serial_parse() {
     .expect("open");
     let cfg = load_config(&repo);
     let ctx = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(Some(4)));
-    let parsed =
-        Index::parse_with_algo_and_config(&bytes, algo, Some(&cfg), ctx).expect("fallback parse");
+    let parsed = Index::parse(
+        &bytes,
+        &grit_lib::index::IndexParseOptions::default()
+            .with_hash_algo(algo)
+            .with_config(&cfg)
+            .with_parse_context(ctx),
+    )
+    .expect("fallback parse");
     assert_eq!(parsed.entries().len(), ENTRY_COUNT);
 }
 

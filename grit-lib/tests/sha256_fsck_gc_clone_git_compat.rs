@@ -1,5 +1,7 @@
 //! Regression for issue #1962: SHA-256 repos from git must fsck/gc/clone cleanly.
 
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_test_support::{free_port, git};
 use std::net::TcpStream;
 use std::path::Path;
@@ -8,10 +10,8 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::maintenance::repository_fsck::FsckOptions;
-use grit_lib::maintenance::{gc, GcOptions};
+use grit_lib::maintenance::GcOptions;
 use grit_lib::objects::HashAlgo;
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::repo::Repository;
 use grit_lib::test_support::refs::all_reflog_oids;
@@ -45,6 +45,7 @@ fn git_sha256_repo_reflog_null_oid_excluded_from_fsck_and_gc() {
     );
 
     let report = repo
+        .maintenance()
         .fsck(
             &FsckOptions::default(),
             &mut NullProgress,
@@ -57,7 +58,13 @@ fn git_sha256_repo_reflog_null_oid_excluded_from_fsck_and_gc() {
         report.issues
     );
 
-    gc(&repo, &GcOptions::default()).expect("gc");
+    repo.maintenance()
+        .gc(
+            &GcOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("gc");
 }
 
 #[test]

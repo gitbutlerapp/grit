@@ -7,7 +7,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::Environment;
 use grit_lib::config::gitmodules::gitdir::{
-    submodule_gitdir_filesystem_path, validate_legacy_submodule_git_dir, validate_submodule_path,
+    submodule_gitdir_filesystem_path, validate_submodule_path,
 };
 use grit_lib::config::{
     canonical_key, global_config_write_path, ConfigFile, ConfigIncludeOrigin, ConfigLocation,
@@ -131,14 +131,14 @@ fn rename_section_rejects_invalid_section_names() {
 fn entries_with_prefix_rejects_empty_and_malformed_prefixes() {
     let set = ConfigSet::new();
     for prefix in ["", "   ", ".", "bad_sec.", "-x_y"] {
-        match set.entries_with_prefix(prefix) {
+        match set.entries_under(prefix) {
             Err(Error::Config(ConfigError::InvalidListPrefix { prefix: got })) => {
                 assert_eq!(got, prefix);
             }
             other => panic!("{prefix:?}: expected InvalidListPrefix, got {other:?}"),
         }
     }
-    assert!(set.entries_with_prefix("remote.origin").is_ok());
+    assert!(set.entries_under("remote.origin").is_ok());
 }
 
 #[test]
@@ -233,30 +233,42 @@ fn environment_config_errors_are_typed_and_git_rejects_them_too() {
 fn relative_include_from_non_file_config_is_typed_or_skipped() {
     let dir = tempdir().expect("tempdir");
     fs::write(dir.path().join("inc"), "[x]\n\ty = 1\n").expect("write include");
-    let blob = ConfigFile::parse_with_origin(
+    let blob = ConfigFile::parse(
         &dir.path().join("blob"),
         "[include]\n\tpath = inc\n",
         ConfigScope::Local,
-        ConfigIncludeOrigin::Blob,
     )
+    .map(|mut file| {
+        file.include_origin = ConfigIncludeOrigin::Blob;
+        file
+    })
     .expect("parse blob config");
     let mut set = ConfigSet::new();
     let err = config_error(
-        set.merge_file_with_includes(&blob, true, &IncludeContext::default())
-            .expect_err("relative include from a blob"),
+        set.merge_file(
+            &blob,
+            &grit_lib::config::IncludeOptions::default().with_context(IncludeContext::default()),
+        )
+        .expect_err("relative include from a blob"),
     );
     assert_eq!(err, ConfigError::RelativeIncludeOutsideFile);
 
-    let command_line = ConfigFile::parse_with_origin(
+    let command_line = ConfigFile::parse(
         &dir.path().join("cmdline"),
         "[include]\n\tpath = inc\n",
         ConfigScope::Command,
-        ConfigIncludeOrigin::CommandLine,
     )
+    .map(|mut file| {
+        file.include_origin = ConfigIncludeOrigin::CommandLine;
+        file
+    })
     .expect("parse command-line config");
     let mut set = ConfigSet::new();
-    set.merge_file_with_includes(&command_line, true, &IncludeContext::default())
-        .expect("relative command-line include is skipped by default");
+    set.merge_file(
+        &command_line,
+        &grit_lib::config::IncludeOptions::default().with_context(IncludeContext::default()),
+    )
+    .expect("relative command-line include is skipped by default");
     assert_eq!(set.get("x.y").unwrap(), None);
 
     let strict = IncludeContext {
@@ -265,7 +277,10 @@ fn relative_include_from_non_file_config_is_typed_or_skipped() {
     };
     let err = config_error(
         ConfigSet::new()
-            .merge_file_with_includes(&command_line, true, &strict)
+            .merge_file(
+                &command_line,
+                &grit_lib::config::IncludeOptions::default().with_context(strict.clone()),
+            )
             .expect_err("strict command-line include"),
     );
     assert_eq!(err, ConfigError::RelativeIncludeOutsideFile);
@@ -326,28 +341,6 @@ fn submodule_path_validation_is_typed() {
         );
     }
     validate_submodule_path(dir.path(), "plain/sub").expect("plain path");
-}
-
-#[test]
-fn legacy_submodule_git_dir_must_end_with_the_name() {
-    let dir = tempdir().expect("tempdir");
-    let modules = dir.path().join(".git/modules");
-    validate_legacy_submodule_git_dir(&modules.join("lib"), "lib").expect("matching name");
-    for (git_dir, name) in [
-        (modules.join("lib"), "other"),
-        (modules.join("xlib"), "lib"),
-        (Path::new("lib").to_path_buf(), "lib"),
-    ] {
-        assert_eq!(
-            submodule_error(
-                validate_legacy_submodule_git_dir(&git_dir, name).expect_err("name mismatch")
-            ),
-            SubmoduleError::GitDirNameMismatch {
-                name: name.to_owned(),
-                git_dir,
-            }
-        );
-    }
 }
 
 #[test]

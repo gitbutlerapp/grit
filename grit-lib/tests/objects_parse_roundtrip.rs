@@ -97,8 +97,7 @@ fn git_mktree(repo: &RepoFixture, lines: &str) -> String {
 }
 
 fn sort_tree_entries(entries: &mut [TreeEntry]) {
-    entries
-        .sort_by(|a, b| tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
+    entries.sort_by(|a, b| tree_entry_cmp(&a.name, a.mode, &b.name, b.mode));
 }
 
 #[test]
@@ -466,11 +465,11 @@ type not-a-kind\ntag t\n\n"
 #[test]
 fn tree_entry_cmp_matches_git_directory_ordering() {
     assert_eq!(
-        tree_entry_cmp(b"foo", true, b"foo-bar", false),
+        tree_entry_cmp(b"foo", 0o040000, b"foo-bar", 0o100644),
         std::cmp::Ordering::Greater
     );
     assert_eq!(
-        tree_entry_cmp(b"foo", false, b"foo", true),
+        tree_entry_cmp(b"foo", 0o100644, b"foo", 0o040000),
         std::cmp::Ordering::Less
     );
 }

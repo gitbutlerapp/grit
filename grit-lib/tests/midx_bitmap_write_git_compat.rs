@@ -10,8 +10,8 @@ use std::process::{Command, Stdio};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::bitmap::BitmapIndex;
 use grit_lib::objects::midx::{
-    compact_multi_pack_index, midx_checksum_hex, resolve_midx_bitmap_layer,
-    write_multi_pack_index_with_options, MidxBitmapWriteOutcome, WriteMultiPackIndexOptions,
+    compact_multi_pack_index, midx_checksum_hex, resolve_midx_bitmap_layer, write_multi_pack_index,
+    MidxBitmapWriteOutcome, WriteMultiPackIndexOptions,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -126,7 +126,7 @@ fn build_three_pack_duplicate_fixture(repo: &RepoFixture) -> String {
 }
 
 fn grit_write_midx_bitmap(pack_dir: &Path, preferred_pack: Option<&str>) {
-    let result = write_multi_pack_index_with_options(
+    let result = write_multi_pack_index(
         pack_dir,
         &WriteMultiPackIndexOptions {
             write_bitmap: true,
@@ -311,7 +311,7 @@ fn incremental_layer_writes_no_placeholder() {
     git_ok(&fixture, &["add", "layer.txt"]);
     git_ok(&fixture, &["commit", "-q", "-m", "layer"]);
     assert!(pack_objects_layer(fixture.path(), 200));
-    let result = write_multi_pack_index_with_options(
+    let result = write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             incremental: true,
@@ -341,7 +341,7 @@ fn extend_chain_with_incremental_layers(
         git_ok(repo, &["add", &format!("chain-{i}.txt")]);
         git_ok(repo, &["commit", "-q", "-m", &format!("chain {i}")]);
         assert!(pack_objects_layer(repo.path(), 300 + i));
-        write_multi_pack_index_with_options(
+        write_multi_pack_index(
             pack_dir,
             &WriteMultiPackIndexOptions {
                 incremental: true,
@@ -420,7 +420,7 @@ fn grit_opens_bitmap_on_compacted_layer_when_upper_chain_has_no_bitmap() {
     git_ok(&fixture, &["add", "upper.txt"]);
     git_ok(&fixture, &["commit", "-q", "-m", "upper"]);
     assert!(pack_objects_layer(fixture.path(), 400));
-    write_multi_pack_index_with_options(
+    write_multi_pack_index(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             incremental: true,

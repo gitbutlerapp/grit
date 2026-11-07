@@ -1981,7 +1981,7 @@ pub(crate) fn rev_list_with_context(
     let sparse_patterns = sparse_oid_lines_from_filter(repo, options.filter.as_ref())?;
     let skip_trees = skip_tree_descent_for_object_type_filter(options.filter.as_ref());
     let walk_cfg = repo_config.as_ref().clone();
-    let promisor_repo = crate::promisor::repo_treats_promisor_packs(repo.git_dir(), &walk_cfg);
+    let promisor_repo = crate::promisor::repo_treats_promisor_packs(&walk_cfg);
     let object_walk_missing_action = if options.objects
         && options.missing_action == MissingAction::Error
         && (promisor_repo || options.exclude_promisor_objects)
@@ -5361,7 +5361,7 @@ fn trees_differ_tree_entries(
     while oi < old.len() || ni < new.len() {
         match (old.get(oi), new.get(ni)) {
             (Some(o), Some(n)) => {
-                let cmp = crate::objects::tree_entry_cmp(
+                let cmp = crate::objects::tree_name_cmp(
                     &o.name,
                     is_tree_mode(o.mode),
                     &n.name,
@@ -12339,7 +12339,12 @@ mod line_coverage_tests {
             let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
         }
 
-        repack_all(&repo, &RepackOptions::default())?;
+        repack_all(
+            &repo,
+            &RepackOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
         let pack_dir = repo.git_dir().join("objects/pack");
         if let Ok(read) = fs::read_dir(&pack_dir) {
             for entry in read.flatten() {

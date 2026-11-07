@@ -11,9 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
-use grit_lib::maintenance::{
-    drop_promised_blobs, DropPromisedBlobsOptions, DropPromisedBlobsReport,
-};
+use grit_lib::maintenance::{DropPromisedBlobsOptions, DropPromisedBlobsReport};
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::transport::http::HttpClient;
@@ -220,7 +218,7 @@ impl Fixture {
             keep_newer_than,
         );
         opts.dry_run = dry_run;
-        let report = drop_promised_blobs(repo, &opts).expect("drop");
+        let report = repo.maintenance().drop_promised_blobs(&opts).expect("drop");
         clear_pack_cache();
         report
     }
@@ -511,7 +509,7 @@ fn sparse_index_directories_protect_their_blobs() {
         LIMIT,
         None,
     );
-    let report = drop_promised_blobs(&repo, &opts).expect("drop");
+    let report = repo.maintenance().drop_promised_blobs(&opts).expect("drop");
     clear_pack_cache();
     assert_eq!(report.candidates, 1, "{report:?}");
     assert_eq!(report.kept.checked_out, 1, "{report:?}");

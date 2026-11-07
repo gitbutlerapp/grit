@@ -663,7 +663,7 @@ fn get_value(
             });
         }
         let origin = config
-            .get_with_origin(key)
+            .origin_of(key)
             .with_context(|| format!("invalid config key {key}"))?;
         return Ok(match origin {
             Some(o) => ConfigOutcome::Get {
@@ -716,7 +716,7 @@ fn get_value(
     }
 
     let origin = config
-        .get_with_origin(key)
+        .origin_of(key)
         .with_context(|| format!("invalid config key {key}"))?;
     Ok(match origin {
         Some(o) => ConfigOutcome::Get {
@@ -756,7 +756,7 @@ fn get_all_values(
     _mode: OutputMode,
 ) -> Result<ConfigOutcome> {
     let config = load_for_read(read_location, env)?;
-    let mut origins = config.get_all_with_origin(key)?;
+    let mut origins = config.origins_of(key)?;
     if origins.is_empty() {
         if let Some(def) = default_value {
             origins.push(grit_lib::config::ConfigValueOrigin {
@@ -797,7 +797,7 @@ fn list_values(
 ) -> Result<ConfigOutcome> {
     let config = load_for_read(read_location, env)?;
     let lib_entries: Vec<LibConfigEntry> = if let Some(prefix) = prefix {
-        config.entries_with_prefix(prefix)?
+        config.entries_under(prefix)?
     } else {
         config.entries().to_vec()
     };

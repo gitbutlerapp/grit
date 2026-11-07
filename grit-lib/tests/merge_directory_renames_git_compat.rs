@@ -578,7 +578,10 @@ fn grit_reads_the_index_git_leaves_after_a_directory_rename_conflict() {
         .expect("git merge");
     assert!(!merge.status.success(), "git must stop on the moved file");
     let repo = fx.repo();
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert_eq!(
         conflicts_from_index(&index),
         vec![Conflict {

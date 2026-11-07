@@ -720,7 +720,10 @@ fn commit_on_main(repo: &Repository, contents: &str, parent: Option<ObjectId>) -
         .odb()
         .write(ObjectKind::Blob, contents.as_bytes())
         .expect("blob");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     index.add_or_replace(
         grit_lib::index::entry_from_stat(&wt.join("f"), b"f", blob, grit_lib::index::MODE_REGULAR)
             .expect("entry"),
@@ -728,7 +731,9 @@ fn commit_on_main(repo: &Repository, contents: &str, parent: Option<ObjectId>) -
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index().write(&mut index).expect("write index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("write index");
     let commit = CommitData {
         tree,
         parents: parent.into_iter().collect(),

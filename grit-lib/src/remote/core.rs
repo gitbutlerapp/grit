@@ -978,7 +978,7 @@ fn local_source_has_promisor_remotes(git_dir: &Path) -> bool {
         Some(git_dir),
         &crate::config::LoadConfigOptions::repo_local_only(git_dir),
     )
-    .is_ok_and(|cfg| crate::promisor::repo_treats_promisor_packs(git_dir, &cfg))
+    .is_ok_and(|cfg| crate::promisor::repo_treats_promisor_packs(&cfg))
 }
 
 fn local_git_dir_from_url(

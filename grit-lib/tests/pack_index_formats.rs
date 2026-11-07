@@ -117,7 +117,7 @@ fn large_fanout_lookup_roundtrips_git_and_grit_indexes() {
                     )
                 })
                 .collect();
-            grit_lib::test_support::objects_pack::write_v2_pack_index_with_trailer(
+            grit_lib::test_support::objects_pack::write_v2_pack_index_from_trailer(
                 &grit_index_path,
                 &entries,
                 trailer,

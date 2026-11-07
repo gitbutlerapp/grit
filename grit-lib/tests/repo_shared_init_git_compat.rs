@@ -22,5 +22,7 @@ fn init_shared_group_adjusts_repository_file_modes() {
     assert_eq!(config_mode & 0o660, 0o660, "group-shared config mode");
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
     assert!(grit.work_tree().is_some());
-    grit.index().load().expect("index load");
+    grit.index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index load");
 }

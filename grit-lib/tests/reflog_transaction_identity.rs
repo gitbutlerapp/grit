@@ -56,7 +56,10 @@ fn seed_main_commit(repo: &Repository, dir: &TempDir) -> ObjectId {
     use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 
     std::fs::write(dir.path().join("f"), "x\n").expect("write");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
     let commit = CommitData {

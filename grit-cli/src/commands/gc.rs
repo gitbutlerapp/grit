@@ -7,10 +7,8 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::Result;
 use grit_lib::config::git_date::approx::approxidate_careful_at;
 use grit_lib::maintenance::{
-    auto_gc_needed, drop_promised_blobs, gc_auto, gc_with_cancel, offload_blobs, pack_refs,
-    prune_loose_objects, repack_all_with_cancel, write_commit_graph, write_midx, AutoGcOutcome,
-    AutoGcReason, CommitGraphOptions, DropExpiry, DropPromisedBlobsOptions,
-    DropPromisedBlobsReport, DropPromisedBlobsSkip, GcLock, GcOptions, GcPhaseTimings, GcStats,
+    AutoGcOutcome, AutoGcReason, CommitGraphOptions, DropExpiry, DropPromisedBlobsOptions,
+    DropPromisedBlobsReport, DropPromisedBlobsSkip, GcOptions, GcPhaseTimings, GcStats,
     MidxOptions, OffloadOptions, OffloadPack, OffloadPackRole, OffloadRepo, OffloadReport,
     PackRefsOptions, PruneOptions, RepackOptions,
 };
@@ -1159,7 +1157,13 @@ pub fn run_full(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcom
     }
     let opts = GcOptions::full_run(dry_run, now);
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let stats = gc_with_cancel(&repo, &opts, &crate::interrupt::process_cancel_token())
+    let stats = repo
+        .maintenance()
+        .gc(
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &crate::interrupt::process_cancel_token(),
+        )
         .map_err(crate::json_error::map_lib_error)?;
     let timings = stats.phase_timings;
     let tasks = tasks_from_gc_stats(stats, timings);
@@ -1175,7 +1179,14 @@ pub fn run_full(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcom
 pub fn run_auto(dry_run: bool, quiet: bool, now: OffsetDateTime) -> Result<GcOutcome> {
     let repo = context::discover()?;
     let opts = GcOptions::full_run(dry_run, now.unix_timestamp());
-    let outcome = gc_auto(&repo, &opts).map_err(crate::json_error::map_lib_error)?;
+    let outcome = repo
+        .maintenance()
+        .gc_auto(
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .map_err(crate::json_error::map_lib_error)?;
     let (auto, tasks) = match outcome {
         AutoGcOutcome::NotNeeded => (GcAutoReport::NotNeeded, Vec::new()),
         AutoGcOutcome::AlreadyRunning(holder) => (
@@ -1224,10 +1235,14 @@ pub fn run_auto_after_command(mode: OutputMode, now: OffsetDateTime) {
     if !config.maintenance_auto() {
         return;
     }
-    let Ok(Some(_)) = auto_gc_needed(&repo) else {
+    let Ok(Some(_)) = repo.maintenance().auto_gc_needed() else {
         return;
     };
-    if GcLock::current_holder(&repo, now.unix_timestamp()).is_some() {
+    if repo
+        .maintenance()
+        .lock_holder(now.unix_timestamp())
+        .is_some()
+    {
         return;
     }
     let human = mode == OutputMode::Human;
@@ -1246,7 +1261,11 @@ pub fn run_auto_after_command(mode: OutputMode, now: OffsetDateTime) {
         }
     }
     let opts = GcOptions::full_run(false, now.unix_timestamp());
-    match gc_auto(&repo, &opts) {
+    match repo.maintenance().gc_auto(
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    ) {
         Ok(AutoGcOutcome::Ran { .. }) if human => {
             eprintln!("Packed the repository (gc.auto); see `grit gc`.");
         }
@@ -1323,7 +1342,12 @@ pub fn run_repack(
     opts.force_recompress = force;
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let (stats, elapsed) = timed(mode, "Repacking objects…", || {
-        repack_all_with_cancel(&repo, &opts, &crate::interrupt::process_cancel_token())
+        repo.maintenance()
+            .repack_all(
+                &opts,
+                &mut grit_lib::progress::NullProgress,
+                &crate::interrupt::process_cancel_token(),
+            )
             .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
@@ -1342,7 +1366,9 @@ pub fn run_commit_graph(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<
     let mut opts = CommitGraphOptions::with_changed_paths(true);
     opts.dry_run = dry_run;
     let (report, elapsed) = timed(mode, "Writing commit-graph…", || {
-        write_commit_graph(&repo, &opts).map_err(crate::json_error::map_lib_error)
+        repo.maintenance()
+            .write_commit_graph(&opts)
+            .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
         quiet,
@@ -1363,7 +1389,9 @@ pub fn run_midx(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcom
     let mut opts = MidxOptions::default();
     opts.dry_run = dry_run;
     let (report, elapsed) = timed(mode, "Writing multi-pack-index…", || {
-        write_midx(&repo, &opts).map_err(crate::json_error::map_lib_error)
+        repo.maintenance()
+            .write_midx(&opts)
+            .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
         quiet,
@@ -1383,7 +1411,9 @@ pub fn run_pack_refs(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcO
     let mut opts = PackRefsOptions::default();
     opts.dry_run = dry_run;
     let (report, elapsed) = timed(mode, "Packing refs…", || {
-        pack_refs(&repo, &opts).map_err(crate::json_error::map_lib_error)
+        repo.maintenance()
+            .pack_refs(&opts)
+            .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
         quiet,
@@ -1409,7 +1439,9 @@ pub fn run_prune(
     let (stats, elapsed) = timed(mode, "Pruning unreachable loose objects…", || {
         let mut prune_opts = PruneOptions::with_older_than(cutoff);
         prune_opts.dry_run = dry_run;
-        prune_loose_objects(&repo, &prune_opts).map_err(crate::json_error::map_lib_error)
+        repo.maintenance()
+            .prune_loose_objects(&prune_opts)
+            .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
         quiet,
@@ -1457,7 +1489,9 @@ pub fn run_offload(
     opts.configure_lop = args.configure_lop;
     opts.dry_run = args.dry_run;
     let (report, elapsed) = timed(mode, "Offloading large blobs…", || {
-        offload_blobs(&repo, &opts).map_err(crate::json_error::map_lib_error)
+        repo.maintenance()
+            .offload_blobs(&opts)
+            .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
         quiet,
@@ -1501,9 +1535,8 @@ pub fn run_drop_large_blobs(
                 .ok_or_else(|| anyhow::anyhow!("invalid date for --older-than: '{spec}'"))
         })
         .transpose()?;
-    let Some(mut opts) =
-        DropPromisedBlobsOptions::from_config_with_overrides(&config, now, min_size, expiry)
-            .map_err(crate::json_error::map_lib_error)?
+    let Some(mut opts) = DropPromisedBlobsOptions::from_config(&config, now, min_size, expiry)
+        .map_err(crate::json_error::map_lib_error)?
     else {
         if older_than.is_some() {
             anyhow::bail!("--older-than never keeps every blob; nothing to drop");
@@ -1514,7 +1547,9 @@ pub fn run_drop_large_blobs(
     };
     opts.dry_run = dry_run;
     let (report, elapsed) = timed(mode, "Dropping large promised blobs…", || {
-        drop_promised_blobs(&repo, &opts).map_err(crate::json_error::map_lib_error)
+        repo.maintenance()
+            .drop_promised_blobs(&opts)
+            .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
         quiet,

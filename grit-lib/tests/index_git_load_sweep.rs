@@ -14,8 +14,10 @@ use support::{git, seed_multidir_repo, HistoryRepo};
 
 fn load_git_index(worktree: &std::path::Path) -> (Repository, Index) {
     let grit = Repository::discover(Some(worktree), &RepositoryOptions::empty()).expect("open");
-    let index =
-        Index::load_expand_sparse_optional(&grit.index().path(), &grit.odb()).expect("load");
+    let index = grit
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default().with_path(&grit.index().path()))
+        .expect("load");
     (grit, index)
 }
 
@@ -32,7 +34,9 @@ fn exercise_index_public_api(repo: &Repository, index: &mut Index) {
     index.sync_fsmonitor_dirty_bitmap();
     let _ = index.has_stage0_descendant_under("a");
     let _ = write_tree_update_index(repo.odb(), index, "", WriteTreeFlags::default());
-    let _ = Index::load_expand_sparse(&repo.index().path(), repo.odb());
+    let _ = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default().with_path(&repo.index().path()));
     if let Ok(head) = repo
         .revwalk()
         .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
@@ -45,8 +49,6 @@ fn exercise_index_public_api(repo: &Repository, index: &mut Index) {
                     repo.odb(),
                     &commit.tree,
                     &patterns,
-                    true,
-                    false,
                     grit_lib::path_validate::ProtectOptions::default(),
                 );
             }
@@ -54,8 +56,9 @@ fn exercise_index_public_api(repo: &Repository, index: &mut Index) {
     }
     index.remove_paths_and_insert(["gone.txt".as_bytes()], []);
     index.clear_resolve_undo();
-    let cfg = grit_lib::config::ConfigSet::new();
-    let _ = index.write_with_config(&repo.index().path(), &cfg);
+    let _ = repo
+        .index()
+        .write(index, &grit_lib::index::IndexWriteOptions::default());
 }
 
 #[test]

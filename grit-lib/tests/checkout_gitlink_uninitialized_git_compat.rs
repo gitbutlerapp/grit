@@ -1,6 +1,8 @@
 //! Checkout materializes uninitialized gitlinks as empty directories (issue #934).
 
 use grit_lib::objects::FileMode;
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -11,8 +13,6 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -81,7 +81,10 @@ fn checkout_uninitialized_gitlink_matches_git_clone() {
         "uninitialized gitlink must not have nested .git"
     );
 
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let entry = index.get(b"sub", 0).expect("sub in index");
     assert_eq!(entry.mode, MODE_GITLINK);
     assert_eq!(entry.oid.to_string(), GITLINK_OID);
@@ -233,7 +236,10 @@ fn checkout_removes_uninitialized_gitlink_on_delete() {
         "deleted gitlink directory should be removed"
     );
     assert!(wt.join("b").is_file());
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     assert!(index.get(b"sub", 0).is_none());
     assert!(index.get(b"b", 0).is_some());
 }

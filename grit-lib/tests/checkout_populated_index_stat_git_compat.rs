@@ -4,6 +4,8 @@
 //! recorded stale stat fields. On Windows with `core.autocrlf=true`, open-handle metadata differs
 //! from path-based `symlink_metadata`, so checkout must stat by path after flush/close.
 
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -12,8 +14,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::stat_matches;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::CancelToken;
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -36,7 +36,10 @@ fn tree_of_head(root: &Path) -> grit_lib::objects::ObjectId {
 }
 
 fn assert_index_stats_match_worktree(repo_root: &Path, repo: &Repository) {
-    let index = repo.index().load().expect("index");
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     for entry in index.entries() {
         if entry.stage() != 0 {
             continue;
@@ -65,7 +68,9 @@ fn populated_checkout_index_stat_matches_worktree_with_autocrlf() {
     .expect("open grit repo");
 
     let mut index = grit_lib::index::Index::new();
-    repo.index().write(&mut index).expect("clear index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("clear index");
     for i in 0..FILE_COUNT {
         let name = format!("file-{i:04}.txt");
         let _ = fs::remove_file(repo_root.join(&name));
@@ -100,7 +105,9 @@ fn first_status_after_populated_checkout_does_not_rewrite_warm_index() {
     .expect("open grit repo");
 
     let mut index = grit_lib::index::Index::new();
-    repo.index().write(&mut index).expect("clear index");
+    repo.index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("clear index");
     for i in 0..file_count {
         let name = format!("file-{i:04}.txt");
         let _ = fs::remove_file(repo_root.join(&name));

@@ -70,7 +70,7 @@ pub fn tag_parse(data: &[u8]) {
 
 /// Index v2+ on-disk format parse (`Index::parse`).
 pub fn index_parse(data: &[u8]) {
-    let _ = Index::parse(data);
+    let _ = Index::parse(data, &crate::index::IndexParseOptions::default());
 }
 
 /// Pkt-line reader over arbitrary bytes (wire framing).

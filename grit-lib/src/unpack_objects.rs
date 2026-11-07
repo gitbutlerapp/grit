@@ -343,7 +343,7 @@ impl UnpackSink for Odb {
         }
         if !self.uses_files_primary() {
             let data = rd.decompress(size)?;
-            return self.write_with_options(kind, &data, WriteOptions::default());
+            return self.write_with(kind, &data, WriteOptions::default());
         }
         self.write_local_stream_with(kind, size_u64, |chunk_sink| {
             rd.decompress_into(size, chunk_sink)
@@ -1418,7 +1418,7 @@ pub struct PackIndexRecord {
 /// Returns [`crate::error::ObjectError::Corrupt`] for a malformed pack and [`crate::error::ObjectError::UnresolvedDeltas`]
 /// for deltas whose bases are in neither the pack nor `odb`.
 pub fn pack_index_records_from_bytes(data: &[u8], odb: &Odb) -> Result<Vec<PackIndexRecord>> {
-    pack_index_records_with_threads(
+    pack_index_records(
         data,
         odb,
         crate::config::ConfigSet::pack_index_parallelism_for_git_dir(
@@ -1429,7 +1429,7 @@ pub fn pack_index_records_from_bytes(data: &[u8], odb: &Odb) -> Result<Vec<PackI
 }
 
 /// Build index records with an explicit worker thread count (`None`/`0` → available CPUs).
-pub fn pack_index_records_with_threads(
+pub fn pack_index_records(
     data: &[u8],
     odb: &Odb,
     parallelism: crate::hash::Parallelism,
@@ -1437,9 +1437,9 @@ pub fn pack_index_records_with_threads(
     crate::pack_index_build::build_pack_index_records(data, odb, parallelism, true)
 }
 
-/// Like [`pack_index_records_with_threads`], reporting indexing and delta resolution
+/// Like [`pack_index_records`], reporting indexing and delta resolution
 /// progress on `progress` when provided.
-pub fn pack_index_records_with_threads_with_progress(
+pub fn pack_index_records_with_progress(
     data: &[u8],
     odb: &Odb,
     parallelism: crate::hash::Parallelism,

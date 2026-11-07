@@ -80,7 +80,7 @@ pub struct ObjectStream<'a> {
 /// objects are reported as `Ok(None)`, not as errors.
 ///
 /// A store used as a repository's primary can give history walks a commit-graph so they
-/// skip commit reads altogether: build one with [`crate::maintenance::build_commit_graph`],
+/// skip commit reads altogether: build one with [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph),
 /// persist its bytes, and attach it with
 /// [`OdbBuilder::commit_graph`](crate::odb::OdbBuilder::commit_graph). Graph files under
 /// `objects/info/` are never read for a custom primary.

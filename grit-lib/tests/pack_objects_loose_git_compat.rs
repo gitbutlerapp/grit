@@ -159,7 +159,7 @@ fn loose_history_pack_finds_tree_deltas_and_matches_git_pack_size() {
 fn served_pack_of_a_loose_history_holds_every_object_for_git() {
     let dir = TempDir::new().expect("tempdir");
     loose_repo(dir.path(), &history_stream(150));
-    let pack = grit_pack_of_main(dir.path(), &PackBuildOptions::for_serve(None, false, true));
+    let pack = grit_pack_of_main(dir.path(), &PackBuildOptions::for_serve(None));
 
     let listed = git(dir.path(), &["verify-pack", "-v", &pack.to_string_lossy()]);
     let expected = git(dir.path(), &["rev-list", "--objects", "main"]);
