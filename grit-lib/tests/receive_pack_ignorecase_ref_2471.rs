@@ -9,7 +9,7 @@ use grit_lib::refs::store::{
 };
 use grit_lib::refs::{write_packed_refs_file, PackedRefRecord};
 use grit_lib::remote::serve::{
-    receive_pack_with_hook, ProtocolVersion, ReceivePolicy, RefUpdateRefusal, ServeOptions,
+    ProtocolVersion, ReceivePack, ReceivePolicy, RefUpdateRefusal, ServeOptions,
 };
 use grit_lib::repo::Repository;
 use grit_test_support::{git, rev_parse};
@@ -133,10 +133,8 @@ fn receive_pack_reports_reference_already_exists_for_casefold_collision() {
     body.extend_from_slice(&pack);
 
     let mut report = Vec::new();
-    let outcome = receive_pack_with_hook(
+    let outcome = ReceivePack::new(
         &repo,
-        &mut Cursor::new(body),
-        &mut report,
         &ServeOptions {
             protocol: ProtocolVersion::V0,
             stateless_rpc: true,
@@ -144,8 +142,9 @@ fn receive_pack_reports_reference_already_exists_for_casefold_collision() {
             ..ServeOptions::default()
         },
         &ReceivePolicy::default(),
-        &(),
     )
+    .with_hook(&())
+    .run(&mut Cursor::new(body), &mut report)
     .expect("receive_pack");
     assert_eq!(
         outcome.updates[0].error,

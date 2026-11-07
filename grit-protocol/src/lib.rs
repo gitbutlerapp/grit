@@ -337,7 +337,9 @@ pub(crate) fn run_upload_pack_with_session(
     // The promisor fetcher in `repository_options` is used only when this request may
     // fetch missing promised objects; otherwise the served repository fetches nothing.
     opts.attach_promisor_fetcher(&repo, repository_options.promisor_fetcher.clone());
-    serve::upload_pack_cancellable(&repo, input, output, &mut opts, session.cancel())
+    serve::UploadPack::new(&repo, &mut opts)
+        .with_cancel(session.cancel())
+        .run(input, output)
         .map_err(Error::from)
 }
 
@@ -423,16 +425,11 @@ pub(crate) fn run_receive_pack_with_session(
         guard,
         extra: session.receive_hook.clone(),
     };
-    serve::receive_pack_with_hook_cancellable(
-        &repo,
-        input,
-        output,
-        &opts,
-        &policy,
-        &hook,
-        session.cancel(),
-    )
-    .map_err(Error::from)
+    serve::ReceivePack::new(&repo, &opts, &policy)
+        .with_hook(&hook)
+        .with_cancel(session.cancel())
+        .run(input, output)
+        .map_err(Error::from)
 }
 
 #[cfg(test)]

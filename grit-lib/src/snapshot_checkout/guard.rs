@@ -87,7 +87,7 @@ mod tests {
     use super::*;
     use crate::objects::{ObjectId, ObjectKind};
     use crate::repo::InitOptions;
-    use crate::serve::{receive_pack_with_hook, ProtocolVersion, ReceivePolicy, ServeOptions};
+    use crate::serve::{ProtocolVersion, ReceivePack, ReceivePolicy, ServeOptions};
 
     const ZERO: &str = "0000000000000000000000000000000000000000";
 
@@ -123,15 +123,10 @@ mod tests {
             ..ServeOptions::default()
         };
         let mut output = Vec::new();
-        let outcome = receive_pack_with_hook(
-            repo,
-            &mut std::io::Cursor::new(body),
-            &mut output,
-            &opts,
-            &ReceivePolicy::default(),
-            hook,
-        )
-        .expect("receive-pack");
+        let outcome = ReceivePack::new(repo, &opts, &ReceivePolicy::default())
+            .with_hook(hook)
+            .run(&mut std::io::Cursor::new(body), &mut output)
+            .expect("receive-pack");
         (
             outcome.updates.into_iter().map(|u| u.error).collect(),
             String::from_utf8_lossy(&output).into_owned(),

@@ -20,8 +20,8 @@ use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::pkt_line::{read_packet, Packet};
 use grit_lib::remote::serve::{
-    receive_pack, upload_pack, MissingObjectReason, ProtocolVersion, ReceiveOutcome, ReceivePolicy,
-    ServeError, ServeOptions,
+    MissingObjectReason, ProtocolVersion, ReceiveOutcome, ReceivePack, ReceivePolicy, ServeError,
+    ServeOptions, UploadPack,
 };
 use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
@@ -233,7 +233,9 @@ fn serve(
     opts: &mut ServeOptions,
 ) -> (Vec<u8>, Result<(), ServeError>) {
     let mut out = Vec::new();
-    let result = upload_pack(repo, &mut Cursor::new(request), &mut out, opts).map(|_| ());
+    let result = UploadPack::new(repo, opts)
+        .run(&mut Cursor::new(request), &mut out)
+        .map(|_| ());
     (out, result)
 }
 
@@ -699,14 +701,9 @@ fn push_edit(fx: &Offloaded, extra: Option<(&str, ObjectId)>) -> (ObjectId, Rece
     };
     let repo = fx.open(None);
     let mut out = Vec::new();
-    let outcome = receive_pack(
-        &repo,
-        &mut Cursor::new(body),
-        &mut out,
-        &opts,
-        &ReceivePolicy::default(),
-    )
-    .unwrap();
+    let outcome = ReceivePack::new(&repo, &opts, &ReceivePolicy::default())
+        .run(&mut Cursor::new(body), &mut out)
+        .unwrap();
     (commit, outcome)
 }
 

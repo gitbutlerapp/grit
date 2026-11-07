@@ -1,6 +1,6 @@
 //! Upload-pack protocol handler (server side of fetch/clone).
 //!
-//! Serves fetch and clone over smart HTTP by calling [`grit_lib::remote::serve::upload_pack`]
+//! Serves fetch and clone over smart HTTP by calling [`grit_lib::remote::serve::UploadPack`]
 //! in-process.
 
 use std::io::Read;

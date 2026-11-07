@@ -1,4 +1,4 @@
-//! [`receive_pack`](grit_lib::remote::serve::receive_pack) with a custom object
+//! [`ReceivePack`](grit_lib::remote::serve::ReceivePack) with a custom object
 //! primary and injected ref store (issue #2506).
 
 use grit_test_support::git;
@@ -13,7 +13,7 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::serve::{
-    receive_pack, ProtocolVersion, ReceivePolicy, RefUpdateRefusal, ServeOptions, UnpackError,
+    ProtocolVersion, ReceivePack, ReceivePolicy, RefUpdateRefusal, ServeOptions, UnpackError,
 };
 use grit_lib::repo::Repository;
 
@@ -144,14 +144,9 @@ fn receive_pack_publishes_push_into_custom_primary() {
     let (repo, store, refs) = memory_serve_repo(&git_dir);
 
     let body = push_body(&[(None, Some(tip), "refs/heads/main")], &pack);
-    let outcome = receive_pack(
-        &repo,
-        &mut std::io::Cursor::new(body),
-        &mut std::io::sink(),
-        &serve_opts(),
-        &ReceivePolicy::default(),
-    )
-    .expect("receive_pack");
+    let outcome = ReceivePack::new(&repo, &serve_opts(), &ReceivePolicy::default())
+        .run(&mut std::io::Cursor::new(body), &mut std::io::sink())
+        .expect("receive_pack");
     assert!(outcome.unpack_error.is_none());
     assert!(outcome.updates[0].error.is_none());
 
@@ -216,14 +211,9 @@ fn non_fast_forward_leaves_custom_store_unchanged() {
     let (repo, store, refs) = memory_serve_repo(&git_dir);
 
     let body = push_body(&[(None, Some(tip), "refs/heads/main")], &pack);
-    receive_pack(
-        &repo,
-        &mut std::io::Cursor::new(&body),
-        &mut std::io::sink(),
-        &serve_opts(),
-        &ReceivePolicy::default(),
-    )
-    .expect("first push");
+    ReceivePack::new(&repo, &serve_opts(), &ReceivePolicy::default())
+        .run(&mut std::io::Cursor::new(&body), &mut std::io::sink())
+        .expect("first push");
 
     let old = tip;
     let orphan = tempfile::tempdir().expect("tempdir");
@@ -234,14 +224,9 @@ fn non_fast_forward_leaves_custom_store_unchanged() {
         deny_non_fast_forwards: true,
         ..ReceivePolicy::default()
     };
-    let outcome = receive_pack(
-        &repo,
-        &mut std::io::Cursor::new(body),
-        &mut std::io::sink(),
-        &serve_opts(),
-        &policy,
-    )
-    .expect("receive_pack");
+    let outcome = ReceivePack::new(&repo, &serve_opts(), &policy)
+        .run(&mut std::io::Cursor::new(body), &mut std::io::sink())
+        .expect("receive_pack");
     assert!(outcome.unpack_error.is_none());
     assert!(matches!(
         outcome.updates[0].error,
@@ -274,14 +259,9 @@ fn truncated_pack_leaves_custom_store_empty() {
     let (repo, store, refs) = memory_serve_repo(&git_dir);
 
     let body = push_body(&[(None, Some(tip), "refs/heads/main")], &pack);
-    let outcome = receive_pack(
-        &repo,
-        &mut std::io::Cursor::new(body),
-        &mut std::io::sink(),
-        &serve_opts(),
-        &ReceivePolicy::default(),
-    )
-    .expect("receive_pack");
+    let outcome = ReceivePack::new(&repo, &serve_opts(), &ReceivePolicy::default())
+        .run(&mut std::io::Cursor::new(body), &mut std::io::sink())
+        .expect("receive_pack");
     assert!(matches!(
         outcome.unpack_error,
         Some(UnpackError::Truncated) | Some(UnpackError::Ingest(_))

@@ -9,7 +9,7 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::ref_storage::RefStorageFormat;
-use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeError, ServeOptions};
+use grit_lib::remote::serve::{ProtocolVersion, ServeError, ServeOptions, UploadPack};
 use grit_lib::repo::{InitOptions, Repository};
 
 fn pkt(payload: &str) -> Vec<u8> {
@@ -69,13 +69,9 @@ fn v2_opts(stateless_rpc: bool, advertise_refs: bool) -> ServeOptions {
 /// The capability lines of a v2 advertisement.
 fn v2_capabilities(repo: &Repository) -> Vec<String> {
     let mut out = Vec::new();
-    upload_pack(
-        repo,
-        &mut Cursor::new(Vec::new()),
-        &mut out,
-        &mut v2_opts(false, true),
-    )
-    .unwrap();
+    UploadPack::new(repo, &mut v2_opts(false, true))
+        .run(&mut Cursor::new(Vec::new()), &mut out)
+        .unwrap();
     let mut caps = Vec::new();
     let mut r = Cursor::new(out);
     while let Ok(Some(grit_lib::remote::pkt_line::Packet::Data(line))) =
@@ -147,7 +143,9 @@ fn v0_advertisement_never_carries_promisor_remote() {
         advertise_refs: true,
         ..ServeOptions::default()
     };
-    upload_pack(&repo, &mut Cursor::new(Vec::new()), &mut out, &mut opts).unwrap();
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(Vec::new()), &mut out)
+        .unwrap();
     assert!(!String::from_utf8_lossy(&out).contains("promisor-remote"));
 }
 
@@ -159,7 +157,9 @@ fn stateful_session_keeps_acceptance_from_ls_refs() {
     input.extend(fetch_request(&["agent=x"], tip));
     let mut out = Vec::new();
     let mut opts = v2_opts(false, false);
-    upload_pack(&repo, &mut Cursor::new(input), &mut out, &mut opts).unwrap();
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(input), &mut out)
+        .unwrap();
     assert_eq!(opts.accepted_promisor_remotes, ["lop"]);
     assert!(String::from_utf8_lossy(&out).contains("packfile"));
 }
@@ -170,13 +170,12 @@ fn stateless_request_records_acceptance_from_fetch() {
     let (repo, tip, _) = bare_repo(tmp.path(), ADVERTISE_LOP);
     let mut out = Vec::new();
     let mut opts = v2_opts(true, false);
-    upload_pack(
-        &repo,
-        &mut Cursor::new(fetch_request(&["promisor-remote=lop"], tip)),
-        &mut out,
-        &mut opts,
-    )
-    .unwrap();
+    UploadPack::new(&repo, &mut opts)
+        .run(
+            &mut Cursor::new(fetch_request(&["promisor-remote=lop"], tip)),
+            &mut out,
+        )
+        .unwrap();
     assert_eq!(opts.accepted_promisor_remotes, ["lop"]);
 }
 
@@ -186,13 +185,12 @@ fn acceptance_is_ignored_when_nothing_was_advertised() {
     let (repo, _, _) = bare_repo(tmp.path(), "");
     let mut out = Vec::new();
     let mut opts = v2_opts(true, false);
-    upload_pack(
-        &repo,
-        &mut Cursor::new(ls_refs_request(&["promisor-remote=lop"])),
-        &mut out,
-        &mut opts,
-    )
-    .unwrap();
+    UploadPack::new(&repo, &mut opts)
+        .run(
+            &mut Cursor::new(ls_refs_request(&["promisor-remote=lop"])),
+            &mut out,
+        )
+        .unwrap();
     assert!(opts.accepted_promisor_remotes.is_empty());
 }
 
@@ -202,24 +200,16 @@ fn promisor_remote_without_names_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
         let (repo, _, _) = bare_repo(tmp.path(), ADVERTISE_LOP);
         let mut out = Vec::new();
-        let err = upload_pack(
-            &repo,
-            &mut Cursor::new(ls_refs_request(&[bad])),
-            &mut out,
-            &mut v2_opts(false, false),
-        )
-        .expect_err(bad);
+        let err = UploadPack::new(&repo, &mut v2_opts(false, false))
+            .run(&mut Cursor::new(ls_refs_request(&[bad])), &mut out)
+            .expect_err(bad);
         assert!(matches!(err, ServeError::Protocol(_)), "{bad}: {err:?}");
 
         // Smart HTTP gets the error as an ERR packet.
         let mut out = Vec::new();
-        upload_pack(
-            &repo,
-            &mut Cursor::new(ls_refs_request(&[bad])),
-            &mut out,
-            &mut v2_opts(true, false),
-        )
-        .unwrap();
+        UploadPack::new(&repo, &mut v2_opts(true, false))
+            .run(&mut Cursor::new(ls_refs_request(&[bad])), &mut out)
+            .unwrap();
         assert!(String::from_utf8_lossy(&out).contains("ERR "), "{bad}");
     }
 }
@@ -229,36 +219,27 @@ fn allow_any_sha1_in_want_serves_unreachable_objects() {
     let tmp = tempfile::tempdir().unwrap();
     let (repo, _, loose) = bare_repo(tmp.path(), "");
     let mut out = Vec::new();
-    let err = upload_pack(
-        &repo,
-        &mut Cursor::new(fetch_request(&[], loose)),
-        &mut out,
-        &mut v2_opts(false, false),
-    )
-    .expect_err("unreachable want refused by default");
+    let err = UploadPack::new(&repo, &mut v2_opts(false, false))
+        .run(&mut Cursor::new(fetch_request(&[], loose)), &mut out)
+        .expect_err("unreachable want refused by default");
     assert!(matches!(err, ServeError::NotOurRef(oid) if oid == loose));
 
     let tmp = tempfile::tempdir().unwrap();
     let (repo, _, loose) = bare_repo(tmp.path(), "[uploadpack]\n\tallowAnySHA1InWant = true\n");
     let mut out = Vec::new();
-    upload_pack(
-        &repo,
-        &mut Cursor::new(fetch_request(&[], loose)),
-        &mut out,
-        &mut v2_opts(false, false),
-    )
-    .unwrap();
+    UploadPack::new(&repo, &mut v2_opts(false, false))
+        .run(&mut Cursor::new(fetch_request(&[], loose)), &mut out)
+        .unwrap();
     assert!(String::from_utf8_lossy(&out).contains("packfile"));
 
     // A want for an object the repository does not have is still refused.
     let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").unwrap();
-    let err = upload_pack(
-        &repo,
-        &mut Cursor::new(fetch_request(&[], missing)),
-        &mut Vec::new(),
-        &mut v2_opts(false, false),
-    )
-    .expect_err("missing object");
+    let err = UploadPack::new(&repo, &mut v2_opts(false, false))
+        .run(
+            &mut Cursor::new(fetch_request(&[], missing)),
+            &mut Vec::new(),
+        )
+        .expect_err("missing object");
     assert!(matches!(err, ServeError::NotOurRef(_)));
 }
 
@@ -271,7 +252,9 @@ fn allow_any_sha1_in_want_advertises_v0_capabilities() {
         advertise_refs: true,
         ..ServeOptions::default()
     };
-    upload_pack(&repo, &mut Cursor::new(Vec::new()), &mut out, &mut opts).unwrap();
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(Vec::new()), &mut out)
+        .unwrap();
     let text = String::from_utf8_lossy(&out);
     assert!(text.contains("allow-tip-sha1-in-want"), "{text}");
     assert!(text.contains("allow-reachable-sha1-in-want"), "{text}");

@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::objects::pack_objects::{write_upload_pack_stream, PackBuildOptions, PackStats};
+use grit_lib::objects::pack_objects::{PackBuildOptions, PackStats, UploadPackStream};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 
@@ -75,18 +75,16 @@ pub fn stream_blob_to_sink(
     want: ObjectId,
     opts: &PackBuildOptions,
 ) -> PackStats {
-    write_upload_pack_stream(
-        repo,
-        &[want],
-        &[],
-        &HashSet::new(),
-        &HashSet::new(),
-        None,
-        opts,
-        &mut grit_lib::progress::NullProgress,
-        &mut std::io::sink(),
-    )
-    .expect("upload-pack stream")
+    UploadPackStream::new(&[want], *opts)
+        .with_haves(&[])
+        .with_source_shallow(&HashSet::new())
+        .with_have_shallow(&HashSet::new())
+        .write(
+            repo,
+            &mut grit_lib::progress::NullProgress,
+            &mut std::io::sink(),
+        )
+        .expect("upload-pack stream")
 }
 
 pub fn write_blob_pack_file(
@@ -96,16 +94,10 @@ pub fn write_blob_pack_file(
     opts: &PackBuildOptions,
 ) {
     let mut file = std::fs::File::create(path).expect("create pack");
-    write_upload_pack_stream(
-        repo,
-        &[want],
-        &[],
-        &HashSet::new(),
-        &HashSet::new(),
-        None,
-        opts,
-        &mut grit_lib::progress::NullProgress,
-        &mut file,
-    )
-    .expect("upload-pack stream");
+    UploadPackStream::new(&[want], *opts)
+        .with_haves(&[])
+        .with_source_shallow(&HashSet::new())
+        .with_have_shallow(&HashSet::new())
+        .write(repo, &mut grit_lib::progress::NullProgress, &mut file)
+        .expect("upload-pack stream");
 }

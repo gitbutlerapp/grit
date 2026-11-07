@@ -1,4 +1,4 @@
-//! `receive_pack_with_hook`: typed refusals, in-process policy hooks, streamed
+//! `ReceivePack` with an in-process hook: typed refusals, in-process policy hooks, streamed
 //! pack storage, and hook environment, checked against the system `git`.
 
 use grit_test_support::{git, rev_parse};
@@ -12,8 +12,8 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
-    receive_pack, receive_pack_with_hook, ProtocolVersion, ReceiveHook, ReceiveOutcome,
-    ReceivePolicy, RefCommand, RefUpdateRefusal, ServeError, ServeOptions, UnpackError,
+    ProtocolVersion, ReceiveHook, ReceiveOutcome, ReceivePack, ReceivePolicy, RefCommand,
+    RefUpdateRefusal, ServeError, ServeOptions, UnpackError,
 };
 use grit_lib::repo::Repository;
 
@@ -103,15 +103,10 @@ fn serve(
     hook: &dyn ReceiveHook,
 ) -> (ReceiveOutcome, String) {
     let mut output = Vec::new();
-    let outcome = receive_pack_with_hook(
-        repo,
-        &mut std::io::Cursor::new(body),
-        &mut output,
-        &serve_opts(),
-        policy,
-        hook,
-    )
-    .expect("receive_pack");
+    let outcome = ReceivePack::new(repo, &serve_opts(), policy)
+        .with_hook(hook)
+        .run(&mut std::io::Cursor::new(body), &mut output)
+        .expect("receive_pack");
     (outcome, String::from_utf8_lossy(&output).into_owned())
 }
 
@@ -521,14 +516,9 @@ fn hook_scripts_see_git_dir_dot() {
 
     let body = push_body(&[(None, Some(tip), "refs/heads/main")], &pack);
     let mut output = Vec::new();
-    let outcome = receive_pack(
-        &repo,
-        &mut std::io::Cursor::new(body),
-        &mut output,
-        &serve_opts(),
-        &ReceivePolicy::default(),
-    )
-    .expect("receive_pack");
+    let outcome = ReceivePack::new(&repo, &serve_opts(), &ReceivePolicy::default())
+        .run(&mut std::io::Cursor::new(body), &mut output)
+        .expect("receive_pack");
     assert!(outcome.updates[0].error.is_none());
     assert_eq!(std::fs::read_to_string(&log).expect("hook log"), ".");
 }
@@ -560,14 +550,9 @@ fn hook_scripts_see_remote_user_from_repository_environment() {
     let repo = Repository::open(&bare, &RepositoryOptions::with_environment(env)).expect("open");
 
     let body = push_body(&[(None, Some(tip), "refs/heads/main")], &pack);
-    let outcome = receive_pack(
-        &repo,
-        &mut std::io::Cursor::new(body),
-        &mut Vec::new(),
-        &serve_opts(),
-        &ReceivePolicy::default(),
-    )
-    .expect("receive_pack");
+    let outcome = ReceivePack::new(&repo, &serve_opts(), &ReceivePolicy::default())
+        .run(&mut std::io::Cursor::new(body), &mut Vec::new())
+        .expect("receive_pack");
     assert!(outcome.updates[0].error.is_none());
     assert_eq!(
         std::fs::read_to_string(&log).expect("hook log"),
@@ -849,13 +834,8 @@ fn malformed_shallow_line_is_a_protocol_error() {
 
     let mut body = pkt_line("shallow not-a-hex-object-id\n");
     body.extend(push_body(&[(None, Some(tip), "refs/heads/main")], &[]));
-    let result = receive_pack(
-        &repo,
-        &mut std::io::Cursor::new(body),
-        &mut Vec::new(),
-        &serve_opts(),
-        &ReceivePolicy::default(),
-    );
+    let result = ReceivePack::new(&repo, &serve_opts(), &ReceivePolicy::default())
+        .run(&mut std::io::Cursor::new(body), &mut Vec::new());
     assert!(matches!(result, Err(ServeError::Protocol(_))), "{result:?}");
     assert!(resolve_ref(&bare, "refs/heads/main").is_err());
 }

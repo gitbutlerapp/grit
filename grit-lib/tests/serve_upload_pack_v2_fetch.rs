@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::serve::{
-    upload_pack, DeepenNotError, ProtocolVersion, ServeError, ServeOptions,
+    DeepenNotError, ProtocolVersion, ServeError, ServeOptions, UploadPack,
 };
 use grit_lib::repo::Repository;
 
@@ -126,7 +126,9 @@ fn serve_grit(bare: &Path, body: &[u8]) -> Vec<u8> {
         stateless_rpc: true,
         ..ServeOptions::default()
     };
-    upload_pack(&repo, &mut Cursor::new(body.to_vec()), &mut out, &mut opts).expect("upload_pack");
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(body.to_vec()), &mut out)
+        .expect("upload_pack");
     out
 }
 
@@ -155,7 +157,9 @@ fn advertised_fetch_features(bare: &Path) -> String {
         advertise_refs: true,
         ..ServeOptions::default()
     };
-    upload_pack(&repo, &mut Cursor::new(Vec::new()), &mut out, &mut opts).expect("advertise");
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(Vec::new()), &mut out)
+        .expect("advertise");
     response_sections(&out)
         .into_iter()
         .find_map(|l| l.strip_prefix("fetch=").map(str::to_owned))
@@ -170,7 +174,8 @@ fn serve_grit_err(bare: &Path, body: &[u8]) -> ServeError {
         protocol: ProtocolVersion::V2,
         ..ServeOptions::default()
     };
-    upload_pack(&repo, &mut Cursor::new(body.to_vec()), &mut out, &mut opts)
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(body.to_vec()), &mut out)
         .expect_err("request should be refused")
 }
 
@@ -383,7 +388,9 @@ fn v2_capability_lines(bare: &Path) -> Vec<String> {
         advertise_refs: true,
         ..ServeOptions::default()
     };
-    upload_pack(&repo, &mut Cursor::new(Vec::new()), &mut out, &mut opts).expect("advertise");
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(Vec::new()), &mut out)
+        .expect("advertise");
     response_sections(&out)
         .into_iter()
         .filter(|l| !matches!(l.as_str(), "<flush>" | "<delim>"))
@@ -488,7 +495,9 @@ fn object_info_is_not_advertised_without_transfer_advertise_object_info() {
         stateless_rpc: true,
         ..ServeOptions::default()
     };
-    upload_pack(&repo, &mut Cursor::new(body), &mut out, &mut opts).expect("stateless v2");
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(body), &mut out)
+        .expect("stateless v2");
     let sections = response_sections(&out);
     assert!(
         sections.first().is_some_and(|l| l.starts_with("ERR ")),
@@ -516,7 +525,8 @@ fn v2_fetch_records_server_option_from_client() {
         stateless_rpc: true,
         ..ServeOptions::default()
     };
-    upload_pack(&repo, &mut Cursor::new(body), &mut out, &mut opts)
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(body), &mut out)
         .expect("fetch with server-option");
     assert_eq!(opts.server_options, ["trace-id=42"]);
 }
@@ -824,8 +834,9 @@ fn stateful_v2_session_returns_upload_outcome_for_fetch() {
         agent: "grit-test".to_owned(),
         ..ServeOptions::default()
     };
-    let summary =
-        upload_pack(&repo, &mut Cursor::new(body), &mut out, &mut opts).expect("stateful v2");
+    let summary = UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(body), &mut out)
+        .expect("stateful v2");
     assert!(
         summary.objects_sent > 0,
         "expected pack objects, got {summary:?}"
@@ -835,10 +846,8 @@ fn stateful_v2_session_returns_upload_outcome_for_fetch() {
 
     let mut two_step = negotiation_request(&[&format!("want {}", tip.to_hex())]);
     two_step.extend(fetch_request(&[&format!("want {}", tip.to_hex())]));
-    let summary2 = upload_pack(
+    let summary2 = UploadPack::new(
         &repo,
-        &mut Cursor::new(two_step),
-        &mut Vec::new(),
         &mut ServeOptions {
             protocol: ProtocolVersion::V2,
             stateless_rpc: false,
@@ -846,6 +855,7 @@ fn stateful_v2_session_returns_upload_outcome_for_fetch() {
             ..ServeOptions::default()
         },
     )
+    .run(&mut Cursor::new(two_step), &mut Vec::new())
     .expect("stateful v2 two-step");
     assert_eq!(summary2.negotiation_rounds, 1);
     assert!(summary2.objects_sent > 0);

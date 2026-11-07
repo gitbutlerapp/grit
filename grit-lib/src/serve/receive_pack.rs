@@ -684,25 +684,14 @@ fn applied_push(updates: Vec<RefUpdateResult>) -> AppliedPush {
     }
 }
 
-/// Serve one push session: advertise refs, read the ref updates and pack, store
-/// the objects, apply the updates, and report the result to the client.
+/// One push session served into a repository (the server side of `git-receive-pack`):
+/// advertise refs, read the ref updates and pack, store the objects, apply the updates,
+/// and report the result to the client.
 ///
-/// The same as [`receive_pack_with_hook`] with no in-process [`ReceiveHook`].
-///
-/// # Errors
-///
-/// See [`receive_pack_with_hook`].
-pub fn receive_pack(
-    repo: &Repository,
-    input: &mut dyn Read,
-    output: &mut dyn Write,
-    opts: &ServeOptions,
-    policy: &ReceivePolicy,
-) -> Result<ReceiveOutcome> {
-    receive_pack_with_hook(repo, input, output, opts, policy, &())
-}
-
-/// Serve one push session, running `hook` alongside the hook scripts.
+/// Build it with [`ReceivePack::new`], optionally add an in-process [`ReceiveHook`]
+/// ([`ReceivePack::with_hook`]) and a [`CancelToken`] ([`ReceivePack::with_cancel`]),
+/// then [`ReceivePack::run`] it over the client's byte streams. Protocol v2 is not
+/// defined for pushes, so a v2 session is served as v0.
 ///
 /// The pushed pack is streamed into a temp file inside a quarantine object
 /// directory, so memory use does not grow with the pack size. Its objects are
@@ -715,7 +704,7 @@ pub fn receive_pack(
 /// capability either every update is applied or none is. Server-side hooks run
 /// through the repository [`CommandRunner`](crate::command_runner::CommandRunner)
 /// (`pre-receive`, `update`, `post-receive`, `post-update`) with push options and
-/// quarantined object ingestion matching Git receive-pack. `hook` runs just
+/// quarantined object ingestion matching Git receive-pack. An in-process [`ReceiveHook`] runs just
 /// before the matching script: [`ReceiveHook::pre_receive`] before
 /// `pre-receive` and [`ReceiveHook::update`] before each `update`; its
 /// [`ReceiveHook::message`] reaches a client that asked for a side band just
@@ -733,16 +722,6 @@ pub fn receive_pack(
 /// added to the `shallow` file before the ref is written and hook scripts see
 /// the client's boundaries through `GIT_SHALLOW_FILE`.
 ///
-/// # Parameters
-///
-/// - `repo`: the repository receiving the push.
-/// - `input`: the client's command list and pack.
-/// - `output`: where the advertisement and status report are written.
-/// - `opts`: framing, protocol version, agent string, and hidden refs. Protocol
-///   v2 is not defined for pushes, so it is served as v0.
-/// - `policy`: which updates to refuse.
-/// - `hook`: in-process checks; pass `&()` for none.
-///
 /// # Returns
 ///
 /// What was stored and which updates were applied. A pack that could not be
@@ -755,35 +734,63 @@ pub fn receive_pack(
 /// Returns [`ServeError::Protocol`] for a malformed command list, and I/O or
 /// repository errors from writing the response, creating the quarantine, or
 /// moving the received objects into the repository.
-pub fn receive_pack_with_hook(
-    repo: &Repository,
-    input: &mut dyn Read,
-    output: &mut dyn Write,
-    opts: &ServeOptions,
-    policy: &ReceivePolicy,
-    hook: &dyn ReceiveHook,
-) -> Result<ReceiveOutcome> {
-    receive_pack_with_hook_cancellable(
-        repo,
-        input,
-        output,
-        opts,
-        policy,
-        hook,
-        &CancelToken::never(),
-    )
+#[must_use = "a ReceivePack does nothing until it is run"]
+pub struct ReceivePack<'a> {
+    repo: &'a Repository,
+    options: &'a ServeOptions,
+    policy: &'a ReceivePolicy,
+    hook: &'a dyn ReceiveHook,
+    cancel: &'a CancelToken,
 }
 
-/// Serve one push session with a cancel signal, running `hook` alongside hook scripts.
-///
-/// Same as [`receive_pack_with_hook`], but stops without moving refs when `cancel`
-/// fires while reading the pack or before updates are applied.
-///
-/// # Errors
-///
-/// Returns [`ServeError::Cancelled`] when `cancel` is already set or fires during
-/// the session before ref updates are committed.
-pub fn receive_pack_with_hook_cancellable(
+impl<'a> ReceivePack<'a> {
+    /// Prepare a session receiving into `repo` with `options` (framing, protocol version,
+    /// agent string, hidden refs) and `policy` (which updates to refuse).
+    pub fn new(repo: &'a Repository, options: &'a ServeOptions, policy: &'a ReceivePolicy) -> Self {
+        Self {
+            repo,
+            options,
+            policy,
+            hook: &(),
+            cancel: CancelToken::never_ref(),
+        }
+    }
+
+    /// Run `hook`'s in-process checks alongside the repository's hook scripts.
+    pub fn with_hook(mut self, hook: &'a dyn ReceiveHook) -> Self {
+        self.hook = hook;
+        self
+    }
+
+    /// Stop without moving refs when `cancel` fires while reading the pack or before the
+    /// updates are applied.
+    pub fn with_cancel(mut self, cancel: &'a CancelToken) -> Self {
+        self.cancel = cancel;
+        self
+    }
+
+    /// Serve the session, reading the client's commands and pack from `input` and writing
+    /// the advertisement and status report to `output`.
+    ///
+    /// # Errors
+    ///
+    /// See [`ReceivePack`]; [`ServeError::Cancelled`] when the cancel token is already set
+    /// or fires before the ref updates are committed.
+    pub fn run(self, input: &mut dyn Read, output: &mut dyn Write) -> Result<ReceiveOutcome> {
+        receive_pack(
+            self.repo,
+            input,
+            output,
+            self.options,
+            self.policy,
+            self.hook,
+            self.cancel,
+        )
+    }
+}
+
+/// Serve one push session (see [`ReceivePack`]).
+pub(crate) fn receive_pack(
     repo: &Repository,
     input: &mut dyn Read,
     output: &mut dyn Write,

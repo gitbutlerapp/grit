@@ -22,7 +22,7 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::push::push_http;
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::serve::{receive_pack, ReceivePolicy, ServeOptions};
+use grit_lib::remote::serve::{ReceivePack, ReceivePolicy, ServeOptions};
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::{Remote, RemoteError, RemoteResult};
@@ -332,13 +332,12 @@ impl InProcessServer {
             stateless_rpc: true,
             ..Default::default()
         };
-        receive_pack(
+        ReceivePack::new(
             &self.repo()?,
-            &mut Cursor::new(body),
-            &mut out,
             &opts,
             &ReceivePolicy::from_config(&ConfigSet::new()),
         )
+        .run(&mut Cursor::new(body), &mut out)
         .map_err(|e| Error::Verbatim(e.to_string()))?;
         Ok(out)
     }
@@ -355,13 +354,12 @@ impl HttpClient for InProcessServer {
             advertise_refs: true,
             ..Default::default()
         };
-        receive_pack(
+        ReceivePack::new(
             &self.repo()?,
-            &mut std::io::empty(),
-            &mut out,
             &opts,
             &ReceivePolicy::from_config(&ConfigSet::new()),
         )
+        .run(&mut std::io::empty(), &mut out)
         .map_err(|e| Error::Verbatim(e.to_string()))?;
         Ok(out)
     }

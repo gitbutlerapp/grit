@@ -6,9 +6,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::ref_storage::RefStorageFormat;
-use grit_lib::remote::serve::{
-    upload_pack, upload_pack_cancellable, ProtocolVersion, ServeError, ServeOptions,
-};
+use grit_lib::remote::serve::{ProtocolVersion, ServeError, ServeOptions, UploadPack};
 use grit_lib::repo::{InitOptions, Repository};
 use std::io::Cursor;
 
@@ -91,24 +89,19 @@ fn upload_pack_v0_advertise_and_stateless_fetch() {
 
     let mut ad_out = Vec::new();
     let mut serve_opts = test_serve_opts(ProtocolVersion::V0, true, false);
-    upload_pack(
-        &repo,
-        &mut Cursor::new([] as [u8; 0]),
-        &mut ad_out,
-        &mut serve_opts,
-    )
-    .expect("advertise");
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(&mut Cursor::new([] as [u8; 0]), &mut ad_out)
+        .expect("advertise");
     assert!(ad_out.len() > 20);
 
     let mut pack_out = Vec::new();
     let mut serve_opts = test_serve_opts(ProtocolVersion::V0, false, true);
-    upload_pack(
-        &repo,
-        &mut Cursor::new(v0_stateless_fetch_body(tip)),
-        &mut pack_out,
-        &mut serve_opts,
-    )
-    .expect("fetch");
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(
+            &mut Cursor::new(v0_stateless_fetch_body(tip)),
+            &mut pack_out,
+        )
+        .expect("fetch");
     assert!(pack_out.len() > 50);
 }
 
@@ -128,30 +121,24 @@ fn upload_pack_v1_and_v2_entry_points() {
 
     let mut v1_out = Vec::new();
     let mut serve_opts = test_serve_opts(ProtocolVersion::V1, true, false);
-    upload_pack(
-        &repo,
-        &mut Cursor::new([] as [u8; 0]),
-        &mut v1_out,
-        &mut serve_opts,
-    )
-    .expect("v1 ad");
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(&mut Cursor::new([] as [u8; 0]), &mut v1_out)
+        .expect("v1 ad");
     assert!(v1_out.windows(9).any(|w| w == b"version 1"));
 
     let v2_ls = pkt_line("command=ls-refs\n");
     let mut v2_out = Vec::new();
     let mut serve_opts = test_serve_opts(ProtocolVersion::V2, false, true);
-    upload_pack(&repo, &mut Cursor::new(v2_ls), &mut v2_out, &mut serve_opts).expect("v2 ls-refs");
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(&mut Cursor::new(v2_ls), &mut v2_out)
+        .expect("v2 ls-refs");
     assert!(!v2_out.is_empty());
 
     let mut v2_ad = Vec::new();
     let mut serve_opts = test_serve_opts(ProtocolVersion::V2, true, false);
-    upload_pack(
-        &repo,
-        &mut Cursor::new([] as [u8; 0]),
-        &mut v2_ad,
-        &mut serve_opts,
-    )
-    .expect("v2 capability ad");
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(&mut Cursor::new([] as [u8; 0]), &mut v2_ad)
+        .expect("v2 capability ad");
     assert!(v2_ad.windows(9).any(|w| w == b"version 2"));
 
     let mut v2_fetch = Vec::new();
@@ -162,13 +149,9 @@ fn upload_pack_v1_and_v2_entry_points() {
     fetch_body.extend_from_slice(&pkt_line("done"));
     fetch_body.extend_from_slice(b"0000");
     let mut serve_opts = test_serve_opts(ProtocolVersion::V2, false, true);
-    upload_pack(
-        &repo,
-        &mut Cursor::new(fetch_body),
-        &mut v2_fetch,
-        &mut serve_opts,
-    )
-    .expect("v2 fetch");
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(&mut Cursor::new(fetch_body), &mut v2_fetch)
+        .expect("v2 fetch");
     assert!(v2_fetch.len() > 20);
 }
 
@@ -215,13 +198,9 @@ fn upload_pack_serves_git_packed_history_with_its_deltas() {
     body.extend_from_slice(&pkt_line("done\n"));
     let mut response = Vec::new();
     let mut serve_opts = test_serve_opts(ProtocolVersion::V0, false, true);
-    upload_pack(
-        &repo,
-        &mut Cursor::new(body),
-        &mut response,
-        &mut serve_opts,
-    )
-    .expect("fetch");
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(&mut Cursor::new(body), &mut response)
+        .expect("fetch");
     assert!(response.starts_with(b"0008NAK\n"));
     let pack = sideband_band1(&response["0008NAK\n".len()..]);
     assert!(pack.starts_with(b"PACK"));
@@ -292,10 +271,8 @@ fn upload_pack_stateless_v0_want_reachable_non_tip() {
     let (_tip, middle) = seed_three_linear_commits(&repo);
 
     let mut pack_out = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(v0_stateless_fetch_body(middle)),
-        &mut pack_out,
         &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
@@ -304,6 +281,10 @@ fn upload_pack_stateless_v0_want_reachable_non_tip() {
             hidden_refs: Vec::new(),
             ..ServeOptions::default()
         },
+    )
+    .run(
+        &mut Cursor::new(v0_stateless_fetch_body(middle)),
+        &mut pack_out,
     )
     .expect("stateless want for ancestor must succeed");
     assert!(pack_out.starts_with(b"0008NAK\n"));
@@ -352,10 +333,8 @@ fn upload_pack_stateful_v0_rejects_non_advertised_ancestor_want() {
     body.extend_from_slice(b"0000");
     body.extend_from_slice(&pkt_line("done\n"));
 
-    let err = upload_pack(
+    let err = UploadPack::new(
         &repo,
-        &mut Cursor::new(body),
-        &mut Vec::new(),
         &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
@@ -365,6 +344,7 @@ fn upload_pack_stateful_v0_rejects_non_advertised_ancestor_want() {
             ..ServeOptions::default()
         },
     )
+    .run(&mut Cursor::new(body), &mut Vec::new())
     .expect_err("stateful session should reject ancestor not in advertisement");
     assert!(
         err.to_string().contains("not our ref"),
@@ -393,10 +373,8 @@ fn upload_pack_stateless_v2_want_reachable_non_tip() {
     fetch_body.extend_from_slice(&pkt_line("done"));
     fetch_body.extend_from_slice(b"0000");
     let mut v2_fetch = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(fetch_body),
-        &mut v2_fetch,
         &mut ServeOptions {
             protocol: ProtocolVersion::V2,
             advertise_refs: false,
@@ -406,6 +384,7 @@ fn upload_pack_stateless_v2_want_reachable_non_tip() {
             ..ServeOptions::default()
         },
     )
+    .run(&mut Cursor::new(fetch_body), &mut v2_fetch)
     .expect("v2 stateless fetch for ancestor");
     assert!(v2_fetch.len() > 20);
 }
@@ -430,10 +409,8 @@ fn upload_pack_stateless_allow_tip_sha1_in_want_accepts_reachable_ancestor() {
     let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
     let (_tip, middle) = seed_three_linear_commits(&repo);
 
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(v0_stateless_fetch_body(middle)),
-        &mut Vec::new(),
         &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
@@ -442,6 +419,10 @@ fn upload_pack_stateless_allow_tip_sha1_in_want_accepts_reachable_ancestor() {
             hidden_refs: Vec::new(),
             ..ServeOptions::default()
         },
+    )
+    .run(
+        &mut Cursor::new(v0_stateless_fetch_body(middle)),
+        &mut Vec::new(),
     )
     .expect("allowTipSha1InWant must not block stateless reachable ancestor wants");
 }
@@ -459,10 +440,8 @@ fn upload_pack_stateless_v0_want_current_annotated_tag_object() {
     let repo = Repository::open(&wt.join(".git"), &RepositoryOptions::empty()).expect("open");
 
     let mut pack_out = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(v0_stateless_fetch_body(tag_obj)),
-        &mut pack_out,
         &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
@@ -471,6 +450,10 @@ fn upload_pack_stateless_v0_want_current_annotated_tag_object() {
             hidden_refs: Vec::new(),
             ..ServeOptions::default()
         },
+    )
+    .run(
+        &mut Cursor::new(v0_stateless_fetch_body(tag_obj)),
+        &mut pack_out,
     )
     .expect("stateless want for annotated tag object on current ref");
     assert!(pack_out.starts_with(b"0008NAK\n"));
@@ -492,10 +475,8 @@ fn upload_pack_stateless_v0_want_advertised_tip_skips_reachability_walk() {
     let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
     let (tip, _middle) = seed_three_linear_commits(&repo);
 
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(v0_stateless_fetch_body(tip)),
-        &mut Vec::new(),
         &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
@@ -504,6 +485,10 @@ fn upload_pack_stateless_v0_want_advertised_tip_skips_reachability_walk() {
             hidden_refs: Vec::new(),
             ..ServeOptions::default()
         },
+    )
+    .run(
+        &mut Cursor::new(v0_stateless_fetch_body(tip)),
+        &mut Vec::new(),
     )
     .expect("current tip want uses advertisement fast path");
 }
@@ -623,12 +608,11 @@ fn upload_pack_v0_multi_ack_detailed_emits_ready_on_flush_when_haves_cover() {
     body.extend_from_slice(&pkt_line("done\n"));
 
     let mut out = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(body),
-        &mut out,
         &mut test_serve_opts(ProtocolVersion::V0, false, false),
     )
+    .run(&mut Cursor::new(body), &mut out)
     .expect("negotiation");
     let text = String::from_utf8_lossy(&out);
     assert!(
@@ -670,12 +654,11 @@ fn upload_pack_v0_multi_ack_detailed_no_ready_when_haves_do_not_cover() {
     body.extend_from_slice(&pkt_line("done\n"));
 
     let mut out = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(body),
-        &mut out,
         &mut test_serve_opts(ProtocolVersion::V0, false, false),
     )
+    .run(&mut Cursor::new(body), &mut out)
     .expect("negotiation");
     let text = String::from_utf8_lossy(&out);
     assert!(text.contains(&format!("ACK {} common", side.to_hex())));
@@ -712,12 +695,11 @@ fn upload_pack_v0_multi_ack_detailed_ready_on_absent_have_not_on_flush() {
     body.extend_from_slice(&pkt_line("done\n"));
 
     let mut out = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(body),
-        &mut out,
         &mut test_serve_opts(ProtocolVersion::V0, false, false),
     )
+    .run(&mut Cursor::new(body), &mut out)
     .expect("negotiation");
     let text = String::from_utf8_lossy(&out);
     assert!(
@@ -759,12 +741,11 @@ fn upload_pack_v0_multi_ack_detailed_absent_have_before_common_suppresses_flush_
     body.extend_from_slice(&pkt_line("done\n"));
 
     let mut out = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(body),
-        &mut out,
         &mut test_serve_opts(ProtocolVersion::V0, false, false),
     )
+    .run(&mut Cursor::new(body), &mut out)
     .expect("negotiation");
     let text = String::from_utf8_lossy(&out);
     assert!(
@@ -801,12 +782,11 @@ fn upload_pack_stateless_v0_multi_ack_detailed_ready_without_done() {
     body.extend_from_slice(b"0000");
 
     let mut out = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(body),
-        &mut out,
         &mut test_serve_opts(ProtocolVersion::V0, false, true),
     )
+    .run(&mut Cursor::new(body), &mut out)
     .expect("stateless negotiation");
     let text = String::from_utf8_lossy(&out);
     assert!(text.contains(&format!("ACK {} ready", ancestor.to_hex())));
@@ -884,7 +864,9 @@ fn upload_pack_v0_have_flush_counts_negotiation_round() {
     let body = v0_stateless_fetch_with_have_flush(tip, tip);
     let mut out = Vec::new();
     let mut opts = test_serve_opts(ProtocolVersion::V0, false, true);
-    let summary = upload_pack(&repo, &mut Cursor::new(body), &mut out, &mut opts).expect("fetch");
+    let summary = UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(body), &mut out)
+        .expect("fetch");
     assert_eq!(summary.negotiation_rounds, 1);
     assert!(summary.bytes_written > 0);
 }
@@ -906,14 +888,10 @@ fn upload_pack_cancelled_before_start_writes_no_pack() {
     cancel.cancel();
     let mut out = Vec::new();
     let mut opts = test_serve_opts(ProtocolVersion::V0, false, true);
-    let err = upload_pack_cancellable(
-        &repo,
-        &mut Cursor::new(v0_stateless_fetch_body(tip)),
-        &mut out,
-        &mut opts,
-        &cancel,
-    )
-    .expect_err("cancelled");
+    let err = UploadPack::new(&repo, &mut opts)
+        .with_cancel(&cancel)
+        .run(&mut Cursor::new(v0_stateless_fetch_body(tip)), &mut out)
+        .expect_err("cancelled");
     assert!(matches!(err, ServeError::Cancelled));
     assert!(!out.windows(4).any(|w| w == b"PACK"));
 }
@@ -938,10 +916,8 @@ fn upload_pack_stateless_v0_want_moved_annotated_blob_tag() {
 
     let repo = Repository::open(&wt.join(".git"), &RepositoryOptions::empty()).expect("open");
     let mut pack_out = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(v0_stateless_fetch_body(tag_obj)),
-        &mut pack_out,
         &mut ServeOptions {
             protocol: ProtocolVersion::V0,
             advertise_refs: false,
@@ -950,6 +926,10 @@ fn upload_pack_stateless_v0_want_moved_annotated_blob_tag() {
             hidden_refs: Vec::new(),
             ..ServeOptions::default()
         },
+    )
+    .run(
+        &mut Cursor::new(v0_stateless_fetch_body(tag_obj)),
+        &mut pack_out,
     )
     .expect("stateless want for tag on reachable blob after tag ref moved away");
     assert!(pack_out.starts_with(b"0008NAK\n"));

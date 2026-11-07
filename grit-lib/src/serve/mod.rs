@@ -1,18 +1,18 @@
 //! Server side of the Git wire protocol: answering fetches and accepting pushes.
 //!
 //! This module lets a process act as the remote end of a clone, fetch, or push.
-//! [`upload_pack`] serves objects to a fetching client (protocol v0, v1, and v2)
-//! and [`receive_pack`] accepts a pushed pack plus ref updates. Both operate on
-//! plain byte streams, so the same code serves a duplex connection (ssh, a
-//! local pipe) and the stateless request/response exchanges of smart HTTP.
+//! An [`UploadPack`] session serves objects to a fetching client (protocol v0, v1,
+//! and v2) and a [`ReceivePack`] session accepts a pushed pack plus ref updates.
+//! Both run over plain byte streams, so the same code serves a duplex connection
+//! (ssh, a local pipe) and the stateless request/response exchanges of smart HTTP.
 //!
 //! A push server decides what to accept with a [`ReceivePolicy`] (the
 //! `receive.*` settings), the repository's hook scripts, and optionally an
-//! in-process [`ReceiveHook`] passed to [`receive_pack_with_hook`]. Refusals
+//! in-process [`ReceiveHook`] passed to [`ReceivePack::with_hook`]. Refusals
 //! come back typed, as [`RefUpdateRefusal`] per ref and [`UnpackError`] for the
 //! pack.
 //!
-//! The functions take an already-opened [`Repository`] and explicit options; they
+//! The sessions take an already-opened [`Repository`] and explicit options; they
 //! never read the process environment or print to the terminal. Callers are
 //! expected to map `GIT_PROTOCOL` to a [`ProtocolVersion`] and to load
 //! configuration at their own boundary.
@@ -31,13 +31,12 @@ pub(crate) use receive_pack::ReceiveHookScripts;
 pub(crate) use shallow_upload::{compute_shallow_response, ShallowRequest};
 
 pub use receive_pack::{
-    receive_pack, receive_pack_with_hook, receive_pack_with_hook_cancellable, ReceiveHook,
-    ReceiveHookContext, ReceiveOutcome, ReceivePolicy, RefCommand, RefUpdateRefusal,
-    RefUpdateResult, UnpackError,
+    ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePack, ReceivePolicy, RefCommand,
+    RefUpdateRefusal, RefUpdateResult, UnpackError,
 };
 pub(crate) use ref_update_policy::{checked_out_branch, validate_ref_update};
 pub(crate) use ref_update_policy::{head_branch, HeadBranches};
-pub use upload_pack::{upload_pack, upload_pack_cancellable, UploadOutcome};
+pub use upload_pack::{UploadOutcome, UploadPack};
 
 use std::cell::RefCell;
 use std::collections::HashMap;

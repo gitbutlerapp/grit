@@ -161,8 +161,8 @@ pub mod pack_objects {
     //! Pack-objects negotiation and encoding.
     pub use crate::pack_objects::{
         build_pack, build_pack_from_send_list, build_pack_with_shallow_and_filter,
-        write_pack_for_push, write_upload_pack_stream, PackBuildOptions, PackObjects,
-        PackObjectsOptions, PackStats, SERVE_WINDOW_MEMORY,
+        write_pack_for_push, PackBuildOptions, PackObjects, PackObjectsOptions, PackStats,
+        UploadPackStream, SERVE_WINDOW_MEMORY,
     };
 }
 

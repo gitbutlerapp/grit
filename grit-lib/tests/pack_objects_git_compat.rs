@@ -724,22 +724,16 @@ fn pack_entry_shape(pack: &[u8]) -> (usize, usize, HashSet<ObjectId>) {
 /// The pack upload-pack sends a thin-pack client that has `have` and wants `want`.
 fn upload_pack_thin(repo_dir: &Path, want: ObjectId, have: ObjectId) -> Vec<u8> {
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::objects::pack_objects::write_upload_pack_stream;
+    use grit_lib::objects::pack_objects::UploadPackStream;
     use grit_lib::repo::Repository;
     let repo = Repository::open(&repo_dir.join(".git"), &RepositoryOptions::empty()).unwrap();
     let mut pack = Vec::new();
-    write_upload_pack_stream(
-        &repo,
-        &[want],
-        &[have],
-        &HashSet::new(),
-        &HashSet::new(),
-        None,
-        &PackBuildOptions::for_serve(None, true, true),
-        &mut |_| {},
-        &mut pack,
-    )
-    .expect("upload-pack stream");
+    UploadPackStream::new(&[want], PackBuildOptions::for_serve(None, true, true))
+        .with_haves(&[have])
+        .with_source_shallow(&HashSet::new())
+        .with_have_shallow(&HashSet::new())
+        .write(&repo, &mut |_| {}, &mut pack)
+        .expect("upload-pack stream");
     pack
 }
 

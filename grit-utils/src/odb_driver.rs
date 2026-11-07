@@ -13,7 +13,7 @@ use grit_lib::objects::pack::{
     read_object_from_pack_at_offset, read_pack_index_cached, PackIndex, SingleLocalPackReader,
 };
 use grit_lib::objects::{parse_commit, Object, ObjectId, ObjectKind};
-use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
+use grit_lib::remote::serve::{ProtocolVersion, ServeOptions, UploadPack};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{RevListOptions, RevListResult};
 use grit_lib::revwalk::CommitFilterBuilder;
@@ -620,8 +620,9 @@ fn serve_request(repo: &Repository, request_file: &str) -> Result<()> {
         hidden_refs: Vec::new(),
         ..ServeOptions::default()
     };
-    let _summary =
-        upload_pack(repo, &mut input, &mut sink, &mut opts).context("upload-pack serve-clone")?;
+    let _summary = UploadPack::new(repo, &mut opts)
+        .run(&mut input, &mut sink)
+        .context("upload-pack serve-clone")?;
     println!("{}", sink.bytes);
     Ok(())
 }

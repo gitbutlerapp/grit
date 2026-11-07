@@ -19,7 +19,7 @@ use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::serve::{
-    receive_pack, upload_pack, ProtocolVersion, ReceivePolicy, ServeOptions,
+    ProtocolVersion, ReceivePack, ReceivePolicy, ServeOptions, UploadPack,
 };
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -114,13 +114,9 @@ fn serve_opts(protocol: ProtocolVersion, stateless_rpc: bool, hidden: &[&str]) -
 fn grit_ls_refs(repo: &Repository, args: &[&str], hidden: &[&str]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut opts = serve_opts(ProtocolVersion::V2, true, hidden);
-    upload_pack(
-        repo,
-        &mut Cursor::new(ls_refs_request(args)),
-        &mut out,
-        &mut opts,
-    )
-    .expect("grit ls-refs");
+    UploadPack::new(repo, &mut opts)
+        .run(&mut Cursor::new(ls_refs_request(args)), &mut out)
+        .expect("grit ls-refs");
     out
 }
 
@@ -403,7 +399,8 @@ fn v0_advertisements_match_git_apart_from_capabilities() {
     );
     let mut actual = Vec::new();
     let mut opts = serve_opts(ProtocolVersion::V0, false, &[hidden]);
-    upload_pack(&repo, &mut Cursor::new(b""), &mut actual, &mut opts)
+    UploadPack::new(&repo, &mut opts)
+        .run(&mut Cursor::new(b""), &mut actual)
         .expect("grit upload-pack advertisement");
     assert_eq!(
         without_capabilities(&actual),
@@ -422,13 +419,12 @@ fn v0_advertisements_match_git_apart_from_capabilities() {
         b"",
     );
     let mut actual = Vec::new();
-    receive_pack(
+    ReceivePack::new(
         &repo,
-        &mut Cursor::new(b""),
-        &mut actual,
         &serve_opts(ProtocolVersion::V0, false, &[hidden]),
         &ReceivePolicy::default(),
     )
+    .run(&mut Cursor::new(b""), &mut actual)
     .expect("grit receive-pack advertisement");
     assert_eq!(
         without_capabilities(&actual),

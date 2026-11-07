@@ -775,42 +775,96 @@ fn write_selected_pack(
     Ok(stats)
 }
 
-/// Stream a pack for upload-pack: pack reuse when bitmaps allow, otherwise pack-objects.
+/// The pack one upload-pack response streams: the client's wants and haves, the shallow
+/// boundaries on either side, and an optional partial-clone filter.
 ///
-/// The whole build runs in the odb's pack read context, so planning and the pack-write
-/// workers share one set of pack caches. Filtered (partial clone) packs stream too.
-///
-/// # Errors
-///
-/// Missing wants, corrupt objects, or I/O failures while writing to `w`.
-#[allow(clippy::too_many_arguments)]
-pub fn write_upload_pack_stream(
-    repo: &Repository,
-    wants: &[ObjectId],
-    haves: &[ObjectId],
-    source_shallow: &HashSet<ObjectId>,
-    have_shallow: &HashSet<ObjectId>,
-    filter: Option<&ObjectFilter>,
-    opts: &PackBuildOptions,
-    progress: &mut dyn crate::progress::ProgressSink,
-    w: &mut dyn Write,
-) -> Result<PackStats> {
-    write_upload_pack_stream_with_cancel(
-        repo,
-        wants,
-        haves,
-        source_shallow,
-        have_shallow,
-        filter,
-        &[],
-        opts,
-        progress,
-        w,
-        &CancelSignal::never(),
-    )
+/// Build it with [`UploadPackStream::new`] and the `with_*` setters, then
+/// [`UploadPackStream::write`] it. The pack is streamed with pack reuse when bitmaps allow,
+/// otherwise with pack-objects; filtered (partial clone) packs stream too.
+#[derive(Clone, Copy, Debug)]
+pub struct UploadPackStream<'a> {
+    wants: &'a [ObjectId],
+    haves: &'a [ObjectId],
+    source_shallow: Option<&'a HashSet<ObjectId>>,
+    have_shallow: Option<&'a HashSet<ObjectId>>,
+    filter: Option<&'a ObjectFilter>,
+    options: PackBuildOptions,
 }
 
-/// [`write_upload_pack_stream`], stopping object enumeration when `stop` fires, that
+impl<'a> UploadPackStream<'a> {
+    /// A pack of everything reachable from `wants`, built with `options`.
+    #[must_use]
+    pub fn new(wants: &'a [ObjectId], options: PackBuildOptions) -> Self {
+        Self {
+            wants,
+            haves: &[],
+            source_shallow: None,
+            have_shallow: None,
+            filter: None,
+            options,
+        }
+    }
+
+    /// Leave out objects reachable from `haves`, which the client already has.
+    #[must_use]
+    pub fn with_haves(mut self, haves: &'a [ObjectId]) -> Self {
+        self.haves = haves;
+        self
+    }
+
+    /// Shallow boundaries of the serving repository: the walk stops at their parents.
+    #[must_use]
+    pub fn with_source_shallow(mut self, grafts: &'a HashSet<ObjectId>) -> Self {
+        self.source_shallow = Some(grafts);
+        self
+    }
+
+    /// Shallow boundaries of the client: history behind them counts as missing on its side.
+    #[must_use]
+    pub fn with_have_shallow(mut self, grafts: &'a HashSet<ObjectId>) -> Self {
+        self.have_shallow = Some(grafts);
+        self
+    }
+
+    /// Apply a partial-clone object filter (`blob:none`, `blob:limit=<n>`, ...).
+    #[must_use]
+    pub fn with_filter(mut self, filter: &'a ObjectFilter) -> Self {
+        self.filter = Some(filter);
+        self
+    }
+
+    /// Write the pack for `repo` to `out`, reporting progress through `progress`.
+    ///
+    /// The whole build runs in the odb's pack read context, so planning and the pack-write
+    /// workers share one set of pack caches.
+    ///
+    /// # Errors
+    ///
+    /// Missing wants, corrupt objects, or I/O failures while writing to `out`.
+    pub fn write(
+        &self,
+        repo: &Repository,
+        progress: &mut dyn crate::progress::ProgressSink,
+        out: &mut dyn Write,
+    ) -> Result<PackStats> {
+        let none = HashSet::new();
+        write_upload_pack_stream_with_cancel(
+            repo,
+            self.wants,
+            self.haves,
+            self.source_shallow.unwrap_or(&none),
+            self.have_shallow.unwrap_or(&none),
+            self.filter,
+            &[],
+            &self.options,
+            progress,
+            out,
+            &CancelSignal::never(),
+        )
+    }
+}
+
+/// [`UploadPackStream::write`], stopping object enumeration when `stop` fires, that
 /// also packs each of `include_tags` whose peeled object is among the objects sent
 /// (`include-tag`), on the walk and reuse paths alike.
 #[allow(clippy::too_many_arguments)]

@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::pack_objects::{
-    build_pack_with_shallow_and_filter, write_upload_pack_stream, PackBuildOptions, PackStats,
+    build_pack_with_shallow_and_filter, PackBuildOptions, PackStats, UploadPackStream,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -197,18 +197,13 @@ fn grit_filtered_pack(
     let empty = std::collections::HashSet::new();
     let mut pack = Vec::new();
     let mut progress = |_ev| {};
-    let stats = write_upload_pack_stream(
-        repo,
-        wants,
-        haves,
-        &empty,
-        &empty,
-        Some(filter),
-        &opts,
-        &mut grit_lib::progress::NullProgress,
-        &mut pack,
-    )
-    .expect("filtered upload-pack stream");
+    let stats = UploadPackStream::new(wants, opts)
+        .with_haves(haves)
+        .with_source_shallow(&empty)
+        .with_have_shallow(&empty)
+        .with_filter(filter)
+        .write(repo, &mut grit_lib::progress::NullProgress, &mut pack)
+        .expect("filtered upload-pack stream");
     (pack, stats)
 }
 

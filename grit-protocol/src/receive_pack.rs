@@ -1,6 +1,6 @@
 //! Receive-pack protocol handler (server side of push).
 //!
-//! Accepts pushes over smart HTTP by calling [`grit_lib::remote::serve::receive_pack`]
+//! Accepts pushes over smart HTTP by calling [`grit_lib::remote::serve::ReceivePack`]
 //! in-process.
 
 use std::io::Read;

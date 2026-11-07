@@ -2507,7 +2507,7 @@ pub(crate) fn fetch_local_into(
 ///    [`crate::index_pack::ingest_received_pack`], excluding objects already
 ///    reachable from the remote's existing ref tips.
 /// 4. Applies the remote's `receive.*` policy (deny non-fast-forwards, deletes and the
-///    current branch, hidden refs) as [`crate::serve::receive_pack`] does.
+///    current branch, hidden refs) as [`crate::serve::ReceivePack`] does.
 /// 5. Runs the remote's receive hooks with Git's arguments, stdin and environment:
 ///    `pre-receive` over every update (with the quarantine variables, so it can read
 ///    the pushed objects), then `update` per ref once the objects are installed. A

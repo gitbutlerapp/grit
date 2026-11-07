@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
+use grit_lib::remote::serve::{ProtocolVersion, ServeOptions, UploadPack};
 use grit_lib::repo::Repository;
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -138,10 +138,8 @@ fn parse_v2_fetch_response(resp: &[u8]) -> (Vec<String>, Vec<u8>) {
 fn grit_fetch(bare: &Path, body: &[u8]) -> Vec<u8> {
     let repo = Repository::open(bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    upload_pack(
+    UploadPack::new(
         &repo,
-        &mut Cursor::new(body.to_vec()),
-        &mut out,
         &mut ServeOptions {
             protocol: ProtocolVersion::V2,
             advertise_refs: false,
@@ -151,6 +149,7 @@ fn grit_fetch(bare: &Path, body: &[u8]) -> Vec<u8> {
             ..ServeOptions::default()
         },
     )
+    .run(&mut Cursor::new(body.to_vec()), &mut out)
     .expect("grit upload-pack");
     out
 }

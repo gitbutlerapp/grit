@@ -88,21 +88,17 @@ pub fn run(
     let mut output = BufWriter::new(std::io::stdout().lock());
     match service {
         Service::UploadPack => {
-            let _summary = serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?;
+            let _summary = serve::UploadPack::new(&repo, &mut opts).run(&mut input, &mut output)?;
         }
         Service::ReceivePack => {
             let _interrupt = crate::interrupt::InterruptCancel::install();
             let policy = ReceivePolicy::from_config(&config);
             let guard = grit_protocol::PushGuard::for_repository(&repo);
-            match serve::receive_pack_with_hook_cancellable(
-                &repo,
-                &mut input,
-                &mut output,
-                &opts,
-                &policy,
-                &guard,
-                &crate::interrupt::process_cancel_token(),
-            ) {
+            match serve::ReceivePack::new(&repo, &opts, &policy)
+                .with_hook(&guard)
+                .with_cancel(&crate::interrupt::process_cancel_token())
+                .run(&mut input, &mut output)
+            {
                 Ok(_summary) => {}
                 Err(ServeError::Cancelled) => {
                     return Err(anyhow::Error::new(LibError::Cancelled));

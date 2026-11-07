@@ -11,7 +11,7 @@ use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
 };
-use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeError, ServeOptions};
+use grit_lib::remote::serve::{ProtocolVersion, ServeError, ServeOptions, UploadPack};
 use grit_lib::repo::{InitOptions, Repository};
 
 #[test]
@@ -49,7 +49,7 @@ fn upload_pack_v0_and_v2_advertise_refs_only() -> grit_lib::remote::serve::Resul
             ..ServeOptions::default()
         };
         let mut out = Vec::new();
-        upload_pack(&repo, &mut Cursor::new(b""), &mut out, &mut opts)?;
+        UploadPack::new(&repo, &mut opts).run(&mut Cursor::new(b""), &mut out)?;
         assert!(!out.is_empty());
     }
     Ok(())
@@ -98,7 +98,9 @@ fn grit_v0_advertisement(repo: &Repository) -> Vec<u8> {
         ..ServeOptions::default()
     };
     let mut out = Vec::new();
-    upload_pack(repo, &mut Cursor::new(b""), &mut out, &mut opts).expect("upload_pack");
+    UploadPack::new(repo, &mut opts)
+        .run(&mut Cursor::new(b""), &mut out)
+        .expect("upload_pack");
     out
 }
 
@@ -316,12 +318,7 @@ fn injected_ref_store_v2_ls_refs_advertises_head_symref() -> grit_lib::remote::s
         ..ServeOptions::default()
     };
     let mut out = Vec::new();
-    upload_pack(
-        &repo,
-        &mut Cursor::new(input.as_slice()),
-        &mut out,
-        &mut opts,
-    )?;
+    UploadPack::new(&repo, &mut opts).run(&mut Cursor::new(input.as_slice()), &mut out)?;
     let body = String::from_utf8_lossy(&out);
     assert!(
         body.contains(&format!(

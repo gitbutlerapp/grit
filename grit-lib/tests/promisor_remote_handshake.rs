@@ -17,7 +17,7 @@ use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
-use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
+use grit_lib::remote::serve::{ProtocolVersion, ServeOptions, UploadPack};
 use grit_lib::remote::transfer::{FetchOptions, FetchOutcome};
 use grit_lib::remote::transport::{read_advertisement, Advertisement, Connection};
 use grit_lib::repo::{InitOptions, Repository};
@@ -61,7 +61,9 @@ impl InProcessConn {
             };
             let mut input = to_server_r;
             let mut output = to_client_w;
-            upload_pack(&repo, &mut input, &mut output, &mut opts).unwrap();
+            UploadPack::new(&repo, &mut opts)
+                .run(&mut input, &mut output)
+                .unwrap();
             opts
         });
         let mut reader = BufReader::new(to_client_r);

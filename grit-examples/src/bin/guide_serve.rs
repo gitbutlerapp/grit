@@ -1,5 +1,5 @@
-//! A minimal Git server on stdin/stdout: serve fetches with `upload_pack` and
-//! pushes with `receive_pack_with_hook`, refusing pushes to protected branches
+//! A minimal Git server on stdin/stdout: serve fetches with `UploadPack` and
+//! pushes with `ReceivePack::with_hook`, refusing pushes to protected branches
 //! from Rust code instead of a hook script.
 //!
 //! Git starts it with the repository path as the last argument:
@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut output = BufWriter::new(std::io::stdout().lock());
     match service.as_str() {
         "upload-pack" => {
-            let summary = serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?;
+            let summary = serve::UploadPack::new(&repo, &mut opts).run(&mut input, &mut output)?;
             eprintln!(
                 "upload-pack: {} bytes, {} objects, {} negotiation rounds",
                 summary.bytes_written, summary.objects_sent, summary.negotiation_rounds
@@ -83,14 +83,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         "receive-pack" => {
             let policy = ReceivePolicy::from_config(&*repo.config().snapshot()?);
-            let outcome = serve::receive_pack_with_hook(
-                &repo,
-                &mut input,
-                &mut output,
-                &opts,
-                &policy,
-                &ServerHook,
-            )?;
+            let outcome = serve::ReceivePack::new(&repo, &opts, &policy)
+                .with_hook(&ServerHook)
+                .run(&mut input, &mut output)?;
             // Typed results: match on the refusal, never on its text.
             for update in &outcome.updates {
                 if let Some(RefUpdateRefusal::Policy(reason)) = &update.error {

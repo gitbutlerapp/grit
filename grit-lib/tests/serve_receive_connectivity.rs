@@ -15,7 +15,7 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::serve::{
-    receive_pack, ProtocolVersion, ReceiveOutcome, ReceivePolicy, RefUpdateRefusal, ServeOptions,
+    ProtocolVersion, ReceiveOutcome, ReceivePack, ReceivePolicy, RefUpdateRefusal, ServeOptions,
 };
 use grit_lib::repo::Repository;
 use grit_lib::test_support::objects_pack::clear_pack_cache;
@@ -90,14 +90,9 @@ fn serve_push(repo_dir: &Path, body: &[u8]) -> (ReceiveOutcome, String) {
     };
     let policy = ReceivePolicy::from_config(&repo.config().snapshot().unwrap());
     let mut output = Vec::new();
-    let outcome = receive_pack(
-        &repo,
-        &mut std::io::Cursor::new(body),
-        &mut output,
-        &opts,
-        &policy,
-    )
-    .unwrap();
+    let outcome = ReceivePack::new(&repo, &opts, &policy)
+        .run(&mut std::io::Cursor::new(body), &mut output)
+        .unwrap();
     (outcome, String::from_utf8_lossy(&output).into_owned())
 }
 

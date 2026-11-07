@@ -1222,7 +1222,7 @@ impl Connection for SshConnection {
 /// Serve a fetch from a local repository over the wire protocol, in-process
 /// (Git's `file://` transport, which runs `git upload-pack` on the path).
 ///
-/// The fetch side talks pkt-lines to [`crate::serve::upload_pack`] running on its own
+/// The fetch side talks pkt-lines to [`crate::serve::UploadPack`] running on its own
 /// thread over a pair of pipes, so filtered and promisor fetches from local paths use
 /// the same exchange as a remote server: filters, the `promisor-remote`
 /// capability, `want`s of single objects. Only fetches are supported.
@@ -1286,7 +1286,8 @@ pub(crate) fn connect_local_upload_pack(
                     ..ServeOptions::default()
                 };
                 serve.attach_promisor_fetcher(&repo, promisor_fetcher);
-                crate::serve::upload_pack(&repo, &mut server_input, &mut server_output, &mut serve)
+                crate::serve::UploadPack::new(&repo, &mut serve)
+                    .run(&mut server_input, &mut server_output)
                     .map(|_| ())
             },
         )?;
@@ -1322,7 +1323,7 @@ pub(crate) fn connect_local_upload_pack(
     }
 }
 
-/// A [`Connection`] to [`crate::serve::upload_pack`] serving a local repository on
+/// A [`Connection`] to [`crate::serve::UploadPack`] serving a local repository on
 /// another thread; see [`connect_local_upload_pack`].
 ///
 /// The two directions are in-memory pipes ([`crate::mem_pipe`]), not OS pipes, so a

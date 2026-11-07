@@ -123,7 +123,14 @@ fn map_repo_cancel(err: ServeError) -> ServeError {
     }
 }
 
-/// Serve one fetch session: advertise refs, negotiate, and send a pack.
+/// One fetch session served from a repository (the server side of `git-upload-pack`):
+/// advertise refs, negotiate, and send a pack.
+///
+/// Build it with [`UploadPack::new`], optionally attach a [`CancelToken`] with
+/// [`UploadPack::with_cancel`], then [`UploadPack::run`] it over the client's byte
+/// streams. The same session serves a duplex connection (ssh, a local pipe) and one
+/// stateless smart-HTTP request.
+///
 ///
 /// The version in [`ServeOptions::protocol`] selects the wire format. With
 /// [`ServeOptions::advertise_refs`] only the advertisement is written. With
@@ -140,14 +147,6 @@ fn map_repo_cancel(err: ServeError) -> ServeError {
 /// v2 capabilities end with `promisor-remote` naming the repository's promisor
 /// remotes, and the names a client accepts are collected in
 /// [`ServeOptions::accepted_promisor_remotes`].
-///
-/// # Parameters
-///
-/// - `repo`: the repository being served.
-/// - `input`: requests from the client.
-/// - `output`: where responses are written.
-/// - `opts`: framing, protocol version, agent string, hidden refs, and (for v2)
-///   [`ServeOptions::server_options`] filled from each command request.
 ///
 /// # Errors
 ///
@@ -172,21 +171,64 @@ fn map_repo_cancel(err: ServeError) -> ServeError {
 /// finds the missing object.
 /// Only blobs are handled this way: a missing commit, tree or tag fails the
 /// request as before.
-pub fn upload_pack(
-    repo: &Repository,
-    input: &mut dyn Read,
-    output: &mut dyn Write,
-    opts: &mut ServeOptions,
-) -> Result<UploadOutcome> {
-    upload_pack_cancellable(repo, input, output, opts, &CancelToken::never())
+///
+/// # Examples
+///
+/// ```
+/// use grit_lib::remote::serve::{ServeOptions, UploadPack};
+/// use grit_lib::repo::{InitOptions, Repository};
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let dir = tempfile::tempdir()?;
+/// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+/// let mut options = ServeOptions {
+///     advertise_refs: true,
+///     ..ServeOptions::default()
+/// };
+/// let mut advertisement = Vec::new();
+/// UploadPack::new(&repo, &mut options).run(&mut std::io::empty(), &mut advertisement)?;
+/// assert!(!advertisement.is_empty());
+/// # Ok(())
+/// # }
+/// ```
+#[must_use = "an UploadPack does nothing until it is run"]
+pub struct UploadPack<'a> {
+    repo: &'a Repository,
+    options: &'a mut ServeOptions,
+    cancel: &'a CancelToken,
 }
 
-/// Serve one fetch session, stopping when `cancel` fires.
-///
-/// Same as [`upload_pack`], but object enumeration and pack generation poll
-/// `cancel` and return [`ServeError::Cancelled`] without writing a pack when it
-/// fires.
-pub fn upload_pack_cancellable(
+impl<'a> UploadPack<'a> {
+    /// Prepare a session serving `repo` with `options` (framing, protocol version, agent
+    /// string, hidden refs). For protocol v2 the session fills
+    /// [`ServeOptions::server_options`] from each command request and records the promisor
+    /// remotes the client accepted in [`ServeOptions::accepted_promisor_remotes`].
+    pub fn new(repo: &'a Repository, options: &'a mut ServeOptions) -> Self {
+        Self {
+            repo,
+            options,
+            cancel: CancelToken::never_ref(),
+        }
+    }
+
+    /// Stop the session when `cancel` fires: object enumeration and pack generation poll
+    /// it and return [`ServeError::Cancelled`] without writing a pack.
+    pub fn with_cancel(mut self, cancel: &'a CancelToken) -> Self {
+        self.cancel = cancel;
+        self
+    }
+
+    /// Serve the session, reading requests from `input` and writing responses to `output`.
+    ///
+    /// # Errors
+    ///
+    /// See [`UploadPack`]; [`ServeError::Cancelled`] when the cancel token fires.
+    pub fn run(self, input: &mut dyn Read, output: &mut dyn Write) -> Result<UploadOutcome> {
+        upload_pack(self.repo, input, output, self.options, self.cancel)
+    }
+}
+
+/// Serve one fetch session (see [`UploadPack`]).
+pub(crate) fn upload_pack(
     repo: &Repository,
     input: &mut dyn Read,
     output: &mut dyn Write,
@@ -2055,7 +2097,8 @@ mod tests {
             stateless_rpc: true,
             ..ServeOptions::default()
         };
-        let err = upload_pack(&fx.repo, &mut input, &mut output, &mut opts.clone())
+        let err = UploadPack::new(&fx.repo, &mut opts.clone())
+            .run(&mut input, &mut output)
             .expect_err("limit must fail before v2 ERR output");
         match err {
             ServeError::Io(e) => assert!(super::super::io_error_is_request_body_limit(&e)),

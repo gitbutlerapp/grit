@@ -11,7 +11,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
-    receive_pack, ProtocolVersion, ReceiveOutcome, ReceivePolicy, RefUpdateRefusal, ServeOptions,
+    ProtocolVersion, ReceiveOutcome, ReceivePack, ReceivePolicy, RefUpdateRefusal, ServeOptions,
 };
 use grit_lib::repo::Repository;
 
@@ -101,14 +101,9 @@ fn serve_push(repo: &Repository, body: &[u8]) -> ReceiveOutcome {
         ..ReceivePolicy::default()
     };
     let mut output = Vec::new();
-    receive_pack(
-        repo,
-        &mut std::io::Cursor::new(body),
-        &mut output,
-        &opts,
-        &policy,
-    )
-    .expect("receive_pack")
+    ReceivePack::new(repo, &opts, &policy)
+        .run(&mut std::io::Cursor::new(body), &mut output)
+        .expect("receive_pack")
 }
 
 fn open_bare(path: &Path) -> Repository {

@@ -13,7 +13,7 @@ use grit_lib::maintenance::fsck::{FsckMsgLevel, ObjectFsckPolicy, SkipListError}
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
-    receive_pack, ProtocolVersion, ReceiveOutcome, ReceivePolicy, RefUpdateRefusal, ServeOptions,
+    ProtocolVersion, ReceiveOutcome, ReceivePack, ReceivePolicy, RefUpdateRefusal, ServeOptions,
     UnpackError,
 };
 use grit_lib::repo::Repository;
@@ -115,14 +115,9 @@ fn serve_push(repo: &Repository, policy: &ReceivePolicy, body: &[u8]) -> Pushed 
         ..ServeOptions::default()
     };
     let mut output = Vec::new();
-    let outcome = receive_pack(
-        repo,
-        &mut std::io::Cursor::new(body),
-        &mut output,
-        &opts,
-        policy,
-    )
-    .expect("receive_pack");
+    let outcome = ReceivePack::new(repo, &opts, policy)
+        .run(&mut std::io::Cursor::new(body), &mut output)
+        .expect("receive_pack");
     Pushed {
         outcome,
         report: String::from_utf8_lossy(&output).into_owned(),

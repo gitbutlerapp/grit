@@ -17,9 +17,8 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
-    receive_pack, receive_pack_with_hook, receive_pack_with_hook_cancellable, ProtocolVersion,
-    ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePolicy, RefCommand, RefUpdateRefusal,
-    ServeError, ServeOptions,
+    ProtocolVersion, ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePack, ReceivePolicy,
+    RefCommand, RefUpdateRefusal, ServeError, ServeOptions,
 };
 use grit_lib::repo::Repository;
 
@@ -84,14 +83,9 @@ fn serve_push(repo: &Repository, body: &[u8]) -> (ReceiveOutcome, Vec<u8>) {
     };
     let policy = ReceivePolicy::default();
     let mut output = Vec::new();
-    let outcome = receive_pack(
-        repo,
-        &mut std::io::Cursor::new(body),
-        &mut output,
-        &opts,
-        &policy,
-    )
-    .expect("receive_pack");
+    let outcome = ReceivePack::new(repo, &opts, &policy)
+        .run(&mut std::io::Cursor::new(body), &mut output)
+        .expect("receive_pack");
     (outcome, output)
 }
 
@@ -230,15 +224,10 @@ fn in_process_pre_receive_can_reject_push_options_before_refs_move() {
     };
     let policy = ReceivePolicy::default();
     let mut output = Vec::new();
-    let outcome = receive_pack_with_hook(
-        &repo,
-        &mut std::io::Cursor::new(body),
-        &mut output,
-        &opts,
-        &policy,
-        &DenyPushOption("ci.skip"),
-    )
-    .expect("receive_pack");
+    let outcome = ReceivePack::new(&repo, &opts, &policy)
+        .with_hook(&DenyPushOption("ci.skip"))
+        .run(&mut std::io::Cursor::new(body), &mut output)
+        .expect("receive_pack");
     assert_eq!(outcome.updates.len(), 1);
     assert_eq!(
         outcome.updates[0].error,
@@ -296,15 +285,10 @@ fn pre_receive_cancel_kills_hook_process_group_and_leaves_ref_unmoved() {
     let body_for_thread = body.clone();
     let cancel_for_thread = cancel.clone();
     let handle = std::thread::spawn(move || {
-        receive_pack_with_hook_cancellable(
-            &repo_for_thread,
-            &mut std::io::Cursor::new(body_for_thread),
-            &mut Vec::new(),
-            &opts,
-            &ReceivePolicy::default(),
-            &(),
-            &cancel_for_thread,
-        )
+        ReceivePack::new(&repo_for_thread, &opts, &ReceivePolicy::default())
+            .with_hook(&())
+            .with_cancel(&cancel_for_thread)
+            .run(&mut std::io::Cursor::new(body_for_thread), &mut Vec::new())
     });
     let deadline = Instant::now() + Duration::from_secs(10);
     while !pid_file.is_file() {
@@ -370,16 +354,11 @@ fn receive_cancel_before_apply_leaves_ref_unmoved() {
     };
     let cancel = CancelToken::new();
     cancel.cancel();
-    let err = receive_pack_with_hook_cancellable(
-        &repo,
-        &mut std::io::Cursor::new(body),
-        &mut Vec::new(),
-        &opts,
-        &ReceivePolicy::default(),
-        &(),
-        &cancel,
-    )
-    .expect_err("cancelled");
+    let err = ReceivePack::new(&repo, &opts, &ReceivePolicy::default())
+        .with_hook(&())
+        .with_cancel(&cancel)
+        .run(&mut std::io::Cursor::new(body), &mut Vec::new())
+        .expect_err("cancelled");
     assert!(matches!(err, ServeError::Cancelled));
     assert!(resolve_ref(&bare, "refs/heads/main").is_err());
     assert!(!repo.odb().exists(&oid));
@@ -1036,7 +1015,7 @@ fn receive_pack_finishes_when_push_client_keeps_stream_open() {
         let policy = ReceivePolicy::default();
         let mut output = Vec::new();
         let started = Instant::now();
-        let outcome = receive_pack(&repo, &mut server, &mut output, &opts, &policy);
+        let outcome = ReceivePack::new(&repo, &opts, &policy).run(&mut server, &mut output);
         result_tx
             .send((outcome, output, started.elapsed()))
             .expect("send receive_pack result");

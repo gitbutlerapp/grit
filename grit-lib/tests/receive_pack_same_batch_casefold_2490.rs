@@ -2,9 +2,7 @@
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::remote::serve::{
-    receive_pack_with_hook, ProtocolVersion, ReceivePolicy, ServeOptions,
-};
+use grit_lib::remote::serve::{ProtocolVersion, ReceivePack, ReceivePolicy, ServeOptions};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, rev_parse};
 use std::io::{Cursor, Write};
@@ -73,10 +71,8 @@ fn receive_pack_rejects_same_batch_casefold_branch_creates() {
     body.extend_from_slice(&pack);
 
     let mut report = Vec::new();
-    let outcome = receive_pack_with_hook(
+    let outcome = ReceivePack::new(
         &repo,
-        &mut Cursor::new(body),
-        &mut report,
         &ServeOptions {
             protocol: ProtocolVersion::V0,
             stateless_rpc: true,
@@ -84,8 +80,9 @@ fn receive_pack_rejects_same_batch_casefold_branch_creates() {
             ..ServeOptions::default()
         },
         &ReceivePolicy::default(),
-        &(),
     )
+    .with_hook(&())
+    .run(&mut Cursor::new(body), &mut report)
     .expect("receive_pack");
     assert!(
         outcome.updates.iter().all(|u| u.error.is_some()),
