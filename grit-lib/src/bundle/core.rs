@@ -818,6 +818,29 @@ fn write_bundle_pack_with_cancel(
         .map_err(io_err)?;
         return Ok(stats);
     };
+    // A filtered bundle is what `pack-objects --filter` sends, the same selection a
+    // filtered fetch gets, so it streams with the same bounded walk instead of listing
+    // the excluded side's whole closure in memory. A partial clone lacks the blobs it
+    // was promised, which that walk does not skip, so it keeps the listing below.
+    let promisor = cfg
+        .as_deref()
+        .is_some_and(crate::promisor::repo_treats_promisor_packs);
+    if !promisor {
+        return crate::pack_objects::write_upload_pack_stream_with_cancel(
+            repo,
+            &include_oids,
+            &haves,
+            &no_shallow,
+            &no_shallow,
+            Some(filter.as_filter()),
+            &[],
+            &pack_opts,
+            progress,
+            out,
+            &stop,
+        )
+        .map_err(io_err);
+    }
     stop.poll().map_err(map_pack_error)?;
     let have_closure = reachable_closure(repo.odb(), &haves, &HashSet::new(), true, &no_shallow)
         .map_err(io_err)?;
@@ -1067,25 +1090,13 @@ fn commit_parent_set(odb: &Odb, commit: ObjectId) -> Result<Vec<ObjectId>> {
     Ok(commit.parents)
 }
 
-fn commit_closure_roots(odb: &Odb, roots: &[ObjectId]) -> Result<HashSet<ObjectId>> {
-    let mut seen = HashSet::new();
-    let mut q: VecDeque<ObjectId> = VecDeque::new();
-    for &root in roots {
-        let c = peel_to_commit(odb, root)?;
-        if seen.insert(c) {
-            q.push_back(c);
-        }
-    }
-    while let Some(c) = q.pop_front() {
-        for p in commit_parent_set(odb, c)? {
-            if seen.insert(p) {
-                q.push_back(p);
-            }
-        }
-    }
-    Ok(seen)
-}
-
+/// Commits the bundle's pack is cut at: excluded commits that are parents of a
+/// commit the bundle carries (`rev-list --boundary`), each with its subject.
+///
+/// The excluded side is walked only as far as the included history meets it (the
+/// same date-ordered walk that bounds the pack, see
+/// [`crate::pack_object_select::uninteresting_commits_to_boundary`]), so a bundle
+/// of one new commit reads a handful of commits instead of the whole history.
 fn prerequisite_commits(
     odb: &Odb,
     includes: &[ObjectId],
@@ -1094,36 +1105,45 @@ fn prerequisite_commits(
     if excludes.is_empty() {
         return Ok(Vec::new());
     }
-    let exclude_set = commit_closure_roots(odb, excludes).map_err(|e| BundleError::Io {
+    let io = |e: Error| BundleError::Io {
         detail: e.to_string(),
-    })?;
+    };
+    let exclude_tips = excludes
+        .iter()
+        .map(|&oid| peel_to_commit(odb, oid))
+        .collect::<Result<Vec<_>>>()
+        .map_err(io)?;
+    let include_tips = includes
+        .iter()
+        .map(|&oid| peel_to_commit(odb, oid))
+        .collect::<Result<Vec<_>>>()
+        .map_err(io)?;
+    // Only as far as the included history meets the excluded side, not the excluded
+    // tips' whole history.
+    let uninteresting = crate::pack_object_select::uninteresting_commits_to_boundary(
+        odb,
+        &include_tips,
+        &exclude_tips,
+    )
+    .map_err(io)?;
     let mut prerequisites = Vec::new();
     let mut seen_prereq = HashSet::new();
     let mut walk_seen = HashSet::new();
     let mut q: VecDeque<ObjectId> = VecDeque::new();
-    for &root in includes {
-        let c = peel_to_commit(odb, root).map_err(|e| BundleError::Io {
-            detail: e.to_string(),
-        })?;
-        if exclude_set.contains(&c) {
-            continue;
-        }
-        if walk_seen.insert(c) {
+    for c in include_tips {
+        if !uninteresting.contains(&c) && walk_seen.insert(c) {
             q.push_back(c);
         }
     }
     while let Some(c) = q.pop_front() {
-        let parents = commit_parent_set(odb, c).map_err(|e| BundleError::Io {
-            detail: e.to_string(),
-        })?;
+        let parents = commit_parent_set(odb, c).map_err(io)?;
         for p in parents {
-            if exclude_set.contains(&p) && seen_prereq.insert(p) {
-                let subject = commit_subject(odb, p).map_err(|e| BundleError::Io {
-                    detail: e.to_string(),
-                })?;
-                prerequisites.push((p, subject));
-            }
-            if !exclude_set.contains(&p) && walk_seen.insert(p) {
+            if uninteresting.contains(&p) {
+                if seen_prereq.insert(p) {
+                    let subject = commit_subject(odb, p).map_err(io)?;
+                    prerequisites.push((p, subject));
+                }
+            } else if walk_seen.insert(p) {
                 q.push_back(p);
             }
         }

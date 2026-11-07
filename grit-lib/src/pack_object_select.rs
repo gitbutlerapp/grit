@@ -571,6 +571,22 @@ fn send_pack_reach_interesting(reach: u8) -> bool {
     reach & SEND_PACK_REACH_WANT != 0 && !send_pack_reach_uninteresting(reach)
 }
 
+/// Commits reachable from `haves` that the date-ordered walk from `wants` meets
+/// before every want-side commit is accounted for: the `--revs` / `^have`
+/// uninteresting set of Git's `rev-list`, without walking the haves' whole
+/// history. Missing tips are skipped.
+///
+/// # Errors
+///
+/// Corrupt commits on the walk.
+pub(crate) fn uninteresting_commits_to_boundary(
+    odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+) -> Result<HashSet<ObjectId>> {
+    send_pack_uninteresting_commits(odb, wants, haves, &HashSet::new(), &CancelSignal::never())
+}
+
 /// Commits marked uninteresting for send-pack (`--revs` with `^have` lines).
 ///
 /// Peels annotated tags on haves (skips missing ids and tags that peel to non-commits),
