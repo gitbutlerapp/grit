@@ -53,6 +53,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-cli", "push_path_destination_tracking"),
     ("grit-cli", "switch_create_upstream"),
     ("grit-lib", "reset_hard_at_head_restores_worktree"),
+    ("grit-lib", "reset_hard_gitlink_stat_2559"),
     ("grit-lib", "pathspec_attr_porcelain"),
     ("grit-lib", "rev_list_attr_pathspec"),
     ("grit-lib", "serve_upload_pack_advertise"),
