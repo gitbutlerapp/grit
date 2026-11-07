@@ -329,3 +329,25 @@ fn injected_ref_store_v2_ls_refs_advertises_head_symref() -> grit_lib::remote::s
     );
     Ok(())
 }
+
+#[test]
+fn v0_advertisement_on_memory_primary_clone_matches_files_clone() {
+    let (upstream, history) = crate::support::tagged_upstream();
+    let (_files_dir, files_repo, _) = crate::support::clone_upstream(upstream.path(), false);
+    let (_memory_dir, memory_repo, _) = crate::support::clone_upstream(upstream.path(), true);
+    let files = grit_v0_advertisement(&files_repo);
+    let memory = grit_v0_advertisement(&memory_repo);
+    assert_eq!(
+        String::from_utf8_lossy(&memory),
+        String::from_utf8_lossy(&files)
+    );
+    let text = String::from_utf8_lossy(&memory);
+    for (name, peel) in [
+        ("nested", history.commit),
+        ("treetag", history.tree),
+        ("v1", history.commit),
+    ] {
+        let line = format!("{peel} refs/tags/{name}^{{}}\n");
+        assert!(text.contains(&line), "missing {line:?} in {text}");
+    }
+}

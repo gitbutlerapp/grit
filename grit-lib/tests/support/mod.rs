@@ -8,6 +8,7 @@
 
 mod attributes_harness;
 mod config_oracle;
+mod custom_store_refs;
 mod diff_harness;
 mod discover_optional;
 mod history_harness;
@@ -24,6 +25,8 @@ mod signature_harness;
 pub use attributes_harness::*;
 #[allow(unused_imports)]
 pub use config_oracle::*;
+#[allow(unused_imports)]
+pub use custom_store_refs::*;
 #[allow(unused_imports)]
 pub use diff_harness::*;
 pub use discover_optional::discover_optional;

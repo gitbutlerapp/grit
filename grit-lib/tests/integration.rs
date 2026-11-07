@@ -533,6 +533,9 @@ mod cross_pack_ref_delta_odb;
 #[path = "custom_odb_porcelain.rs"]
 mod custom_odb_porcelain;
 #[cfg(feature = "full-tests")]
+#[path = "custom_store_ref_peel.rs"]
+mod custom_store_ref_peel;
+#[cfg(feature = "full-tests")]
 #[path = "deep_tree_untracked_autocrlf_git_compat.rs"]
 mod deep_tree_untracked_autocrlf_git_compat;
 #[cfg(feature = "full-tests")]

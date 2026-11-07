@@ -462,3 +462,36 @@ fn ls_refs_unborn_head_matches_git() {
         );
     }
 }
+
+#[test]
+fn ls_refs_peel_on_memory_primary_clone_matches_files_clone() {
+    let (upstream, history) = crate::support::tagged_upstream();
+    let (_files_dir, files_repo, _) = crate::support::clone_upstream(upstream.path(), false);
+    let (_memory_dir, memory_repo, _) = crate::support::clone_upstream(upstream.path(), true);
+    let requests: &[&[&str]] = &[
+        &["peel"],
+        &["peel", "symrefs"],
+        &["peel", "ref-prefix refs/tags/"],
+        &["peel", "ref-prefix refs/tags/nested"],
+    ];
+    for args in requests {
+        assert_eq!(
+            String::from_utf8_lossy(&grit_ls_refs(&memory_repo, args, &[])),
+            String::from_utf8_lossy(&grit_ls_refs(&files_repo, args, &[])),
+            "ls-refs {args:?}"
+        );
+    }
+    let lines = pkt_lines(&grit_ls_refs(
+        &memory_repo,
+        &["peel", "ref-prefix refs/tags/"],
+        &[],
+    ));
+    for (name, tag, peel) in [
+        ("nested", history.nested, history.commit),
+        ("treetag", history.treetag, history.tree),
+        ("v1", history.v1, history.commit),
+    ] {
+        let line = format!("{tag} refs/tags/{name} peeled:{peel}");
+        assert!(lines.contains(&Some(line.clone())), "missing {line}");
+    }
+}
