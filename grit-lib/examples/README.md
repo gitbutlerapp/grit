@@ -72,7 +72,7 @@ Lists **pack indexes** under `objects/pack/` via `pack::read_local_pack_indexes`
 
 ## `rev_parse`
 
-Creates a commit, updates `refs/heads/main`, then resolves `"HEAD"` and a full 40-character hex string with `rev_parse::resolve_revision`—the same resolution layer used for symbolic refs, abbreviations, and object peeling in more complex commands.
+Creates a commit, updates `refs/heads/main`, then resolves `"HEAD"` and a full 40-character hex string with `RevWalk::resolve`—the same resolution layer used for symbolic refs, abbreviations, and object peeling in more complex commands.
 
 **Interesting bits:** `HEAD` as symref vs raw object id.
 
@@ -80,7 +80,7 @@ Creates a commit, updates `refs/heads/main`, then resolves `"HEAD"` and a full 4
 
 ## `merge_base`
 
-Constructs two branch tips that share an ancestor (`main` stays on the root commit, `feature` advances one commit), then calls `merge_base::merge_bases_first_vs_rest` to compute merge bases (the shared commit).
+Constructs two branch tips that share an ancestor (`main` stays on the root commit, `feature` advances one commit), then calls `RevWalk::merge_bases` to compute merge bases (the shared commit).
 
 **Interesting bits:** merge base as “best” common ancestor; typical input for merges and rebases.
 

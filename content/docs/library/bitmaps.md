@@ -44,7 +44,7 @@ When bitmaps are missing, truncated, or unsupported for the requested walk:
 
 - [`BitmapIndex::open`](rustdoc:grit_lib::objects::bitmap::BitmapIndex) returns `Ok(None)`; callers fall back to graph walks.
 - Corrupt sidecars may emit diagnostics (for example EWAH or index corruption) while still completing the operation via fallback where Git would.
-- [`rev_list`](rustdoc:grit_lib::revwalk::rev_list::rev_list) uses bitmap fast paths when [`RevListOptions`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions) allow it (`--use-bitmap-index` semantics); incompatible options or shallow repos fall back transparently (see `grit-lib/tests/rev_list_bitmaps.rs`).
+- [`RevWalk::rev_list`](rustdoc:grit_lib::revwalk::RevWalk::rev_list) uses bitmap fast paths when [`RevListOptions`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions) allow it (`--use-bitmap-index` semantics); incompatible options or shallow repos fall back transparently (see `grit-lib/tests/rev_list_bitmaps.rs`).
 - [`build_pack`](rustdoc:grit_lib::objects::pack_objects::build_pack) and upload-pack use [`enumerate_pack_objects`](rustdoc:grit_lib::objects::pack_object_select::enumerate_pack_objects) when [`PackBuildOptions::use_bitmaps`](rustdoc:grit_lib::objects::pack_objects::PackBuildOptions) is true and a [`BitmapIndex`](rustdoc:grit_lib::objects::bitmap::BitmapIndex) is available; otherwise the object walk runs with the same resulting set.
 
 ## Not supported yet

@@ -2997,7 +2997,7 @@ An additional benchmark, **`odb_backend/exists_miss_loop_10k`**, calls `exists` 
 
 ## grit-lib: abbreviating ids on custom object stores
 
-Criterion bench **`abbreviate`** (`cargo bench -p grit-lib --bench abbreviate`) calls [`abbreviate_object_id`](rustdoc:grit_lib::revwalk::rev_parse::abbreviate_object_id) with a 7-digit minimum for 200 ids out of 200,000 blobs held in three stores: a [`MemoryStore`](rustdoc:grit_lib::objects::odb::store::MemoryStore), a store that implements only the required [`ObjectStore`](rustdoc:grit_lib::objects::odb::store::ObjectStore) methods (so it uses the default full-scan `lookup_prefix`), and one pack in a files ODB. Factory VM medians (2026-10-24, issue #1736):
+Criterion bench **`abbreviate`** (`cargo bench -p grit-lib --bench abbreviate`) calls [`RevWalk::abbreviate`](rustdoc:grit_lib::revwalk::RevWalk::abbreviate) with a 7-digit minimum for 200 ids out of 200,000 blobs held in three stores: a [`MemoryStore`](rustdoc:grit_lib::objects::odb::store::MemoryStore), a store that implements only the required [`ObjectStore`](rustdoc:grit_lib::objects::odb::store::ObjectStore) methods (so it uses the default full-scan `lookup_prefix`), and one pack in a files ODB. Factory VM medians (2026-10-24, issue #1736):
 
 | Store | Before | After |
 | --- | --- | --- |
@@ -3256,7 +3256,7 @@ Committed baseline: **`grit-utils/baselines/conflicts.json`**. Factory VM median
 
 Listing every commit with a valid commit-graph took as long as walking without one ([#1745](https://github.com/gitbutlerapp/grit/issues/1745)). The walk took parents and dates from the graph, but still inflated every commit object to cache its subject line, and looked each commit up in the graph three times. Commits found in the graph are no longer read during the walk. Callers that print subjects read them for the listed commits only. Each commit now costs one graph lookup.
 
-[`rev_list`](rustdoc:grit_lib::revwalk::rev_list::rev_list) on upstream `git/git` (82 563 commits, commit-graph from `git gc`), in process, release build, `origin/main` → this change, against system `git 2.43.0`:
+[`RevWalk::rev_list`](rustdoc:grit_lib::revwalk::RevWalk::rev_list) on upstream `git/git` (82 563 commits, commit-graph from `git gc`), in process, release build, `origin/main` → this change, against system `git 2.43.0`:
 
 | Walk | Git ms | Grit ms with graph, before → after | Grit ms without graph |
 | --- | ---: | ---: | ---: |
