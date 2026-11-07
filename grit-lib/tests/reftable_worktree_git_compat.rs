@@ -15,7 +15,7 @@ use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::RawRef;
 use grit_lib::refs::store::RefNameRef;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::state::{resolve_head, resolve_head_for_repository, HeadState};
+use grit_lib::state::HeadState;
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
 use grit_test_support::git;
 
@@ -41,8 +41,8 @@ fn assert_head(path: &Path, oid: ObjectId, branch: Option<&str>, status: &str) {
         short_name: name.into(),
         oid: Some(oid),
     });
-    assert_eq!(resolve_head_for_repository(&repo).unwrap(), expected);
-    assert_eq!(resolve_head(repo.git_dir()).unwrap(), expected);
+    assert_eq!(repo.references().head().unwrap(), expected);
+    assert_eq!(repo.references().head().unwrap(), expected);
     let list = git(path, &["worktree", "list", "--porcelain"]);
     let worktree_line = format!("worktree {}", path.canonicalize().unwrap().display());
     let row = list

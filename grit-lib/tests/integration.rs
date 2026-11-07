@@ -1524,6 +1524,8 @@ mod refs_abstraction_guard;
 mod refs_api_coverage;
 #[path = "refs_fsck_coverage.rs"]
 mod refs_fsck_coverage;
+#[path = "refs_handle_git_roundtrip.rs"]
+mod refs_handle_git_roundtrip;
 #[cfg(feature = "full-tests")]
 #[path = "refs_harness_smoke.rs"]
 mod refs_harness_smoke;

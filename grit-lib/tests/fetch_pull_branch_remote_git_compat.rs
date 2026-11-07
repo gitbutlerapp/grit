@@ -11,7 +11,6 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head_for_repository;
 use grit_test_support::{git, git_fsck, unique_tmp, write_file};
 
 fn commit(dir: &Path, file: &str, message: &str) {
@@ -110,7 +109,7 @@ fn fetch_without_remote_updates_branch_remote_tracking_ref_like_git() {
     let origin_before = rev(&grit_dir, "refs/remotes/origin/main");
     let repo = open(&grit_dir);
     let config = repo.config().snapshot().expect("config");
-    let head = resolve_head_for_repository(&repo).expect("head");
+    let head = repo.references().head().expect("head");
     let invocation = resolve_fetch_invocation(config.as_ref(), None, &[], head.branch_name());
     assert_eq!(invocation.remote, "backup");
 

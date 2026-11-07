@@ -33,7 +33,6 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::{AuthFailure, Error, RemoteUnreadableReason, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::credentials::{Credential, CredentialProvider, HelperCredentialProvider};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
@@ -374,7 +373,10 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
             "wrong credentials must never be approved"
         );
         // Nothing was fetched.
-        assert!(resolve_ref(&local_git, "refs/remotes/origin/main").is_err());
+        assert!(grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .is_err());
     }
 
     // --- 2. RIGHT credentials → fetch succeeds, approve() fired -----------------
@@ -424,15 +426,24 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
 
     // Refs + tag landed.
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .expect("origin/main"),
         main_oid
     );
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/topic").expect("origin/topic"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/topic")
+            .expect("origin/topic"),
         topic_oid
     );
     assert_eq!(
-        resolve_ref(&local_git, "refs/tags/v1").expect("tag v1"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/v1")
+            .expect("tag v1"),
         tag_oid
     );
     assert!(outcome
@@ -452,7 +463,9 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
 
     // Cross-check the fetched main tip against system git's view of the source.
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main")
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
             .unwrap()
             .to_hex(),
         git(&source, &["rev-parse", "refs/heads/main"]).trim()
@@ -641,7 +654,10 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
             "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth {{ .. }}) for an unauthenticated push, got: {err:?}"
         );
         assert!(
-            resolve_ref(&bare, "refs/heads/main").is_err(),
+            grit_test_support::refs::at(&bare)
+                .references()
+                .resolve("refs/heads/main")
+                .is_err(),
             "rejected push must not create the remote ref"
         );
     }
@@ -678,7 +694,10 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
     assert!(provider.0.approves.load(Ordering::SeqCst) >= 1);
     assert_eq!(provider.0.rejects.load(Ordering::SeqCst), 0);
 
-    let remote_main = resolve_ref(&bare, "refs/heads/main").expect("remote main written");
+    let remote_main = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main written");
     assert_eq!(remote_main, main_oid);
 
     let remote_odb = open_odb(&bare);
@@ -815,7 +834,10 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
     )
     .expect("fetch authenticated by the host-level store entry");
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .expect("origin/main"),
         main_oid
     );
 
@@ -848,7 +870,10 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
     .expect("push authenticated by the host-level store entry");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
     assert_eq!(
-        resolve_ref(&push_target, "refs/heads/main").expect("pushed main"),
+        grit_test_support::refs::at(&push_target)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("pushed main"),
         main_oid
     );
 
@@ -1005,7 +1030,10 @@ fn git_askpass_authenticates_fetch_with_the_prompts_system_git_uses() {
     )
     .expect("fetch authenticated through GIT_ASKPASS");
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .expect("origin/main"),
         main_oid
     );
     git_fsck(&local_git);

@@ -13,7 +13,7 @@ pub const fn packed_refs_rel() -> &'static str {
 
 /// Absolute path to `packed-refs` under `common_dir`.
 #[must_use]
-pub fn packed_refs_path(common_dir: &Path) -> PathBuf {
+pub(crate) fn packed_refs_path(common_dir: &Path) -> PathBuf {
     common_dir.join(packed_refs_rel())
 }
 

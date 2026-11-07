@@ -21,8 +21,15 @@
 //! ```
 
 use crate::diff::merge_trees::{DirectoryRenameConflict, TreeMergeOutput};
+use crate::error::Result;
 use crate::index::Index;
-use crate::state::NextStep;
+use crate::objects::ObjectId;
+use crate::repo::Repository;
+use crate::state::{
+    detect_in_progress, operation_blocking_switch, read_cherry_pick_head, read_merge_heads,
+    read_merge_msg, read_revert_head, split_commit_in_progress, wt_status_get_state, HeadState,
+    InProgressOperation, NextStep, WtStatusState,
+};
 use std::collections::{BTreeMap, HashMap};
 
 /// How the two sides of a merge collided on one path.
@@ -272,6 +279,147 @@ pub fn tree_merge_has_conflicts(merged: &TreeMergeOutput) -> bool {
 #[must_use]
 pub fn next_step_grit_commands(steps: &[NextStep]) -> Vec<String> {
     steps.iter().filter_map(NextStep::grit_command).collect()
+}
+
+/// What paused operations left in the git directory, from [`Operations::state`].
+///
+/// All fields describe the current worktree's git directory (a linked worktree has its own
+/// merge and sequencer state); a bisect is recorded in the common directory.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OperationState {
+    /// Paused operations, in detection order: merge, rebase (or `am`), cherry-pick, revert,
+    /// bisect, then an unfinished history rewrite. More than one can be active, for example
+    /// a merge stopped inside a rebase.
+    pub in_progress: Vec<InProgressOperation>,
+    /// The commits being merged (`MERGE_HEAD`); empty when no merge is in progress.
+    pub merge_heads: Vec<ObjectId>,
+    /// The prepared merge or sequencer commit message (`MERGE_MSG`).
+    pub merge_message: Option<String>,
+    /// The commit being picked (`CHERRY_PICK_HEAD`); `None` when absent or malformed.
+    pub cherry_pick_head: Option<ObjectId>,
+    /// The commit being reverted (`REVERT_HEAD`); `None` when absent or malformed.
+    pub revert_head: Option<ObjectId>,
+    /// The commit `HEAD` was on before the last reset, merge or rebase (`ORIG_HEAD`).
+    pub orig_head: Option<ObjectId>,
+}
+
+impl OperationState {
+    /// Whether no operation is paused.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.in_progress.is_empty()
+    }
+}
+
+/// Paused merge, rebase, pick, revert and bisect state for one open repository.
+///
+/// Get one with [`Repository::operation`](crate::repo::Repository::operation).
+///
+/// # Examples
+///
+/// ```
+/// # fn main() -> grit_lib::error::Result<()> {
+/// use grit_lib::repo::{InitOptions, Repository};
+/// let dir = tempfile::tempdir()?;
+/// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+/// let state = repo.operation().state()?;
+/// assert!(state.is_clean());
+/// assert!(repo.operation().blocking_switch()?.is_none());
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Copy, Clone)]
+pub struct Operations<'repo> {
+    repo: &'repo Repository,
+}
+
+impl<'repo> Operations<'repo> {
+    pub(crate) fn new(repo: &'repo Repository) -> Self {
+        Self { repo }
+    }
+
+    /// Underlying repository.
+    #[must_use]
+    pub fn repository(&self) -> &'repo Repository {
+        self.repo
+    }
+
+    /// Paused operations and the state files they keep.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`](crate::error::Error::Io) when a state file exists but cannot be read, an
+    /// object id error for a malformed `MERGE_HEAD`, and ref store failures reading
+    /// `ORIG_HEAD`.
+    pub fn state(&self) -> Result<OperationState> {
+        let git_dir = self.repo.git_dir();
+        Ok(OperationState {
+            in_progress: detect_in_progress(git_dir),
+            merge_heads: read_merge_heads(git_dir)?,
+            merge_message: read_merge_msg(git_dir)?,
+            cherry_pick_head: read_cherry_pick_head(git_dir)?,
+            revert_head: read_revert_head(git_dir)?,
+            orig_head: self.repo.references().resolve_if_exists("ORIG_HEAD")?,
+        })
+    }
+
+    /// Just the paused operations, the cheap part of [`Self::state`].
+    #[must_use]
+    pub fn in_progress(&self) -> Vec<InProgressOperation> {
+        detect_in_progress(self.repo.git_dir())
+    }
+
+    /// The paused operation that must finish (or be aborted) before `HEAD` may move to
+    /// another branch or commit, if any.
+    ///
+    /// Merge, rebase, `am`, cherry-pick and revert all keep state tied to the current `HEAD`;
+    /// a bisect does not block.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`](crate::error::Error::Io) when a state file cannot be read.
+    pub fn blocking_switch(&self) -> Result<Option<InProgressOperation>> {
+        operation_blocking_switch(self.repo.git_dir())
+    }
+
+    /// Everything `status` reports about paused operations: which operation, the branch and
+    /// onto commit of a rebase, the picked or reverted commit, and the bisect start.
+    ///
+    /// [`WtStatusState::detached_from`] is left unset; the status model
+    /// ([`StatusModel::state`](crate::porcelain::status::StatusModel::state)) fills it in.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`](crate::error::Error::Io) when a state file cannot be read.
+    pub fn status_state(&self) -> Result<WtStatusState> {
+        wt_status_get_state(self.repo.git_dir(), &HeadState::Invalid, false)
+    }
+
+    /// Remove the state files of every paused operation without moving `HEAD`, refs, the
+    /// index or the work tree, and return the operations that were paused.
+    ///
+    /// This forgets an operation rather than aborting it: nothing is restored.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`](crate::error::Error::Io) when a state file cannot be removed.
+    pub fn clear(&self) -> Result<Vec<InProgressOperation>> {
+        crate::porcelain::workspace_snapshot::clear_in_progress(self.repo)
+    }
+
+    /// Whether an interactive rebase stopped to split a commit and the split is not done
+    /// yet (`HEAD` has moved off the commit being edited).
+    ///
+    /// # Errors
+    ///
+    /// Ref store failures resolving `HEAD`.
+    pub fn split_commit_in_progress(&self) -> Result<bool> {
+        Ok(split_commit_in_progress(
+            self.repo.git_dir(),
+            &self.repo.references().head()?,
+        ))
+    }
 }
 
 /// Conflicted paths of a tree merge (marker blobs and unmerged stages), sorted and deduplicated.

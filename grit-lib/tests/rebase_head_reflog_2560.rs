@@ -5,12 +5,10 @@
 mod support;
 
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::revwalk::history::{
     EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
     StartRebaseOptions,
 };
-use grit_lib::state::resolve_head;
 use support::{git, git_rev_parse_verify, open_grit_repo, HistoryRepo};
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
@@ -110,11 +108,11 @@ fn conflict_stop_logs_head_detach() {
         .expect("start");
     assert!(matches!(out, RebaseOutcome::Stopped(_)));
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
+        grit.references().resolve("refs/heads/topic").unwrap(),
         orig_tip
     );
     assert!(matches!(
-        resolve_head(grit.git_dir()).expect("head"),
+        grit.references().head().expect("head"),
         grit_lib::state::HeadState::Detached { .. }
     ));
     assert_head_reflog_chain(wt);
@@ -155,7 +153,7 @@ fn conflict_stop_abort_logs_head_reattach() {
         .to_owned();
     grit.history().abort_rebase(&test_ident()).expect("abort");
     assert_eq!(
-        resolve_head(grit.git_dir()).unwrap().branch_name(),
+        grit.references().head().unwrap().branch_name(),
         Some("topic")
     );
     assert_eq!(git_oid(wt, "topic"), orig_tip);

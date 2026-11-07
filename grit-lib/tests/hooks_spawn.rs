@@ -19,7 +19,6 @@ use grit_lib::porcelain::commit::{create_commit, CommitOutcome, CommitRequest};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head;
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io;
@@ -374,7 +373,7 @@ fn commit_with_unstartable_pre_commit_hook_fails_with_spawn_error() {
         other => panic!("expected a pre-commit spawn error, got {other:?}"),
     }
     assert!(
-        resolve_head(repo.git_dir()).expect("head").oid().is_none(),
+        repo.references().head().expect("head").oid().is_none(),
         "no commit is written when pre-commit cannot start"
     );
 }
@@ -397,7 +396,7 @@ fn commit_with_unstartable_post_commit_hook_succeeds_with_warning() {
     assert!(!outcome.hooks_run.contains(&HookName::PostCommit));
     assert_eq!(runner.specs().len(), 1, "post-commit was attempted");
     assert_eq!(
-        resolve_head(repo.git_dir()).expect("head").oid(),
+        repo.references().head().expect("head").oid(),
         Some(&outcome.oid)
     );
     let warned = diagnostics.warnings().into_iter().any(|w| match w {
@@ -442,7 +441,7 @@ fn spawn_error_keeps_output_of_hooks_that_already_ran() {
         other => panic!("expected the hooks-dir script to fail to start, got {other:?}"),
     }
     assert!(
-        resolve_head(repo.git_dir()).expect("head").oid().is_none(),
+        repo.references().head().expect("head").oid().is_none(),
         "no commit is written when pre-commit cannot start"
     );
 }
@@ -543,10 +542,7 @@ fn switch_with_unstartable_post_checkout_hook_succeeds_with_warning() {
     .expect("post-checkout runs after the switch and must not fail it");
     assert!(outcome.hooks_run.is_empty());
     assert_eq!(runner.specs().len(), 1, "post-checkout was attempted");
-    assert_eq!(
-        resolve_head(repo.git_dir()).expect("head").oid(),
-        Some(&first)
-    );
+    assert_eq!(repo.references().head().expect("head").oid(), Some(&first));
     let warned = diagnostics.warnings().into_iter().any(
         |w| matches!(w, Warning::HookNotRun { hook_name, .. } if hook_name == "post-checkout"),
     );
@@ -651,7 +647,7 @@ fn commit_msg_hook_using_grep_rejects_the_commit() {
         "commit-msg",
         "#!/bin/sh\nif grep -q WIP \"$1\"; then echo no WIP >&2; exit 1; fi\n",
     );
-    let head_before = resolve_head(repo.git_dir()).expect("head").oid().copied();
+    let head_before = repo.references().head().expect("head").oid().copied();
 
     match commit_staged(&repo, &dir, "WIP thing") {
         Err(grit_lib::error::Error::Hook(HookError::Failed {
@@ -663,7 +659,7 @@ fn commit_msg_hook_using_grep_rejects_the_commit() {
         other => panic!("expected commit-msg to reject the commit, got {other:?}"),
     }
     assert_eq!(
-        resolve_head(repo.git_dir()).expect("head").oid().copied(),
+        repo.references().head().expect("head").oid().copied(),
         head_before
     );
     commit_staged(&repo, &dir, "real change").expect("a message without WIP passes");

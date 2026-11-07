@@ -9,8 +9,6 @@ use std::time::SystemTime;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::append_reflog;
-use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::ExpireOptions;
 use tempfile::TempDir;
@@ -132,27 +130,34 @@ fn reflog_expire_dry_run() {
 
     let refname = "refs/heads/main";
     let git_dir = repo.git_dir();
-    append_reflog(
-        git_dir,
-        refname,
-        &ObjectId::zero(),
-        &oid1,
-        "T <t@e.com> 1000000 +0000",
-        "old",
-        false,
-    )
-    .expect("log1");
-    append_reflog(
-        git_dir,
-        refname,
-        &oid1,
-        &oid2,
-        "T <t@e.com> 2500000000 +0000",
-        "new",
-        false,
-    )
-    .expect("log2");
-    write_ref(git_dir, refname, &oid2).expect("tip");
+    grit_test_support::refs::at(git_dir)
+        .reflogs()
+        .append(
+            refname,
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: ObjectId::zero(),
+                new_oid: oid1,
+                identity: ("T <t@e.com> 1000000 +0000").to_string(),
+                message: ("old").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::IfAllowed,
+        )
+        .expect("log1");
+    grit_test_support::refs::at(git_dir)
+        .reflogs()
+        .append(
+            refname,
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: oid1,
+                new_oid: oid2,
+                identity: ("T <t@e.com> 2500000000 +0000").to_string(),
+                message: ("new").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::IfAllowed,
+        )
+        .expect("log2");
+    grit_test_support::refs::set_ref(&grit_test_support::refs::at(git_dir), refname, &oid2)
+        .expect("tip");
 
     let grit_copy = TempDir::new().expect("grit copy");
     let git_copy = TempDir::new().expect("git copy");

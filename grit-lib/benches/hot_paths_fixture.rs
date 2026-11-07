@@ -64,7 +64,7 @@ impl HotPathsFixture {
         populate_worktree(dir.path(), file_count, dir_count);
         let file_paths = list_txt_paths(dir.path());
         let head_tree = commit_all(&repo, "initial").expect("initial commit");
-        let main_head_oid = refs::resolve_ref(repo.git_dir(), "HEAD").expect("HEAD");
+        let main_head_oid = repo.references().resolve("HEAD").expect("HEAD");
         let wide_switch_tip = prepare_wide_switch_tip(&repo, &file_paths, head_tree, main_head_oid);
         hard_reset_to_main(&repo, main_head_oid);
         let index_mutate_plan = build_index_mutate_plan(&repo);
@@ -198,7 +198,7 @@ impl HotPathsFixture {
     pub fn build_stash_touching_fraction(&self, fraction: f64) -> ObjectId {
         self.reset_worktree_to_head();
         let stash_tree = self.tree_with_fraction_changed(fraction);
-        let head_oid = refs::resolve_ref(self.repo.git_dir(), "HEAD").expect("head");
+        let head_oid = self.repo.references().resolve("HEAD").expect("head");
         let index_parent = write_tree_commit(
             &self.repo,
             self.head_tree,
@@ -217,7 +217,7 @@ impl HotPathsFixture {
     pub fn pick_three_trees(&self, path_count: usize) -> (ObjectId, ObjectId, ObjectId) {
         self.reset_worktree_to_head();
         let head_tree = self.head_tree;
-        let head_oid = refs::resolve_ref(self.repo.git_dir(), "HEAD").expect("head");
+        let head_oid = self.repo.references().resolve("HEAD").expect("head");
         let source_tree = self.tree_with_path_count_changed(path_count);
         let _source_commit = write_tree_commit(&self.repo, source_tree, &[head_oid], "pick source");
         (head_tree, head_tree, source_tree)
@@ -328,7 +328,7 @@ fn commit_all(repo: &Repository, message: &str) -> Result<ObjectId> {
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())?;
     repo.index().write(&mut index)?;
-    let parent = refs::resolve_ref(repo.git_dir(), "HEAD").ok();
+    let parent = repo.references().resolve("HEAD").ok();
     let commit_data = CommitData {
         tree,
         parents: parent.into_iter().collect(),
@@ -343,8 +343,9 @@ fn commit_all(repo: &Repository, message: &str) -> Result<ObjectId> {
     };
     let bytes = serialize_commit(&commit_data);
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &oid)?;
-    refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &oid)?;
+    repo.references()
+        .update_symbolic("HEAD", "refs/heads/main")?;
     Ok(tree)
 }
 
@@ -376,7 +377,8 @@ fn prepare_wide_switch_tip(
     let wide_tree = wide_tree_from_fraction(repo, file_paths, 0.10);
     checkout_between_trees(repo, Some(&head_tree), &wide_tree).expect("apply wide tree");
     let tip = write_tree_commit(repo, wide_tree, &[main_head_oid], "bench-wide switch");
-    refs::write_ref(repo.git_dir(), "refs/heads/bench-wide", &tip).expect("wide branch ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/bench-wide", &tip)
+        .expect("wide branch ref");
     hard_reset_to_main(repo, main_head_oid);
     tip
 }

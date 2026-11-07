@@ -645,7 +645,6 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     use grit_lib::porcelain::add::stage_for_commit;
     use grit_lib::porcelain::commit::{create_commit, CommitRequest};
     use grit_lib::progress::NullProgress;
-    use grit_lib::refs;
     use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef};
     use grit_lib::repo::{InitOptions, Repository};
 
@@ -672,7 +671,7 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     )
     .expect("commit");
 
-    let tip = refs::resolve_ref(repo.git_dir(), "HEAD").expect("tip");
+    let tip = repo.references().resolve("HEAD").expect("tip");
     let git_dir = repo.git_dir();
     let branch_ref = git_dir.join("refs/heads/main");
     if branch_ref.is_file() {
@@ -680,7 +679,10 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     }
     fs::write(git_dir.join("HEAD"), b"ref: refs/heads/main\n").expect("unborn head");
     assert!(
-        refs::resolve_ref(git_dir, "HEAD").is_err(),
+        grit_test_support::refs::at(git_dir)
+            .references()
+            .resolve("HEAD")
+            .is_err(),
         "on-disk HEAD should be unborn after removing the branch ref"
     );
 

@@ -31,7 +31,7 @@ use grit_lib::objects::{parse_commit, HashAlgo, ObjectKind};
 use grit_lib::porcelain::branch::list_branches;
 use grit_lib::remote::grit_server_auth::AUTHORIZE_PATH;
 use grit_lib::repo::Repository;
-use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_lib::state::HeadState;
 use grit_protocol::RepositoryOptions;
 use time::OffsetDateTime;
 
@@ -876,7 +876,7 @@ fn summarize(
         .into_iter()
         .map(|b| (b.name, b.oid.to_short_hex(), b.current))
         .collect();
-    let (head, mut next) = match resolve_head_for_repository(&repo)? {
+    let (head, mut next) = match repo.references().head()? {
         HeadState::Branch {
             short_name, oid, ..
         } => (Some(short_name), oid),

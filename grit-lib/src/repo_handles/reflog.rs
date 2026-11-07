@@ -10,6 +10,7 @@ use crate::reflog::{
     read_reflog_on_store, reflog_identity_timestamp, reflog_refs_on_store, MessageMatcher,
     ReflogEntry, ReflogExpireParams, ReflogExpireResult, ReflogExpiryCache,
 };
+use crate::refs::append_reflog_on_store;
 use crate::refs::store::{RefName, RefNameRef, RefStore};
 use crate::repo::Repository;
 use crate::worktree_ref::resolve_ref_dwim;
@@ -82,6 +83,19 @@ pub struct ReflogPage {
     pub truncated: bool,
 }
 
+/// When [`RepositoryReflogs::append`] may start a reflog that does not exist yet.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReflogCreate {
+    /// Append only when the reflog already exists or `core.logAllRefUpdates` allows creating
+    /// one for this ref (branches, remote-tracking refs, notes and `HEAD` by default in a
+    /// repository with a work tree; every ref with `always`).
+    #[default]
+    IfAllowed,
+    /// Create the reflog when it is missing, whatever `core.logAllRefUpdates` says.
+    Always,
+}
+
 /// Reflog read/write helpers scoped to an open repository.
 ///
 /// Every operation reads and rewrites reflogs through the repository's ref store
@@ -124,6 +138,79 @@ impl<'repo> RepositoryReflogs<'repo> {
 
     fn store(&self) -> &'repo dyn RefStore {
         self.repo.ref_store()
+    }
+
+    /// Whether `ref_name` has a reflog in the repository's ref store (an empty one counts).
+    ///
+    /// # Errors
+    ///
+    /// Propagates ref-store and I/O errors.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// use grit_lib::repo::{InitOptions, Repository};
+    /// let dir = tempfile::tempdir()?;
+    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+    /// assert!(!repo.reflogs().exists("refs/heads/main")?);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn exists(&self, ref_name: impl AsRef<RefNameRef>) -> Result<bool> {
+        self.store().reflog_exists(ref_name.as_ref())
+    }
+
+    /// Append `entry` to the reflog of `ref_name` without moving the ref.
+    ///
+    /// [`ReflogEntry::identity`] is a full `Name <email> <epoch> <tz>` line; `old_oid` and
+    /// `new_oid` are recorded as given (a zero id for a ref that did not exist). Whether a
+    /// missing reflog is started follows `create`.
+    ///
+    /// # Errors
+    ///
+    /// [`ObjectError::InvalidSignature`](crate::error::ObjectError::InvalidSignature) for an identity or message that would corrupt the log
+    /// line, [`RefError::Invalid`](crate::error::RefError::Invalid) when `ref_name` is not safe to store, and lock and I/O
+    /// failures from the ref backend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// use grit_lib::objects::ObjectId;
+    /// use grit_lib::refs::reflog::ReflogEntry;
+    /// use grit_lib::repo::{InitOptions, Repository};
+    /// use grit_lib::repo_handles::ReflogCreate;
+    /// let dir = tempfile::tempdir()?;
+    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+    /// let entry = ReflogEntry {
+    ///     old_oid: ObjectId::zero(),
+    ///     new_oid: ObjectId::zero(),
+    ///     identity: "Doc <doc@example.com> 1700000000 +0000".to_owned(),
+    ///     message: "note".to_owned(),
+    /// };
+    /// repo.reflogs().append("refs/notes/demo", &entry, ReflogCreate::Always)?;
+    /// assert!(repo.reflogs().exists("refs/notes/demo")?);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn append(
+        &self,
+        ref_name: impl AsRef<RefNameRef>,
+        entry: &ReflogEntry,
+        create: ReflogCreate,
+    ) -> Result<()> {
+        let config = self.repo.config().snapshot()?;
+        append_reflog_on_store(
+            self.store(),
+            ref_name.as_ref().as_str(),
+            &entry.old_oid,
+            &entry.new_oid,
+            &entry.identity,
+            &entry.message,
+            create == ReflogCreate::Always,
+            config.as_ref(),
+        )
     }
 
     /// Reflog entries for `ref_name`, newest first with indices starting at `0`.

@@ -21,7 +21,6 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope}
 use grit_lib::porcelain::stage_tracked::IndexStagingThresholds;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, UpdateMode};
 use grit_lib::remote::{Remote, RemoteError};
 use grit_lib::repo::error::FilesOnlyOperation;
@@ -170,7 +169,10 @@ fn fetch_into_custom_primary_round_trips_with_git() {
         )
         .expect("fetch into custom primary");
 
-    let tip = resolve_ref(repo.git_dir(), "refs/remotes/origin/main").expect("tracking ref");
+    let tip = repo
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("tracking ref");
     assert_eq!(tip, rev_parse(upstream.path(), "main"));
     assert!(store.contains(&tip).expect("contains"));
     assert!(repo.odb().read(&tip).is_ok());
@@ -204,7 +206,10 @@ fn fetch_from_bundle_into_custom_primary_succeeds() {
             None,
         )
         .expect("bundle fetch into custom primary");
-    let tip = resolve_ref(repo.git_dir(), "refs/remotes/origin/main").expect("tracking ref");
+    let tip = repo
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("tracking ref");
     assert_eq!(tip, rev_parse(upstream.path(), "main"));
     assert!(store.contains(&tip).expect("contains"));
     assert_eq!(object_files(repo.git_dir()), before);
@@ -240,7 +245,10 @@ fn fetch_incremental_into_custom_primary_uses_haves_from_store() {
         )
         .expect("incremental fetch");
     assert!(count_store_objects(&store) > after_first);
-    let tip = resolve_ref(repo.git_dir(), "refs/remotes/origin/main").expect("tracking ref");
+    let tip = repo
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("tracking ref");
     assert_eq!(tip, rev_parse(upstream.path(), "main"));
 }
 
@@ -267,7 +275,10 @@ fn fetch_dry_run_into_custom_primary_classifies_without_persisting() {
         .expect("dry-run fetch");
     assert!(outcome.updates.iter().any(|u| u.mode == UpdateMode::New));
     assert_eq!(count_store_objects(&store), before_count);
-    assert!(resolve_ref(repo.git_dir(), "refs/remotes/origin/main").is_err());
+    assert!(repo
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .is_err());
 }
 
 #[test]
@@ -434,7 +445,10 @@ fn fetch_all_succeeds_with_custom_primary() {
     let (name, outcome) = &results[0];
     assert_eq!(name, "origin");
     outcome.as_ref().expect("custom primary fetch");
-    assert!(resolve_ref(repo.git_dir(), "refs/remotes/origin/main").is_ok());
+    assert!(repo
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .is_ok());
 }
 
 #[test]
@@ -633,7 +647,10 @@ fn files_primary_fetch_and_push_still_round_trip_with_git() {
             None,
         )
         .expect("files-primary fetch");
-    let tip = resolve_ref(repo.git_dir(), "refs/remotes/origin/main").expect("tracking ref");
+    let tip = repo
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("tracking ref");
     assert_eq!(tip, rev_parse(upstream.path(), "main"));
     assert!(repo.odb().read(&tip).is_ok());
     git(dir.path(), &["fsck", "--full"]);

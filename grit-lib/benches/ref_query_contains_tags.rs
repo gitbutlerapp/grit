@@ -10,7 +10,7 @@ use std::time::Instant;
 use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
+use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryOptions};
 use grit_lib::repo::Repository;
 
 fn bench_cache_root() -> PathBuf {
@@ -69,7 +69,9 @@ fn bench_contains_tags(c: &mut Criterion) {
                 contains: vec![contains],
                 ..RefQuery::default()
             };
-            let n = query_refs(&repo, &query, &RefQueryOptions::default())
+            let n = repo
+                .references()
+                .query(&query, &RefQueryOptions::default())
                 .expect("query")
                 .len();
             std::hint::black_box(n)
@@ -162,7 +164,8 @@ fn bench_bounded_branches(c: &mut Criterion) {
                                 ..RefQuery::default()
                             };
                             std::hint::black_box(
-                                query_refs(&repo, &query, &RefQueryOptions::default())
+                                repo.references()
+                                    .query(&query, &RefQueryOptions::default())
                                     .expect("query"),
                             )
                         },

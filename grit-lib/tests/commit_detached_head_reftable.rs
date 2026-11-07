@@ -6,7 +6,7 @@ use grit_lib::porcelain::commit::{commit_worktree, CommitRequest, HookPolicy};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::HeadState;
 use support::{git, git_init_reftable_repo, require_reftable_git};
 
 fn ident() -> String {
@@ -48,9 +48,9 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("first commit");
-    let main_tip = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").unwrap();
+    let main_tip = repo.references().resolve("refs/heads/main").unwrap();
 
-    let tip = match resolve_head(repo.git_dir()).expect("head before detach") {
+    let tip = match repo.references().head().expect("head before detach") {
         HeadState::Branch { oid: Some(oid), .. } => oid,
         other => panic!("expected branch tip, got {other:?}"),
     };
@@ -80,12 +80,12 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
     assert_eq!(outcome.branch, None);
     assert_ne!(outcome.oid, main_tip);
 
-    match resolve_head(repo.git_dir()).expect("head") {
+    match repo.references().head().expect("head") {
         HeadState::Detached { oid } => assert_eq!(oid, outcome.oid),
         other => panic!("expected detached HEAD, got {other:?}"),
     }
     assert_eq!(
-        grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").unwrap(),
+        repo.references().resolve("refs/heads/main").unwrap(),
         main_tip
     );
 
@@ -112,7 +112,7 @@ fn grit_amend_on_detached_reftable_head() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("first");
-    let tip = match resolve_head(repo.git_dir()).expect("head before detach") {
+    let tip = match repo.references().head().expect("head before detach") {
         HeadState::Branch { oid: Some(oid), .. } => oid,
         other => panic!("expected branch tip, got {other:?}"),
     };
@@ -141,7 +141,7 @@ fn grit_amend_on_detached_reftable_head() {
     )
     .expect("amend detached");
     assert_eq!(outcome.branch, None);
-    match resolve_head(repo.git_dir()).expect("head") {
+    match repo.references().head().expect("head") {
         HeadState::Detached { oid } => assert_eq!(oid, outcome.oid),
         other => panic!("expected detached HEAD, got {other:?}"),
     }

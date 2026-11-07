@@ -89,7 +89,7 @@ fn log_decorations_cover_all_ref_namespaces() -> grit_lib::error::Result<()> {
     let blob = repo.odb().write(ObjectKind::Blob, b"x\n")?;
     assert!(peel_to_commit_hex(repo.odb(), &blob.to_hex()).is_none());
 
-    let head = grit_lib::state::resolve_head(repo.git_dir())?;
+    let head = repo.references().head()?;
     if let Some(items) = map_short.get(&tip_hex) {
         let _ = current_branch_decoration_index(items, &head);
     }

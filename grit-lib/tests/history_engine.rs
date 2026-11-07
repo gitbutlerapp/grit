@@ -13,10 +13,8 @@ use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{
     parse_commit, parse_tree, serialize_commit, CommitData, ObjectId, ObjectKind,
 };
-use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions};
-use grit_lib::state::resolve_head;
 
 use support::{build_commit_dag, commit_file, git, git_rev_parse, HistoryRepo};
 
@@ -378,7 +376,7 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
     let b = write_test_commit(&grit, tree_b, &[], "b", &ident).expect("b");
     let merge_tree = write_tree_with_blob(&grit, "m.txt", b"m\n").expect("merge tree");
     let merge = write_test_commit(&grit, merge_tree, &[a, b], "merge", &ident).expect("merge");
-    write_ref(grit.git_dir(), "refs/heads/main", &merge).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &merge).expect("ref");
 
     let insert_tree = grit.odb().write(ObjectKind::Tree, &[]).expect("empty tree");
     let mut edits = HistoryEdits::new();
@@ -568,7 +566,7 @@ fn plan_rewrite_keeps_all_merge_parents_on_implicit_tree_reword() {
     git(wt, &["checkout", "main"]);
     git(wt, &["merge", "side", "-m", "merge m"]);
     let grit = open_grit(wt);
-    let merge_oid = match resolve_head(grit.git_dir()).expect("head") {
+    let merge_oid = match grit.references().head().expect("head") {
         grit_lib::state::HeadState::Branch { oid: Some(oid), .. } => oid,
         grit_lib::state::HeadState::Detached { oid } => oid,
         _ => panic!("expected merge tip"),
@@ -808,7 +806,7 @@ fn plan_rewrite_reports_conflict_with_paths() {
     let a = write_test_commit(&grit, tree_base, &[], "a", &ident).expect("a");
     let b = write_test_commit(&grit, tree_left, &[a], "b", &ident).expect("b");
     let c = write_test_commit(&grit, tree_right, &[b], "c", &ident).expect("c");
-    write_ref(grit.git_dir(), "refs/heads/main", &c).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
 
     let mut edits = HistoryEdits::new();
     edits.insert(
@@ -861,7 +859,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
     let a = write_test_commit(&grit, tree_a, &[], "a", &ident).expect("a");
     let b = write_test_commit(&grit, tree_b, &[a], "b", &ident).expect("b");
     let c = write_test_commit(&grit, tree_a, &[b], "c", &ident).expect("c");
-    write_ref(grit.git_dir(), "refs/heads/main", &c).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
     let oids_c = c;
     let mut edits_drop = HistoryEdits::new();
     edits_drop.insert(
@@ -1079,7 +1077,10 @@ fn plan_rewrite_leaves_refs_index_worktree_untouched() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
     commit_file(wt, "tracked.txt", "v1", "track");
-    let before_head = resolve_ref(open_grit(wt).git_dir(), "refs/heads/main").expect("read ref");
+    let before_head = grit_test_support::refs::at(open_grit(wt).git_dir())
+        .references()
+        .resolve("refs/heads/main")
+        .expect("read ref");
     let grit = open_grit(wt);
     let mut edits = HistoryEdits::new();
     edits.insert(
@@ -1104,7 +1105,10 @@ fn plan_rewrite_leaves_refs_index_worktree_untouched() {
             },
         )
         .expect("plan");
-    let after_head = resolve_ref(grit.git_dir(), "refs/heads/main").expect("read ref after");
+    let after_head = grit
+        .references()
+        .resolve("refs/heads/main")
+        .expect("read ref after");
     assert_eq!(before_head, after_head);
     assert!(wt.join("tracked.txt").exists());
 }
@@ -1284,6 +1288,8 @@ fn history_public_api_coverage_smoke() {
         CommitEdit::InsertBefore(_nc),
     );
     let _edits: HistoryEdits = map;
-    let head = resolve_head(&HistoryRepo::init().worktree().join(".git"));
+    let head = grit_test_support::refs::at(&HistoryRepo::init().worktree().join(".git"))
+        .references()
+        .head();
     let _ = head;
 }

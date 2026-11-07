@@ -244,12 +244,20 @@ fn porcelain_checkout_glob_and_branch_tracking() {
     .expect("config");
     repo.reload_config().expect("reload");
     let commit = support::stored_commit(&git_dir, 1);
-    grit_lib::refs::write_ref(git_dir.as_path(), "refs/heads/main", &commit).expect("main");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(git_dir.as_path()),
+        "refs/heads/main",
+        &commit,
+    )
+    .expect("main");
     assert_eq!(
         upstream_tracking_full_ref(&repo, "main").as_deref(),
         Some("refs/remotes/origin/main")
     );
-    let head = grit_lib::refs::resolve_ref(git_dir.as_path(), "HEAD").expect("head");
+    let head = grit_test_support::refs::at(git_dir.as_path())
+        .references()
+        .resolve("HEAD")
+        .expect("head");
     let pushed = PushRefResult {
         local_ref: Some("refs/heads/main".to_owned()),
         remote_ref: "refs/heads/main".to_owned(),
@@ -263,7 +271,10 @@ fn porcelain_checkout_glob_and_branch_tracking() {
     apply_push_remote_tracking_updates(git_dir.as_path(), "origin", &[pushed])
         .expect("tracking update");
     assert_eq!(
-        grit_lib::refs::resolve_ref(git_dir.as_path(), "refs/remotes/origin/main").ok(),
+        grit_test_support::refs::at(git_dir.as_path())
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .ok(),
         Some(head)
     );
     let query = BranchListQuery {

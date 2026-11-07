@@ -12,14 +12,21 @@
 //! and provides working tree / index diff summaries used by `status`,
 //! `commit`, and other porcelain commands.
 //!
+//! This module holds the vocabulary ([`HeadState`], [`InProgressOperation`],
+//! [`WtStatusState`], [`NextStep`]). Read them through the repository handles:
+//! [`References::head`](crate::refs::References::head) for `HEAD` and
+//! [`Repository::operation`](crate::repo::Repository::operation) for paused operations.
+//!
 //! Library guide: [state](https://grit-scm.com/docs/library/repository)
 //!
 //! ```rust
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! let (_repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-//! use grit_lib::state::resolve_head; let _ = resolve_head(_repo.git_dir())?;
+//! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+//! let head = repo.references().head()?;
+//! assert!(head.is_unborn());
+//! assert!(repo.operation().in_progress().is_empty());
 //!
 //! # Ok(())
 //! # }
@@ -433,20 +440,6 @@ pub fn status_operation(state: &WtStatusState, has_unmerged_conflicts: bool) -> 
     })
 }
 
-/// Full snapshot of a repository's state.
-///
-/// This is the information that porcelain commands like `status` need to
-/// display the repository's current situation.
-#[derive(Debug, Clone)]
-pub struct RepoState {
-    /// Current HEAD state.
-    pub head: HeadState,
-    /// In-progress operations (there can be multiple, e.g. rebase + merge).
-    pub in_progress: Vec<InProgressOperation>,
-    /// Whether the repository is bare.
-    pub is_bare: bool,
-}
-
 /// Resolve HEAD from the given git directory.
 ///
 /// Reads `HEAD`, follows symbolic refs, and resolves the final OID.
@@ -458,7 +451,7 @@ pub struct RepoState {
 /// # Errors
 ///
 /// Returns [`Error::Io`] if files cannot be read.
-pub fn resolve_head(git_dir: &Path) -> Result<HeadState> {
+pub(crate) fn resolve_head(git_dir: &Path) -> Result<HeadState> {
     let store = crate::refs::store::open_ref_store(git_dir)?;
     if store.format() == crate::refs::store::RefStorageFormat::Reftable {
         return resolve_head_from_store(store.as_ref());
@@ -475,7 +468,7 @@ pub fn resolve_head(git_dir: &Path) -> Result<HeadState> {
 /// # Errors
 ///
 /// Propagates ref store read and resolution failures.
-pub fn resolve_head_for_repository(repo: &crate::repo::Repository) -> Result<HeadState> {
+pub(crate) fn resolve_head_for_repository(repo: &crate::repo::Repository) -> Result<HeadState> {
     if repo.ref_store().format() == crate::refs::store::RefStorageFormat::Files {
         return resolve_head_impl(repo.git_dir(), Some(repo));
     }
@@ -500,9 +493,9 @@ fn resolve_head_from_store(store: &dyn crate::refs::store::RefStore) -> Result<H
 impl Repository {
     /// The commit `HEAD` points at, whether through a branch or detached.
     ///
-    /// `HEAD` is read with [`resolve_head_for_repository`], so injected ref stores are honoured.
-    /// Use that function instead when the caller also needs the branch name or must treat an
-    /// unborn branch as a normal state.
+    /// `HEAD` is read with [`References::head`](crate::refs::References::head), so injected
+    /// ref stores are honoured. Use that method instead when the caller also needs the branch
+    /// name or must treat an unborn branch as a normal state.
     ///
     /// # Errors
     ///
@@ -674,7 +667,7 @@ pub(crate) fn read_grit_rebase_stopped_source(
 /// # Returns
 ///
 /// A list of detected in-progress operations.
-pub fn detect_in_progress(git_dir: &Path) -> Vec<InProgressOperation> {
+pub(crate) fn detect_in_progress(git_dir: &Path) -> Vec<InProgressOperation> {
     let mut ops = Vec::new();
 
     if git_dir.join("MERGE_HEAD").exists() {
@@ -723,17 +716,6 @@ pub fn detect_in_progress(git_dir: &Path) -> Vec<InProgressOperation> {
     ops
 }
 
-/// Remove in-progress operation sentinels without moving `HEAD`, refs, or the worktree.
-///
-/// Returns the operations that were active before clearing (same order as [`detect_in_progress`]).
-///
-/// # Errors
-///
-/// Returns [`Error::Io`] when sentinel files cannot be removed.
-pub fn clear_in_progress(repo: &Repository) -> Result<Vec<InProgressOperation>> {
-    crate::porcelain::workspace_snapshot::clear_in_progress(repo)
-}
-
 /// The paused operation that must finish before `HEAD` may move to another branch or commit.
 ///
 /// Merge, rebase (grit's or git's), am, cherry-pick and revert all keep state that refers to
@@ -747,7 +729,7 @@ pub fn clear_in_progress(repo: &Repository) -> Result<Vec<InProgressOperation>> 
 /// # Errors
 ///
 /// Returns [`Error::Io`] when an operation sentinel cannot be read.
-pub fn operation_blocking_switch(git_dir: &Path) -> Result<Option<InProgressOperation>> {
+pub(crate) fn operation_blocking_switch(git_dir: &Path) -> Result<Option<InProgressOperation>> {
     let state = wt_status_get_state(git_dir, &HeadState::Invalid, false)?;
     Ok(primary_in_progress_operation(&state).filter(|op| *op != InProgressOperation::Bisect))
 }
@@ -972,7 +954,7 @@ fn sequencer_first_replay(git_dir: &Path) -> Option<bool> {
 ///
 /// `get_detached_from` matches Git's third parameter: when true and `head` is detached, populate
 /// `detached_from` / `detached_at` from the `HEAD` reflog.
-pub fn wt_status_get_state(
+pub(crate) fn wt_status_get_state(
     git_dir: &Path,
     head: &HeadState,
     get_detached_from: bool,
@@ -1079,7 +1061,7 @@ fn read_grit_replay_status_hints(git_dir: &Path) -> Option<(InProgressOperation,
 }
 
 /// Whether a split commit is in progress during interactive rebase (`wt-status.c` `split_commit_in_progress`).
-pub fn split_commit_in_progress(git_dir: &Path, head: &HeadState) -> bool {
+pub(crate) fn split_commit_in_progress(git_dir: &Path, head: &HeadState) -> bool {
     let HeadState::Detached { oid: head_oid } = head else {
         return false;
     };
@@ -1104,27 +1086,6 @@ pub fn split_commit_in_progress(git_dir: &Path, head: &HeadState) -> bool {
     }
 }
 
-/// Build a complete [`RepoState`] snapshot for a repository.
-///
-/// # Parameters
-///
-/// - `git_dir` — path to the `.git` directory.
-/// - `is_bare` — whether this is a bare repository.
-///
-/// # Errors
-///
-/// Returns [`Error::Io`] on filesystem failures.
-pub fn repo_state(git_dir: &Path, is_bare: bool) -> Result<RepoState> {
-    let head = resolve_head(git_dir)?;
-    let in_progress = detect_in_progress(git_dir);
-
-    Ok(RepoState {
-        head,
-        in_progress,
-        is_bare,
-    })
-}
-
 /// Read the MERGE_HEAD file and return the OIDs listed.
 ///
 /// # Parameters
@@ -1134,7 +1095,7 @@ pub fn repo_state(git_dir: &Path, is_bare: bool) -> Result<RepoState> {
 /// # Returns
 ///
 /// A vector of merge parent OIDs, or empty if not in a merge.
-pub fn read_merge_heads(git_dir: &Path) -> Result<Vec<ObjectId>> {
+pub(crate) fn read_merge_heads(git_dir: &Path) -> Result<Vec<ObjectId>> {
     let path = git_dir.join("MERGE_HEAD");
     let content = match fs::read_to_string(&path) {
         Ok(c) => c,
@@ -1161,7 +1122,7 @@ pub fn read_merge_heads(git_dir: &Path) -> Result<Vec<ObjectId>> {
 /// # Returns
 ///
 /// The merge message text, or `None` if not in a merge.
-pub fn read_merge_msg(git_dir: &Path) -> Result<Option<String>> {
+pub(crate) fn read_merge_msg(git_dir: &Path) -> Result<Option<String>> {
     let path = git_dir.join("MERGE_MSG");
     match fs::read_to_string(&path) {
         Ok(c) => Ok(Some(c)),
@@ -1181,7 +1142,7 @@ pub fn read_merge_msg(git_dir: &Path) -> Result<Option<String>> {
 /// # Errors
 ///
 /// Returns [`Error::Io`] if a present sentinel file cannot be removed.
-pub fn clear_merge_state(git_dir: &Path) -> Result<()> {
+pub(crate) fn clear_merge_state(git_dir: &Path) -> Result<()> {
     for name in merge_completion_sentinels() {
         let path = git_dir.join(name);
         if path.exists() {
@@ -1203,7 +1164,7 @@ pub fn clear_merge_state(git_dir: &Path) -> Result<()> {
 /// # Errors
 ///
 /// Returns [`Error::Io`] if a sentinel file or the sequencer directory cannot be removed.
-pub fn clear_replay_state(git_dir: &Path) -> Result<()> {
+pub(crate) fn clear_replay_state(git_dir: &Path) -> Result<()> {
     for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG", "AUTO_MERGE"] {
         let path = git_dir.join(name);
         if path.exists() {
@@ -1219,7 +1180,7 @@ pub fn clear_replay_state(git_dir: &Path) -> Result<()> {
 
 /// Sentinel filenames Git removes when a merge concludes with `git commit`.
 #[must_use]
-pub fn merge_completion_sentinels() -> &'static [&'static str] {
+pub(crate) fn merge_completion_sentinels() -> &'static [&'static str] {
     &[
         "MERGE_HEAD",
         "MERGE_MSG",
@@ -1233,7 +1194,7 @@ pub fn merge_completion_sentinels() -> &'static [&'static str] {
 
 /// Side effects of [`finish_merge_state`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FinishMergeStateResult {
+pub(crate) struct FinishMergeStateResult {
     /// Applying the merge autostash left conflicts (the autostash entry is kept).
     pub autostash_left_conflicts: bool,
     /// Rerere postimage events recorded while concluding the merge commit.
@@ -1248,7 +1209,7 @@ pub struct FinishMergeStateResult {
 /// # Errors
 ///
 /// Propagates autostash apply, rerere, and I/O failures.
-pub fn finish_merge_state(repo: &Repository) -> Result<FinishMergeStateResult> {
+pub(crate) fn finish_merge_state(repo: &Repository) -> Result<FinishMergeStateResult> {
     let autostash_conflicts = crate::porcelain::stash::apply_merge_autostash(repo)?;
     let rerere = crate::rerere::finish_merge_rerere(repo)?;
     clear_merge_state(repo.git_dir())?;
@@ -1260,12 +1221,12 @@ pub fn finish_merge_state(repo: &Repository) -> Result<FinishMergeStateResult> {
 
 /// Read CHERRY_PICK_HEAD when it contains a valid 40-hex OID; `None` if missing, empty, or invalid
 /// (Git ignores malformed `CHERRY_PICK_HEAD` for the "commit $abbrev" line; sequencer still applies).
-pub fn read_cherry_pick_head(git_dir: &Path) -> Result<Option<ObjectId>> {
+pub(crate) fn read_cherry_pick_head(git_dir: &Path) -> Result<Option<ObjectId>> {
     read_oid_head_file_optional(&git_dir.join("CHERRY_PICK_HEAD"))
 }
 
 /// Read REVERT_HEAD when it contains a valid OID; `None` if missing, empty, or invalid.
-pub fn read_revert_head(git_dir: &Path) -> Result<Option<ObjectId>> {
+pub(crate) fn read_revert_head(git_dir: &Path) -> Result<Option<ObjectId>> {
     read_oid_head_file_optional(&git_dir.join("REVERT_HEAD"))
 }
 
@@ -1293,7 +1254,7 @@ fn read_oid_head_file_optional(path: &Path) -> Result<Option<ObjectId>> {
 ///
 /// Returns [`Error::Io`] when the file cannot be read and an object id parse error when it
 /// does not hold one.
-pub fn read_orig_head(git_dir: &Path) -> Result<Option<ObjectId>> {
+pub(crate) fn read_orig_head(git_dir: &Path) -> Result<Option<ObjectId>> {
     read_single_oid_file(&git_dir.join("ORIG_HEAD"))
 }
 
@@ -1306,7 +1267,7 @@ pub fn read_orig_head(git_dir: &Path) -> Result<Option<ObjectId>> {
 /// # Errors
 ///
 /// Propagates ref store read and resolution failures.
-pub fn read_orig_head_for_repository(repo: &Repository) -> Result<Option<ObjectId>> {
+pub(crate) fn read_orig_head_for_repository(repo: &Repository) -> Result<Option<ObjectId>> {
     repo.references().resolve_if_exists("ORIG_HEAD")
 }
 
@@ -1320,7 +1281,7 @@ pub fn read_orig_head_for_repository(repo: &Repository) -> Result<Option<ObjectI
 /// # Errors
 ///
 /// Propagates ref store write failures (for example a held lock).
-pub fn write_orig_head(repo: &Repository, oid: ObjectId) -> Result<()> {
+pub(crate) fn write_orig_head(repo: &Repository, oid: ObjectId) -> Result<()> {
     crate::refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "ORIG_HEAD", &oid)
 }
 

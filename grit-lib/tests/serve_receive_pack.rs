@@ -10,7 +10,6 @@ use std::sync::Mutex;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
     ProtocolVersion, ReceiveHook, ReceiveOutcome, ReceivePack, ReceivePolicy, RefCommand,
     RefUpdateRefusal, ServeError, ServeOptions, UnpackError,
@@ -176,7 +175,10 @@ fn pre_receive_hook_refusal_refuses_whole_push_and_keeps_objects_out() {
     assert_eq!(outcome.updates[0].error, refusal);
     assert_eq!(outcome.updates[1].error, refusal);
     assert!(report.contains("ng refs/heads/main frozen branches are read-only"));
-    assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .is_err());
     assert!(
         !open(&bare).odb().exists(&tip),
         "refused objects stay quarantined"
@@ -219,7 +221,13 @@ fn pre_receive_hook_sees_quarantined_objects_and_only_accepted_commands() {
     );
     let seen = recorder.0.into_inner().unwrap_or_else(|e| e.into_inner());
     assert_eq!(seen, vec![("refs/heads/main".to_owned(), true)]);
-    assert_eq!(resolve_ref(&bare, "refs/heads/main").expect("main"), tip);
+    assert_eq!(
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main"),
+        tip
+    );
     fsck(&bare);
 }
 
@@ -254,8 +262,17 @@ fn update_closure_refuses_one_ref_and_applies_the_rest() {
     );
     assert!(report.contains("ok refs/heads/main"));
     assert!(report.contains("ng refs/tags/v1 tags are managed by CI"));
-    assert_eq!(resolve_ref(&bare, "refs/heads/main").expect("main"), tip);
-    assert!(resolve_ref(&bare, "refs/tags/v1").is_err());
+    assert_eq!(
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main"),
+        tip
+    );
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/tags/v1")
+        .is_err());
     fsck(&bare);
 }
 
@@ -293,7 +310,10 @@ fn atomic_push_refuses_everything_when_the_update_hook_refuses_one() {
         outcome.updates[1].error,
         Some(RefUpdateRefusal::Policy("no".into()))
     );
-    assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .is_err());
 }
 
 #[test]
@@ -388,7 +408,10 @@ fn corrupt_pack_checksum_is_an_ingest_error_for_both_storage_paths() {
             "unpackLimit={unpack_limit}: {:?}",
             outcome.unpack_error
         );
-        assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+        assert!(grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .is_err());
         assert!(!has_quarantine_leftovers(&bare.join("objects")));
     }
 }
@@ -409,7 +432,10 @@ fn max_input_size_is_a_typed_unpack_error() {
         outcome.unpack_error,
         Some(UnpackError::TooLarge { limit: 64 })
     ));
-    assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .is_err());
 }
 
 /// Above `receive.unpackLimit` the pushed pack is installed as a pack with an
@@ -443,7 +469,13 @@ fn pushed_pack_is_stored_streamed_and_fsck_clean_on_both_paths() {
             "no spool files may reach objects/pack: {packs:?}"
         );
         assert!(!has_quarantine_leftovers(&objects));
-        assert_eq!(resolve_ref(&bare, "refs/heads/main").expect("main"), tip);
+        assert_eq!(
+            grit_test_support::refs::at(&bare)
+                .references()
+                .resolve("refs/heads/main")
+                .expect("main"),
+            tip
+        );
         fsck(&bare);
         assert_eq!(git(&bare, &["rev-list", "--count", "main"]).trim(), "40");
     }
@@ -591,7 +623,13 @@ fn large_blob_push_under_unpack_limit_materializes_loose() {
         "few-object push unpacks to loose, not pack"
     );
     fsck(&bare);
-    assert_eq!(resolve_ref(&bare, "refs/heads/main").expect("main"), tip);
+    assert_eq!(
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main"),
+        tip
+    );
 }
 
 /// A `--depth 1` clone of `src` with one new commit on top, as a CI checkout
@@ -742,7 +780,10 @@ fn receive_pack_mixed_create_and_update_falls_back_from_initial_batch() {
             bare.to_str().expect("utf8"),
         ],
     );
-    let old_main = resolve_ref(&bare, "refs/heads/main").expect("main");
+    let old_main = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("main");
     let repo = open(&bare);
     let commands: Vec<(Option<ObjectId>, Option<ObjectId>, &str)> = vec![
         (Some(old_main), Some(tip), "refs/heads/main"),
@@ -757,8 +798,20 @@ fn receive_pack_mixed_create_and_update_falls_back_from_initial_batch() {
         outcome.updates.iter().all(|u| u.error.is_none()),
         "{report}"
     );
-    assert_eq!(resolve_ref(&bare, "refs/heads/main").expect("main"), tip);
-    assert_eq!(resolve_ref(&bare, "refs/heads/extra/a").expect("a"), tip);
+    assert_eq!(
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main"),
+        tip
+    );
+    assert_eq!(
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/extra/a")
+            .expect("a"),
+        tip
+    );
     fsck(&bare);
 }
 
@@ -782,8 +835,17 @@ fn receive_pack_non_atomic_batch_conflict_still_applies_valid_refs() {
         outcome.updates[1].error.is_some(),
         "ancestor conflict must refuse nested ref: {report}"
     );
-    assert_eq!(resolve_ref(&bare, "refs/heads/ok").expect("ok"), tip);
-    assert!(resolve_ref(&bare, "refs/heads/ok/nested").is_err());
+    assert_eq!(
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/ok")
+            .expect("ok"),
+        tip
+    );
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/ok/nested")
+        .is_err());
     fsck(&bare);
 }
 
@@ -816,7 +878,13 @@ fn shallow_client_push_onto_full_history_is_applied() {
     assert!(outcome.unpack_error.is_none(), "{report}");
     assert_eq!(outcome.updates[0].error, None, "{report}");
     assert!(report.contains("ok refs/heads/t1"), "{report}");
-    assert_eq!(resolve_ref(&bare, "refs/heads/t1").expect("t1"), tip);
+    assert_eq!(
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/t1")
+            .expect("t1"),
+        tip
+    );
     assert!(
         !bare.join("shallow").exists(),
         "no shallow update was needed"
@@ -840,7 +908,10 @@ fn malformed_shallow_line_is_a_protocol_error() {
         matches!(result, Err(ServeError::Protocol { .. })),
         "{result:?}"
     );
-    assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .is_err());
 }
 
 /// Into an empty repository, a shallow client's history would make the server
@@ -867,7 +938,10 @@ fn shallow_push_that_needs_a_shallow_update_is_refused_by_default() {
         report.contains("ng refs/heads/t shallow update not allowed"),
         "{report}"
     );
-    assert!(resolve_ref(&bare, "refs/heads/t").is_err());
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/t")
+        .is_err());
     assert!(!bare.join("shallow").exists());
     assert!(!has_quarantine_leftovers(&bare.join("objects")));
 }
@@ -911,7 +985,13 @@ fn shallow_update_records_the_new_boundary_on_both_storage_paths() {
 
         assert!(outcome.unpack_error.is_none(), "{report}");
         assert_eq!(outcome.updates[0].error, None, "{report}");
-        assert_eq!(resolve_ref(&bare, "refs/heads/t").expect("t"), tip);
+        assert_eq!(
+            grit_test_support::refs::at(&bare)
+                .references()
+                .resolve("refs/heads/t")
+                .expect("t"),
+            tip
+        );
         assert_eq!(
             std::fs::read_to_string(bare.join("shallow")).expect("shallow file"),
             format!("{}\n", boundary.to_hex()),
@@ -986,7 +1066,10 @@ fn non_atomic_receive_pack_many_creates_one_reftable_table() {
     );
     for i in 0..32 {
         assert_eq!(
-            resolve_ref(&bare, &format!("refs/heads/b{i}")).ok(),
+            grit_test_support::refs::at(&bare)
+                .references()
+                .resolve(&format!("refs/heads/b{i}"))
+                .ok(),
             Some(tip)
         );
     }

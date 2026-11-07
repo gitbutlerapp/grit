@@ -1262,6 +1262,24 @@ impl Repository {
         crate::repo_handles::RepositoryReflogs::new(self)
     }
 
+    /// Paused merge, rebase, pick, revert and bisect state for this repository.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// use grit_lib::repo::{InitOptions, Repository};
+    /// let dir = tempfile::tempdir()?;
+    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+    /// assert!(repo.operation().in_progress().is_empty());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn operation(&self) -> crate::operation::Operations<'_> {
+        crate::operation::Operations::new(self)
+    }
+
     /// Bundle create, verify, list-heads, and unbundle for this repository.
     #[must_use]
     pub fn bundles(&self) -> crate::repo_handles::RepositoryBundles<'_> {

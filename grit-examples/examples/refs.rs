@@ -1,15 +1,16 @@
-// API docs: https://docs.rs/grit-lib/latest/grit_lib/refs/index.html
+// API docs: https://docs.rs/grit-lib/latest/grit_lib/refs/struct.References.html
 //
 // Network fetch paths reject malformed advertised ref names via
 // `grit_lib::refs::is_valid_fetch_advertised_ref` before refspec mapping.
-use grit_lib::refs::{list_refs, read_head};
-use std::path::Path;
+use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::repo::Repository;
 
 fn main() -> grit_lib::error::Result<()> {
-    let git_dir = Path::new(".git");
-    println!("HEAD = {:?}", read_head(git_dir)?);
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
+    let refs = repo.references();
+    println!("HEAD = {:?}", refs.symbolic("HEAD")?);
 
-    for (name, oid) in list_refs(git_dir, "refs/heads")? {
+    for (name, oid) in refs.list("refs/heads/")? {
         println!("{name} {oid}");
     }
     Ok(())

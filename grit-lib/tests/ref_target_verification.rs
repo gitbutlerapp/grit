@@ -12,14 +12,12 @@ use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::ref_storage::RefStorageFormat;
-use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefCaseOnlyRename, RefName,
     RefNameRef, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 use grit_lib::refs::{
-    commit_ref_update_on_store, update_branch_for_commit, update_branch_for_commit_on_store,
-    BranchCommitRefUpdate,
+    commit_ref_update_on_store, update_branch_for_commit_on_store, BranchCommitRefUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -309,7 +307,12 @@ fn log_only_updates_with_missing_reflog_objects_are_refused() {
 fn log_only_with_no_new_value_still_checks_explicit_reflog_objects() {
     each_format(|format, fx| {
         let git_dir = fx.repo.git_dir();
-        let log_len = || read_reflog(git_dir, "refs/heads/main").map_or(0, |e| e.len());
+        let log_len = || {
+            grit_test_support::refs::at(git_dir)
+                .references()
+                .reflog("refs/heads/main")
+                .map_or(0, |e| e.len())
+        };
         let before = log_len();
         let log_only = RefUpdate {
             name: name("refs/heads/main"),
@@ -506,13 +509,19 @@ fn references_update_refuses_missing_objects_and_non_commit_branches() {
 fn git_dir_writers_refuse_missing_objects() {
     each_format(|format, fx| {
         let git_dir = fx.repo.git_dir();
-        let err = grit_lib::refs::write_ref(git_dir, "refs/heads/w", &bogus())
-            .expect_err("write_ref to a missing object");
+        let err = grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(git_dir),
+            "refs/heads/w",
+            &bogus(),
+        )
+        .expect_err("write_ref to a missing object");
         assert!(
             matches!(&err, Error::Ref(RefError::Store(e)) if *e == missing("refs/heads/w", bogus())),
             "{format:?}: {err:?}"
         );
-        let err = grit_lib::refs::write_ref_cas(git_dir, "refs/heads/main", &fx.tree, fx.commit)
+        let err = grit_test_support::refs::at(git_dir)
+            .references()
+            .compare_and_swap("refs/heads/main", &fx.commit, &fx.tree)
             .expect_err("write_ref_cas to a tree");
         assert!(
             matches!(
@@ -521,11 +530,10 @@ fn git_dir_writers_refuse_missing_objects() {
             ),
             "{format:?}: {err:?}"
         );
-        let err = grit_lib::refs::commit_ref_store_batch(
-            git_dir,
-            &[put("refs/heads/x", fx.commit), put("refs/heads/y", bogus())],
-        )
-        .expect_err("batch with a missing object");
+        let err = grit_test_support::refs::at(git_dir)
+            .references()
+            .apply(&[put("refs/heads/x", fx.commit), put("refs/heads/y", bogus())])
+            .expect_err("batch with a missing object");
         assert!(
             matches!(&err, Error::Ref(RefError::Store(e)) if *e == missing("refs/heads/y", bogus())),
             "{format:?}: {err:?}"
@@ -535,8 +543,15 @@ fn git_dir_writers_refuse_missing_objects() {
         }
         assert_eq!(fx.raw("refs/heads/main"), Some(RawRef::Direct(fx.commit)));
 
-        grit_lib::refs::write_ref(git_dir, "refs/tags/tree", &fx.tree).expect("tag at a tree");
-        grit_lib::refs::commit_ref_store_batch(git_dir, &[put("refs/heads/x", fx.commit)])
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(git_dir),
+            "refs/tags/tree",
+            &fx.tree,
+        )
+        .expect("tag at a tree");
+        grit_test_support::refs::at(git_dir)
+            .references()
+            .apply(&[put("refs/heads/x", fx.commit)])
             .expect("valid batch");
         assert_eq!(fx.raw("refs/heads/x"), Some(RawRef::Direct(fx.commit)));
     });
@@ -655,8 +670,11 @@ fn branch_commit_writer_refuses_missing_and_non_commit_tips() {
             ),
             "{format:?}: {err:?}"
         );
-        let err = update_branch_for_commit(fx.repo.git_dir(), &branch_commit(fx.commit, bogus()))
-            .expect_err("path-based writer, missing tip");
+        let err = grit_lib::test_support::refs::update_branch_for_commit(
+            fx.repo.git_dir(),
+            &branch_commit(fx.commit, bogus()),
+        )
+        .expect_err("path-based writer, missing tip");
         assert!(
             matches!(&err, Error::Ref(RefError::Store(e)) if *e == missing("refs/heads/main", bogus())),
             "{format:?}: {err:?}"

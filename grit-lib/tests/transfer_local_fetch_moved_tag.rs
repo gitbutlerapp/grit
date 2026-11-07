@@ -4,7 +4,6 @@ use grit_test_support::rev_parse;
 use std::process::Command;
 
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
@@ -49,7 +48,10 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     )
     .expect("initial fetch");
 
-    let tag_before = resolve_ref(&local_git, "refs/tags/newtag").expect("tag after first fetch");
+    let tag_before = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/tags/newtag")
+        .expect("tag after first fetch");
     assert_eq!(tag_before, rev_parse(&remote, "refs/tags/newtag"));
 
     std::fs::write(remote.join("b.txt"), b"b\n").unwrap();
@@ -86,7 +88,10 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     );
 
     assert_eq!(
-        resolve_ref(&local_git, "refs/tags/newtag").expect("local tag unchanged"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/newtag")
+            .expect("local tag unchanged"),
         tag_before,
         "local tag must not move without --tags --force"
     );
@@ -157,7 +162,10 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     )
     .expect("seed");
 
-    let tag_before = resolve_ref(&local_git, "refs/tags/newtag").unwrap();
+    let tag_before = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/tags/newtag")
+        .unwrap();
     std::fs::write(remote.join("b.txt"), b"b\n").unwrap();
     git(&remote, &["add", "b.txt"]);
     git(&remote, &["commit", "-q", "-m", "b"]);
@@ -189,7 +197,10 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
         .expect("moved tag reported under All");
     assert_eq!(tag_update.mode, UpdateMode::TagUpdateRejected);
     assert_eq!(
-        resolve_ref(&local_git, "refs/tags/newtag").unwrap(),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/newtag")
+            .unwrap(),
         tag_before
     );
 
@@ -212,7 +223,10 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     .expect("fetch --tags --force");
     assert!(!applied.has_rejections());
     assert_eq!(
-        resolve_ref(&local_git, "refs/tags/newtag").unwrap(),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/newtag")
+            .unwrap(),
         tag_after
     );
 

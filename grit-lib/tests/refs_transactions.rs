@@ -14,11 +14,9 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::gc::{update_refs, RefTransactionItem};
 use grit_lib::refs::reftable::{ReftableReader, ReftableStack};
 use grit_lib::refs::store::RefNameRef;
-use grit_lib::refs::{
-    delete_ref, delete_ref_cas, lock_path_for_ref, resolve_ref, update_branch_for_commit,
-    write_ref, BranchCommitRefUpdate,
-};
+use grit_lib::refs::{lock_path_for_ref, BranchCommitRefUpdate};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::refs::update_branch_for_commit;
 
 use support::{
     assert_fsck_when_git_interop, duplicate_repo, each_backend, git, git_empty_commit_oid,
@@ -33,8 +31,18 @@ fn t1404_failed_cas_changes_nothing() {
         let git_dir = repo.git_dir();
         let (c1, c2) = two_commit_oids(&repo);
 
-        write_ref(&git_dir, "refs/heads/to-update", &c1).expect("seed to-update");
-        write_ref(&git_dir, "refs/heads/to-delete", &c1).expect("seed to-delete");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/to-update",
+            &c1,
+        )
+        .expect("seed to-update");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/to-delete",
+            &c1,
+        )
+        .expect("seed to-delete");
 
         let refs_before = ref_store_bytes_snapshot(&git_dir);
         let logs_before = reflog_bytes_snapshot(&git_dir);
@@ -230,7 +238,12 @@ fn ref_lock_present_fails_and_preserves_ref() {
         }
         let git_dir = repo.git_dir();
         let oid = git_empty_commit_oid(repo.worktree());
-        write_ref(&git_dir, "refs/heads/locked", &oid).expect("seed ref");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/locked",
+            &oid,
+        )
+        .expect("seed ref");
 
         let ref_path = git_dir.join("refs/heads/locked");
         let lock = lock_path_for_ref(&ref_path);
@@ -245,15 +258,46 @@ fn ref_lock_present_fails_and_preserves_ref() {
             .parse()
             .expect("oid");
 
-        assert!(write_ref(&git_dir, "refs/heads/locked", &new_oid).is_err());
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/locked").unwrap(), oid);
-        assert!(delete_ref(&git_dir, "refs/heads/locked").is_err());
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/locked").unwrap(), oid);
+        assert!(grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/locked",
+            &new_oid
+        )
+        .is_err());
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/locked")
+                .unwrap(),
+            oid
+        );
+        assert!(grit_test_support::refs::at(&git_dir)
+            .references()
+            .delete("refs/heads/locked")
+            .is_err());
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/locked")
+                .unwrap(),
+            oid
+        );
 
         fs::remove_file(&lock).expect("drop external lock");
-        write_ref(&git_dir, "refs/heads/locked", &new_oid).expect("write after lock cleared");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/locked",
+            &new_oid,
+        )
+        .expect("write after lock cleared");
         assert!(!lock.exists(), "lock file must not remain after success");
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/locked").unwrap(), new_oid);
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/locked")
+                .unwrap(),
+            new_oid
+        );
     });
 }
 
@@ -265,7 +309,12 @@ fn delete_ref_cas_failure_cleans_ref_lock_and_preserves_packed_ref() {
         }
         let git_dir = repo.git_dir();
         let oid = git_empty_commit_oid(repo.worktree());
-        write_ref(&git_dir, "refs/heads/packed-cas", &oid).expect("seed ref");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/packed-cas",
+            &oid,
+        )
+        .expect("seed ref");
         git(repo.worktree(), &["pack-refs", "--all"]);
 
         let ref_path = git_dir.join("refs/heads/packed-cas");
@@ -274,11 +323,17 @@ fn delete_ref_cas_failure_cleans_ref_lock_and_preserves_packed_ref() {
         fs::write(&packed_lock, b"held").expect("block packed-refs rewrite");
 
         assert!(
-            delete_ref_cas(&git_dir, "refs/heads/packed-cas", oid).is_err(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .compare_and_delete("refs/heads/packed-cas", &oid)
+                .is_err(),
             "delete must fail when packed-refs is locked"
         );
         assert_eq!(
-            resolve_ref(&git_dir, "refs/heads/packed-cas").unwrap(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/packed-cas")
+                .unwrap(),
             oid,
             "packed ref must remain"
         );
@@ -331,7 +386,12 @@ fn concurrent_cas_single_winner() {
     each_backend(|_backend, repo| {
         let git_dir = repo.git_dir();
         let (c1, c2) = two_commit_oids(&repo);
-        write_ref(&git_dir, "refs/heads/cas-race", &c1).expect("seed");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/cas-race",
+            &c1,
+        )
+        .expect("seed");
 
         let item = RefTransactionItem {
             name: "refs/heads/cas-race".to_owned(),
@@ -339,7 +399,13 @@ fn concurrent_cas_single_winner() {
             expected_old: Some(c1),
         };
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
-            assert_eq!(resolve_ref(gd, "refs/heads/cas-race").unwrap(), c2);
+            assert_eq!(
+                grit_test_support::refs::at(gd)
+                    .references()
+                    .resolve("refs/heads/cas-race")
+                    .unwrap(),
+                c2
+            );
         });
         assert_fsck_when_git_interop(&repo);
     });
@@ -353,7 +419,12 @@ fn concurrent_cas_delete_single_winner() {
         }
         let git_dir = repo.git_dir();
         let (c1, _) = two_commit_oids(&repo);
-        write_ref(&git_dir, "refs/heads/cas-del", &c1).expect("seed");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/cas-del",
+            &c1,
+        )
+        .expect("seed");
 
         let item = RefTransactionItem {
             name: "refs/heads/cas-del".to_owned(),
@@ -361,7 +432,10 @@ fn concurrent_cas_delete_single_winner() {
             expected_old: Some(c1),
         };
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
-            assert!(resolve_ref(gd, "refs/heads/cas-del").is_err());
+            assert!(grit_test_support::refs::at(gd)
+                .references()
+                .resolve("refs/heads/cas-del")
+                .is_err());
         });
         assert_fsck_when_git_interop(&repo);
     });
@@ -375,7 +449,12 @@ fn concurrent_cas_delete_single_winner_packed_only() {
         }
         let git_dir = repo.git_dir();
         let (c1, _) = two_commit_oids(&repo);
-        write_ref(&git_dir, "refs/heads/cas-del-packed", &c1).expect("seed");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/cas-del-packed",
+            &c1,
+        )
+        .expect("seed");
         git(repo.worktree(), &["pack-refs", "--all"]);
         assert!(
             !git_dir.join("refs/heads/cas-del-packed").is_file(),
@@ -388,7 +467,10 @@ fn concurrent_cas_delete_single_winner_packed_only() {
             expected_old: Some(c1),
         };
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
-            assert!(resolve_ref(gd, "refs/heads/cas-del-packed").is_err());
+            assert!(grit_test_support::refs::at(gd)
+                .references()
+                .resolve("refs/heads/cas-del-packed")
+                .is_err());
         });
         assert_fsck_when_git_interop(&repo);
     });
@@ -407,7 +489,12 @@ fn concurrent_reftable_cas_single_winner() {
     let git_dir = repo.git_dir().to_path_buf();
     let c1 = support::stored_commit(&git_dir, 1);
     let c2 = support::stored_commit(&git_dir, 2);
-    write_ref(&git_dir, "refs/heads/cas-rt", &c1).expect("seed");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/cas-rt",
+        &c1,
+    )
+    .expect("seed");
 
     let item = RefTransactionItem {
         name: "refs/heads/cas-rt".to_owned(),
@@ -415,7 +502,13 @@ fn concurrent_reftable_cas_single_winner() {
         expected_old: Some(c1),
     };
     concurrent_cas_winners(&git_dir, item, 1, |gd| {
-        assert_eq!(resolve_ref(gd, "refs/heads/cas-rt").unwrap(), c2);
+        assert_eq!(
+            grit_test_support::refs::at(gd)
+                .references()
+                .resolve("refs/heads/cas-rt")
+                .unwrap(),
+            c2
+        );
     });
 }
 
@@ -450,7 +543,10 @@ fn duplicate_ref_updates_match_git_update_ref_stdin() {
             },
         ];
         assert!(update_refs(&grit_repo.git_dir(), &items).is_err());
-        assert!(resolve_ref(&grit_repo.git_dir(), "refs/heads/dup").is_err());
+        assert!(grit_test_support::refs::at(grit_repo.git_dir())
+            .references()
+            .resolve("refs/heads/dup")
+            .is_err());
     });
 }
 
@@ -462,7 +558,12 @@ fn update_branch_for_commit_writes_head_and_branch_reflogs() {
         }
         let git_dir = repo.git_dir();
         let (c1, c2) = two_commit_oids(&repo);
-        write_ref(&git_dir, "refs/heads/main", &c1).expect("branch");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/main",
+            &c1,
+        )
+        .expect("branch");
         fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("symref HEAD");
 
         update_branch_for_commit(
@@ -493,7 +594,13 @@ fn update_branch_for_commit_writes_head_and_branch_reflogs() {
             branch_log.contains("commit: refs transaction test"),
             "branch reflog: {branch_log:?}"
         );
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/main").unwrap(), c2);
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/main")
+                .unwrap(),
+            c2
+        );
     });
 }
 
@@ -506,7 +613,12 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
         let (c1, c2) = two_commit_oids(&repo);
-        write_ref(&git_dir, "refs/heads/main", &c2).expect("branch");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/main",
+            &c2,
+        )
+        .expect("branch");
         fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("symref HEAD");
         let refs_before = ref_store_bytes_snapshot(&git_dir);
 
@@ -538,7 +650,13 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
             assert_eq!(actual, Some(RawRef::Direct(c2)));
         }
 
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/main").unwrap(), c2);
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/main")
+                .unwrap(),
+            c2
+        );
         assert_eq!(ref_store_bytes_snapshot(&git_dir), refs_before);
     });
 
@@ -612,7 +730,6 @@ fn reftable_transaction_one_table_single_update_index() {
 
 #[test]
 fn non_atomic_batch_create_one_reftable_table() {
-    use grit_lib::refs::commit_ref_updates_non_atomic;
     use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 
     each_backend(|backend, repo| {
@@ -631,10 +748,16 @@ fn non_atomic_batch_create_one_reftable_table() {
             })
             .collect();
         let (_, count_before) = reftable_tables_snapshot(&git_dir);
-        commit_ref_updates_non_atomic(&git_dir, updates).expect("non-atomic batch");
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .apply_each(updates)
+            .expect("non-atomic batch");
         for i in 0..40 {
             assert_eq!(
-                resolve_ref(&git_dir, &format!("refs/heads/batch-{i}")).ok(),
+                grit_test_support::refs::at(&git_dir)
+                    .references()
+                    .resolve(&format!("refs/heads/batch-{i}"))
+                    .ok(),
                 Some(tip)
             );
         }
@@ -650,7 +773,6 @@ fn non_atomic_batch_create_one_reftable_table() {
 
 #[test]
 fn non_atomic_allow_failure_updates_siblings_in_one_table() {
-    use grit_lib::refs::commit_ref_updates_non_atomic;
     use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 
     each_backend(|backend, repo| {
@@ -677,14 +799,26 @@ fn non_atomic_allow_failure_updates_siblings_in_one_table() {
         } else {
             0
         };
-        let outcomes = commit_ref_updates_non_atomic(&git_dir, updates).expect("batch");
+        let outcomes = grit_test_support::refs::at(&git_dir)
+            .references()
+            .apply_each(updates)
+            .expect("batch");
         assert!(outcomes[0].result.is_ok());
         assert!(matches!(
             outcomes[1].result,
             Err(grit_lib::refs::store::RefStoreError::NameUnavailable { .. })
         ));
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/parent").ok(), Some(tip));
-        assert!(resolve_ref(&git_dir, "refs/heads/parent/child").is_err());
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/parent")
+                .ok(),
+            Some(tip)
+        );
+        assert!(grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/parent/child")
+            .is_err());
         if backend == Backend::Reftable {
             let count_after = reftable_tables_snapshot(&git_dir).1;
             assert_eq!(count_after, count_before + 1);
@@ -695,7 +829,6 @@ fn non_atomic_allow_failure_updates_siblings_in_one_table() {
 
 #[test]
 fn non_atomic_delete_then_create_two_reftable_tables() {
-    use grit_lib::refs::commit_ref_updates_non_atomic;
     use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 
     each_backend(|backend, repo| {
@@ -704,7 +837,12 @@ fn non_atomic_delete_then_create_two_reftable_tables() {
         }
         let git_dir = repo.git_dir();
         let (_, tip) = two_commit_oids(&repo);
-        grit_lib::refs::write_ref(&git_dir, "refs/heads/to-drop", &tip).expect("seed delete");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/to-drop",
+            &tip,
+        )
+        .expect("seed delete");
         let updates = vec![
             RefUpdate {
                 name: "refs/heads/to-drop".to_owned(),
@@ -722,9 +860,21 @@ fn non_atomic_delete_then_create_two_reftable_tables() {
             },
         ];
         let (_, count_before) = reftable_tables_snapshot(&git_dir);
-        commit_ref_updates_non_atomic(&git_dir, updates).expect("delete then create");
-        assert!(resolve_ref(&git_dir, "refs/heads/to-drop").is_err());
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/fresh").ok(), Some(tip));
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .apply_each(updates)
+            .expect("delete then create");
+        assert!(grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/to-drop")
+            .is_err());
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/fresh")
+                .ok(),
+            Some(tip)
+        );
         let (_, count_after) = reftable_tables_snapshot(&git_dir);
         assert_eq!(
             count_after,

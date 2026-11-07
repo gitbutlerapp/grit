@@ -11,7 +11,6 @@ use grit_lib::diff::{hunk_ids, DiffSide};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, RebaseOntoOptions,
@@ -104,8 +103,11 @@ fn undo_after_rebase_restores_stacked_branches() {
     );
     let onto = commit_file(wt, "base.txt", "base\n", "onto");
     let grit = open_grit(wt);
-    let main_before = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
-    let stacked_before = resolve_ref(grit.git_dir(), "refs/heads/stacked").expect("stacked");
+    let main_before = grit.references().resolve("refs/heads/main").expect("main");
+    let stacked_before = grit
+        .references()
+        .resolve("refs/heads/stacked")
+        .expect("stacked");
     let plan = grit
         .history()
         .rebase_onto(
@@ -131,7 +133,7 @@ fn undo_after_rebase_restores_stacked_branches() {
         )
         .expect("apply rebase");
     assert_ne!(
-        resolve_ref(grit.git_dir(), "refs/heads/main").expect("main"),
+        grit.references().resolve("refs/heads/main").expect("main"),
         main_before
     );
 
@@ -143,11 +145,13 @@ fn undo_after_rebase_restores_stacked_branches() {
         )
         .expect("undo");
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/main").expect("main"),
+        grit.references().resolve("refs/heads/main").expect("main"),
         main_before
     );
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/stacked").expect("stacked"),
+        grit.references()
+            .resolve("refs/heads/stacked")
+            .expect("stacked"),
         stacked_before
     );
     git_fsck_strict(wt);
@@ -187,7 +191,7 @@ fn undo_refuses_when_ref_moved() {
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let grit = open_grit(wt);
     drop_and_apply(&grit, oids["b"]);
-    write_ref(grit.git_dir(), "refs/heads/main", &oids["a"]).expect("move ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &oids["a"]).expect("move ref");
     let err = grit
         .history()
         .undo_last(

@@ -138,7 +138,7 @@ fn commit_staged_without_index_stat_refresh(
     repo: &Repository,
     message: &str,
 ) -> grit_lib::objects::ObjectId {
-    let head = grit_lib::state::resolve_head(repo.git_dir()).expect("head");
+    let head = repo.references().head().expect("head");
     let (refname, _short, parent) = match head {
         grit_lib::state::HeadState::Branch {
             refname,

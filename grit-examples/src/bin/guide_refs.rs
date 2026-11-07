@@ -8,11 +8,12 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::list_branches;
 use grit_lib::porcelain::tag::list_tags;
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefSort, SortKey};
-use grit_lib::refs::reflog::read_reflog;
+use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::RefName;
 use grit_lib::refs::{self, Ref};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head_for_repository;
+use grit_lib::repo_handles::ReflogCreate;
+
 use std::path::{Path, PathBuf};
 
 const DEMO_BRANCH: &str = "refs/heads/library-guide-demo";
@@ -44,7 +45,7 @@ fn main() -> Result<()> {
     let repo = open_repo(&root)?;
     let git_dir = repo.git_dir();
 
-    let head = resolve_head_for_repository(&repo)?;
+    let head = repo.references().head()?;
     match &head {
         grit_lib::state::HeadState::Branch { refname, oid, .. } => {
             println!("head_symbolic={refname}");
@@ -94,20 +95,21 @@ fn main() -> Result<()> {
     let zero = ObjectId::zero();
     let old_oid = old.as_ref().unwrap_or(&zero);
     let identity = "Library Guide <guide@grit-scm.com> 1735689600 +0000";
-    refs::append_reflog(
-        git_dir,
-        DEMO_BRANCH,
-        old_oid,
-        &target,
-        identity,
-        "library guide refs example",
-        true,
+    repo.reflogs().append(
+        &demo,
+        &ReflogEntry {
+            old_oid: *old_oid,
+            new_oid: target,
+            identity: identity.to_owned(),
+            message: "library guide refs example".to_owned(),
+        },
+        ReflogCreate::Always,
     )?;
 
     println!("demo_ref={DEMO_BRANCH}");
     println!("demo_oid={}", target.to_hex());
 
-    let entries = read_reflog(git_dir, DEMO_BRANCH)?;
+    let entries = repo.references().reflog(&demo)?;
     if let Some(last) = entries.last() {
         println!("demo_reflog_new={}", last.new_oid.to_hex());
         println!("demo_reflog_message={}", last.message);

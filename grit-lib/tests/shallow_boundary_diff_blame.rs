@@ -7,7 +7,6 @@ use grit_lib::error::Error;
 use grit_lib::error::RefError;
 use grit_lib::error::RevisionError;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::git;
@@ -66,7 +65,7 @@ fn shallow_boundary_commit_diff_is_against_empty_tree() {
     build_linear_bare(&bare);
     let clone_dir = dir.path().join("shallow");
     let repo = grit_shallow_clone(&bare, &clone_dir, 1);
-    let tip = resolve_ref(repo.git_dir(), "HEAD").unwrap();
+    let tip = repo.references().resolve("HEAD").unwrap();
     assert!(repo.git_dir().join("shallow").exists());
 
     let config = repo.config().snapshot().unwrap().clone();
@@ -136,7 +135,7 @@ fn depth_two_child_still_diffs_against_parent() {
     build_linear_bare(&bare);
     let clone_dir = dir.path().join("shallow2");
     let repo = grit_shallow_clone(&bare, &clone_dir, 2);
-    let tip = resolve_ref(repo.git_dir(), "HEAD").unwrap();
+    let tip = repo.references().resolve("HEAD").unwrap();
     let parent = repo
         .revwalk()
         .resolve("HEAD~1", &grit_lib::revwalk::ResolveOptions::default())

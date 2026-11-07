@@ -46,7 +46,7 @@ fn ref_exists(repo: &Repository, name: &str) -> Result<bool> {
 }
 
 /// Follow symbolic refs from `start` to the terminal ref name Git uses for DWIM output.
-pub fn peel_symref_to_terminal_ref(repo: &Repository, start: &str) -> Result<String> {
+pub(crate) fn peel_symref_to_terminal_ref(repo: &Repository, start: &str) -> Result<String> {
     let refname_opts = RefFormatOptions::default();
     let mut name = start.to_owned();
     for _ in 0..SYMREF_MAXDEPTH {
@@ -75,7 +75,7 @@ fn symref_target_resolves(repo: &Repository, start: &str) -> Result<bool> {
 
 /// Read `core.warnAmbiguousRefs` (default **true** / strict shortening).
 #[must_use]
-pub fn warn_ambiguous_refs_from_config(repo: &Repository) -> bool {
+pub(crate) fn warn_ambiguous_refs_from_config(repo: &Repository) -> bool {
     let Ok(config) = repo.config().snapshot() else {
         return true;
     };
@@ -89,7 +89,10 @@ pub fn warn_ambiguous_refs_from_config(repo: &Repository) -> bool {
 /// # Errors
 ///
 /// Propagates ref-store read failures.
-pub fn expand_ref_dwim_full_name(repo: &Repository, spec: &str) -> Result<(usize, Option<String>)> {
+pub(crate) fn expand_ref_dwim_full_name(
+    repo: &Repository,
+    spec: &str,
+) -> Result<(usize, Option<String>)> {
     let warn = warn_ambiguous_refs_from_config(repo);
     let mut count = 0usize;
     let mut first = None;
@@ -129,7 +132,11 @@ pub fn expand_ref_dwim_full_name(repo: &Repository, spec: &str) -> Result<(usize
 /// # Errors
 ///
 /// Propagates config and ref-store errors from existence checks.
-pub fn shorten_unambiguous(repo: &Repository, full_ref: &str, strict: bool) -> Result<String> {
+pub(crate) fn shorten_unambiguous(
+    repo: &Repository,
+    full_ref: &str,
+    strict: bool,
+) -> Result<String> {
     // Rule 0 always matches; start from the most specific rules.
     for i in (1..NUM_REV_PARSE_RULES).rev() {
         let Some(short) = match_parse_rule(full_ref, REV_PARSE_RULES[i]) else {

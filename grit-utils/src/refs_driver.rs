@@ -8,8 +8,8 @@ use anyhow::{bail, Context, Result};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::gc::{update_refs, RefTransactionItem};
-use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
-use grit_lib::refs::{list_refs_for_repository, list_refs_glob_for_repository};
+use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryOptions};
+
 use grit_lib::repo::Repository;
 
 use crate::odb_driver::open_repo;
@@ -22,9 +22,23 @@ use crate::odb_driver::open_repo;
 pub fn for_each_ref(repo: &Repository, pattern: Option<&str>) -> Result<()> {
     let pattern = pattern.unwrap_or("");
     let entries = if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-        list_refs_glob_for_repository(repo, pattern).context("list_refs_glob")?
+        repo.references()
+            .list_glob(pattern)
+            .map(|refs| {
+                refs.into_iter()
+                    .map(|(n, o)| (String::from(n), o))
+                    .collect::<Vec<_>>()
+            })
+            .context("list_refs_glob")?
     } else {
-        list_refs_for_repository(repo, pattern).context("list_refs")?
+        repo.references()
+            .list(pattern)
+            .map(|refs| {
+                refs.into_iter()
+                    .map(|(n, o)| (String::from(n), o))
+                    .collect::<Vec<_>>()
+            })
+            .context("list_refs")?
     };
     let mut stdout = io::stdout().lock();
     let mut kind_by_oid: HashMap<ObjectId, &str> = HashMap::new();
@@ -146,7 +160,10 @@ pub fn open_repo_for_refs(path: &std::path::Path) -> Result<Repository> {
 
 /// List refs matching [`RefQuery`] (for benchmarks; stdout is ref names only).
 pub fn ref_query(repo: &Repository, query: &RefQuery) -> Result<()> {
-    let rows = query_refs(repo, query, &RefQueryOptions::default()).context("query_refs")?;
+    let rows = repo
+        .references()
+        .query(query, &RefQueryOptions::default())
+        .context("query_refs")?;
     let mut stdout = io::stdout().lock();
     for row in rows {
         writeln!(stdout, "{}", row.full_name)?;

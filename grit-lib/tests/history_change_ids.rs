@@ -16,7 +16,6 @@ use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, Placement, RebaseOntoOptions, RefScope,
@@ -145,7 +144,7 @@ fn grit_linear(wt: &Path, grit: &Repository, messages: &[&str], ids: &[&str]) ->
         oids.push(oid);
     }
     let tip = *oids.last().expect("tip");
-    write_ref(grit.git_dir(), "refs/heads/main", &tip).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &tip).expect("ref");
     git(wt, &["reset", "--hard", &tip.to_hex()]);
     oids
 }
@@ -235,7 +234,7 @@ fn history_change_ids_survive_every_rewrite() {
         Some("vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"),
         &[],
     );
-    write_ref(grit.git_dir(), "refs/heads/main", &f2).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &f2).expect("ref");
     git(wt, &["reset", "--hard", &f2.to_hex()]);
     std::fs::write(wt.join("fix.txt"), b"base\nextra\n").expect("write");
     git(wt, &["add", "fix.txt"]);
@@ -287,7 +286,7 @@ fn history_change_ids_survive_every_rewrite() {
         Some("tttttttttttttttttttttttttttttttt"),
         &[],
     );
-    write_ref(grit.git_dir(), "refs/heads/main", &tip).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &tip).expect("ref");
     git(wt, &["reset", "--hard", &tip.to_hex()]);
     std::fs::write(wt.join("absorb.txt"), b"one\ntwo\nthree\n").expect("write");
     git(wt, &["add", "absorb.txt"]);
@@ -310,7 +309,7 @@ fn history_change_ids_survive_every_rewrite() {
             &CancelToken::never(),
         )
         .expect("apply absorb");
-    let main = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
+    let main = grit.references().resolve("refs/heads/main").expect("main");
     let parent = parse_commit(&grit.odb().read(&main).expect("read").data)
         .expect("parse")
         .parents[0];
@@ -355,7 +354,7 @@ fn history_change_ids_survive_every_rewrite() {
         .drop_commit(d2, &rewrite_opts(5))
         .expect("drop");
     apply_plan(&grit, &plan);
-    let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("tip");
+    let tip = grit.references().resolve("refs/heads/main").expect("tip");
     let replayed = parse_commit(&grit.odb().read(&tip).expect("read").data).expect("parse");
     assert_change_id_on_oid(wt, &replayed.parents[0], "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzt");
 
@@ -399,7 +398,7 @@ fn history_change_ids_survive_every_rewrite() {
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&tagged))
         .expect("tag head");
-    write_ref(grit.git_dir(), "refs/heads/main", &head).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &head).expect("ref");
     git(wt, &["reset", "--hard", &head.to_hex()]);
     let grit_split = open_grit_with_policy(wt, true, Some(Arc::new(FixedGenerator([0xab; 16]))));
     let plan = grit_split
@@ -447,7 +446,7 @@ fn history_change_ids_survive_every_rewrite() {
         Some("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzn"),
         &[],
     );
-    write_ref(grit.git_dir(), "refs/heads/main", &r3).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &r3).expect("ref");
     git(wt, &["reset", "--hard", &r3.to_hex()]);
     let onto = grit_commit_with_id(
         &grit,
@@ -457,7 +456,7 @@ fn history_change_ids_survive_every_rewrite() {
         Some("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzm"),
         &[],
     );
-    write_ref(grit.git_dir(), "refs/heads/onto", &onto).expect("onto ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/onto", &onto).expect("onto ref");
     let plan = grit
         .history()
         .rebase_onto(
@@ -510,7 +509,7 @@ fn rewrite_keeps_legacy_and_unknown_headers() {
 gitbutler-change-id legacy-should-stay\n\
 x-custom custom-value\n";
     let old = grit_commit_with_id(&grit, tree, &[], "hdr\n", None, extra);
-    write_ref(grit.git_dir(), "refs/heads/main", &old).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &old).expect("ref");
     git(wt, &["reset", "--hard", &old.to_hex()]);
     let plan = grit
         .history()
@@ -545,7 +544,7 @@ fn rewrite_strips_signature_but_keeps_change_id() {
         b"gpgsig -----BEGIN SSH SIGNATURE-----\n sig\n -----END SSH SIGNATURE-----\n",
     );
     let old = grit_commit_with_id(&grit, tree, &[], "signed\n", None, &extra);
-    write_ref(grit.git_dir(), "refs/heads/main", &old).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &old).expect("ref");
     git(wt, &["reset", "--hard", &old.to_hex()]);
     let plan = grit
         .history()
@@ -615,7 +614,7 @@ fn fixup_hunks_preserves_change_id() {
         Some("qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"),
         &[],
     );
-    write_ref(grit.git_dir(), "refs/heads/main", &pick2).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &pick2).expect("ref");
     git(wt, &["reset", "--hard", &pick2.to_hex()]);
     std::fs::write(wt.join("pick.txt"), b"base\nextra\n").expect("write");
     let files = unstaged_file_diffs(&grit, &[]).expect("diff");

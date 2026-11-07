@@ -206,19 +206,47 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
 
     let default_branch = "main";
     let tracking = format!("refs/remotes/origin/{default_branch}");
-    let oid_hex = grit_lib::refs::resolve_ref(&clone_git, &tracking)
+    let oid_hex = grit_test_support::refs::at(&clone_git)
+        .references()
+        .resolve(&tracking)
         .expect("main tracking ref")
         .to_hex();
     let branch_ref = format!("refs/heads/{default_branch}");
     let oid = grit_lib::objects::ObjectId::from_hex(&oid_hex).unwrap();
-    grit_lib::refs::write_ref(&clone_git, &branch_ref, &oid).expect("local branch");
+    grit_test_support::refs::set_ref(&grit_test_support::refs::at(&clone_git), &branch_ref, &oid)
+        .expect("local branch");
     let zero = grit_lib::objects::ObjectId::zero();
     let identity = "T <t@e.com> 1 +0000";
     let msg = "clone: from file://fixture";
-    grit_lib::refs::append_reflog(&clone_git, &branch_ref, &zero, &oid, identity, msg, false)
+    grit_test_support::refs::at(&clone_git)
+        .reflogs()
+        .append(
+            &branch_ref,
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: zero,
+                new_oid: oid,
+                identity: (identity).to_string(),
+                message: (msg).to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::IfAllowed,
+        )
         .expect("branch reflog");
-    grit_lib::refs::write_symbolic_ref(&clone_git, "HEAD", &branch_ref).expect("HEAD");
-    grit_lib::refs::append_reflog(&clone_git, "HEAD", &zero, &oid, identity, msg, false)
+    grit_test_support::refs::at(&clone_git)
+        .references()
+        .update_symbolic("HEAD", &branch_ref)
+        .expect("HEAD");
+    grit_test_support::refs::at(&clone_git)
+        .reflogs()
+        .append(
+            "HEAD",
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: zero,
+                new_oid: oid,
+                identity: (identity).to_string(),
+                message: (msg).to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::IfAllowed,
+        )
         .expect("HEAD reflog");
 
     let count = git_out(&clone.path(), &["count-objects", "-v"]).expect("count-objects");

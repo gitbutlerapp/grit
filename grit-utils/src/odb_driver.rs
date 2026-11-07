@@ -392,8 +392,8 @@ pub fn rev_list_count_head(repo: &Repository) -> Result<()> {
 }
 
 fn blame_head_start(repo: &Repository) -> Result<grit_lib::objects::ObjectId> {
-    use grit_lib::state::{resolve_head, HeadState};
-    match resolve_head(repo.git_dir())? {
+    use grit_lib::state::HeadState;
+    match repo.references().head()? {
         HeadState::Detached { oid } => Ok(oid),
         HeadState::Branch { oid: Some(oid), .. } => Ok(oid),
         HeadState::Branch { oid: None, .. } | HeadState::Invalid => {
@@ -633,7 +633,9 @@ pub fn checkout_branch_force(repo: &Repository, branch: &str) -> Result<()> {
     use grit_lib::objects::parse_commit;
     use grit_lib::porcelain::checkout::checkout_between_trees;
     let oid = if branch.eq_ignore_ascii_case("HEAD") {
-        *grit_lib::state::resolve_head(repo.git_dir())?
+        *repo
+            .references()
+            .head()?
             .oid()
             .context("HEAD does not resolve to a commit")?
     } else {
@@ -684,9 +686,12 @@ pub fn index_pack_records(
 pub fn pack_build_all_stdout(repo: &Repository, delta_threads: usize) -> Result<()> {
     use grit_lib::objects::hash::Parallelism;
     use grit_lib::objects::pack_objects::{PackBuildOptions, PackObjects, PackObjectsOptions};
-    use grit_lib::refs::list_refs_for_repository;
 
-    let refs = list_refs_for_repository(repo, "")?;
+    let refs = repo.references().list("").map(|refs| {
+        refs.into_iter()
+            .map(|(n, o)| (String::from(n), o))
+            .collect::<Vec<_>>()
+    })?;
     let wants: Vec<_> = refs.into_iter().map(|(_, oid)| oid).collect();
     let workers = if delta_threads == 0 {
         Parallelism::resolve(None).threads().get()

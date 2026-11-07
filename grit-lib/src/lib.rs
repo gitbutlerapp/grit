@@ -28,13 +28,13 @@
 //! ```
 //! use grit_lib::config::environment::RepositoryOptions;
 //! use grit_lib::repo::{InitOptions, Repository};
-//! use grit_lib::state::resolve_head;
 //!
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-//! let head = resolve_head(repo.git_dir())?;
-//! assert!(matches!(head, grit_lib::state::HeadState::Branch { short_name, oid: None, .. } if short_name == "main"));
+//! let head = repo.references().head()?;
+//! assert!(head.is_unborn());
+//! assert_eq!(head.branch_name(), Some("main"));
 //! let _ = Repository::open(
 //!     repo.git_dir(),
 //!     &RepositoryOptions::empty().with_work_tree(dir.path()),

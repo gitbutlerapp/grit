@@ -105,7 +105,7 @@ impl RefStorageFormat {
 }
 
 /// Detect ref storage format for `git_dir` (see [`RefStorageFormat::detect`]).
-pub fn detect_format(git_dir: &Path) -> Result<RefStorageFormat> {
+pub(crate) fn detect_format(git_dir: &Path) -> Result<RefStorageFormat> {
     RefStorageFormat::detect(git_dir)
 }
 

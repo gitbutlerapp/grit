@@ -30,7 +30,6 @@ use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 #[cfg(unix)]
@@ -243,7 +242,10 @@ fn push_options_are_delivered_to_receive_pack_hook_over_git_daemon() {
     );
     // The ref landed.
     assert_eq!(
-        resolve_ref(&bare, "refs/heads/main").expect("remote main written"),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("remote main written"),
         main_oid
     );
 
@@ -351,7 +353,10 @@ fn push_options_are_delivered_to_receive_pack_hook_over_ssh() {
         outcome.results[0].message
     );
     assert_eq!(
-        resolve_ref(&bare, "refs/heads/main").expect("remote main written"),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("remote main written"),
         main_oid
     );
 
@@ -436,7 +441,10 @@ fn pushing_options_to_server_without_capability_errors_typed() {
 
     // Nothing was pushed: the ref must not exist on the remote.
     assert!(
-        resolve_ref(&bare, "refs/heads/main").is_err(),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .is_err(),
         "no ref should be created when the push aborts before sending"
     );
 }

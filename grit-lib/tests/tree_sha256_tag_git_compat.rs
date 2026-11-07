@@ -111,7 +111,7 @@ fn signed_tag_with_tree_sha256_verifies_with_git() {
     setup_ssh_signing_repo(root);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").unwrap();
+    let head = repo.references().resolve("HEAD").unwrap();
     let outcome = signed_tag_with_tree_sha256(&repo, "v1", head, TreeSha256Options::default());
 
     git_out(root, &["verify-tag", "v1"]);
@@ -134,7 +134,7 @@ fn header_digest_equals_recomputed() {
     setup_ssh_signing_repo(root);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").unwrap();
+    let head = repo.references().resolve("HEAD").unwrap();
     let outcome = signed_tag_with_tree_sha256(&repo, "v1", head, TreeSha256Options::default());
     let ts = outcome.tree_sha256.expect("tree_sha256 outcome");
     let raw = repo.odb().read(&outcome.oid).expect("read tag").data;
@@ -192,7 +192,7 @@ fn excluded_submodule_writes_excluded_header() {
     git(root, &["commit", "-m", "gitlink"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").unwrap();
+    let head = repo.references().resolve("HEAD").unwrap();
     let mut opts = TreeSha256Options::default();
     opts.exclude_globs = vec!["vendor".into()];
     let outcome = signed_tag_with_tree_sha256(&repo, "rel", head, opts);
@@ -245,7 +245,7 @@ fn missing_submodule_fails_before_writing_tag() {
     git(root, &["commit", "-m", "gitlink without checkout"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").unwrap();
+    let head = repo.references().resolve("HEAD").unwrap();
     let err = create_tag(
         &repo,
         &CreateTagRequest {
@@ -281,7 +281,7 @@ fn tree_sha256_with_no_sign_is_error() {
     git(root, &["commit", "--allow-empty", "-m", "base"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").unwrap();
+    let head = repo.references().resolve("HEAD").unwrap();
     let err = create_tag(
         &repo,
         &CreateTagRequest {
@@ -320,7 +320,7 @@ fn signed_tag_tree_sha256_overhead_within_bound() {
     git(root, &["commit", "-m", "many files"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").unwrap();
+    let head = repo.references().resolve("HEAD").unwrap();
     let tagger = "T <t@example.com> 1700000000 +0000".to_owned();
 
     let sign_only = std::time::Instant::now();

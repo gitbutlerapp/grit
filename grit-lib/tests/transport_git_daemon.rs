@@ -21,7 +21,6 @@ use std::time::{Duration, Instant};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 use grit_lib::repo::Repository;
@@ -176,14 +175,23 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
     .expect("fetch_remote over git daemon");
 
     // Tracking refs written.
-    let got_main = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
-    let got_topic = resolve_ref(&local_git, "refs/remotes/origin/topic").expect("origin/topic");
+    let got_main = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
+    let got_topic = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/topic")
+        .expect("origin/topic");
     assert_eq!(got_main, main_oid, "origin/main oid mismatch vs source");
     assert_eq!(got_topic, topic_oid, "origin/topic oid mismatch vs source");
 
     // The annotated tag arrived (TagMode::All).
     let tag_oid = rev_parse(&source, "refs/tags/v1");
-    let got_tag = resolve_ref(&local_git, "refs/tags/v1").expect("tag v1 written");
+    let got_tag = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/tags/v1")
+        .expect("tag v1 written");
     assert_eq!(got_tag, tag_oid, "tag v1 oid mismatch vs source");
 
     // Objects landed in the local odb: tips and an interior commit.
@@ -322,14 +330,23 @@ fn fetch_following_lightweight_tag_at_branch_tip_downloads_branch() {
     )
     .expect("fetch with TagMode::Following");
 
-    let got_rel = resolve_ref(&local_git, "refs/remotes/origin/rel").expect("origin/rel");
+    let got_rel = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/rel")
+        .expect("origin/rel");
     assert_eq!(got_rel, rel_oid);
     assert_eq!(
-        resolve_ref(&local_git, "refs/tags/light").expect("light tag"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/light")
+            .expect("light tag"),
         light_oid
     );
     assert_eq!(
-        resolve_ref(&local_git, "refs/tags/rel-1.0").expect("annotated tag"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/rel-1.0")
+            .expect("annotated tag"),
         rel10_oid
     );
 
@@ -449,7 +466,10 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
 
     let tag_oid = rev_parse(&source, "refs/tags/annotated-paired");
     assert_eq!(
-        resolve_ref(&local_git, "refs/tags/annotated-paired").expect("tag ref"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/annotated-paired")
+            .expect("tag ref"),
         tag_oid
     );
     assert!(
@@ -530,7 +550,10 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
     .expect("fetch main");
 
     let repo = Repository::open(&local_git, &RepositoryOptions::empty()).expect("open local repo");
-    let head = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
+    let head = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
     let tag_outcome = create_tag(
         &repo,
         &CreateTagRequest {
@@ -583,7 +606,10 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
     .expect("push annotated tag");
 
     assert_eq!(
-        resolve_ref(&bare, "refs/tags/v1-ann").expect("tag ref on remote"),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/tags/v1-ann")
+            .expect("tag ref on remote"),
         tag_outcome.oid
     );
     let cat_type = git(&bare, &["cat-file", "-t", "v1-ann"]);
@@ -671,7 +697,10 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
     .expect("seed fetch");
 
     git(&local, &["branch", "probe", &c1_oid.to_hex()]);
-    let probe_before = resolve_ref(&local_git, "refs/heads/probe").expect("probe");
+    let probe_before = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/heads/probe")
+        .expect("probe");
 
     std::fs::write(work.join("c.txt"), "three\n").unwrap();
     git(&work, &["add", "c.txt"]);
@@ -718,7 +747,10 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
         outcome.updates
     );
     assert_eq!(
-        resolve_ref(&local_git, "refs/heads/probe").expect("probe after dry-run"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/heads/probe")
+            .expect("probe after dry-run"),
         probe_before
     );
 }

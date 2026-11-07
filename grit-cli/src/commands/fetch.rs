@@ -16,7 +16,7 @@ use grit_lib::remote::transfer::{
     FetchOutcome as LibFetchOutcome, TagMode, TransferStats, UpdateKind, UpdateMode,
 };
 use grit_lib::remote::DefaultHttpClientFactory;
-use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_lib::state::HeadState;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -312,7 +312,7 @@ pub(crate) fn run_one_in(
         ),
     )
     .context("could not load config")?;
-    let head = resolve_head_for_repository(repo).ok();
+    let head = repo.references().head().ok();
     let invocation = resolve_fetch_invocation(
         &config,
         args.remote.as_deref(),

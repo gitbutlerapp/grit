@@ -10,7 +10,6 @@ use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use grit_lib::diff::{count_changes_with_algorithm, TreeDiffOptions};
 use grit_lib::refs::branch_tracking::TipComparison;
-use grit_lib::refs::write_ref;
 
 use grit_lib::revwalk::rev_list::{OrderingMode, RevListOptions};
 
@@ -340,7 +339,7 @@ fn bench_describe_many_tags(c: &mut Criterion) {
             .expect("rev-list")
             .commits;
         for (i, oid) in commits.iter().enumerate().step_by(50) {
-            write_ref(fx.repo.git_dir(), &format!("refs/tags/describe-t{i}"), oid)
+            grit_test_support::refs::set_ref(&fx.repo, &format!("refs/tags/describe-t{i}"), oid)
                 .expect("tag ref");
         }
     });
@@ -412,7 +411,10 @@ fn bench_log_first_1000_gitgit_like(c: &mut Criterion) {
 
 fn bench_merge_base_deep(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
-    let mid = grit_lib::refs::resolve_ref(fx.repo.git_dir(), "refs/heads/bench/b00100")
+    let mid = fx
+        .repo
+        .references()
+        .resolve("refs/heads/bench/b00100")
         .expect("mid-history branch ref");
     let mut group = c.benchmark_group("revwalk/merge_base_deep");
     for (graph_label, use_graph) in [("no_commit_graph", false), ("commit_graph", true)] {
@@ -442,7 +444,10 @@ fn bench_merge_base_deep(c: &mut Criterion) {
 
 fn bench_ahead_behind_deep(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
-    let mid = grit_lib::refs::resolve_ref(fx.repo.git_dir(), "refs/heads/bench/b00100")
+    let mid = fx
+        .repo
+        .references()
+        .resolve("refs/heads/bench/b00100")
         .expect("mid-history branch ref");
     let mut group = c.benchmark_group("revwalk/ahead_behind_deep");
     for (graph_label, use_graph) in [("no_commit_graph", false), ("commit_graph", true)] {

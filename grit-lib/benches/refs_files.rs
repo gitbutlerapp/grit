@@ -10,7 +10,6 @@ use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectKind;
 use grit_lib::refs::gc::{update_refs, RefTransactionItem};
-use grit_lib::refs::list_refs;
 
 fn refs_cache_root() -> PathBuf {
     std::env::var("GRIT_BENCH_REFS_CACHE")
@@ -56,16 +55,20 @@ fn bench_list_all(c: &mut Criterion, kind: &str) {
     let Some(fx) = RefsFilesFixture::open(kind) else {
         return;
     };
+    let repo = grit_test_support::refs::at(&fx.git_dir);
     let mut group = c.benchmark_group(format!("refs_files/for_each_ref_100k_{kind}"));
     group.bench_function("list_refs_all", |b| {
         b.iter(|| {
-            let rows = list_refs(black_box(&fx.git_dir), "refs/").expect("list");
+            let rows = black_box(&repo).references().list("refs/").expect("list");
             black_box(rows.len())
         });
     });
     group.bench_function("list_refs_prefix_b05", |b| {
         b.iter(|| {
-            let rows = list_refs(black_box(&fx.git_dir), "refs/heads/b05").expect("list");
+            let rows = black_box(&repo)
+                .references()
+                .list("refs/heads/b05")
+                .expect("list");
             black_box(rows.len())
         });
     });

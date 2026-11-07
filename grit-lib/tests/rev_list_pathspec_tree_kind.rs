@@ -41,7 +41,7 @@ fn pathspec_log_skips_commit_when_tree_header_points_at_blob() {
         .objects()
         .write(ObjectKind::Commit, &serialize_commit(&commit))
         .expect("commit");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/main", &commit_oid).expect("update ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &commit_oid).expect("update ref");
 
     let git_log = Command::new("git")
         .current_dir(dir.path())

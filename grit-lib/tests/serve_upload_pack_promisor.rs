@@ -728,7 +728,7 @@ fn small_push_naming_an_offloaded_blob_is_accepted() {
     );
     let repo = fx.open(None);
     assert_eq!(
-        grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").unwrap(),
+        repo.references().resolve("refs/heads/main").unwrap(),
         commit
     );
     assert!(!repo.odb().exists_stored(&fx.big), "nothing was fetched");

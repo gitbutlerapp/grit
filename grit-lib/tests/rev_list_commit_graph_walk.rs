@@ -12,7 +12,6 @@ use std::process::Command;
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
-use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{OrderingMode, RevListOptions};
 use support::{commit_labeled_with_dates, git, git_rev_list, open_grit_repo, HistoryRepo};
@@ -60,7 +59,7 @@ fn write_linear_commits(repo: &Repository, count: usize) -> grit_lib::objects::O
         tip = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
         parent = Some(tip);
     }
-    write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &tip).expect("ref");
     tip
 }
 

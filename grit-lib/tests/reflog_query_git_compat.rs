@@ -134,7 +134,6 @@ fn reflog_query_since_until_matches_git() {
 
 fn seed_reflog_repo_with_spread_timestamps() -> TestRepo {
     use grit_lib::objects::ObjectId;
-    use grit_lib::refs::append_reflog;
 
     let repo = support::files_repo();
     let tip = support::git_empty_commit_oid(repo.worktree());
@@ -150,16 +149,19 @@ fn seed_reflog_repo_with_spread_timestamps() -> TestRepo {
         1_850_000_000,
     ];
     for (i, ts) in stamps.iter().enumerate() {
-        append_reflog(
-            git_dir,
-            "HEAD",
-            &zero,
-            &oid,
-            &format!("T <t@example.com> {ts} +0000"),
-            &format!("commit: spread{i}"),
-            true,
-        )
-        .expect("append");
+        grit_test_support::refs::at(git_dir)
+            .reflogs()
+            .append(
+                "HEAD",
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: zero,
+                    new_oid: oid,
+                    identity: (&format!("T <t@example.com> {ts} +0000")).to_string(),
+                    message: (&format!("commit: spread{i}")).to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::Always,
+            )
+            .expect("append");
     }
     repo
 }

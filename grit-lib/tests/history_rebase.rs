@@ -9,7 +9,6 @@ use grit_lib::config::ConfigSet;
 use grit_lib::diff::merge_file::MergeFavor;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, RebaseCheckPlan, RebaseOntoOptions, RebasePlan, RebaseRequest,
@@ -144,7 +143,7 @@ fn rebase_onto_replays_range_and_moves_branch() {
         .iter()
         .any(|u| u.name.as_str().ends_with("main")));
     apply_plan(&grit, &plan);
-    let new_tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("ref");
+    let new_tip = grit.references().resolve("refs/heads/main").expect("ref");
     assert_ne!(new_tip, tip);
     assert_git_fsck_strict(wt);
 }
@@ -415,11 +414,13 @@ fn rebase_onto_moves_stacked_branches() {
         .expect("stacked moves");
     apply_plan(&grit, &plan);
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/main").expect("main"),
+        grit.references().resolve("refs/heads/main").expect("main"),
         main_update.new
     );
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/stacked").expect("stacked"),
+        grit.references()
+            .resolve("refs/heads/stacked")
+            .expect("stacked"),
         stacked_update.new
     );
     assert_git_fsck_strict(wt);
@@ -562,7 +563,12 @@ fn rebase_onto_defaults_upstream_from_tracking_config() {
         wt,
         &["config", "branch.feature.merge", "refs/heads/upstream"],
     );
-    write_ref(wt.join(".git").as_path(), "refs/heads/upstream", &oids["u"]).expect("upstream ref");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(wt.join(".git").as_path()),
+        "refs/heads/upstream",
+        &oids["u"],
+    )
+    .expect("upstream ref");
     let grit = open_grit(wt);
     let config = ConfigSet::load(
         grit.environment(),
@@ -574,7 +580,10 @@ fn rebase_onto_defaults_upstream_from_tracking_config() {
         .get("branch.feature.merge")
         .expect("branch.feature.merge");
     assert_eq!(merge.as_deref(), Some("refs/heads/upstream"));
-    let upstream = resolve_ref(grit.git_dir(), "refs/heads/upstream").expect("upstream");
+    let upstream = grit
+        .references()
+        .resolve("refs/heads/upstream")
+        .expect("upstream");
     assert_eq!(upstream, oids["u"]);
 }
 
@@ -691,7 +700,7 @@ fn rebase_onto_bare_repository() {
             }),
         )
         .expect("onto");
-    write_ref(grit.git_dir(), "refs/heads/main", &tip).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &tip).expect("ref");
     let open = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
     let plan = open
         .history()
@@ -704,7 +713,7 @@ fn rebase_onto_bare_repository() {
         .expect("plan bare");
     apply_plan(&open, &plan);
     assert_ne!(
-        resolve_ref(open.git_dir(), "refs/heads/main").expect("ref"),
+        open.references().resolve("refs/heads/main").expect("ref"),
         tip
     );
 }
@@ -750,7 +759,10 @@ fn history_rebase_matches_git_replay_onto() {
         eprintln!("SKIP: git replay --onto unavailable or failed");
         return;
     }
-    let grit_tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("grit tip");
+    let grit_tip = grit
+        .references()
+        .resolve("refs/heads/main")
+        .expect("grit tip");
     let git_tip = git_rev_parse(wt_git, "main");
     if grit_tip != git_tip {
         eprintln!(
@@ -785,7 +797,7 @@ fn plan_apply(grit: &Repository, request: RebaseRequest, opts: &RebaseOntoOption
         RebasePlan::Conflict { .. } => panic!("unexpected conflict"),
         RebasePlan::Plan(plan) => {
             apply_plan(grit, &plan);
-            resolve_ref(grit.git_dir(), "refs/heads/main").expect("main")
+            grit.references().resolve("refs/heads/main").expect("main")
         }
     }
 }
@@ -850,7 +862,7 @@ fn plan_rebase_up_to_date_is_noop() {
         .expect("plan");
     assert_eq!(plan, RebasePlan::UpToDate);
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/main").expect("main"),
+        grit.references().resolve("refs/heads/main").expect("main"),
         tip
     );
 }
@@ -1081,7 +1093,7 @@ fn plan_rebase_over_merged_unrelated_root_matches_git_rebase() {
     apply_plan(&grit, &plan);
 
     git(wt, &["rebase", "-q", "main", "feat-git"]);
-    let grit_tip = resolve_ref(grit.git_dir(), "refs/heads/feat").expect("feat");
+    let grit_tip = grit.references().resolve("refs/heads/feat").expect("feat");
     let git_tip = git_rev_parse(wt, "feat-git");
     let grit_commit = parse_commit(&grit.odb().read(&grit_tip).expect("read").data).expect("parse");
     let git_commit = parse_commit(&grit.odb().read(&git_tip).expect("read").data).expect("parse");
@@ -1116,7 +1128,10 @@ fn history_rebase_matches_git_rebase() {
         .expect("grit plan");
     apply_plan(&grit, &plan);
     git_rebase_onto(wt_git, &o_git, &u_git, "main");
-    let grit_tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("grit tip");
+    let grit_tip = grit
+        .references()
+        .resolve("refs/heads/main")
+        .expect("grit tip");
     let git_tip = git_rev_parse(wt_git, "main");
     if grit_tip != git_tip {
         eprintln!(

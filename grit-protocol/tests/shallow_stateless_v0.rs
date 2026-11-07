@@ -32,7 +32,9 @@ fn init_linear_bare(dir: &std::path::Path, commits: usize) -> ObjectId {
             .expect("commit");
         parent = Some(tip);
     }
-    grit_lib::refs::write_ref(dir, "refs/heads/main", &tip).expect("ref");
+    repo.references()
+        .update("refs/heads/main", &tip)
+        .expect("ref");
     tip
 }
 

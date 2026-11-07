@@ -8,7 +8,6 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, ObjectKind};
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::write_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions, SquashMessage, SquashOptions,
@@ -103,7 +102,7 @@ fn init_undo_redo_chain(
     let a = write_test_commit(grit, tree_a, &[], "a", author, ident).expect("a");
     let b = write_test_commit(grit, tree_b, &[a], "b", author, ident).expect("b");
     let c = write_test_commit(grit, tree_a, &[b], "c", author, ident).expect("c");
-    write_ref(grit.git_dir(), "refs/heads/main", &c).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
     (a, b, c)
 }
 
@@ -186,7 +185,7 @@ fn squash_keep_committer_at_head_fast_path() {
     let a = write_test_commit(&grit, tree_a, &[], "a", author, original_committer).expect("a");
     let b = write_test_commit(&grit, tree_b, &[a], "b", author, original_committer).expect("b");
     let c = write_test_commit(&grit, tree_c, &[b], "c", author, original_committer).expect("c");
-    write_ref(grit.git_dir(), "refs/heads/main", &c).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
     let range = format!("{}..{}", a.to_hex(), c.to_hex());
     let plan = grit
         .history()
@@ -229,7 +228,7 @@ fn squash_empty_abort_returns_became_empty() {
     let ident = "Writer <w@grit.test> 1700000001 +0000";
     let author = "Author <a@grit.test> 1700000000 +0000";
     let d = write_test_commit(&grit, tree_d, &[c], "d", author, ident).expect("d");
-    write_ref(grit.git_dir(), "refs/heads/main", &d).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &d).expect("ref");
     let range = format!("{}..{}", a.to_hex(), c.to_hex());
     match grit.history().squash(
         &[&range],

@@ -235,7 +235,9 @@ fn declining_pre_receive_keeps_ref_and_objects_out() {
         assert_eq!(Fixture::object_count(&fx.bare), 0, "objects stay out");
         assert!(Fixture::quarantine_dirs(&fx.bare).is_empty());
         assert!(
-            grit_lib::refs::resolve_ref(repo.git_dir(), "refs/remotes/origin/main").is_err(),
+            repo.references()
+                .resolve("refs/remotes/origin/main")
+                .is_err(),
             "no tracking ref after a declined push"
         );
         git(&fx.bare, &["fsck", "--strict"]);

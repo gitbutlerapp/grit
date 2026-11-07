@@ -6,7 +6,7 @@ use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{unified_diff, DiffEntry, DiffStatus, TreeDiffOptions};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head;
+
 use std::path::{Path, PathBuf};
 
 fn open_repo(root: &Path) -> Result<Repository> {
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("missing repository path"))?;
     let repo = open_repo(&root)?;
 
-    let head = resolve_head(repo.git_dir())?;
+    let head = repo.references().head()?;
     let new_commit = head
         .oid()
         .cloned()

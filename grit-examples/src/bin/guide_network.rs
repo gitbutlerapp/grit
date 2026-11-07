@@ -8,7 +8,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::ident::parse_signature;
 use grit_lib::objects::NewCommit;
-use grit_lib::refs;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::transport_path::resolve_local_remote_git_dir;
 use grit_lib::remote::{ListRefsOptions, Remote};
@@ -30,7 +29,7 @@ fn main() -> Result<()> {
         &grit_lib::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
     )?;
 
-    let remote_info = remote::resolve_remote(&config, &git_dir, Some("origin"), false)?;
+    let remote_info = remote::resolve_remote(&config, &repo, Some("origin"), false)?;
 
     let remote_git_dir =
         resolve_local_remote_git_dir(&remote_info.url, &git_dir, work_tree.as_deref());
@@ -50,8 +49,8 @@ fn main() -> Result<()> {
     fetch_opts.tags = TagMode::Following;
     remote::fetch(&repo, &remote_info, &fetch_opts)?;
 
-    let tracking = refs::resolve_ref(&git_dir, "refs/remotes/origin/main")?;
-    refs::write_ref(&git_dir, "refs/heads/main", &tracking)?;
+    let tracking = repo.references().resolve("refs/remotes/origin/main")?;
+    repo.references().update("refs/heads/main", &tracking)?;
 
     let parent = repo.objects().read_commit(&tracking)?;
     let committer = parse_signature(&parent.committer)
@@ -65,7 +64,7 @@ fn main() -> Result<()> {
         )
         .with_parents([tracking]),
     )?;
-    refs::write_ref(&git_dir, "refs/heads/main", &new_oid)?;
+    repo.references().update("refs/heads/main", &new_oid)?;
 
     let spec = PushRefSpec {
         src: Some(new_oid),

@@ -4,7 +4,6 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::merge_base::ReachableWalkLimit;
 use std::path::Path;
@@ -19,7 +18,10 @@ fn push_fast_hide_window_is_incremental_not_full_history() {
         return;
     }
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open client");
-    let tip = resolve_ref(&git_dir, "refs/heads/main").expect("main");
+    let tip = grit_test_support::refs::at(&git_dir)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("main");
     let base = ObjectId::from_hex(FETCH_BASE).expect("base hex");
     let (_, commits) = repo
         .revwalk()

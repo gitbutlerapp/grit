@@ -8,7 +8,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::tree_oid_of_commit;
 use grit_lib::diff::{DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head;
 
 fn git_run(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -50,7 +49,7 @@ fn diff_index_to_tree_with_renames_reports_staged_mv() {
     git_run(root, &["mv", "a.txt", "b.txt"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = resolve_head(repo.git_dir()).expect("head");
+    let head = repo.references().head().expect("head");
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
     let index = repo.index().load().expect("index");
@@ -95,7 +94,7 @@ fn apply_rename_detection_matches_git_cached_name_status() {
     );
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = resolve_head(repo.git_dir()).expect("head");
+    let head = repo.references().head().expect("head");
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
     let index = repo.index().load().expect("index");
@@ -142,7 +141,7 @@ fn worktree_rename_detection_with_small_unstaged_edit() {
     );
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = resolve_head(repo.git_dir()).expect("head");
+    let head = repo.references().head().expect("head");
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
     let index = repo.index().load().expect("index");

@@ -11,7 +11,6 @@ use grit_lib::revwalk::history::{
     normalize_rewrite_message, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewordOptions,
     RewriteOptions,
 };
-use grit_lib::state::resolve_head;
 
 use support::{
     build_commit_dag, commit_labeled_with_dates, git, git_fsck_strict, git_rev_parse, HistoryRepo,
@@ -344,7 +343,7 @@ fn reword_in_bare_repository() {
         .odb()
         .write(grit_lib::objects::ObjectKind::Commit, &commit_bytes)
         .expect("commit");
-    grit_lib::refs::write_ref(grit.git_dir(), "refs/heads/main", &oid).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &oid).expect("ref");
     let plan = grit
         .history()
         .reword(
@@ -440,7 +439,7 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
         )
         .expect("apply");
 
-    let head = resolve_head(grit.git_dir()).expect("head");
+    let head = grit.references().head().expect("head");
     let head_oid = head.oid().copied().expect("head oid");
     let head_tree = parse_commit(&grit.odb().read(&head_oid).expect("read").data)
         .expect("parse head")

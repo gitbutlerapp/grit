@@ -8,9 +8,8 @@ use grit_lib::maintenance::{gc, GcOptions};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, create_commit, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::{write_ref, write_ref_cas};
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::HeadState;
 use grit_lib::worktree::{
     add_linked_worktree, list_worktrees, AddLinkedWorktreeOptions, WorktreeBranch,
 };
@@ -244,16 +243,18 @@ fn read_only_linked_worktree_metadata_on_detached_commit_names_head_lock() {
 
     let linked_repo = Repository::discover(Some(linked_wt.as_path()), &RepositoryOptions::empty())
         .expect("discover linked");
-    let head_oid = match resolve_head(linked_repo.git_dir()).expect("head") {
+    let head_oid = match linked_repo.references().head().expect("head") {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
         other => panic!("unexpected head state: {other:?}"),
     };
-    write_ref(linked_repo.git_dir(), "HEAD", &head_oid).expect("detach head");
+    grit_test_support::refs::set_ref(&linked_repo, "HEAD", &head_oid).expect("detach head");
 
     let admin = linked_repo.git_dir().to_path_buf();
     chmod_tree_readonly(&admin);
 
-    let err = write_ref_cas(linked_repo.git_dir(), "HEAD", &head_oid, head_oid)
+    let err = linked_repo
+        .references()
+        .compare_and_swap("HEAD", &head_oid, &head_oid)
         .expect_err("HEAD update should fail");
     match &err {
         Error::Repository(RepositoryError::GitDirPathIo(_)) => {

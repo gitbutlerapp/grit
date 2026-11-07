@@ -325,12 +325,14 @@ fn snapshot_error(e: &grit_lib::error::Error) -> Option<&CheckoutError> {
 
 /// The tip of `branch`, which a checkout is made or refreshed from.
 fn branch_tip(repo: &Repository, branch: &str) -> Result<ObjectId, Rejection> {
-    grit_lib::refs::resolve_ref(repo.git_dir(), format!("refs/heads/{branch}")).map_err(|_| {
-        error(
-            StatusCode::CONFLICT,
-            format!("{branch} has no commits, so there is nothing to check out"),
-        )
-    })
+    repo.references()
+        .resolve(format!("refs/heads/{branch}"))
+        .map_err(|_| {
+            error(
+                StatusCode::CONFLICT,
+                format!("{branch} has no commits, so there is nothing to check out"),
+            )
+        })
 }
 
 /// The target branch's short name and tip.
@@ -525,7 +527,8 @@ fn create_blocking(
     let mut record = store
         .record(&id)
         .ok_or_else(|| internal(&format!("made an invalid checkout id {id}")))?;
-    grit_lib::refs::write_ref(repo.git_dir(), target_ref(&id), &snapshot.commit)
+    repo.references()
+        .update(target_ref(&id), &snapshot.commit)
         .map_err(|e| internal(&e))?;
     let info = CheckoutInfo {
         id: id.clone(),
@@ -878,7 +881,7 @@ async fn update<H: CheckoutHost>(
                         }
                     })?;
                 // The checkout's own ref, written only while its lock is held.
-                grit_lib::refs::write_ref(repo.git_dir(), target_ref(&id), &snapshot.commit)
+                repo.references().update(target_ref(&id), &snapshot.commit)
                     .map_err(|e| internal(&e))?;
                 info.base = head.to_hex();
                 info.root = snapshot.commit.to_hex();
@@ -1061,7 +1064,7 @@ fn checkin_blocking(
     // checkout snapshots, and the one HEAD names now if that differs.
     let mut targets: Vec<ObjectId> = [stored.info.branch.as_str(), target.as_str()]
         .into_iter()
-        .filter_map(|b| grit_lib::refs::resolve_ref(repo.git_dir(), format!("refs/heads/{b}")).ok())
+        .filter_map(|b| repo.references().resolve(format!("refs/heads/{b}")).ok())
         .collect();
     targets.dedup();
     let who = signature(None, email)?;

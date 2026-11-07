@@ -6,7 +6,7 @@ use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::StashApplyOptions;
 use grit_lib::stash::{CorruptStashReason, StashError};
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::HeadState;
 use grit_test_support::{git, git_cmd};
 use std::fs;
 use tempfile::tempdir;
@@ -88,7 +88,7 @@ fn corrupt_stash_wrong_parent_count() {
         &grit_lib::config::environment::RepositoryOptions::empty(),
     )
     .unwrap();
-    let head = match resolve_head(repo.git_dir()).expect("head") {
+    let head = match repo.references().head().expect("head") {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
         other => panic!("unexpected head {other:?}"),
     };

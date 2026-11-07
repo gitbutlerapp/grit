@@ -21,7 +21,7 @@ use grit_lib::revwalk::history::{
     EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
     StartRebaseOptions,
 };
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::HeadState;
 use tempfile::TempDir;
 
 fn git_cmd(root: &std::path::Path, args: &[&str]) -> String {
@@ -62,7 +62,7 @@ fn open_grit(dir: &TempDir) -> Repository {
 }
 
 fn head_oid(repo: &Repository) -> ObjectId {
-    match resolve_head(repo.git_dir()).expect("head") {
+    match repo.references().head().expect("head") {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
         HeadState::Branch { oid: None, .. } | HeadState::Invalid => panic!("invalid head"),
     }

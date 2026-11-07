@@ -20,7 +20,6 @@ use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head;
 use similar::Algorithm;
 
 use super::history_harness::git;
@@ -864,7 +863,7 @@ pub fn set_repo_config(worktree: &Path, key: &str, value: &str) {
 }
 
 pub fn head_tree_oid(repo: &Repository) -> Option<ObjectId> {
-    let head = resolve_head(repo.git_dir()).ok()?;
+    let head = repo.references().head().ok()?;
     let commit = head.oid()?;
     tree_oid_of_commit(repo.odb(), commit).ok()
 }

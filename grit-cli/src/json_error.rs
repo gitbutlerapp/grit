@@ -10,7 +10,7 @@ use grit_lib::error::{Error as LibError, OverwriteReason};
 use grit_lib::lockfile::LockHolder;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::state::{wt_status_get_state, HeadState, InProgressOperation, NextStep, Operation};
+use grit_lib::state::{InProgressOperation, NextStep, Operation};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -313,7 +313,9 @@ pub fn operation_in_progress_for_repo(
     action: &str,
     kind: InProgressOperation,
 ) -> Error {
-    let operation = wt_status_get_state(repo.git_dir(), &HeadState::Invalid, false)
+    let operation = repo
+        .operation()
+        .status_state()
         .ok()
         .and_then(|state| grit_lib::state::status_operation(&state, false));
     operation_in_progress(action, kind, operation.as_ref())

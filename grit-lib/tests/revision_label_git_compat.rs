@@ -5,7 +5,6 @@ mod support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectKind;
-use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::object_inspect::RevisionLabel;
 use support::{each_backend, git, Backend};
@@ -35,8 +34,10 @@ fn revision_labels_read_system_git_tags_and_packed_refs() {
             assert!(
                 matches!(&label, Some(RevisionLabel::Branch { name }) if name == "main"),
                 "{backend:?} {spec}: {label:?}; HEAD={:?}; branch={:?}",
-                refs::read_symbolic_ref(repo.git_dir(), "HEAD"),
-                refs::resolve_ref(repo.git_dir(), "refs/heads/main")
+                repo.references()
+                    .symbolic("HEAD")
+                    .map(|t| t.map(String::from)),
+                repo.references().resolve("refs/heads/main")
             );
         }
         assert!(matches!(repo.revision_label("light").expect("tag label"),
@@ -66,11 +67,11 @@ fn revision_labels_on_library_tags_are_readable_by_system_git() {
         let commit = repo.odb().write(ObjectKind::Commit, format!(
             "tree {tree}\nauthor Writer <writer@example.com> 1 +0000\ncommitter Writer <writer@example.com> 1 +0000\n\ninitial\n"
         ).as_bytes()).expect("commit");
-        refs::write_ref(repo.git_dir(), "refs/heads/main", &commit).expect("branch");
+        grit_test_support::refs::set_ref(&repo, "refs/heads/main", &commit).expect("branch");
         let tag = repo.odb().write(ObjectKind::Tag, format!(
             "object {commit}\ntype commit\ntag release\ntagger Writer <writer@example.com> 1 +0000\n\nrelease metadata\n"
         ).as_bytes()).expect("tag");
-        refs::write_ref(repo.git_dir(), "refs/tags/release", &tag).expect("tag ref");
+        grit_test_support::refs::set_ref(&repo, "refs/tags/release", &tag).expect("tag ref");
         assert!(matches!(repo.revision_label("release").expect("label"),
             Some(RevisionLabel::Tag { annotation: Some(annotation), .. }) if annotation.object == commit));
         assert_eq!(git(wt, &["cat-file", "-t", "release"]).trim(), "tag");

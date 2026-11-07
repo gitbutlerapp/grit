@@ -5,7 +5,6 @@
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::list_refs;
 use grit_lib::remote::push_plan::{PushPlanContext, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::PushOptions;
@@ -74,7 +73,14 @@ fn packed_annotated_tags_push_is_up_to_date_and_preserves_remote_tag() {
         .trim()
         .parse()
         .unwrap();
-    let listed: Vec<_> = list_refs(&local.join(".git"), "refs/tags/")
+    let listed: Vec<_> = grit_test_support::refs::at(&local.join(".git"))
+        .references()
+        .list("refs/tags/")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
         .expect("list_refs")
         .into_iter()
         .filter(|(name, _)| name == "refs/tags/v1")

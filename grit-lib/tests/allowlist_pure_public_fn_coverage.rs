@@ -176,7 +176,12 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
     let repo = init_repo(dir.path());
     let git_dir = dir.path().join(".git");
     let seed = support::stored_commit(&git_dir, 1);
-    grit_lib::refs::write_ref(git_dir.as_path(), "refs/heads/main", &seed).expect("seed main");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(git_dir.as_path()),
+        "refs/heads/main",
+        &seed,
+    )
+    .expect("seed main");
     let _ = repo.revwalk().decorations(
         &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
     );
@@ -188,9 +193,9 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
     );
     let _ = normalize_glob_ref("heads/*");
     let odb = repo.odb();
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").expect("resolve");
+    let head = repo.references().resolve("HEAD").expect("resolve");
     let _ = peel_to_commit_hex(odb, &head.to_hex());
-    let head_state = grit_lib::state::resolve_head(repo.git_dir()).expect("head");
+    let head_state = repo.references().head().expect("head");
     let _ = current_branch_decoration_index(&[], &head_state);
 
     let c = CommitData {

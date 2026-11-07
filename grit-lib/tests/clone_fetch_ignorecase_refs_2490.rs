@@ -9,7 +9,6 @@ use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
@@ -98,7 +97,10 @@ fn clone_stores_casefold_remote_refs_in_packed_refs() {
         "refs/tags/v1",
         "refs/remotes/origin/main",
     ] {
-        resolve_ref(&git_dir, name).unwrap_or_else(|_| panic!("missing {name}"));
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve(name)
+            .unwrap_or_else(|_| panic!("missing {name}"));
     }
 
     let mut names = git_for_each_ref_names(&git_dir, "refs/");
@@ -157,13 +159,25 @@ fn fetch_rejects_second_case_twin_and_keeps_first() {
         "case twin must be reported as rejection"
     );
 
-    resolve_ref(&git_dir, "refs/remotes/origin/main").expect("main stored");
-    resolve_ref(&git_dir, "refs/remotes/origin/Foo").expect("first branch spelling stored");
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("main stored");
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .resolve("refs/remotes/origin/Foo")
+        .expect("first branch spelling stored");
     assert!(
-        resolve_ref(&git_dir, "refs/remotes/origin/foo").is_err(),
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/remotes/origin/foo")
+            .is_err(),
         "second branch spelling must not be stored as loose ref"
     );
-    resolve_ref(&git_dir, "refs/tags/V1").expect("first tag spelling stored");
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .resolve("refs/tags/V1")
+        .expect("first tag spelling stored");
 
     let rejected = outcome
         .updates

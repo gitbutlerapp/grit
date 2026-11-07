@@ -12,9 +12,9 @@ use grit_lib::maintenance::{gc, GcOptions};
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::reflog::all_reflog_oids;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::repo::Repository;
+use grit_lib::test_support::refs::all_reflog_oids;
 use grit_test_support::git_supports_sha256;
 use tempfile::TempDir;
 

@@ -250,8 +250,8 @@ fn repo_with_loose_stash_ref() -> (TempDir, Repository) {
     let dir = TempDir::new().expect("tempdir");
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("main");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/stash", &head).expect("refs/stash");
+    let head = repo.references().resolve("refs/heads/main").expect("main");
+    grit_test_support::refs::set_ref(&repo, "refs/stash", &head).expect("refs/stash");
     let refs = repo.git_dir().join("refs");
     assert!(refs.join("stash").is_file());
     assert!(refs.join("tags").is_dir());
@@ -287,7 +287,10 @@ fn assert_packed_stash_repo_readable_by_git(dir: &Path, repo: &Repository) {
     assert!(packed.contains(" refs/stash\n"), "{packed}");
 
     assert_eq!(git_stdout(dir, &["rev-parse", "--git-dir"]), ".git");
-    let head = grit_lib::refs::resolve_ref(git_dir, "refs/heads/main").expect("main");
+    let head = grit_test_support::refs::at(git_dir)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("main");
     assert_eq!(git_stdout(dir, &["rev-parse", "refs/stash"]), head.to_hex());
     git(dir, &["fsck", "--strict"]);
 }

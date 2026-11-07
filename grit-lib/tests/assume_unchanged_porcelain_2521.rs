@@ -6,7 +6,6 @@ use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, DEFAU
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
-use grit_lib::state::resolve_head_for_repository;
 use grit_test_support::git;
 
 use crate::support::{
@@ -40,7 +39,9 @@ fn seed_assume_unchanged_repo() -> (tempfile::TempDir, Repository, grit_lib::obj
     git(root, &["update-index", "--skip-worktree", "a.txt"]);
     std::fs::write(root.join("b.txt"), "b\nlocal\n").expect("local edit on b");
     std::fs::write(root.join("c.txt"), "c\nwork\n").expect("local edit on c");
-    let head = *resolve_head_for_repository(&repo)
+    let head = *repo
+        .references()
+        .head()
         .expect("head")
         .oid()
         .expect("commit");
@@ -111,7 +112,9 @@ fn commit_c_txt_tip(repo: &Repository, root: &std::path::Path) -> grit_lib::obje
     std::fs::write(root.join("c.txt"), "c\ncommit2\n").expect("second commit");
     git(root, &["add", "c.txt"]);
     git(root, &["commit", "-qm", "other"]);
-    *resolve_head_for_repository(repo)
+    *repo
+        .references()
+        .head()
         .expect("tip")
         .oid()
         .expect("commit")
@@ -183,7 +186,9 @@ fn fast_forward_merge_other_file_keeps_assume_unchanged() {
     std::fs::write(root.join("c.txt"), "c\nbranch\n").expect("other commit");
     git(root, &["commit", "-qam", "other"]);
     git(root, &["switch", "main"]);
-    let head = *resolve_head_for_repository(&repo)
+    let head = *repo
+        .references()
+        .head()
         .expect("head")
         .oid()
         .expect("commit");

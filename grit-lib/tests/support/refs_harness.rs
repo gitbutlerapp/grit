@@ -13,7 +13,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::create_commit;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::list_refs;
 use grit_lib::refs::ref_namespace::storage_ref_name;
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -209,10 +208,17 @@ pub fn git_fsck_strict(dir: &Path) -> bool {
     git_ok(dir, &["fsck", "--strict"])
 }
 
-/// List refs under `refs/` via grit [`list_refs`], as a name → oid map.
+/// List refs under `refs/` via grit [`References::list`](grit_lib::refs::References::list), as a name → oid map.
 pub fn grit_refs(worktree: &Path) -> BTreeMap<String, ObjectId> {
     let git_dir = worktree.join(".git");
-    list_refs(&git_dir, "refs/")
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .list("refs/")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
         .expect("list_refs")
         .into_iter()
         .collect()
@@ -259,7 +265,8 @@ pub fn stored_commit(git_dir: &Path, n: u8) -> ObjectId {
          author {AUTHOR_NAME} <{AUTHOR_EMAIL}> {DETERMINISTIC_DATE}\n\
          committer {AUTHOR_NAME} <{AUTHOR_EMAIL}> {DETERMINISTIC_DATE}\n\ncommit {n}\n"
     );
-    let common = grit_lib::refs::common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
+    let common =
+        grit_lib::test_support::refs::common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
     grit_lib::objects::odb::Odb::new(&common.join("objects"))
         .write(grit_lib::objects::ObjectKind::Commit, body.as_bytes())
         .expect("store commit")
@@ -384,10 +391,18 @@ pub fn git_for_each_ref_output(worktree: &Path, prefix: &str) -> Output {
     )
 }
 
-/// Assert grit [`list_refs`] and `git for-each-ref` both succeed and agree.
+/// Assert grit [`References::list`](grit_lib::refs::References::list) and `git for-each-ref` both succeed and agree.
 pub fn assert_list_refs_match_git(worktree: &Path, prefix: &str) {
     let git_dir = worktree.join(".git");
-    let grit_rows: Vec<(String, ObjectId)> = list_refs(&git_dir, prefix).expect("list_refs");
+    let grit_rows: Vec<(String, ObjectId)> = grit_test_support::refs::at(&git_dir)
+        .references()
+        .list(prefix)
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
+        .expect("list_refs");
     let git_rows = git_for_each_ref(worktree, prefix);
     assert_eq!(
         grit_rows, git_rows,

@@ -134,7 +134,12 @@ pub fn served_file(repo_path: &Path, file: &str) -> Option<PathBuf> {
 fn bundle_refs(repo: &Repository) -> Result<Vec<(String, ObjectId)>, BundleBuildError> {
     let mut refs = Vec::new();
     for prefix in ["refs/heads/", "refs/tags/"] {
-        refs.extend(grit_lib::refs::list_refs(repo.git_dir(), prefix)?);
+        refs.extend(
+            repo.references()
+                .list(prefix)?
+                .into_iter()
+                .map(|(name, oid)| (name.into(), oid)),
+        );
     }
     refs.sort();
     Ok(refs)

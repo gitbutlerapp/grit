@@ -23,9 +23,9 @@ use grit_lib::refs::reflog::{
     ReflogExpireParams,
 };
 use grit_lib::refs::store::RefNameRef;
-use grit_lib::refs::{reflog_file_path, write_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::ExpireOptions;
+use grit_lib::test_support::refs::reflog_file_path;
 
 use support::{
     assert_reflog_tree_matches, copy_worktree, git, git_fsck_strict, git_version_at_least,
@@ -187,7 +187,8 @@ fn build_history(repo: &Repository) -> History {
         let right = b.commit(&[head], None);
         head = b.commit(&[left, right], None);
         if i == DIAMONDS / 2 {
-            write_ref(repo.git_dir(), "refs/heads/feature", &head).expect("feature ref");
+            grit_test_support::refs::set_ref(&repo, "refs/heads/feature", &head)
+                .expect("feature ref");
         }
     }
     let feature_tip = repo
@@ -198,9 +199,9 @@ fn build_history(repo: &Repository) -> History {
     let topic_side = b.commit(&[feature_tip], None);
     let lost = b.commit(&[tip], None);
 
-    write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("main ref");
-    write_ref(repo.git_dir(), "refs/heads/topic", &topic_side).expect("topic ref");
-    write_ref(repo.git_dir(), "refs/tags/v1", &tag).expect("tag ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &tip).expect("main ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/topic", &topic_side).expect("topic ref");
+    grit_test_support::refs::set_ref(&repo, "refs/tags/v1", &tag).expect("tag ref");
     History {
         early,
         tagged,
@@ -447,7 +448,8 @@ fn expire_many_refs_in_one_pass_judges_each_ref_by_its_own_tip_like_git() {
     let mut refnames = Vec::new();
     for (i, side) in sides.iter().enumerate() {
         let refname = format!("refs/heads/b{i}");
-        write_ref(&git_dir, &refname, side).expect("branch ref");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), &refname, side)
+            .expect("branch ref");
         let other = sides[(i + 1) % BRANCHES];
         write_reflog(
             &git_dir,

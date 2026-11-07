@@ -8,9 +8,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::refs::append_reflog;
-use grit_lib::refs::reflog::{read_reflog, ReflogEntry};
-use grit_lib::refs::reflog_file_path;
+use grit_lib::refs::reflog::ReflogEntry;
+use grit_lib::test_support::refs::reflog_file_path;
 
 use support::{
     each_backend, git, git_fsck_strict, git_interop_available, null_device_for_tests,
@@ -153,7 +152,10 @@ fn seed_git_reflog(repo: &TestRepo) {
         "1700400000 +0000",
         &["branch", "-m", "main", "trunk"],
     );
-    let entries = read_reflog(&repo.git_dir(), "HEAD").expect("read");
+    let entries = grit_test_support::refs::at(repo.git_dir())
+        .references()
+        .reflog("HEAD")
+        .expect("read");
     let first_commit = entries
         .iter()
         .find(|e| e.message.contains("first"))
@@ -173,7 +175,10 @@ fn git_writes_grit_reads_reflog_signatures() {
             return;
         }
         seed_git_reflog(&repo);
-        let entries = read_reflog(&repo.git_dir(), "HEAD").expect("read reflog");
+        let entries = grit_test_support::refs::at(repo.git_dir())
+            .references()
+            .reflog("HEAD")
+            .expect("read reflog");
         assert!(entries.len() >= 4, "expected several reflog entries");
         assert_signatures_match_git(&repo, "HEAD", &entries);
     });
@@ -223,7 +228,10 @@ fn grit_writes_git_reads() {
         run_grit(repo.worktree(), &grit, &["add", "b.txt"]);
         run_grit(repo.worktree(), &grit, &["commit", "-m", "grit second"]);
         run_grit(repo.worktree(), &grit, &["switch", "-c", "grit-side"]);
-        let entries = read_reflog(&repo.git_dir(), "HEAD").expect("grit read reflog");
+        let entries = grit_test_support::refs::at(repo.git_dir())
+            .references()
+            .reflog("HEAD")
+            .expect("grit read reflog");
         assert!(entries.len() >= 2);
         assert_signatures_match_git(&repo, "HEAD", &entries);
         assert!(
@@ -250,16 +258,20 @@ fn grit_written_reflog_timezones_read_back_by_git() {
         let oid = support::empty_commit_oid(repo);
         for (i, tz) in ["+0530", "-0800", "+1245", "-0330"].into_iter().enumerate() {
             let when = 1_700_000_000 + i64::try_from(i).unwrap();
-            append_reflog(
-                &repo.git_dir(),
-                "refs/heads/main",
-                &oid,
-                &oid,
-                &format!("{AUTHOR_NAME} <{AUTHOR_EMAIL}> {when} {tz}"),
-                &format!("grit tz {tz}"),
-                true,
-            )
-            .expect("append reflog");
+            grit_test_support::refs::at(repo.git_dir())
+                .reflogs()
+                .append(
+                    "refs/heads/main",
+                    &grit_lib::refs::reflog::ReflogEntry {
+                        old_oid: oid,
+                        new_oid: oid,
+                        identity: (&format!("{AUTHOR_NAME} <{AUTHOR_EMAIL}> {when} {tz}"))
+                            .to_string(),
+                        message: (&format!("grit tz {tz}")).to_string(),
+                    },
+                    grit_lib::repo_handles::ReflogCreate::Always,
+                )
+                .expect("append reflog");
             let shown = git(
                 repo.worktree(),
                 &[
@@ -276,7 +288,10 @@ fn grit_written_reflog_timezones_read_back_by_git() {
                 format!("refs/heads/main@{{{when} {tz}}}"),
                 "{backend:?} timezone {tz}"
             );
-            let entries = read_reflog(&repo.git_dir(), "refs/heads/main").expect("read");
+            let entries = grit_test_support::refs::at(repo.git_dir())
+                .references()
+                .reflog("refs/heads/main")
+                .expect("read");
             let last = entries.last().expect("entry");
             assert!(
                 last.identity.ends_with(&format!("{when} {tz}")),

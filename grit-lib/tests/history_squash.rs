@@ -6,7 +6,6 @@ use crate::support;
 
 use grit_lib::objects::parse_commit;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions, RewritePlan, SquashMessage,
@@ -80,7 +79,7 @@ fn squash_folds_linear_range_into_oldest() {
         )
         .expect("squash");
     apply_plan(&grit, &plan);
-    let main = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
+    let main = grit.references().resolve("refs/heads/main").expect("main");
     let parents = parse_commit(&grit.odb().read(&main).expect("read").data)
         .expect("parse")
         .parents;
@@ -353,7 +352,12 @@ fn squash_divergent_branch_refused_unless_update_refs_head() {
         &[("b", "a"), ("c", "b"), ("d", "c")],
         &[("d", "refs/heads/main")],
     );
-    write_ref(open_grit(wt).git_dir(), "refs/heads/mid", &oids["b"]).expect("mid ref");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(open_grit(wt).git_dir()),
+        "refs/heads/mid",
+        &oids["b"],
+    )
+    .expect("mid ref");
     let grit = open_grit(wt);
     let err = grit
         .history()
@@ -366,7 +370,7 @@ fn squash_divergent_branch_refused_unless_update_refs_head() {
         matches!(err, HistoryError::DivergentBranch { .. }),
         "{err:?}"
     );
-    let side_before = resolve_ref(grit.git_dir(), "refs/heads/mid").expect("mid");
+    let side_before = grit.references().resolve("refs/heads/mid").expect("mid");
     let plan = grit
         .history()
         .squash(
@@ -375,7 +379,10 @@ fn squash_divergent_branch_refused_unless_update_refs_head() {
         )
         .expect("head-only");
     apply_plan(&grit, &plan);
-    let side_after = resolve_ref(grit.git_dir(), "refs/heads/mid").expect("mid after");
+    let side_after = grit
+        .references()
+        .resolve("refs/heads/mid")
+        .expect("mid after");
     assert_eq!(side_before, side_after);
     assert!(!plan
         .ref_updates

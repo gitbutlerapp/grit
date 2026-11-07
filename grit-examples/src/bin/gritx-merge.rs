@@ -4,7 +4,7 @@ use grit_examples::{checkout_tree, commit_tree, head_oid, resolve_name};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
 use grit_lib::objects::{parse_commit, ObjectKind};
-use grit_lib::refs::read_symbolic_ref_for_repository;
+
 use grit_lib::refs::store::RefName;
 use grit_lib::repo::Repository;
 
@@ -42,7 +42,11 @@ fn run() -> Result<()> {
     repo.index().write(&mut index)?;
     checkout_tree(&repo, target_tree)?;
 
-    if let Some(target_ref) = read_symbolic_ref_for_repository(&repo, "HEAD")? {
+    if let Some(target_ref) = repo
+        .references()
+        .symbolic("HEAD")
+        .map(|t| t.map(String::from))?
+    {
         let name = RefName::try_from(target_ref.as_str())
             .map_err(|e| anyhow::anyhow!("invalid HEAD target: {e}"))?;
         repo.references().update(&name, &target)?;

@@ -79,7 +79,7 @@ fn repo_for_rebase() -> (
     let base = commit_all(&repo, "base");
     write_files(tmp.path(), "side", "side");
     let side = commit_all(&repo, "side");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/side", &side).expect("side");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/side", &side).expect("side");
     grit_lib::porcelain::reset::reset_to_commit(
         &repo,
         &grit_lib::porcelain::reset::ResetOptions::new(
@@ -92,8 +92,10 @@ fn repo_for_rebase() -> (
         &CancelToken::never(),
     )
     .expect("reset");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/topic", &base).expect("topic");
-    grit_lib::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/topic").expect("HEAD");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/topic", &base).expect("topic");
+    repo.references()
+        .update_symbolic("HEAD", "refs/heads/topic")
+        .expect("HEAD");
     std::fs::write(tmp.path().join("topic.txt"), "topic\n").expect("write");
     let topic = commit_all(&repo, "topic");
     (tmp, repo, side, topic)

@@ -8,7 +8,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::resolve_ref;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::clone::{clone_into, CloneCheckout, CloneIntoOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -96,7 +95,10 @@ fn clone_into_custom_primary_fetches_and_checks_out() {
     assert!(dir.path().join("a.txt").is_file());
     assert!(dir.path().join("b.txt").is_file());
     assert_eq!(
-        resolve_ref(&dir.path().join(".git"), "refs/heads/main").expect("main"),
+        grit_test_support::refs::at(&dir.path().join(".git"))
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main"),
         tip
     );
     git(upstream.path(), &["fsck", "--full"]);

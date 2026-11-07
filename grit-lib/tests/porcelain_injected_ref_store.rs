@@ -29,7 +29,7 @@ use grit_lib::refs::store::{
 };
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
-use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_lib::state::HeadState;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 
@@ -112,7 +112,7 @@ fn switch_to(repo: &Repository, branch: &str) {
 }
 
 fn head_branch(repo: &Repository) -> Option<String> {
-    match resolve_head_for_repository(repo).expect("head") {
+    match repo.references().head().expect("head") {
         HeadState::Branch { short_name, .. } => Some(short_name),
         _ => None,
     }
@@ -606,7 +606,7 @@ fn head_state_comes_only_from_the_injected_store() {
     let store = Arc::new(MemoryRefStore::new());
     let repo = repo.with_ref_store(store.clone());
     assert_eq!(
-        resolve_head_for_repository(&repo).expect("head"),
+        repo.references().head().expect("head"),
         HeadState::Invalid,
         "an empty store has no HEAD, whatever .git/HEAD says"
     );
@@ -615,7 +615,7 @@ fn head_state_comes_only_from_the_injected_store() {
         .set_ref("HEAD", RawRef::Symbolic("refs/heads/fresh".into()))
         .expect("HEAD");
     assert_eq!(
-        resolve_head_for_repository(&repo).expect("head"),
+        repo.references().head().expect("head"),
         HeadState::Branch {
             refname: "refs/heads/fresh".into(),
             short_name: "fresh".into(),
@@ -627,7 +627,7 @@ fn head_state_comes_only_from_the_injected_store() {
         .set_ref("HEAD", RawRef::Direct(on_disk))
         .expect("HEAD");
     assert_eq!(
-        resolve_head_for_repository(&repo).expect("head"),
+        repo.references().head().expect("head"),
         HeadState::Detached { oid: on_disk }
     );
 }
@@ -648,10 +648,7 @@ fn headless_store_repo(dir: &Path) -> (Repository, Arc<MemoryRefStore>, ObjectId
 fn switch_to_existing_branch_installs_head_when_store_has_none() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (repo, store, tip) = headless_store_repo(dir.path());
-    assert_eq!(
-        resolve_head_for_repository(&repo).expect("head"),
-        HeadState::Invalid
-    );
+    assert_eq!(repo.references().head().expect("head"), HeadState::Invalid);
 
     let outcome = switch_repository(
         &repo,
@@ -703,7 +700,7 @@ fn detached_switch_installs_head_when_store_has_none() {
         Some(RawRef::Direct(tip))
     );
     assert_eq!(
-        resolve_head_for_repository(&repo).expect("head"),
+        repo.references().head().expect("head"),
         HeadState::Detached { oid: tip }
     );
 }

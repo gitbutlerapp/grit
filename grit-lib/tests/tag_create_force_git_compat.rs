@@ -29,7 +29,7 @@ fn seed_repo(root: &std::path::Path) -> (Repository, grit_lib::objects::ObjectId
     git(root, &["add", "f"]);
     git(root, &["commit", "-qm", "seed"]);
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("discover");
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").unwrap();
+    let head = repo.references().resolve("HEAD").unwrap();
     (repo, head)
 }
 

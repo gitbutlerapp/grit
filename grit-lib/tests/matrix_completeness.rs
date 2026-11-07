@@ -50,7 +50,6 @@ use std::time::{Duration, Instant};
 use grit_lib::error::{Error, RemoteUnreadableReason, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions, PushOptions, PushRefSpec, TagMode};
@@ -246,7 +245,10 @@ fn fetch_v0_sideband_band3_fatal_is_typed_error_not_hang() {
         "band-3 fatal must be reported as a remote error carrying the server text, got: {msg}"
     );
     // Nothing landed.
-    assert!(resolve_ref(&local_git, "refs/remotes/origin/main").is_err());
+    assert!(grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .is_err());
 }
 
 // ===========================================================================
@@ -893,7 +895,10 @@ fn shallow_depth1_with_all_tags_over_git_daemon() {
     drop(conn);
 
     // The shallow tip landed as origin/main, cross-checked vs system git.
-    let landed_tip = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
+    let landed_tip = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
     assert_eq!(landed_tip, tip, "shallow fetch must land the remote tip");
     assert_eq!(
         landed_tip.to_hex(),
@@ -902,7 +907,10 @@ fn shallow_depth1_with_all_tags_over_git_daemon() {
 
     // The annotated tag came along (TagMode::All + include-tag), and points at the
     // same object system git resolves it to.
-    let landed_tag = resolve_ref(&local_git, "refs/tags/v1").expect("tag v1 must be fetched");
+    let landed_tag = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/tags/v1")
+        .expect("tag v1 must be fetched");
     assert_eq!(
         landed_tag, tag,
         "the annotated tag must land with the shallow fetch"

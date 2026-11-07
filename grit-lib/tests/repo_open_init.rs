@@ -6,7 +6,6 @@ use std::sync::OnceLock;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::list_refs_for_repository;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
@@ -181,7 +180,15 @@ fn open_discover_and_init_roundtrip_fsck() {
         built.ref_store().format(),
         grit_lib::refs::store::RefStorageFormat::Memory
     );
-    let listed = list_refs_for_repository(&built, "refs/heads/").expect("list");
+    let listed = built
+        .references()
+        .list("refs/heads/")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
+        .expect("list");
     assert!(
         listed
             .iter()

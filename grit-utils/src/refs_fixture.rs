@@ -240,7 +240,7 @@ fn build_fixture(git: &Path, dest: &Path, kind: RefsFixtureKind) -> Result<()> {
         }
         RefsFixtureKind::Loose => {
             // Ensure no packed-refs file remains.
-            let _ = fs::remove_file(grit_lib::refs::store::paths::packed_refs_path(dest));
+            let _ = fs::remove_file(grit_lib::test_support::refs::packed_refs_path(dest));
         }
     }
 
@@ -364,7 +364,7 @@ fn clear_refs_subdir_or_file(git_dir: &Path, name: &str) -> Result<()> {
 
 /// Strip branch/tag refs while keeping objects (detached `HEAD` at base commit).
 pub fn strip_refs_to_empty(git_dir: &Path, base_commit: &str) -> Result<()> {
-    let _ = fs::remove_file(grit_lib::refs::store::paths::packed_refs_path(git_dir));
+    let _ = fs::remove_file(grit_lib::test_support::refs::packed_refs_path(git_dir));
     clear_refs_subdir_or_file(git_dir, "heads")?;
     clear_refs_subdir_or_file(git_dir, "tags")?;
     if git_dir.join("reftable").is_dir() {
@@ -383,7 +383,7 @@ pub fn strip_refs_to_empty(git_dir: &Path, base_commit: &str) -> Result<()> {
 
 /// Keep the first `keep` ref lines in `packed-refs` (Git packed-refs format).
 pub fn truncate_packed_refs(repo: &Path, keep: usize) -> Result<()> {
-    let path = grit_lib::refs::store::paths::packed_refs_path(repo);
+    let path = grit_lib::test_support::refs::packed_refs_path(repo);
     let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let mut header = String::new();
     let mut ref_lines: Vec<&str> = Vec::new();

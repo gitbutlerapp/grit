@@ -521,9 +521,9 @@ pub struct RefTransactionItem {
 /// and **nothing** is written (all-or-nothing). Only once all CAS checks pass
 /// are the changes applied:
 ///
-/// * `new_oid = Some(oid)` writes (creates or updates) the ref to `oid` via
-///   [`crate::refs::write_ref`].
-/// * `new_oid = None` deletes the ref via `delete_ref`.
+/// * `new_oid = Some(oid)` writes (creates or updates) the ref to `oid`, with the same
+///   object checks as [`References::update`](crate::refs::References::update).
+/// * `new_oid = None` deletes the ref.
 ///
 /// This is a thin transactional wrapper over the [`crate::refs`] primitives,
 /// matching the in-process ref-update path jj built on `gix::refs::transaction`.

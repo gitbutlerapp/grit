@@ -12,7 +12,6 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{tree_oid_of_commit, DiffStatus, TreeDiffOptions};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head;
 
 const DIRS: usize = 300;
 
@@ -102,7 +101,7 @@ fn staged_diff_on_wide_git_written_cache_tree_matches_git() {
         "expected a wide cache-tree root, got {} children",
         cache.children.len()
     );
-    let head = resolve_head(repo.git_dir()).expect("head");
+    let head = repo.references().head().expect("head");
     let head_tree = tree_oid_of_commit(repo.odb(), head.oid().expect("commit")).expect("tree");
 
     let entries = repo

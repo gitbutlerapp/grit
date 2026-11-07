@@ -9,7 +9,6 @@ use std::process::Command;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::push_plan::{ForceMode, LeaseExpectation, PushPlanContext, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushOutcome};
@@ -401,10 +400,9 @@ fn file_lease_success_updates_tracking_ref() {
         ForceMode::Lease(LeaseExpectation::Tracking),
         &[],
     );
-    let tracking = resolve_ref(
-        open_repo(&fx.grit_client).git_dir(),
-        "refs/remotes/origin/main",
-    )
-    .expect("tracking");
+    let tracking = grit_test_support::refs::at(open_repo(&fx.grit_client).git_dir())
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("tracking");
     assert_eq!(tracking, remote_tip(&fx.bare));
 }

@@ -35,7 +35,6 @@ use std::process::Command;
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::remote::transport::{ConnectOptions, Service, SshTransport, Transport};
@@ -188,7 +187,10 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
     assert!(r.old_oid.is_none(), "new ref has no old value");
 
     // The remote ref now points at our main, and the objects are present.
-    let remote_main = resolve_ref(&bare, "refs/heads/main").expect("remote main written");
+    let remote_main = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main written");
     assert_eq!(remote_main, main_oid, "remote main oid mismatch");
 
     let remote_odb = open_odb(&bare);
@@ -270,7 +272,10 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
     );
 
     // The remote ref must be unchanged by the rejected push.
-    let remote_main_after = resolve_ref(&bare, "refs/heads/main").expect("remote main still set");
+    let remote_main_after = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main still set");
     assert_eq!(
         remote_main_after, main_oid,
         "rejected non-ff ssh push must not move the remote ref"
@@ -311,8 +316,10 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
     assert!(r3.forced, "forced update should be flagged forced");
     assert_eq!(r3.new_oid, Some(diverged));
 
-    let remote_main_forced =
-        resolve_ref(&bare, "refs/heads/main").expect("remote main after force");
+    let remote_main_forced = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main after force");
     assert_eq!(
         remote_main_forced, diverged,
         "forced ssh push must advance the remote ref to the divergent tip"

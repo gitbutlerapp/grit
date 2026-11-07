@@ -30,7 +30,7 @@ use grit_lib::remote::grit_server_space::{fetch_space, hosted_project, Space};
 use grit_lib::remote::HttpClientFactory as _;
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::RemoteUrlKind;
-use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_lib::state::HeadState;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -333,9 +333,11 @@ fn space_error(server: &ServerUrl, e: ServerAuthError) -> anyhow::Error {
 
 /// Branch name → tip, for refs under `prefix`.
 pub(crate) fn tips(repo: &Repository, prefix: &str) -> Result<BTreeMap<String, ObjectId>> {
-    Ok(grit_lib::refs::list_refs(repo.git_dir(), prefix)?
+    Ok(repo
+        .references()
+        .list(prefix)?
         .into_iter()
-        .filter_map(|(name, oid)| Some((name.strip_prefix(prefix)?.to_owned(), oid)))
+        .filter_map(|(name, oid)| Some((name.as_str().strip_prefix(prefix)?.to_owned(), oid)))
         .collect())
 }
 
@@ -490,7 +492,7 @@ pub(crate) fn is_shared(config: &ConfigSet, branch: &str) -> bool {
 
 /// The branch `HEAD` is on, if any.
 fn current_branch(repo: &Repository) -> Option<String> {
-    match resolve_head_for_repository(repo).ok()? {
+    match repo.references().head().ok()? {
         HeadState::Branch { short_name, .. } => Some(short_name),
         _ => None,
     }
@@ -516,7 +518,8 @@ fn fast_forward(repo: &Repository, name: &str, to: &str, oid: ObjectId) -> Resul
         .with_context(|| format!("fast-forwarding {name}"))?;
         Ok(())
     } else {
-        grit_lib::refs::write_ref(repo.git_dir(), format!("refs/heads/{name}"), &oid)
+        repo.references()
+            .update(format!("refs/heads/{name}"), &oid)
             .with_context(|| format!("moving {name}"))
     }
 }
@@ -609,7 +612,8 @@ pub(crate) fn sync_target(
     let ours = tips(repo, "refs/heads/")?.get(target).copied();
     let action = match ours {
         None => {
-            grit_lib::refs::write_ref(repo.git_dir(), format!("refs/heads/{target}"), &theirs)?;
+            repo.references()
+                .update(format!("refs/heads/{target}"), &theirs)?;
             TargetAction::Created
         }
         Some(ours) if ours == theirs => TargetAction::UpToDate,
@@ -772,7 +776,8 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
                 SyncAction::Pushed
             }
             (None, Some(theirs)) => {
-                grit_lib::refs::write_ref(repo.git_dir(), format!("refs/heads/{name}"), &theirs)?;
+                repo.references()
+                    .update(format!("refs/heads/{name}"), &theirs)?;
                 set_tracking(&repo, name, &setup.remote)?;
                 SyncAction::Created
             }

@@ -320,7 +320,7 @@ pub(crate) fn comparison(
             format!("refs/remotes/{remote}/{base}"),
             format!("refs/heads/{base}"),
         ] {
-            if let Ok(oid) = grit_lib::refs::resolve_ref(repo.git_dir(), &name) {
+            if let Ok(oid) = repo.references().resolve(&name) {
                 if !floor.contains(&oid) {
                     floor.push(oid);
                 }
@@ -379,14 +379,15 @@ pub(crate) fn put_together(
 /// rather than overwrite them).
 pub(crate) fn move_branch(repo: &Repository, branch: &str, head: ObjectId) -> Result<()> {
     let checked_out = matches!(
-        grit_lib::state::resolve_head_for_repository(repo),
+        repo.references().head(),
         Ok(grit_lib::state::HeadState::Branch { short_name, .. }) if short_name == branch
     );
     if checked_out {
         crate::commands::reset::run(Some(head.to_hex()), false, false, false, true, false, None)
             .with_context(|| format!("moving {branch} (it is checked out)"))?;
     } else {
-        grit_lib::refs::write_ref(repo.git_dir(), format!("refs/heads/{branch}"), &head)
+        repo.references()
+            .update(format!("refs/heads/{branch}"), &head)
             .with_context(|| format!("moving {branch}"))?;
     }
     Ok(())

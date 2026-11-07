@@ -472,7 +472,7 @@ mod tests {
         assert!(!text.contains("gpgsig"), "{text}");
         assert!(text.contains("\nchange-id "), "{text}");
         assert_eq!(
-            crate::refs::read_head(co.repo.git_dir()).expect("HEAD"),
+            co.repo.references().symbolic("HEAD").expect("HEAD"),
             None,
             "still detached"
         );

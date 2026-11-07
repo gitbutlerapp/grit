@@ -54,7 +54,6 @@ fn assert_invalid_reflog_signature(err: Error) {
 fn seed_main_commit(repo: &Repository, dir: &TempDir) -> ObjectId {
     use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
     use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
-    use grit_lib::refs;
 
     std::fs::write(dir.path().join("f"), "x\n").expect("write");
     let mut index = repo.index().load().expect("index");
@@ -76,8 +75,10 @@ fn seed_main_commit(repo: &Repository, dir: &TempDir) -> ObjectId {
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))
         .expect("commit");
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &oid).expect("branch");
-    refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("sym");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &oid).expect("branch");
+    repo.references()
+        .update_symbolic("HEAD", "refs/heads/main")
+        .expect("sym");
     oid
 }
 

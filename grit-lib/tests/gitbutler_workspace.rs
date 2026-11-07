@@ -12,7 +12,6 @@ use grit_lib::gitbutler::{
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::branch_tracking::{BranchStanding, StandingOptions, TrackedComparison};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head_for_repository;
 use tempfile::TempDir;
 
 fn git(root: &Path, args: &[&str]) -> String {
@@ -112,7 +111,7 @@ fn detects_workspace_and_names_each_merged_head() {
 fn target_comparison(repo: &Repository, counts: bool) -> TrackedComparison {
     BranchStanding::compute(
         repo,
-        &resolve_head_for_repository(repo).expect("HEAD"),
+        &repo.references().head().expect("HEAD"),
         StandingOptions {
             newest_ahead_limit: 10,
             counts,

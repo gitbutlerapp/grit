@@ -7,8 +7,9 @@ use crate::support;
 use std::fs;
 
 use grit_lib::refs::check_ref_format::{RefName, RefNameError, RefNamePolicy, RefNameRef};
-use grit_lib::refs::{collect_alternate_ref_oids, list_refs_glob, ref_matches_glob, write_ref};
+use grit_lib::refs::ref_matches_glob;
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::refs::collect_alternate_ref_oids;
 use tempfile::tempdir;
 
 #[test]
@@ -36,13 +37,44 @@ fn list_refs_glob_prefix_and_pattern() {
     .expect("init");
     let git_dir = root.join(".git");
     let oid = support::stored_commit(&git_dir, 1);
-    write_ref(&git_dir, "refs/heads/topic/one", &oid).expect("write");
-    write_ref(&git_dir, "refs/heads/topic/two", &oid).expect("write");
-    write_ref(&git_dir, "refs/heads/other", &oid).expect("write");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/topic/one",
+        &oid,
+    )
+    .expect("write");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/topic/two",
+        &oid,
+    )
+    .expect("write");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/other",
+        &oid,
+    )
+    .expect("write");
 
-    let globbed = list_refs_glob(&git_dir, "refs/heads/topic/*").expect("glob");
+    let globbed = grit_test_support::refs::at(&git_dir)
+        .references()
+        .list_glob("refs/heads/topic/*")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
+        .expect("glob");
     assert_eq!(globbed.len(), 2);
-    let prefix = list_refs_glob(&git_dir, "refs/heads/o*").expect("prefix glob");
+    let prefix = grit_test_support::refs::at(&git_dir)
+        .references()
+        .list_glob("refs/heads/o*")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
+        .expect("prefix glob");
     assert_eq!(prefix.len(), 1);
 }
 
@@ -67,7 +99,12 @@ fn collect_alternate_ref_oids_reads_linked_object_store() {
     .expect("init alt");
     let alt_git = alt.join(".git");
     let oid = support::stored_commit(&alt_git, 2);
-    write_ref(&alt_git, "refs/heads/from-alt", &oid).expect("alt ref");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&alt_git),
+        "refs/heads/from-alt",
+        &oid,
+    )
+    .expect("alt ref");
 
     let primary_git = primary.join(".git");
     let objects = primary_git.join("objects");
@@ -102,8 +139,18 @@ fn collect_alternate_ref_oids_honors_prefix_config() {
     .expect("init alt");
     let alt_git = alt.join(".git");
     let oid = support::stored_commit(&alt_git, 3);
-    write_ref(&alt_git, "refs/heads/picked", &oid).expect("alt ref");
-    write_ref(&alt_git, "refs/tags/skipped", &oid).expect("tag");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&alt_git),
+        "refs/heads/picked",
+        &oid,
+    )
+    .expect("alt ref");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&alt_git),
+        "refs/tags/skipped",
+        &oid,
+    )
+    .expect("tag");
 
     let primary_git = primary.join(".git");
     fs::write(

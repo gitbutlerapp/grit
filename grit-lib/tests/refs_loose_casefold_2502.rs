@@ -5,7 +5,8 @@ use grit_lib::refs::store::{
     Expected, FilesRefStore, FilesRefStoreConfig, RawRef, RefStore, RefStoreError, RefTransaction,
     RefUpdate,
 };
-use grit_lib::refs::{write_packed_refs_file, PackedRefRecord};
+use grit_lib::refs::PackedRefRecord;
+use grit_lib::test_support::refs::write_packed_refs_file;
 use grit_test_support::{git, rev_parse};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

@@ -1,15 +1,15 @@
-// API docs: https://docs.rs/grit-lib/latest/grit_lib/reflog/index.html
-use grit_lib::refs::reflog::{read_reflog, reflog_path};
-use std::path::Path;
+// API docs: https://docs.rs/grit-lib/latest/grit_lib/repo_handles/struct.RepositoryReflogs.html
+use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::refs::store::RefName;
+use grit_lib::repo::Repository;
 
 fn main() -> grit_lib::error::Result<()> {
-    let git_dir = Path::new(".git");
-    println!(
-        "HEAD reflog path: {}",
-        reflog_path(git_dir, "HEAD").display()
-    );
+    let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
+    let head = RefName::from_trusted("HEAD");
+    println!("HEAD has a reflog: {}", repo.reflogs().exists(&head)?);
 
-    for entry in read_reflog(git_dir, "HEAD")?.iter().take(5) {
+    for row in repo.reflogs().entries(&head)?.iter().take(5) {
+        let entry = &row.entry;
         println!("{} -> {} {}", entry.old_oid, entry.new_oid, entry.message);
     }
     Ok(())

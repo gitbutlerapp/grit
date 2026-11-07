@@ -7,7 +7,6 @@ use grit_lib::objects;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
-use grit_lib::refs;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -100,8 +99,10 @@ fn commit_file(
             &objects::serialize_commit(&commit),
         )
         .expect("commit");
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &co).expect("branch");
-    refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &co).expect("branch");
+    repo.references()
+        .update_symbolic("HEAD", "refs/heads/main")
+        .expect("symhead");
     co
 }
 
@@ -270,7 +271,7 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
         "cancelled reset moved the branch or index"
     );
     assert_eq!(
-        refs::resolve_ref(repo.git_dir(), "HEAD").expect("HEAD"),
+        repo.references().resolve("HEAD").expect("HEAD"),
         head,
         "cancelled reset must not move HEAD"
     );
@@ -328,8 +329,10 @@ fn commit_tree(repo: &Repository, updates: &[(&str, &str)], parent: Option<Objec
             &objects::serialize_commit(&commit),
         )
         .expect("commit");
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &co).expect("branch");
-    refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &co).expect("branch");
+    repo.references()
+        .update_symbolic("HEAD", "refs/heads/main")
+        .expect("symhead");
     co
 }
 
@@ -393,7 +396,7 @@ fn hard_reset_cancel_restores_coalesced_directory_delete() {
         "cancelled reset moved the branch or index"
     );
     assert_eq!(
-        refs::resolve_ref(repo.git_dir(), "HEAD").expect("HEAD"),
+        repo.references().resolve("HEAD").expect("HEAD"),
         commit_b,
         "cancelled reset must not move HEAD"
     );

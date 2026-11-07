@@ -17,10 +17,7 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::ResolveOptions;
 
 use grit_lib::revwalk::rev_parse_error::RevParseError;
-use grit_lib::state::{
-    operation_blocking_switch, resolve_head_for_repository, wt_status_get_state, HeadState,
-    InProgressOperation,
-};
+use grit_lib::state::{HeadState, InProgressOperation};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::error::Error as StdError;
@@ -501,7 +498,7 @@ fn branch_for_upstream(repo: &Repository, opts: &BranchRunOptions) -> Result<Str
 }
 
 fn current_branch_short(repo: &Repository) -> Result<String> {
-    match resolve_head_for_repository(repo)? {
+    match repo.references().head()? {
         HeadState::Branch { short_name, .. } => Ok(short_name),
         HeadState::Detached { .. } => bail!("HEAD is detached; pass the branch name"),
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
@@ -526,7 +523,7 @@ fn resolve_rename(
                 name.clone()
             } else if let Some(name) = current {
                 name
-            } else if let Some(op) = operation_blocking_switch(repo.git_dir())? {
+            } else if let Some(op) = repo.operation().blocking_switch()? {
                 return Err(json_error::operation_in_progress_for_repo(
                     repo,
                     "rename the branch",
@@ -540,7 +537,7 @@ fn resolve_rename(
         2 => (args[0].clone(), args[1].clone(), force),
         _ => bail!("`--move` expects one or two branch names"),
     };
-    if let Some(op) = operation_blocking_switch(repo.git_dir())? {
+    if let Some(op) = repo.operation().blocking_switch()? {
         if matches!(
             op,
             InProgressOperation::Rebase | InProgressOperation::RebaseInteractive
@@ -557,7 +554,7 @@ fn resolve_rename(
 }
 
 fn rebase_branch_short_name(repo: &Repository) -> Result<Option<String>> {
-    let state = wt_status_get_state(repo.git_dir(), &HeadState::Invalid, false)?;
+    let state = repo.operation().status_state()?;
     Ok(state.rebase_branch)
 }
 
@@ -584,7 +581,7 @@ fn list(repo: &Repository, opts: &BranchRunOptions) -> Result<BranchOutcome> {
     let limited = grit_lib::list_limit::Limited::from_vec(rows, limit);
     let rows = limited.items;
     let truncated = limited.truncated;
-    let current = match resolve_head_for_repository(repo)? {
+    let current = match repo.references().head()? {
         HeadState::Branch { short_name, .. } => Some(short_name),
         HeadState::Detached { .. } | HeadState::Invalid => None,
     };

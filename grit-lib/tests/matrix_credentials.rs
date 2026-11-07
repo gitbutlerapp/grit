@@ -773,7 +773,6 @@ mod http_401 {
 
     use grit_lib::error::Error;
     use grit_lib::progress::NullProgress;
-    use grit_lib::refs::resolve_ref;
     use grit_lib::remote::transfer::{FetchOptions, TagMode};
     use grit_lib::remote::transport::http::http_client_arc;
     use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
@@ -1053,7 +1052,9 @@ mod http_401 {
         );
 
         // The fetched ref matches the source tip (cross-check vs system git).
-        let fetched = resolve_ref(&local_git, "refs/remotes/origin/main")
+        let fetched = grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
             .expect("origin/main landed after authed fetch");
         assert_eq!(fetched.to_hex(), main_hex, "fetched tip must match source");
 

@@ -36,7 +36,6 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::{
     ConnectOptions, Connection, GitDaemonTransport, Service, Transport,
@@ -373,11 +372,17 @@ fn v2_clone_from_scratch_no_haves_and_not_v0() {
     drop(conn);
 
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main").unwrap(),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .unwrap(),
         main_oid
     );
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/topic").unwrap(),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/topic")
+            .unwrap(),
         topic_oid
     );
     fsck_clean(&local);
@@ -531,7 +536,10 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
     drop(conn);
 
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main").unwrap(),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .unwrap(),
         main_new,
         "incremental main tip"
     );
@@ -729,11 +737,17 @@ fn v2_tag_modes_all_and_following() {
         drop(conn);
 
         assert_eq!(
-            resolve_ref(&local_git, "refs/tags/v1").expect("v1 tag (All)"),
+            grit_test_support::refs::at(&local_git)
+                .references()
+                .resolve("refs/tags/v1")
+                .expect("v1 tag (All)"),
             v1_oid
         );
         assert_eq!(
-            resolve_ref(&local_git, "refs/tags/vside").expect("vside tag (All)"),
+            grit_test_support::refs::at(&local_git)
+                .references()
+                .resolve("refs/tags/vside")
+                .expect("vside tag (All)"),
             vside_oid,
             "TagMode::All must fetch even unreachable-from-main tags"
         );
@@ -774,13 +788,19 @@ fn v2_tag_modes_all_and_following() {
 
         // v1 points at main's tip's history -> kept.
         assert_eq!(
-            resolve_ref(&local_git, "refs/tags/v1").expect("v1 tag (Following)"),
+            grit_test_support::refs::at(&local_git)
+                .references()
+                .resolve("refs/tags/v1")
+                .expect("v1 tag (Following)"),
             v1_oid,
             "TagMode::Following must keep tags reachable from fetched heads"
         );
         // vside points at the `side` branch we did NOT fetch -> dropped.
         assert!(
-            resolve_ref(&local_git, "refs/tags/vside").is_err(),
+            grit_test_support::refs::at(&local_git)
+                .references()
+                .resolve("refs/tags/vside")
+                .is_err(),
             "TagMode::Following must NOT write a tag unreachable from fetched heads"
         );
         fsck_clean(&local);
@@ -845,7 +865,10 @@ fn v2_ref_prefix_filtering_excludes_tags() {
 
     // No tag ref was written.
     assert!(
-        resolve_ref(&local_git, "refs/tags/v1").is_err(),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/v1")
+            .is_err(),
         "heads-only refspec with TagMode::None must not fetch tags"
     );
     // The outcome's updates are all heads, never tags.
@@ -985,22 +1008,33 @@ fn v2_sha256_fetch_lands_refs_and_objects() {
 
     // Tracking refs + tag landed with the source's 64-hex oids.
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main").unwrap(),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .unwrap(),
         main_oid
     );
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/topic").unwrap(),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/topic")
+            .unwrap(),
         topic_oid
     );
     assert_eq!(
-        resolve_ref(&local_git, "refs/tags/v1").expect("sha256 tag v1"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/v1")
+            .expect("sha256 tag v1"),
         tag_oid
     );
     assert_eq!(outcome.default_branch.as_deref(), Some("main"));
 
     // Cross-check every fetched oid against system `git rev-parse` on the source.
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main")
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
             .unwrap()
             .to_hex(),
         git(&srv.source, &["rev-parse", "refs/heads/main"]).trim()

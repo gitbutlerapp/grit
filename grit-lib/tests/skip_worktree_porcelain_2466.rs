@@ -7,7 +7,6 @@ use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource}
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
-use grit_lib::state::resolve_head_for_repository;
 use grit_lib::worktree::WorktreeError;
 use grit_test_support::git;
 
@@ -39,7 +38,9 @@ fn seed_skip_worktree_repo() -> (tempfile::TempDir, Repository, grit_lib::object
     git(root, &["update-index", "--skip-worktree", "config.local"]);
     std::fs::write(root.join("config.local"), "DB_URL=prod-password-123\n").expect("override");
     std::fs::write(root.join("app.c"), "code2\n").expect("modify app");
-    let head = *resolve_head_for_repository(&repo)
+    let head = *repo
+        .references()
+        .head()
         .expect("head")
         .oid()
         .expect("commit");
@@ -170,7 +171,9 @@ fn reset_hard_parent_same_blob_keeps_skip_worktree_edit() {
     std::fs::write(root.join("app.c"), "code3\n").expect("second commit file");
     git(root, &["add", "app.c"]);
     git(root, &["commit", "-qm", "second"]);
-    let parent = *resolve_head_for_repository(&repo)
+    let parent = *repo
+        .references()
+        .head()
         .expect("parent")
         .oid()
         .expect("commit");

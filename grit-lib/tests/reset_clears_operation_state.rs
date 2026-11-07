@@ -22,7 +22,7 @@ use grit_lib::porcelain::replay_sequence::{
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::state::{primary_in_progress_operation, resolve_head_for_repository};
+use grit_lib::state::primary_in_progress_operation;
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
 /// Fixed git author/committer date so twin repositories (and the stash commits
@@ -153,8 +153,7 @@ fn conflicted_pick_repo() -> (tempfile::TempDir, Repository, ObjectId) {
 fn assert_no_operation_state(repo: &Repository) {
     assert!(!repo.git_dir().join("MERGE_HEAD").exists());
     assert!(!repo.git_dir().join("CHERRY_PICK_HEAD").exists());
-    let head = resolve_head_for_repository(repo).expect("head");
-    let state = grit_lib::state::wt_status_get_state(repo.git_dir(), &head, false).expect("state");
+    let state = repo.operation().status_state().expect("state");
     assert!(
         !state.merge_in_progress && !state.cherry_pick_in_progress,
         "expected no merge/pick in progress: {state:?}"
@@ -416,11 +415,7 @@ fn invalid_reset_preserves_conflicted_merge_and_autostash() {
         ],
     );
     let repo = open_repo(root.path());
-    let head = resolve_head_for_repository(&repo)
-        .unwrap()
-        .oid()
-        .copied()
-        .unwrap();
+    let head = repo.references().head().unwrap().oid().copied().unwrap();
     assert_invalid_reset_preserves_operation(root.path(), &repo, head);
     git(root.path(), &["fsck", "--strict"]);
 }

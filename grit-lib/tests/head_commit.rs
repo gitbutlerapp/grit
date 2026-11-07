@@ -19,7 +19,7 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     EmptyPolicy, HistoryEngineError, HistoryError, Placement, RefScope, RewriteOptions,
 };
-use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_lib::state::HeadState;
 use grit_test_support::git;
 
 fn open(dir: &Path) -> Repository {
@@ -115,7 +115,7 @@ fn head_tree_of_an_invalid_head_is_invalid_head_but_head_state_tree_is_none() {
     fs::write(repo.git_dir().join("HEAD"), "ref: refs/tags/missing\n").expect("write HEAD");
     let err = repo.head_tree().expect_err("invalid");
     assert!(matches!(err, Error::Ref(RefError::InvalidHead)), "{err:?}");
-    let head = resolve_head_for_repository(&repo).expect("resolve");
+    let head = repo.references().head().expect("resolve");
     assert_eq!(head, HeadState::Invalid);
     assert_eq!(head.tree(repo.odb()).expect("lenient"), None);
 }

@@ -7,14 +7,13 @@ use crate::support;
 use std::fs;
 
 use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy, RefNameRef};
-use grit_lib::refs::{
-    append_reflog, delete_ref_cas, effective_log_refs_config, list_refs, list_refs_glob,
-    lock_path_for_ref, pack_remote_tracking_refs_for_clone, packed_refs_entry_exists, read_head,
-    read_log_refs_config, read_raw_ref, resolve_at_n_branch, resolve_ref_cached, resolve_ref_dwim,
-    should_autocreate_reflog, write_ref, write_ref_cached, write_ref_cas, write_symbolic_ref,
-    PackedRefs, RawRefLookup,
-};
+use grit_lib::refs::{lock_path_for_ref, PackedRefs, RawRefLookup};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::refs::{
+    effective_log_refs_config, pack_remote_tracking_refs_for_clone, packed_refs_entry_exists,
+    read_log_refs_config, read_raw_ref, resolve_at_n_branch, resolve_ref_cached,
+    should_autocreate_reflog, write_ref_cached,
+};
 use tempfile::tempdir;
 
 #[test]
@@ -37,7 +36,12 @@ fn packed_refs_load_and_namespace_conflict() {
     .expect("init");
     let git_dir = dir.path().join(".git");
     let oid = |n: u8| support::stored_commit(&git_dir, n);
-    write_ref(&git_dir, "refs/heads/packed", &oid(1)).expect("write");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/packed",
+        &oid(1),
+    )
+    .expect("write");
     fs::write(
         git_dir.join("packed-refs"),
         format!(
@@ -71,9 +75,20 @@ fn write_ref_cas_and_delete_cas_error_paths() {
     .expect("init");
     let git_dir = dir.path().join(".git");
     let oid = |n: u8| support::stored_commit(&git_dir, n);
-    write_ref(&git_dir, "refs/heads/cas", &oid(1)).expect("seed");
-    assert!(write_ref_cas(&git_dir, "refs/heads/cas", &oid(2), oid(9)).is_err());
-    write_ref_cas(&git_dir, "refs/heads/cas", &oid(2), oid(1)).expect("cas ok");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/cas",
+        &oid(1),
+    )
+    .expect("seed");
+    assert!(grit_test_support::refs::at(&git_dir)
+        .references()
+        .compare_and_swap("refs/heads/cas", &oid(9), &oid(2))
+        .is_err());
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .compare_and_swap("refs/heads/cas", &oid(1), &oid(2))
+        .expect("cas ok");
     assert_eq!(
         resolve_ref_cached(
             &git_dir,
@@ -84,7 +99,10 @@ fn write_ref_cas_and_delete_cas_error_paths() {
         .expect("oid"),
         oid(2)
     );
-    delete_ref_cas(&git_dir, "refs/heads/cas", oid(2)).expect("delete cas");
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .compare_and_delete("refs/heads/cas", &oid(2))
+        .expect("delete cas");
 }
 
 #[test]
@@ -99,22 +117,30 @@ fn reflog_policy_and_append() {
     .expect("init");
     let git_dir = dir.path().join(".git");
     let oid = |n: u8| support::stored_commit(&git_dir, n);
-    write_ref(&git_dir, "refs/heads/logged", &oid(2)).expect("write");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/logged",
+        &oid(2),
+    )
+    .expect("write");
     let mode = read_log_refs_config(&git_dir);
     let effective = effective_log_refs_config(&git_dir);
     assert!(should_autocreate_reflog(&git_dir, "refs/heads/logged"));
     let _ = effective;
     let _ = mode;
-    append_reflog(
-        &git_dir,
-        "refs/heads/logged",
-        &oid(1),
-        &oid(2),
-        "Tester <t@e.com> 1700000000 +0000",
-        "coverage",
-        true,
-    )
-    .expect("append");
+    grit_test_support::refs::at(&git_dir)
+        .reflogs()
+        .append(
+            "refs/heads/logged",
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: oid(1),
+                new_oid: oid(2),
+                identity: ("Tester <t@e.com> 1700000000 +0000").to_string(),
+                message: ("coverage").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::Always,
+        )
+        .expect("append");
 }
 
 #[test]
@@ -129,16 +155,48 @@ fn list_refs_resolve_dwim_and_symbolic() {
     .expect("init");
     let git_dir = dir.path().join(".git");
     let oid = |n: u8| support::stored_commit(&git_dir, n);
-    write_ref(&git_dir, "refs/heads/topic", &oid(3)).expect("write");
-    write_symbolic_ref(&git_dir, "refs/heads/sym", "refs/heads/topic").expect("sym");
-    let listed = list_refs(&git_dir, "refs/heads/").expect("list");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/topic",
+        &oid(3),
+    )
+    .expect("write");
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .update_symbolic("refs/heads/sym", "refs/heads/topic")
+        .expect("sym");
+    let listed = grit_test_support::refs::at(&git_dir)
+        .references()
+        .list("refs/heads/")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
+        .expect("list");
     assert!(listed.iter().any(|(n, _)| n.contains("topic")));
-    let (_n, oid_opt) = resolve_ref_dwim(&git_dir, "topic");
-    assert!(oid_opt.is_some());
-    let head = read_head(&git_dir).expect("head");
+    let dwim = grit_test_support::refs::at(&git_dir)
+        .references()
+        .dwim("topic")
+        .expect("dwim")
+        .expect("topic matches");
+    assert!(dwim.name.as_str().ends_with("/topic"));
+    let head = grit_test_support::refs::at(&git_dir)
+        .references()
+        .symbolic("HEAD")
+        .map(|t| t.map(String::from))
+        .expect("head");
     assert!(head.as_deref().is_some_and(|h| h.contains("main")));
     let _ = resolve_at_n_branch(&git_dir, "HEAD");
-    let _ = list_refs_glob(&git_dir, "refs/heads/t*").expect("glob");
+    let _ = grit_test_support::refs::at(&git_dir)
+        .references()
+        .list_glob("refs/heads/t*")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
+        .expect("glob");
     let path = git_dir.join("refs/heads/topic");
     let _ = lock_path_for_ref(&path);
     assert!(matches!(
@@ -162,7 +220,12 @@ fn pack_remote_tracking_refs_for_clone_smoke() {
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("cfg");
     cfg.push_str("[remote \"origin\"]\n\turl = https://example.com/r.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n");
     fs::write(git_dir.join("config"), cfg).expect("write cfg");
-    write_ref(&git_dir, "refs/remotes/origin/main", &oid(4)).expect("remote tracking");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/remotes/origin/main",
+        &oid(4),
+    )
+    .expect("remote tracking");
     pack_remote_tracking_refs_for_clone(&git_dir, "origin").expect("pack remote");
 }
 

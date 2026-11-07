@@ -92,7 +92,7 @@ impl MessageMatcher {
 ///
 /// Uses the same storage rules as [`refs::append_reflog`] (branch reflogs under the
 /// repository common directory for linked worktrees).
-pub fn reflog_path(git_dir: &Path, refname: &str) -> PathBuf {
+pub(crate) fn reflog_path(git_dir: &Path, refname: &str) -> PathBuf {
     reflog_file_path(git_dir, refname)
 }
 
@@ -157,19 +157,6 @@ fn adjust_reflog_shared_perm(git_dir: &Path, path: &Path) {
     }
 }
 
-/// Check whether a reflog exists for the given ref.
-pub fn reflog_exists(git_dir: &Path, refname: &str) -> bool {
-    if let Ok(store) = crate::refs::store::open_ref_store(git_dir) {
-        if store.format() != crate::refs::store::RefStorageFormat::Files {
-            return store
-                .reflog_exists(RefNameRef::from_trusted(refname))
-                .unwrap_or(false);
-        }
-    }
-    let path = reflog_path(git_dir, refname);
-    path.is_file()
-}
-
 /// Read a reflog using Git's loose ref DWIM rules when the direct path is missing.
 ///
 /// Tries `refname`, then `refs/<refname>`, then `refs/heads/<refname>` (when `refname` is not
@@ -193,7 +180,7 @@ pub(crate) fn read_reflog_dwim(git_dir: &Path, refname: &str) -> Result<Vec<Refl
 /// Read all reflog entries for the given ref, in file order (oldest first).
 ///
 /// Returns an empty vec if the reflog file does not exist.
-pub fn read_reflog(git_dir: &Path, refname: &str) -> Result<Vec<ReflogEntry>> {
+pub(crate) fn read_reflog(git_dir: &Path, refname: &str) -> Result<Vec<ReflogEntry>> {
     if crate::refs::store::open_ref_store(git_dir)?.format()
         != crate::refs::store::RefStorageFormat::Files
     {
@@ -393,7 +380,7 @@ fn parse_reflog_line(line: &str) -> Option<ReflogEntry> {
 /// Collect every non-null object ID mentioned in any reflog.
 ///
 /// Used by `fsck` to validate reflog entries across loose-file and reftable backends.
-pub fn all_reflog_oids(git_dir: &Path) -> Result<HashSet<ObjectId>> {
+pub(crate) fn all_reflog_oids(git_dir: &Path) -> Result<HashSet<ObjectId>> {
     if crate::refs::store::open_ref_store(git_dir)?.format()
         != crate::refs::store::RefStorageFormat::Files
     {
@@ -589,7 +576,12 @@ pub(crate) fn read_reflog_on_store(
 /// Expire (prune) reflog entries older than a given timestamp (Unix seconds).
 ///
 /// If `expire_time` is `None`, removes all entries.
-pub fn expire_reflog(git_dir: &Path, refname: &str, expire_time: Option<i64>) -> Result<usize> {
+#[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
+pub(crate) fn expire_reflog(
+    git_dir: &Path,
+    refname: &str,
+    expire_time: Option<i64>,
+) -> Result<usize> {
     let store = crate::refs::store::open_ref_store(git_dir)?;
     let mut pruned = 0usize;
     store.rewrite_reflog_str(RefNameRef::from_trusted(refname), &mut |current| {
@@ -745,7 +737,7 @@ pub(crate) fn reflog_oids_on_store(
 }
 
 /// List all refs that have reflogs.
-pub fn list_reflog_refs(git_dir: &Path) -> Result<Vec<String>> {
+pub(crate) fn list_reflog_refs(git_dir: &Path) -> Result<Vec<String>> {
     if crate::refs::store::open_ref_store(git_dir)?.format()
         != crate::refs::store::RefStorageFormat::Files
     {

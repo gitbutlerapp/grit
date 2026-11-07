@@ -6,7 +6,7 @@ use std::sync::Arc;
 use grit_examples::counting_ref_store::CountingRefStore;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::list_refs_for_repository;
+
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
 };
@@ -30,7 +30,11 @@ fn counting_ref_store_tracks_operations() -> grit_lib::error::Result<()> {
     );
     assert!(counting.read_raw_calls() >= 1);
 
-    let listed = list_refs_for_repository(&repo, "refs/heads/")?;
+    let listed = repo.references().list("refs/heads/").map(|refs| {
+        refs.into_iter()
+            .map(|(n, o)| (String::from(n), o))
+            .collect::<Vec<_>>()
+    })?;
     assert!(listed.iter().any(|(n, _)| n == "refs/heads/wrapped"));
     assert!(counting.for_each_ref_calls() >= 1);
 

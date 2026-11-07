@@ -8,7 +8,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::porcelain::merge::{resolve_merge_source, MergeSourceKind};
-use grit_lib::refs::list_refs_for_repository;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefNameRef, RefStore, RefTransaction, RefUpdate,
     ReflogUpdate,
@@ -81,7 +80,15 @@ fn repository_with_memory_ref_store() {
         grit_lib::refs::store::RefStorageFormat::Memory
     );
 
-    let listed = list_refs_for_repository(&repo, "refs/heads/").expect("list");
+    let listed = repo
+        .references()
+        .list("refs/heads/")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
+        .expect("list");
     assert!(
         listed
             .iter()

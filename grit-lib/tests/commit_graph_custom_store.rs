@@ -18,7 +18,6 @@ use grit_lib::objects::commit_graph::CommitGraphChain;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
-use grit_lib::refs::write_ref;
 use grit_lib::repo::{Repository, RepositoryError};
 use grit_lib::revwalk::RevWalkListOptions;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
@@ -363,7 +362,7 @@ fn commits_newer_than_the_attached_graph_are_still_walked() {
             .write(ObjectKind::Commit, body.as_bytes())
             .expect("commit");
     }
-    write_ref(plain.git_dir(), "refs/heads/main", &tip).expect("move main");
+    grit_test_support::refs::set_ref(&plain, "refs/heads/main", &tip).expect("move main");
 
     let custom = open_custom(dir.path(), Arc::clone(&store), Some(graph)).expect("open");
     store.take_commit_reads();
@@ -466,7 +465,7 @@ fn graph_written_by_git_attaches_to_a_custom_store() {
             commit_body(rev_parse(dir.path(), "main")).as_bytes(),
         )
         .expect("commit");
-    write_ref(files.git_dir(), "refs/heads/main", &next).expect("ref");
+    grit_test_support::refs::set_ref(&files, "refs/heads/main", &next).expect("ref");
     git(
         dir.path(),
         &["commit-graph", "write", "--reachable", "--split=no-merge"],

@@ -1,7 +1,6 @@
 //! Linked worktree admin layout and per-worktree refs vs system `git`.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::{init_worktree_config, Repository};
 use grit_lib::worktree::worktree_ref::{parse_worktree_ref, resolve_ref_storage, RefWorktreeType};
 use grit_lib::worktree::{
@@ -218,8 +217,8 @@ fn per_worktree_refs_resolve_like_git() {
     .expect("add");
 
     let linked_repo = open_grit(&linked);
-    write_ref(
-        linked_repo.git_dir(),
+    grit_test_support::refs::set_ref(
+        &linked_repo,
         "refs/worktree/exclusive",
         &tip.parse().expect("oid"),
     )
@@ -228,7 +227,9 @@ fn per_worktree_refs_resolve_like_git() {
     let git_oid = git_cmd(&linked, &["rev-parse", "refs/worktree/exclusive"])
         .trim()
         .to_owned();
-    let grit_oid = resolve_ref(linked_repo.git_dir(), "refs/worktree/exclusive")
+    let grit_oid = linked_repo
+        .references()
+        .resolve("refs/worktree/exclusive")
         .expect("resolve")
         .to_hex();
     assert_eq!(grit_oid, git_oid);
@@ -293,19 +294,19 @@ fn t2401_remove_linked_worktree_matches_git() {
 }
 
 fn grit_ref_listing(repo: &Repository) -> Vec<String> {
-    use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
-    query_refs(
-        repo,
-        &RefQuery {
-            namespaces: vec![RefNamespace::Custom("refs/".into())],
-            ..RefQuery::default()
-        },
-        &RefQueryOptions::default(),
-    )
-    .expect("query refs")
-    .into_iter()
-    .map(|r| r.full_name)
-    .collect()
+    use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryOptions};
+    repo.references()
+        .query(
+            &RefQuery {
+                namespaces: vec![RefNamespace::Custom("refs/".into())],
+                ..RefQuery::default()
+            },
+            &RefQueryOptions::default(),
+        )
+        .expect("query refs")
+        .into_iter()
+        .map(|r| r.full_name)
+        .collect()
 }
 
 fn git_ref_listing(root: &Path) -> Vec<String> {

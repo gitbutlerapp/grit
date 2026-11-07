@@ -9,12 +9,13 @@ use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::reftable::{
-    read_write_options, reftable_delete_ref_with_write_options,
-    reftable_write_ref_with_write_options, ReftableStack,
-};
+use grit_lib::refs::reftable::ReftableStack;
 use grit_lib::refs::store::{RawRef, RefStore, ReftableRefStore};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::refs::{
+    read_write_options, reftable_delete_ref_with_write_options,
+    reftable_write_ref_with_write_options,
+};
 
 use support::{git_for_each_ref, git_fsck_strict, require_reftable_git, stored_commit};
 

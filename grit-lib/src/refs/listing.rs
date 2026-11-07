@@ -11,7 +11,7 @@
 //!   `refs/heads/main`; `refs/tags/v1*` also matches `refs/tags/v1^{}`).
 //!
 //! ```rust
-//! use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions, SortKey};
+//! use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryOptions, SortKey};
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;
@@ -20,7 +20,7 @@
 //!     namespaces: vec![RefNamespace::Heads],
 //!     ..RefQuery::default()
 //! };
-//! let _branches = query_refs(&repo, &query, &RefQueryOptions::default())?;
+//! let _branches = repo.references().query(&query, &RefQueryOptions::default())?;
 //! # Ok(())
 //! # }
 //! ```
@@ -476,7 +476,7 @@ pub(crate) enum PeelTips {
 /// # Errors
 ///
 /// Propagates ref-store and object-read failures.
-pub fn query_refs(
+pub(crate) fn query_refs(
     repo: &Repository,
     query: &RefQuery,
     options: &RefQueryOptions,

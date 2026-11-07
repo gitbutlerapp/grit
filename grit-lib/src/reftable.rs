@@ -2408,6 +2408,7 @@ impl ReftableStack {
     }
 
     /// First ref name under `prefix` (child path), if any.
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     fn first_ref_name_with_prefix(&self, prefix: &str) -> Result<Option<String>> {
         let names = self.table_names_for_read()?;
         let cached = cached_stack_tables_for_names(&self.reftable_dir, &names)?;
@@ -3529,7 +3530,8 @@ pub(crate) fn reftable_storage_location(git_dir: &Path, refname: &str) -> (PathB
 }
 
 /// Write a ref to a reftable repo using config-derived [`WriteOptions`].
-pub fn reftable_write_ref(
+#[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
+pub(crate) fn reftable_write_ref(
     git_dir: &Path,
     refname: &str,
     oid: &ObjectId,
@@ -3542,7 +3544,8 @@ pub fn reftable_write_ref(
 }
 
 /// Write a ref to a reftable repo with explicit write options (including auto-compaction).
-pub fn reftable_write_ref_with_write_options(
+#[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
+pub(crate) fn reftable_write_ref_with_write_options(
     git_dir: &Path,
     refname: &str,
     oid: &ObjectId,
@@ -3614,7 +3617,8 @@ pub(crate) fn reftable_log_record_for_commit(
 }
 
 /// Write a symbolic ref to a reftable repo.
-pub fn reftable_write_symref(
+#[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
+pub(crate) fn reftable_write_symref(
     git_dir: &Path,
     refname: &str,
     target: &str,
@@ -3655,6 +3659,7 @@ pub fn reftable_write_symref(
 /// Validate a ref batch for a reftable repository without per-ref filesystem scans.
 ///
 /// Loads the merged ref set once, then checks create/update naming rules in memory.
+#[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
 pub(crate) fn verify_ref_transaction_batch_reftable(
     git_dir: &Path,
     items: &[crate::refs::RefBatchItem],
@@ -3768,14 +3773,16 @@ fn test_inject_reftable_transaction_fail() -> Result<()> {
 }
 
 /// Delete a ref from a reftable repo.
-pub fn reftable_delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
+#[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
+pub(crate) fn reftable_delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
     let (store_git_dir, _) = reftable_storage_location(git_dir, refname);
     let opts = read_write_options(&store_git_dir);
     reftable_delete_ref_with_write_options(git_dir, refname, &opts)
 }
 
 /// Delete a ref using explicit reftable write options (for tests and callers that disable auto-compaction).
-pub fn reftable_delete_ref_with_write_options(
+#[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
+pub(crate) fn reftable_delete_ref_with_write_options(
     git_dir: &Path,
     refname: &str,
     opts: &WriteOptions,
@@ -3804,7 +3811,7 @@ fn push_list_ref_entry(git_dir: &Path, rec: &RefRecord, out: &mut Vec<(String, O
 }
 
 /// List all refs in a reftable repo under a given prefix.
-pub fn reftable_list_refs(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
+pub(crate) fn reftable_list_refs(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
     let stack = ReftableStack::open(git_dir)?;
     stack.list_refs_under_prefix(git_dir, prefix)
 }
@@ -3823,7 +3830,7 @@ fn reftable_should_write_log(git_dir: &Path, storage_refname: &str) -> bool {
 }
 
 /// Append a reflog entry for a reftable repo.
-pub fn reftable_append_reflog(
+pub(crate) fn reftable_append_reflog(
     git_dir: &Path,
     refname: &str,
     old_oid: &ObjectId,
@@ -3895,7 +3902,7 @@ fn apply_geometric_factor_from_config(opts: &mut WriteOptions, raw: &str) {
 }
 
 /// Read reftable write options from the repository config (auto-compaction enabled).
-pub fn read_write_options(git_dir: &Path) -> WriteOptions {
+pub(crate) fn read_write_options(git_dir: &Path) -> WriteOptions {
     read_write_options_with_environment(
         git_dir,
         &crate::environment::Environment::empty(),

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use grit_examples::counting_ref_store::CountingRefStore;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::list_refs_for_repository;
+
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
 };
@@ -26,7 +26,11 @@ fn main() -> grit_lib::error::Result<()> {
     let resolved = repo
         .revwalk()
         .resolve("refs/heads/custom-demo", &ResolveOptions::default())?;
-    let listed = list_refs_for_repository(&repo, "refs/heads/")?;
+    let listed = repo.references().list("refs/heads/").map(|refs| {
+        refs.into_iter()
+            .map(|(n, o)| (String::from(n), o))
+            .collect::<Vec<_>>()
+    })?;
 
     println!("resolved={resolved}");
     println!("listed={}", listed.len());

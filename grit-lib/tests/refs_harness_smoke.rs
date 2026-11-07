@@ -2,8 +2,6 @@
 
 use crate::support;
 
-use grit_lib::refs::write_ref;
-
 use support::{each_backend, empty_commit_oid, git_interop_available, git_show_ref};
 
 #[test]
@@ -11,7 +9,12 @@ fn each_backend_inits_and_round_trips_one_ref() {
     each_backend(|_backend, repo| {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, "refs/heads/harness-smoke", &oid).expect("write_ref");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/harness-smoke",
+            &oid,
+        )
+        .expect("write_ref");
 
         let grit_map = support::grit_refs(repo.worktree());
         assert_eq!(

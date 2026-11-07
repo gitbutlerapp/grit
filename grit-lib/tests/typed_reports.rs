@@ -11,7 +11,6 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::reflog::{
     expire_reflog_git, load_gc_reflog_expire_config, ReflogExpireActionKind, ReflogExpireParams,
 };
-use grit_lib::refs::{append_reflog, write_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::TempDir;
 
@@ -80,9 +79,34 @@ fn reflog_expire_reports_actions_dry_run_and_real() {
     let old = ObjectId::zero();
     let identity_old = "T <t@e.com> 1000000 +0000";
     let identity_new = "T <t@e.com> 2000000 +0000";
-    append_reflog(&git_dir, refname, &old, &oid1, identity_old, "old", false).expect("log1");
-    append_reflog(&git_dir, refname, &oid1, &oid2, identity_new, "new", false).expect("log2");
-    write_ref(&git_dir, refname, &oid2).expect("tip");
+    grit_test_support::refs::at(&git_dir)
+        .reflogs()
+        .append(
+            refname,
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: old,
+                new_oid: oid1,
+                identity: (identity_old).to_string(),
+                message: ("old").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::IfAllowed,
+        )
+        .expect("log1");
+    grit_test_support::refs::at(&git_dir)
+        .reflogs()
+        .append(
+            refname,
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: oid1,
+                new_oid: oid2,
+                identity: (identity_new).to_string(),
+                message: ("new").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::IfAllowed,
+        )
+        .expect("log2");
+    grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &oid2)
+        .expect("tip");
 
     let now = 3_000_000_i64;
     let cutoff = 1_500_000_i64;

@@ -269,8 +269,10 @@ fn push_after_set_url_uses_new_pushurl() {
         .expect("set push url");
 
     let client_repo = open(&client);
-    let main_oid =
-        grit_lib::refs::resolve_ref(client_repo.git_dir(), "refs/heads/main").expect("main oid");
+    let main_oid = client_repo
+        .references()
+        .resolve("refs/heads/main")
+        .expect("main oid");
     let remote = grit_lib::remote::Remote::from_config(
         &client_repo.config().snapshot().expect("config"),
         "origin",

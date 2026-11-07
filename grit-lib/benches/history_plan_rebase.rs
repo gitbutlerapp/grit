@@ -9,7 +9,6 @@ use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
-use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
     EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions,
@@ -143,7 +142,7 @@ fn build_rebase_plan_fixture(
         extra_headers: Vec::new(),
     });
     let tip = repo.odb().write(ObjectKind::Commit, &tip_raw).expect("tip");
-    write_ref(repo.git_dir(), "refs/heads/main", &tip).expect("ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &tip).expect("ref");
     (root, repo, fork, onto, tip)
 }
 

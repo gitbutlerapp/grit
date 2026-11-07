@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let index = repo.index().load()?;
     let tree_a = write_tree_from_index(repo.odb(), &index, "")?;
     let commit_a = commit_from_tree(&repo, tree_a, &[], "initial\n")?;
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &commit_a)?;
+    repo.references().update("refs/heads/main", &commit_a)?;
 
     // Topic commit: parent A, adds picked.txt (not on main yet).
     let blob_pick = repo.odb().write(ObjectKind::Blob, b"hello from topic\n")?;
@@ -127,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let index = repo.index().load()?;
     let tree_b = write_tree_from_index(repo.odb(), &index, "")?;
     let commit_b = commit_from_tree(&repo, tree_b, &[commit_a], "add picked file\n")?;
-    refs::write_ref(repo.git_dir(), "refs/heads/topic", &commit_b)?;
+    repo.references().update("refs/heads/topic", &commit_b)?;
 
     // Cherry-pick `topic` onto `main` (still at A).
     let head = repo
@@ -192,7 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &picked.to_hex(),
     );
     let new_commit = commit_from_tree(&repo, new_tree, &[head], &msg)?;
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &new_commit)?;
+    repo.references().update("refs/heads/main", &new_commit)?;
 
     println!("cherry-picked {} onto {}", picked, head);
     println!("new main: {new_commit}");

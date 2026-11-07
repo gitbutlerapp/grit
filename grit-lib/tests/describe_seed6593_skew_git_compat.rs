@@ -115,7 +115,7 @@ fn describe_seed6593_skewed_merge_matches_git_rev_list_without_commit_graph() {
         let idx = (lcg(&mut sample_seed) as usize) % commits.len();
         let head = commits[idx];
         let head_hex = head.to_hex().to_string();
-        grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/main", &head).expect("ref");
+        grit_test_support::refs::set_ref(&repo, "refs/heads/main", &head).expect("ref");
         let mut min_dist = usize::MAX;
         let mut has_ancestor_tag = false;
         for name in &tag_names {

@@ -6,7 +6,6 @@ use grit_lib::commit::encoding;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head;
 use grit_test_support::git;
 
 fn ident() -> String {
@@ -94,7 +93,7 @@ fn init_repo_with_empty_commit(root: &std::path::Path) -> (Repository, ObjectId,
     );
     let repo =
         Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open grit repo");
-    let parent = match resolve_head(repo.git_dir()).expect("head") {
+    let parent = match repo.references().head().expect("head") {
         grit_lib::state::HeadState::Branch { oid: Some(oid), .. } => oid,
         grit_lib::state::HeadState::Detached { oid } => oid,
         _ => panic!("expected base commit"),
@@ -165,7 +164,7 @@ fn git_encoded_commit_readable_by_grit() {
         &["commit", "-m", "caf\u{00e9}", "--author", "T <t@e.com>"],
     );
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = match resolve_head(repo.git_dir()).expect("head") {
+    let head = match repo.references().head().expect("head") {
         grit_lib::state::HeadState::Branch { oid: Some(oid), .. } => oid,
         grit_lib::state::HeadState::Detached { oid } => oid,
         _ => panic!("expected commit at HEAD"),

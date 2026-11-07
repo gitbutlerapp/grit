@@ -1633,7 +1633,7 @@ fn map_rebase_session_error(repo: &Repository, err: LibError) -> anyhow::Error {
     match err {
         RebaseSessionError::NoRebaseInProgress => anyhow::Error::new(LibError::from(err)),
         RebaseSessionError::RebaseAlreadyInProgress => {
-            let kind = grit_lib::state::operation_blocking_switch(repo.git_dir())
+            let kind = repo.operation().blocking_switch()
                 .ok()
                 .flatten()
                 .unwrap_or(grit_lib::state::InProgressOperation::Rebase);
@@ -1702,7 +1702,7 @@ fn run_rebase_check(
 fn resolve_rebase_upstream(repo: &Repository, upstream: Option<&str>) -> Result<ObjectId> {
     if upstream.is_none()
         && matches!(
-            grit_lib::state::resolve_head_for_repository(repo)?,
+            repo.references().head()?,
             grit_lib::state::HeadState::Detached { .. }
         )
     {

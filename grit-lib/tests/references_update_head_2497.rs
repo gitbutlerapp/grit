@@ -8,9 +8,7 @@ use grit_lib::error::Error;
 use grit_lib::error::RefError;
 use grit_lib::ident::Signature;
 use grit_lib::objects::NewCommit;
-use grit_lib::refs::append_reflog;
 use grit_lib::refs::store::{RefName, RefStoreError};
-use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git;
 use std::fs;
@@ -66,7 +64,7 @@ fn issue_repro(repo: &Repository) -> (grit_lib::objects::ObjectId, grit_lib::obj
         .objects()
         .write_commit(&NewCommit::new(tree, who.clone(), who, "two\n").with_parents([c1]))
         .expect("c2");
-    write_ref(repo.git_dir(), "refs/heads/main", &c1).expect("seed main");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &c1).expect("seed main");
     (c1, c2)
 }
 
@@ -168,16 +166,18 @@ fn update_head_with_only_head_reflog_does_not_touch_branch_log() {
     let (c1, c2) = issue_repro(&repo);
     disable_log_all_ref_updates(dir.path());
     let repo = reopen(dir.path());
-    append_reflog(
-        repo.git_dir(),
-        "HEAD",
-        &zero_oid(),
-        &c1,
-        REFLOG_ID,
-        "seed head",
-        true,
-    )
-    .expect("seed HEAD log");
+    repo.reflogs()
+        .append(
+            "HEAD",
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: zero_oid(),
+                new_oid: c1,
+                identity: (REFLOG_ID).to_string(),
+                message: ("seed head").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::Always,
+        )
+        .expect("seed HEAD log");
     assert_eq!(reflog_lines(&log_file(dir.path(), "HEAD")), 1);
     assert_eq!(reflog_lines(&log_file(dir.path(), "refs/heads/main")), 0);
 
@@ -200,16 +200,18 @@ fn update_head_with_only_branch_reflog_does_not_touch_head_log() {
     let (c1, c2) = issue_repro(&repo);
     disable_log_all_ref_updates(dir.path());
     let repo = reopen(dir.path());
-    append_reflog(
-        repo.git_dir(),
-        "refs/heads/main",
-        &zero_oid(),
-        &c1,
-        REFLOG_ID,
-        "seed branch",
-        true,
-    )
-    .expect("seed branch log");
+    repo.reflogs()
+        .append(
+            "refs/heads/main",
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: zero_oid(),
+                new_oid: c1,
+                identity: (REFLOG_ID).to_string(),
+                message: ("seed branch").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::Always,
+        )
+        .expect("seed branch log");
     assert_eq!(reflog_lines(&log_file(dir.path(), "refs/heads/main")), 1);
     assert_eq!(reflog_lines(&log_file(dir.path(), "HEAD")), 0);
 

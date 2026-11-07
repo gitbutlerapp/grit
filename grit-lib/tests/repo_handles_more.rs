@@ -7,7 +7,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::CancelToken;
-use grit_lib::refs;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::ListRefsOptions;
 use grit_lib::repo::Repository;
@@ -485,7 +484,8 @@ fn handle_notes_add_rejects_invalid_existing_notes_ref() {
         .odb()
         .write(ObjectKind::Blob, b"not a commit\n")
         .expect("blob");
-    refs::write_ref(repo.git_dir(), "refs/notes/commits", &blob).expect("seed bad notes ref");
+    grit_test_support::refs::set_ref(&repo, "refs/notes/commits", &blob)
+        .expect("seed bad notes ref");
 
     let notes_before = git_cmd(dir.path(), &["rev-parse", "refs/notes/commits"]);
     let err = repo

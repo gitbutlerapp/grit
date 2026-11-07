@@ -5,7 +5,6 @@ use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy};
-use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::tempdir;
 
@@ -136,7 +135,12 @@ fn write_ref_rejects_invalid_branch_names_without_loose_files() {
     for name in invalid {
         let refname = format!("refs/heads/{name}");
         assert!(
-            write_ref(&git_dir, &refname, &sample_oid()).is_err(),
+            grit_test_support::refs::set_ref(
+                &grit_test_support::refs::at(&git_dir),
+                &refname,
+                &sample_oid()
+            )
+            .is_err(),
             "write_ref must reject {refname}"
         );
         let loose = git_dir.join("refs/heads").join(name);
@@ -161,7 +165,8 @@ fn write_ref_accepts_refs_heads_head_like_git() {
     )
     .expect("init");
     let tip = seed_empty_commit(worktree);
-    write_ref(repo.git_dir(), "refs/heads/HEAD", &tip).expect("plumbing may write refs/heads/HEAD");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/HEAD", &tip)
+        .expect("plumbing may write refs/heads/HEAD");
     assert!(
         git_fsck_strict(worktree),
         "git fsck --strict must pass on refs/heads/HEAD"

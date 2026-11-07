@@ -17,7 +17,7 @@ use grit_lib::porcelain::commit::{
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
 use grit_lib::porcelain::CommitError;
 use grit_lib::progress::{NullProgress, ProgressSink};
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::HeadState;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::{self, Read, Write};
@@ -336,7 +336,7 @@ pub fn run(
     let repo = context::discover()?;
     refuse_gitbutler_workspace(&repo)?;
 
-    match resolve_head(repo.git_dir())? {
+    match repo.references().head()? {
         HeadState::Branch { .. } | HeadState::Detached { .. } => {}
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     }

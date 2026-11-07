@@ -6,7 +6,6 @@ use crate::support;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git;
 use tempfile::TempDir;
@@ -53,8 +52,10 @@ fn commit_file(repo: &Repository, path: &str, contents: &str) -> grit_lib::objec
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))
         .expect("commit");
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &co).expect("branch");
-    refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &co).expect("branch");
+    repo.references()
+        .update_symbolic("HEAD", "refs/heads/main")
+        .expect("symhead");
     co
 }
 
@@ -170,8 +171,10 @@ fn hard_reset_at_head_restores_chmod_only_change() {
             .write(ObjectKind::Commit, &serialize_commit(&commit))
             .expect("commit")
     };
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &head).expect("branch");
-    refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &head).expect("branch");
+    repo.references()
+        .update_symbolic("HEAD", "refs/heads/main")
+        .expect("symhead");
     let mut perms = std::fs::metadata(&path).expect("meta").permissions();
     perms.set_mode(0o100644);
     std::fs::set_permissions(&path, perms).expect("chmod");

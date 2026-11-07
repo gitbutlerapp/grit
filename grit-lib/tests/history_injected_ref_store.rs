@@ -25,7 +25,7 @@ use grit_lib::revwalk::history::{
     RebaseRequest, RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
     StartRebaseOptions,
 };
-use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_lib::state::HeadState;
 
 const TS: &str = "T <t@e.x> 1700000000 +0000";
 
@@ -143,7 +143,7 @@ fn main_tip(refs: &MemoryRefStore) -> ObjectId {
 }
 
 fn head_commit(repo: &Repository) -> ObjectId {
-    match resolve_head_for_repository(repo).expect("HEAD") {
+    match repo.references().head().expect("HEAD") {
         HeadState::Branch {
             refname,
             oid: Some(oid),

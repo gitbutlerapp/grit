@@ -446,7 +446,7 @@ fn pull_rebase_conflict_stops_like_git_and_continues() {
         "branch ref untouched"
     );
     assert_eq!(
-        grit_lib::state::detect_in_progress(repo.git_dir()),
+        repo.operation().in_progress(),
         vec![grit_lib::state::InProgressOperation::Rebase]
     );
 

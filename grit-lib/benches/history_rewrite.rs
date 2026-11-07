@@ -10,7 +10,6 @@ use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
-use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions};
 
@@ -103,7 +102,7 @@ fn build_linear_wide_repo(
         parent = Some(oid);
     }
     let head = parent.expect("head");
-    write_ref(repo.git_dir(), "refs/heads/main", &head).expect("ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &head).expect("ref");
     (root, repo, oldest.expect("oldest"))
 }
 

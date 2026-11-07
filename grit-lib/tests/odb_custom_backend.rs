@@ -12,7 +12,6 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{serialize_tag, TagData};
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::refs::gc::prune_loose_unreachable;
-use grit_lib::refs::write_ref;
 use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_lib::revwalk::rev_list::RevListOptions;
@@ -445,7 +444,7 @@ fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
         .odb()
         .write(ObjectKind::Blob, b"tagged-blob\n")
         .expect("blob");
-    write_ref(repo.git_dir(), "refs/tags/blob-tip", &blob).expect("blob ref");
+    grit_test_support::refs::set_ref(&repo, "refs/tags/blob-tip", &blob).expect("blob ref");
 
     let tree_body = serialize_tree(&[TreeEntry {
         mode: 0o100644,
@@ -456,7 +455,7 @@ fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
         .odb()
         .write(ObjectKind::Tree, &tree_body)
         .expect("tree");
-    write_ref(repo.git_dir(), "refs/tags/tree-tip", &tree).expect("tree ref");
+    grit_test_support::refs::set_ref(&repo, "refs/tags/tree-tip", &tree).expect("tree ref");
 
     let tag_bytes = serialize_tag(&TagData {
         object: blob,
@@ -471,7 +470,7 @@ fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
         .odb()
         .write(ObjectKind::Tag, &tag_bytes)
         .expect("tag object");
-    write_ref(repo.git_dir(), "refs/tags/annotated", &tag_oid).expect("tag ref");
+    grit_test_support::refs::set_ref(&repo, "refs/tags/annotated", &tag_oid).expect("tag ref");
 
     repo.odb().gc().expect("gc");
 

@@ -11,7 +11,6 @@ use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -220,7 +219,7 @@ fn checkout_replaced_src_tree_matches_git_after_issue_2336_shape() {
     .expect("open grit repo");
     checkout_between_trees(&grit_repo, Some(&from_tree), &to_tree).expect("checkout");
     let to_commit = ObjectId::from_hex(&to_commit_hex).expect("commit");
-    refs::write_ref(grit_repo.git_dir(), "HEAD", &to_commit).expect("head");
+    grit_test_support::refs::set_ref(&grit_repo, "HEAD", &to_commit).expect("head");
 
     assert_eq!(
         index_file_count(tmp.path()),
@@ -452,7 +451,7 @@ fn checkout_replaced_src_with_chunked_wholesale_deletes_is_clean() {
     )
     .expect("open grit repo");
     checkout_between_trees(&grit_repo, Some(&from_tree), &to_tree).expect("checkout");
-    refs::write_ref(grit_repo.git_dir(), "HEAD", &new_commit).expect("head");
+    grit_test_support::refs::set_ref(&grit_repo, "HEAD", &new_commit).expect("head");
 
     assert_eq!(
         index_file_count(tmp.path()),

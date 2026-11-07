@@ -136,7 +136,7 @@ fn init_linear_repo(root: &Path) -> (ObjectId, ObjectId) {
 
 fn assert_head_detached(root: &Path) {
     let repo = open_grit(root);
-    match grit_lib::state::resolve_head_for_repository(&repo).expect("head") {
+    match repo.references().head().expect("head") {
         HeadState::Detached { .. } => {}
         other => panic!("expected detached HEAD, got {other:?}"),
     }
@@ -319,7 +319,7 @@ fn git_cherry_pick_then_grit_reads_detached_head() {
     git(root.path(), &["cherry-pick", &side_tip.to_hex()]);
     let git_head = git(root.path(), &["rev-parse", "HEAD"]);
     let repo = open_grit(root.path());
-    match grit_lib::state::resolve_head_for_repository(&repo).expect("head") {
+    match repo.references().head().expect("head") {
         HeadState::Detached { oid } => assert_eq!(oid.to_hex(), git_head),
         other => panic!("expected detached HEAD, got {other:?}"),
     }

@@ -6,7 +6,7 @@ use crate::support;
 
 use grit_lib::maintenance::CommitGraphOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryError, RefQueryOptions};
+use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryError, RefQueryOptions};
 use grit_lib::refs::query_reachability::resolve_commit_filter_target;
 use grit_lib::repo::{InitOptions, Repository};
 use support::{git, git_interop_available, require_reftable_git, Backend};
@@ -22,7 +22,8 @@ fn git_refnames(worktree: &std::path::Path, extra: &[&str]) -> Vec<String> {
 }
 
 fn grit_refnames(repo: &Repository, query: RefQuery) -> Vec<String> {
-    query_refs(repo, &query, &RefQueryOptions::default())
+    repo.references()
+        .query(&query, &RefQueryOptions::default())
         .expect("query_refs")
         .into_iter()
         .map(|r| r.full_name)
@@ -529,16 +530,17 @@ fn bounded_contains_does_not_load_irrelevant_trailing_tips() {
     std::fs::write(repo.git_dir().join("packed-refs"), packed).unwrap();
     objects.reads.lock().unwrap().clear();
     objects.info.lock().unwrap().clear();
-    let rows = query_refs(
-        &repo,
-        &RefQuery {
-            contains: vec![target],
-            limit: Some(100),
-            ..RefQuery::default()
-        },
-        &RefQueryOptions::default(),
-    )
-    .unwrap();
+    let rows = repo
+        .references()
+        .query(
+            &RefQuery {
+                contains: vec![target],
+                limit: Some(100),
+                ..RefQuery::default()
+            },
+            &RefQueryOptions::default(),
+        )
+        .unwrap();
     assert_eq!(
         rows.iter().map(|r| r.full_name.clone()).collect::<Vec<_>>(),
         (0..100)
@@ -699,15 +701,16 @@ fn merged_filter_peels_loose_tips_with_one_header_read() {
         .unwrap();
     }
     objects.info.lock().unwrap().clear();
-    let rows = query_refs(
-        &repo,
-        &RefQuery {
-            merged: vec![base],
-            ..RefQuery::default()
-        },
-        &RefQueryOptions::default(),
-    )
-    .unwrap();
+    let rows = repo
+        .references()
+        .query(
+            &RefQuery {
+                merged: vec![base],
+                ..RefQuery::default()
+            },
+            &RefQueryOptions::default(),
+        )
+        .unwrap();
     assert_eq!(
         rows.iter()
             .map(|r| r.full_name.as_str())
@@ -799,7 +802,9 @@ fn filtered_listings_report_git_peels() {
                     None => l.to_owned(),
                 })
                 .collect();
-            let got: Vec<String> = query_refs(&repo, &query, &RefQueryOptions::default())
+            let got: Vec<String> = repo
+                .references()
+                .query(&query, &RefQueryOptions::default())
                 .expect("query_refs")
                 .into_iter()
                 .map(|r| match r.peeled {
@@ -830,16 +835,17 @@ fn bounded_contains_memoizes_shared_negative_history() {
     packed.push_str(&format!("{target} refs/heads/z-match\n"));
     std::fs::write(repo.git_dir().join("packed-refs"), packed).unwrap();
     objects.reads.lock().unwrap().clear();
-    let rows = query_refs(
-        &repo,
-        &RefQuery {
-            contains: vec![target],
-            limit: Some(1),
-            ..RefQuery::default()
-        },
-        &RefQueryOptions::default(),
-    )
-    .unwrap();
+    let rows = repo
+        .references()
+        .query(
+            &RefQuery {
+                contains: vec![target],
+                limit: Some(1),
+                ..RefQuery::default()
+            },
+            &RefQueryOptions::default(),
+        )
+        .unwrap();
     assert_eq!(rows[0].short_name, "z-match");
     let reads = objects.reads.lock().unwrap();
     for oid in trunk {
@@ -983,16 +989,17 @@ fn bounded_contains_validates_targets_even_with_zero_limit_or_no_candidates() {
     let missing = ObjectId::from_hex("0000000000000000000000000000000000000001").unwrap();
     for limit in [0, 1] {
         for target in [blob, missing] {
-            let err = query_refs(
-                &repo,
-                &RefQuery {
-                    contains: vec![target],
-                    limit: Some(limit),
-                    ..RefQuery::default()
-                },
-                &RefQueryOptions::default(),
-            )
-            .unwrap_err();
+            let err = repo
+                .references()
+                .query(
+                    &RefQuery {
+                        contains: vec![target],
+                        limit: Some(limit),
+                        ..RefQuery::default()
+                    },
+                    &RefQueryOptions::default(),
+                )
+                .unwrap_err();
             match target {
                 t if t == blob => assert!(matches!(err, RefQueryError::NotCommit(_))),
                 _ => assert!(matches!(err, RefQueryError::MissingObject(_))),

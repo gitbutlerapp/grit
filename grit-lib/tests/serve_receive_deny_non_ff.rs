@@ -9,7 +9,6 @@ use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
     ProtocolVersion, ReceiveOutcome, ReceivePack, ReceivePolicy, RefUpdateRefusal, ServeOptions,
 };
@@ -181,7 +180,13 @@ fn create_then_fast_forward_is_accepted_and_git_fsck_passes() {
         ),
     );
     assert!(outcome.updates[0].error.is_none(), "{:?}", outcome.updates);
-    assert_eq!(resolve_ref(&f.bare, "refs/heads/main").unwrap(), one);
+    assert_eq!(
+        grit_test_support::refs::at(&f.bare)
+            .references()
+            .resolve("refs/heads/main")
+            .unwrap(),
+        one
+    );
 
     let two = commit(&f.source, "a", "1\n2\n");
     let three = commit(&f.source, "b", "3\n");
@@ -199,7 +204,13 @@ fn create_then_fast_forward_is_accepted_and_git_fsck_passes() {
         "fast-forward must be accepted: {:?}",
         outcome.updates
     );
-    assert_eq!(resolve_ref(&f.bare, "refs/heads/main").unwrap(), three);
+    assert_eq!(
+        grit_test_support::refs::at(&f.bare)
+            .references()
+            .resolve("refs/heads/main")
+            .unwrap(),
+        three
+    );
     assert!(f.repo.odb().exists(&two), "pushed objects must be migrated");
     git(&f.bare, &["fsck", "--strict"]);
 }
@@ -241,7 +252,13 @@ fn fast_forward_with_descendants_dated_before_the_old_tip_is_accepted() {
             "skewed fast-forward refused (commit-graph: {with_commit_graph}): {:?}",
             outcome.updates
         );
-        assert_eq!(resolve_ref(&f.bare, "refs/heads/main").unwrap(), new);
+        assert_eq!(
+            grit_test_support::refs::at(&f.bare)
+                .references()
+                .resolve("refs/heads/main")
+                .unwrap(),
+            new
+        );
         git(&f.bare, &["fsck", "--strict"]);
     }
 }
@@ -277,7 +294,13 @@ fn non_fast_forward_branch_update_is_refused() {
         outcome.updates[0].error,
         Some(RefUpdateRefusal::NonFastForward)
     );
-    assert_eq!(resolve_ref(&f.bare, "refs/heads/main").unwrap(), two);
+    assert_eq!(
+        grit_test_support::refs::at(&f.bare)
+            .references()
+            .resolve("refs/heads/main")
+            .unwrap(),
+        two
+    );
 
     // Rewinding to an existing ancestor is a non-fast-forward too.
     let rewind = serve_push(
@@ -288,7 +311,13 @@ fn non_fast_forward_branch_update_is_refused() {
         rewind.updates[0].error,
         Some(RefUpdateRefusal::NonFastForward)
     );
-    assert_eq!(resolve_ref(&f.bare, "refs/heads/main").unwrap(), two);
+    assert_eq!(
+        grit_test_support::refs::at(&f.bare)
+            .references()
+            .resolve("refs/heads/main")
+            .unwrap(),
+        two
+    );
     git(&f.bare, &["fsck", "--strict"]);
 }
 
@@ -323,7 +352,13 @@ fn non_branch_ref_rewrite_is_not_subject_to_the_policy() {
         "git only applies denyNonFastForwards to refs/heads/: {:?}",
         outcome.updates
     );
-    assert_eq!(resolve_ref(&f.bare, "refs/tags/v1").unwrap(), unrelated);
+    assert_eq!(
+        grit_test_support::refs::at(&f.bare)
+            .references()
+            .resolve("refs/tags/v1")
+            .unwrap(),
+        unrelated
+    );
 }
 
 #[test]
@@ -347,5 +382,11 @@ fn branch_update_to_a_non_commit_is_refused_as_bad_ref() {
         &push_body(Some(one), tree, "refs/heads/main", &empty_pack(&f.source)),
     );
     assert_eq!(outcome.updates[0].error, Some(RefUpdateRefusal::BadRef));
-    assert_eq!(resolve_ref(&f.bare, "refs/heads/main").unwrap(), one);
+    assert_eq!(
+        grit_test_support::refs::at(&f.bare)
+            .references()
+            .resolve("refs/heads/main")
+            .unwrap(),
+        one
+    );
 }

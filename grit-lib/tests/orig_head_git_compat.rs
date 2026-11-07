@@ -26,7 +26,6 @@ use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, ExecSpec, HistoryError, PreRebase, RebaseOntoOptions, RebaseOutcome,
     RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
-use grit_lib::state::{read_orig_head_for_repository, write_orig_head};
 use grit_test_support::{git, git_cmd};
 use tempfile::TempDir;
 
@@ -123,7 +122,7 @@ fn assert_orig_head_undoes(dir: &Path, before: ObjectId) {
     let repo = open(dir);
     assert_eq!(git_orig_head(dir), Some(before), "git reads ORIG_HEAD");
     assert_eq!(
-        read_orig_head_for_repository(&repo).expect("read"),
+        repo.operation().state().map(|s| s.orig_head).expect("read"),
         Some(before)
     );
     assert!(
@@ -769,7 +768,7 @@ fn reftable_reset_stores_orig_head_in_the_ref_store() {
         "reftable keeps ORIG_HEAD in the stack, not a loose file"
     );
     assert_eq!(
-        read_orig_head_for_repository(&repo).expect("read"),
+        repo.operation().state().map(|s| s.orig_head).expect("read"),
         Some(second)
     );
     assert_eq!(
@@ -789,13 +788,20 @@ fn write_orig_head_overwrites_and_git_reads_it() {
     let (tmp, main, topic) = issue_repo();
     let dir = tmp.path();
     let repo = open(dir);
-    assert_eq!(read_orig_head_for_repository(&repo).expect("read"), None);
-    write_orig_head(&repo, topic).expect("write");
+    assert_eq!(
+        repo.operation().state().map(|s| s.orig_head).expect("read"),
+        None
+    );
+    repo.references()
+        .update_direct("ORIG_HEAD", &topic)
+        .expect("write");
     assert_eq!(git_orig_head(dir), Some(topic));
-    write_orig_head(&repo, main).expect("overwrite");
+    repo.references()
+        .update_direct("ORIG_HEAD", &main)
+        .expect("overwrite");
     assert_eq!(git_orig_head(dir), Some(main));
     assert_eq!(
-        read_orig_head_for_repository(&repo).expect("read"),
+        repo.operation().state().map(|s| s.orig_head).expect("read"),
         Some(main)
     );
     assert_eq!(

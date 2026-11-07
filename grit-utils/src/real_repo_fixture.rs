@@ -163,9 +163,10 @@ fn stored_marker(dest: &Path, name: &str) -> Result<Option<String>> {
 
 /// Branch refs that must not appear after a single-branch tag clone.
 pub fn list_branch_head_refs(repo: &Path) -> Result<Vec<String>> {
-    let mut refs = grit_lib::refs::list_refs(repo, "refs/heads/")?;
-    refs.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(refs.into_iter().map(|(name, _)| name).collect())
+    let refs = grit_test_support::refs::at(repo)
+        .references()
+        .list("refs/heads/")?;
+    Ok(refs.into_iter().map(|(name, _)| name.into()).collect())
 }
 
 /// Remove branch tips introduced by campaign network scenarios on a tag-pinned bare remote.

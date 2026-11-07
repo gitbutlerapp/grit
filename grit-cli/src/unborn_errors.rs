@@ -4,7 +4,7 @@ use anyhow::Error;
 use grit_lib::error::Error as LibError;
 use grit_lib::error::RefError;
 use grit_lib::repo::Repository;
-use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_lib::state::HeadState;
 
 use crate::context;
 use crate::error_kind::ErrorKind;
@@ -39,7 +39,7 @@ pub fn unborn_head_from_cwd() -> Option<Error> {
 
 /// When `repo` has an unborn branch at `HEAD`, return a guided error.
 pub fn unborn_head_from_repo(repo: &Repository) -> Option<Error> {
-    match resolve_head_for_repository(repo).ok()? {
+    match repo.references().head().ok()? {
         HeadState::Branch {
             short_name,
             oid: None,

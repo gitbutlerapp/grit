@@ -8,7 +8,6 @@ use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::{read_advertisement, Connection};
@@ -120,7 +119,10 @@ fn assert_config_unchanged(git_dir: &Path, before: &[u8]) {
 
 fn assert_no_tracking_ref_for_traversal(git_dir: &Path) {
     assert!(
-        resolve_ref(git_dir, "refs/remotes/origin/../../../config").is_err(),
+        grit_test_support::refs::at(git_dir)
+            .references()
+            .resolve("refs/remotes/origin/../../../config")
+            .is_err(),
         "must not create a tracking ref for traversal-shaped names"
     );
 }

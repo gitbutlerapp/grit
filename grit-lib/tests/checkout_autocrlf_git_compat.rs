@@ -8,7 +8,6 @@ use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn git_eol(repo: &std::path::Path, path: &str) -> String {
@@ -54,7 +53,7 @@ fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
     repo.index().write(&mut index).expect("write index");
-    let parent = refs::resolve_ref(repo.git_dir(), "HEAD").ok();
+    let parent = repo.references().resolve("HEAD").ok();
     let commit_data = CommitData {
         tree,
         parents: parent.into_iter().collect(),
@@ -72,7 +71,7 @@ fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
         .odb()
         .write(ObjectKind::Commit, &bytes)
         .expect("commit");
-    refs::write_ref(repo.git_dir(), "HEAD", &commit_oid).expect("head");
+    grit_test_support::refs::set_ref(&repo, "HEAD", &commit_oid).expect("head");
     tree
 }
 

@@ -6,7 +6,7 @@ use grit_lib::objects::{CommitData, OidHashMap};
 use grit_lib::refs::branch_tracking::{
     compare_with_target_optional, TargetComparisonOptions, TargetSpec,
 };
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::HeadState;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -200,7 +200,7 @@ pub fn run(args: &ShortlogCliArgs) -> Result<ShortlogOutcome> {
     let Some(comparison) =
         compare_with_target_optional(&repo, &opts).context("could not compare with target")?
     else {
-        let head = resolve_head(repo.git_dir()).context("could not resolve HEAD")?;
+        let head = repo.references().head().context("could not resolve HEAD")?;
         let branch = match head {
             HeadState::Branch { short_name, .. } => short_name,
             _ => "HEAD".to_owned(),

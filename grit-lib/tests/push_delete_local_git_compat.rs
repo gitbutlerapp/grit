@@ -3,7 +3,6 @@
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::refs;
 use grit_lib::remote::push_plan::{
     open_push_destination, PushPlanError, PushPlanKind, PushRequest,
 };
@@ -180,7 +179,10 @@ fn push_delete_tag_on_local_remote() {
         .unwrap();
 
     let local_git = local.join(".git");
-    let tag_oid = refs::resolve_ref(&local_git, "refs/tags/v1").unwrap();
+    let tag_oid = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/tags/v1")
+        .unwrap();
     grit_lib::repo::Repository::open(
         &local_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -204,7 +206,10 @@ fn push_delete_tag_on_local_remote() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push tag");
-    assert!(refs::resolve_ref(&origin, "refs/tags/v1").is_ok());
+    assert!(grit_test_support::refs::at(&origin)
+        .references()
+        .resolve("refs/tags/v1")
+        .is_ok());
 
     grit_lib::repo::Repository::open(
         &local_git,
@@ -229,5 +234,8 @@ fn push_delete_tag_on_local_remote() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("delete tag");
-    assert!(refs::resolve_ref(&origin, "refs/tags/v1").is_err());
+    assert!(grit_test_support::refs::at(&origin)
+        .references()
+        .resolve("refs/tags/v1")
+        .is_err());
 }

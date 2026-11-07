@@ -15,7 +15,6 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{
     serialize_commit, serialize_tag, CommitData, ObjectId, ObjectKind, TagData,
 };
-use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::TempDir;
 
@@ -146,13 +145,13 @@ fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
         parent = Some(oid);
     }
     let head = *commits.last().expect("commits");
-    write_ref(repo.git_dir(), "refs/heads/main", &head).expect("write main");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &head).expect("write main");
 
     let branch_refs = 200usize.min(commits.len());
     let step = commits.len() / branch_refs.max(1);
     for i in 0..branch_refs {
         let oid = commits[i * step];
-        write_ref(repo.git_dir(), &format!("refs/heads/bench/b{i:05}"), &oid)
+        grit_test_support::refs::set_ref(&repo, &format!("refs/heads/bench/b{i:05}"), &oid)
             .expect("write branch ref");
     }
 
@@ -170,7 +169,8 @@ fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
         .odb()
         .write(ObjectKind::Tag, &serialize_tag(&tag))
         .expect("write tag");
-    write_ref(repo.git_dir(), "refs/tags/bench-tag", &tag_oid).expect("write tag ref");
+    grit_test_support::refs::set_ref(&repo, "refs/tags/bench-tag", &tag_oid)
+        .expect("write tag ref");
 
     repo
 }
@@ -314,8 +314,10 @@ impl HistoryBenchFixtures {
         let commit_count = history_commit_count();
         let root = tempfile::tempdir().expect("history tempdir");
         let repo = build_history_repo(root.path(), commit_count);
-        let head =
-            grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("read head");
+        let head = repo
+            .references()
+            .resolve("refs/heads/main")
+            .expect("read head");
 
         if git_commit_graph_write(root.path()).is_err() {
             write_grit_commit_graph(repo.odb().objects_dir(), repo.odb())

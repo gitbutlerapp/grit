@@ -6,7 +6,6 @@ use grit_test_support::rev_parse;
 use std::path::{Path, PathBuf};
 
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, FetchOutcome, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, Service, SshTransport, Transport};
 use grit_test_support::git;
@@ -77,7 +76,10 @@ fn update_mode(outcome: &FetchOutcome, local_ref: &str) -> UpdateMode {
 }
 
 fn assert_annotated_tag(dir: &Path, name: &str, expected: ObjectId) {
-    let got = resolve_ref(&dir.join(".git"), name).expect("tag ref");
+    let got = grit_test_support::refs::at(&dir.join(".git"))
+        .references()
+        .resolve(name)
+        .expect("tag ref");
     assert_eq!(got, expected, "{name} must point at the tag object");
     assert_eq!(git(dir, &["cat-file", "-t", name]).trim(), "tag");
 }
@@ -123,7 +125,10 @@ fn forced_annotated_tag_refspec_moves_retargeted_tag() {
         UpdateMode::TagUpdateRejected
     );
     assert_eq!(
-        resolve_ref(&grit_dn.join(".git"), "refs/tags/rel").unwrap(),
+        grit_test_support::refs::at(&grit_dn.join(".git"))
+            .references()
+            .resolve("refs/tags/rel")
+            .unwrap(),
         old
     );
 
@@ -147,7 +152,10 @@ fn tag_pattern_refspec_is_not_subject_to_following() {
     assert_eq!(update_mode(&outcome, "refs/tags/rel"), UpdateMode::New);
     assert_annotated_tag(&grit_dn, "refs/tags/rel", rev_parse(&up, "refs/tags/rel"));
     assert_eq!(
-        resolve_ref(&grit_dn.join(".git"), "refs/tags/v1").unwrap(),
+        grit_test_support::refs::at(&grit_dn.join(".git"))
+            .references()
+            .resolve("refs/tags/v1")
+            .unwrap(),
         rev_parse(&up, "refs/tags/v1")
     );
     fsck(&grit_dn);

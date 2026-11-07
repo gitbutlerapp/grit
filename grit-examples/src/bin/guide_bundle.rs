@@ -8,7 +8,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head;
+
 use std::path::{Path, PathBuf};
 
 fn open_repo(root: &Path) -> Result<Repository> {
@@ -41,7 +41,7 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| root.join("guide.bundle"));
 
     let repo = open_repo(&root)?;
-    let head = resolve_head(repo.git_dir())?;
+    let head = repo.references().head()?;
     let tip: ObjectId = head
         .oid()
         .cloned()

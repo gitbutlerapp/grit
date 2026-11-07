@@ -8,14 +8,12 @@ use grit_lib::worktree::WorktreeError;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::MergeError;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     EmptyPolicy, ExecSpec, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RebaseSessionError,
     RefScope, RewriteOptions, StartRebaseOptions,
 };
-use grit_lib::state::resolve_head;
-use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation};
+use grit_lib::state::{HeadState, InProgressOperation};
 use support::{
     assert_git_fsck_strict, build_commit_dag, git, git_merge_base_is_ancestor,
     git_rev_parse_verify, open_grit_repo, HistoryRepo,
@@ -259,7 +257,7 @@ fn rebase_session_conflict_stop_continue_and_abort() {
     assert_eq!(stop.remaining, vec![tip]);
     assert!(stop.conflicts.iter().any(|c| c.path == "f.txt"));
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
+        grit.references().resolve("refs/heads/topic").unwrap(),
         orig_tip
     );
     assert!(grit.git_dir().join("rebase-merge/grit-plan").is_file());
@@ -328,7 +326,7 @@ fn rebase_session_conflict_stop_continue_and_abort() {
         .expect("stop");
     grit2.history().abort_rebase(&test_ident()).expect("abort");
     assert_eq!(git_oid(wt2, "topic"), orig2);
-    assert!(resolve_head(grit2.git_dir()).unwrap().branch_name() == Some("topic"));
+    assert!(grit2.references().head().unwrap().branch_name() == Some("topic"));
     assert_git_fsck_strict(wt2);
 }
 
@@ -814,7 +812,7 @@ fn skip_drops_conflicting_commit() {
     assert_eq!(git_oid(wt, "HEAD"), before);
     assert_eq!(git_oid(wt, "topic"), onto);
     assert_eq!(
-        resolve_head(grit.git_dir()).unwrap().branch_name(),
+        grit.references().head().unwrap().branch_name(),
         Some("topic")
     );
     assert_eq!(git(wt, &["show", "HEAD:f.txt"]), "main change\n");
@@ -976,7 +974,7 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
         )
         .expect("stop");
     let head_before = git_oid(wt, "HEAD");
-    let branch_before = resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap();
+    let branch_before = grit.references().resolve("refs/heads/topic").unwrap();
 
     let mut pull_progress = NullProgress;
     let pull_err = pull(
@@ -1030,7 +1028,7 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
 
     assert_eq!(git_oid(wt, "HEAD"), head_before);
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
+        grit.references().resolve("refs/heads/topic").unwrap(),
         branch_before
     );
     assert_eq!(branch_before, orig_tip);
@@ -1074,11 +1072,11 @@ fn stop_writes_markers_and_detaches_head() {
     let body = std::fs::read_to_string(wt.join("f.txt")).expect("f.txt");
     assert!(body.contains("<<<<<<<"));
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
+        grit.references().resolve("refs/heads/topic").unwrap(),
         orig_tip
     );
     assert!(matches!(
-        resolve_head(grit.git_dir()).expect("head"),
+        grit.references().head().expect("head"),
         grit_lib::state::HeadState::Detached { .. }
     ));
     assert_head_reflog_chain(wt);
@@ -1121,7 +1119,7 @@ fn conflict_stop_abort_head_reflog_reattaches() {
     let detach_line = log_before_abort.lines().last().expect("detach");
     grit.history().abort_rebase(&test_ident()).expect("abort");
     assert_eq!(
-        resolve_head(grit.git_dir()).unwrap().branch_name(),
+        grit.references().head().unwrap().branch_name(),
         Some("topic")
     );
     assert_eq!(git_oid(wt, "topic"), orig_tip);
@@ -1166,7 +1164,7 @@ fn exec_replay_conflict_stops_resumably_and_continue_runs_command() {
     };
     assert!(stop.conflicts.iter().any(|c| c.path == "f.txt"));
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
+        grit.references().resolve("refs/heads/topic").unwrap(),
         orig_tip
     );
     assert!(wt.join(".git/rebase-merge/grit-plan").is_file());
@@ -1390,7 +1388,7 @@ fn branch_refs_unchanged_until_final_step() {
         )
         .expect("stop");
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
+        grit.references().resolve("refs/heads/topic").unwrap(),
         orig_tip
     );
     std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
@@ -1404,7 +1402,7 @@ fn branch_refs_unchanged_until_final_step() {
         )
         .expect("continue");
     assert_ne!(
-        resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
+        grit.references().resolve("refs/heads/topic").unwrap(),
         orig_tip
     );
     assert_git_fsck_strict(wt);
@@ -1431,9 +1429,11 @@ fn git_status_reports_rebase_in_progress_after_stop() {
         "git status should report rebase: {status}"
     );
     assert!(
-        detect_in_progress(grit.git_dir()).contains(&InProgressOperation::Rebase),
+        grit.operation()
+            .in_progress()
+            .contains(&InProgressOperation::Rebase),
         "expected non-interactive rebase, got {:?}",
-        detect_in_progress(grit.git_dir())
+        grit.operation().in_progress()
     );
     assert_git_fsck_strict(wt);
 }
@@ -1684,7 +1684,7 @@ fn conflict_stop_detaches_head_at_onto_not_upstream() {
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("stop");
-    let detached = match resolve_head(grit.git_dir()).expect("head") {
+    let detached = match grit.references().head().expect("head") {
         HeadState::Detached { oid } => oid,
         other => panic!("expected detached HEAD during stop, got {other:?}"),
     };
@@ -1806,7 +1806,7 @@ fn multi_step_conflict_continue_keeps_done_commits_in_history() {
     assert_eq!(stop.done, vec![commit_one]);
     assert!(stop.remaining.starts_with(&[commit_two, commit_three][..]));
 
-    let replayed_one = match resolve_head(grit.git_dir()).expect("head") {
+    let replayed_one = match grit.references().head().expect("head") {
         HeadState::Detached { oid } => oid,
         other => panic!("expected detached HEAD at replayed commit one, got {other:?}"),
     };
@@ -1914,7 +1914,7 @@ fn refscope_head_leaves_other_branch_refs_on_continue() {
 
     let grit = open_grit(wt);
     git(wt, &["switch", "topic"]);
-    let mirror_before = resolve_ref(grit.git_dir(), "refs/heads/mirror").unwrap();
+    let mirror_before = grit.references().resolve("refs/heads/mirror").unwrap();
     let _ = grit
         .history()
         .start_rebase(
@@ -1936,14 +1936,11 @@ fn refscope_head_leaves_other_branch_refs_on_continue() {
         )
         .expect("continue");
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/mirror").unwrap(),
+        grit.references().resolve("refs/heads/mirror").unwrap(),
         mirror_before,
         "RefScope::Head must not move unrelated branch refs"
     );
-    assert_ne!(
-        resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
-        tip
-    );
+    assert_ne!(grit.references().resolve("refs/heads/topic").unwrap(), tip);
     assert_git_fsck_strict(wt);
 }
 
@@ -1989,8 +1986,8 @@ fn stacked_branches_move_atomically_after_continue() {
         },
         exec: None,
     };
-    let main_before = resolve_ref(grit.git_dir(), "refs/heads/main").unwrap();
-    let stacked_before = resolve_ref(grit.git_dir(), "refs/heads/stacked").unwrap();
+    let main_before = grit.references().resolve("refs/heads/main").unwrap();
+    let stacked_before = grit.references().resolve("refs/heads/stacked").unwrap();
     match grit
         .history()
         .start_rebase(
@@ -2021,8 +2018,8 @@ fn stacked_branches_move_atomically_after_continue() {
         }
         other => panic!("expected conflict stop, got {other:?}"),
     }
-    let main_after = resolve_ref(grit.git_dir(), "refs/heads/main").unwrap();
-    let stacked_after = resolve_ref(grit.git_dir(), "refs/heads/stacked").unwrap();
+    let main_after = grit.references().resolve("refs/heads/main").unwrap();
+    let stacked_after = grit.references().resolve("refs/heads/stacked").unwrap();
     assert_ne!(main_before, main_after);
     assert_ne!(stacked_before, stacked_after);
     assert_git_fsck_strict(wt);
@@ -2263,7 +2260,7 @@ fn switch_refuses_during_git_started_rebase_and_git_continue_still_moves_only_to
         );
     }
     assert!(matches!(
-        resolve_head(grit.git_dir()).unwrap(),
+        grit.references().head().unwrap(),
         HeadState::Detached { oid } if oid == head_before
     ));
     assert_eq!(git_oid(wt, "main"), main_tip);
@@ -2347,8 +2344,7 @@ fn status_reports_git_started_rebase_with_branch_and_git_continue_step() {
         },
     )
     .expect("standing");
-    let header =
-        StatusHeader::resolve(&standing, &model.state, &detect_in_progress(grit.git_dir()));
+    let header = StatusHeader::resolve(&standing, &model.state, &grit.operation().in_progress());
     assert_eq!(
         header,
         StatusHeader::RebaseInProgress {
@@ -2443,7 +2439,7 @@ fn abort_restores_git_started_rebase() {
         git(wt, &["status", "--porcelain"]).trim().is_empty(),
         "index and worktree should match orig-head"
     );
-    assert!(detect_in_progress(grit.git_dir()).is_empty());
+    assert!(grit.operation().in_progress().is_empty());
     assert_git_fsck_strict(wt);
 }
 
@@ -2460,7 +2456,7 @@ fn abort_restores_detached_git_rebase() {
         .expect("abort detached git rebase");
     assert!(!wt.join(".git/rebase-merge").exists());
     assert!(matches!(
-        resolve_head(grit.git_dir()).unwrap(),
+        grit.references().head().unwrap(),
         HeadState::Detached { oid } if oid == orig_tip
     ));
     assert_eq!(git_oid(wt, "topic"), orig_tip);
@@ -2984,7 +2980,7 @@ fn failed_head_reflog_append_keeps_rebase_detached_and_abortable() {
 
     assert!(
         matches!(
-            resolve_head(grit.git_dir()).unwrap(),
+            grit.references().head().unwrap(),
             HeadState::Detached { .. }
         ),
         "HEAD must stay detached until the finish is logged"
@@ -2996,7 +2992,7 @@ fn failed_head_reflog_append_keeps_rebase_detached_and_abortable() {
     grit.history().abort_rebase(&test_ident()).expect("abort");
     assert_eq!(git_oid(wt, "topic"), orig_tip);
     assert_eq!(
-        resolve_head(grit.git_dir()).unwrap().branch_name(),
+        grit.references().head().unwrap().branch_name(),
         Some("topic")
     );
     assert!(!grit.git_dir().join("rebase-merge").exists());
@@ -3054,7 +3050,7 @@ fn skip_with_remaining_replay_reports_head_change() {
     assert_eq!(git(wt, &["show", "HEAD:note.txt"]), "later note\n");
     assert!(git(wt, &["status", "--porcelain"]).trim().is_empty());
     assert_eq!(
-        resolve_head(grit.git_dir()).unwrap().branch_name(),
+        grit.references().head().unwrap().branch_name(),
         Some("topic")
     );
     assert!(!grit.git_dir().join("rebase-merge").exists());
@@ -3172,12 +3168,10 @@ fn exec_stop_keeps_dirty_index_and_resume_requires_explicit_recovery() {
     }
     assert!(!wt.join("exec-log").exists());
     // A dirty stop is a grit-owned rebase; status must offer grit recovery.
-    let state = grit_lib::state::wt_status_get_state(
-        &wt.join(".git"),
-        &HeadState::Detached { oid: first },
-        false,
-    )
-    .unwrap();
+    let state = grit_test_support::refs::at(&wt.join(".git"))
+        .operation()
+        .status_state()
+        .unwrap();
     assert!(state.grit_rebase_in_progress);
     assert_git_fsck_strict(wt);
     open_grit(wt).history().abort_rebase(&test_ident()).unwrap();
@@ -4619,8 +4613,8 @@ fn stacked_continue_after_conflict_undo_restores_all_branch_tips_issue_2274() {
         apply: rebase_apply_with_record(),
         exec: None,
     };
-    let main_before = resolve_ref(grit.git_dir(), "refs/heads/main").unwrap();
-    let stacked_before = resolve_ref(grit.git_dir(), "refs/heads/stacked").unwrap();
+    let main_before = grit.references().resolve("refs/heads/main").unwrap();
+    let stacked_before = grit.references().resolve("refs/heads/stacked").unwrap();
 
     match grit
         .history()
@@ -4653,11 +4647,11 @@ fn stacked_continue_after_conflict_undo_restores_all_branch_tips_issue_2274() {
     }
 
     assert_ne!(
-        resolve_ref(grit.git_dir(), "refs/heads/main").unwrap(),
+        grit.references().resolve("refs/heads/main").unwrap(),
         main_before
     );
     assert_ne!(
-        resolve_ref(grit.git_dir(), "refs/heads/stacked").unwrap(),
+        grit.references().resolve("refs/heads/stacked").unwrap(),
         stacked_before
     );
 
@@ -4674,11 +4668,11 @@ fn stacked_continue_after_conflict_undo_restores_all_branch_tips_issue_2274() {
         )
         .expect("undo");
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/main").unwrap(),
+        grit.references().resolve("refs/heads/main").unwrap(),
         main_before
     );
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/stacked").unwrap(),
+        grit.references().resolve("refs/heads/stacked").unwrap(),
         stacked_before
     );
     assert_eq!(

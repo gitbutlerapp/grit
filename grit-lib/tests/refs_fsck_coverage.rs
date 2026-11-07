@@ -10,7 +10,6 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::refs_fsck::{format_refs_fsck_line, refs_fsck, RefsFsckIssue};
 use grit_lib::refs::store::{Expected, RawRef, RefName, RefTransaction, RefUpdate, RefUpdateFlags};
-use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
 use tempfile::tempdir;
@@ -46,7 +45,12 @@ fn refs_fsck_reports_bad_symref_and_formats_line() {
     )
     .expect("symref");
 
-    write_ref(&git_dir, "refs/heads/good", &oid(1)).expect("good ref");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/good",
+        &oid(1),
+    )
+    .expect("good ref");
     let dangling = RefTransaction::new()
         .update(RefUpdate {
             name: RefName::from_trusted("refs/heads/dangling"),
@@ -169,7 +173,12 @@ fn refs_fsck_accepts_reftable_placeholder_files_after_commit() {
     let odb = repo.odb().clone();
 
     let oid = support::stored_commit(&git_dir, 1);
-    write_ref(&git_dir, "refs/heads/main", &oid).expect("main");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/main",
+        &oid,
+    )
+    .expect("main");
 
     let issues = refs_fsck(&repo, &odb, false).expect("fsck");
     assert!(issues.is_empty(), "{issues:?}");
@@ -192,7 +201,12 @@ fn refs_fsck_reftable_linked_worktree_placeholders_and_missing_object() {
     )
     .expect("open");
     let oid = support::stored_commit(&git_dir, 1);
-    write_ref(&git_dir, "refs/heads/main", &oid).expect("main");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/main",
+        &oid,
+    )
+    .expect("main");
 
     let wt_path = dir.path().join("linked");
     let entry = add_linked_worktree(
@@ -284,7 +298,12 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
     )
     .expect("open");
     let oid = support::stored_commit(&git_dir, 1);
-    write_ref(&git_dir, "refs/heads/main", &oid).expect("main");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/main",
+        &oid,
+    )
+    .expect("main");
 
     let wt_path = dir.path().join("linked");
     let entry = add_linked_worktree(

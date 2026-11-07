@@ -106,18 +106,21 @@ fn bench_sparse_stash_pop(c: &mut Criterion) {
         b.iter_batched(
             || {
                 fx.reset_worktree_to_head();
-                grit_lib::refs::write_ref(fx.repo.git_dir(), "refs/stash", &stash_oid)
+                grit_test_support::refs::set_ref(&fx.repo, "refs/stash", &stash_oid)
                     .expect("restore stash ref");
-                grit_lib::refs::append_reflog(
-                    fx.repo.git_dir(),
-                    "refs/stash",
-                    &grit_lib::objects::ObjectId::zero(),
-                    &stash_oid,
-                    "Bench <bench@grit-scm.test> 1700000000 +0000",
-                    "sparse stash",
-                    true,
-                )
-                .expect("restore stash reflog");
+                fx.repo
+                    .reflogs()
+                    .append(
+                        "refs/stash",
+                        &grit_lib::refs::reflog::ReflogEntry {
+                            old_oid: grit_lib::objects::ObjectId::zero(),
+                            new_oid: stash_oid,
+                            identity: ("Bench <bench@grit-scm.test> 1700000000 +0000").to_string(),
+                            message: ("sparse stash").to_string(),
+                        },
+                        grit_lib::repo_handles::ReflogCreate::Always,
+                    )
+                    .expect("restore stash reflog");
             },
             |_| {
                 black_box(

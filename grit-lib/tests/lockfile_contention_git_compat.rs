@@ -8,8 +8,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
+use grit_lib::refs::lock_path_for_ref;
 use grit_lib::refs::store::RefStoreError;
-use grit_lib::refs::{lock_path_for_ref, write_ref};
 
 use support::{
     assert_fsck_when_git_interop, files_repo, git, git_empty_commit_oid, git_interop_available,
@@ -24,7 +24,12 @@ fn lockfile_contention_git_compat_succeeds_within_default_budget() {
     let repo = files_repo();
     let git_dir = repo.git_dir();
     let base = git_empty_commit_oid(repo.worktree());
-    write_ref(&git_dir, "refs/heads/main", &base).expect("seed main");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/main",
+        &base,
+    )
+    .expect("seed main");
 
     let ref_path = git_dir.join("refs/heads/contended");
     let lock_path = lock_path_for_ref(&ref_path);
@@ -45,7 +50,12 @@ fn lockfile_contention_git_compat_succeeds_within_default_budget() {
 
     starter.wait();
     let began = Instant::now();
-    write_ref(&git_dir, "refs/heads/contended", &base).expect("write after brief contention");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/contended",
+        &base,
+    )
+    .expect("write after brief contention");
     assert!(
         began.elapsed() < Duration::from_millis(500),
         "ref update should not block far beyond the default lock budget"
@@ -64,7 +74,12 @@ fn lockfile_contention_held_forever_preserves_foreign_lock() {
     let repo = files_repo();
     let git_dir = repo.git_dir();
     let base = git_empty_commit_oid(repo.worktree());
-    write_ref(&git_dir, "refs/heads/main", &base).expect("seed main");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/main",
+        &base,
+    )
+    .expect("seed main");
 
     let ref_path = git_dir.join("refs/heads/blocked");
     let lock_path = lock_path_for_ref(&ref_path);
@@ -73,7 +88,12 @@ fn lockfile_contention_held_forever_preserves_foreign_lock() {
     }
     std::fs::write(&lock_path, b"foreign\n").expect("foreign lock");
 
-    let err = write_ref(&git_dir, "refs/heads/blocked", &base).expect_err("budget exhausted");
+    let err = grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/blocked",
+        &base,
+    )
+    .expect_err("budget exhausted");
     assert!(
         matches!(&err, Error::LockHeld(lock) if lock.holder.is_none() && lock.path == lock_path)
             || matches!(&err, Error::Ref(RefError::Store(RefStoreError::LockHeld { name })) if name == "refs/heads/blocked"),

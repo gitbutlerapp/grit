@@ -62,11 +62,11 @@ fn run() -> Result<()> {
         &grit_lib::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
     )?;
 
-    let r = remote::resolve_remote(&config, &git_dir, cli.remote.as_deref(), true)?;
+    let r = remote::resolve_remote(&config, &repo, cli.remote.as_deref(), true)?;
 
     let spec = match cli.refspec.as_deref() {
-        Some(s) => parse_refspec(&git_dir, s, cli.force)?,
-        None => current_branch_spec(&git_dir, cli.force)?,
+        Some(s) => parse_refspec(&repo, s, cli.force)?,
+        None => current_branch_spec(&repo, cli.force)?,
     };
 
     eprintln!("Pushing to '{}' <{}>", r.name, r.url);
@@ -107,13 +107,18 @@ fn run() -> Result<()> {
 }
 
 /// Build the default refspec: the current branch to its same-named branch.
-fn current_branch_spec(git_dir: &std::path::Path, force: bool) -> Result<PushRefSpec> {
-    let head = grit_lib::refs::read_symbolic_ref(git_dir, "HEAD")?
+fn current_branch_spec(repo: &Repository, force: bool) -> Result<PushRefSpec> {
+    let head = repo
+        .references()
+        .symbolic("HEAD")?
         .context("HEAD is detached; specify a refspec to push")?;
     let branch = head
+        .as_str()
         .strip_prefix("refs/heads/")
         .context("HEAD is not on a branch; specify a refspec to push")?;
-    let oid = grit_lib::refs::resolve_ref(git_dir, &head)
+    let oid = repo
+        .references()
+        .resolve(&head)
         .with_context(|| format!("cannot resolve {head}"))?;
     Ok(PushRefSpec {
         src: Some(oid),
@@ -128,7 +133,7 @@ fn current_branch_spec(git_dir: &std::path::Path, force: bool) -> Result<PushRef
 }
 
 /// Parse a `[+]<src>[:<dst>]` refspec (`:<dst>` / empty `<src>` deletes `<dst>`).
-fn parse_refspec(git_dir: &std::path::Path, spec: &str, force_flag: bool) -> Result<PushRefSpec> {
+fn parse_refspec(repo: &Repository, spec: &str, force_flag: bool) -> Result<PushRefSpec> {
     let (force, body) = match spec.strip_prefix('+') {
         Some(rest) => (true, rest),
         None => (force_flag, spec),
@@ -156,8 +161,10 @@ fn parse_refspec(git_dir: &std::path::Path, spec: &str, force_flag: bool) -> Res
     }
 
     let src_ref = normalize_ref(src);
-    let oid = grit_lib::refs::resolve_ref(git_dir, &src_ref)
-        .or_else(|_| grit_lib::refs::resolve_ref(git_dir, src))
+    let oid = repo
+        .references()
+        .resolve(&src_ref)
+        .or_else(|_| repo.references().resolve(src))
         .or_else(|_| src.parse::<ObjectId>().map_err(anyhow::Error::from))
         .with_context(|| format!("cannot resolve source '{src}'"))?;
     Ok(PushRefSpec {

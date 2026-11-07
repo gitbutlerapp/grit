@@ -222,7 +222,7 @@ pub fn setup_git_git_loose_tags(setup: &DailySetup<'_>) -> Result<DailyHeadlineC
         }
     }
     // Identical loose and packed tag records would otherwise hide the object-read cost.
-    grit_lib::refs::write_packed_refs_file(&git_dir, &packed)?;
+    grit_lib::test_support::refs::write_packed_refs_file(&git_dir, &packed)?;
     Ok(headline)
 }
 

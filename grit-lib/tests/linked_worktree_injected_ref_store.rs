@@ -19,7 +19,7 @@ use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::Repository;
-use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_lib::state::HeadState;
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
@@ -195,7 +195,7 @@ fn assert_commits_land_on_feat(fixture: &Fixture, linked: &Repository) {
         "ref: refs/heads/feat\n"
     );
     assert_eq!(
-        resolve_head_for_repository(linked).expect("linked HEAD"),
+        linked.references().head().expect("linked HEAD"),
         HeadState::Branch {
             refname: "refs/heads/feat".into(),
             short_name: "feat".into(),
@@ -294,7 +294,7 @@ fn detaching_and_switching_in_the_linked_worktree_leave_the_shared_head_alone() 
     );
     let detached = commit_change(&linked, &fixture.linked.join("c.txt"), "detached work");
     assert_eq!(
-        resolve_head_for_repository(&linked).expect("linked HEAD"),
+        linked.references().head().expect("linked HEAD"),
         HeadState::Detached { oid: detached }
     );
     assert_eq!(

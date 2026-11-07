@@ -14,7 +14,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::pack_objects::{PackBuildOptions, UploadPackStream};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::{CancelToken, NullProgress};
-use grit_lib::refs;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_plan::{ForceMode, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;
@@ -63,7 +62,7 @@ fn commit(repo: &Repository, name: &str, text: &str, parent: Option<ObjectId>) -
         .objects()
         .write(ObjectKind::Commit, body.as_bytes())
         .expect("commit");
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &oid).expect("main");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &oid).expect("main");
     oid
 }
 
@@ -145,7 +144,10 @@ fn bundles_write_verify_unbundle_and_fetch_between_repositories() {
         .expect("fetch from bundle");
     assert_eq!(fetched.changed_ref_count(), 1);
     assert_eq!(
-        refs::resolve_ref(fetcher.git_dir(), "refs/remotes/origin/main").expect("tracking"),
+        fetcher
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .expect("tracking"),
         c2
     );
 }
@@ -222,7 +224,10 @@ fn remotes_fetch_from_and_push_to_a_local_endpoint() {
         .expect("fetch_from");
     assert_eq!(outcome.changed_ref_count(), 1);
     assert_eq!(
-        refs::resolve_ref(local.git_dir(), "refs/remotes/origin/main").expect("tracking"),
+        local
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .expect("tracking"),
         base
     );
 
@@ -240,7 +245,10 @@ fn remotes_fetch_from_and_push_to_a_local_endpoint() {
     assert!(pushed.has_updates());
     assert!(!pushed.has_rejections());
     assert_eq!(
-        refs::resolve_ref(upstream.git_dir(), "refs/heads/main").expect("main"),
+        upstream
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main"),
         tip
     );
 
@@ -398,10 +406,16 @@ fn remotes_fetch_from_and_push_to_a_connection_served_in_process() {
     assert_eq!(pushed.results[0].status, PushRefStatus::Ok);
     assert_eq!(pushed.results[1].status, PushRefStatus::RemoteRejected);
     assert_eq!(
-        refs::resolve_ref(&upstream_dir, "refs/heads/main").expect("main"),
+        grit_test_support::refs::at(&upstream_dir)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main"),
         tip
     );
-    assert!(refs::resolve_ref(&upstream_dir, "refs/heads/protected/x").is_err());
+    assert!(grit_test_support::refs::at(&upstream_dir)
+        .references()
+        .resolve("refs/heads/protected/x")
+        .is_err());
 }
 
 #[test]
@@ -442,7 +456,7 @@ fn remotes_fetch_all_applies_the_prune_override_to_every_remote() {
         .add("two", &two.git_dir().to_string_lossy())
         .expect("add two");
     let local_tip = commit(&local, "c.txt", "local\n", None);
-    refs::write_ref(local.git_dir(), "refs/remotes/one/gone", &local_tip).expect("stale");
+    grit_test_support::refs::set_ref(&local, "refs/remotes/one/gone", &local_tip).expect("stale");
 
     let results = local
         .remotes()
@@ -461,14 +475,20 @@ fn remotes_fetch_all_applies_the_prune_override_to_every_remote() {
         assert!(result.is_ok(), "{name}: {result:?}");
     }
     assert_eq!(
-        refs::resolve_ref(local.git_dir(), "refs/remotes/one/main").expect("one"),
+        local
+            .references()
+            .resolve("refs/remotes/one/main")
+            .expect("one"),
         one_tip
     );
     assert_eq!(
-        refs::resolve_ref(local.git_dir(), "refs/remotes/two/main").expect("two"),
+        local
+            .references()
+            .resolve("refs/remotes/two/main")
+            .expect("two"),
         two_tip
     );
-    assert!(refs::resolve_ref(local.git_dir(), "refs/remotes/one/gone").is_err());
+    assert!(local.references().resolve("refs/remotes/one/gone").is_err());
 }
 
 #[test]

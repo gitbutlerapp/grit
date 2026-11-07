@@ -7,7 +7,6 @@ use std::fs;
 use std::path::Path;
 
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
@@ -64,7 +63,10 @@ fn fetch_applies_other_refs_when_stale_nested_ref_blocks_without_prune() {
     .expect("initial fetch");
 
     assert!(
-        resolve_ref(&clone_git, "refs/remotes/origin/gone/x").is_ok(),
+        grit_test_support::refs::at(&clone_git)
+            .references()
+            .resolve("refs/remotes/origin/gone/x")
+            .is_ok(),
         "stale nested tracking ref should exist after first fetch"
     );
 
@@ -103,11 +105,17 @@ fn fetch_applies_other_refs_when_stale_nested_ref_blocks_without_prune() {
         "namespace conflict must be reported as rejection, not hard error"
     );
     assert!(
-        resolve_ref(&clone_git, "refs/remotes/origin/other").is_ok(),
+        grit_test_support::refs::at(&clone_git)
+            .references()
+            .resolve("refs/remotes/origin/other")
+            .is_ok(),
         "origin/other must be created despite gone conflict"
     );
     assert!(
-        resolve_ref(&clone_git, "refs/remotes/origin/gone").is_err(),
+        grit_test_support::refs::at(&clone_git)
+            .references()
+            .resolve("refs/remotes/origin/gone")
+            .is_err(),
         "origin/gone must not be created while gone/x remains"
     );
 
@@ -134,7 +142,10 @@ fn fetch_applies_other_refs_when_stale_nested_ref_blocks_without_prune() {
     git(&git_clone, &["clone", "-q", bare.to_str().unwrap(), "."]);
     git(&git_clone, &["fetch", "origin"]);
     assert!(
-        resolve_ref(&git_clone.join(".git"), "refs/remotes/origin/other").is_ok(),
+        grit_test_support::refs::at(&git_clone.join(".git"))
+            .references()
+            .resolve("refs/remotes/origin/other")
+            .is_ok(),
         "system git fetch should also create origin/other"
     );
 }
@@ -201,6 +212,12 @@ fn fetch_with_prune_resolves_namespace_conflict() {
         "prune should remove stale gone/x so gone can be created: {:?}",
         outcome.updates
     );
-    assert!(resolve_ref(&clone_git, "refs/remotes/origin/gone").is_ok());
-    assert!(resolve_ref(&clone_git, "refs/remotes/origin/gone/x").is_err());
+    assert!(grit_test_support::refs::at(&clone_git)
+        .references()
+        .resolve("refs/remotes/origin/gone")
+        .is_ok());
+    assert!(grit_test_support::refs::at(&clone_git)
+        .references()
+        .resolve("refs/remotes/origin/gone/x")
+        .is_err());
 }

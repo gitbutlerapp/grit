@@ -332,6 +332,12 @@ impl AsRef<str> for RefName {
     }
 }
 
+impl From<RefName> for String {
+    fn from(name: RefName) -> Self {
+        name.0
+    }
+}
+
 impl AsRef<RefNameRef> for RefName {
     fn as_ref(&self) -> &RefNameRef {
         RefNameRef::new(self.as_str())

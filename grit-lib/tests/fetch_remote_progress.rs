@@ -14,7 +14,6 @@ use std::rc::Rc;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::ProgressSink;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, Connection, Service, SshTransport, Transport};
 
@@ -196,7 +195,10 @@ fn run_case(protocol_v2: bool, remote_progress: bool) -> (Vec<u8>, Vec<u8>) {
     )
     .expect("fetch");
 
-    let got = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
+    let got = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
     assert_eq!(got, main_oid);
 
     let fsck = Command::new("git")

@@ -12,7 +12,6 @@ use grit_lib::stash::{
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::refs::reflog::read_reflog;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
 use grit_test_support::git;
@@ -344,7 +343,10 @@ fn drop_stash_middle_entry_rechains_reflog_like_git() {
         "middle stash drop must rewrite the reflog like git"
     );
 
-    let entries = read_reflog(&grit_dir.path().join(".git"), "refs/stash").expect("parse");
+    let entries = grit_test_support::refs::at(&grit_dir.path().join(".git"))
+        .references()
+        .reflog("refs/stash")
+        .expect("parse");
     for window in entries.windows(2) {
         assert_eq!(
             window[0].new_oid, window[1].old_oid,
@@ -1423,7 +1425,10 @@ fn stash_clear_removes_ref_and_reflog_git_agrees() {
     let cleared = repo.stash().clear().expect("clear");
     assert_eq!(cleared, 2);
     assert!(git_cmd(dir.path(), &["stash", "list"]).trim().is_empty());
-    let reflog = read_reflog(dir.path().join(".git").as_path(), "refs/stash").unwrap_or_default();
+    let reflog = grit_test_support::refs::at(dir.path().join(".git").as_path())
+        .references()
+        .reflog("refs/stash")
+        .unwrap_or_default();
     assert!(reflog.is_empty(), "stash reflog must be empty after clear");
     assert_fsck_strict(dir.path());
 }

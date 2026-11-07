@@ -79,8 +79,8 @@ mod unix {
             )
             .expect("open");
             checkout_between_trees(&grit_repo, Some(&main_tree), &target_tree).expect("checkout");
-            grit_lib::refs::write_ref(
-                grit_repo.git_dir(),
+            grit_test_support::refs::set_ref(
+                &grit_repo,
                 "HEAD",
                 &ObjectId::from_hex(&target_commit).expect("commit"),
             )
@@ -133,8 +133,8 @@ mod unix {
             )
             .expect("open");
             checkout_between_trees(&grit_repo, Some(&main_tree), &target_tree).expect("checkout");
-            grit_lib::refs::write_ref(
-                grit_repo.git_dir(),
+            grit_test_support::refs::set_ref(
+                &grit_repo,
                 "HEAD",
                 &ObjectId::from_hex(&target_commit).expect("commit"),
             )

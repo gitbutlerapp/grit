@@ -44,7 +44,7 @@ fn pop_rolls_back_when_untracked_blob_missing() {
         .unwrap()
         .unwrap();
 
-    let stash_oid = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/stash").expect("stash ref");
+    let stash_oid = repo.references().resolve("refs/stash").expect("stash ref");
     let stash_commit = repo.odb().read_commit(&stash_oid).unwrap();
     assert!(stash_commit.parents.len() >= 3, "expected untracked parent");
     let ut_tree = repo.odb().commit_tree(&stash_commit.parents[2]).unwrap();
@@ -91,9 +91,7 @@ fn pop_rolls_back_when_untracked_blob_missing() {
         "index must be unchanged"
     );
     assert!(
-        grit_lib::refs::resolve_ref(repo.git_dir(), "refs/stash")
-            .ok()
-            .is_some(),
+        repo.references().resolve("refs/stash").ok().is_some(),
         "stash entry must remain"
     );
 }
@@ -135,7 +133,7 @@ fn pop_rolls_back_tracked_symlink_when_untracked_blob_missing() {
         "push must reset symlink to HEAD"
     );
 
-    let stash_oid = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/stash").expect("stash ref");
+    let stash_oid = repo.references().resolve("refs/stash").expect("stash ref");
     let stash_commit = repo.odb().read_commit(&stash_oid).unwrap();
     let ut_tree = repo.odb().commit_tree(&stash_commit.parents[2]).unwrap();
     let protect = grit_lib::path_validate::ProtectOptions::default();

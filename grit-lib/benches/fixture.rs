@@ -199,7 +199,7 @@ fn grit_record_commit(
     };
     let bytes = serialize_commit(&commit_data);
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &oid)?;
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &oid)?;
     Ok(oid)
 }
 

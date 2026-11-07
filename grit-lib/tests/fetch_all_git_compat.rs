@@ -3,7 +3,6 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::list_refs;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -13,7 +12,14 @@ use std::process::Command;
 
 fn remote_tracking_refs(repo: &Path) -> BTreeMap<String, String> {
     let git_dir = repo.join(".git");
-    list_refs(&git_dir, "refs/remotes")
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .list("refs/remotes")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
         .expect("list refs")
         .into_iter()
         .filter(|(name, _)| !name.ends_with("/HEAD"))

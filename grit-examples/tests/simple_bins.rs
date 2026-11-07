@@ -3,7 +3,6 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::{parse_commit, ObjectKind};
-use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn run_bin(bin: &str, args: &[&str], cwd: &std::path::Path) -> Result<String> {
@@ -78,7 +77,7 @@ fn simple_bins_cover_a_tiny_commit_workflow() -> Result<()> {
     assert_eq!(object.kind, ObjectKind::Commit);
     assert_eq!(parse_commit(&object.data)?.message, "initial example\n");
     assert_eq!(
-        refs::resolve_ref(repo.git_dir(), "refs/heads/main")?.to_string(),
+        repo.references().resolve("refs/heads/main")?.to_string(),
         commit
     );
 
@@ -107,7 +106,7 @@ fn simple_bins_cover_a_tiny_commit_workflow() -> Result<()> {
         "hello again\n"
     );
     assert_eq!(
-        refs::resolve_ref(repo.git_dir(), "refs/heads/main")?.to_string(),
+        repo.references().resolve("refs/heads/main")?.to_string(),
         second_commit
     );
 

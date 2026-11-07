@@ -23,7 +23,7 @@ use grit_lib::remote::snapshot_checkout::{
 use grit_lib::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags, FetchOptions};
 use grit_lib::remote::HttpClientFactory;
 use grit_lib::repo::Repository;
-use grit_lib::state::{resolve_head_for_repository, InProgressOperation};
+use grit_lib::state::InProgressOperation;
 
 pub(crate) use pull_outcome::{changes_phrase, commits_on_snapshots, gave_change_ids_phrase};
 pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
@@ -85,7 +85,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     let mut options =
         PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args))
             .map_err(|err| crate::error_map::map_pull_options_error(&repo, err))?;
-    let head = resolve_head_for_repository(&repo)?;
+    let head = repo.references().head()?;
     let invocation = resolve_pull_invocation(
         &config,
         args.fetch.remote.as_deref(),

@@ -35,8 +35,8 @@ pub use notes::{
     NotesWriteOptions, RepositoryNotes,
 };
 pub use reflog::{
-    ExpireOptions, IndexedReflogEntry, RefExpireResult, ReflogExpireOutcome, ReflogPage,
-    ReflogQuery, RepositoryReflogs,
+    ExpireOptions, IndexedReflogEntry, RefExpireResult, ReflogCreate, ReflogExpireOutcome,
+    ReflogPage, ReflogQuery, RepositoryReflogs,
 };
 pub use remote::has_remote_section;
 pub use remote::{

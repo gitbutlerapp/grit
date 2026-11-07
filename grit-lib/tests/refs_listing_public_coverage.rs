@@ -9,7 +9,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::query_listings_on_store;
 use grit_lib::refs::listing::{
     compare_version_names, creator_date_from_bytes, epoch_from_identity,
-    pattern_matches_short_name, query_listings_from_pairs, query_refs, ref_kind_from_name,
+    pattern_matches_short_name, query_listings_from_pairs, ref_kind_from_name,
     short_name_in_namespace, RefKind, RefNamespace, RefQuery, RefQueryOptions, RefSort, SortKey,
 };
 use grit_lib::refs::store::{MemoryRefStore, RawRef};
@@ -241,7 +241,10 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
         ],
         ..RefQuery::default()
     };
-    let rows = query_refs(&repo, &query, &RefQueryOptions::default()).unwrap();
+    let rows = repo
+        .references()
+        .query(&query, &RefQueryOptions::default())
+        .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].full_name, "refs/tags/t");
 }

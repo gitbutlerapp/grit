@@ -788,8 +788,10 @@ impl StatusHeader {
     /// # Parameters
     ///
     /// - `standing`: branch comparison used when no operation is in progress.
-    /// - `state`: in-progress state from [`wt_status_get_state`](crate::state::wt_status_get_state).
-    /// - `operations`: sentinels from [`detect_in_progress`](crate::state::detect_in_progress).
+    /// - `state`: in-progress state from
+    ///   [`Operations::status_state`](crate::operation::Operations::status_state).
+    /// - `operations`: paused operations from
+    ///   [`Operations::in_progress`](crate::operation::Operations::in_progress).
     #[must_use]
     pub fn resolve(
         standing: &BranchStanding,

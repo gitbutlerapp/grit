@@ -36,7 +36,6 @@ use std::time::{Duration, Instant};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::http::http_client_arc;
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
@@ -238,7 +237,10 @@ fn cookie_file_sends_cookie_header_to_server() {
             .any(|u| u.remote_ref == "refs/heads/main" && u.new_oid == Some(fx.main_oid)),
         "cookie fetch did not land origin/main"
     );
-    let got_main = resolve_ref(&fx.local_git, "refs/remotes/origin/main").expect("origin/main");
+    let got_main = grit_test_support::refs::at(&fx.local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
     assert_eq!(got_main, fx.main_oid);
 
     let logged = read_logged_headers(&log_path);
@@ -462,7 +464,10 @@ fn http_proxy_routes_fetch_through_proxy() {
             return;
         }
     };
-    let got_main = resolve_ref(&fx.local_git, "refs/remotes/origin/main").expect("origin/main");
+    let got_main = grit_test_support::refs::at(&fx.local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
     assert_eq!(got_main, fx.main_oid, "proxied fetch did not land the ref");
     assert!(
         outcome

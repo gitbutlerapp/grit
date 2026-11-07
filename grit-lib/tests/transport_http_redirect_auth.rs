@@ -23,7 +23,6 @@ use base64::Engine as _;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::credentials::{Credential, CredentialProvider};
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::http::http_client_arc;
@@ -302,7 +301,10 @@ fn cross_authority_redirect_does_not_forward_cached_basic_auth() {
     )
     .expect("fetch through cross-origin redirect");
 
-    let got = resolve_ref(&fx.local_git, "refs/remotes/origin/main").expect("origin/main");
+    let got = grit_test_support::refs::at(&fx.local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
     assert_eq!(got, fx.main_oid);
 
     let logged = read_logged_headers(&fx.headers_log);

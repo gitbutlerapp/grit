@@ -645,8 +645,7 @@ pub fn run(
                     })
                     .collect()
             };
-            let mut ours =
-                grit_lib::refs::resolve_ref(repo.git_dir(), format!("refs/heads/{name}")).ok();
+            let mut ours = repo.references().resolve(format!("refs/heads/{name}")).ok();
             let mut heads = heads_now(ours);
             // Heads that go together with yours without losing anything:
             // combine them here, and push the result.
@@ -724,7 +723,10 @@ fn integrated_again(
     let url = crate::context::config_string(config, &format!("remote.{remote}.pushurl"))
         .or_else(|| crate::context::config_string(config, &format!("remote.{remote}.url")))?;
     let (server, project) = grit_lib::remote::grit_server_space::hosted_project(&url)?;
-    let tip = grit_lib::refs::resolve_ref(repo.git_dir(), format!("refs/heads/{branch}")).ok()?;
+    let tip = repo
+        .references()
+        .resolve(format!("refs/heads/{branch}"))
+        .ok()?;
     crate::commands::share::integrated_on(repo, config, &server, &project, branch, tip)
         .ok()
         .flatten()

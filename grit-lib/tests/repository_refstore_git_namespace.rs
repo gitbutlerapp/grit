@@ -10,7 +10,6 @@ use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::list_refs_for_repository;
 use grit_lib::refs::store::{Expected, RawRef, RefTransaction, RefUpdate, RefUpdateFlags};
 use grit_lib::repo::Repository;
 
@@ -144,7 +143,15 @@ fn repository_namespaced_packed_refs_exclude_unscoped_branches() {
     let grit_heads = head_branch_names(&repo);
     assert_eq!(grit_heads, BTreeSet::from(["refs/heads/scoped".to_owned()]));
 
-    let listed = list_refs_for_repository(&repo, "refs/heads/").expect("list");
+    let listed = repo
+        .references()
+        .list("refs/heads/")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
+        .expect("list");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].0, "refs/heads/scoped");
     assert_eq!(listed[0].1, scoped);

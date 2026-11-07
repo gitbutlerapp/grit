@@ -11,7 +11,6 @@ use std::process::{Command, Stdio};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::maintenance::fsck::{FsckMsgLevel, ObjectFsckPolicy, SkipListError};
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
     ProtocolVersion, ReceiveOutcome, ReceivePack, ReceivePolicy, RefUpdateRefusal, ServeOptions,
     UnpackError,
@@ -248,7 +247,10 @@ impl Fixture {
             "{}",
             pushed.report
         );
-        assert!(resolve_ref(&self.bare, "refs/heads/bad").is_err());
+        assert!(grit_test_support::refs::at(&self.bare)
+            .references()
+            .resolve("refs/heads/bad")
+            .is_err());
         assert!(
             !self.server().odb().exists(&bad),
             "refused object must not enter the repository"
@@ -267,7 +269,13 @@ impl Fixture {
             pushed.outcome
         );
         assert!(pushed.outcome.updates[0].error.is_none());
-        assert_eq!(resolve_ref(&self.bare, "refs/heads/bad").expect("ref"), tip);
+        assert_eq!(
+            grit_test_support::refs::at(&self.bare)
+                .references()
+                .resolve("refs/heads/bad")
+                .expect("ref"),
+            tip
+        );
     }
 }
 
@@ -361,7 +369,10 @@ fn unreadable_skip_list_refuses_the_push() {
         pushed.outcome
     );
     assert!(pushed.report.contains("skip list"), "{}", pushed.report);
-    assert!(resolve_ref(&f.bare, "refs/heads/bad").is_err());
+    assert!(grit_test_support::refs::at(&f.bare)
+        .references()
+        .resolve("refs/heads/bad")
+        .is_err());
 }
 
 #[test]

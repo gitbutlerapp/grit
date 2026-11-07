@@ -1,6 +1,5 @@
 //! `fetch_local` from a `git clone --bare` remote (guide_network layout).
 
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_test_support::git;
 
@@ -47,5 +46,8 @@ fn fetch_local_from_bare_remote_like_guide_network() {
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch_local from bare remote");
-    resolve_ref(&local_git, "refs/remotes/origin/main").expect("tracking ref");
+    grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("tracking ref");
 }

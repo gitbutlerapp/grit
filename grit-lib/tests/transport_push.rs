@@ -20,7 +20,6 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
@@ -172,14 +171,20 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     assert_eq!(r.new_oid, Some(main_oid));
     assert!(r.old_oid.is_none(), "new ref has no old value");
 
-    let tracking = resolve_ref(&local_git, "refs/remotes/origin/main").expect("tracking ref");
+    let tracking = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("tracking ref");
     assert_eq!(
         tracking, main_oid,
         "PushOptions.tracking_remote must update refs/remotes/origin/main"
     );
 
     // The remote ref now points at our main, and the objects are present.
-    let remote_main = resolve_ref(&bare, "refs/heads/main").expect("remote main written");
+    let remote_main = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main written");
     assert_eq!(remote_main, main_oid, "remote main oid mismatch");
 
     let remote_odb = open_odb(&bare);
@@ -271,7 +276,10 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     );
 
     // The remote ref must be unchanged by the rejected push.
-    let remote_main_after = resolve_ref(&bare, "refs/heads/main").expect("remote main still set");
+    let remote_main_after = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main still set");
     assert_eq!(
         remote_main_after, main_oid,
         "rejected non-ff push must not move the remote ref"
@@ -319,8 +327,10 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     );
     assert!(r3.forced, "forced update should be flagged forced");
     assert_eq!(r3.new_oid, Some(diverged));
-    let remote_main_forced =
-        resolve_ref(&bare, "refs/heads/main").expect("remote main after force");
+    let remote_main_forced = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main after force");
     assert_eq!(
         remote_main_forced, diverged,
         "forced push must advance the remote ref to the divergent tip"
@@ -376,7 +386,10 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     .expect("create scratch ref");
     drop(conn_mk);
     assert_eq!(
-        resolve_ref(&bare, "refs/heads/scratch").expect("scratch created"),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/scratch")
+            .expect("scratch created"),
         diverged,
         "scratch ref should be created before deletion"
     );
@@ -425,7 +438,10 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         rdel.new_oid
     );
     assert!(
-        resolve_ref(&bare, "refs/heads/scratch").is_err(),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/scratch")
+            .is_err(),
         "scratch ref must be gone after a deletion push"
     );
 }
@@ -554,7 +570,10 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
         "clone A ff push to main should succeed, got {:?}",
         outcome_a.results[0].message
     );
-    let remote_main_after_a = resolve_ref(&bare, "refs/heads/main").expect("remote main");
+    let remote_main_after_a = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main");
     assert_eq!(
         remote_main_after_a, advanced,
         "remote main must advance after clone A push"
@@ -605,7 +624,10 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
         outcome.results[0].status,
         outcome.results[0].message
     );
-    let remote_newbr = resolve_ref(&bare, "refs/heads/newbr").expect("remote newbr");
+    let remote_newbr = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/newbr")
+        .expect("remote newbr");
     assert_eq!(remote_newbr, new_tip);
     assert!(
         open_odb(&bare).exists(&new_tip),
@@ -653,7 +675,10 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     );
     assert!(outcome_force.results[0].forced);
     assert_eq!(
-        resolve_ref(&bare, "refs/heads/main").expect("main after force"),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main after force"),
         new_tip
     );
 

@@ -57,7 +57,7 @@ fn run() -> Result<()> {
         &grit_lib::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
     )?;
 
-    let r = remote::resolve_remote(&config, &git_dir, cli.remote.as_deref(), false)?;
+    let r = remote::resolve_remote(&config, &repo, cli.remote.as_deref(), false)?;
 
     eprintln!("Fetching from '{}' <{}>", r.name, r.url);
     eprintln!("  transport: {}", r.kind.label());

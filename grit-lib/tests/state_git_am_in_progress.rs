@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::state::{detect_in_progress, resolve_head, wt_status_get_state, InProgressOperation};
+use grit_lib::state::InProgressOperation;
 use tempfile::TempDir;
 
 fn null_config() -> &'static str {
@@ -87,7 +87,9 @@ fn system_git_am_conflict_reports_in_progress_state() {
     }
 
     let git_dir = root.join(".git");
-    let ops = detect_in_progress(&git_dir);
+    let ops = grit_test_support::refs::at(&git_dir)
+        .operation()
+        .in_progress();
     assert!(
         ops.contains(&InProgressOperation::Am),
         "expected Am in {:?}, got {:?}",
@@ -95,8 +97,14 @@ fn system_git_am_conflict_reports_in_progress_state() {
         ops
     );
 
-    let head = resolve_head(&git_dir).expect("resolve HEAD");
-    let wt = wt_status_get_state(&git_dir, &head, false).expect("wt status state");
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .head()
+        .expect("resolve HEAD");
+    let wt = grit_test_support::refs::at(&git_dir)
+        .operation()
+        .status_state()
+        .expect("wt status state");
     assert!(
         wt.am_in_progress,
         "expected am_in_progress in wt status state: {:?}",

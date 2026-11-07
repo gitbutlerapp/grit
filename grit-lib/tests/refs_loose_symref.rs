@@ -11,16 +11,16 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy};
-use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::store::{open_ref_store, RefNameRef, RefStoreError};
 use grit_lib::refs::{
-    append_reflog, delete_ref, list_refs, list_refs_glob, list_refs_physical,
-    packed_refs_entry_exists, read_head, read_log_refs_config, read_raw_ref, read_ref_file,
-    read_symbolic_ref, resolve_ref, resolve_ref_cached, resolve_ref_dwim, should_autocreate_reflog,
-    verify_ref_available_for_create, write_ref, write_ref_cached, write_symbolic_ref, PackedRefs,
-    RawRefLookup, Ref, RefnameUnavailable, SYMREF_MAXDEPTH,
+    read_ref_file, PackedRefs, RawRefLookup, Ref, RefnameUnavailable, SYMREF_MAXDEPTH,
 };
 use grit_lib::repo::Repository;
+use grit_lib::test_support::refs::{
+    list_refs_physical, packed_refs_entry_exists, read_log_refs_config, read_raw_ref,
+    resolve_ref_cached, should_autocreate_reflog, verify_ref_available_for_create,
+    write_ref_cached,
+};
 
 use support::{
     assert_git_fsck_strict, each_backend, empty_commit_oid, git, git_check_ref_format,
@@ -40,7 +40,13 @@ fn assert_direct_ref_stored(git_dir: &Path, backend: Backend, refname: &str, oid
                 !loose_ref_path(git_dir, refname).exists(),
                 "reftable refs are not loose files"
             );
-            assert_eq!(resolve_ref(git_dir, refname).unwrap(), *oid);
+            assert_eq!(
+                grit_test_support::refs::at(git_dir)
+                    .references()
+                    .resolve(refname)
+                    .unwrap(),
+                *oid
+            );
         }
     }
 }
@@ -53,21 +59,21 @@ fn backend_label(backend: Backend) -> &'static str {
 }
 
 fn build_symref_chain(git_dir: &Path, depth: usize, tip: &ObjectId) {
-    write_ref(git_dir, "refs/heads/r0", tip).expect("r0");
+    grit_test_support::refs::set_ref(&grit_test_support::refs::at(git_dir), "refs/heads/r0", tip)
+        .expect("r0");
     for i in 1..=depth {
-        write_symbolic_ref(
-            git_dir,
-            &format!("refs/heads/r{i}"),
-            &format!("refs/heads/r{}", i - 1),
-        )
-        .expect("chain link");
+        grit_test_support::refs::at(git_dir)
+            .references()
+            .update_symbolic(
+                &format!("refs/heads/r{i}"),
+                &format!("refs/heads/r{}", i - 1),
+            )
+            .expect("chain link");
     }
-    write_symbolic_ref(
-        git_dir,
-        "refs/heads/chain-top",
-        &format!("refs/heads/r{depth}"),
-    )
-    .expect("chain top");
+    grit_test_support::refs::at(git_dir)
+        .references()
+        .update_symbolic("refs/heads/chain-top", &format!("refs/heads/r{depth}"))
+        .expect("chain top");
 }
 
 #[test]
@@ -76,9 +82,16 @@ fn t1400_loose_ref_roundtrip_both_backends() {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
         let refname = "refs/heads/t1400-roundtrip";
-        write_ref(&git_dir, refname, &oid).expect("write_ref");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &oid)
+            .expect("write_ref");
 
-        assert_eq!(resolve_ref(&git_dir, refname).unwrap(), oid);
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve(refname)
+                .unwrap(),
+            oid
+        );
         assert_eq!(
             read_raw_ref(&git_dir, refname).unwrap(),
             RawRefLookup::Exists
@@ -110,7 +123,13 @@ fn t1400_git_written_ref_read_by_grit_both_backends() {
         let refname = "refs/heads/t1400-from-git";
         git_update_ref(repo.worktree(), refname, &oid);
 
-        assert_eq!(resolve_ref(&git_dir, refname).unwrap(), oid);
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve(refname)
+                .unwrap(),
+            oid
+        );
         assert_direct_ref_stored(&git_dir, backend, refname, &oid);
         eprintln!("ok t1400_git_written ({})", backend_label(backend));
     });
@@ -125,7 +144,8 @@ fn t1400_grit_written_reftable_roundtrip() {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
         let refname = "refs/heads/t1400-reftable-only";
-        write_ref(&git_dir, refname, &oid).expect("write_ref");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &oid)
+            .expect("write_ref");
         assert_direct_ref_stored(&git_dir, backend, refname, &oid);
         assert_eq!(
             read_raw_ref(&git_dir, refname).unwrap(),
@@ -140,15 +160,32 @@ fn t1401_symref_read_write_roundtrip_both_backends() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, "refs/heads/sym-target", &oid).expect("target");
-        write_symbolic_ref(&git_dir, "refs/heads/sym-alias", "refs/heads/sym-target")
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/sym-target",
+            &oid,
+        )
+        .expect("target");
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .update_symbolic("refs/heads/sym-alias", "refs/heads/sym-target")
             .expect("symref");
 
         assert_eq!(
-            read_symbolic_ref(&git_dir, "refs/heads/sym-alias").unwrap(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .symbolic("refs/heads/sym-alias")
+                .map(|t| t.map(String::from))
+                .unwrap(),
             Some("refs/heads/sym-target".to_owned())
         );
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/sym-alias").unwrap(), oid);
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/sym-alias")
+                .unwrap(),
+            oid
+        );
         if git_interop_available(backend) {
             assert_git_fsck_strict(repo.worktree());
         }
@@ -163,15 +200,32 @@ fn t1401_head_detached_vs_symbolic_both_backends() {
         let oid = empty_commit_oid(repo);
 
         assert!(
-            read_head(&git_dir).unwrap().is_some(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .symbolic("HEAD")
+                .map(|t| t.map(String::from))
+                .unwrap()
+                .is_some(),
             "init should leave HEAD symbolic"
         );
 
         // Reftable keeps HEAD in the stack (the `HEAD` file is only a stub), so both
         // backends detach and reattach through the ref API.
-        write_ref(&git_dir, "HEAD", &oid).expect("detach HEAD");
-        assert!(read_head(&git_dir).unwrap().is_none());
-        assert_eq!(resolve_ref(&git_dir, "HEAD").unwrap(), oid);
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), "HEAD", &oid)
+            .expect("detach HEAD");
+        assert!(grit_test_support::refs::at(&git_dir)
+            .references()
+            .symbolic("HEAD")
+            .map(|t| t.map(String::from))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("HEAD")
+                .unwrap(),
+            oid
+        );
         if git_interop_available(backend) {
             assert_eq!(
                 git(
@@ -184,9 +238,17 @@ fn t1401_head_detached_vs_symbolic_both_backends() {
             );
         }
 
-        write_symbolic_ref(&git_dir, "HEAD", "refs/heads/main").expect("reattach HEAD");
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .update_symbolic("HEAD", "refs/heads/main")
+            .expect("reattach HEAD");
         assert_eq!(
-            read_head(&git_dir).unwrap().as_deref(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .symbolic("HEAD")
+                .map(|t| t.map(String::from))
+                .unwrap()
+                .as_deref(),
             Some("refs/heads/main")
         );
         if git_interop_available(backend) {
@@ -210,12 +272,21 @@ fn t1401_head_detached_vs_symbolic_both_backends() {
 fn t1401_dangling_symref_resolve_and_read_both_backends() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
-        write_symbolic_ref(&git_dir, "refs/heads/dangle", "refs/heads/no-such-target")
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .update_symbolic("refs/heads/dangle", "refs/heads/no-such-target")
             .expect("dangling symref");
 
-        assert!(resolve_ref(&git_dir, "refs/heads/dangle").is_err());
+        assert!(grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/dangle")
+            .is_err());
         assert_eq!(
-            read_symbolic_ref(&git_dir, "refs/heads/dangle").unwrap(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .symbolic("refs/heads/dangle")
+                .map(|t| t.map(String::from))
+                .unwrap(),
             Some("refs/heads/no-such-target".to_owned())
         );
         assert_eq!(
@@ -236,14 +307,20 @@ fn t1401_symref_chain_max_depth_both_backends() {
         let ok_depth = SYMREF_MAXDEPTH.saturating_sub(2);
         build_symref_chain(&git_dir, ok_depth, &oid);
         assert_eq!(
-            resolve_ref(&git_dir, "refs/heads/chain-top").unwrap(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/chain-top")
+                .unwrap(),
             oid,
             "chain depth {ok_depth} should resolve"
         );
 
         let fail_depth = ok_depth + 1;
         build_symref_chain(&git_dir, fail_depth, &oid);
-        let grit_err = resolve_ref(&git_dir, "refs/heads/chain-top").unwrap_err();
+        let grit_err = grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/chain-top")
+            .unwrap_err();
         assert!(
             matches!(grit_err, Error::Ref(RefError::Invalid { .. })),
             "expected InvalidRef, got {grit_err:?}"
@@ -275,8 +352,15 @@ fn t1401_long_ref_name_both_backends() {
         let oid = empty_commit_oid(repo);
         let segment = "a".repeat(200);
         let refname = format!("refs/heads/{segment}/tip");
-        write_ref(&git_dir, &refname, &oid).expect("long refname");
-        assert_eq!(resolve_ref(&git_dir, &refname).unwrap(), oid);
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), &refname, &oid)
+            .expect("long refname");
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve(&refname)
+                .unwrap(),
+            oid
+        );
         if git_interop_available(backend) {
             assert_git_fsck_strict(repo.worktree());
         }
@@ -289,9 +373,23 @@ fn t1401_symref_invalid_target_overwrite_both_backends() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_symbolic_ref(&git_dir, "refs/heads/over", "not a valid ref!!").expect("bad symref");
-        write_ref(&git_dir, "refs/heads/over", &oid).expect("overwrite with direct ref");
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/over").unwrap(), oid);
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .update_symbolic("refs/heads/over", "not a valid ref!!")
+            .expect("bad symref");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/over",
+            &oid,
+        )
+        .expect("overwrite with direct ref");
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/over")
+                .unwrap(),
+            oid
+        );
         eprintln!("ok t1401_overwrite_bad_symref ({})", backend_label(backend));
     });
 }
@@ -302,14 +400,21 @@ fn t1400_delete_ref_semantics_both_backends() {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
         let refname = "refs/heads/t1400-delete-semantics";
-        write_ref(&git_dir, refname, &oid).expect("write nested ref");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &oid)
+            .expect("write nested ref");
 
-        delete_ref(&git_dir, refname).expect("delete_ref");
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .delete(refname)
+            .expect("delete_ref");
         assert_eq!(
             read_raw_ref(&git_dir, refname).unwrap(),
             RawRefLookup::NotFound
         );
-        assert!(resolve_ref(&git_dir, refname).is_err());
+        assert!(grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve(refname)
+            .is_err());
         eprintln!("ok t1400_delete_semantics ({})", backend_label(backend));
     });
 }
@@ -323,11 +428,15 @@ fn t1400_delete_ref_prunes_loose_paths() {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
         let refname = "refs/nested/t1400/delete-me";
-        write_ref(&git_dir, refname, &oid).expect("write nested ref");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &oid)
+            .expect("write nested ref");
         let path = loose_ref_path(&git_dir, refname);
         assert!(path.is_file());
 
-        delete_ref(&git_dir, refname).expect("delete_ref");
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .delete(refname)
+            .expect("delete_ref");
         assert!(!path.exists());
         assert!(
             !git_dir.join("refs/nested/t1400").exists(),
@@ -341,7 +450,10 @@ fn t1400_delete_ref_prunes_loose_paths() {
 fn t1400_delete_missing_ref_typed_error_both_backends() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
-        let err = delete_ref(&git_dir, "refs/heads/never-created").unwrap_err();
+        let err = grit_test_support::refs::at(&git_dir)
+            .references()
+            .delete("refs/heads/never-created")
+            .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -358,7 +470,10 @@ fn t1400_delete_missing_ref_typed_error_both_backends() {
 fn resolve_missing_ref_names_the_missing_ref_both_backends() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
-        let err = resolve_ref(&git_dir, "refs/heads/never-created").unwrap_err();
+        let err = grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/never-created")
+            .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -368,8 +483,14 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
             "{err:?}"
         );
 
-        write_symbolic_ref(&git_dir, "refs/heads/dangling", "refs/heads/gone").expect("symref");
-        let err = resolve_ref(&git_dir, "refs/heads/dangling").unwrap_err();
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .update_symbolic("refs/heads/dangling", "refs/heads/gone")
+            .expect("symref");
+        let err = grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/dangling")
+            .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -396,21 +517,30 @@ fn t1400_delete_through_symref_both_backends() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, "refs/heads/delete-target", &oid).expect("target");
-        write_symbolic_ref(
-            &git_dir,
-            "refs/heads/delete-alias",
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
             "refs/heads/delete-target",
+            &oid,
         )
-        .expect("alias");
+        .expect("target");
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .update_symbolic("refs/heads/delete-alias", "refs/heads/delete-target")
+            .expect("alias");
 
-        delete_ref(&git_dir, "refs/heads/delete-alias").expect("delete symref");
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .delete("refs/heads/delete-alias")
+            .expect("delete symref");
         assert_eq!(
             read_raw_ref(&git_dir, "refs/heads/delete-alias").unwrap(),
             RawRefLookup::NotFound
         );
         assert_eq!(
-            resolve_ref(&git_dir, "refs/heads/delete-target").unwrap(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/delete-target")
+                .unwrap(),
             oid,
             "deleting symref must not delete referent"
         );
@@ -430,10 +560,17 @@ fn t0600_empty_directory_does_not_block_create() {
         fs::create_dir_all(&parent).expect("empty dir");
         assert!(parent.is_dir());
 
-        write_ref(&git_dir, "refs/heads/empty-dir-test/leaf", &oid)
-            .expect("create under empty dir");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/empty-dir-test/leaf",
+            &oid,
+        )
+        .expect("create under empty dir");
         assert_eq!(
-            resolve_ref(&git_dir, "refs/heads/empty-dir-test/leaf").unwrap(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/empty-dir-test/leaf")
+                .unwrap(),
             oid
         );
         eprintln!("ok t0600_empty_directory");
@@ -452,7 +589,12 @@ fn t0600_nonempty_directory_blocks_create() {
         fs::create_dir_all(sibling.parent().unwrap()).expect("parent");
         fs::write(&sibling, format!("{oid}\n")).expect("sibling ref");
 
-        let err = write_ref(&git_dir, "refs/heads/blocker", &oid).unwrap_err();
+        let err = grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/blocker",
+            &oid,
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -478,7 +620,12 @@ fn t0600_directory_of_lock_files_blocks_create() {
         fs::create_dir_all(lock.parent().unwrap()).expect("parent");
         fs::write(&lock, "").expect("lock");
 
-        let err = write_ref(&git_dir, "refs/heads/blocker", &oid).unwrap_err();
+        let err = grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/blocker",
+            &oid,
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -506,14 +653,24 @@ fn t0600_broken_ref_file_blocks_create() {
         let read_err = read_ref_file(&broken).unwrap_err();
         assert!(matches!(read_err, Error::Ref(RefError::Invalid { .. })));
 
-        let err = write_ref(&git_dir, "refs/heads/broken-file", &oid).unwrap_err();
+        let err = grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/broken-file",
+            &oid,
+        )
+        .unwrap_err();
         assert!(
             matches!(err, Error::Ref(RefError::Invalid { detail: ref m }) if m.contains("reference broken")),
             "updating broken ref should fail: {err:?}"
         );
 
         assert!(
-            write_ref(&git_dir, "refs/heads/broken-file/child", &oid).is_err(),
+            grit_test_support::refs::set_ref(
+                &grit_test_support::refs::at(&git_dir),
+                "refs/heads/broken-file/child",
+                &oid
+            )
+            .is_err(),
             "nested create under broken ref file must fail"
         );
         assert!(
@@ -584,7 +741,12 @@ fn t1405_verify_refname_df_prefix_single_ref() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, "refs/df/parent", &oid).expect("parent ref");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/df/parent",
+            &oid,
+        )
+        .expect("parent ref");
 
         let extras = BTreeSet::new();
         let skip = HashSet::new();
@@ -592,8 +754,16 @@ fn t1405_verify_refname_df_prefix_single_ref() {
             .unwrap_err();
         assert!(matches!(err, RefnameUnavailable::AncestorExists { .. }));
 
-        delete_ref(&git_dir, "refs/df/parent").expect("remove parent");
-        write_ref(&git_dir, "refs/df/parent/child", &oid).expect("child ref");
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .delete("refs/df/parent")
+            .expect("remove parent");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/df/parent/child",
+            &oid,
+        )
+        .expect("child ref");
         let err = verify_ref_available_for_create(&git_dir, "refs/df/parent", &extras, &skip)
             .unwrap_err();
         assert!(matches!(err, RefnameUnavailable::DescendantExists { .. }));
@@ -637,20 +807,55 @@ fn t1400_list_refs_glob_and_dwim_both_backends() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, "refs/heads/topic/one", &oid).expect("one");
-        write_ref(&git_dir, "refs/heads/topic/two", &oid).expect("two");
-        write_ref(&git_dir, "refs/tags/v1", &oid).expect("tag");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/topic/one",
+            &oid,
+        )
+        .expect("one");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/topic/two",
+            &oid,
+        )
+        .expect("two");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/tags/v1",
+            &oid,
+        )
+        .expect("tag");
 
-        let listed = list_refs(&git_dir, "refs/heads/topic/").expect("list_refs");
+        let listed = grit_test_support::refs::at(&git_dir)
+            .references()
+            .list("refs/heads/topic/")
+            .map(|refs| {
+                refs.into_iter()
+                    .map(|(n, o)| (String::from(n), o))
+                    .collect::<Vec<_>>()
+            })
+            .expect("list_refs");
         assert_eq!(listed.len(), 2);
 
-        let globbed = list_refs_glob(&git_dir, "refs/heads/topic/*").expect("glob");
+        let globbed = grit_test_support::refs::at(&git_dir)
+            .references()
+            .list_glob("refs/heads/topic/*")
+            .map(|refs| {
+                refs.into_iter()
+                    .map(|(n, o)| (String::from(n), o))
+                    .collect::<Vec<_>>()
+            })
+            .expect("glob");
         assert_eq!(globbed.len(), 2);
 
         let physical = list_refs_physical(&git_dir, "refs/heads/topic/").expect("physical");
         assert_eq!(physical.len(), 2);
 
-        let (_, dwim_oid) = resolve_ref_dwim(&git_dir, "topic/one");
+        let dwim_oid = grit_test_support::refs::at(&git_dir)
+            .references()
+            .dwim("topic/one")
+            .expect("dwim")
+            .map(|found| found.oid);
         assert_eq!(dwim_oid, Some(oid));
 
         eprintln!("ok t1400_list_glob_dwim ({})", backend_label(backend));
@@ -665,12 +870,28 @@ fn t1400_packed_refs_resolve_delete_and_cached() {
         }
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, "refs/heads/packed-a", &oid).expect("a");
-        write_ref(&git_dir, "refs/heads/packed-b", &oid).expect("b");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/packed-a",
+            &oid,
+        )
+        .expect("a");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/packed-b",
+            &oid,
+        )
+        .expect("b");
         git(repo.worktree(), &["pack-refs", "--all", "--prune"]);
 
         assert!(packed_refs_entry_exists(&git_dir, "refs/heads/packed-a").unwrap());
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/packed-a").unwrap(), oid);
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve("refs/heads/packed-a")
+                .unwrap(),
+            oid
+        );
 
         let mut packed = PackedRefs::load(&git_dir).expect("load packed");
         assert_eq!(
@@ -681,7 +902,10 @@ fn t1400_packed_refs_resolve_delete_and_cached() {
         );
 
         write_ref_cached(&git_dir, "refs/heads/packed-c", &oid, &mut packed).expect("cached write");
-        delete_ref(&git_dir, "refs/heads/packed-a").expect("delete packed entry");
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .delete("refs/heads/packed-a")
+            .expect("delete packed entry");
         assert!(!packed_refs_entry_exists(&git_dir, "refs/heads/packed-a").unwrap());
         assert_git_fsck_strict(repo.worktree());
         eprintln!("ok t1400_packed_refs");
@@ -693,7 +917,12 @@ fn t1400_reflog_append_and_log_refs_config_both_backends() {
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, "refs/heads/reflog-branch", &oid).expect("write");
+        grit_test_support::refs::set_ref(
+            &grit_test_support::refs::at(&git_dir),
+            "refs/heads/reflog-branch",
+            &oid,
+        )
+        .expect("write");
         let _cfg = read_log_refs_config(&git_dir);
         assert!(should_autocreate_reflog(
             &git_dir,
@@ -702,17 +931,23 @@ fn t1400_reflog_append_and_log_refs_config_both_backends() {
         let zero_oid: ObjectId = "0000000000000000000000000000000000000000"
             .parse()
             .expect("zero oid");
-        append_reflog(
-            &git_dir,
-            "refs/heads/reflog-branch",
-            &zero_oid,
-            &oid,
-            "Refs Harness <refs-harness@example.com>",
-            "refs harness reflog",
-            true,
-        )
-        .expect("append_reflog");
-        let entries = read_reflog(&git_dir, "refs/heads/reflog-branch").expect("read_reflog");
+        grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .append(
+                "refs/heads/reflog-branch",
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: zero_oid,
+                    new_oid: oid,
+                    identity: ("Refs Harness <refs-harness@example.com>").to_string(),
+                    message: ("refs harness reflog").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::Always,
+            )
+            .expect("append_reflog");
+        let entries = grit_test_support::refs::at(&git_dir)
+            .references()
+            .reflog("refs/heads/reflog-branch")
+            .expect("read_reflog");
         assert!(
             !entries.is_empty(),
             "reflog should contain at least one entry"
@@ -732,7 +967,12 @@ fn t1430_write_ref_rejects_invalid_names_both_backends() {
             "refs/heads/a.lock",
         ] {
             assert!(
-                write_ref(&git_dir, refname, &oid).is_err(),
+                grit_test_support::refs::set_ref(
+                    &grit_test_support::refs::at(&git_dir),
+                    refname,
+                    &oid
+                )
+                .is_err(),
                 "write_ref must reject {refname}"
             );
             assert!(

@@ -679,7 +679,12 @@ fn push_local_up_to_date_refreshes_stale_remote_tracking_ref() {
     .expect("initial push");
 
     // Stale tracking ref: remote is at c2 but we still record c1 locally.
-    grit_lib::refs::write_ref(&local_git, "refs/remotes/origin/main", &c1).expect("stale tracking");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&local_git),
+        "refs/remotes/origin/main",
+        &c1,
+    )
+    .expect("stale tracking");
 
     let outcome = grit_lib::repo::Repository::open(
         &local_git,

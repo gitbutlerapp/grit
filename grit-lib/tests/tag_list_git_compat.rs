@@ -311,7 +311,7 @@ fn packed_peel_lines_answer_without_reading_tag_objects() {
 
     let repo = open(&root);
     let options = grit_lib::refs::listing::ref_query_options_for_repo(&repo).unwrap();
-    let listings = grit_lib::refs::listing::query_refs(&repo, &name_query(), &options).unwrap();
+    let listings = repo.references().query(&name_query(), &options).unwrap();
     let gone = listings
         .iter()
         .find(|l| l.short_name == "gone")

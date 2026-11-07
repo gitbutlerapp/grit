@@ -52,21 +52,16 @@ use grit_lib::porcelain::status::expand_untracked_for_staging;
 use grit_lib::porcelain::tag::creator_date;
 use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
 use grit_lib::progress::{CancelToken, NullProgress};
-use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
+use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryOptions};
 use grit_lib::refs::query_reachability::{ref_points_at, resolve_commit_filter_target};
-use grit_lib::refs::ref_storage::detect_format;
 use grit_lib::refs::ref_storage::RefStorageFormat;
-use grit_lib::refs::{
-    list_refs_glob_for_repository, reftable::verify_ref_transaction_batch_reftable, write_ref,
-    RefBatchItem,
-};
+use grit_lib::refs::{reftable::verify_ref_transaction_batch_reftable, RefBatchItem};
 use grit_lib::remote::transfer::{build_pack, FetchOptions, PackBuildOptions, TagMode};
 use grit_lib::repo::caches::RepoCaches;
 use grit_lib::repo::ensure_core_bare;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::worktree_bytes_for_index_mode;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
-use grit_lib::state::{read_merge_msg, resolve_head, split_commit_in_progress};
 use grit_lib::test_support::objects_pack::{
     clear_pack_delta_base_cache, configure_delta_base_cache_from_config,
     packed_ref_delta_reuse_slice, read_object_from_pack_at_offset, read_pack_index,
@@ -110,7 +105,9 @@ fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
-    grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("main oid")
+    repo.references()
+        .resolve("refs/heads/main")
+        .expect("main oid")
 }
 
 fn git_fsck(dir: &Path) {
@@ -276,7 +273,7 @@ fn gitmodules_verify_for_commit() {
         .status()
         .expect("git commit");
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").expect("head");
+    let head = repo.references().resolve("HEAD").expect("head");
     let _ = verify_gitmodules_for_commit(repo.odb(), head);
 }
 
@@ -286,9 +283,21 @@ fn refs_state_repo_caches_and_notes() {
     let repo = init_repo(dir.path());
     let git_dir = dir.path().join(".git");
     let oid = support::stored_commit(&git_dir, 7);
-    write_ref(git_dir.as_path(), "refs/heads/topic/foo", &oid).expect("write ref");
-    let _ = list_refs_glob_for_repository(&repo, "refs/heads/topic/*");
-    let _ = detect_format(git_dir.as_path());
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(git_dir.as_path()),
+        "refs/heads/topic/foo",
+        &oid,
+    )
+    .expect("write ref");
+    let _ = repo
+        .references()
+        .list_glob("refs/heads/topic/*")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        });
+    let _ = grit_lib::refs::ref_storage::RefStorageFormat::detect(git_dir.as_path());
     ensure_core_bare(git_dir.as_path()).expect("bare");
 
     let caches = RepoCaches::new(system_command_runner());
@@ -297,9 +306,17 @@ fn refs_state_repo_caches_and_notes() {
     let mut entries: Vec<NotesTreeEntry> = Vec::new();
     assert!(!remove_note_entry(&mut entries, oid.to_hex().as_str()));
 
-    let head = resolve_head(git_dir.as_path()).expect("head");
-    let _ = split_commit_in_progress(git_dir.as_path(), &head);
-    let _ = read_merge_msg(git_dir.as_path());
+    let head = grit_test_support::refs::at(git_dir.as_path())
+        .references()
+        .head()
+        .expect("head");
+    let _ = grit_test_support::refs::at(&git_dir)
+        .operation()
+        .split_commit_in_progress();
+    let _ = grit_test_support::refs::at(git_dir.as_path())
+        .operation()
+        .state()
+        .map(|s| s.merge_message);
 
     let rt_dir = tempdir().expect("rt");
     let (rt_repo, _) = Repository::init(
@@ -366,16 +383,17 @@ fn porcelain_stash_tag_status_and_worktree() {
     let _ = creator_date(&repo, &tag_oid);
     let _ = resolve_commit_filter_target(&repo, tag_oid).ok();
     let _ = ref_points_at(repo.odb(), tag_oid, &tag_oid).ok();
-    let _ = query_refs(
-        &repo,
-        &RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            contains: vec![tag_oid],
-            ..RefQuery::default()
-        },
-        &RefQueryOptions::default(),
-    )
-    .ok();
+    let _ = repo
+        .references()
+        .query(
+            &RefQuery {
+                namespaces: vec![RefNamespace::Tags],
+                contains: vec![tag_oid],
+                ..RefQuery::default()
+            },
+            &RefQueryOptions::default(),
+        )
+        .ok();
 
     let gpg = grit_lib::commit::signing::GpgConfig::from_config(&ConfigSet::new()).expect("gpg");
     let _ = verify_tag(&gpg, b"not a signed tag");
@@ -432,7 +450,10 @@ fn mailmap_gitmodules_submodule_and_write_tree() {
         "[submodule \"sub\"]\n\tpath = sub\n\turl = ./sub.git\n",
     )
     .expect("gitmodules");
-    let head = resolve_head(git_dir.as_path()).expect("head");
+    let head = grit_test_support::refs::at(git_dir.as_path())
+        .references()
+        .head()
+        .expect("head");
     if let Some(oid) = head.oid() {
         let _ = verify_gitmodules_for_commit(repo.odb(), *oid);
     }

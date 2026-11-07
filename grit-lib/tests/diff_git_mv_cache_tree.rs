@@ -39,7 +39,7 @@ fn grit_diff_stat_after_git_mv_does_not_read_stale_cache_tree() {
     std::fs::write(root.join("g.txt"), b"line\nextra\n").expect("write");
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = grit_lib::state::resolve_head(repo.git_dir()).expect("head");
+    let head = repo.references().head().expect("head");
     let head_tree =
         grit_lib::diff::tree_oid_of_commit(repo.odb(), head.oid().expect("oid")).expect("tree");
     let index = repo.index().load().expect("index");

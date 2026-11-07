@@ -69,10 +69,11 @@ fn main() -> grit_lib::error::Result<()> {
     )?;
 
     let base = commit_tree(&repo, None, "common root")?;
-    refs::write_ref(repo.git_dir(), "refs/heads/main", &base)?;
+    repo.references().update("refs/heads/main", &base)?;
 
     let feature_tip = commit_tree(&repo, Some(base), "feature work")?;
-    refs::write_ref(repo.git_dir(), "refs/heads/feature", &feature_tip)?;
+    repo.references()
+        .update("refs/heads/feature", &feature_tip)?;
 
     let main_tip = base;
     let bases = repo.revwalk().merge_bases(

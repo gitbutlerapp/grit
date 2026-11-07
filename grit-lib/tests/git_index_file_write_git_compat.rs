@@ -148,7 +148,7 @@ fn reset_mixed_with_git_index_file_rewrites_temp_index_only() {
     assert!(git_ls_files(&root, Some(&alt_index)).contains(&"n".to_owned()));
 
     let repo = open_with_index(&root, &alt_index);
-    let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").expect("head");
+    let head = repo.references().resolve("HEAD").expect("head");
     reset_to_commit(
         &repo,
         &ResetOptions::new(

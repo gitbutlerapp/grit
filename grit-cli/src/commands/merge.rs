@@ -31,7 +31,7 @@ use grit_lib::porcelain::MergeError;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::ProgressSink;
 use grit_lib::repo::Repository;
-use grit_lib::state::{read_merge_msg, resolve_head, HeadState};
+use grit_lib::state::HeadState;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -605,7 +605,7 @@ pub fn run(
 
     let branch = branch.context("branch name required unless using --abort or --continue")?;
 
-    if let Some(op) = grit_lib::state::operation_blocking_switch(repo.git_dir())? {
+    if let Some(op) = repo.operation().blocking_switch()? {
         if !matches!(op, grit_lib::state::InProgressOperation::Merge) {
             return Err(crate::json_error::operation_in_progress_for_repo(
                 &repo, "merge", op,
@@ -613,7 +613,7 @@ pub fn run(
         }
     }
 
-    let head = resolve_head(repo.git_dir())?;
+    let head = repo.references().head()?;
     let other_oid = resolve_merge_source(&repo, branch)
         .map_err(crate::json_error::map_lib_error)?
         .oid;
@@ -729,10 +729,11 @@ fn build_merge_options(run: &MergeRunOptions) -> Result<MergeOptions> {
     })
 }
 
-fn merge_continue_label(git_dir: &std::path::Path) -> String {
-    read_merge_msg(git_dir)
+fn merge_continue_label(repo: &Repository) -> String {
+    repo.operation()
+        .state()
         .ok()
-        .flatten()
+        .and_then(|state| state.merge_message)
         .and_then(|msg| {
             let line = msg.lines().next()?.trim();
             if let Some(rest) = line.strip_prefix("Merge branch '") {
@@ -753,8 +754,8 @@ fn run_continue(
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<MergeOutcome> {
-    let label = merge_continue_label(repo.git_dir());
-    let detached = matches!(resolve_head(repo.git_dir())?, HeadState::Detached { .. });
+    let label = merge_continue_label(repo);
+    let detached = matches!(repo.references().head()?, HeadState::Detached { .. });
     let now = context::wall_clock_now(repo.environment());
     let options = ContinueOptions {
         message: message.map(str::to_owned),

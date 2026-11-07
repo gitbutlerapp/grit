@@ -433,7 +433,6 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
 
 #[test]
 fn git_daemon_shallow_depth_two_keeps_parent_tag() {
-    use grit_lib::refs::resolve_ref;
     use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -487,6 +486,8 @@ fn git_daemon_shallow_depth_two_keeps_parent_tag() {
     )
     .expect("git:// depth-2 clone");
 
-    resolve_ref(&dest.join(".git"), "refs/tags/parent-tag")
+    grit_test_support::refs::at(&dest.join(".git"))
+        .references()
+        .resolve("refs/tags/parent-tag")
         .expect("parent-tag after depth-2 clone over git://");
 }

@@ -45,3 +45,7 @@ pub mod fuzz;
 pub mod knobs;
 
 pub mod git_date;
+
+/// Git-directory-level ref, reflog and reftable helpers for backend tests.
+#[cfg(any(test, feature = "test-support"))]
+pub mod refs;

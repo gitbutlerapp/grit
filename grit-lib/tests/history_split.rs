@@ -318,7 +318,7 @@ fn split_in_bare_repository() {
             }),
         )
         .expect("root commit");
-    grit_lib::refs::write_ref(grit.git_dir(), "refs/heads/main", &root).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &root).expect("ref");
     let blob_f = grit
         .odb()
         .write(grit_lib::objects::ObjectKind::Blob, b"x")
@@ -361,7 +361,7 @@ fn split_in_bare_repository() {
             }),
         )
         .expect("tip");
-    grit_lib::refs::write_ref(grit.git_dir(), "refs/heads/main", &tip).expect("update tip");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &tip).expect("update tip");
     let plan = grit
         .history()
         .split(

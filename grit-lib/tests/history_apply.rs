@@ -11,8 +11,6 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, parse_tree, ObjectKind};
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::reflog::read_reflog;
-use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
@@ -295,7 +293,7 @@ fn apply_rewrite_updates_refs_atomically_files_backend() {
     let new_tip = applied.head;
     assert_ne!(new_tip, oids["c"]);
     assert_eq!(
-        resolve_ref(grit.git_dir(), "refs/heads/main").expect("main"),
+        grit.references().resolve("refs/heads/main").expect("main"),
         new_tip
     );
     assert_ne!(new_tip, oids["c"]);
@@ -494,7 +492,7 @@ fn apply_rewrite_bare_repository() {
         .odb()
         .write(ObjectKind::Commit, &commit)
         .expect("commit");
-    grit_lib::refs::write_ref(grit.git_dir(), "refs/heads/main", &oid).expect("ref");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &oid).expect("ref");
     let mut edits = HistoryEdits::new();
     edits.insert(
         oid,
@@ -543,7 +541,7 @@ fn apply_rewrite_writes_reflog_entries() {
             &CancelToken::never(),
         )
         .expect("apply");
-    let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
+    let tip = grit.references().resolve("refs/heads/main").expect("main");
     let branch_reflog = git(wt, &["reflog", "show", "-1", "main"]);
     assert!(
         branch_reflog.contains("history rewrite"),
@@ -554,8 +552,11 @@ fn apply_rewrite_writes_reflog_entries() {
         head_reflog.contains("history rewrite"),
         "HEAD reflog must record apply message: {head_reflog}"
     );
-    let head_log = read_reflog(grit.git_dir(), "HEAD").expect("parse HEAD reflog");
-    let branch_log = read_reflog(grit.git_dir(), "refs/heads/main").expect("parse branch reflog");
+    let head_log = grit.references().reflog("HEAD").expect("parse HEAD reflog");
+    let branch_log = grit
+        .references()
+        .reflog("refs/heads/main")
+        .expect("parse branch reflog");
     let head_entry = head_log.last().expect("HEAD reflog entry");
     let branch_entry = branch_log.last().expect("branch reflog entry");
     assert_eq!(head_entry.new_oid, tip);
@@ -588,9 +589,15 @@ fn apply_rewrite_checked_out_branch_reflog_single_entry_per_update() {
             &CancelToken::never(),
         )
         .expect("apply");
-    let new_tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main tip");
-    let head_log = read_reflog(grit.git_dir(), "HEAD").expect("HEAD reflog");
-    let branch_log = read_reflog(grit.git_dir(), "refs/heads/main").expect("main reflog");
+    let new_tip = grit
+        .references()
+        .resolve("refs/heads/main")
+        .expect("main tip");
+    let head_log = grit.references().reflog("HEAD").expect("HEAD reflog");
+    let branch_log = grit
+        .references()
+        .reflog("refs/heads/main")
+        .expect("main reflog");
     assert_eq!(
         head_log.len(),
         4,
@@ -647,7 +654,7 @@ fn apply_rewrite_head_reflog_matches_git_update_ref_on_checked_out_branch() {
             &CancelToken::never(),
         )
         .expect("apply");
-    let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
+    let tip = grit.references().resolve("refs/heads/main").expect("main");
     let head_gs = git(wt, &["reflog", "show", "-1", "--format=%gs", "HEAD"]);
     let branch_gs = git(
         wt,
@@ -682,8 +689,11 @@ fn apply_rewrite_head_reflog_reftable_backend() {
             &CancelToken::never(),
         )
         .expect("apply");
-    let head_log = read_reflog(grit.git_dir(), "HEAD").expect("head log");
-    let branch_log = read_reflog(grit.git_dir(), "refs/heads/main").expect("branch log");
+    let head_log = grit.references().reflog("HEAD").expect("head log");
+    let branch_log = grit
+        .references()
+        .reflog("refs/heads/main")
+        .expect("branch log");
     let head_entry = head_log.last().expect("HEAD reflog entry");
     let branch_entry = branch_log.last().expect("branch reflog entry");
     assert_eq!(head_entry.new_oid, branch_entry.new_oid);

@@ -3,7 +3,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::refs::append_reflog;
 use grit_lib::refs::store::RefName;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::{ExpireOptions, RepositoryReflogs};
@@ -26,16 +25,19 @@ fn repository_reflogs_public_methods() {
 
     let refname = "refs/heads/main";
     let git_dir = repo.git_dir();
-    append_reflog(
-        git_dir,
-        refname,
-        &grit_lib::objects::ObjectId::zero(),
-        &grit_lib::objects::ObjectId::zero(),
-        "T <t@example.com> 1700000000 +0000",
-        "cov",
-        true,
-    )
-    .expect("append");
+    grit_test_support::refs::at(git_dir)
+        .reflogs()
+        .append(
+            refname,
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: grit_lib::objects::ObjectId::zero(),
+                new_oid: grit_lib::objects::ObjectId::zero(),
+                identity: ("T <t@example.com> 1700000000 +0000").to_string(),
+                message: ("cov").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::Always,
+        )
+        .expect("append");
 
     let refs = handle.list_reflog_refs().expect("refs");
     assert!(refs.iter().any(|r| r.as_str() == refname));
@@ -51,16 +53,19 @@ fn repository_reflogs_public_methods() {
         .expect("entries after delete")
         .is_empty());
 
-    append_reflog(
-        git_dir,
-        refname,
-        &grit_lib::objects::ObjectId::zero(),
-        &grit_lib::objects::ObjectId::zero(),
-        "T <t@example.com> 1000000000 +0000",
-        "old",
-        true,
-    )
-    .expect("re-append");
+    grit_test_support::refs::at(git_dir)
+        .reflogs()
+        .append(
+            refname,
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: grit_lib::objects::ObjectId::zero(),
+                new_oid: grit_lib::objects::ObjectId::zero(),
+                identity: ("T <t@example.com> 1000000000 +0000").to_string(),
+                message: ("old").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::Always,
+        )
+        .expect("re-append");
 
     let outcome = handle
         .expire(&ExpireOptions {

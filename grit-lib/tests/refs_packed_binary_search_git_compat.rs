@@ -2,7 +2,7 @@
 
 use crate::support;
 
-use grit_lib::refs::{resolve_ref, PackedRefs};
+use grit_lib::refs::PackedRefs;
 
 use support::{files_repo, git, git_empty_commit_oid, git_for_each_ref, TestRepo};
 
@@ -43,7 +43,11 @@ fn git_packed_two_thousand_tags_resolve_matches_git() {
         let git_oid = git(wt, &["rev-parse", &name]);
         assert_eq!(grit_oid.to_hex(), git_oid.trim(), "list parity for {name}");
         assert_eq!(
-            resolve_ref(&git_dir, &name).expect("resolve").to_hex(),
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .resolve(&name)
+                .expect("resolve")
+                .to_hex(),
             git_oid.trim()
         );
         if let Some(want) = packed.get(&name) {
@@ -61,18 +65,30 @@ fn separate_repository_reads_see_git_packed_ref_update() {
     git(wt, &["branch", "session-a"]);
     git(wt, &["pack-refs", "--all"]);
 
-    let oid_before = resolve_ref(&git_dir, "refs/heads/session-a").expect("session-a");
+    let oid_before = grit_test_support::refs::at(&git_dir)
+        .references()
+        .resolve("refs/heads/session-a")
+        .expect("session-a");
     assert_eq!(
-        resolve_ref(&git_dir, "refs/heads/session-a").expect("lookup"),
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/session-a")
+            .expect("lookup"),
         oid_before
     );
 
     git(wt, &["branch", "session-b"]);
     git(wt, &["pack-refs", "--all"]);
-    let oid_b = resolve_ref(&git_dir, "refs/heads/session-b").expect("session-b");
+    let oid_b = grit_test_support::refs::at(&git_dir)
+        .references()
+        .resolve("refs/heads/session-b")
+        .expect("session-b");
 
     assert_eq!(
-        resolve_ref(&git_dir, "refs/heads/session-b").expect("lookup"),
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/session-b")
+            .expect("lookup"),
         oid_b
     );
 }

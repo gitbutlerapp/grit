@@ -11,7 +11,6 @@ use switch_overwrite_git_helpers::git_switch_refused_paths;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -840,7 +839,7 @@ fn switch_tree_diff_git_clean_after() {
     );
     git_fsck(tmp.path());
 
-    let _ = refs::resolve_ref(grit_repo.git_dir(), "HEAD").expect("head");
+    let _ = grit_repo.references().resolve("HEAD").expect("head");
 }
 
 #[test]

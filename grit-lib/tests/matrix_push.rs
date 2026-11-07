@@ -57,7 +57,6 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::{PushRefResult, PushRefStatus};
 use grit_lib::remote::transfer::{PushOptions, PushOutcome, PushRefSpec};
@@ -234,7 +233,10 @@ fn fsck_clean(bare: &Path, what: &str) {
 /// Assert the remote ref equals `oid` both via grit's resolver and system git.
 fn assert_remote_ref(bare: &Path, name: &str, oid: ObjectId) {
     assert_eq!(
-        resolve_ref(bare, name).unwrap_or_else(|e| panic!("resolve {name}: {e}")),
+        grit_test_support::refs::at(bare)
+            .references()
+            .resolve(name)
+            .unwrap_or_else(|e| panic!("resolve {name}: {e}")),
         oid,
         "remote {name} oid mismatch (grit resolver)"
     );
@@ -745,7 +747,10 @@ fn run_push_matrix(label: &str, bare: &Path, graph: &Graph, push: &Pusher<'_>) {
     assert!(r.deletion, "[{label}] result should be flagged a deletion");
     assert!(r.new_oid.is_none(), "[{label}] a deletion has no new oid");
     assert!(
-        resolve_ref(bare, "refs/heads/scratch").is_err(),
+        grit_test_support::refs::at(bare)
+            .references()
+            .resolve("refs/heads/scratch")
+            .is_err(),
         "[{label}] scratch ref must be gone after deletion"
     );
     fsck_clean(bare, &format!("{label} deletion"));
@@ -841,7 +846,10 @@ fn run_push_matrix(label: &str, bare: &Path, graph: &Graph, push: &Pusher<'_>) {
         good.status
     );
     assert!(
-        resolve_ref(bare, "refs/heads/atomic-ok").is_err(),
+        grit_test_support::refs::at(bare)
+            .references()
+            .resolve("refs/heads/atomic-ok")
+            .is_err(),
         "[{label}] atomic abort must not create the good ref"
     );
     assert_remote_ref(bare, "refs/heads/main", ff); // still at ff
@@ -1200,7 +1208,10 @@ fn remote_rejection_surfaces_over_git_daemon() {
     );
     // Nothing landed: the ref must not exist on the remote.
     assert!(
-        resolve_ref(&bare, "refs/heads/main").is_err(),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .is_err(),
         "server-rejected push must not create the ref"
     );
 }
@@ -1262,7 +1273,10 @@ fn remote_rejection_surfaces_over_ssh() {
         r.message
     );
     assert!(
-        resolve_ref(&bare, "refs/heads/main").is_err(),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .is_err(),
         "server-rejected ssh push must not create the ref"
     );
 }

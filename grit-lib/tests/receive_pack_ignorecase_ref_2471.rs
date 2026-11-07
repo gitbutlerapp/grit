@@ -7,11 +7,12 @@ use grit_lib::refs::store::{
     Expected, FilesRefStore, FilesRefStoreConfig, RawRef, RefNameRef, RefStore, RefStoreError,
     RefTransaction, RefUpdate,
 };
-use grit_lib::refs::{write_packed_refs_file, PackedRefRecord};
+use grit_lib::refs::PackedRefRecord;
 use grit_lib::remote::serve::{
     ProtocolVersion, ReceivePack, ReceivePolicy, RefUpdateRefusal, ServeOptions,
 };
 use grit_lib::repo::Repository;
+use grit_lib::test_support::refs::write_packed_refs_file;
 use grit_test_support::{git, rev_parse};
 use std::io::{Cursor, Write};
 use std::path::Path;

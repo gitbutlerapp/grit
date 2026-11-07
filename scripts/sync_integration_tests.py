@@ -47,6 +47,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "merge_df_integrate_issue_2359"),
     ("grit-lib", "merge_file_issue_2369_git_compat"),
     ("grit-lib", "push_packed_tag_regression"),
+    ("grit-lib", "refs_handle_git_roundtrip"),
     ("grit-lib", "push_tag_update_git_compat"),
     ("grit-cli", "push_tag_exists"),
     ("grit-lib", "push_path_tracking_git_compat"),

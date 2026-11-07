@@ -7,7 +7,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::Remote;
 use grit_lib::repo::Repository;
@@ -65,7 +64,10 @@ fn read_fetch_head(git_dir: &Path) -> String {
 }
 
 fn tracking_tip(git_dir: &Path, name: &str) -> Option<ObjectId> {
-    resolve_ref(git_dir, name).ok()
+    grit_test_support::refs::at(git_dir)
+        .references()
+        .resolve(name)
+        .ok()
 }
 
 struct BareRemote {
@@ -252,7 +254,10 @@ fn named_remote_explicit_refspec_writes_fetch_head_via_remote_fetch() {
         .expect("Remote::fetch explicit main");
 
     let fetch_head = read_fetch_head(&git_dir);
-    let expected = resolve_ref(&remote.git_dir(), "refs/heads/main").expect("remote main");
+    let expected = grit_test_support::refs::at(remote.git_dir())
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main");
     let got_oid = fetch_head
         .lines()
         .next()

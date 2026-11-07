@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::gc::{update_refs, RefTransactionItem};
-use grit_lib::refs::list_refs;
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::TempDir;
 
@@ -57,9 +56,10 @@ impl ReftableBenchFixture {
 
 fn bench_for_each_ref_100k(c: &mut Criterion) {
     let fx = ReftableBenchFixture::new();
+    let repo = grit_test_support::refs::at(&fx.git_dir);
     c.bench_function("refs_reftable/for_each_ref_100k", |b| {
         b.iter(|| {
-            let listed = list_refs(&fx.git_dir, "refs/").expect("list");
+            let listed = black_box(&repo).references().list("refs/").expect("list");
             black_box(listed.len())
         });
     });
@@ -67,9 +67,13 @@ fn bench_for_each_ref_100k(c: &mut Criterion) {
 
 fn bench_prefix_seek(c: &mut Criterion) {
     let fx = ReftableBenchFixture::new();
+    let repo = grit_test_support::refs::at(&fx.git_dir);
     c.bench_function("refs_reftable/prefix_seek", |b| {
         b.iter(|| {
-            let listed = list_refs(&fx.git_dir, "refs/heads/b05").expect("list prefix");
+            let listed = black_box(&repo)
+                .references()
+                .list("refs/heads/b05")
+                .expect("list prefix");
             assert_eq!(listed.len(), PREFIX_REF_COUNT);
             black_box(listed.len())
         });

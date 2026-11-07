@@ -62,7 +62,6 @@ use grit_lib::porcelain::replay_sequence::{
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
-use grit_lib::refs::read_symbolic_ref_for_repository;
 use grit_lib::refs::store::RefName;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::Remote;
@@ -417,7 +416,10 @@ fn remote_refs_for_bare_heads(bare: &Repository) -> BTreeMap<String, String> {
 /// Expected `refs/remotes/origin/*` after fetch, derived only from the bare remote.
 fn expected_fetch_remote_refs_from_bare(bare: &Repository) -> BTreeMap<String, String> {
     let mut expected = remote_refs_for_bare_heads(bare);
-    let default_branch = read_symbolic_ref_for_repository(bare, "HEAD")
+    let default_branch = bare
+        .references()
+        .symbolic("HEAD")
+        .map(|t| t.map(String::from))
         .expect("read bare HEAD")
         .unwrap_or_else(|| "refs/heads/main".into());
     if let Some(short) = default_branch.strip_prefix("refs/heads/") {

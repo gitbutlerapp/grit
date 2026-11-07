@@ -67,7 +67,7 @@ fn describe_clock_skew_fixture_matches_git_rev_list_count() {
     let tagged = write_commit_at(odb, &[base], "tagged", 2598).expect("tagged");
     let side = write_commit_at(odb, &[tagged], "side", 4411).expect("side");
     let merge = write_commit_at(odb, &[base, side], "merge", 5000).expect("merge");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/main", &merge).expect("ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &merge).expect("ref");
     tag_annotated(&repo, "t20", tagged, "m");
 
     let described = repo

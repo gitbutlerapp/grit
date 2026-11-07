@@ -1,6 +1,5 @@
 //! Smoke test: fetch from a bare remote (regression for grit-examples fetch_push).
 
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::FetchOptions;
 
 #[test]
@@ -42,5 +41,8 @@ fn fetch_local_from_bare_remote_with_loose_objects_only() {
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch from bare remote");
-    resolve_ref(&local_git, "refs/remotes/origin/main").expect("tracking ref");
+    grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("tracking ref");
 }

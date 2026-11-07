@@ -2,7 +2,6 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{parse_commit, parse_tree, tag_object_line_oid, ObjectId, ObjectKind};
-use grit_lib::refs::write_ref;
 use grit_lib::remote::{ListRefsOptions, Remote};
 use grit_lib::repo::Repository;
 use std::collections::HashSet;
@@ -12,6 +11,7 @@ use std::path::PathBuf;
 fn main() -> grit_lib::error::Result<()> {
     let local_git = arg_path(1, ".git");
     let remote_git = arg_path(2, "../remote.git");
+    let local = Repository::open(&local_git, &RepositoryOptions::from_process())?;
     let local_odb = Odb::new(&local_git.join("objects"));
     let remote_odb = Odb::new(&remote_git.join("objects"));
 
@@ -32,7 +32,7 @@ fn main() -> grit_lib::error::Result<()> {
         copy_reachable(&remote_odb, &local_odb, remote_ref.oid)?;
         if let Some(branch) = remote_ref.name.strip_prefix("refs/heads/") {
             let tracking_ref = format!("refs/remotes/origin/{branch}");
-            write_ref(&local_git, &tracking_ref, &remote_ref.oid)?;
+            local.references().update(&tracking_ref, &remote_ref.oid)?;
             println!("fetched {} -> {}", remote_ref.name, tracking_ref);
         }
     }

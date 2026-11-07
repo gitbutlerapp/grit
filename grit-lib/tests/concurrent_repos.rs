@@ -494,8 +494,10 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             )
             .expect("fetch");
         let main_ref = format!("refs/remotes/origin/{default_branch}");
-        let main_tip = grit_lib::refs::resolve_ref(repo.git_dir(), &main_ref).expect("main tip");
-        let topic_tip = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/remotes/origin/topic")
+        let main_tip = repo.references().resolve(&main_ref).expect("main tip");
+        let topic_tip = repo
+            .references()
+            .resolve("refs/remotes/origin/topic")
             .expect("topic tip");
         let main_tree = parse_commit(&repo.odb().read(&main_tip).expect("main obj").data)
             .expect("parse main")
@@ -570,8 +572,10 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             &format!("note for {email}"),
         )
         .expect("notes");
-        let notes_tip =
-            grit_lib::refs::resolve_ref(repo.git_dir(), "refs/notes/commits").expect("notes tip");
+        let notes_tip = repo
+            .references()
+            .resolve("refs/notes/commits")
+            .expect("notes tip");
         let notes_commit = parse_commit(
             &repo
                 .odb()

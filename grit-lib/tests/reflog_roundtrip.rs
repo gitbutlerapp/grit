@@ -14,20 +14,20 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::append_reflog_with_config;
 use grit_lib::refs::reflog::{
-    all_reflog_oids, all_reflog_oids_ordered, delete_reflog_entries, expire_reflog,
-    expire_reflog_git, expire_reflog_unreachable, list_reflog_refs, load_gc_reflog_expire_config,
-    mark_stalefix_reachable, mirror_branch_reflog_to_head, parse_reflog_ref, read_reflog,
-    read_reflog_dwim, reflog_exists, truncate_last_reflog_line, ReflogEntry, ReflogExpireParams,
+    all_reflog_oids_ordered, delete_reflog_entries, expire_reflog_git, expire_reflog_unreachable,
+    load_gc_reflog_expire_config, mark_stalefix_reachable, mirror_branch_reflog_to_head,
+    parse_reflog_ref, read_reflog_dwim, truncate_last_reflog_line, ReflogEntry, ReflogExpireParams,
     ReflogSelector,
 };
 use grit_lib::refs::store::{RefName, RefStore, ReftableRefStore};
-use grit_lib::refs::{
-    append_reflog, append_reflog_with_config, effective_log_refs_config, read_log_refs_config,
-    reflog_file_path, write_ref, write_symbolic_ref,
-};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::ExpireOptions;
+use grit_lib::test_support::refs::{all_reflog_oids, expire_reflog};
+use grit_lib::test_support::refs::{
+    effective_log_refs_config, read_log_refs_config, reflog_file_path,
+};
 
 use support::{
     append_repo_config, assert_reflog_tree_matches, copy_worktree, each_backend, empty_commit_oid,
@@ -108,7 +108,8 @@ fn seed_three_entry_reflog(repo: &TestRepo, refname: &str) -> (ObjectId, ObjectI
     let o1 = empty_commit_oid(repo);
     let o2 = empty_commit_oid(repo);
     let o3 = empty_commit_oid(repo);
-    write_ref(&git_dir, refname, &o3).expect("write tip");
+    grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &o3)
+        .expect("write tip");
     let z = ObjectId::zero();
     let entries = vec![
         ReflogEntry {
@@ -306,7 +307,8 @@ fn gc_reflog_expire_numeric_90000_and_100m_boundary_match_git() {
         let refname = "refs/heads/main";
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, refname, &oid).expect("tip");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &oid)
+            .expect("tip");
         write_controlled_reflog(
             repo,
             refname,
@@ -388,7 +390,8 @@ fn gc_per_ref_pattern_non_match_wildmatch_matches_git() {
         let now = wall_clock_now();
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, refname, &oid).expect("tip");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &oid)
+            .expect("tip");
         let ts = now - 60 * 86_400;
         write_controlled_reflog(
             repo,
@@ -451,7 +454,9 @@ fn gc_per_ref_pattern_non_match_wildmatch_matches_git() {
             );
         }
         assert!(
-            !read_reflog(&grit_git_dir, refname)
+            !grit_test_support::refs::at(&grit_git_dir)
+                .references()
+                .reflog(refname)
                 .expect("grit read")
                 .is_empty(),
             "pattern must not apply to refs/heads/main"
@@ -468,7 +473,8 @@ fn gc_per_ref_overlapping_pattern_precedence_matches_git() {
         let now = wall_clock_now();
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, refname, &oid).expect("tip");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &oid)
+            .expect("tip");
         let ts = now - 60 * 86_400;
         write_controlled_reflog(
             repo,
@@ -534,29 +540,36 @@ fn t1421_grit_written_entries_read_by_git_log_g() {
         let refname = "refs/heads/main";
         let o1 = empty_commit_oid(repo);
         let o2 = empty_commit_oid(repo);
-        write_ref(&git_dir, refname, &o2).expect("tip");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &o2)
+            .expect("tip");
         let z = ObjectId::zero();
         let identity = reflog_identity(1_650_000_000);
-        append_reflog(
-            &git_dir,
-            refname,
-            &z,
-            &o1,
-            &identity,
-            "grit: bootstrap",
-            true,
-        )
-        .expect("append");
-        append_reflog(
-            &git_dir,
-            refname,
-            &o1,
-            &o2,
-            &identity,
-            "grit: advance",
-            false,
-        )
-        .expect("append2");
+        grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .append(
+                refname,
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: z,
+                    new_oid: o1,
+                    identity: (&identity).to_string(),
+                    message: ("grit: bootstrap").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::Always,
+            )
+            .expect("append");
+        grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .append(
+                refname,
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: o1,
+                    new_oid: o2,
+                    identity: (&identity).to_string(),
+                    message: ("grit: advance").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::IfAllowed,
+            )
+            .expect("append2");
 
         let cfg = load_repo_config(&git_dir);
         append_reflog_with_config(
@@ -671,7 +684,10 @@ fn log_all_ref_updates_modes_match_git() {
                 mode.key
             );
 
-            let tag_log_before = reflog_exists(&git_dir, tag);
+            let tag_log_before = grit_test_support::refs::at(&git_dir)
+                .reflogs()
+                .exists(tag)
+                .unwrap_or(false);
             append_reflog_with_config(
                 &git_dir,
                 tag,
@@ -683,7 +699,10 @@ fn log_all_ref_updates_modes_match_git() {
                 Some(&cfg),
             )
             .expect("tag append");
-            let branch_log_before = reflog_exists(&git_dir, branch);
+            let branch_log_before = grit_test_support::refs::at(&git_dir)
+                .reflogs()
+                .exists(branch)
+                .unwrap_or(false);
             append_reflog_with_config(
                 &git_dir,
                 branch,
@@ -697,13 +716,19 @@ fn log_all_ref_updates_modes_match_git() {
             .expect("branch append");
 
             assert_eq!(
-                reflog_exists(&git_dir, tag),
+                grit_test_support::refs::at(&git_dir)
+                    .reflogs()
+                    .exists(tag)
+                    .unwrap_or(false),
                 tag_log_before || mode.tag_expect,
                 "grit tag reflog create {}",
                 mode.key
             );
             assert_eq!(
-                reflog_exists(&git_dir, branch),
+                grit_test_support::refs::at(&git_dir)
+                    .reflogs()
+                    .exists(branch)
+                    .unwrap_or(false),
                 branch_log_before || mode.branch_expect,
                 "grit branch reflog create {}",
                 mode.key
@@ -731,51 +756,71 @@ fn t0600_expire_on_symref_not_referent() {
         let o1 = git_empty_commit_oid(wt);
         let o2 = git_empty_commit_oid(wt);
         let o3 = git_empty_commit_oid(wt);
-        write_ref(&gd, refname, &o3).expect("write tip");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&gd), refname, &o3)
+            .expect("write tip");
         let z = ObjectId::zero();
-        append_reflog(
-            &gd,
-            refname,
-            &z,
-            &o1,
-            &reflog_identity(1_000_000),
-            "first",
-            true,
-        )
-        .expect("log1");
-        append_reflog(
-            &gd,
-            refname,
-            &o1,
-            &o2,
-            &reflog_identity(1_500_000_000),
-            "second",
-            false,
-        )
-        .expect("log2");
-        append_reflog(
-            &gd,
-            refname,
-            &o2,
-            &o3,
-            &reflog_identity(1_690_000_000),
-            "third",
-            false,
-        )
-        .expect("log3");
+        grit_test_support::refs::at(&gd)
+            .reflogs()
+            .append(
+                refname,
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: z,
+                    new_oid: o1,
+                    identity: (&reflog_identity(1_000_000)).to_string(),
+                    message: ("first").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::Always,
+            )
+            .expect("log1");
+        grit_test_support::refs::at(&gd)
+            .reflogs()
+            .append(
+                refname,
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: o1,
+                    new_oid: o2,
+                    identity: (&reflog_identity(1_500_000_000)).to_string(),
+                    message: ("second").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::IfAllowed,
+            )
+            .expect("log2");
+        grit_test_support::refs::at(&gd)
+            .reflogs()
+            .append(
+                refname,
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: o2,
+                    new_oid: o3,
+                    identity: (&reflog_identity(1_690_000_000)).to_string(),
+                    message: ("third").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::IfAllowed,
+            )
+            .expect("log3");
     };
     seed_main_reflog(worktree);
-    write_symbolic_ref(&git_dir, sym, refname).expect("symref");
-    append_reflog(
-        &git_dir,
-        sym,
-        &ObjectId::zero(),
-        &git_empty_commit_oid(worktree), // files-only repo; system git seed
-        &reflog_identity(1_000_000),
-        "sym only",
-        true,
-    )
-    .expect("sym log");
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .update_symbolic(sym, refname)
+        .expect("symref");
+    grit_test_support::refs::at(&git_dir)
+        .reflogs()
+        .append(
+            sym,
+            &grit_lib::refs::reflog::ReflogEntry {
+                old_oid: ObjectId::zero(),
+                new_oid: git_empty_commit_oid(worktree),
+                identity: (
+                    // files-only repo; system git seed
+                    &reflog_identity(1_000_000)
+                )
+                    .to_string(),
+                message: ("sym only").to_string(),
+            },
+            grit_lib::repo_handles::ReflogCreate::Always,
+        )
+        .expect("sym log");
 
     let grit_copy = tempfile::tempdir().expect("grit copy");
     let git_copy = tempfile::tempdir().expect("git copy");
@@ -812,7 +857,8 @@ fn git_written_reflog_lines_parse_like_grit() {
         let refname = "refs/heads/parse-me";
         let o1 = empty_commit_oid(repo);
         let o2 = empty_commit_oid(repo);
-        write_ref(&git_dir, refname, &o2).expect("tip");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), refname, &o2)
+            .expect("tip");
         let path = reflog_file_path(&git_dir, refname);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("mkdir");
@@ -852,7 +898,13 @@ fn git_written_reflog_lines_parse_like_grit() {
                 message: String::new(),
             },
         ];
-        assert_eq!(read_reflog(&git_dir, refname).expect("read"), want);
+        assert_eq!(
+            grit_test_support::refs::at(&git_dir)
+                .references()
+                .reflog(refname)
+                .expect("read"),
+            want
+        );
         assert_eq!(read_reflog_dwim(&git_dir, "parse-me").expect("dwim"), want);
     });
 }
@@ -863,24 +915,29 @@ fn reflog_exists_list_and_path_match_git() {
         let git_dir = repo.git_dir();
         let nested = "refs/heads/group/deep/ref";
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, nested, &oid).expect("write nested");
-        append_reflog(
-            &git_dir,
-            nested,
-            &ObjectId::zero(),
-            &oid,
-            &reflog_identity(1_640_000_000),
-            "nested",
-            true,
-        )
-        .expect("nested log");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), nested, &oid)
+            .expect("write nested");
+        grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .append(
+                nested,
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: ObjectId::zero(),
+                    new_oid: oid,
+                    identity: (&reflog_identity(1_640_000_000)).to_string(),
+                    message: ("nested").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::Always,
+            )
+            .expect("nested log");
 
         let empty_path = reflog_file_path(&git_dir, nested);
         if empty_path.is_file() {
             // touch empty trailing file for a sibling ref
         }
         let sibling = "refs/heads/group/deep/empty";
-        write_ref(&git_dir, sibling, &oid).expect("sibling");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), sibling, &oid)
+            .expect("sibling");
         let sib_log = reflog_file_path(&git_dir, sibling);
         if backend == Backend::Reftable {
             ReftableRefStore::open(git_dir.to_path_buf())
@@ -893,14 +950,24 @@ fn reflog_exists_list_and_path_match_git() {
             fs::write(&sib_log, "").expect("empty reflog file");
         }
 
-        assert!(reflog_exists(&git_dir, nested));
-        assert!(reflog_exists(&git_dir, sibling));
+        assert!(grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .exists(nested)
+            .unwrap_or(false));
+        assert!(grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .exists(sibling)
+            .unwrap_or(false));
         assert_eq!(
             reflog_file_path(&git_dir, nested),
-            grit_lib::refs::reflog::reflog_path(&git_dir, nested)
+            grit_lib::test_support::refs::reflog_path(&git_dir, nested)
         );
 
-        let mut grit_refs = list_reflog_refs(&git_dir).expect("list");
+        let mut grit_refs = grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .list_reflog_refs()
+            .map(|refs| refs.into_iter().map(String::from).collect::<Vec<_>>())
+            .expect("list");
         grit_refs.sort();
         let mut git_refs = git_reflog_refs(repo.worktree());
         git_refs.sort();
@@ -981,16 +1048,20 @@ fn expire_unreachable_stalefix_and_mark_reachable() {
             );
         }
 
-        append_reflog(
-            &git_dir,
-            refname,
-            &o3,
-            &ObjectId::from_hex("1111111111111111111111111111111111111111").expect("bad oid"),
-            &reflog_identity(1_000_000),
-            "stale",
-            false,
-        )
-        .expect("stale append");
+        grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .append(
+                refname,
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: o3,
+                    new_oid: ObjectId::from_hex("1111111111111111111111111111111111111111")
+                        .expect("bad oid"),
+                    identity: (&reflog_identity(1_000_000)).to_string(),
+                    message: ("stale").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::IfAllowed,
+            )
+            .expect("stale append");
         if backend == Backend::Files {
             write_repo_config(repo.worktree(), "[core]\nrepositoryformatversion = 0\n");
         }
@@ -1043,19 +1114,29 @@ fn mirror_branch_reflog_to_head_and_detached() {
         }
 
         let oid = empty_commit_oid(repo);
-        write_ref(&git_dir, "HEAD", &oid).expect("detach head");
-        append_reflog(
-            &git_dir,
-            "HEAD",
-            &oid,
-            &oid,
-            &reflog_identity(1_680_000_000),
-            "detached",
-            true,
-        )
-        .expect("detached head log");
-        assert!(reflog_exists(&git_dir, "HEAD"));
-        let head_entries = read_reflog(&git_dir, "HEAD").expect("head read");
+        grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), "HEAD", &oid)
+            .expect("detach head");
+        grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .append(
+                "HEAD",
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: oid,
+                    new_oid: oid,
+                    identity: (&reflog_identity(1_680_000_000)).to_string(),
+                    message: ("detached").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::Always,
+            )
+            .expect("detached head log");
+        assert!(grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .exists("HEAD")
+            .unwrap_or(false));
+        let head_entries = grit_test_support::refs::at(&git_dir)
+            .references()
+            .reflog("HEAD")
+            .expect("head read");
         assert!(
             head_entries.iter().any(|e| e.message.contains("detached")),
             "HEAD reflog should contain detached entry"
@@ -1094,29 +1175,40 @@ fn all_reflog_oids_and_ordered_match_git_walk() {
 
     each_backend_git_oracle(|backend, repo| {
         seed_three_entry_reflog(repo, "refs/heads/main");
-        append_reflog(
-            &repo.git_dir(),
-            "refs/heads/extra",
-            &ObjectId::zero(),
-            &empty_commit_oid(repo),
-            &reflog_identity(1_610_000_000),
-            "extra",
-            true,
-        )
-        .expect("extra");
+        grit_test_support::refs::at(repo.git_dir())
+            .reflogs()
+            .append(
+                "refs/heads/extra",
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: ObjectId::zero(),
+                    new_oid: empty_commit_oid(repo),
+                    identity: (&reflog_identity(1_610_000_000)).to_string(),
+                    message: ("extra").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::Always,
+            )
+            .expect("extra");
         let git_dir = repo.git_dir();
         let grit_set = all_reflog_oids(&git_dir).expect("oids");
         if backend == Backend::Files {
             assert_eq!(grit_set, git_reflog_oid_set(repo.worktree()));
         }
         let ordered = all_reflog_oids_ordered(&git_dir).expect("ordered");
-        let mut names = list_reflog_refs(&git_dir).expect("names");
+        let mut names = grit_test_support::refs::at(&git_dir)
+            .reflogs()
+            .list_reflog_refs()
+            .map(|refs| refs.into_iter().map(String::from).collect::<Vec<_>>())
+            .expect("names");
         names.sort();
         let mut manual = Vec::new();
         let mut seen = HashSet::new();
         let z = ObjectId::zero();
         for name in names {
-            for entry in read_reflog(&git_dir, &name).expect("read") {
+            for entry in grit_test_support::refs::at(&git_dir)
+                .references()
+                .reflog(&name)
+                .expect("read")
+            {
                 for oid in [entry.old_oid, entry.new_oid] {
                     if oid != z && seen.insert(oid) {
                         manual.push(oid);
@@ -1277,16 +1369,18 @@ fn typed_selectors_query_and_delete_across_git_and_grit() {
         assert_eq!(entries.len(), 1, "{:?}", fixture.backend());
         assert_eq!(entries[0].entry.new_oid, third);
 
-        append_reflog(
-            repo.git_dir(),
-            refname,
-            &third,
-            &third,
-            &reflog_identity(NOW),
-            "typed selector roundtrip",
-            true,
-        )
-        .expect("write with grit");
+        repo.reflogs()
+            .append(
+                refname,
+                &grit_lib::refs::reflog::ReflogEntry {
+                    old_oid: third,
+                    new_oid: third,
+                    identity: (&reflog_identity(NOW)).to_string(),
+                    message: ("typed selector roundtrip").to_string(),
+                },
+                grit_lib::repo_handles::ReflogCreate::Always,
+            )
+            .expect("write with grit");
         let repo = open_repo(fixture.worktree());
         let selector: ReflogSelector = "refs/heads/main@{0}".parse().expect("parse full ref");
         let entries = repo

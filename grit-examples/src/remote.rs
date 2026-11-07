@@ -4,8 +4,6 @@
 //! Operations go through [`grit_lib::remote::Remote`] — the same dispatcher the
 //! `grit` CLI uses.
 
-use std::path::Path;
-
 use anyhow::Context as _;
 use anyhow::Result;
 use grit_lib::config::ConfigSet;
@@ -16,6 +14,7 @@ use grit_lib::remote::transfer::PushOptions;
 use grit_lib::remote::transfer::PushOutcome;
 use grit_lib::remote::transfer::PushRefSpec;
 use grit_lib::remote::{DefaultHttpClientFactory, Remote, RemoteUrl};
+use grit_lib::repo::Repository;
 
 /// How a remote URL is reached, and therefore what authentication it implies.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -65,12 +64,12 @@ pub struct RemoteInfo {
 
 /// Pick the remote name: an explicit argument, else the current branch's
 /// `branch.<name>.remote`, else `origin` (matching Git's default selection).
-fn default_remote_name(config: &ConfigSet, git_dir: &Path, explicit: Option<&str>) -> String {
+fn default_remote_name(config: &ConfigSet, repo: &Repository, explicit: Option<&str>) -> String {
     if let Some(name) = explicit {
         return name.to_owned();
     }
-    if let Ok(Some(head)) = grit_lib::refs::read_symbolic_ref(git_dir, "HEAD") {
-        if let Some(branch) = head.strip_prefix("refs/heads/") {
+    if let Ok(Some(head)) = repo.references().symbolic("HEAD") {
+        if let Some(branch) = head.as_str().strip_prefix("refs/heads/") {
             if let Some(remote) = config
                 .get(&format!("branch.{branch}.remote"))
                 .ok()
@@ -88,11 +87,11 @@ fn default_remote_name(config: &ConfigSet, git_dir: &Path, explicit: Option<&str
 /// Resolve the remote to operate on.
 pub fn resolve_remote(
     config: &ConfigSet,
-    git_dir: &Path,
+    repo: &Repository,
     explicit: Option<&str>,
     _for_push: bool,
 ) -> Result<RemoteInfo> {
-    let name = default_remote_name(config, git_dir, explicit);
+    let name = default_remote_name(config, repo, explicit);
     let remote = Remote::from_config(config, &name)
         .with_context(|| format!("remote '{name}' has no configured URL"))?;
     let url = remote.fetch_url().to_url_string();

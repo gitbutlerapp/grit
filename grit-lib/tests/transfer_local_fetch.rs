@@ -15,7 +15,6 @@ use grit_lib::config::environment::Environment;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectKind;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{build_pack, FetchOptions, PackBuildOptions, TagMode, UpdateMode};
 use grit_test_support::{git, git_cmd};
 
@@ -79,7 +78,10 @@ fn fetch_local_copies_refs_and_objects_then_fast_forwards() {
     assert_eq!(outcome.default_branch.as_deref(), Some("main"));
 
     // Tracking ref written and equals the remote tip.
-    let tracked = resolve_ref(&local_git, "refs/remotes/origin/main").expect("tracking ref");
+    let tracked = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("tracking ref");
     assert_eq!(tracked, remote_main);
 
     // Objects present locally: read them back from the local odb.
@@ -96,7 +98,10 @@ fn fetch_local_copies_refs_and_objects_then_fast_forwards() {
     // The annotated tag object and its tracking ref are present.
     assert!(local_odb.exists(&remote_v1), "tag object present");
     assert_eq!(
-        resolve_ref(&local_git, "refs/tags/v1").expect("tag ref"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/tags/v1")
+            .expect("tag ref"),
         remote_v1
     );
 
@@ -161,7 +166,10 @@ fn fetch_local_copies_refs_and_objects_then_fast_forwards() {
 
     // Tracking ref advanced and the new objects arrived.
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main").unwrap(),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .unwrap(),
         remote_main2
     );
     let local_odb = open_odb(&local_git);

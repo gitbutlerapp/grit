@@ -14,19 +14,21 @@ use std::thread;
 use grit_lib::error::Error;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::ref_storage::RefStorageFormat;
-use grit_lib::refs::reflog::{list_reflog_refs, read_reflog, reflog_exists, ReflogEntry};
+use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::reftable::{
-    read_write_options, reftable_append_reflog, reftable_delete_ref,
-    reftable_log_record_for_commit, reftable_write_ref, reftable_write_ref_with_write_options,
-    reftable_write_symref, RefValue, ReftableError, ReftableStack, ReftableTransactionUpdate,
+    reftable_log_record_for_commit, RefValue, ReftableError, ReftableStack,
+    ReftableTransactionUpdate,
 };
 use grit_lib::refs::store::{
     open_ref_store, Expected, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate,
     RefUpdateFlags, ReftableRefStore,
 };
-use grit_lib::refs::{read_head, read_symbolic_ref, resolve_ref};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::HeadState;
+use grit_lib::test_support::refs::{
+    read_write_options, reftable_append_reflog, reftable_delete_ref, reftable_write_ref,
+    reftable_write_ref_with_write_options, reftable_write_symref,
+};
 
 use support::{
     build_commit_dag, git, git_empty_commit_oid, git_for_each_ref_peeled, git_fsck_strict,
@@ -234,7 +236,10 @@ fn grit_written_reftable_passes_git_fsck_and_refs_verify() {
         git(root.path(), &["symbolic-ref", "refs/heads/grit-sym"]).trim(),
         "refs/heads/grit-branch"
     );
-    let grit_logs = read_reflog(&git_dir, "refs/heads/grit-branch").expect("grit reflog");
+    let grit_logs = grit_test_support::refs::at(&git_dir)
+        .references()
+        .reflog("refs/heads/grit-branch")
+        .expect("grit reflog");
     assert!(
         grit_logs.iter().any(|e| e.message.contains("grit update")),
         "grit reflog should record update message"
@@ -514,7 +519,10 @@ fn reftable_reflog_api_matches_git() {
     ReftableRefStore::open(git_dir.to_path_buf())
         .and_then(|store| store.create_reflog(RefNameRef::from_trusted("refs/heads/log-test")))
         .expect("create reflog");
-    assert!(reflog_exists(&git_dir, "refs/heads/log-test"));
+    assert!(grit_test_support::refs::at(&git_dir)
+        .reflogs()
+        .exists("refs/heads/log-test")
+        .unwrap_or(false));
 
     let null = ObjectId::null(HashAlgo::Sha1);
     reftable_append_reflog(
@@ -553,12 +561,19 @@ fn reftable_reflog_api_matches_git() {
         })
         .expect("replace");
 
-    let grit_entries = read_reflog(&git_dir, "refs/heads/log-test").expect("read");
+    let grit_entries = grit_test_support::refs::at(&git_dir)
+        .references()
+        .reflog("refs/heads/log-test")
+        .expect("read");
     let git_lines = git_reflog_lines(root.path(), "refs/heads/log-test");
     assert_eq!(grit_entries.len(), git_lines.len());
     assert_eq!(grit_entries[0].new_oid, git_lines[0].1);
 
-    let listed = list_reflog_refs(&git_dir).expect("list");
+    let listed = grit_test_support::refs::at(&git_dir)
+        .reflogs()
+        .list_reflog_refs()
+        .map(|refs| refs.into_iter().map(String::from).collect::<Vec<_>>())
+        .expect("list");
     assert!(listed.iter().any(|r| r == "refs/heads/log-test"));
     assert!(
         git_ok_list_reflog(root.path(), "refs/heads/log-test"),
@@ -568,9 +583,14 @@ fn reftable_reflog_api_matches_git() {
     ReftableRefStore::open(git_dir.to_path_buf())
         .and_then(|store| store.delete_reflog(RefNameRef::from_trusted("refs/heads/log-test")))
         .expect("delete reflog");
-    assert!(!reflog_exists(&git_dir, "refs/heads/log-test"));
+    assert!(!grit_test_support::refs::at(&git_dir)
+        .reflogs()
+        .exists("refs/heads/log-test")
+        .unwrap_or(false));
     assert!(
-        read_reflog(&git_dir, "refs/heads/log-test")
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .reflog("refs/heads/log-test")
             .expect("read after delete")
             .is_empty(),
         "grit should have no log lines after delete"
@@ -714,7 +734,13 @@ fn resolve_head_after_git_commit_tree_on_reftable() {
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let git_dir = wt.join(".git");
     let tip = oids["c"];
-    assert_eq!(resolve_ref(&git_dir, "refs/heads/main").expect("main"), tip);
+    assert_eq!(
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main"),
+        tip
+    );
     assert_eq!(
         ReftableRefStore::open(git_dir.to_path_buf())
             .and_then(|store| store.resolve(RefNameRef::from_trusted("HEAD")))
@@ -722,10 +748,19 @@ fn resolve_head_after_git_commit_tree_on_reftable() {
         tip
     );
     assert_eq!(
-        read_head(&git_dir).expect("read_head").as_deref(),
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .symbolic("HEAD")
+            .map(|t| t.map(String::from))
+            .expect("read_head")
+            .as_deref(),
         Some("refs/heads/main")
     );
-    match resolve_head(&git_dir).expect("resolve_head") {
+    match grit_test_support::refs::at(&git_dir)
+        .references()
+        .head()
+        .expect("resolve_head")
+    {
         HeadState::Branch {
             refname,
             oid: Some(oid),
@@ -875,14 +910,25 @@ fn resolve_detached_head_after_git_checkout_detach_on_reftable() {
         .parse::<ObjectId>()
         .expect("oid");
     let git_dir = wt.join(".git");
-    assert_eq!(read_symbolic_ref(&git_dir, "HEAD").expect("sym"), None);
+    assert_eq!(
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .symbolic("HEAD")
+            .map(|t| t.map(String::from))
+            .expect("sym"),
+        None
+    );
     assert_eq!(
         ReftableRefStore::open(git_dir.to_path_buf())
             .and_then(|store| store.resolve(RefNameRef::from_trusted("HEAD")))
             .expect("resolve HEAD"),
         tip
     );
-    match resolve_head(&git_dir).expect("resolve_head") {
+    match grit_test_support::refs::at(&git_dir)
+        .references()
+        .head()
+        .expect("resolve_head")
+    {
         HeadState::Detached { oid } => assert_eq!(oid, tip),
         other => panic!("expected detached head, got {other:?}"),
     }

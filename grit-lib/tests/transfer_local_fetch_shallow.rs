@@ -8,7 +8,6 @@ use grit_test_support::rev_parse;
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
@@ -80,15 +79,24 @@ fn fetch_local_in_git_shallow_clone_does_not_create_broken_tags() {
     .expect("fetch_local");
 
     assert!(
-        resolve_ref(&shallow_git, "refs/tags/v1").is_err(),
+        grit_test_support::refs::at(&shallow_git)
+            .references()
+            .resolve("refs/tags/v1")
+            .is_err(),
         "v1 must not be created in a depth-1 shallow clone"
     );
     assert!(
-        resolve_ref(&shallow_git, "refs/tags/v2").is_err(),
+        grit_test_support::refs::at(&shallow_git)
+            .references()
+            .resolve("refs/tags/v2")
+            .is_err(),
         "v2 must not be created in a depth-1 shallow clone"
     );
     assert_eq!(
-        resolve_ref(&shallow_git, "refs/tags/v3").expect("v3"),
+        grit_test_support::refs::at(&shallow_git)
+            .references()
+            .resolve("refs/tags/v3")
+            .expect("v3"),
         rev_parse(&shallow, "HEAD")
     );
 
@@ -148,11 +156,17 @@ fn fetch_local_clone_from_shallow_source_propagates_shallow_file() {
         "clone fetch must copy shallow boundaries from a shallow source"
     );
     assert_eq!(
-        resolve_ref(&dest_git, "refs/tags/v3").expect("v3 on shallow clone"),
+        grit_test_support::refs::at(&dest_git)
+            .references()
+            .resolve("refs/tags/v3")
+            .expect("v3 on shallow clone"),
         rev_parse(&shallow_src, "HEAD")
     );
     assert!(
-        resolve_ref(&dest_git, "refs/tags/v1").is_err(),
+        grit_test_support::refs::at(&dest_git)
+            .references()
+            .resolve("refs/tags/v1")
+            .is_err(),
         "v1 must not be imported from a depth-1 source"
     );
     let log = git(&dest, &["log", "--oneline", "refs/remotes/origin/main"]);
@@ -212,7 +226,10 @@ fn fetch_local_initial_fetch_following_imports_reachable_tags() {
         "refs/tags/lightweight-tip",
         "refs/tags/on-topic",
     ] {
-        resolve_ref(&local_git, tag).unwrap_or_else(|_| panic!("missing {tag}"));
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve(tag)
+            .unwrap_or_else(|_| panic!("missing {tag}"));
     }
     git_fsck_clean(&local);
 }
@@ -405,7 +422,10 @@ fn shallow_tag_following_uses_requested_history_and_tag_mode() {
         .unwrap();
         assert_tag_history_matches_git(&client, &comparison);
         if tags == TagMode::Following {
-            assert!(resolve_ref(&client.join(".git"), "refs/tags/side-tag").is_err());
+            assert!(grit_test_support::refs::at(&client.join(".git"))
+                .references()
+                .resolve("refs/tags/side-tag")
+                .is_err());
         }
     }
 }
@@ -516,7 +536,10 @@ fn unshallow_preserves_negative_refspecs_and_existing_tags() {
                 .updates
                 .iter()
                 .any(|u| u.remote_ref == "refs/tags/v1"));
-            assert!(resolve_ref(&client.join(".git"), "refs/tags/v1").is_err());
+            assert!(grit_test_support::refs::at(&client.join(".git"))
+                .references()
+                .resolve("refs/tags/v1")
+                .is_err());
         }
         assert_eq!(
             rev_parse(&client, "refs/tags/v2"),

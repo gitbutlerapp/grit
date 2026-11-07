@@ -13,6 +13,7 @@ pub mod net;
 pub mod objects;
 pub mod odb_conformance;
 pub mod parallel;
+pub mod refs;
 pub mod refstore_conformance;
 pub mod repository_conformance;
 pub mod sparse_scale;

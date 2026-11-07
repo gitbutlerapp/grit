@@ -553,7 +553,7 @@ fn root_commit_and_grit_only_write_without_generation_chunk() {
         extra_headers: Vec::new(),
     });
     let commit = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/main", &commit).expect("ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/main", &commit).expect("ref");
     let sorted = vec![commit];
     let infos = commit_infos(&repo, &sorted);
     write_grit_graph_file(&repo, &sorted, &infos, false, false);

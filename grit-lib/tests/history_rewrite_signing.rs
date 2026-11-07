@@ -15,7 +15,6 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
@@ -327,7 +326,10 @@ fn signing_failure_aborts_rewrite_without_ref_moves() {
     );
 
     let git_dir = root.join(".git");
-    let tip_before = resolve_ref(&git_dir, "refs/heads/main").expect("resolve tip");
+    let tip_before = grit_test_support::refs::at(&git_dir)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("resolve tip");
 
     let grit = open_grit(root);
     let err = grit
@@ -343,7 +345,10 @@ fn signing_failure_aborts_rewrite_without_ref_moves() {
         matches!(err, HistoryError::Signing { .. }),
         "expected Signing error, got {err:?}"
     );
-    let tip_after = resolve_ref(&git_dir, "refs/heads/main").expect("resolve tip");
+    let tip_after = grit_test_support::refs::at(&git_dir)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("resolve tip");
     assert_eq!(
         tip_before, tip_after,
         "refs must not move when signing fails"

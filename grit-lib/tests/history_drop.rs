@@ -11,7 +11,6 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
@@ -277,8 +276,11 @@ fn drop_conflict_changes_nothing() {
     let a = write_test_commit(&grit, tree_base, &[], "a", &ident).expect("a");
     let b = write_test_commit(&grit, tree_left, &[a], "b", &ident).expect("b");
     let c = write_test_commit(&grit, tree_right, &[b], "c", &ident).expect("c");
-    write_ref(grit.git_dir(), "refs/heads/main", &c).expect("ref");
-    let before = resolve_ref(grit.git_dir(), "refs/heads/main").expect("resolve");
+    grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
+    let before = grit
+        .references()
+        .resolve("refs/heads/main")
+        .expect("resolve");
     let err = grit
         .history()
         .drop_commit(b, &opts(5))
@@ -295,7 +297,10 @@ fn drop_conflict_changes_nothing() {
     assert_eq!(commit, c);
     assert_eq!(subject, "c");
     assert!(refs.is_empty(), "a conflict on HEAD's history names no ref");
-    let after = resolve_ref(grit.git_dir(), "refs/heads/main").expect("resolve");
+    let after = grit
+        .references()
+        .resolve("refs/heads/main")
+        .expect("resolve");
     assert_eq!(before, after);
 }
 

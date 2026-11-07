@@ -30,7 +30,6 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
@@ -249,13 +248,22 @@ fn fetch_over_smart_http_lands_refs_and_objects() {
     );
 
     // Tracking refs written.
-    let got_main = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
-    let got_topic = resolve_ref(&local_git, "refs/remotes/origin/topic").expect("origin/topic");
+    let got_main = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
+    let got_topic = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/topic")
+        .expect("origin/topic");
     assert_eq!(got_main, main_oid, "origin/main oid mismatch vs source");
     assert_eq!(got_topic, topic_oid, "origin/topic oid mismatch vs source");
 
     // Annotated tag arrived (TagMode::All).
-    let got_tag = resolve_ref(&local_git, "refs/tags/v1").expect("tag v1 written");
+    let got_tag = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/tags/v1")
+        .expect("tag v1 written");
     assert_eq!(got_tag, tag_oid, "tag v1 oid mismatch vs source");
 
     // Objects landed in the local odb.
@@ -719,13 +727,22 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
     );
 
     // Tracking refs written.
-    let got_main = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
-    let got_topic = resolve_ref(&local_git, "refs/remotes/origin/topic").expect("origin/topic");
+    let got_main = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
+    let got_topic = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/topic")
+        .expect("origin/topic");
     assert_eq!(got_main, main_oid, "origin/main oid mismatch vs source");
     assert_eq!(got_topic, topic_oid, "origin/topic oid mismatch vs source");
 
     // Annotated tag arrived (TagMode::All).
-    let got_tag = resolve_ref(&local_git, "refs/tags/v1").expect("tag v1 written");
+    let got_tag = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/tags/v1")
+        .expect("tag v1 written");
     assert_eq!(got_tag, tag_oid, "tag v1 oid mismatch vs source");
 
     // Objects landed in the local odb.
@@ -812,7 +829,10 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
         commands2.iter().any(|c| c == "command=fetch"),
         "incremental fetch missing command=fetch; saw {commands2:?}"
     );
-    let got_main2 = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
+    let got_main2 = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
     assert_eq!(
         got_main2, new_main_oid,
         "incremental v2 fetch did not advance origin/main"
@@ -980,7 +1000,10 @@ fn fetch_from_config_client_v2_many_refs_and_large_pack() {
 
     let main_oid = rev_parse(&source, "refs/heads/main");
     assert_eq!(
-        resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main"),
+        grit_test_support::refs::at(&local_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .expect("origin/main"),
         main_oid
     );
     let fsck = Command::new("git")
@@ -1299,7 +1322,10 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
     assert!(r.old_oid.is_none(), "new ref has no old value");
 
     // The remote ref now points at our main, and the objects are present.
-    let remote_main = resolve_ref(&bare, "refs/heads/main").expect("remote main written");
+    let remote_main = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main written");
     assert_eq!(
         remote_main, main_oid,
         "remote main oid mismatch after http push"
@@ -1374,7 +1400,10 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
     )
     .expect("push_http topic over grit-http-server");
     assert_eq!(outcome_topic.results[0].status, PushRefStatus::Ok);
-    let remote_topic = resolve_ref(&bare, "refs/heads/feature").expect("remote feature written");
+    let remote_topic = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/feature")
+        .expect("remote feature written");
     assert_eq!(remote_topic, topic_oid);
     let fsck_topic = Command::new("git")
         .current_dir(&bare)
@@ -1445,7 +1474,10 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
     );
 
     // The remote ref must be unchanged by the rejected push.
-    let remote_main_after = resolve_ref(&bare, "refs/heads/main").expect("remote main still set");
+    let remote_main_after = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main still set");
     assert_eq!(
         remote_main_after, main_oid,
         "rejected non-ff push must not move the remote ref"
@@ -1485,7 +1517,10 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         "forced non-ff push should be accepted: {:?}",
         outcome3.results[0].message
     );
-    let remote_main_forced = resolve_ref(&bare, "refs/heads/main").expect("remote main moved");
+    let remote_main_forced = grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .expect("remote main moved");
     assert_eq!(
         remote_main_forced, diverged,
         "forced push should move the remote ref to the divergent tip"
@@ -1616,12 +1651,18 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
         );
     }
     assert_eq!(
-        resolve_ref(&bare, "refs/heads/main").unwrap(),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .unwrap(),
         main_oid,
         "remote main mismatch after push"
     );
     assert_eq!(
-        resolve_ref(&bare, "refs/heads/topic").unwrap(),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/topic")
+            .unwrap(),
         topic_oid,
         "remote topic mismatch after push"
     );
@@ -1657,12 +1698,18 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
 
     // The round-tripped refs equal what we pushed (byte-for-byte oid equality).
     assert_eq!(
-        resolve_ref(&back_git, "refs/remotes/origin/main").unwrap(),
+        grit_test_support::refs::at(&back_git)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .unwrap(),
         main_oid,
         "round-trip: fetched origin/main != pushed main"
     );
     assert_eq!(
-        resolve_ref(&back_git, "refs/remotes/origin/topic").unwrap(),
+        grit_test_support::refs::at(&back_git)
+            .references()
+            .resolve("refs/remotes/origin/topic")
+            .unwrap(),
         topic_oid,
         "round-trip: fetched origin/topic != pushed topic"
     );
@@ -1759,7 +1806,10 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
     );
     // The remote ref must be unchanged by the server-rejected push.
     assert_eq!(
-        resolve_ref(&bare, "refs/heads/main").unwrap(),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .unwrap(),
         main_oid,
         "server-rejected push must not move the remote ref"
     );
@@ -2041,7 +2091,10 @@ fn fetch_over_git_http_backend_cgi() {
     .expect("http_fetch over git http-backend CGI wrapper");
 
     assert_eq!(
-        resolve_ref(&local, "refs/remotes/origin/main").unwrap(),
+        grit_test_support::refs::at(&local)
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .unwrap(),
         main_oid
     );
 }

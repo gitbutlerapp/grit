@@ -9,10 +9,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::pull::{
     pull, resolve_pull_mode, PullError, PullMode, PullOptions, PullResult,
 };
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
-use grit_lib::state::resolve_head;
 use grit_test_support::{git, git_fsck, unique_tmp, write_file};
 
 fn commit(dir: &Path, file: &str, message: &str) {
@@ -215,14 +213,16 @@ fn pull_refuses_when_configured_merge_ref_did_not_fetch() {
 
     let head_before = rev(&grit_dir, "HEAD");
     assert!(
-        resolve_ref(grit_dir.join(".git").as_path(), "refs/remotes/origin/main").is_ok(),
+        grit_test_support::refs::at(grit_dir.join(".git").as_path())
+            .references()
+            .resolve("refs/remotes/origin/main")
+            .is_ok(),
         "origin/main exists but configured upstream is missing"
     );
-    assert!(resolve_ref(
-        grit_dir.join(".git").as_path(),
-        "refs/remotes/origin/missing"
-    )
-    .is_err());
+    assert!(grit_test_support::refs::at(grit_dir.join(".git").as_path())
+        .references()
+        .resolve("refs/remotes/origin/missing")
+        .is_err());
 
     let repo = open(&grit_dir);
     let err = try_pull_grit(
@@ -442,11 +442,11 @@ fn pull_unborn_adoption_matches_git() {
         },
     );
     assert_eq!(outcome.result, PullResult::SetUpstream);
-    assert!(resolve_head(repo.git_dir()).expect("head").oid().is_some());
+    assert!(repo.references().head().expect("head").oid().is_some());
     git_pull(&git_dir);
     assert_repo_matches_git(&grit_dir, &git_dir);
     assert_eq!(
-        resolve_ref(repo.git_dir(), "refs/heads/main").expect("main"),
+        repo.references().resolve("refs/heads/main").expect("main"),
         rev(&git_dir, "HEAD")
     );
 }
@@ -501,7 +501,7 @@ fn pull_unborn_adoption_with_autostash_matches_git() {
         },
     );
     assert_eq!(outcome.result, PullResult::SetUpstream);
-    assert!(resolve_head(repo.git_dir()).expect("head").oid().is_some());
+    assert!(repo.references().head().expect("head").oid().is_some());
     git_allow_fail(&grit_dir, &["rev-parse", "refs/stash"]);
 
     git(&git_dir, &["pull", "-q", "--autostash"]);

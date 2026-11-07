@@ -22,7 +22,7 @@ use grit_lib::objects::pack_rev::{
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 use grit_lib::repo::Repository;
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::HeadState;
 use grit_lib::test_support::objects_pack::read_pack_index;
 use grit_test_support::git;
 use tempfile::TempDir;
@@ -71,7 +71,7 @@ fn init_git_repo(algo: HashAlgo) -> TempDir {
 }
 
 fn tip_oid(repo: &Repository) -> ObjectId {
-    match resolve_head(repo.git_dir()).expect("head") {
+    match repo.references().head().expect("head") {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
         _ => panic!("expected a commit at HEAD"),
     }

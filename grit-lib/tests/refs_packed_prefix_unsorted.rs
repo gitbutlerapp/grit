@@ -3,8 +3,7 @@
 use std::fs;
 use std::process::Command;
 
-use grit_lib::refs::list_refs_glob;
-use grit_lib::refs::store::paths::packed_refs_path;
+use grit_lib::test_support::refs::packed_refs_path;
 use tempfile::tempdir;
 
 fn git_available() -> bool {
@@ -58,7 +57,14 @@ fn unsorted_packed_refs_prefix_glob_matches_git_for_each_ref() {
     )
     .expect("packed-refs");
 
-    let grit: Vec<String> = list_refs_glob(git_dir, "refs/heads/a*")
+    let grit: Vec<String> = grit_test_support::refs::at(git_dir)
+        .references()
+        .list_glob("refs/heads/a*")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
         .expect("list_refs_glob")
         .into_iter()
         .map(|(name, _)| name)

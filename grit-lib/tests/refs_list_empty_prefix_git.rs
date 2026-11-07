@@ -2,7 +2,6 @@
 
 use std::process::Command;
 
-use grit_lib::refs::list_refs;
 use tempfile::tempdir;
 
 fn git_available() -> bool {
@@ -48,7 +47,14 @@ fn empty_prefix_list_refs_matches_git_for_each_ref_with_resolvable_head() {
         git_dir.to_path_buf()
     };
 
-    let grit_names: Vec<String> = list_refs(&store, "")
+    let grit_names: Vec<String> = grit_test_support::refs::at(&store)
+        .references()
+        .list("")
+        .map(|refs| {
+            refs.into_iter()
+                .map(|(n, o)| (String::from(n), o))
+                .collect::<Vec<_>>()
+        })
         .expect("list_refs")
         .into_iter()
         .map(|(name, _)| name)

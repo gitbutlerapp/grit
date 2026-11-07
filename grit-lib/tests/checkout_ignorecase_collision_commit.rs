@@ -293,7 +293,7 @@ fn commit_request(message: &str) -> CommitRequest {
 }
 
 fn head_oid(repo: &Repository) -> grit_lib::objects::ObjectId {
-    grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").expect("head")
+    repo.references().resolve("HEAD").expect("head")
 }
 
 #[test]
@@ -553,10 +553,12 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
     )
     .expect("collide commit");
     let collide_tip = head_oid(&fx.repo);
-    grit_lib::refs::write_ref(fx.repo.git_dir(), "refs/heads/collide", &collide_tip)
+    grit_test_support::refs::set_ref(&fx.repo, "refs/heads/collide", &collide_tip)
         .expect("collide ref");
-    grit_lib::refs::write_ref(fx.repo.git_dir(), "refs/heads/master", &main_tip).expect("main");
-    grit_lib::refs::write_symbolic_ref(fx.repo.git_dir(), "HEAD", "refs/heads/master")
+    grit_test_support::refs::set_ref(&fx.repo, "refs/heads/master", &main_tip).expect("main");
+    fx.repo
+        .references()
+        .update_symbolic("HEAD", "refs/heads/master")
         .expect("head main");
     let _ = fs::remove_file(fx.dest.join("A.txt"));
     let _ = fs::remove_file(fx.dest.join("a.txt"));

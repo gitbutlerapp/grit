@@ -7,12 +7,14 @@ use crate::support;
 use grit_lib::error::Result;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::gc::{update_refs, RefTransactionItem};
-use grit_lib::refs::reftable::{
-    read_write_options, reftable_delete_ref_with_write_options,
-    reftable_write_ref_with_write_options, RefValue, ReftableStack,
-};
-use grit_lib::refs::{verify_ref_transaction_batch, write_ref, RefBatchItem, RefnameUnavailable};
+use grit_lib::refs::reftable::{RefValue, ReftableStack};
+use grit_lib::refs::{RefBatchItem, RefnameUnavailable};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::refs::verify_ref_transaction_batch;
+use grit_lib::test_support::refs::{
+    read_write_options, reftable_delete_ref_with_write_options,
+    reftable_write_ref_with_write_options,
+};
 use tempfile::tempdir;
 
 fn reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -54,7 +56,12 @@ fn delete_with_autocompact_off(git_dir: &std::path::Path, refname: &str) -> Resu
 fn reftable_verify_batch_rejects_existing_ancestor_with_unrelated_sibling() {
     let (_dir, git_dir) = reftable_git_dir();
     let oid = |n: u8| support::stored_commit(&git_dir, n);
-    write_ref(&git_dir, "refs/heads/parent", &oid(1)).expect("parent");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/parent",
+        &oid(1),
+    )
+    .expect("parent");
 
     let items = vec![
         RefBatchItem {
@@ -182,7 +189,10 @@ fn reftable_verify_batch_allows_parent_after_deleted_descendant() {
     )
     .expect("create parent");
     assert_eq!(
-        grit_lib::refs::resolve_ref(&git_dir, "refs/heads/topic").expect("resolve"),
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve("refs/heads/topic")
+            .expect("resolve"),
         oid(0x32)
     );
 }

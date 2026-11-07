@@ -15,7 +15,6 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
     ProtocolVersion, ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePack, ReceivePolicy,
     RefCommand, RefUpdateRefusal, ServeError, ServeOptions,
@@ -233,7 +232,10 @@ fn in_process_pre_receive_can_reject_push_options_before_refs_move() {
         outcome.updates[0].error,
         Some(RefUpdateRefusal::Policy("ci.skip".to_owned()))
     );
-    assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .is_err());
     assert!(
         !repo.odb().exists(&oid),
         "rejected push must not install objects in the main ODB"
@@ -303,7 +305,10 @@ fn pre_receive_cancel_kills_hook_process_group_and_leaves_ref_unmoved() {
     cancel.cancel();
     let err = handle.join().expect("join").expect_err("cancelled");
     assert!(matches!(err, ServeError::Cancelled));
-    assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .is_err());
     assert!(!repo.odb().exists(&oid));
     let child_pid: u32 = std::fs::read_to_string(&child_pid_file)
         .expect("child pid file")
@@ -360,7 +365,10 @@ fn receive_cancel_before_apply_leaves_ref_unmoved() {
         .run(&mut std::io::Cursor::new(body), &mut Vec::new())
         .expect_err("cancelled");
     assert!(matches!(err, ServeError::Cancelled));
-    assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .is_err());
     assert!(!repo.odb().exists(&oid));
 }
 
@@ -391,7 +399,10 @@ fn pre_receive_reject_leaves_main_object_store_clean() {
         outcome.updates[0].error,
         Some(RefUpdateRefusal::PreReceiveHookDeclined)
     );
-    assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/main")
+        .is_err());
     assert_eq!(count_pack_files(&bare.join("objects")), packs_before);
     assert!(
         !repo.odb().exists(&oid),
@@ -447,8 +458,17 @@ fn update_reject_only_blocks_one_ref() {
         outcome.updates[1].error,
         Some(RefUpdateRefusal::UpdateHookDeclined)
     );
-    assert_eq!(resolve_ref(&bare, "refs/heads/main").unwrap(), main);
-    assert!(resolve_ref(&bare, "refs/heads/block").is_err());
+    assert_eq!(
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .unwrap(),
+        main
+    );
+    assert!(grit_test_support::refs::at(&bare)
+        .references()
+        .resolve("refs/heads/block")
+        .is_err());
 }
 
 #[test]
@@ -1051,7 +1071,10 @@ fn receive_pack_finishes_when_push_client_keeps_stream_open() {
         outcome.updates
     );
     assert_eq!(
-        resolve_ref(&bare, "refs/heads/main").expect("main"),
+        grit_test_support::refs::at(&bare)
+            .references()
+            .resolve("refs/heads/main")
+            .expect("main"),
         oid,
         "push should land on the remote"
     );

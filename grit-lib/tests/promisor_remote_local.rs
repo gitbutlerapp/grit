@@ -359,10 +359,7 @@ fn a_checkout_whose_blobs_cannot_be_fetched_keeps_the_clone() {
             .with_promisor_fetcher(Some(fetcher)),
     )
     .unwrap();
-    assert_eq!(
-        grit_lib::state::resolve_head(repo.git_dir()).unwrap().oid(),
-        Some(&commit)
-    );
+    assert_eq!(repo.references().head().unwrap().oid(), Some(&commit));
     assert!(!dest.join("big").exists());
     lop_repo
         .odb()

@@ -8,7 +8,7 @@ use grit_lib::notes::NotesRef;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{NoteAddOutcome, NotesWriteOptions};
-use grit_lib::state::resolve_head;
+
 use std::path::{Path, PathBuf};
 
 const IDENT: &str = "Library Guide <guide@grit-scm.com> 1735689600 +0000";
@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("missing repository path"))?;
     let repo = open_repo(&root)?;
 
-    let head = resolve_head(repo.git_dir())?;
+    let head = repo.references().head()?;
     let commit: ObjectId = head
         .oid()
         .cloned()

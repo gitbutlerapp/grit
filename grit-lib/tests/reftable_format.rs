@@ -11,15 +11,33 @@ use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::read_symbolic_ref;
-use grit_lib::refs::reflog::{list_reflog_refs, read_reflog, reflog_exists};
 use grit_lib::refs::reftable::{
-    dump_reftable_blocks, read_write_options, reftable_append_reflog, reftable_delete_ref,
-    reftable_list_refs, reftable_write_ref, reftable_write_symref, LogRecord, RefRecord, RefValue,
-    ReftableError, ReftableReader, ReftableStack, ReftableTransactionUpdate, ReftableWriter,
-    WriteOptions,
+    dump_reftable_blocks, LogRecord, RefRecord, RefValue, ReftableError, ReftableReader,
+    ReftableStack, ReftableTransactionUpdate, ReftableWriter, WriteOptions,
 };
 use grit_lib::refs::store::{RefNameRef, RefStore, ReftableRefStore};
+use grit_lib::test_support::refs::{
+    read_write_options, reftable_append_reflog, reftable_delete_ref, reftable_list_refs,
+    reftable_write_ref, reftable_write_symref,
+};
+
+fn store_at(git_dir: &std::path::Path) -> ReftableRefStore {
+    ReftableRefStore::open(git_dir.to_path_buf()).expect("open store")
+}
+
+fn store_reflog(
+    git_dir: &std::path::Path,
+    refname: &str,
+) -> Vec<grit_lib::refs::reflog::ReflogEntry> {
+    let mut entries = Vec::new();
+    store_at(git_dir)
+        .for_each_reflog_entry(RefNameRef::from_trusted(refname), false, &mut |entry| {
+            entries.push(entry.clone());
+            std::ops::ControlFlow::Continue(())
+        })
+        .expect("read reflog");
+    entries
+}
 
 fn oid(byte: u8) -> ObjectId {
     ObjectId::from_bytes(&[byte; 20]).expect("oid")
@@ -716,8 +734,10 @@ fn reftable_reflog_create_append_replace_and_list() {
         Some("init"),
     )
     .expect("write");
-    assert!(reflog_exists(&git_dir, "refs/heads/main"));
-    let entries = read_reflog(&git_dir, "refs/heads/main").expect("read");
+    assert!(store_at(&git_dir)
+        .reflog_exists(RefNameRef::from_trusted("refs/heads/main"))
+        .expect("exists"));
+    let entries = store_reflog(&git_dir, "refs/heads/main");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].message, "init");
 
@@ -732,17 +752,18 @@ fn reftable_reflog_create_append_replace_and_list() {
         false,
     )
     .expect("append");
-    assert_eq!(
-        read_reflog(&git_dir, "refs/heads/main")
-            .expect("read2")
-            .len(),
-        2
-    );
+    assert_eq!(store_reflog(&git_dir, "refs/heads/main").len(), 2);
 
     ReftableRefStore::open(git_dir.to_path_buf())
         .and_then(|store| store.create_reflog(RefNameRef::from_trusted("refs/heads/empty")))
         .expect("create marker");
-    let listed = list_reflog_refs(&git_dir).expect("list reflogs");
+    let mut listed = Vec::new();
+    store_at(&git_dir)
+        .for_each_reflog_ref(&mut |name| {
+            listed.push(name.as_str().to_owned());
+            std::ops::ControlFlow::Continue(())
+        })
+        .expect("list reflogs");
     assert!(listed.iter().any(|r| r == "refs/heads/main"));
 
     ReftableRefStore::open(git_dir.to_path_buf())
@@ -750,9 +771,7 @@ fn reftable_reflog_create_append_replace_and_list() {
             store.replace_reflog(RefNameRef::from_trusted("refs/heads/main"), Vec::new())
         })
         .expect("clear");
-    assert!(read_reflog(&git_dir, "refs/heads/main")
-        .expect("read cleared")
-        .is_empty());
+    assert!(store_reflog(&git_dir, "refs/heads/main").is_empty());
     ReftableRefStore::open(git_dir.to_path_buf())
         .and_then(|store| store.delete_reflog(RefNameRef::from_trusted("refs/heads/empty")))
         .expect("delete marker");
@@ -787,7 +806,10 @@ fn reftable_write_transaction_batch() {
         o1
     );
     assert_eq!(
-        read_symbolic_ref(&git_dir, "refs/heads/b").expect("sym"),
+        store_at(&git_dir)
+            .read_raw(RefNameRef::from_trusted("refs/heads/b"))
+            .expect("read b")
+            .filter(|raw| matches!(raw, grit_lib::refs::store::RawRef::Symbolic(_))),
         None
     );
 }

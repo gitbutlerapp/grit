@@ -16,7 +16,7 @@ use grit_lib::revwalk::CommitExtent;
 use grit_lib::revwalk::{
     GraphCharset, GraphCommitInput, GraphLayout, GraphLineKind, GraphRenderedLine,
 };
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::HeadState;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::cell::RefCell;
@@ -667,7 +667,7 @@ pub fn run(
     }
     let repo = context::discover()?;
     let display = LogDisplayOptions {
-        no_commits_in_repo: grit_lib::state::resolve_head_for_repository(&repo).is_err(),
+        no_commits_in_repo: repo.references().head().is_err(),
         ..display
     };
     let env = repo.environment();
@@ -912,7 +912,7 @@ fn graph_needs_parent_rewrite(
 
 fn resolve_current_branch(repo: &grit_lib::repo::Repository) -> Result<Option<String>> {
     Ok(
-        match resolve_head(repo.git_dir()).context("could not resolve HEAD")? {
+        match repo.references().head().context("could not resolve HEAD")? {
             HeadState::Branch { short_name, .. } => Some(short_name),
             _ => None,
         },

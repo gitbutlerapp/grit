@@ -158,11 +158,13 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
 }
 
 fn head(repo: &Repository) -> ObjectId {
-    grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").expect("HEAD")
+    repo.references().resolve("HEAD").expect("HEAD")
 }
 
 fn branch(repo: &Repository, name: &str) -> ObjectId {
-    grit_lib::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{name}")).expect("branch")
+    repo.references()
+        .resolve(&format!("refs/heads/{name}"))
+        .expect("branch")
 }
 
 fn index_bytes(repo: &Repository) -> Vec<u8> {
@@ -494,7 +496,7 @@ fn repo_with_side_branch() -> (tempfile::TempDir, Repository, ObjectId, ObjectId
     let base = commit_all(&repo, "base");
     write_files(tmp.path(), "side", "side");
     let side = commit_all(&repo, "side");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/side", &side).expect("side");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/side", &side).expect("side");
     reset_to_commit(
         &repo,
         &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
@@ -692,8 +694,10 @@ fn rebase_start(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
 /// `topic` (checked out) adds one file on `base`; `side` adds [`FILES`] files on `base`.
 fn repo_for_rebase() -> (tempfile::TempDir, Repository, ObjectId, ObjectId) {
     let (tmp, repo, base, side) = repo_with_side_branch();
-    grit_lib::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/topic").expect("HEAD");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/topic", &base).expect("topic");
+    repo.references()
+        .update_symbolic("HEAD", "refs/heads/topic")
+        .expect("HEAD");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/topic", &base).expect("topic");
     fs::write(tmp.path().join("topic.txt"), "topic\n").expect("write");
     let topic = commit_all(&repo, "topic");
     (tmp, repo, side, topic)
@@ -707,8 +711,10 @@ fn repo_for_conflicting_rebase() -> (tempfile::TempDir, Repository, ObjectId, Ob
     let base = commit_all(&repo, "base");
     fs::write(root.join("c.txt"), "main\n").expect("write");
     let main = commit_all(&repo, "main");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/topic", &base).expect("topic");
-    grit_lib::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/topic").expect("HEAD");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/topic", &base).expect("topic");
+    repo.references()
+        .update_symbolic("HEAD", "refs/heads/topic")
+        .expect("HEAD");
     reset_to_commit(
         &repo,
         &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),

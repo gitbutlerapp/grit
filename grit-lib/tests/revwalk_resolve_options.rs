@@ -59,7 +59,7 @@ fn resolve_options_fixture() -> Fixture {
         .odb()
         .write_loose_materialize(ObjectKind::Tag, tag_body.as_bytes())
         .expect("tag");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/tags/v1", &tag).expect("tag ref");
+    grit_test_support::refs::set_ref(&repo, "refs/tags/v1", &tag).expect("tag ref");
 
     let side_body = format!(
         "tree {}\nparent {first}\nauthor A <a@example.com> 400 +0000\ncommitter A <a@example.com> 400 +0000\n\nside\n",
@@ -69,7 +69,7 @@ fn resolve_options_fixture() -> Fixture {
         .odb()
         .write_loose_materialize(ObjectKind::Commit, side_body.as_bytes())
         .expect("side");
-    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/side", &side).expect("side ref");
+    grit_test_support::refs::set_ref(&repo, "refs/heads/side", &side).expect("side ref");
 
     let tracked_blob = hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"tracked\n").expect("hash");
     Fixture {
@@ -427,7 +427,7 @@ fn removed_as_commit_without_index_dwim() {
 #[test]
 fn removed_checkout_guess_is_checkout_no_guess() {
     let f = resolve_options_fixture();
-    grit_lib::refs::write_ref(f.repo.git_dir(), "refs/remotes/origin/topic", &f.side)
+    grit_test_support::refs::set_ref(&f.repo, "refs/remotes/origin/topic", &f.side)
         .expect("remote ref");
     let guess = resolve_spec(&f.repo, "topic", &ResolveOptions::default());
     assert_eq!(

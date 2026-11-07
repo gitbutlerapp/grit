@@ -229,7 +229,7 @@ fn create_commit_rejects_unwritable_signatures() {
         "unexpected error: {err}"
     );
     assert!(
-        grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").is_err(),
+        repo.references().resolve("refs/heads/main").is_err(),
         "nothing may be committed with an invalid identity"
     );
 }

@@ -338,7 +338,7 @@ fn inspect_tracked_with_non_directory_destination_prefix_reftable() {
     )
     .expect("write alternates");
     for name in ["refs/remotes/origin-main", "refs/remotes/origin-topic"] {
-        grit_lib::refs::write_ref(&repo.git_dir(), name, &head).expect("write tracking ref");
+        grit_test_support::refs::set_ref(&repo, name, &head).expect("write tracking ref");
     }
 
     let repo = open_repo(&client);

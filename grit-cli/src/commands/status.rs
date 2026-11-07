@@ -17,7 +17,7 @@ use grit_lib::refs::branch_tracking::{
     StatusHeader, StatusIntegrationAction, StatusIntegrationHint, TrackedComparison,
 };
 use grit_lib::revwalk::AbbrevLength;
-use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation, NextStep};
+use grit_lib::state::{HeadState, InProgressOperation, NextStep};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -281,7 +281,10 @@ fn shared_status(repo: &grit_lib::repo::Repository, branch: &str) -> Option<Stat
     if !crate::commands::sync::is_shared(&config, branch) {
         return None;
     }
-    let ours = grit_lib::refs::resolve_ref(repo.git_dir(), format!("refs/heads/{branch}")).ok();
+    let ours = repo
+        .references()
+        .resolve(format!("refs/heads/{branch}"))
+        .ok();
     let mut remotes: Vec<String> =
         crate::context::config_string(&config, &format!("branch.{branch}.remote"))
             .into_iter()
@@ -1111,7 +1114,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     )
     .context("could not compute status")?;
 
-    let operations = detect_in_progress(repo.git_dir());
+    let operations = repo.operation().in_progress();
     let merging = model.state.merge_in_progress;
     let conflicts: Vec<ConflictJson> = model.conflict_details.iter().map(conflict_json).collect();
     let conflict_groups = model.conflict_groups();

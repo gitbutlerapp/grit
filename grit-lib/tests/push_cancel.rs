@@ -17,7 +17,6 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, Result};
 use grit_lib::objects::{parse_commit, serialize_tree, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::push_report::PushRefStatus;
@@ -114,7 +113,10 @@ fn main_spec(tip: ObjectId) -> PushRefSpec {
 }
 
 fn remote_main(git_dir: &Path) -> Option<ObjectId> {
-    resolve_ref(git_dir, "refs/heads/main").ok()
+    grit_test_support::refs::at(git_dir)
+        .references()
+        .resolve("refs/heads/main")
+        .ok()
 }
 
 fn cancel_after_checks(limit: usize) -> CancelToken {

@@ -4,11 +4,9 @@
 
 use crate::support;
 
-use grit_lib::refs::{
-    delete_ref, list_refs_physical, read_raw_ref, resolve_ref, write_ref, write_ref_cas,
-    RawRefLookup,
-};
+use grit_lib::refs::RawRefLookup;
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::refs::{list_refs_physical, read_raw_ref};
 use tempfile::tempdir;
 
 #[test]
@@ -24,10 +22,23 @@ fn write_ref_cas_and_delete_loose_ref() {
     let git_dir = dir.path().join(".git");
     let oid = |n: u8| support::stored_commit(&git_dir, n);
     let name = "refs/heads/cas";
-    write_ref(&git_dir, name, &oid(1)).expect("create");
-    write_ref_cas(&git_dir, name, &oid(2), oid(1)).expect("cas");
-    assert_eq!(resolve_ref(&git_dir, name).expect("resolve"), oid(2));
-    delete_ref(&git_dir, name).expect("delete");
+    grit_test_support::refs::set_ref(&grit_test_support::refs::at(&git_dir), name, &oid(1))
+        .expect("create");
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .compare_and_swap(name, &oid(1), &oid(2))
+        .expect("cas");
+    assert_eq!(
+        grit_test_support::refs::at(&git_dir)
+            .references()
+            .resolve(name)
+            .expect("resolve"),
+        oid(2)
+    );
+    grit_test_support::refs::at(&git_dir)
+        .references()
+        .delete(name)
+        .expect("delete");
     assert!(matches!(
         read_raw_ref(&git_dir, name).expect("gone"),
         RawRefLookup::NotFound
@@ -46,7 +57,12 @@ fn list_refs_physical_includes_loose_file() {
     .expect("init");
     let git_dir = dir.path().join(".git");
     let oid = |n: u8| support::stored_commit(&git_dir, n);
-    write_ref(&git_dir, "refs/heads/extra", &oid(9)).expect("write");
+    grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/extra",
+        &oid(9),
+    )
+    .expect("write");
     let physical = list_refs_physical(&git_dir, "refs/").expect("list");
     assert!(physical.iter().any(|(n, _)| n == "refs/heads/extra"));
 }

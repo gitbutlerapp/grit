@@ -4,9 +4,7 @@
 
 use crate::support;
 
-use grit_lib::refs::listing::{
-    query_refs, RefNamespace, RefQuery, RefQueryOptions, RefSort, SortKey,
-};
+use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryOptions, RefSort, SortKey};
 use grit_lib::repo::{InitOptions, Repository};
 use support::{each_backend, git, git_interop_available, require_reftable_git, Backend};
 
@@ -55,7 +53,8 @@ fn grit_sorted_refnames(
         limit,
         ..RefQuery::default()
     };
-    query_refs(repo, &query, options)
+    repo.references()
+        .query(&query, options)
         .expect("query_refs")
         .into_iter()
         .map(|r| r.full_name)

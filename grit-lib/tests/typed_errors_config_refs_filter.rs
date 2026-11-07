@@ -87,7 +87,12 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
         "0000000000000000000000000000000000000000\n",
     )
     .unwrap();
-    let err = grit_lib::refs::write_ref(&git_dir, "refs/heads/feature", &oid).unwrap_err();
+    let err = grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/feature",
+        &oid,
+    )
+    .unwrap_err();
     assert!(
         matches!(
             err,
@@ -111,7 +116,12 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
     // With only a lock file inside, there is no ref to name.
     fs::remove_file(git_dir.join("refs/heads/feature/extra")).unwrap();
     fs::write(git_dir.join("refs/heads/feature/extra.lock"), "").unwrap();
-    let err = grit_lib::refs::write_ref(&git_dir, "refs/heads/feature", &oid).unwrap_err();
+    let err = grit_test_support::refs::set_ref(
+        &grit_test_support::refs::at(&git_dir),
+        "refs/heads/feature",
+        &oid,
+    )
+    .unwrap_err();
     assert!(
         matches!(
             err,

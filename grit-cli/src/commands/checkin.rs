@@ -285,7 +285,10 @@ fn chosen_branches(co: &OpenCheckout, names: &[String]) -> Result<Vec<(String, O
     names
         .iter()
         .map(|name| {
-            let tip = grit_lib::refs::resolve_ref(co.repo.git_dir(), format!("refs/heads/{name}"))
+            let tip = co
+                .repo
+                .references()
+                .resolve(format!("refs/heads/{name}"))
                 .map_err(|_| anyhow::anyhow!("there is no branch {name} here"))?;
             Ok((name.clone(), tip))
         })

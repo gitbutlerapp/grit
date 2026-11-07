@@ -30,7 +30,6 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
@@ -195,13 +194,22 @@ fn fetch_over_git_daemon_v2_lands_refs_and_objects() {
     .expect("v2 fetch_remote over git daemon");
 
     // Tracking refs written (same assertions as the v0/v1 test).
-    let got_main = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
-    let got_topic = resolve_ref(&local_git, "refs/remotes/origin/topic").expect("origin/topic");
+    let got_main = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
+    let got_topic = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/topic")
+        .expect("origin/topic");
     assert_eq!(got_main, main_oid, "origin/main oid mismatch vs source");
     assert_eq!(got_topic, topic_oid, "origin/topic oid mismatch vs source");
 
     // The annotated tag arrived (TagMode::All).
-    let got_tag = resolve_ref(&local_git, "refs/tags/v1").expect("tag v1 written");
+    let got_tag = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/tags/v1")
+        .expect("tag v1 written");
     assert_eq!(got_tag, tag_oid, "tag v1 oid mismatch vs source");
 
     // Objects landed in the local odb.
@@ -404,7 +412,10 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
     .expect("incremental v2 fetch");
 
     // The new topic tip landed.
-    let got_topic = resolve_ref(&local_git, "refs/remotes/origin/topic").expect("origin/topic");
+    let got_topic = grit_test_support::refs::at(&local_git)
+        .references()
+        .resolve("refs/remotes/origin/topic")
+        .expect("origin/topic");
     assert_eq!(got_topic, topic_new, "incremental topic tip mismatch");
     let local_odb = open_odb(&local_git);
     assert!(
