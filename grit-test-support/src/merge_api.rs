@@ -39,6 +39,7 @@ pub fn integrate_branch(
 }
 
 /// Integrate with explicit [`MergeOptions`].
+#[allow(clippy::too_many_arguments)]
 pub fn integrate_branch_with(
     repo: &Repository,
     into_ref: &str,
