@@ -106,11 +106,12 @@ for oid in &result.oids {
 ### Diff two trees
 
 ```rust
-use grit_lib::diff::{diff_trees, DiffEntry};
+use grit_lib::diff::{RenameDetection, TreeDiffOptions};
 
-let entries: Vec<DiffEntry> = diff_trees(&repo.odb, Some(old_tree), Some(new_tree))?;
-for e in &entries {
-    println!("{} {}", e.status, e.new_path.as_deref().or(e.old_path.as_deref()).unwrap());
+let options = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
+let result = repo.diff().tree_to_tree(Some(&old_tree), Some(&new_tree), &options)?;
+for e in &result.entries {
+    println!("{} {}", e.status.letter(), e.path());
 }
 ```
 

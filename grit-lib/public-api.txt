@@ -3496,9 +3496,9 @@ pub grit_lib::diff::structured::SideBytes::encoding_lossy: bool
 pub grit_lib::diff::structured::SideBytes::size: u64
 impl grit_lib::diff::structured::SideBytes
 pub fn grit_lib::diff::structured::SideBytes::byte_len(&self) -> u64
-pub fn grit_lib::diff::structured::SideBytes::empty_with_size(u64) -> Self
 pub fn grit_lib::diff::structured::SideBytes::from_bytes(alloc::vec::Vec<u8>) -> Self
 pub fn grit_lib::diff::structured::SideBytes::text(&self) -> alloc::string::String
+pub fn grit_lib::diff::structured::SideBytes::unread(u64) -> Self
 impl core::clone::Clone for grit_lib::diff::structured::SideBytes
 pub fn grit_lib::diff::structured::SideBytes::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::diff::structured::SideBytes
@@ -3665,6 +3665,56 @@ pub fn grit_lib::diff::userdiff::matcher_for_path_parsed(&grit_lib::config::Conf
 pub mod grit_lib::diff::ws
 pub fn grit_lib::diff::ws::is_space_git(u8) -> bool
 pub fn grit_lib::diff::ws::ws_blank_line(&str) -> bool
+#[non_exhaustive] pub enum grit_lib::diff::BreakRewrites
+pub grit_lib::diff::BreakRewrites::Off
+pub grit_lib::diff::BreakRewrites::Score(u64)
+impl grit_lib::diff::BreakRewrites
+pub const grit_lib::diff::BreakRewrites::DEFAULT: Self
+pub const grit_lib::diff::BreakRewrites::MAX_SCORE: u64
+pub fn grit_lib::diff::BreakRewrites::percent(u8) -> Self
+pub fn grit_lib::diff::BreakRewrites::score(self) -> core::option::Option<u64>
+impl core::clone::Clone for grit_lib::diff::BreakRewrites
+pub fn grit_lib::diff::BreakRewrites::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::BreakRewrites
+impl core::cmp::PartialEq for grit_lib::diff::BreakRewrites
+pub fn grit_lib::diff::BreakRewrites::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::BreakRewrites
+pub fn grit_lib::diff::BreakRewrites::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::BreakRewrites
+pub fn grit_lib::diff::BreakRewrites::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::BreakRewrites
+impl core::marker::StructuralPartialEq for grit_lib::diff::BreakRewrites
+impl core::marker::Freeze for grit_lib::diff::BreakRewrites
+impl core::marker::Send for grit_lib::diff::BreakRewrites
+impl core::marker::Sync for grit_lib::diff::BreakRewrites
+impl core::marker::Unpin for grit_lib::diff::BreakRewrites
+impl core::marker::UnsafeUnpin for grit_lib::diff::BreakRewrites
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::BreakRewrites
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::BreakRewrites
+#[non_exhaustive] pub enum grit_lib::diff::CopyDetection
+pub grit_lib::diff::CopyDetection::FindHarder(u8)
+pub grit_lib::diff::CopyDetection::Off
+pub grit_lib::diff::CopyDetection::Similarity(u8)
+impl grit_lib::diff::CopyDetection
+pub fn grit_lib::diff::CopyDetection::threshold_percent(self) -> core::option::Option<u32>
+impl core::clone::Clone for grit_lib::diff::CopyDetection
+pub fn grit_lib::diff::CopyDetection::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::CopyDetection
+impl core::cmp::PartialEq for grit_lib::diff::CopyDetection
+pub fn grit_lib::diff::CopyDetection::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::CopyDetection
+pub fn grit_lib::diff::CopyDetection::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::CopyDetection
+pub fn grit_lib::diff::CopyDetection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::CopyDetection
+impl core::marker::StructuralPartialEq for grit_lib::diff::CopyDetection
+impl core::marker::Freeze for grit_lib::diff::CopyDetection
+impl core::marker::Send for grit_lib::diff::CopyDetection
+impl core::marker::Sync for grit_lib::diff::CopyDetection
+impl core::marker::Unpin for grit_lib::diff::CopyDetection
+impl core::marker::UnsafeUnpin for grit_lib::diff::CopyDetection
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::CopyDetection
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::CopyDetection
 #[non_exhaustive] pub enum grit_lib::diff::DiffAlgorithm
 pub grit_lib::diff::DiffAlgorithm::Histogram
 pub grit_lib::diff::DiffAlgorithm::Minimal
@@ -4028,6 +4078,29 @@ impl core::marker::Unpin for grit_lib::diff::ResolveDiffArgumentsError
 impl core::marker::UnsafeUnpin for grit_lib::diff::ResolveDiffArgumentsError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::ResolveDiffArgumentsError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::ResolveDiffArgumentsError
+#[non_exhaustive] pub enum grit_lib::diff::SubmoduleIgnoreMode
+pub grit_lib::diff::SubmoduleIgnoreMode::All
+pub grit_lib::diff::SubmoduleIgnoreMode::Dirty
+pub grit_lib::diff::SubmoduleIgnoreMode::None
+pub grit_lib::diff::SubmoduleIgnoreMode::Untracked
+impl core::clone::Clone for grit_lib::diff::SubmoduleIgnoreMode
+pub fn grit_lib::diff::SubmoduleIgnoreMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::SubmoduleIgnoreMode
+impl core::cmp::PartialEq for grit_lib::diff::SubmoduleIgnoreMode
+pub fn grit_lib::diff::SubmoduleIgnoreMode::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::SubmoduleIgnoreMode
+pub fn grit_lib::diff::SubmoduleIgnoreMode::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::SubmoduleIgnoreMode
+pub fn grit_lib::diff::SubmoduleIgnoreMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::SubmoduleIgnoreMode
+impl core::marker::StructuralPartialEq for grit_lib::diff::SubmoduleIgnoreMode
+impl core::marker::Freeze for grit_lib::diff::SubmoduleIgnoreMode
+impl core::marker::Send for grit_lib::diff::SubmoduleIgnoreMode
+impl core::marker::Sync for grit_lib::diff::SubmoduleIgnoreMode
+impl core::marker::Unpin for grit_lib::diff::SubmoduleIgnoreMode
+impl core::marker::UnsafeUnpin for grit_lib::diff::SubmoduleIgnoreMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::SubmoduleIgnoreMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::SubmoduleIgnoreMode
 pub struct grit_lib::diff::CommitFilesManyInput
 pub grit_lib::diff::CommitFilesManyInput::oid: grit_lib::objects::ObjectId
 pub grit_lib::diff::CommitFilesManyInput::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
@@ -4076,43 +4149,35 @@ impl core::marker::Unpin for grit_lib::diff::CommitFilesResult
 impl core::marker::UnsafeUnpin for grit_lib::diff::CommitFilesResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::CommitFilesResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::CommitFilesResult
-pub struct grit_lib::diff::DetectRenamesOptions
-pub grit_lib::diff::DetectRenamesOptions::skip_basename_heuristic: bool
-impl core::clone::Clone for grit_lib::diff::DetectRenamesOptions
-pub fn grit_lib::diff::DetectRenamesOptions::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::diff::DetectRenamesOptions
-impl core::cmp::PartialEq for grit_lib::diff::DetectRenamesOptions
-pub fn grit_lib::diff::DetectRenamesOptions::eq(&self, &Self) -> bool
-impl core::default::Default for grit_lib::diff::DetectRenamesOptions
-pub fn grit_lib::diff::DetectRenamesOptions::default() -> Self
-impl core::fmt::Debug for grit_lib::diff::DetectRenamesOptions
-pub fn grit_lib::diff::DetectRenamesOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::diff::DetectRenamesOptions
-impl core::marker::StructuralPartialEq for grit_lib::diff::DetectRenamesOptions
-impl core::marker::Freeze for grit_lib::diff::DetectRenamesOptions
-impl core::marker::Send for grit_lib::diff::DetectRenamesOptions
-impl core::marker::Sync for grit_lib::diff::DetectRenamesOptions
-impl core::marker::Unpin for grit_lib::diff::DetectRenamesOptions
-impl core::marker::UnsafeUnpin for grit_lib::diff::DetectRenamesOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DetectRenamesOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DetectRenamesOptions
 pub struct grit_lib::diff::Diff<'repo>
 impl grit_lib::diff::Diff<'_>
 pub fn grit_lib::diff::Diff<'_>::commit_files_many(&self, &[grit_lib::objects::ObjectId], &grit_lib::worktree::pathspec::Pathspec, grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 pub fn grit_lib::diff::Diff<'_>::commit_files_many_work(&self, &[grit_lib::diff::CommitFilesManyInput], &grit_lib::worktree::pathspec::Pathspec, grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 pub fn grit_lib::diff::Diff<'_>::commit_line_totals(&self, &[grit_lib::objects::ObjectId], &grit_lib::worktree::pathspec::Pathspec, grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<core::option::Option<grit_lib::diff::DiffTotals>>>
 impl<'repo> grit_lib::diff::Diff<'repo>
+pub fn grit_lib::diff::Diff<'repo>::commit_files(&self, &grit_lib::objects::ObjectId, grit_lib::diff::DiffMerges, grit_lib::diff::DiffDetail, &grit_lib::diff::DiffOptions, &grit_lib::worktree::pathspec::Pathspec) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
+pub fn grit_lib::diff::Diff<'repo>::commits(&self, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &grit_lib::diff::TreeDiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffEntriesResult>
+pub fn grit_lib::diff::Diff<'repo>::detect_renames(&self, alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::diff::TreeDiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffEntriesResult>
 pub fn grit_lib::diff::Diff<'repo>::entries(&self, &grit_lib::diff::DiffTarget, &grit_lib::worktree::pathspec::Pathspec, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffEntriesResult>
 pub fn grit_lib::diff::Diff<'repo>::files(&self, &grit_lib::diff::DiffTarget, &grit_lib::worktree::pathspec::Pathspec, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>>
-pub fn grit_lib::diff::Diff<'repo>::index_to_tree(&self, &grit_lib::index::Index, core::option::Option<&grit_lib::objects::ObjectId>, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::Diff<'repo>::files_for_entries(&self, alloc::vec::Vec<grit_lib::diff::DiffEntry>, grit_lib::diff::DiffDetail, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
+pub fn grit_lib::diff::Diff<'repo>::for_each_file(&self, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::diff::DiffOptions, impl core::ops::function::FnMut(grit_lib::diff::ListedFileDiff) -> grit_lib::error::Result<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::diff::Diff<'repo>::for_each_structured(&self, &[grit_lib::diff::DiffEntry], &grit_lib::diff::DiffOptions, impl core::ops::function::FnMut(grit_lib::diff::TreeDiffStructured) -> grit_lib::error::Result<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::diff::Diff<'repo>::hunk_bundle(&self, &grit_lib::worktree::pathspec::Pathspec, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::HunkDiffBundle>
+pub fn grit_lib::diff::Diff<'repo>::index_to_tree(&self, &grit_lib::index::Index, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::diff::TreeDiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffEntriesResult>
+pub fn grit_lib::diff::Diff<'repo>::index_to_worktree(&self, &mut grit_lib::index::Index, &grit_lib::diff::TreeDiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffEntriesResult>
 pub fn grit_lib::diff::Diff<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
+pub fn grit_lib::diff::Diff<'repo>::object_changes(&self, &[grit_lib::diff::DiffEntry]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileChange>>
 pub fn grit_lib::diff::Diff<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
-pub fn grit_lib::diff::Diff<'repo>::tree_to_tree(&self, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::Diff<'repo>::tree_to_tree_renames(&self, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::Diff<'repo>::resolve_pathspec(&self, core::option::Option<&str>, &[alloc::string::String]) -> grit_lib::error::Result<grit_lib::worktree::pathspec::Pathspec>
+pub fn grit_lib::diff::Diff<'repo>::resolve_request(&self, core::option::Option<&str>, &grit_lib::diff::DiffRequest) -> grit_lib::error::Result<grit_lib::diff::DiffArguments>
+pub fn grit_lib::diff::Diff<'repo>::stat(&self, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffStat>
+pub fn grit_lib::diff::Diff<'repo>::structured(&self, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::TreeDiffStructured>>
+pub fn grit_lib::diff::Diff<'repo>::tree_to_tree(&self, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::diff::TreeDiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffEntriesResult>
+pub fn grit_lib::diff::Diff<'repo>::tree_to_worktree(&self, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::index::Index, &grit_lib::diff::TreeDiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffEntriesResult>
 pub fn grit_lib::diff::Diff<'repo>::uncommitted(&self) -> grit_lib::error::Result<grit_lib::diff::UncommittedDiff<'repo>>
-pub fn grit_lib::diff::Diff<'repo>::worktree_to_index(&self, &mut grit_lib::index::Index, bool, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 impl<'repo> grit_lib::diff::Diff<'repo>
-pub fn grit_lib::diff::Diff<'repo>::has_changes(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], grit_lib::diff::DiffOptions) -> grit_lib::error::Result<bool>
+pub fn grit_lib::diff::Diff<'repo>::has_changes(&self, &grit_lib::diff::DiffTarget, &grit_lib::worktree::pathspec::Pathspec, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<bool>
 impl<'repo> core::clone::Clone for grit_lib::diff::Diff<'repo>
 pub fn grit_lib::diff::Diff<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::diff::Diff<'repo>
@@ -4139,9 +4204,12 @@ impl core::marker::Unpin for grit_lib::diff::DiffArguments
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffArguments
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffArguments
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffArguments
-pub struct grit_lib::diff::DiffEntriesResult
+#[non_exhaustive] pub struct grit_lib::diff::DiffEntriesResult
 pub grit_lib::diff::DiffEntriesResult::entries: alloc::vec::Vec<grit_lib::diff::DiffEntry>
+pub grit_lib::diff::DiffEntriesResult::index_stat_refreshed: bool
 pub grit_lib::diff::DiffEntriesResult::inexact_rename_skipped: core::option::Option<grit_lib::diff::InexactRenameDetectionSkipped>
+impl grit_lib::diff::DiffEntriesResult
+pub fn grit_lib::diff::DiffEntriesResult::new(alloc::vec::Vec<grit_lib::diff::DiffEntry>) -> Self
 impl core::clone::Clone for grit_lib::diff::DiffEntriesResult
 pub fn grit_lib::diff::DiffEntriesResult::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::diff::DiffEntriesResult
@@ -4231,39 +4299,6 @@ impl core::marker::Unpin for grit_lib::diff::DiffFilter
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffFilter
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffFilter
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffFilter
-pub struct grit_lib::diff::DiffIndexToWorktreeOptions
-pub grit_lib::diff::DiffIndexToWorktreeOptions::cancel: core::option::Option<grit_lib::progress::CancelToken>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::command_runner: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::config: core::option::Option<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::diagnostics: core::option::Option<grit_lib::diagnostics::DiagnosticsHandle>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::error_on_broken_gitlinks: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::for_status: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::fsmonitor_query_boundary: core::option::Option<grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::hash_blobs_without_write: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::ignore_submodule_untracked: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::index_mtime: core::option::Option<(u32, u32)>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::refresh_fsmonitor: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::refresh_index_stat_in_pass: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::repository_git_dir: core::option::Option<std::path::PathBuf>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::restrict_to_paths: core::option::Option<alloc::rcs::arc::Arc<alloc::collections::btree::set::BTreeSet<alloc::string::String>>>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::simplify_gitlinks: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::size_change_proves_modified: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::skip_inaccessible_paths: bool
-pub grit_lib::diff::DiffIndexToWorktreeOptions::skip_index_path: core::option::Option<alloc::rcs::arc::Arc<(dyn core::ops::function::Fn(&[u8]) -> bool + core::marker::Send + core::marker::Sync)>>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::stat_parallel_threads: core::option::Option<usize>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::thread_policy: core::option::Option<grit_lib::parallel::ThreadPolicy>
-pub grit_lib::diff::DiffIndexToWorktreeOptions::worktree_rules: core::option::Option<alloc::rcs::arc::Arc<std::sync::poison::mutex::Mutex<grit_lib::worktree::worktree_rules::WorktreeRules>>>
-impl core::clone::Clone for grit_lib::diff::DiffIndexToWorktreeOptions
-pub fn grit_lib::diff::DiffIndexToWorktreeOptions::clone(&self) -> Self
-impl core::default::Default for grit_lib::diff::DiffIndexToWorktreeOptions
-pub fn grit_lib::diff::DiffIndexToWorktreeOptions::default() -> Self
-impl core::marker::Freeze for grit_lib::diff::DiffIndexToWorktreeOptions
-impl core::marker::Send for grit_lib::diff::DiffIndexToWorktreeOptions
-impl core::marker::Sync for grit_lib::diff::DiffIndexToWorktreeOptions
-impl core::marker::Unpin for grit_lib::diff::DiffIndexToWorktreeOptions
-impl core::marker::UnsafeUnpin for grit_lib::diff::DiffIndexToWorktreeOptions
-impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffIndexToWorktreeOptions
-impl !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffIndexToWorktreeOptions
 #[non_exhaustive] pub struct grit_lib::diff::DiffOptions
 pub grit_lib::diff::DiffOptions::algorithm: grit_lib::diff::DiffAlgorithm
 pub grit_lib::diff::DiffOptions::context_lines: usize
@@ -4304,41 +4339,6 @@ impl core::marker::Unpin for grit_lib::diff::DiffOptions
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffOptions
-pub struct grit_lib::diff::DiffPostprocessOptions
-pub grit_lib::diff::DiffPostprocessOptions::break_score: core::option::Option<u64>
-pub grit_lib::diff::DiffPostprocessOptions::copy_threshold: core::option::Option<u32>
-pub grit_lib::diff::DiffPostprocessOptions::find_copies_harder: bool
-pub grit_lib::diff::DiffPostprocessOptions::materialize_break_worktree_new_oid: bool
-pub grit_lib::diff::DiffPostprocessOptions::rename_threshold: u32
-impl core::clone::Clone for grit_lib::diff::DiffPostprocessOptions
-pub fn grit_lib::diff::DiffPostprocessOptions::clone(&self) -> Self
-impl core::default::Default for grit_lib::diff::DiffPostprocessOptions
-pub fn grit_lib::diff::DiffPostprocessOptions::default() -> Self
-impl core::fmt::Debug for grit_lib::diff::DiffPostprocessOptions
-pub fn grit_lib::diff::DiffPostprocessOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::diff::DiffPostprocessOptions
-impl core::marker::Freeze for grit_lib::diff::DiffPostprocessOptions
-impl core::marker::Send for grit_lib::diff::DiffPostprocessOptions
-impl core::marker::Sync for grit_lib::diff::DiffPostprocessOptions
-impl core::marker::Unpin for grit_lib::diff::DiffPostprocessOptions
-impl core::marker::UnsafeUnpin for grit_lib::diff::DiffPostprocessOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffPostprocessOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffPostprocessOptions
-pub struct grit_lib::diff::DiffPostprocessWorktree<'a>
-pub grit_lib::diff::DiffPostprocessWorktree::index: &'a grit_lib::index::Index
-pub grit_lib::diff::DiffPostprocessWorktree::repository_git_dir: &'a std::path::Path
-impl<'a> core::clone::Clone for grit_lib::diff::DiffPostprocessWorktree<'a>
-pub fn grit_lib::diff::DiffPostprocessWorktree<'a>::clone(&self) -> Self
-impl<'a> core::fmt::Debug for grit_lib::diff::DiffPostprocessWorktree<'a>
-pub fn grit_lib::diff::DiffPostprocessWorktree<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'a> core::marker::Copy for grit_lib::diff::DiffPostprocessWorktree<'a>
-impl<'a> core::marker::Freeze for grit_lib::diff::DiffPostprocessWorktree<'a>
-impl<'a> core::marker::Send for grit_lib::diff::DiffPostprocessWorktree<'a>
-impl<'a> core::marker::Sync for grit_lib::diff::DiffPostprocessWorktree<'a>
-impl<'a> core::marker::Unpin for grit_lib::diff::DiffPostprocessWorktree<'a>
-impl<'a> core::marker::UnsafeUnpin for grit_lib::diff::DiffPostprocessWorktree<'a>
-impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffPostprocessWorktree<'a>
-impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffPostprocessWorktree<'a>
 pub struct grit_lib::diff::DiffRequest
 pub grit_lib::diff::DiffRequest::against: core::option::Option<alloc::string::String>
 pub grit_lib::diff::DiffRequest::paths: alloc::vec::Vec<alloc::string::String>
@@ -4724,26 +4724,41 @@ impl core::marker::Unpin for grit_lib::diff::StatBar
 impl core::marker::UnsafeUnpin for grit_lib::diff::StatBar
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::StatBar
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::StatBar
-pub struct grit_lib::diff::TreeDiffContent
-pub grit_lib::diff::TreeDiffContent::binary: bool
-pub grit_lib::diff::TreeDiffContent::entry: grit_lib::diff::DiffEntry
-pub grit_lib::diff::TreeDiffContent::new_bytes: grit_lib::diff::structured::SideBytes
-pub grit_lib::diff::TreeDiffContent::old_bytes: grit_lib::diff::structured::SideBytes
-impl core::clone::Clone for grit_lib::diff::TreeDiffContent
-pub fn grit_lib::diff::TreeDiffContent::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::diff::TreeDiffContent
-impl core::cmp::PartialEq for grit_lib::diff::TreeDiffContent
-pub fn grit_lib::diff::TreeDiffContent::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::diff::TreeDiffContent
-pub fn grit_lib::diff::TreeDiffContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for grit_lib::diff::TreeDiffContent
-impl core::marker::Freeze for grit_lib::diff::TreeDiffContent
-impl core::marker::Send for grit_lib::diff::TreeDiffContent
-impl core::marker::Sync for grit_lib::diff::TreeDiffContent
-impl core::marker::Unpin for grit_lib::diff::TreeDiffContent
-impl core::marker::UnsafeUnpin for grit_lib::diff::TreeDiffContent
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::TreeDiffContent
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::TreeDiffContent
+#[non_exhaustive] pub struct grit_lib::diff::TreeDiffOptions
+pub grit_lib::diff::TreeDiffOptions::break_rewrites: grit_lib::diff::BreakRewrites
+pub grit_lib::diff::TreeDiffOptions::copies: grit_lib::diff::CopyDetection
+pub grit_lib::diff::TreeDiffOptions::for_status: bool
+pub grit_lib::diff::TreeDiffOptions::pathspec: core::option::Option<grit_lib::worktree::pathspec::Pathspec>
+pub grit_lib::diff::TreeDiffOptions::prefix: alloc::string::String
+pub grit_lib::diff::TreeDiffOptions::refresh_index_stat: bool
+pub grit_lib::diff::TreeDiffOptions::renames: grit_lib::diff::RenameDetection
+pub grit_lib::diff::TreeDiffOptions::show_tree_entries: bool
+pub grit_lib::diff::TreeDiffOptions::submodules: grit_lib::diff::SubmoduleIgnoreMode
+pub grit_lib::diff::TreeDiffOptions::threads: core::option::Option<grit_lib::parallel::ThreadPolicy>
+impl grit_lib::diff::TreeDiffOptions
+pub fn grit_lib::diff::TreeDiffOptions::with_break_rewrites(self, grit_lib::diff::BreakRewrites) -> Self
+pub fn grit_lib::diff::TreeDiffOptions::with_copies(self, grit_lib::diff::CopyDetection) -> Self
+pub fn grit_lib::diff::TreeDiffOptions::with_for_status(self, bool) -> Self
+pub fn grit_lib::diff::TreeDiffOptions::with_pathspec(self, core::option::Option<grit_lib::worktree::pathspec::Pathspec>) -> Self
+pub fn grit_lib::diff::TreeDiffOptions::with_prefix(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::diff::TreeDiffOptions::with_refresh_index_stat(self, bool) -> Self
+pub fn grit_lib::diff::TreeDiffOptions::with_renames(self, grit_lib::diff::RenameDetection) -> Self
+pub fn grit_lib::diff::TreeDiffOptions::with_show_tree_entries(self, bool) -> Self
+pub fn grit_lib::diff::TreeDiffOptions::with_submodules(self, grit_lib::diff::SubmoduleIgnoreMode) -> Self
+pub fn grit_lib::diff::TreeDiffOptions::with_threads(self, core::option::Option<grit_lib::parallel::ThreadPolicy>) -> Self
+impl core::clone::Clone for grit_lib::diff::TreeDiffOptions
+pub fn grit_lib::diff::TreeDiffOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::diff::TreeDiffOptions
+pub fn grit_lib::diff::TreeDiffOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::TreeDiffOptions
+pub fn grit_lib::diff::TreeDiffOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::diff::TreeDiffOptions
+impl core::marker::Send for grit_lib::diff::TreeDiffOptions
+impl core::marker::Sync for grit_lib::diff::TreeDiffOptions
+impl core::marker::Unpin for grit_lib::diff::TreeDiffOptions
+impl core::marker::UnsafeUnpin for grit_lib::diff::TreeDiffOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::TreeDiffOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::TreeDiffOptions
 pub struct grit_lib::diff::TreeDiffStructured
 pub grit_lib::diff::TreeDiffStructured::binary: bool
 pub grit_lib::diff::TreeDiffStructured::entry: grit_lib::diff::DiffEntry
@@ -4838,41 +4853,18 @@ pub const grit_lib::diff::RENAME_DETECTION_DISABLED: u32
 pub const grit_lib::diff::WORD_LEVEL_INLINE_MAX_CHANGED_FILES: usize
 pub fn grit_lib::diff::anchored_unified_diff(&str, &str, &str, &str, usize, &[alloc::string::String], similar::types::Algorithm, bool, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::annotate_unified_diff_no_newline_at_eof(&str, &str, &str) -> alloc::string::String
-pub fn grit_lib::diff::build_file_diffs(&grit_lib::prelude::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, grit_lib::diff::DiffDetail, grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
-pub fn grit_lib::diff::build_file_diffs_streaming(&grit_lib::prelude::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, impl core::ops::function::FnMut(grit_lib::diff::ListedFileDiff) -> grit_lib::error::Result<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::diff::bytes_for_diff(alloc::vec::Vec<u8>) -> (grit_lib::diff::structured::SideBytes, bool)
 pub fn grit_lib::diff::combined_structured_patch_body(&grit_lib::diff::combined_diff_patch::CombinedStructuredTextDiff) -> alloc::string::String
-pub fn grit_lib::diff::commit_diff_files(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, grit_lib::diff::DiffMerges, grit_lib::diff::DiffDetail, &grit_lib::diff::DiffOptions, &grit_lib::worktree::pathspec::Pathspec, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
 pub fn grit_lib::diff::count_changes_with_algorithm(&str, &str, similar::types::Algorithm, bool) -> (usize, usize)
 pub fn grit_lib::diff::count_git_lines(&[u8]) -> usize
-pub fn grit_lib::diff::detect_copies_with_policy(&grit_lib::prelude::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, grit_lib::objects::FileMode, grit_lib::objects::ObjectId)], &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::detect_renames_with_policy(&grit_lib::prelude::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, core::option::Option<&grit_lib::progress::CancelToken>, grit_lib::diff::DetectRenamesOptions) -> grit_lib::error::Result<grit_lib::diff::core::RenameDetectionResult>
-pub fn grit_lib::diff::diff_commits(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_commits_with_renames(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, u32) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_index_to_tree(&grit_lib::prelude::Odb, &grit_lib::index::Index, core::option::Option<&grit_lib::objects::ObjectId>, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_index_to_worktree(&grit_lib::prelude::Odb, &mut grit_lib::index::Index, &std::path::Path, bool, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_index_to_worktree_for_staging(&grit_lib::prelude::Odb, &std::path::Path, &mut grit_lib::index::Index, &std::path::Path, grit_lib::diff::DiffIndexToWorktreeOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, bool, alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::index::IndexStatFields>)>
-pub fn grit_lib::diff::diff_index_to_worktree_with_options(&grit_lib::prelude::Odb, &mut grit_lib::index::Index, &std::path::Path, grit_lib::diff::DiffIndexToWorktreeOptions) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, bool)>
-pub fn grit_lib::diff::diff_index_to_worktree_with_renames(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &std::path::Path, grit_lib::diff::DiffIndexToWorktreeOptions, u32) -> grit_lib::error::Result<(alloc::vec::Vec<grit_lib::diff::DiffEntry>, bool)>
 pub fn grit_lib::diff::diff_paths(&std::path::Path, &std::path::Path, &grit_lib::diff::DiffOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>, grit_lib::diff::NoIndexError>
-pub fn grit_lib::diff::diff_tree_to_worktree(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_tree_to_worktree_with_git_dir(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &std::path::Path, &grit_lib::index::Index, core::option::Option<&grit_lib::config::ConfigSet>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_tree_to_worktree_with_git_dir_and_rules(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, &std::path::Path, &std::path::Path, &grit_lib::index::Index, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_trees(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_trees_show_tree_entries(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
-pub fn grit_lib::diff::diff_trees_with_renames(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str, u32) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::empty_blob_oid() -> grit_lib::objects::ObjectId
-pub fn grit_lib::diff::for_each_tree_diff_structured(&grit_lib::prelude::Odb, &[grit_lib::diff::DiffEntry], grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, impl core::ops::function::FnMut(grit_lib::diff::TreeDiffStructured) -> grit_lib::error::Result<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::diff::format_raw(&grit_lib::diff::DiffEntry) -> alloc::string::String
 pub fn grit_lib::diff::format_raw_abbrev(&grit_lib::diff::DiffEntry, usize) -> alloc::string::String
-pub fn grit_lib::diff::hash_worktree_file(&grit_lib::prelude::Odb, &std::path::Path, &std::fs::Metadata, &grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, &str, core::option::Option<&grit_lib::index::IndexEntry>, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::diff::hunk_diff_bundle(&grit_lib::repo::Repository, &grit_lib::worktree::pathspec::Pathspec, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::HunkDiffBundle>
-pub fn grit_lib::diff::hunk_ids(grit_lib::diff::DiffSide, &str, &[grit_lib::diff::structured::StructuredHunk]) -> alloc::vec::Vec<grit_lib::diff::HunkId>
-pub fn grit_lib::diff::hunk_ids_with_duplicate_peers(grit_lib::diff::DiffSide, &str, &[grit_lib::diff::structured::StructuredHunk], &[grit_lib::diff::structured::StructuredHunk]) -> alloc::vec::Vec<grit_lib::diff::HunkId>
+pub fn grit_lib::diff::hunk_ids(grit_lib::diff::DiffSide, &str, &[grit_lib::diff::structured::StructuredHunk], &[grit_lib::diff::structured::StructuredHunk]) -> alloc::vec::Vec<grit_lib::diff::HunkId>
 pub fn grit_lib::diff::index_mtime_for_diff(&grit_lib::index::Index, core::option::Option<(u32, u32)>) -> core::option::Option<(u32, u32)>
 pub fn grit_lib::diff::line_change_counts(&str, &str, &grit_lib::diff::DiffOptions) -> grit_lib::diff::LineStat
 pub fn grit_lib::diff::line_diff_unified_hunk_body(&str, &str, &grit_lib::diff::DiffOptions) -> alloc::string::String
-pub fn grit_lib::diff::load_object_changes(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileChange>>
 pub fn grit_lib::diff::load_odb_blob_side_for_diff(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId, core::option::Option<&str>, bool) -> grit_lib::error::Result<(grit_lib::diff::structured::SideBytes, bool)>
 pub fn grit_lib::diff::mode_from_metadata(&std::fs::Metadata) -> u32
 pub fn grit_lib::diff::name_status_line(&grit_lib::diff::DiffEntry) -> alloc::string::String
@@ -4881,23 +4873,16 @@ pub fn grit_lib::diff::normalize_ignore_space_change_line(&str) -> alloc::string
 pub fn grit_lib::diff::parse_diff_rename_threshold_percent(&str) -> core::option::Option<u8>
 pub fn grit_lib::diff::peer_hunks_by_primary_path(&std::collections::hash::set::HashSet<&str>, impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>)>) -> std::collections::hash::map::HashMap<alloc::string::String, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>>
 pub fn grit_lib::diff::peer_scope_includes_path(&str, core::option::Option<&str>, &std::collections::hash::set::HashSet<&str>) -> bool
-pub fn grit_lib::diff::postprocess_diff_entries(&grit_lib::prelude::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&std::path::Path>, core::option::Option<&grit_lib::diff::DiffPostprocessWorktree<'_>>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, &grit_lib::diff::DiffPostprocessOptions, core::option::Option<&mut core::option::Option<grit_lib::diff::InexactRenameDetectionSkipped>>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::read_worktree_side_bytes_for_diff(&grit_lib::prelude::Odb, &std::path::Path, &str, u32, &grit_lib::config::ConfigSet, core::option::Option<&grit_lib::index::IndexEntry>, core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::diff::refresh_index_stat_content_verified(&grit_lib::prelude::Odb, &std::path::Path, &mut grit_lib::index::Index, &std::path::Path, core::option::Option<(u32, u32)>, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<usize>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::diff::rename_similarity_score(&[u8], &[u8]) -> u32
 pub fn grit_lib::diff::renames_from_config(&grit_lib::config::ConfigSet) -> grit_lib::diff::RenameDetection
-pub fn grit_lib::diff::resolve_commit_diff_pathspecs(&grit_lib::repo::Repository, core::option::Option<&str>, &[alloc::string::String]) -> grit_lib::error::Result<grit_lib::worktree::pathspec::Pathspec>
-pub fn grit_lib::diff::resolve_diff_arguments(&grit_lib::repo::Repository, core::option::Option<&str>, bool, bool, core::option::Option<&str>, &[alloc::string::String], &[alloc::string::String]) -> grit_lib::error::Result<grit_lib::diff::DiffArguments>
-pub fn grit_lib::diff::resolve_diff_request(&grit_lib::repo::Repository, core::option::Option<&str>, &grit_lib::diff::DiffRequest) -> grit_lib::error::Result<grit_lib::diff::DiffArguments>
 pub fn grit_lib::diff::resolve_indent_heuristic(&grit_lib::config::ConfigSet, bool, bool) -> bool
 pub fn grit_lib::diff::sort_entries_by_path(&mut [grit_lib::diff::DiffEntry])
 pub fn grit_lib::diff::stat_matches(&grit_lib::index::IndexEntry, &std::fs::Metadata) -> bool
 pub fn grit_lib::diff::submodule_porcelain_flags(&std::path::Path, &str, grit_lib::objects::ObjectId) -> grit_lib::diff::core::SubmodulePorcelainFlags
 pub fn grit_lib::diff::text_sides_differ(&str, &str, &grit_lib::diff::DiffOptions) -> bool
-pub fn grit_lib::diff::tree_diff_contents_parallel(&grit_lib::prelude::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::TreeDiffContent>>
-pub fn grit_lib::diff::tree_diff_stat_parallel(&grit_lib::prelude::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::diff::DiffEntry, bool, core::option::Option<grit_lib::diff::LineStat>, u64, u64)>>
 pub fn grit_lib::diff::tree_diff_structured_entry(&grit_lib::prelude::Odb, &grit_lib::diff::DiffEntry, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::TreeDiffStructured>
-pub fn grit_lib::diff::tree_diff_structured_parallel(&grit_lib::prelude::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::TreeDiffStructured>>
 pub fn grit_lib::diff::tree_oid_of_commit(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::diff::unified_diff(&str, &str, &str, &str, usize, bool, bool) -> alloc::string::String
 pub fn grit_lib::diff::unified_diff_histogram_hunks_only(&str, &str, usize, usize, bool) -> alloc::string::String
@@ -29373,6 +29358,7 @@ pub fn grit_lib::worktree::worktree_rules::WorktreeRules::file_attrs(&self, &str
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::filter_process(&self) -> &grit_lib::filter_process::FilterProcessState
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::from_checkout_prospective_index(&grit_lib::repo::Repository, &grit_lib::index::Index) -> grit_lib::error::Result<Self>
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::from_repository(&grit_lib::repo::Repository, &grit_lib::index::Index) -> grit_lib::error::Result<Self>
+pub fn grit_lib::worktree::worktree_rules::WorktreeRules::hash_worktree_file(&self, &grit_lib::prelude::Odb, &std::path::Path, &std::fs::Metadata, &str, core::option::Option<&grit_lib::index::IndexEntry>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::ignore(&self) -> core::cell::Ref<'_, grit_lib::worktree::ignore::IgnoreMatcher>
 pub fn grit_lib::worktree::worktree_rules::WorktreeRules::ignore_mut(&self) -> core::cell::RefMut<'_, grit_lib::worktree::ignore::IgnoreMatcher>
 impl !core::marker::Freeze for grit_lib::worktree::worktree_rules::WorktreeRules

@@ -66,7 +66,7 @@ impl DiffTotals {
     }
 }
 
-/// One changed file with optional patch body or line counts (returned by [`build_file_diffs`](crate::diff::build_file_diffs)).
+/// One changed file with optional patch body or line counts (returned by [`Diff::files_for_entries`](crate::diff::Diff::files_for_entries)).
 ///
 /// Re-exported at the crate root as [`ListedFileDiff`](crate::diff::ListedFileDiff). Use
 /// [`crate::diff::targets::FileDiff`] when you need structured hunks from [`Diff::files`](crate::diff::Diff::files).

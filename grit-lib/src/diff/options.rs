@@ -98,7 +98,7 @@ pub struct DiffOptions {
     pub algorithm: DiffAlgorithm,
     /// Apply Git's indent heuristic when generating hunks.
     pub indent_heuristic: bool,
-    /// Rename detection applied by [`super::build_file_diffs`] and tree content loaders when
+    /// Rename detection applied by [`Diff::files_for_entries`](super::Diff::files_for_entries) and tree content loaders when
     /// entries are not already paired (default similarity 50 via [`RenameDetection::Similarity`], Git `-M`).
     pub renames: RenameDetection,
     /// `--diff-filter` status selection (applied after rename detection).

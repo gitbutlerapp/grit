@@ -66,7 +66,7 @@ impl FileDiff {
     ///
     /// Moves the paths and modes out of `entry` without reading any blob, so converting a
     /// list entry by entry costs no more than the entries themselves. This is the row
-    /// [`build_file_diffs`] produces for [`DiffDetail::NameOnly`] and [`DiffDetail::NameStatus`].
+    /// [`Diff::files_for_entries`](super::Diff::files_for_entries) produces for [`DiffDetail::NameOnly`] and [`DiffDetail::NameStatus`].
     ///
     /// # Parameters
     ///
@@ -148,7 +148,7 @@ fn file_diff_from_stat(
     }
 }
 
-/// Output of [`build_file_diffs`].
+/// Output of [`Diff::files_for_entries`](super::Diff::files_for_entries).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffFilesOutput {
     /// Per-file results in path order.
@@ -164,7 +164,7 @@ pub struct DiffFilesOutput {
 /// Applies [`DiffOptions::renames`] to the entry list first (Git's default `-M50`), pairing
 /// added and deleted paths before stat or patch work. Use [`RenameDetection::Off`](crate::diff::RenameDetection::Off) when the
 /// caller already ran rename detection (`detect_renames`) or
-/// [`diff_trees_with_renames`](crate::diff::diff_trees_with_renames). Metadata-only
+/// [`Diff::tree_to_tree`](crate::diff::Diff::tree_to_tree) with renames on. Metadata-only
 /// [`DiffDetail::NameOnly`] and [`DiffDetail::NameStatus`] still skip line-diff blob reads,
 /// but rename detection may read blob sides for similarity scoring when renames are enabled.
 ///

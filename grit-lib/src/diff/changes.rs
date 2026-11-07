@@ -5,7 +5,7 @@
 //! one set of [`WorktreeRules`] for every step; [`UncommittedDiff::entries`] picks the comparison
 //! from a [`DiffTarget`] and applies pathspecs and `--diff-filter`.
 //! [`UncommittedDiff::load_worktree_changes`] and
-//! [`load_object_changes`] then turn entries into [`FileChange`]s whose bytes feed structured
+//! [`Diff::object_changes`](super::Diff::object_changes) then turn entries into [`FileChange`]s whose bytes feed structured
 //! hunks ([`FileChange::structured`]) or line counts ([`FileChange::line_stat`]).
 
 use std::collections::{BTreeSet, HashSet};
@@ -627,7 +627,7 @@ impl<'repo> UncommittedDiff<'repo> {
     ///
     /// # Parameters
     ///
-    /// - `target` - what to compare, e.g. from [`resolve_diff_request`](crate::diff::resolve_diff_request).
+    /// - `target` - what to compare, e.g. from [`Diff::resolve_request`](crate::diff::Diff::resolve_request).
     /// - `pathspecs` - repository-relative pathspecs; empty means every path.
     /// - `options` - only `renames` and `filter` are used.
     ///

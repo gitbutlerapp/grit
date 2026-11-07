@@ -68,7 +68,7 @@ pub enum DiffTarget {
 /// One changed file with structured hunks and metadata (returned by [`Diff::files`](crate::diff::Diff::files)).
 ///
 /// Always carries [`Self::hunks`] when line diff was computed. For stat-or-patch listing rows
-/// from [`build_file_diffs`](crate::diff::build_file_diffs), use [`ListedFileDiff`](crate::diff::ListedFileDiff)
+/// from [`Diff::files_for_entries`](crate::diff::Diff::files_for_entries), use [`ListedFileDiff`](crate::diff::ListedFileDiff)
 /// instead (structured hunks and line counts are optional there).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDiff {
@@ -115,7 +115,7 @@ pub struct DiffArguments {
 
 /// Unparsed `grit diff` flags and operands, as the user typed them.
 ///
-/// [`resolve_diff_request`] turns this into a [`DiffArguments`].
+/// [`Diff::resolve_request`](crate::diff::Diff::resolve_request) turns this into a [`DiffArguments`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiffRequest {
     /// Compare the index with `HEAD` (`--staged`).

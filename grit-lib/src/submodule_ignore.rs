@@ -6,7 +6,9 @@ use std::path::Path;
 
 use crate::config::{ConfigEntry, ConfigFile, ConfigScope, ConfigSet};
 
-/// Submodule ignore mode for worktree gitlink comparisons.
+/// Submodule ignore mode for worktree gitlink comparisons (Git `--ignore-submodules`,
+/// `diff.ignoreSubmodules`, `submodule.<name>.ignore`).
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SubmoduleIgnoreMode {
     /// Report new submodule commits and dirty tracked content inside the checkout.

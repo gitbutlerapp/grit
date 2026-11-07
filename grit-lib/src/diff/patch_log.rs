@@ -204,7 +204,7 @@ pub fn write_patch<W: Write>(
 
 /// Write patch text from precomputed [`TreeDiffStructured`](super::tree_content::TreeDiffStructured) rows.
 ///
-/// Use after [`super::tree_diff_structured_parallel`] (or `grit diff`'s commit-range path) to avoid
+/// Use after [`Diff::structured`](super::Diff::structured) (or `grit diff`'s commit-range path) to avoid
 /// recomputing line diffs.
 ///
 /// # Errors
