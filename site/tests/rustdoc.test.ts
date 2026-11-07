@@ -81,7 +81,7 @@ describe("variant tables", () => {
 describe("unresolvedGritLibPaths", () => {
   it("accepts public paths in prose, code and use groups", () => {
     const markdown = [
-      "Serve with `grit_lib::remote::serve::upload_pack` and [`Odb`](rustdoc:grit_lib::objects::odb::Odb).",
+      "Serve with `grit_lib::remote::serve::UploadPack` and [`Odb`](rustdoc:grit_lib::objects::odb::Odb).",
       "```rust",
       "use grit_lib::objects::{HashAlgo, ObjectKind as Kind, hash::hash_object};",
       "use grit_lib::config::Config;",
