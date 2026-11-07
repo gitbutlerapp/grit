@@ -1949,8 +1949,8 @@ fn scan_index_blob_stats_for_hard_reset(
     let mut stats: Vec<_> = batches
         .into_iter()
         .flatten()
-        .filter_map(|(plan_index, lookup)| match lookup {
-            BlobDiskLookup::Present(stat) => plan.indices.get(plan_index).map(|&pos| (pos, stat)),
+        .filter_map(|(entry_index, lookup)| match lookup {
+            BlobDiskLookup::Present(stat) => Some((entry_index, stat)),
             _ => None,
         })
         .collect();
