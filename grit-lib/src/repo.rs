@@ -1749,12 +1749,11 @@ impl Repository {
             hook_stdio: options.hook_stdio,
         };
         repo.refresh_config_session()?;
-        read_core_bare_and_worktree_from_config(repo.config().snapshot()?.as_ref())?;
+        read_core_bare_and_worktree_from_config(repo.ensure_config_arc_fast()?.as_ref())?;
         if options.validate_repository_format {
             repo.validate_repository_format_cached()?;
         }
         repo.check_injected_object_format(&injected_algos)?;
-        repo.install_config_snapshot();
         warn_core_bare_worktree_conflict(options, &repo);
         Ok(repo)
     }
