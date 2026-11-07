@@ -17,8 +17,8 @@ use grit_lib::porcelain::replay_sequence::{
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    start_rebase, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
-    RewriteOptions, StartRebaseOptions,
+    EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 use grit_lib::state::{resolve_head, HeadState};
 use tempfile::TempDir;
@@ -322,6 +322,7 @@ fn issue_2468_rebase_replays_git_rr_cache() {
             branch_tip: tip,
         },
         rebase: RebaseOntoOptions {
+            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
@@ -340,9 +341,17 @@ fn issue_2468_rebase_replays_git_rr_cache() {
             record_operation: None,
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+        exec: None,
     };
-    let out = start_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("rebase");
+    let out = repo
+        .history()
+        .start_rebase(
+            &opts,
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("rebase");
     let RebaseOutcome::Stopped(stop) = out else {
         panic!("expected rebase stop on conflicts");
     };

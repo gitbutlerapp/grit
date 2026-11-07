@@ -10,9 +10,8 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    abort_rebase, continue_rebase, plan_rebase, rebase_run_request, ApplyOptions, EmptyPolicy,
-    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RefScope, RewriteOptions,
-    StartRebaseOptions,
+    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
+    RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::worktree::WorktreeError;
 use grit_test_support::{git, git_fsck, unique_tmp, write_file};
@@ -489,15 +488,16 @@ fn pull_rebase_conflict_stops_like_git_and_continues() {
             record_operation: None,
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+        exec: None,
     };
-    let done = continue_rebase(
-        &open(&grit_dir),
-        &resume,
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("continue");
+    let done = open(&grit_dir)
+        .history()
+        .continue_rebase(
+            &resume,
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("continue");
     assert!(matches!(done, RebaseOutcome::Done { .. }), "{done:?}");
     let out = git_unchecked(&git_dir, &["rebase", "--continue"]);
     assert!(
@@ -530,7 +530,10 @@ fn pull_rebase_conflict_abort_restores_tip_with_grit_and_git() {
         if use_git_abort {
             git(&grit_dir, &["rebase", "--abort"]);
         } else {
-            abort_rebase(&open(&grit_dir), &test_sig()).expect("abort");
+            open(&grit_dir)
+                .history()
+                .abort_rebase(&test_sig())
+                .expect("abort");
         }
         assert_eq!(rev(&grit_dir, "HEAD"), local_tip);
         assert_eq!(
@@ -862,8 +865,10 @@ fn pull_rebase_implicit_upstream_up_to_date_after_fetch() {
     let repo = open(&grit_dir);
     let head = rev(&grit_dir, "HEAD");
     let upstream = rev(&grit_dir, "origin/main");
-    let request =
-        rebase_run_request(&repo, head, upstream, None, None, false, None).expect("request");
+    let request = repo
+        .history()
+        .rebase_run_request(head, upstream, None, None, false, None)
+        .expect("request");
     let opts = RebaseOntoOptions::new(RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
@@ -871,7 +876,7 @@ fn pull_rebase_implicit_upstream_up_to_date_after_fetch() {
         preserve_committer: false,
         sign: false,
     });
-    let plan = plan_rebase(&repo, &request, &opts).expect("plan");
+    let plan = repo.history().plan_rebase(&request, &opts).expect("plan");
     assert!(
         matches!(plan, RebasePlan::UpToDate),
         "implicit rebase after fetch should be up to date, got {plan:?}"

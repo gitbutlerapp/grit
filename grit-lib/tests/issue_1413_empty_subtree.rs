@@ -9,9 +9,8 @@ use std::path::Path;
 use grit_lib::diff::merge_trees::{merge_trees_three_way, TreeMergeConflictPresentation};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
-use grit_lib::revwalk::history::{
-    apply_rewrite, drop as history_drop, ApplyOptions, EmptyPolicy, RefScope, RewriteOptions,
-};
+use grit_lib::progress::CancelToken;
+use grit_lib::revwalk::history::{ApplyOptions, EmptyPolicy, RefScope, RewriteOptions};
 
 use support::{
     assert_git_fsck_strict, commit_file, commit_tree, git, git_fsck_strict, git_rev_parse,
@@ -81,15 +80,18 @@ fn history_drop_emptied_subdirectory_fsck_clean() {
     seed_three_dir_commits(wt);
     let c2 = git_rev_parse(wt, "HEAD~1").expect("c2");
     let grit = open_grit_repo(wt);
-    let plan = history_drop(&grit, c2, &drop_opts(0)).expect("drop c2");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit
+        .history()
+        .drop_commit(c2, &drop_opts(0))
+        .expect("drop c2");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     assert_head_has_no_empty_subtree_dirs(wt);
 }
 
@@ -111,7 +113,7 @@ fn replay_revert_emptied_subdirectory_fsck_clean() {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("revert c2");
     assert!(matches!(outcome, ReplayOutcome::Committed { .. }));
@@ -143,7 +145,7 @@ fn replay_pick_dir_delete_fsck_clean() {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("pick delete");
     assert!(matches!(outcome, ReplayOutcome::Committed { .. }));

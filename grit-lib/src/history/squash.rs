@@ -52,15 +52,8 @@ struct ResolvedSquashRange {
 
 /// Plan squashing `range` into one commit and replaying descendants.
 ///
-/// `range` uses the same revision syntax as `git rev-list` (for example `base..tip`, `^excl tip`).
-///
-/// # Errors
-///
-/// Returns [`HistoryError::Planning`] when `range` is empty, is not a `<base>..<tip>` range, or
-/// selects fewer than two commits; the revision, object or ref area
-/// error when a revision does not resolve or a read fails; and other [`HistoryError`] variants when markers
-/// refuse or planning fails.
-pub fn squash(
+/// See [`History::squash`](super::History::squash).
+pub(crate) fn squash(
     repo: &Repository,
     range: &[&str],
     opts: &SquashOptions,

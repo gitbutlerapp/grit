@@ -12,9 +12,7 @@ use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
 use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::history::{
-    plan_rewrite, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
-};
+use grit_lib::revwalk::history::{CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions};
 
 use s7::HistoryBenchFixtures;
 
@@ -126,18 +124,19 @@ fn bench_history_rewrite(c: &mut Criterion) {
                     parents: None,
                 },
             );
-            let plan = plan_rewrite(
-                &repo,
-                &edits,
-                &RewriteOptions {
-                    scope: RefScope::Branches,
-                    empty: EmptyPolicy::Drop,
-                    committer: "Bench <b@grit.test> 9 +0000".parse().expect("signature"),
-                    preserve_committer: false,
-                    sign: true,
-                },
-            )
-            .expect("plan");
+            let plan = repo
+                .history()
+                .plan_rewrite(
+                    &edits,
+                    &RewriteOptions {
+                        scope: RefScope::Branches,
+                        empty: EmptyPolicy::Drop,
+                        committer: "Bench <b@grit.test> 9 +0000".parse().expect("signature"),
+                        preserve_committer: false,
+                        sign: true,
+                    },
+                )
+                .expect("plan");
             black_box(plan.commits.len())
         });
     });

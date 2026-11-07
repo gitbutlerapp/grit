@@ -601,7 +601,7 @@ mod tests {
         ));
 
         let identity = "T <t@example.com> 0 +0000".parse().expect("signature");
-        crate::revwalk::history::abort_rebase(&repo, &identity).expect("abort");
+        repo.history().abort_rebase(&identity).expect("abort");
         assert!(ensure_refreshable(&repo).is_ok());
         assert_eq!(git(&co, &["rev-parse", "HEAD"]), given.to_hex());
     }

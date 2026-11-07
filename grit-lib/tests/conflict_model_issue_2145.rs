@@ -21,8 +21,8 @@ use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest,
-    RefScope, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
+    RewriteOptions, StartRebaseOptions,
 };
 use grit_test_support::git;
 
@@ -106,6 +106,7 @@ fn rebase_stop_and_status_report_the_same_conflict() {
             branch_tip: fx.feat,
         },
         rebase: RebaseOntoOptions {
+            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
@@ -124,10 +125,17 @@ fn rebase_stop_and_status_report_the_same_conflict() {
             record_operation: None,
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+        exec: None,
     };
-    let RebaseOutcome::Stopped(stop) =
-        start_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("rebase")
+    let RebaseOutcome::Stopped(stop) = repo
+        .history()
+        .start_rebase(
+            &opts,
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("rebase")
     else {
         panic!("expected the rebase to stop on f");
     };

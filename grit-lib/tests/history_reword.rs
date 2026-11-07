@@ -5,10 +5,11 @@
 use crate::support;
 
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId};
+use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, normalize_rewrite_message, reword, reword_with, ApplyOptions, EmptyPolicy,
-    HistoryError, RefScope, RewordOptions, RewriteOptions,
+    normalize_rewrite_message, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewordOptions,
+    RewriteOptions,
 };
 use grit_lib::state::resolve_head;
 
@@ -42,19 +43,20 @@ fn reword_changes_only_message_and_replays_descendants() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let plan = reword(
-        &grit,
-        oids["b"],
-        "second reworded\n".into(),
-        &RewriteOptions {
-            scope: RefScope::Branches,
-            empty: EmptyPolicy::Drop,
-            committer: committer(1).parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
-    )
-    .expect("reword");
+    let plan = grit
+        .history()
+        .reword(
+            oids["b"],
+            &RewordOptions::default().with_message("second reworded\n".into()),
+            &RewriteOptions {
+                scope: RefScope::Branches,
+                empty: EmptyPolicy::Drop,
+                committer: committer(1).parse().expect("signature"),
+                preserve_committer: false,
+                sign: true,
+            },
+        )
+        .expect("reword");
     let b_row = plan
         .commits
         .iter()
@@ -92,19 +94,20 @@ fn reword_rejects_unwritable_committer_before_writing_objects() {
         email: "r@grit.test".into(),
         time: time::OffsetDateTime::from_unix_timestamp(1).expect("time"),
     };
-    let err = reword(
-        &grit,
-        oids["b"],
-        "second reworded\n".into(),
-        &RewriteOptions {
-            scope: RefScope::Branches,
-            empty: EmptyPolicy::Drop,
-            committer: injected,
-            preserve_committer: false,
-            sign: true,
-        },
-    )
-    .expect_err("unwritable committer");
+    let err = grit
+        .history()
+        .reword(
+            oids["b"],
+            &RewordOptions::default().with_message("second reworded\n".into()),
+            &RewriteOptions {
+                scope: RefScope::Branches,
+                empty: EmptyPolicy::Drop,
+                committer: injected,
+                preserve_committer: false,
+                sign: true,
+            },
+        )
+        .expect_err("unwritable committer");
     assert!(
         matches!(
             &err,
@@ -150,29 +153,30 @@ fn reword_author_only_keeps_message_and_date() {
         .message;
 
     let grit = open_grit(wt);
-    let plan = reword_with(
-        &grit,
-        b,
-        &RewordOptions {
-            message: None,
-            author: Some("New Author <new@example.com>".into()),
-        },
-        &rewrite_opts(2),
-    )
-    .expect("reword author");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Rewriter <r@grit.test>"),
-            reflog_message: "history reword".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit
+        .history()
+        .reword(
+            b,
+            &RewordOptions {
+                message: None,
+                author: Some("New Author <new@example.com>".into()),
+            },
+            &rewrite_opts(2),
+        )
+        .expect("reword author");
+    grit.history()
+        .apply(
+            &plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Rewriter <r@grit.test>"),
+                reflog_message: "history reword".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     let new_b = plan
         .commits
         .iter()
@@ -199,29 +203,30 @@ fn reword_author_and_message() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let plan = reword_with(
-        &grit,
-        oids["b"],
-        &RewordOptions {
-            message: Some("both changed\n".into()),
-            author: Some("Both Author <both@example.com>".into()),
-        },
-        &rewrite_opts(3),
-    )
-    .expect("reword");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Rewriter <r@grit.test>"),
-            reflog_message: "history reword".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit
+        .history()
+        .reword(
+            oids["b"],
+            &RewordOptions {
+                message: Some("both changed\n".into()),
+                author: Some("Both Author <both@example.com>".into()),
+            },
+            &rewrite_opts(3),
+        )
+        .expect("reword");
+    grit.history()
+        .apply(
+            &plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Rewriter <r@grit.test>"),
+                reflog_message: "history reword".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     let new_b = plan.replacement(oids["b"]).expect("mapped");
     let fields: Vec<_> = git_log_author_fields(wt, &new_b.to_hex())
         .split('|')
@@ -240,16 +245,17 @@ fn reword_message_with_whitespace_only_author_succeeds() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let plan = reword_with(
-        &grit,
-        oids["b"],
-        &RewordOptions {
-            message: Some("message only despite empty author opt\n".into()),
-            author: Some("   ".into()),
-        },
-        &rewrite_opts(6),
-    )
-    .expect("reword message with ignored empty author");
+    let plan = grit
+        .history()
+        .reword(
+            oids["b"],
+            &RewordOptions {
+                message: Some("message only despite empty author opt\n".into()),
+                author: Some("   ".into()),
+            },
+            &rewrite_opts(6),
+        )
+        .expect("reword message with ignored empty author");
     let new_b = plan.replacement(oids["b"]).expect("mapped");
     let parsed = parse_commit(&grit.odb().read(&new_b).expect("read").data).expect("parse");
     assert_eq!(parsed.message, "message only despite empty author opt\n");
@@ -262,16 +268,17 @@ fn reword_requires_message_or_author() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let err = reword_with(
-        &grit,
-        oids["b"],
-        &RewordOptions {
-            message: None,
-            author: None,
-        },
-        &rewrite_opts(4),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .reword(
+            oids["b"],
+            &RewordOptions {
+                message: None,
+                author: None,
+            },
+            &rewrite_opts(4),
+        )
+        .unwrap_err();
     assert!(matches!(err, HistoryError::NothingToReword));
 }
 
@@ -281,16 +288,17 @@ fn reword_author_rejects_newline() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let err = reword_with(
-        &grit,
-        oids["b"],
-        &RewordOptions {
-            message: None,
-            author: Some("Bad\nInjected <x@y.example>".into()),
-        },
-        &rewrite_opts(5),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .reword(
+            oids["b"],
+            &RewordOptions {
+                message: None,
+                author: Some("Bad\nInjected <x@y.example>".into()),
+            },
+            &rewrite_opts(5),
+        )
+        .unwrap_err();
     assert!(matches!(err, HistoryError::InvalidAuthor(_)));
 }
 
@@ -302,19 +310,20 @@ fn reword_rejects_empty_message() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let err = reword(
-        &grit,
-        oids["b"],
-        "  \t\n".into(),
-        &RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: committer(1).parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .reword(
+            oids["b"],
+            &RewordOptions::default().with_message("  \t\n".into()),
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: committer(1).parse().expect("signature"),
+                preserve_committer: false,
+                sign: true,
+            },
+        )
+        .unwrap_err();
     assert!(matches!(err, HistoryError::EmptyMessage));
 }
 
@@ -351,19 +360,20 @@ fn reword_in_bare_repository() {
         .write(grit_lib::objects::ObjectKind::Commit, &commit_bytes)
         .expect("commit");
     grit_lib::refs::write_ref(grit.git_dir(), "refs/heads/main", &oid).expect("ref");
-    let plan = reword(
-        &grit,
-        oid,
-        "bare reword\n".into(),
-        &RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: committer(2).parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
-    )
-    .expect("reword bare");
+    let plan = grit
+        .history()
+        .reword(
+            oid,
+            &RewordOptions::default().with_message("bare reword\n".into()),
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: committer(2).parse().expect("signature"),
+                preserve_committer: false,
+                sign: true,
+            },
+        )
+        .expect("reword bare");
     let new = plan
         .commits
         .iter()
@@ -417,32 +427,33 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
     );
 
     let grit = open_grit(wt);
-    let plan = reword(
-        &grit,
-        root,
-        "rewritten root\n".into(),
-        &RewriteOptions {
-            scope: RefScope::Branches,
-            empty: EmptyPolicy::Drop,
-            committer: committer(10).parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
-    )
-    .expect("reword root");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Rewriter <rewriter@test>"),
-            reflog_message: "history reword".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit
+        .history()
+        .reword(
+            root,
+            &RewordOptions::default().with_message("rewritten root\n".into()),
+            &RewriteOptions {
+                scope: RefScope::Branches,
+                empty: EmptyPolicy::Drop,
+                committer: committer(10).parse().expect("signature"),
+                preserve_committer: false,
+                sign: true,
+            },
+        )
+        .expect("reword root");
+    grit.history()
+        .apply(
+            &plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Rewriter <rewriter@test>"),
+                reflog_message: "history reword".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
 
     let head = resolve_head(grit.git_dir()).expect("head");
     let head_oid = head.oid().copied().expect("head oid");
@@ -465,19 +476,19 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
 }
 
 fn apply_reword(grit: &Repository, plan: &grit_lib::revwalk::history::RewritePlan) {
-    apply_rewrite(
-        grit,
-        plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Rewriter <r@grit.test>"),
-            reflog_message: "history reword".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    grit.history()
+        .apply(
+            plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Rewriter <r@grit.test>"),
+                reflog_message: "history reword".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
 }
 
 #[test]
@@ -490,7 +501,14 @@ fn reword_head_leaves_backup_branch_at_old_tip() {
         &[("c", "refs/heads/main"), ("c", "refs/heads/backup")],
     );
     let grit = open_grit(wt);
-    let plan = reword(&grit, oids["c"], "c reworded\n".into(), &rewrite_opts(1)).expect("reword");
+    let plan = grit
+        .history()
+        .reword(
+            oids["c"],
+            &RewordOptions::default().with_message("c reworded\n".into()),
+            &rewrite_opts(1),
+        )
+        .expect("reword");
     let moved: Vec<&str> = plan.ref_updates.iter().map(|u| u.name.as_str()).collect();
     assert_eq!(moved, ["refs/heads/main"]);
     apply_reword(&grit, &plan);
@@ -513,7 +531,14 @@ fn reword_keeps_moving_stacked_branches_but_not_same_tip_backup() {
         ],
     );
     let grit = open_grit(wt);
-    let plan = reword(&grit, oids["b"], "b reworded\n".into(), &rewrite_opts(1)).expect("reword");
+    let plan = grit
+        .history()
+        .reword(
+            oids["b"],
+            &RewordOptions::default().with_message("b reworded\n".into()),
+            &rewrite_opts(1),
+        )
+        .expect("reword");
     let mut moved: Vec<&str> = plan.ref_updates.iter().map(|u| u.name.as_str()).collect();
     moved.sort_unstable();
     assert_eq!(moved, ["refs/heads/main", "refs/heads/stacked"]);
@@ -534,7 +559,14 @@ fn reword_on_detached_head_leaves_branch_at_head_commit() {
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     git(wt, &["switch", "-q", "--detach", &oids["c"].to_hex()]);
     let grit = open_grit(wt);
-    let plan = reword(&grit, oids["b"], "b reworded\n".into(), &rewrite_opts(1)).expect("reword");
+    let plan = grit
+        .history()
+        .reword(
+            oids["b"],
+            &RewordOptions::default().with_message("b reworded\n".into()),
+            &rewrite_opts(1),
+        )
+        .expect("reword");
     let moved: Vec<&str> = plan.ref_updates.iter().map(|u| u.name.as_str()).collect();
     assert_eq!(moved, ["HEAD"]);
     apply_reword(&grit, &plan);

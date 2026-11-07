@@ -19,8 +19,7 @@ use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_fixup_hunk_selection, apply_fixup_rewrite, fixup, staged_fixup_paths, ApplyOptions,
-    EmptyPolicy, FixupOptions, HistoryError, RefScope, RewriteOptions,
+    ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, RefScope, RewriteOptions,
 };
 
 use support::{
@@ -80,9 +79,16 @@ fn apply_opts() -> ApplyOptions {
 }
 
 fn plan_and_apply(grit: &Repository, wt: &std::path::Path, target: ObjectId, opts: &FixupOptions) {
-    let staged = staged_fixup_paths(grit).expect("staged paths");
-    let plan = fixup(grit, target, opts).expect("plan");
-    apply_fixup_rewrite(grit, &plan, &apply_opts(), &staged).expect("apply");
+    let staged = grit.history().staged_paths().expect("staged paths");
+    let plan = grit.history().fixup(target, opts).expect("plan");
+    grit.history()
+        .apply_fixup(
+            &plan,
+            &apply_opts(),
+            &staged,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply");
     git_fsck_strict(wt);
 }
 
@@ -128,12 +134,10 @@ fn fixup_preserves_message_and_author() {
     fs::write(wt.join("file.txt"), "content\nfix\n").expect("write");
     git(wt, &["add", "file.txt"]);
     let grit = open_grit(wt);
-    let plan = fixup(
-        &grit,
-        target,
-        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
-    )
-    .expect("plan");
+    let plan = grit
+        .history()
+        .fixup(target, &fixup_opts(RefScope::Head, EmptyPolicy::Drop))
+        .expect("plan");
     let new_oid = plan
         .commits
         .iter()
@@ -155,7 +159,7 @@ fn fixup_replaces_message_when_given() {
     let grit = open_grit(wt);
     let mut opts = fixup_opts(RefScope::Head, EmptyPolicy::Drop);
     opts.message = Some("replacement subject\n".into());
-    let plan = fixup(&grit, target, &opts).expect("plan");
+    let plan = grit.history().fixup(target, &opts).expect("plan");
     let new_oid = plan
         .commits
         .iter()
@@ -176,13 +180,11 @@ fn fixup_empty_policy_drop_keep_abort() {
     commit_file(wt, "third.t", "3\n", "third");
     git(wt, &["rm", "second.t"]);
     let grit = open_grit(wt);
-    let staged = staged_fixup_paths(&grit).expect("staged");
-    let plan = fixup(
-        &grit,
-        target,
-        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
-    )
-    .expect("drop plan");
+    let staged = grit.history().staged_paths().expect("staged");
+    let plan = grit
+        .history()
+        .fixup(target, &fixup_opts(RefScope::Head, EmptyPolicy::Drop))
+        .expect("drop plan");
     let row = plan
         .commits
         .iter()
@@ -192,7 +194,14 @@ fn fixup_empty_policy_drop_keep_abort() {
         row.new.is_none(),
         "drop should omit the empty target commit"
     );
-    apply_fixup_rewrite(&grit, &plan, &apply_opts(), &staged).expect("drop apply");
+    grit.history()
+        .apply_fixup(
+            &plan,
+            &apply_opts(),
+            &staged,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("drop apply");
     let log = git(wt, &["log", "--format=%s"]);
     assert!(!log.contains("second"));
     assert!(log.contains("third"));
@@ -205,12 +214,10 @@ fn fixup_empty_policy_drop_keep_abort() {
     commit_file(wt2, "third.t", "3\n", "third");
     git(wt2, &["rm", "second.t"]);
     let grit2 = open_grit(wt2);
-    let err = fixup(
-        &grit2,
-        target2,
-        &fixup_opts(RefScope::Head, EmptyPolicy::Abort),
-    )
-    .unwrap_err();
+    let err = grit2
+        .history()
+        .fixup(target2, &fixup_opts(RefScope::Head, EmptyPolicy::Abort))
+        .unwrap_err();
     assert!(matches!(err, HistoryError::FixupMakesTargetEmpty { .. }));
 
     let repo3 = HistoryRepo::init();
@@ -221,13 +228,11 @@ fn fixup_empty_policy_drop_keep_abort() {
     commit_file(wt3, "third.t", "3\n", "third");
     git(wt3, &["rm", "second.t"]);
     let grit3 = open_grit(wt3);
-    let staged3 = staged_fixup_paths(&grit3).expect("staged");
-    let plan3 = fixup(
-        &grit3,
-        target3,
-        &fixup_opts(RefScope::Head, EmptyPolicy::Keep),
-    )
-    .expect("keep plan");
+    let staged3 = grit3.history().staged_paths().expect("staged");
+    let plan3 = grit3
+        .history()
+        .fixup(target3, &fixup_opts(RefScope::Head, EmptyPolicy::Keep))
+        .expect("keep plan");
     let row = plan3
         .commits
         .iter()
@@ -237,7 +242,15 @@ fn fixup_empty_policy_drop_keep_abort() {
         row.new.is_some(),
         "keep should retain an empty target commit"
     );
-    apply_fixup_rewrite(&grit3, &plan3, &apply_opts(), &staged3).expect("keep apply");
+    grit3
+        .history()
+        .apply_fixup(
+            &plan3,
+            &apply_opts(),
+            &staged3,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("keep apply");
 }
 
 #[test]
@@ -255,12 +268,10 @@ fn fixup_conflict_changes_nothing() {
     let before = git_rev_parse(wt, "HEAD").expect("before");
     let grit = open_grit(wt);
     let target = git_rev_parse(wt, "HEAD~1").expect("target");
-    let err = fixup(
-        &grit,
-        target,
-        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .fixup(target, &fixup_opts(RefScope::Head, EmptyPolicy::Drop))
+        .unwrap_err();
     assert!(matches!(err, HistoryError::Conflict { .. }));
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(before));
 }
@@ -462,12 +473,13 @@ fn fixup_nothing_staged_errors() {
     let wt = repo.worktree();
     commit_file(wt, "only.t", "x\n", "only");
     let grit = open_grit(wt);
-    let err = fixup(
-        &grit,
-        git_rev_parse(wt, "HEAD").expect("head"),
-        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .fixup(
+            git_rev_parse(wt, "HEAD").expect("head"),
+            &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
+        )
+        .unwrap_err();
     assert!(matches!(err, HistoryError::NothingStaged));
 }
 
@@ -479,12 +491,13 @@ fn fixup_rejects_bare_repository() {
         &["init", "--bare", "-b", "main", tmp.path().to_str().unwrap()],
     );
     let grit = Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("bare");
-    let err = fixup(
-        &grit,
-        ObjectId::null(grit.odb().hash_algo()),
-        &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .fixup(
+            ObjectId::null(grit.odb().hash_algo()),
+            &fixup_opts(RefScope::Head, EmptyPolicy::Drop),
+        )
+        .unwrap_err();
     assert!(matches!(err, HistoryError::BareRepository));
 }
 
@@ -626,8 +639,15 @@ fn plan_and_apply_hunks(
     opts: &FixupOptions,
 ) {
     let selection = opts.selection.clone().expect("selection");
-    let plan = fixup(grit, target, opts).expect("plan");
-    apply_fixup_hunk_selection(grit, &plan, &apply_opts(), &selection, &opts.pathspecs)
+    let plan = grit.history().fixup(target, opts).expect("plan");
+    grit.history()
+        .apply_fixup_hunks(
+            &plan,
+            &apply_opts(),
+            &selection,
+            &opts.pathspecs,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("apply");
     git_fsck_strict(wt);
 }
@@ -1055,12 +1075,13 @@ fn fixup_hunks_stale_id_no_rewrite() {
         ids: vec![HunkId::from_str("000000000001").expect("id")],
         ranges: Vec::new(),
     };
-    let err = fixup(
-        &grit,
-        target,
-        &fixup_opts_with_selection(RefScope::Head, EmptyPolicy::Drop, selection),
-    )
-    .expect_err("stale");
+    let err = grit
+        .history()
+        .fixup(
+            target,
+            &fixup_opts_with_selection(RefScope::Head, EmptyPolicy::Drop, selection),
+        )
+        .expect_err("stale");
     assert!(matches!(
         err,
         HistoryError::HunkSelect(HunkSelectError::StaleId { .. })

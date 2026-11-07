@@ -15,8 +15,8 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope}
 use grit_lib::porcelain::merge::integrate_branch;
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::revwalk::history::{
-    start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope,
-    RewriteOptions, StartRebaseOptions,
+    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 use grit_lib::stash::{StashMode, StashPushOptions};
 
@@ -222,6 +222,7 @@ fn cancelled_merge_and_rebase_keep_branches_where_git_left_them() {
             branch_tip: topic,
         },
         rebase: RebaseOntoOptions {
+            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
@@ -240,19 +241,29 @@ fn cancelled_merge_and_rebase_keep_branches_where_git_left_them() {
             record_operation: None,
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+        exec: None,
     };
     let repo = open_grit_repo(root);
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
     let cancel = sink.flag.clone();
-    let err = start_rebase(&repo, &start, &mut sink, &cancel).expect_err("cancelled");
+    let err = repo
+        .history()
+        .start_rebase(&start, repo.command_runner().as_ref(), &mut sink, &cancel)
+        .expect_err("cancelled");
     assert!(err.is_cancelled(), "got {err:?}");
     assert_eq!(oid(root, "topic"), topic);
     assert_eq!(status(root), "", "rollback leaves a clean work tree");
     assert!(!root.join(".git/rebase-merge").exists());
     assert_git_fsck_strict(root);
 
-    start_rebase(&repo, &start, &mut NullProgress, &CancelToken::never()).expect("rebase");
+    repo.history()
+        .start_rebase(
+            &start,
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("rebase");
     assert_eq!(rev(root, "topic~1"), side.to_hex());
     assert_eq!(status(root), "");
     assert_git_fsck_strict(root);

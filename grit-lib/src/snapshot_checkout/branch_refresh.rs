@@ -675,7 +675,7 @@ mod tests {
         ));
         assert_eq!(stopped.tip, stopped.previous.expect("previous"));
         let identity = "T <t@example.com> 0 +0000".parse().expect("signature");
-        crate::revwalk::history::abort_rebase(&repo, &identity).expect("abort");
+        repo.history().abort_rebase(&identity).expect("abort");
         assert_eq!(git(&co, &["rev-parse", "feature"]), stopped.tip.to_hex());
         assert_eq!(git(&co, &["log", "-1", "--format=%s", "feature"]), "Mine");
     }

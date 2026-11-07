@@ -74,8 +74,10 @@ pub enum RewriteApplyRecovery {
 }
 
 /// Whether `.git/grit/rewrite-apply/` records an incomplete rewrite apply.
+///
+/// See [`History::apply_journal_active`](crate::history::History::apply_journal_active).
 #[must_use]
-pub fn rewrite_apply_journal_active(git_dir: &Path) -> bool {
+pub(crate) fn rewrite_apply_journal_active(git_dir: &Path) -> bool {
     journal_dir(git_dir).join(META).is_file()
 }
 
@@ -140,15 +142,8 @@ pub(crate) fn clear_rewrite_apply_journal(repo: &Repository) -> crate::error::Re
 
 /// Abort an incomplete rewrite apply by rolling refs back and restoring snapshots.
 ///
-/// Runs under `index.lock`, like [`recover_interrupted_rewrite_apply`].
-///
-/// # Errors
-///
-/// Returns [`HistoryError::RewriteApplyIncomplete`] when no journal is pending,
-/// [`Error::LockHeld`](crate::error::Error::LockHeld) when
-/// another process holds `index.lock`, [`HistoryError::UndoRecordRead`] when the journal is
-/// invalid, and apply failures when rollback cannot complete.
-pub fn abort_interrupted_rewrite_apply(
+/// See [`History::abort_interrupted_apply`](crate::history::History::abort_interrupted_apply).
+pub(crate) fn abort_interrupted_rewrite_apply(
     repo: &Repository,
 ) -> crate::error::Result<RewriteApplyRecovery> {
     if !rewrite_apply_journal_active(repo.git_dir()) {
@@ -161,11 +156,8 @@ pub fn abort_interrupted_rewrite_apply(
 
 /// Try to finish or roll back a pending journal, then fail when it remains.
 ///
-/// # Errors
-///
-/// Returns [`HistoryError::RewriteApplyIncomplete`] when recovery could not clear the journal,
-/// and the errors of [`recover_interrupted_rewrite_apply`].
-pub fn ensure_rewrite_apply_ready(repo: &Repository) -> crate::error::Result<()> {
+/// See [`History::ensure_apply_ready`](crate::history::History::ensure_apply_ready).
+pub(crate) fn ensure_rewrite_apply_ready(repo: &Repository) -> crate::error::Result<()> {
     if !rewrite_apply_journal_active(repo.git_dir()) {
         return Ok(());
     }
@@ -178,30 +170,8 @@ pub fn ensure_rewrite_apply_ready(repo: &Repository) -> crate::error::Result<()>
 
 /// Finish or roll back an interrupted rewrite apply recorded in the journal.
 ///
-/// Recovery holds `index.lock` throughout. A lock left by a process that is no longer running
-/// (per its `core.lockfilePid` sidecar) is removed first; any other existing lock means the
-/// apply may still be in flight, so nothing is touched.
-///
-/// When every planned ref already points at its new OID and the journal comes from
-/// [`super::apply_rewrite`], the captured pre-apply index and worktree paths are restored and the
-/// checkout is run again, so a half-written checkout is not mistaken for local edits. If that
-/// checkout still fails, refs are rolled back instead. When every ref still matches the pre-apply
-/// OID, the journal is cleared. Otherwise refs are rolled back and the snapshots restored.
-///
-/// A journal directory without its `meta` file is left over from a kill while the snapshots were
-/// being written, before any ref moved; it is removed once `index.lock` can be taken.
-///
-/// # Returns
-///
-/// `None` when no journal was pending (or it recorded no ref movement), otherwise what recovery
-/// did.
-///
-/// # Errors
-///
-/// Returns [`Error::LockHeld`](crate::error::Error::LockHeld)
-/// when another process holds `index.lock`, [`HistoryError::UndoRecordRead`] when the journal is
-/// present but invalid, and apply failures when rollback cannot complete.
-pub fn recover_interrupted_rewrite_apply(
+/// See [`History::recover_interrupted_apply`](crate::history::History::recover_interrupted_apply).
+pub(crate) fn recover_interrupted_rewrite_apply(
     repo: &Repository,
 ) -> crate::error::Result<Option<RewriteApplyRecovery>> {
     if !rewrite_apply_journal_active(repo.git_dir()) {

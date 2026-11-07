@@ -13,11 +13,12 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, reword, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
+    ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
 };
 use grit_test_support::git;
 
@@ -111,7 +112,7 @@ fn signed_tip_via_grit(root: &Path, gpgsign: bool) -> ObjectId {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("stage");
     let ident = "T <t@example.com> 1700000001 +0000".to_owned();
@@ -128,7 +129,7 @@ fn signed_tip_via_grit(root: &Path, gpgsign: bool) -> ObjectId {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("create_commit")
     .oid
@@ -173,26 +174,28 @@ fn history_rewrite_resigns_when_gpgsign() {
     git(root, &["update-ref", "refs/heads/main", &signed.to_hex()]);
 
     let grit = open_grit(root);
-    let plan = reword(
-        &grit,
-        signed,
-        "reworded signed subject\n".into(),
-        &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", true),
-    )
-    .expect("reword plan");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Rewriter <r@grit.test>"),
-            reflog_message: "history reword".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit
+        .history()
+        .reword(
+            signed,
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("reworded signed subject\n".into()),
+            &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", true),
+        )
+        .expect("reword plan");
+    grit.history()
+        .apply(
+            &plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Rewriter <r@grit.test>"),
+                reflog_message: "history reword".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
 
     assert_eq!(git_out(root, &["log", "-1", "--format=%G?"]), "G");
     let cat = git_out(root, &["cat-file", "-p", "HEAD"]);
@@ -241,13 +244,15 @@ fn history_rewrite_unsigned_when_gpgsign_off() {
     let signed = signed_tip_via_grit(root, true);
     git(root, &["config", "commit.gpgsign", "false"]);
     let grit = open_grit(root);
-    let plan = reword(
-        &grit,
-        signed,
-        "unsigned rewrite\n".into(),
-        &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", true),
-    )
-    .expect("reword");
+    let plan = grit
+        .history()
+        .reword(
+            signed,
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("unsigned rewrite\n".into()),
+            &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", true),
+        )
+        .expect("reword");
     let new_oid = plan.replacement(signed).expect("replacement");
     let raw = grit.odb().read(&new_oid).expect("read").data;
     let parsed = parse_commit(&raw).expect("parse");
@@ -280,13 +285,14 @@ fn history_dry_run_does_not_invoke_signer() {
     let oids = build_commit_dag(wt, &[], &[("a", "refs/heads/main")]);
     let runner = RecordingRunner::always_success();
     let grit = open_grit_with_runner(wt, runner.clone());
-    reword(
-        &grit,
-        oids["a"],
-        "dry-run reword\n".into(),
-        &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", false),
-    )
-    .expect("dry-run plan");
+    grit.history()
+        .reword(
+            oids["a"],
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("dry-run reword\n".into()),
+            &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", false),
+        )
+        .expect("dry-run plan");
     assert!(
         runner.specs().is_empty(),
         "signing must not spawn external commands during dry-run planning"
@@ -325,13 +331,15 @@ fn signing_failure_aborts_rewrite_without_ref_moves() {
     let tip_before = resolve_ref(&git_dir, "refs/heads/main").expect("resolve tip");
 
     let grit = open_grit(root);
-    let err = reword(
-        &grit,
-        tip_before,
-        "should fail signing\n".into(),
-        &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", true),
-    )
-    .expect_err("signing should fail");
+    let err = grit
+        .history()
+        .reword(
+            tip_before,
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("should fail signing\n".into()),
+            &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", true),
+        )
+        .expect_err("signing should fail");
     assert!(
         matches!(err, HistoryError::Signing { .. }),
         "expected Signing error, got {err:?}"

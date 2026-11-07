@@ -5,12 +5,12 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::notes::read_notes_tree;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, drop as history_drop, reword, squash, start_rebase, ApplyOptions, EmptyPolicy,
-    RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions, SquashMessage,
-    SquashOptions, StartRebaseOptions,
+    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
+    RewriteOptions, SquashMessage, SquashOptions, StartRebaseOptions,
 };
 use grit_test_support::git;
 
@@ -117,22 +117,24 @@ fn rebase_feat_onto_main(root: &std::path::Path, repo: &Repository, feat_tip: Ob
         .trim()
         .parse()
         .expect("main");
-    let outcome = start_rebase(
-        repo,
-        &StartRebaseOptions {
-            request: RebaseRequest {
-                upstream: main,
-                onto: None,
-                branch_tip: feat_tip,
+    let outcome = repo
+        .history()
+        .start_rebase(
+            &StartRebaseOptions {
+                request: RebaseRequest {
+                    upstream: main,
+                    onto: None,
+                    branch_tip: feat_tip,
+                },
+                rebase: RebaseOntoOptions::new(rewrite_options()),
+                apply: apply_options(),
+                exec: None,
             },
-            rebase: RebaseOntoOptions::new(rewrite_options()),
-            apply: apply_options(),
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("start rebase");
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("start rebase");
     let RebaseOutcome::Done { .. } = outcome else {
         panic!("expected clean rebase, got {outcome:?}");
     };
@@ -168,21 +170,23 @@ fn rebase_copies_note_to_rewritten_commit() {
 fn reword_copies_note_to_rewritten_commit() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (repo, feat1_old, _) = setup_feat_rebase_repo(dir.path());
-    let plan = reword(
-        &repo,
-        feat1_old,
-        "feat 1 reworded".into(),
-        &rewrite_options(),
-    )
-    .expect("reword plan");
-    apply_rewrite(
-        &repo,
-        &plan,
-        &apply_options(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply reword");
+    let plan = repo
+        .history()
+        .reword(
+            feat1_old,
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("feat 1 reworded".into()),
+            &rewrite_options(),
+        )
+        .expect("reword plan");
+    repo.history()
+        .apply(
+            &plan,
+            &apply_options(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply reword");
     let feat1_new = plan.replacement(feat1_old).expect("replacement");
     assert_eq!(
         note_on_object(dir.path(), &feat1_new).as_deref(),
@@ -199,23 +203,24 @@ fn squash_concatenates_notes_on_survivor() {
         dir.path(),
         &["notes", "add", "-m", "second note", &feat_tip.to_hex()],
     );
-    let plan = squash(
-        &repo,
-        &["main..HEAD"],
-        &SquashOptions {
-            message: SquashMessage::Combine,
-            rewrite: rewrite_options(),
-        },
-    )
-    .expect("squash plan");
-    apply_rewrite(
-        &repo,
-        &plan,
-        &apply_options(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply squash");
+    let plan = repo
+        .history()
+        .squash(
+            &["main..HEAD"],
+            &SquashOptions {
+                message: SquashMessage::Combine,
+                rewrite: rewrite_options(),
+            },
+        )
+        .expect("squash plan");
+    repo.history()
+        .apply(
+            &plan,
+            &apply_options(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply squash");
     let survivor = plan.replacement(feat1_old).expect("survivor");
     let body = note_on_object(dir.path(), &survivor).expect("note on survivor");
     assert!(body.contains("review: approved"));
@@ -227,15 +232,18 @@ fn squash_concatenates_notes_on_survivor() {
 fn history_drop_leaves_note_on_dropped_commit() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (repo, feat1_old, _) = setup_feat_rebase_repo(dir.path());
-    let plan = history_drop(&repo, feat1_old, &rewrite_options()).expect("drop plan");
-    apply_rewrite(
-        &repo,
-        &plan,
-        &apply_options(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply drop");
+    let plan = repo
+        .history()
+        .drop_commit(feat1_old, &rewrite_options())
+        .expect("drop plan");
+    repo.history()
+        .apply(
+            &plan,
+            &apply_options(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply drop");
     assert_eq!(
         note_on_object(dir.path(), &feat1_old).as_deref(),
         Some("review: approved")
@@ -331,13 +339,8 @@ fn amend_copies_note_when_post_rewrite_runs() {
         req.post_rewrite = PostOperationHooks::Run;
         req
     };
-    let outcome = create_commit(
-        &repo,
-        &request,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("amend");
+    let outcome =
+        create_commit(&repo, &request, &mut NullProgress, &CancelToken::never()).expect("amend");
     assert!(outcome.hooks_run.contains(&HookName::PostRewrite));
     assert_eq!(
         note_on_object(dir.path(), &outcome.oid).as_deref(),

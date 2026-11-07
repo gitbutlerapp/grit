@@ -12,8 +12,7 @@ use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    absorb, apply_absorb_rewrite, apply_fixup_rewrite, fixup, staged_fixup_paths, AbsorbOptions,
-    ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, RefScope, RewriteOptions,
+    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, RefScope, RewriteOptions,
     UnassignedReason,
 };
 
@@ -64,18 +63,23 @@ fn absorb_assigns_hunks_to_last_touching_commit() {
     fs::write(wt.join("file.txt"), "line1\nchanged\nfix\n").expect("write");
     git(wt, &["add", "file.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(base),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert_eq!(plan.assignments.len(), 1);
     assert_eq!(plan.assignments[0].commit, middle);
     assert!(plan.unassigned.is_empty());
-    apply_absorb_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    grit.history()
+        .apply_absorb(
+            &plan,
+            &apply_opts(),
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply");
     let parent = git_rev_parse(wt, "HEAD~1").expect("parent");
     let fixed = parse_commit(&grit.odb().read(&parent).expect("read").data).expect("parse");
     let blob = grit.odb().read(&fixed.tree).expect("tree");
@@ -106,21 +110,26 @@ fn absorb_multiple_targets_single_replay() {
     fs::write(wt.join("b.txt"), "b\nfix-b\n").expect("write");
     git(wt, &["add", "a.txt", "b.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(base),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert_eq!(plan.assignments.len(), 2);
     let targets: std::collections::HashSet<_> = plan.assignments.iter().map(|a| a.commit).collect();
     assert_eq!(targets.len(), 2);
     assert!(targets.contains(&c1));
     assert!(targets.contains(&c2));
     assert!(plan.plan.commits.len() >= 2);
-    apply_absorb_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    grit.history()
+        .apply_absorb(
+            &plan,
+            &apply_opts(),
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply");
     git_fsck_strict(wt);
 }
 
@@ -139,14 +148,13 @@ fn absorb_leaves_ambiguous_hunk_staged() {
     fs::write(wt.join("file.txt"), "A*\nB*\n").expect("write");
     git(wt, &["add", "file.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(c1),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert!(plan.assignments.is_empty());
     assert_eq!(plan.unassigned.len(), 1);
     let st = status(
@@ -167,14 +175,13 @@ fn absorb_ignores_new_files() {
     fs::write(wt.join("new.txt"), "n\n").expect("write");
     git(wt, &["add", "new.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: None,
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert!(plan.assignments.is_empty());
     assert_eq!(plan.unassigned.len(), 1);
     assert_eq!(
@@ -194,14 +201,13 @@ fn absorb_respects_base() {
     fs::write(wt.join("file.txt"), "mid\nfix\n").expect("write");
     git(wt, &["add", "file.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(mid),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert!(plan.assignments.is_empty());
     assert!(!plan.unassigned.is_empty());
 }
@@ -218,14 +224,13 @@ fn absorb_dry_run_leaves_index_file_unchanged() {
     let index_path = wt.join(".git/index");
     let before_index = fs::read(&index_path).expect("read index");
     let grit = open_grit(wt);
-    let _plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let _plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(target),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     let after_index = fs::read(&index_path).expect("read index");
     assert_eq!(
         before_index, after_index,
@@ -247,11 +252,17 @@ fn absorb_dry_run_assignment_matches_apply() {
         base: Some(base),
         rewrite: rewrite_opts(),
     };
-    let plan = absorb(&grit, &opts).expect("plan");
+    let plan = grit.history().absorb(&opts).expect("plan");
     let dry_assignments = plan.assignments.clone();
     assert_eq!(dry_assignments.len(), 1);
     assert_eq!(dry_assignments[0].subject, "second");
-    apply_absorb_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    grit.history()
+        .apply_absorb(
+            &plan,
+            &apply_opts(),
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply");
     let new_target = plan
         .plan
         .commits
@@ -284,14 +295,13 @@ fn absorb_dry_run_changes_nothing() {
     git(wt, &["add", "file.txt"]);
     let before = git_rev_parse(wt, "HEAD").expect("before");
     let grit = open_grit(wt);
-    let _plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let _plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(target),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(before));
 }
 
@@ -317,21 +327,38 @@ fn absorb_result_equals_manual_fixups() {
     fs::write(wt.join("a.txt"), "a\nfix-a\n").expect("write");
     git(wt, &["add", "a.txt"]);
     let grit = open_grit(wt);
-    let staged = staged_fixup_paths(&grit).expect("staged");
-    let plan1 = fixup(&grit, c1, &fixup_opts()).expect("fixup1");
-    apply_fixup_rewrite(&grit, &plan1, &apply_opts(), &staged).expect("apply1");
+    let staged = grit.history().staged_paths().expect("staged");
+    let plan1 = grit.history().fixup(c1, &fixup_opts()).expect("fixup1");
+    grit.history()
+        .apply_fixup(
+            &plan1,
+            &apply_opts(),
+            &staged,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply1");
     fs::write(wt.join("b.txt"), "b\nfix-b\n").expect("write");
     git(wt, &["add", "b.txt"]);
     let grit = open_grit(wt);
-    let staged2 = staged_fixup_paths(&grit).expect("staged2");
+    let staged2 = grit.history().staged_paths().expect("staged2");
     let c2_target = plan1
         .commits
         .iter()
         .find(|row| row.old == c2)
         .and_then(|row| row.new)
         .unwrap_or(c2);
-    let plan2 = fixup(&grit, c2_target, &fixup_opts()).expect("fixup2");
-    apply_fixup_rewrite(&grit, &plan2, &apply_opts(), &staged2).expect("apply2");
+    let plan2 = grit
+        .history()
+        .fixup(c2_target, &fixup_opts())
+        .expect("fixup2");
+    grit.history()
+        .apply_fixup(
+            &plan2,
+            &apply_opts(),
+            &staged2,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply2");
     git_fsck_strict(wt);
     let manual_tip = git_rev_parse(wt, "HEAD").expect("manual tip");
     let manual_c1_new = plan1
@@ -354,8 +381,14 @@ fn absorb_result_equals_manual_fixups() {
         base: Some(base),
         rewrite: rewrite_opts(),
     };
-    let absorb_plan = absorb(&grit, &absorb_opts).expect("plan");
-    apply_absorb_rewrite(&grit, &absorb_plan, &apply_opts()).expect("apply");
+    let absorb_plan = grit.history().absorb(&absorb_opts).expect("plan");
+    grit.history()
+        .apply_absorb(
+            &absorb_plan,
+            &apply_opts(),
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply");
     git_fsck_strict(wt);
     let absorb_tip = git_rev_parse(wt, "HEAD").expect("absorb tip");
     let c1_new = absorb_plan
@@ -407,18 +440,23 @@ fn absorb_leaves_unassigned_hunks_on_same_path_staged() {
     fs::write(wt.join("file.txt"), &staged).expect("write");
     git(wt, &["add", "file.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(base),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert_eq!(plan.assignments.len(), 1);
     assert_eq!(plan.assignments[0].commit, target);
     assert_eq!(plan.unassigned.len(), 2);
-    apply_absorb_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    grit.history()
+        .apply_absorb(
+            &plan,
+            &apply_opts(),
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply");
     git_fsck_strict(wt);
 
     let head_file = fs::read_to_string(wt.join("file.txt")).expect("worktree");
@@ -465,18 +503,23 @@ fn absorb_coordinate_safe_insertion_with_unassigned_line8() {
     fs::write(wt.join("file.txt"), &staged).expect("write");
     git(wt, &["add", "file.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(base),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert_eq!(plan.assignments.len(), 1, "{plan:?}");
     assert_eq!(plan.unassigned.len(), 1);
     assert_eq!(plan.unassigned[0].reason, UnassignedReason::NoCandidate);
-    apply_absorb_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    grit.history()
+        .apply_absorb(
+            &plan,
+            &apply_opts(),
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply");
     git_fsck_strict(wt);
 
     let head_file = fs::read_to_string(wt.join("file.txt")).expect("worktree");
@@ -509,14 +552,13 @@ fn absorb_empty_stack_leaves_hunks_unassigned() {
     fs::write(wt.join("solo.txt"), "only\nstaged\n").expect("write");
     git(wt, &["add", "solo.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(tip),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert!(plan.assignments.is_empty());
     assert_eq!(plan.unassigned.len(), 1);
     assert!(plan.plan.commits.is_empty());
@@ -528,14 +570,13 @@ fn absorb_nothing_staged_errors() {
     let wt = repo.worktree();
     commit_file(wt, "only.t", "x\n", "only");
     let grit = open_grit(wt);
-    let err = absorb(
-        &grit,
-        &AbsorbOptions {
+    let err = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: None,
             rewrite: rewrite_opts(),
-        },
-    )
-    .unwrap_err();
+        })
+        .unwrap_err();
     assert!(matches!(err, HistoryError::NothingStaged));
 }
 
@@ -575,14 +616,13 @@ fn absorb_assigns_with_second_branch_name_at_head() {
     git(wt, &["branch", "backup"]);
     let backup_tip = git_rev_parse(wt, "HEAD").expect("tip");
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: None,
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert_eq!(plan.assignments.len(), 1, "{plan:?}");
     assert_eq!(plan.assignments[0].commit, target);
     assert!(plan.unassigned.is_empty());
@@ -594,7 +634,13 @@ fn absorb_assigns_with_second_branch_name_at_head() {
         "{:?}",
         plan.excluded_refs
     );
-    apply_absorb_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    grit.history()
+        .apply_absorb(
+            &plan,
+            &apply_opts(),
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("apply");
     git_fsck_strict(wt);
     assert_eq!(
         git_rev_parse(wt, "refs/heads/backup").expect("backup"),
@@ -609,14 +655,13 @@ fn absorb_hidden_by_ref_when_review_branch_covers_introducing_commit() {
     let target = init_issue_2256_fixture(wt);
     git(wt, &["branch", "review", "HEAD~2"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: None,
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert!(plan.assignments.is_empty(), "{plan:?}");
     assert_eq!(plan.unassigned.len(), 1);
     assert_eq!(plan.unassigned[0].reason, UnassignedReason::HiddenByRef);
@@ -657,26 +702,24 @@ fn absorb_stack_cap_is_not_hidden_by_ref_when_main_at_base() {
     fs::write(wt.join("tracked.txt"), text).expect("write");
     git(wt, &["add", "tracked.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: None,
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert_eq!(plan.unassigned.len(), 1);
     assert_eq!(plan.unassigned[0].reason, UnassignedReason::NoCandidate);
     assert!(plan.unassigned[0].detail.is_none());
     git(wt, &["branch", "-D", "main"]);
-    let plan_without_main = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan_without_main = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: None,
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert_eq!(
         plan_without_main.unassigned[0].reason,
         UnassignedReason::NoCandidate
@@ -716,14 +759,13 @@ fn absorb_diverged_branch_at_main_does_not_block_feature_stack() {
     .expect("write");
     git(wt, &["add", "f1.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: None,
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("plan");
+        })
+        .expect("plan");
     assert_eq!(plan.assignments.len(), 1, "{plan:?}");
     assert_eq!(plan.assignments[0].commit, target);
     assert!(

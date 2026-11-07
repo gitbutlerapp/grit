@@ -9,18 +9,8 @@ use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
 
 /// Plan removal of `commit` from history and replay of its descendants onto the mapped parent.
 ///
-/// Writes replacement commit objects into the ODB; refs are updated only when the caller applies
-/// the returned [`RewritePlan`].
-///
-/// # Errors
-///
-/// Returns [`HistoryError::RootCommit`] when `commit` has no parents, or
-/// [`HistoryError::MergeCommitInReplay`] when `commit` is a merge, and an object error
-/// when `commit` cannot be read as a commit (for example
-/// [`ObjectError::UnexpectedKind`](crate::error::ObjectError::UnexpectedKind)).
-/// Other failures
-/// come from [`plan_rewrite`].
-pub fn drop(
+/// See [`History::drop_commit`](super::History::drop_commit).
+pub(crate) fn drop(
     repo: &Repository,
     commit: ObjectId,
     opts: &RewriteOptions,

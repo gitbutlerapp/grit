@@ -339,34 +339,8 @@ struct ExecCursor {
 /// `HEAD`, the index, and the worktree on clean completion. Branch refs are not modified;
 /// apply the updated `plan` afterwards.
 ///
-/// A command may rewrite the commit it runs at, the way `git rebase --exec` allows: after
-/// it exits zero, a detached `HEAD` that amends the replay commit (same first parent) or
-/// adds commits on top of it is adopted. `plan` is updated so the amended commit replaces
-/// the planned one, later commits are replayed onto the new `HEAD` with `rewrite`, and ref
-/// updates and [`RewritePlan::head`] point at the result. Later commands see the
-/// rewritten trees. On error, `plan` may be partially updated and should be discarded.
-///
-/// # Errors
-///
-/// - [`HistoryError::BareRepository`] in a bare repository.
-/// - [`HistoryError::UncommittedChanges`] when the worktree or index is dirty.
-/// - [`HistoryError::LocalChangesWouldBeOverwritten`] when a checkout would clobber local paths.
-/// - [`HistoryError::ExecFailed`] when a command exits non-zero (state is rolled back).
-/// - [`HistoryError::ExecHeadMoved`] when a command leaves `HEAD` anywhere else (state is
-///   rolled back).
-/// - [`HistoryError::ExecDirty`] when a successful command leaves the index or worktree
-///   different from the resulting `HEAD`. The edits remain at the detached `HEAD`, branch
-///   refs stay unchanged, and exec recovery state is saved in `rebase-merge/grit-exec`.
-///   Save or remove the edits before [`super::continue_rebase`] or [`super::skip_rebase`];
-///   [`super::abort_rebase`] explicitly discards them and restores the original state.
-/// - [`HistoryError::ExecConflict`] when replaying a later commit onto a rewritten one
-///   conflicts. The conflict is checked out and exec recovery state is saved; resolve and
-///   [`super::continue_rebase`], or [`super::skip_rebase`] / [`super::abort_rebase`].
-/// - [`HistoryError::Conflict`] when such a replay of a merge commit conflicts, and
-///   [`HistoryError::BecameEmpty`] when a replay becomes empty under
-///   [`super::EmptyPolicy::Abort`] (state is rolled back).
-/// - I/O, checkout, or subprocess failures.
-pub fn verify_rebase_with_exec(
+/// See [`History::verify_rebase`](super::History::verify_rebase).
+pub(crate) fn verify_rebase_with_exec(
     repo: &Repository,
     plan: &mut RewritePlan,
     spec: &ExecSpec,
@@ -1549,9 +1523,8 @@ mod tests {
         system_command_runner, CommandRunner, CommandSpec, RecordedResponse, RecordingRunner,
         RunningCommand,
     };
-    use crate::history::{
-        plan_rewrite, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
-    };
+    use crate::history::plan::plan_rewrite;
+    use crate::history::{CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions};
     use crate::index::write_tree::write_tree_from_index;
     use crate::objects::parse_commit;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};

@@ -5,10 +5,9 @@
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::history::{
-    apply_rewrite, reword, ApplyOptions, EmptyPolicy, RefScope, RewriteOptions,
-};
+use grit_lib::revwalk::history::{ApplyOptions, EmptyPolicy, RefScope, RewriteOptions};
 use grit_lib::revwalk::{Peel, ResolveOptions};
 
 use std::path::{Path, PathBuf};
@@ -39,10 +38,9 @@ fn main() -> Result<()> {
         .revwalk()
         .resolve(&spec, &ResolveOptions::default().with_peel(Peel::Commit))?;
 
-    let plan = reword(
-        &repo,
+    let plan = repo.history().reword(
         commit,
-        message,
+        &grit_lib::revwalk::history::RewordOptions::default().with_message(message),
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
@@ -61,8 +59,7 @@ fn main() -> Result<()> {
         );
     }
 
-    let applied = apply_rewrite(
-        &repo,
+    let applied = repo.history().apply(
         &plan,
         &ApplyOptions {
             identity: grit_lib::ident::parse_signature("History Guide <guide@grit.test> 1 +0000")
@@ -72,7 +69,7 @@ fn main() -> Result<()> {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )?;
 
     println!("head={}", applied.head.to_hex());

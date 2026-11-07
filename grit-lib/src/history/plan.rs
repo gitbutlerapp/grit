@@ -130,22 +130,8 @@ impl ChangeIdWriteContext {
 /// Build a rewrite plan: walk affected history, write replacement commits to the ODB, and
 /// record ref movements without touching refs, the index, or the worktree.
 ///
-/// Replacement commits preserve `change-id`, legacy `gitbutler-change-id`, and other extra
-/// headers from the template (signatures are stripped). When [`ChangeIdPolicy`](crate::change_id::ChangeIdPolicy)
-/// is enabled and the source commit has no stored change id, the rewritten commit stores the
-/// Jujutsu-derived id for the original commit oid. New commits inserted by the plan (for example
-/// split parents) receive fresh ids from [`ChangeIdPolicy::id_for_new_commit`](crate::change_id::ChangeIdPolicy::id_for_new_commit).
-///
-/// When [`RewriteOptions::sign`] is `true`, replacement commits honor `commit.gpgsign` via
-/// [`prepare_commit_bytes`](crate::porcelain::commit::prepare_commit_bytes). When `sign` is
-/// `false`, commits are written unsigned and external signers are not invoked.
-///
-/// # Errors
-///
-/// Returns [`HistoryError`] for conflicts, unsupported merges, scope violations, empty-policy
-/// aborts, [`HistoryError::Planning`] for invalid planning inputs, and the object, revision or ref
-/// area errors for read failures.
-pub fn plan_rewrite(
+/// See [`History::plan_rewrite`](super::History::plan_rewrite).
+pub(crate) fn plan_rewrite(
     repo: &Repository,
     edits: &HistoryEdits,
     opts: &RewriteOptions,
@@ -2152,7 +2138,7 @@ mod merge_call_tests {
     #[test]
     fn add_only_rebase_stack_skips_three_way_merge() {
         use crate::objects::{serialize_commit, CommitData};
-        use crate::revwalk::history::{plan_rebase, RebaseOntoOptions, RebaseRequest};
+        use crate::revwalk::history::{RebaseOntoOptions, RebaseRequest};
 
         let dir = tempfile::tempdir().expect("tempdir");
         let (repo, _) = Repository::init(
@@ -2237,7 +2223,7 @@ mod merge_call_tests {
             branch_tip: tip,
         };
         test_reset_merge_tree_call_count();
-        plan_rebase(&repo, &request, &opts).expect("plan");
+        repo.history().plan_rebase(&request, &opts).expect("plan");
         assert_eq!(
             test_merge_tree_call_count(),
             0,
@@ -2248,7 +2234,7 @@ mod merge_call_tests {
     #[test]
     fn replay_delete_last_file_in_dir_matches_git_rebase_tree() {
         use crate::objects::parse_commit;
-        use crate::revwalk::history::{plan_rebase, RebaseOntoOptions, RebasePlan, RebaseRequest};
+        use crate::revwalk::history::{RebaseOntoOptions, RebasePlan, RebaseRequest};
         use std::process::Command;
 
         if Command::new("git").arg("--version").status().is_err() {
@@ -2331,7 +2317,7 @@ mod merge_call_tests {
             onto: Some(onto),
             branch_tip: tip,
         };
-        let plan = match plan_rebase(&repo, &request, &opts).expect("plan") {
+        let plan = match repo.history().plan_rebase(&request, &opts).expect("plan") {
             RebasePlan::Plan(plan) => plan,
             other => panic!("expected plan, got {other:?}"),
         };
@@ -2472,7 +2458,7 @@ mod merge_call_tests {
         tip: ObjectId,
     ) -> ObjectId {
         use crate::objects::parse_commit;
-        use crate::revwalk::history::{plan_rebase, RebaseOntoOptions, RebasePlan, RebaseRequest};
+        use crate::revwalk::history::{RebaseOntoOptions, RebasePlan, RebaseRequest};
 
         let opts = RebaseOntoOptions::new(RewriteOptions {
             scope: RefScope::Head,
@@ -2488,7 +2474,7 @@ mod merge_call_tests {
         };
         test_reset_merge_tree_call_count();
         test_reset_upstream_delta_scan_count();
-        let plan = match plan_rebase(repo, &request, &opts).expect("plan") {
+        let plan = match repo.history().plan_rebase(&request, &opts).expect("plan") {
             RebasePlan::Plan(plan) => plan,
             other => panic!("expected plan, got {other:?}"),
         };

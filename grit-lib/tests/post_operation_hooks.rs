@@ -19,12 +19,12 @@ use grit_lib::porcelain::merge::{
     integrate_branch_with, IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
 };
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, continue_rebase, drop as history_drop, reword_with, start_rebase,
-    undo_last_rewrite, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest,
-    RefScope, RewordOptions, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
+    RewordOptions, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
 
@@ -142,7 +142,7 @@ fn switch(repo: &Repository, mode: SwitchMode) -> grit_lib::porcelain::switch::S
             hooks: PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("switch")
 }
@@ -420,7 +420,7 @@ fn switch_dry_run_or_skip_runs_no_hook() {
             hooks: PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("dry run");
     assert!(outcome.hooks_run.is_empty());
@@ -433,7 +433,7 @@ fn switch_dry_run_or_skip_runs_no_hook() {
             hooks: PostOperationHooks::Skip,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("switch without hooks");
     assert!(outcome.hooks_run.is_empty());
@@ -467,7 +467,7 @@ fn merge(
         other,
         options,
         &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("merge")
 }
@@ -592,7 +592,7 @@ fn amend_runs_post_rewrite_amend_after_post_commit() {
         &repo,
         &commit_request("amended", true),
         &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("amend");
     assert_eq!(
@@ -612,7 +612,7 @@ fn amend_runs_post_rewrite_amend_after_post_commit() {
         &repo,
         &commit_request("next", false),
         &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(outcome.hooks_run, vec![HookName::PostCommit]);
@@ -627,13 +627,8 @@ fn amend_without_post_rewrite_runs_only_post_commit() {
 
     let mut request = commit_request("amended", true);
     request.post_rewrite = PostOperationHooks::Skip;
-    let outcome = create_commit(
-        &repo,
-        &request,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("amend");
+    let outcome =
+        create_commit(&repo, &request, &mut NullProgress, &CancelToken::never()).expect("amend");
     assert_eq!(outcome.hooks_run, vec![HookName::PostCommit]);
     assert_eq!(fx.take_log(), vec!["post-commit "]);
 }
@@ -666,7 +661,7 @@ fn rebase_onto(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
         },
         rebase: RebaseOntoOptions::new(rewrite_options()),
         apply: apply_options(None),
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+        exec: None,
     }
 }
 
@@ -682,13 +677,15 @@ fn rebase_runs_post_checkout_then_post_rewrite_with_pairs_in_order() {
     fx.git(&["switch", "-q", "topic"]);
     let repo = fx.repo();
 
-    let outcome = start_rebase(
-        &repo,
-        &rebase_onto(main, t2),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("rebase");
+    let outcome = repo
+        .history()
+        .start_rebase(
+            &rebase_onto(main, t2),
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("rebase");
     let RebaseOutcome::Done { applied, .. } = outcome else {
         panic!("expected a clean rebase, got {outcome:?}");
     };
@@ -716,13 +713,15 @@ fn fast_forward_rebase_runs_post_checkout_but_no_post_rewrite() {
     fx.git(&["switch", "-q", "side"]);
     let repo = fx.repo();
 
-    let outcome = start_rebase(
-        &repo,
-        &rebase_onto(c2, c1),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("rebase");
+    let outcome = repo
+        .history()
+        .start_rebase(
+            &rebase_onto(c2, c1),
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("rebase");
     let RebaseOutcome::Done { applied, .. } = outcome else {
         panic!("expected a fast-forward, got {outcome:?}");
     };
@@ -744,25 +743,24 @@ fn conflicted_rebase_runs_post_checkout_on_stop_and_post_rewrite_on_continue() {
     let repo = fx.repo();
     let opts = rebase_onto(main, t2);
 
-    let outcome = start_rebase(
-        &repo,
-        &opts,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("start");
+    let outcome = repo
+        .history()
+        .start_rebase(
+            &opts,
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("start");
     assert!(matches!(outcome, RebaseOutcome::Stopped(_)), "{outcome:?}");
     assert_eq!(fx.take_log(), vec![checkout_line(t2, main)]);
 
     std::fs::write(fx.wt().join("f"), "resolved\n").expect("resolve");
     fx.git(&["add", "f"]);
-    let outcome = continue_rebase(
-        &repo,
-        &opts,
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("continue");
+    let outcome = repo
+        .history()
+        .continue_rebase(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("continue");
     let RebaseOutcome::Done { applied, .. } = outcome else {
         panic!("expected the rebase to finish, got {outcome:?}");
     };
@@ -786,24 +784,26 @@ fn reword_runs_post_rewrite_without_post_checkout() {
     let c3 = fx.commit("f", "3\n", "c3");
     let repo = fx.repo();
 
-    let plan = reword_with(
-        &repo,
-        c2,
-        &RewordOptions {
-            message: Some("c2 reworded\n".into()),
-            author: None,
-        },
-        &rewrite_options(),
-    )
-    .expect("plan reword");
-    let applied = apply_rewrite(
-        &repo,
-        &plan,
-        &apply_options(None),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = repo
+        .history()
+        .reword(
+            c2,
+            &RewordOptions {
+                message: Some("c2 reworded\n".into()),
+                author: None,
+            },
+            &rewrite_options(),
+        )
+        .expect("plan reword");
+    let applied = repo
+        .history()
+        .apply(
+            &plan,
+            &apply_options(None),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     assert_eq!(applied.hooks_run, vec![HookName::PostRewrite]);
     assert_eq!(
         fx.take_log(),
@@ -823,15 +823,19 @@ fn drop_leaves_dropped_commit_out_of_post_rewrite() {
     let c3 = fx.commit("h", "3\n", "c3");
     let repo = fx.repo();
 
-    let plan = history_drop(&repo, c2, &rewrite_options()).expect("plan drop");
-    let applied = apply_rewrite(
-        &repo,
-        &plan,
-        &apply_options(None),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = repo
+        .history()
+        .drop_commit(c2, &rewrite_options())
+        .expect("plan drop");
+    let applied = repo
+        .history()
+        .apply(
+            &plan,
+            &apply_options(None),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     let new_c3 = fx.oid("main");
     assert_eq!(
         applied.hooks_run,
@@ -854,22 +858,33 @@ fn skipped_rewrite_hooks_and_undo_run_nothing() {
     let c2 = fx.commit("g", "2\n", "c2");
     let repo = fx.repo();
 
-    let plan = history_drop(&repo, c2, &rewrite_options()).expect("plan drop");
-    let applied = apply_rewrite(
-        &repo,
-        &plan,
-        &ApplyOptions {
-            hooks: PostOperationHooks::Skip,
-            ..apply_options(Some("drop"))
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = repo
+        .history()
+        .drop_commit(c2, &rewrite_options())
+        .expect("plan drop");
+    let applied = repo
+        .history()
+        .apply(
+            &plan,
+            &ApplyOptions {
+                hooks: PostOperationHooks::Skip,
+                ..apply_options(Some("drop"))
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     assert!(applied.hooks_run.is_empty());
     assert!(fx.take_log().is_empty());
 
-    let undone = undo_last_rewrite(&repo, &apply_options(None), false).expect("undo");
+    let undone = repo
+        .history()
+        .undo_last(
+            &apply_options(None),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(undone.head, c2);
     assert!(fx.take_log().is_empty(), "undo runs no hooks");
 }

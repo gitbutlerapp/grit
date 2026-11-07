@@ -9,10 +9,10 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::parse_commit;
+use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, move_commit, ApplyOptions, EmptyPolicy, HistoryError, Placement, RefScope,
-    RewriteOptions,
+    ApplyOptions, EmptyPolicy, HistoryError, Placement, RefScope, RewriteOptions,
 };
 
 use support::{build_commit_dag, commit_file, git, git_rev_parse_verify, HistoryRepo};
@@ -44,19 +44,19 @@ fn git_fsck_strict(wt: &std::path::Path) {
 
 fn apply_plan(wt: &std::path::Path, plan: &grit_lib::revwalk::history::RewritePlan) {
     let grit = open_grit(wt);
-    apply_rewrite(
-        &grit,
-        plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("T <t@grit.test>"),
-            reflog_message: "history move".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    grit.history()
+        .apply(
+            plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("T <t@grit.test>"),
+                reflog_message: "history move".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
 }
 
 const PINNED_NAME: &str = "History Parity";
@@ -152,7 +152,10 @@ fn move_commit_before_and_after() {
         sign: true,
     };
 
-    let plan = move_commit(&grit, c, Placement::Before(b), &opts).expect("move c before b");
+    let plan = grit
+        .history()
+        .move_commit(c, Placement::Before(b), &opts)
+        .expect("move c before b");
     apply_plan(wt, &plan);
     assert_eq!(
         subjects(wt),
@@ -167,7 +170,10 @@ fn move_commit_before_and_after() {
     let grit = open_grit(wt);
     let b_live = git_rev_parse_verify(wt, "HEAD~1").expect("b");
     let d_tip = git_rev_parse_verify(wt, "HEAD").expect("d");
-    let plan = move_commit(&grit, b_live, Placement::After(d_tip), &opts).expect("move b after d");
+    let plan = grit
+        .history()
+        .move_commit(b_live, Placement::After(d_tip), &opts)
+        .expect("move b after d");
     apply_plan(wt, &plan);
     assert_eq!(
         subjects(wt).last().map(String::as_str),
@@ -194,7 +200,10 @@ fn move_commit_to_top_and_bottom_of_segment() {
         sign: true,
     };
 
-    let plan = move_commit(&grit, b, Placement::After(tip), &opts).expect("move b to top");
+    let plan = grit
+        .history()
+        .move_commit(b, Placement::After(tip), &opts)
+        .expect("move b to top");
     apply_plan(wt, &plan);
     assert_eq!(
         subjects(wt).last().map(String::as_str),
@@ -203,7 +212,10 @@ fn move_commit_to_top_and_bottom_of_segment() {
 
     let grit = open_grit(wt);
     let e_oid = git_rev_parse_verify(wt, "HEAD~1").expect("e before moving tip");
-    let plan = move_commit(&grit, e_oid, Placement::After(a), &opts).expect("move e after root");
+    let plan = grit
+        .history()
+        .move_commit(e_oid, Placement::After(a), &opts)
+        .expect("move e after root");
     apply_plan(wt, &plan);
     assert_eq!(subjects(wt)[1], "history harness e");
     git_fsck_strict(wt);
@@ -222,7 +234,10 @@ fn move_noop_errors() {
         preserve_committer: false,
         sign: true,
     };
-    let err = move_commit(&grit, b, Placement::Before(c), &opts).unwrap_err();
+    let err = grit
+        .history()
+        .move_commit(b, Placement::Before(c), &opts)
+        .unwrap_err();
     assert!(matches!(err, HistoryError::NoOp { .. }));
 }
 
@@ -250,7 +265,9 @@ fn move_with_ancient_merge_on_first_parent_chain() {
         preserve_committer: false,
         sign: true,
     };
-    let plan = move_commit(&grit, oids["c"], Placement::Before(oids["b"]), &opts)
+    let plan = grit
+        .history()
+        .move_commit(oids["c"], Placement::Before(oids["b"]), &opts)
         .expect("move c before b with ancient merge below");
     apply_plan(wt, &plan);
     assert_eq!(
@@ -283,7 +300,9 @@ fn move_with_forked_topic_branch_succeeds() {
         preserve_committer: false,
         sign: true,
     };
-    let plan = move_commit(&grit, oids["c"], Placement::Before(oids["b"]), &opts)
+    let plan = grit
+        .history()
+        .move_commit(oids["c"], Placement::Before(oids["b"]), &opts)
         .expect("move c before b with forked topic branch");
     apply_plan(wt, &plan);
     assert_eq!(
@@ -326,7 +345,10 @@ fn move_across_merge_rejected() {
         preserve_committer: false,
         sign: true,
     };
-    let err = move_commit(&grit, oids["b"], Placement::After(oids["merge"]), &opts).unwrap_err();
+    let err = grit
+        .history()
+        .move_commit(oids["b"], Placement::After(oids["merge"]), &opts)
+        .unwrap_err();
     assert!(
         matches!(
             err,
@@ -355,7 +377,10 @@ fn move_conflict_changes_nothing() {
         preserve_committer: false,
         sign: true,
     };
-    let err = move_commit(&grit, c, Placement::Before(b), &opts).unwrap_err();
+    let err = grit
+        .history()
+        .move_commit(c, Placement::Before(b), &opts)
+        .unwrap_err();
     assert!(matches!(err, HistoryError::Conflict { .. }));
     assert_eq!(
         git_rev_parse_verify(wt, "HEAD").expect("unchanged"),
@@ -385,7 +410,10 @@ fn move_maps_branch_in_segment() {
         preserve_committer: false,
         sign: true,
     };
-    let plan = move_commit(&grit, c, Placement::Before(b), &opts).expect("move");
+    let plan = grit
+        .history()
+        .move_commit(c, Placement::Before(b), &opts)
+        .expect("move");
     apply_plan(wt, &plan);
     let topic = git_rev_parse_verify(wt, "refs/heads/topic").expect("topic");
     let parsed = parse_commit(&grit.odb().read(&topic).expect("read").data).expect("parse");
@@ -422,7 +450,10 @@ fn history_move_matches_git_rebase_reorder() {
         preserve_committer: false,
         sign: true,
     };
-    let plan = move_commit(&grit, c, Placement::Before(b), &opts).expect("grit move");
+    let plan = grit
+        .history()
+        .move_commit(c, Placement::Before(b), &opts)
+        .expect("grit move");
     apply_plan(wt, &plan);
 
     let b_pick = git(wt2.path(), &["rev-parse", "--short", &b.to_hex()])

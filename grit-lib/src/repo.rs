@@ -1100,6 +1100,13 @@ impl Repository {
         crate::repo_handles::RepositorySnapshotCheckouts::new(self)
     }
 
+    /// History edits (reword, drop, move, fixup, squash, split, absorb), undo and rebase handle.
+    #[inline]
+    #[must_use]
+    pub fn history(&self) -> crate::revwalk::history::History<'_> {
+        crate::revwalk::history::History::new(self)
+    }
+
     /// Remote configuration, `ls-remote`, fetch, and push for this repository.
     #[must_use]
     pub fn remotes(&self) -> crate::repo_handles::RepositoryRemotes<'_> {

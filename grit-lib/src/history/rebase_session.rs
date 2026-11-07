@@ -36,8 +36,7 @@ use super::plan::{
     ResumablePlanOutcome,
 };
 use super::rebase::{
-    commits_in_rebase_range, plan_rebase_resumable, PreRebase, RebaseOntoOptions, RebasePlan,
-    RebaseRequest,
+    commits_in_rebase_range, plan_rebase_resumable, RebaseOntoOptions, RebasePlan, RebaseRequest,
 };
 use super::types::RefScope;
 use super::types::{
@@ -47,18 +46,22 @@ use super::types::{
 use super::{commit_tree, load_commit};
 use crate::operation::Conflict;
 
-/// Options for [`start_rebase`].
+/// Options for [`History::start_rebase`](super::History::start_rebase),
+/// [`History::continue_rebase`](super::History::continue_rebase) and
+/// [`History::skip_rebase`](super::History::skip_rebase).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartRebaseOptions {
     /// Upstream, optional onto, and branch tip to rebase.
     pub request: RebaseRequest,
-    /// Replay and cherry-detection options.
+    /// Replay and cherry-detection options, and whether starting the rebase runs `pre-rebase`
+    /// ([`RebaseOntoOptions::pre_rebase`]; continuing or skipping never runs it).
     pub rebase: RebaseOntoOptions,
-    /// Reflog identity and message used when the rebase finishes with [`apply_rewrite`].
+    /// Reflog identity and message used when the rebase finishes and its plan is applied.
     pub apply: ApplyOptions,
-    /// Whether [`start_rebase`] runs the `pre-rebase` hook. [`continue_rebase`] and
-    /// [`skip_rebase`] never run it.
-    pub pre_rebase: PreRebase,
+    /// Commands to run at each replayed commit before any ref moves (`grit rebase --exec`).
+    /// `None` replays without running anything. Read when the rebase starts; a stop saves the
+    /// commands, so continuing or skipping uses the saved ones.
+    pub exec: Option<super::ExecSpec>,
 }
 
 /// Snapshot when a resumable rebase stops on conflicts.
@@ -209,35 +212,8 @@ pub enum RebaseSessionError {
 
 /// Start a resumable rebase of `opts.request.branch_tip` onto the effective onto commit.
 ///
-/// Unless the branch is already up to date, runs `pre-rebase` before any commit is replayed
-/// (see [`StartRebaseOptions::pre_rebase`]); a refusal returns
-/// [`Error::Hook`](crate::error::Error::Hook), and
-/// nothing is changed or written.
-///
-/// On a clean replay, applies the plan atomically and returns [`RebaseOutcome::Done`].
-/// On conflict, writes Git-compatible rebase state and returns [`RebaseOutcome::Stopped`]
-/// without moving the branch ref away from its pre-rebase tip. Both record the pre-rebase tip
-/// as `ORIG_HEAD`, which finishing or aborting the rebase leaves in place; an up-to-date branch
-/// leaves `ORIG_HEAD` untouched.
-///
-/// # Errors
-///
-/// Returns [`RebaseSessionError::RebaseAlreadyInProgress`] when grit or `git` already has a
-/// rebase in progress, [`RebaseSessionError::NotOnBranch`] when `HEAD` is unborn,
-/// and planning/apply failures otherwise. When the replay would stop on conflicts but the index
-/// or worktree has local changes (or an untracked file sits where the stop checks out a path),
-/// returns
-/// [`crate::worktree::WorktreeError::DirtyWorktree`](crate::worktree::WorktreeError::DirtyWorktree) or the overwrite error and
-/// leaves the repository untouched, because stopping would discard that work.
-///
-/// Work-tree updates report [`crate::progress::ProgressPhase::CheckingOutFiles`] to `progress`.
-/// `cancel` is checked after planning and during the apply
-/// and stop checkouts; a cancel returns
-/// [`Error::Cancelled`](crate::error::Error::Cancelled) (see [`crate::error::Error::is_cancelled`]).
-/// The last cancel point is before a conflict stop is recorded, so a cancel leaves nothing
-/// changed; once the stop state and `HEAD` are written, its checkout runs to completion and the
-/// rebase stops with its conflicts as without a cancel.
-pub fn start_rebase(
+/// See [`History::start_rebase`](super::History::start_rebase).
+pub(crate) fn start_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
     progress: &mut dyn ProgressSink,
@@ -255,7 +231,7 @@ pub fn start_rebase(
         });
     }
     let (head_ref, orig_head) = branch_head(repo)?;
-    let plan = plan_rebase_resumable(repo, &opts.request, &opts.rebase, &opts.pre_rebase)?;
+    let plan = plan_rebase_resumable(repo, &opts.request, &opts.rebase)?;
     poll_cancel(progress, cancel).map_err(map_lib)?;
     match plan {
         Err(RebasePlan::UpToDate) => Ok(up_to_date_outcome(orig_head)),
@@ -300,30 +276,10 @@ pub fn start_rebase(
     }
 }
 
-/// Rebase like [`start_rebase`], running `spec.commands` at each replayed commit before any
-/// ref moves (`grit rebase --exec`).
+/// Start a rebase that runs `spec.commands` at each replayed commit before any ref moves.
 ///
-/// [`StartRebaseOptions::pre_rebase`] runs before anything is replayed, as for [`start_rebase`].
-///
-/// The commands run through [`verify_rebase_with_exec`](super::verify_rebase_with_exec); when
-/// they all succeed, the (possibly amended) plan is applied atomically and the pre-rebase tip
-/// `opts.request.branch_tip` is recorded as `ORIG_HEAD`. When there is nothing to replay and
-/// no `--exec` commands, returns [`RebaseOutcome::Done`] with no `head_change` and leaves
-/// `ORIG_HEAD` untouched. With `--exec`, commits in the rebase range still run the commands
-/// even when the branch is already based on the upstream (matching `git rebase -x`). A replay
-/// conflict before any command runs stops like [`start_rebase`] with conflict markers and a
-/// resumable grit session; [`continue_rebase`] runs the exec commands at the resolved commit.
-///
-/// # Errors
-///
-/// Returns the `--exec` errors of
-/// [`verify_rebase_with_exec`](super::verify_rebase_with_exec)
-/// ([`HistoryError::ExecFailed`], [`HistoryError::ExecDirty`],
-/// [`HistoryError::ExecConflict`], …). The two that save a resumable stop
-/// ([`HistoryError::ExecDirty`] and [`HistoryError::ExecConflict`]) record `ORIG_HEAD` first;
-/// the others roll back and leave it alone. Planning, work-tree and apply failures propagate
-/// as for [`start_rebase`].
-pub fn start_rebase_with_exec(
+/// See [`History::start_rebase`](super::History::start_rebase).
+pub(crate) fn start_rebase_with_exec(
     repo: &Repository,
     opts: &StartRebaseOptions,
     spec: &super::ExecSpec,
@@ -343,7 +299,7 @@ pub fn start_rebase_with_exec(
         });
     }
     let (head_ref, orig_head) = branch_head(repo)?;
-    let plan = plan_rebase_resumable(repo, &opts.request, &opts.rebase, &opts.pre_rebase)?;
+    let plan = plan_rebase_resumable(repo, &opts.request, &opts.rebase)?;
     poll_cancel(progress, cancel).map_err(map_lib)?;
     match plan {
         Err(RebasePlan::UpToDate) => {
@@ -361,7 +317,7 @@ pub fn start_rebase_with_exec(
             if range.is_empty() {
                 return Ok(up_to_date_outcome(orig_head));
             }
-            opts.pre_rebase.run(repo)?;
+            opts.rebase.pre_rebase.run(repo)?;
             let mut plan = super::rebase::plan_rebase_identity_exec(
                 repo,
                 fork,
@@ -616,24 +572,8 @@ fn advance_after_user_resolution_commit(
 
 /// Finish the current conflicted commit and replay remaining commits.
 ///
-/// For an exec stop, requires a clean index/worktree at the recorded replay HEAD,
-/// then resumes at the next command (the successful dirty command is not rerun).
-/// Save exec edits with a stash before continuing. A moved HEAD is rejected;
-/// save new commits on a branch, abort, and restart in that case. For an exec replay
-/// conflict ([`HistoryError::ExecConflict`]), commits the staged resolution and runs the
-/// commands at it. Later replays and new commits use the rewrite options saved when the
-/// exec stop was recorded, not `opts.rebase.rewrite`.
-///
-/// # Errors
-///
-/// Returns [`RebaseSessionError::UnmergedPaths`] when the index still records conflicts,
-/// [`RebaseSessionError::ForeignRebaseInProgress`] when `git` started the rebase,
-/// [`RebaseSessionError::NoRebaseInProgress`] when no rebase is in progress, and, for an
-/// exec stop, [`RebaseSessionError::StaleExecPlan`] (changing nothing) when the rebased branch
-/// or a ref the plan updates was moved during the stop.
-/// Cancellation follows [`start_rebase`]: a cancel before the replayed commits are applied
-/// keeps the rebase stopped where it was.
-pub fn continue_rebase(
+/// See [`History::continue_rebase`](super::History::continue_rebase).
+pub(crate) fn continue_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
     progress: &mut dyn ProgressSink,
@@ -769,18 +709,8 @@ pub fn continue_rebase(
 
 /// Skip the current todo commit and replay the rest.
 ///
-/// For an exec stop, requires the edits to be saved or removed first, then skips
-/// remaining commands at that replay commit; the already replayed commit is kept.
-/// For an exec replay conflict, drops the conflicted commit and runs that commit's
-/// commands at the current `HEAD`, as Git's todo list would.
-///
-/// # Errors
-///
-/// Returns [`RebaseSessionError::ForeignRebaseInProgress`] when `git` started the rebase,
-/// [`RebaseSessionError::NoRebaseInProgress`] when no rebase is in progress,
-/// [`RebaseSessionError::StaleExecPlan`] as for [`continue_rebase`], and
-/// planning/apply failures otherwise. Cancellation follows [`continue_rebase`].
-pub fn skip_rebase(
+/// See [`History::skip_rebase`](super::History::skip_rebase).
+pub(crate) fn skip_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
     progress: &mut dyn ProgressSink,
@@ -843,25 +773,8 @@ pub fn skip_rebase(
 
 /// Cancel the in-progress rebase and restore the branch to `orig-head`.
 ///
-/// Also cancels a rebase that `git` started (`rebase-merge/` or `rebase-apply/` without grit's
-/// plan): `HEAD` is re-attached to the rebased branch (or detached, when the rebase started
-/// detached), the index and worktree are reset to `orig-head`, and the state directory is
-/// removed. Either way, unresolved rerere records for the abandoned conflict are cleared
-/// (`MERGE_RR`), as `git rebase --abort` does.
-///
-/// The branch is restored to `orig-head` even when something else (another worktree, a
-/// `git branch -f`, an amend on the checked-out branch) moved it while the rebase was stopped;
-/// such movements are listed in [`RebaseAbort::overwritten`] and logged as `rebase (abort)`
-/// in the branch reflog with `identity`. `identity` also signs the reflog entries of the reset.
-///
-/// # Errors
-///
-/// Returns [`RebaseSessionError::NoRebaseInProgress`] when no rebase is in progress,
-/// [`RebaseSessionError::ForeignRebaseInProgress`] when a git-started rebase recorded an
-/// autostash or has no readable `orig-head` (finish those with `git rebase --abort`), and
-/// [`RebaseSessionError::AbortRefMoved`] when, for an exec stop, the branch moves again between
-/// reading and resetting it (nothing is restored and the abort can be retried).
-pub fn abort_rebase(
+/// See [`History::abort_rebase`](super::History::abort_rebase).
+pub(crate) fn abort_rebase(
     repo: &Repository,
     identity: &crate::ident::Signature,
 ) -> crate::error::Result<RebaseAbort> {

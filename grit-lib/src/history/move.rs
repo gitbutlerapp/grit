@@ -23,17 +23,8 @@ pub enum Placement {
 
 /// Plan moving `commit` to `placement` on the linear first-parent history of `HEAD`.
 ///
-/// Writes replacement commit objects into the ODB; refs are updated only when the caller applies
-/// the returned [`RewritePlan`].
-///
-/// # Errors
-///
-/// Returns [`HistoryError::NotInHistory`], [`HistoryError::MoveTargetNotInHistory`],
-/// [`HistoryError::NoOp`], [`HistoryError::NotLinear`], or errors from replay planning.
-/// An unborn or invalid `HEAD` is
-/// [`RefError::UnbornHead`](crate::error::RefError::UnbornHead) or
-/// [`RefError::InvalidHead`](crate::error::RefError::InvalidHead).
-pub fn move_commit(
+/// See [`History::move_commit`](super::History::move_commit).
+pub(crate) fn move_commit(
     repo: &Repository,
     commit: ObjectId,
     placement: Placement,

@@ -46,16 +46,8 @@ pub struct FixupOptions {
 
 /// Plan a fixup of `target`: merge staged index changes onto `target`'s tree and replay descendants.
 ///
-/// When [`FixupOptions::selection`] is set, only the selected unstaged hunks are folded; the on-disk
-/// index is unchanged until [`apply_fixup_hunk_selection`].
-///
-/// Writes new commit objects into the ODB; refs are updated only when the caller applies the plan.
-///
-/// # Errors
-///
-/// Returns [`HistoryError::BareRepository`], [`HistoryError::NothingStaged`], merge
-/// [`HistoryError::Conflict`], empty-policy failures, and other planning errors.
-pub fn fixup(
+/// See [`History::fixup`](super::History::fixup).
+pub(crate) fn fixup(
     repo: &Repository,
     target: ObjectId,
     opts: &FixupOptions,
@@ -143,10 +135,8 @@ pub fn fixup(
 
 /// Repository-relative paths touched by a hunk selection (for [`apply_fixup_rewrite`](super::apply_fixup_rewrite)).
 ///
-/// # Errors
-///
-/// Returns [`HistoryError::HunkSelect`] when ids or line ranges cannot be resolved.
-pub fn fixup_selection_paths(
+/// See [`History::fixup_selection_paths`](super::History::fixup_selection_paths).
+pub(crate) fn fixup_selection_paths(
     repo: &Repository,
     selection: &HunkSelection,
     pathspecs: &[String],
@@ -162,33 +152,9 @@ pub fn fixup_selection_paths(
     Ok(paths)
 }
 
-/// Apply a fixup plan built with [`FixupOptions::selection`]: stage selected hunks, then run [`apply_fixup_rewrite`](super::apply_fixup_rewrite).
-///
-/// Pre-existing staged edits on the same path as a selected unstaged hunk are preserved in the
-/// index and worktree after apply. On failure, the index is restored to its pre-call state.
-///
-/// # Errors
-///
-/// Same as [`apply_fixup_rewrite`](super::apply_fixup_rewrite), plus hunk resolution and staging failures.
-pub fn apply_fixup_hunk_selection(
-    repo: &Repository,
-    plan: &RewritePlan,
-    apply_opts: &ApplyOptions,
-    selection: &HunkSelection,
-    pathspecs: &[String],
-) -> crate::error::Result<AppliedRewrite> {
-    apply_fixup_hunk_selection_with_cancel(
-        repo,
-        plan,
-        apply_opts,
-        selection,
-        pathspecs,
-        &crate::progress::CancelToken::never(),
-    )
-}
-
-/// Like [`apply_fixup_hunk_selection`], but stops when `cancel` is set.
-pub fn apply_fixup_hunk_selection_with_cancel(
+/// Stage the selected hunks, then apply a fixup plan built with [`FixupOptions::selection`]; see
+/// [`History::apply_fixup_hunks`](super::History::apply_fixup_hunks).
+pub(crate) fn apply_fixup_hunk_selection(
     repo: &Repository,
     plan: &RewritePlan,
     apply_opts: &ApplyOptions,
@@ -449,10 +415,8 @@ fn fixup_target_became_empty(
 
 /// Repository-relative paths that differ between the index and `HEAD`'s tree (stage 0).
 ///
-/// # Errors
-///
-/// Returns [`HistoryError::BareRepository`] or planning failures when the index or `HEAD` cannot be read.
-pub fn staged_fixup_paths(repo: &Repository) -> crate::error::Result<Vec<String>> {
+/// See [`History::staged_paths`](super::History::staged_paths).
+pub(crate) fn staged_fixup_paths(repo: &Repository) -> crate::error::Result<Vec<String>> {
     if repo.is_bare() {
         return Err(HistoryError::BareRepository.into());
     }
@@ -606,7 +570,14 @@ mod hunk_selection_restore_tests {
             record_operation: None,
             hooks: crate::hooks::PostOperationHooks::Run,
         };
-        apply_fixup_rewrite(&grit, &plan, &apply_opts, &paths).expect("apply rewrite");
+        apply_fixup_rewrite(
+            &grit,
+            &plan,
+            &apply_opts,
+            &paths,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("apply rewrite");
         set_test_inject_index_write_fail_remaining(1);
         let err = restore_after_hunk_fixup_apply(&grit, &snapshot).expect_err("restore fails");
         restore_full_hunk_fixup_snapshot(&grit, &snapshot).expect("rollback snapshot");

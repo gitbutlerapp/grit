@@ -26,9 +26,7 @@ use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::Remote;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::{NoteAddOutcome, NotesWriteOptions};
-use grit_lib::revwalk::history::{
-    apply_rewrite, reword, ApplyOptions, EmptyPolicy, RefScope, RewriteOptions,
-};
+use grit_lib::revwalk::history::{ApplyOptions, EmptyPolicy, RefScope, RewriteOptions};
 use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::revwalk::ResolveOptions;
 use time::OffsetDateTime;
@@ -388,32 +386,35 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
     let committer: Signature = "Ada <ada@example.com> 1700000600 +0000"
         .parse()
         .expect("committer");
-    let plan = reword(
-        &repo,
-        merge_commit,
-        "merge topic (reworded)".to_owned(),
-        &RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: committer.clone(),
-            preserve_committer: false,
-            sign: false,
-        },
-    )
-    .expect("plan reword");
-    let applied = apply_rewrite(
-        &repo,
-        &plan,
-        &ApplyOptions {
-            identity: committer,
-            reflog_message: "history reword".to_owned(),
-            record_operation: None,
-            hooks: PostOperationHooks::Run,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("apply reword");
+    let plan = repo
+        .history()
+        .reword(
+            merge_commit,
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("merge topic (reworded)".to_owned()),
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: committer.clone(),
+                preserve_committer: false,
+                sign: false,
+            },
+        )
+        .expect("plan reword");
+    let applied = repo
+        .history()
+        .apply(
+            &plan,
+            &ApplyOptions {
+                identity: committer,
+                reflog_message: "history reword".to_owned(),
+                record_operation: None,
+                hooks: PostOperationHooks::Run,
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply reword");
     assert_eq!(
         repo.revwalk()
             .resolve("main", &ResolveOptions::default())

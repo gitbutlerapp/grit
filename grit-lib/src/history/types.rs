@@ -266,7 +266,18 @@ pub struct ApplyOptions {
     pub hooks: crate::hooks::PostOperationHooks,
 }
 
-/// Result of [`super::undo::undo_last_rewrite`](crate::history::undo::undo_last_rewrite).
+/// Whether [`History::undo_last`](super::History::undo_last) moves refs or only reports what it
+/// would do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UndoMode {
+    /// Undo the last rewrite: move refs and update the index and work tree.
+    #[default]
+    Apply,
+    /// Check that the undo can run and report its effect without changing anything.
+    DryRun,
+}
+
+/// Result of [`History::undo_last`](super::History::undo_last).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UndoOutcome {
     /// Ref updates that were applied or would be applied (`--dry-run`).

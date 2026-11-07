@@ -32,10 +32,7 @@ use grit_lib::refs::store::{
 };
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::NotesWriteOptions;
-use grit_lib::revwalk::history::{
-    apply_rewrite, reword, verify_rebase_with_exec, ApplyOptions, EmptyPolicy, ExecSpec, RefScope,
-    RewriteOptions,
-};
+use grit_lib::revwalk::history::{ApplyOptions, EmptyPolicy, ExecSpec, RefScope, RewriteOptions};
 
 #[derive(Clone, Default)]
 struct DurabilityState {
@@ -464,15 +461,22 @@ fn reword_apply_flushes_before_ref_update() {
     let base = seed_commit(&repo);
     store.clear_events();
 
-    let plan = reword(&repo, base, "reworded\n".into(), &rewrite_options()).expect("plan");
-    apply_rewrite(
-        &repo,
-        &plan,
-        &apply_options(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = repo
+        .history()
+        .reword(
+            base,
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &rewrite_options(),
+        )
+        .expect("plan");
+    repo.history()
+        .apply(
+            &plan,
+            &apply_options(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
 
     let main = repo
         .revwalk()
@@ -646,18 +650,26 @@ fn rebase_exec_flushes_before_head_ref_update() {
     let wt = tmp.path().join("wt");
     let (repo, store) = open_repo(&gd, &wt);
     let tips = three_commits(&repo, &wt);
-    let mut plan = reword(&repo, tips[1], "reworded\n".into(), &rewrite_options()).expect("plan");
+    let mut plan = repo
+        .history()
+        .reword(
+            tips[1],
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &rewrite_options(),
+        )
+        .expect("plan");
     store.clear_events();
-    let report = verify_rebase_with_exec(
-        &repo,
-        &mut plan,
-        &ExecSpec {
-            commands: vec!["test -f f2".into()],
-        },
-        &rewrite_options(),
-        system_command_runner().as_ref(),
-    )
-    .expect("rebase exec");
+    let report = repo
+        .history()
+        .verify_rebase(
+            &mut plan,
+            &ExecSpec {
+                commands: vec!["test -f f2".into()],
+            },
+            &rewrite_options(),
+            system_command_runner().as_ref(),
+        )
+        .expect("rebase exec");
     assert_eq!(report.runs.len(), 2);
     assert_flush_before_first_ref_commit(&store.events());
     let replacement = plan.replacement(tips[1]).expect("replacement");

@@ -10,13 +10,12 @@ use std::process::Command;
 use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    absorb, apply_absorb_rewrite, apply_fixup_hunk_selection, apply_fixup_rewrite, apply_rewrite,
-    drop as history_drop, fixup, rebase_onto, staged_fixup_paths, undo_last_rewrite, AbsorbOptions,
-    ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, RebaseOntoOptions, RefScope,
-    RewriteOptions,
+    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, RebaseOntoOptions,
+    RefScope, RewriteOptions,
 };
 
 use support::{
@@ -58,15 +57,18 @@ fn undo_opts() -> ApplyOptions {
 }
 
 fn drop_and_apply(grit: &Repository, commit: grit_lib::objects::ObjectId) {
-    let plan = history_drop(grit, commit, &rewrite_opts()).expect("drop plan");
-    apply_rewrite(
-        grit,
-        &plan,
-        &apply_opts("drop"),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply drop");
+    let plan = grit
+        .history()
+        .drop_commit(commit, &rewrite_opts())
+        .expect("drop plan");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts("drop"),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply drop");
 }
 
 #[test]
@@ -80,7 +82,13 @@ fn undo_restores_refs_after_drop() {
     let after_drop = git_rev_parse(wt, "HEAD").expect("after drop");
     assert_ne!(before, after_drop);
 
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(before));
     git_fsck_strict(wt);
 }
@@ -98,34 +106,42 @@ fn undo_after_rebase_restores_stacked_branches() {
     let grit = open_grit(wt);
     let main_before = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
     let stacked_before = resolve_ref(grit.git_dir(), "refs/heads/stacked").expect("stacked");
-    let plan = rebase_onto(
-        &grit,
-        oids["u"],
-        onto,
-        &[oids["c"]],
-        &RebaseOntoOptions {
-            rewrite: rewrite_opts(),
-            skip_applied: true,
-            flatten_leaf_merges: false,
-            favor: grit_lib::diff::merge_file::MergeFavor::default(),
-            drop: Vec::new(),
-        },
-    )
-    .expect("rebase plan");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts("rebase"),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply rebase");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            oids["u"],
+            onto,
+            &[oids["c"]],
+            &RebaseOntoOptions {
+                pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+                rewrite: rewrite_opts(),
+                skip_applied: true,
+                flatten_leaf_merges: false,
+                favor: grit_lib::diff::merge_file::MergeFavor::default(),
+                drop: Vec::new(),
+            },
+        )
+        .expect("rebase plan");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts("rebase"),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply rebase");
     assert_ne!(
         resolve_ref(grit.git_dir(), "refs/heads/main").expect("main"),
         main_before
     );
 
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(
         resolve_ref(grit.git_dir(), "refs/heads/main").expect("main"),
         main_before
@@ -146,9 +162,21 @@ fn undo_twice_redoes() {
     let original = git_rev_parse(wt, "HEAD").expect("tip");
     drop_and_apply(&grit, oids["b"]);
     let dropped = git_rev_parse(wt, "HEAD").expect("after drop");
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(original));
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("redo");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("redo");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(dropped));
 }
 
@@ -160,7 +188,14 @@ fn undo_refuses_when_ref_moved() {
     let grit = open_grit(wt);
     drop_and_apply(&grit, oids["b"]);
     write_ref(grit.git_dir(), "refs/heads/main", &oids["a"]).expect("move ref");
-    let err = undo_last_rewrite(&grit, &undo_opts(), false).expect_err("stale");
+    let err = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect_err("stale");
     assert!(matches!(err, HistoryError::UndoStale { .. }));
 }
 
@@ -176,7 +211,14 @@ fn undo_refuses_on_dirty_overlap() {
     drop_and_apply(&grit, git_rev_parse(wt, "HEAD").expect("c"));
     fs::write(wt.join("track.t"), "dirty\n").expect("dirty");
     let _ = tip;
-    let err = undo_last_rewrite(&grit, &undo_opts(), false).expect_err("dirty");
+    let err = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect_err("dirty");
     assert!(matches!(
         err,
         HistoryError::LocalChangesWouldBeOverwritten { .. }
@@ -187,7 +229,14 @@ fn undo_refuses_on_dirty_overlap() {
 fn undo_without_record_errors() {
     let repo = HistoryRepo::init();
     let grit = open_grit(repo.worktree());
-    let err = undo_last_rewrite(&grit, &undo_opts(), false).expect_err("no record");
+    let err = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect_err("no record");
     assert!(matches!(err, HistoryError::NoUndoRecord));
 }
 
@@ -225,15 +274,18 @@ fn undo_survives_git_gc_with_reflog_updates_disabled() {
             .expect("signature"),
         ..apply_opts("drop")
     };
-    let plan = history_drop(&grit, dropped_tip, &rewrite_opts()).expect("drop plan");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &drop_opts,
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply drop");
+    let plan = grit
+        .history()
+        .drop_commit(dropped_tip, &rewrite_opts())
+        .expect("drop plan");
+    grit.history()
+        .apply(
+            &plan,
+            &drop_opts,
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply drop");
     assert_ne!(git_rev_parse(wt, "HEAD"), Some(dropped_tip));
 
     let gc = Command::new("git")
@@ -261,7 +313,13 @@ fn undo_survives_git_gc_with_reflog_updates_disabled() {
         "dropped tip must stay reachable via reflog after gc"
     );
 
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo after gc");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo after gc");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(dropped_tip));
 }
 
@@ -273,7 +331,14 @@ fn undo_refuses_when_recorded_ref_deleted() {
     let grit = open_grit(wt);
     drop_and_apply(&grit, oids["b"]);
     git(wt, &["update-ref", "-d", "refs/heads/main"]);
-    let err = undo_last_rewrite(&grit, &undo_opts(), false).expect_err("stale");
+    let err = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect_err("stale");
     assert!(matches!(err, HistoryError::UndoStale { .. }));
 }
 
@@ -285,7 +350,13 @@ fn undo_old_commits_remain_in_reflog() {
     let grit = open_grit(wt);
     let dropped_tip = oids["c"];
     drop_and_apply(&grit, oids["b"]);
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     let log = Command::new("git")
         .current_dir(wt)
         .args(["reflog", "show", "main"])
@@ -308,9 +379,14 @@ fn fixup_opts(selection: Option<HunkSelection>) -> FixupOptions {
 }
 
 fn fixup_staged_into(grit: &Repository, target: ObjectId) {
-    let staged = staged_fixup_paths(grit).expect("staged paths");
-    let plan = fixup(grit, target, &fixup_opts(None)).expect("fixup plan");
-    apply_fixup_rewrite(grit, &plan, &apply_opts("fixup"), &staged).expect("apply fixup");
+    let staged = grit.history().staged_paths().expect("staged paths");
+    let plan = grit
+        .history()
+        .fixup(target, &fixup_opts(None))
+        .expect("fixup plan");
+    grit.history()
+        .apply_fixup(&plan, &apply_opts("fixup"), &staged, &CancelToken::never())
+        .expect("apply fixup");
 }
 
 fn status_porcelain(wt: &std::path::Path) -> String {
@@ -342,7 +418,14 @@ fn undo_after_staged_fixup_restores_the_staged_edit() {
     let fixed_tip = git_rev_parse(wt, "HEAD").expect("fixed tip");
     assert_eq!(status_porcelain(wt), "");
 
-    let outcome = undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    let outcome = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(outcome.restored_paths, vec!["a.txt".to_owned()]);
     assert_eq!(outcome.unrestored_edits, None);
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(c3));
@@ -351,13 +434,26 @@ fn undo_after_staged_fixup_restores_the_staged_edit() {
     assert_eq!(read(wt, "a.txt"), "a\na-fixed\n");
     git_fsck_strict(wt);
 
-    let redo = undo_last_rewrite(&grit, &undo_opts(), false).expect("redo");
+    let redo = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("redo");
     assert_eq!(redo.restored_paths, vec!["a.txt".to_owned()]);
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(fixed_tip));
     assert_eq!(status_porcelain(wt), "");
     assert_eq!(read(wt, "a.txt"), "a\na-fixed\n");
 
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo again");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo again");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(c3));
     assert_eq!(status_porcelain(wt), "M  a.txt\n");
     git_fsck_strict(wt);
@@ -376,7 +472,14 @@ fn undo_after_fixup_restores_staged_and_unstaged_layers() {
     fixup_staged_into(&grit, c1);
     assert_eq!(status_porcelain(wt), " M a.txt\n");
 
-    let outcome = undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    let outcome = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(
         outcome.restored_paths,
         vec!["a.txt".to_owned(), "new.txt".to_owned()]
@@ -387,7 +490,13 @@ fn undo_after_fixup_restores_staged_and_unstaged_layers() {
     assert_eq!(read(wt, "new.txt"), "new\n");
     git_fsck_strict(wt);
 
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("redo");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("redo");
     assert_eq!(status_porcelain(wt), " M a.txt\n");
     assert_eq!(read(wt, "a.txt"), "a\na-fixed\nunstaged\n");
 }
@@ -402,7 +511,14 @@ fn undo_dry_run_reports_restored_paths_without_touching_anything() {
     fixup_staged_into(&grit, c1);
     let fixed_tip = git_rev_parse(wt, "HEAD");
 
-    let outcome = undo_last_rewrite(&grit, &undo_opts(), true).expect("dry run");
+    let outcome = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::DryRun,
+            &CancelToken::never(),
+        )
+        .expect("dry run");
     assert!(outcome.dry_run);
     assert_eq!(outcome.restored_paths, vec!["a.txt".to_owned()]);
     assert_eq!(git_rev_parse(wt, "HEAD"), fixed_tip);
@@ -420,7 +536,14 @@ fn undo_after_fixup_refuses_when_a_restored_path_was_edited() {
     let fixed_tip = git_rev_parse(wt, "HEAD");
     fs::write(wt.join("a.txt"), "a\na-fixed\nlater\n").expect("later edit");
 
-    let err = undo_last_rewrite(&grit, &undo_opts(), false).expect_err("edited");
+    let err = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect_err("edited");
     assert!(
         matches!(&err, HistoryError::LocalChangesWouldBeOverwritten { paths } if paths == &["a.txt"]),
         "{err:?}"
@@ -440,21 +563,29 @@ fn undo_after_absorb_restores_assigned_hunks_and_keeps_unassigned_staged() {
     fs::write(wt.join("root.txt"), "r2\n").expect("edit of a line older than base");
     git(wt, &["add", "a.txt", "root.txt"]);
     let grit = open_grit(wt);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(base),
             rewrite: rewrite_opts(),
-        },
-    )
-    .expect("absorb plan");
+        })
+        .expect("absorb plan");
     assert_eq!(plan.assignments.len(), 1);
     assert_eq!(plan.unassigned.len(), 1);
-    apply_absorb_rewrite(&grit, &plan, &apply_opts("absorb")).expect("apply absorb");
+    grit.history()
+        .apply_absorb(&plan, &apply_opts("absorb"), &CancelToken::never())
+        .expect("apply absorb");
     let absorbed_tip = git_rev_parse(wt, "HEAD");
     assert_eq!(git(wt, &["diff", "--cached", "--name-only"]), "root.txt\n");
 
-    let outcome = undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    let outcome = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(
         outcome.restored_paths,
         vec!["a.txt".to_owned(), "root.txt".to_owned()]
@@ -465,7 +596,13 @@ fn undo_after_absorb_restores_assigned_hunks_and_keeps_unassigned_staged() {
     assert_eq!(read(wt, "root.txt"), "r2\n");
     git_fsck_strict(wt);
 
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("redo");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("redo");
     assert_eq!(git_rev_parse(wt, "HEAD"), absorbed_tip);
     assert_eq!(git(wt, &["diff", "--cached", "--name-only"]), "root.txt\n");
 }
@@ -489,12 +626,29 @@ fn undo_after_hunk_selection_fixup_restores_the_work_tree() {
         ids: vec![ids[0].clone()],
         ranges: Vec::new(),
     };
-    let plan = fixup(&grit, target, &fixup_opts(Some(selection.clone()))).expect("plan");
-    apply_fixup_hunk_selection(&grit, &plan, &apply_opts("fixup"), &selection, &[])
+    let plan = grit
+        .history()
+        .fixup(target, &fixup_opts(Some(selection.clone())))
+        .expect("plan");
+    grit.history()
+        .apply_fixup_hunks(
+            &plan,
+            &apply_opts("fixup"),
+            &selection,
+            &[],
+            &CancelToken::never(),
+        )
         .expect("apply hunk fixup");
     assert_eq!(read(wt, "f.txt"), edited);
 
-    let outcome = undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    let outcome = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(outcome.restored_paths, vec!["f.txt".to_owned()]);
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(tip));
     assert_eq!(status_porcelain(wt), " M f.txt\n");
@@ -513,7 +667,14 @@ fn undo_of_a_fixup_record_without_saved_state_names_the_commit_holding_the_edit(
     let fixed_tip = git_rev_parse(wt, "HEAD").expect("fixed tip");
     fs::remove_file(grit.git_dir().join("grit/history-last-work")).expect("drop sidecar");
 
-    let outcome = undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    let outcome = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert!(outcome.restored_paths.is_empty());
     assert_eq!(outcome.unrestored_edits, Some(fixed_tip));
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(c3));
@@ -541,7 +702,14 @@ fn a_later_rewrite_discards_the_saved_fixup_state() {
         !sidecar.exists(),
         "drop record must not inherit fixup state"
     );
-    let outcome = undo_last_rewrite(&grit, &undo_opts(), false).expect("undo drop");
+    let outcome = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo drop");
     assert!(outcome.restored_paths.is_empty());
     assert_eq!(outcome.unrestored_edits, None);
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(tip));
@@ -584,7 +752,14 @@ fn undo_after_fixup_restores_a_staged_submodule_pointer() {
     assert_eq!(git_rev_parse(wt, "HEAD:sub"), Some(s2));
     assert_eq!(status_porcelain(wt), "");
 
-    let outcome = undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    let outcome = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(outcome.restored_paths, vec!["sub".to_owned()]);
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(tip));
     assert_eq!(git_rev_parse(wt, "HEAD:sub"), Some(s1));
@@ -593,7 +768,14 @@ fn undo_after_fixup_restores_a_staged_submodule_pointer() {
     assert_eq!(git_rev_parse(&wt.join("sub"), "HEAD"), Some(s2));
     git_fsck_strict(wt);
 
-    let redo = undo_last_rewrite(&grit, &undo_opts(), false).expect("redo");
+    let redo = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("redo");
     assert_eq!(redo.restored_paths, vec!["sub".to_owned()]);
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(fixed_tip));
     assert_eq!(git_rev_parse(wt, ":sub"), Some(s2));
@@ -629,7 +811,7 @@ fn grit_status_paths(grit: &Repository) -> (Vec<String>, Vec<String>) {
         grit,
         &grit_lib::porcelain::status::StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("grit status");
     let paths = |entries: &[grit_lib::diff::DiffEntry]| {
@@ -649,7 +831,14 @@ fn undo_after_fixup_restores_a_staged_crlf_file_stat_clean() {
     let grit = open_grit(wt);
     fixup_staged_into(&grit, c1);
 
-    let outcome = undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    let outcome = grit
+        .history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(outcome.restored_paths, vec!["f1.txt".to_owned()]);
     assert_eq!(status_porcelain(wt), "M  f1.txt\n");
     assert_eq!(git_rev_parse(wt, ":f1.txt"), Some(staged_blob));
@@ -665,7 +854,13 @@ fn undo_after_fixup_restores_a_staged_crlf_file_stat_clean() {
     );
     git_fsck_strict(wt);
 
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("redo");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("redo");
     assert_eq!(status_porcelain(wt), "");
     git(wt, &["update-index", "--refresh"]);
 }
@@ -682,7 +877,13 @@ fn undo_after_fixup_keeps_an_unstaged_crlf_edit_visible() {
     fixup_staged_into(&grit, c1);
     assert_eq!(status_porcelain(wt), " M f1.txt\n");
 
-    undo_last_rewrite(&grit, &undo_opts(), false).expect("undo");
+    grit.history()
+        .undo_last(
+            &undo_opts(),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(status_porcelain(wt), "MM f1.txt\n");
     assert_eq!(git_rev_parse(wt, ":f1.txt"), Some(staged_blob));
     assert_eq!(

@@ -130,10 +130,10 @@ pub(crate) fn write_history_last(
 
 /// Read `.git/grit/history-last` when present.
 ///
-/// # Errors
-///
-/// Returns [`HistoryError::UndoRecordCorrupt`](crate::history::HistoryError::UndoRecordCorrupt) when the file exists but is invalid.
-pub fn read_history_last(repo: &Repository) -> crate::error::Result<Option<HistoryLastRecord>> {
+/// See [`History::last`](super::History::last).
+pub(crate) fn read_history_last(
+    repo: &Repository,
+) -> crate::error::Result<Option<HistoryLastRecord>> {
     let path = history_last_path(repo);
     if !path.is_file() {
         return Ok(None);

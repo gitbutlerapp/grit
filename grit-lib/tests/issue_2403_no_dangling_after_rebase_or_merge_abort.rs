@@ -10,8 +10,8 @@ use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, Integrate
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest,
-    RefScope, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
+    RewriteOptions, StartRebaseOptions,
 };
 use grit_test_support::git;
 use grit_test_support::objects::git_supports_sha256;
@@ -138,22 +138,24 @@ fn clean_add_only_rebase_leaves_no_dangling_empty_objects() {
     let main = oid(root, "main");
     let side_tip = oid(root, "side");
     let repo = open(root);
-    let outcome = start_rebase(
-        &repo,
-        &StartRebaseOptions {
-            request: RebaseRequest {
-                upstream: main,
-                onto: None,
-                branch_tip: side_tip,
+    let outcome = repo
+        .history()
+        .start_rebase(
+            &StartRebaseOptions {
+                request: RebaseRequest {
+                    upstream: main,
+                    onto: None,
+                    branch_tip: side_tip,
+                },
+                rebase: RebaseOntoOptions::new(rewrite_options()),
+                apply: apply_options(),
+                exec: None,
             },
-            rebase: RebaseOntoOptions::new(rewrite_options()),
-            apply: apply_options(),
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("rebase");
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("rebase");
     assert!(matches!(outcome, RebaseOutcome::Done { .. }));
 
     assert_canonical_empty_objects_absent(&git_dir, EMPTY_BLOB_SHA1, EMPTY_TREE_SHA1);
@@ -312,22 +314,24 @@ fn sha256_rebase_and_merge_abort_leave_no_dangling_empty_objects() {
 
     let main = oid(root, "main");
     let side_tip = oid(root, "side");
-    let outcome = start_rebase(
-        &repo,
-        &StartRebaseOptions {
-            request: RebaseRequest {
-                upstream: main,
-                onto: None,
-                branch_tip: side_tip,
+    let outcome = repo
+        .history()
+        .start_rebase(
+            &StartRebaseOptions {
+                request: RebaseRequest {
+                    upstream: main,
+                    onto: None,
+                    branch_tip: side_tip,
+                },
+                rebase: RebaseOntoOptions::new(rewrite_options()),
+                apply: apply_options(),
+                exec: None,
             },
-            rebase: RebaseOntoOptions::new(rewrite_options()),
-            apply: apply_options(),
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("rebase");
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("rebase");
     assert!(matches!(outcome, RebaseOutcome::Done { .. }));
     assert_canonical_empty_objects_absent(&git_dir, EMPTY_BLOB_SHA256, EMPTY_TREE_SHA256);
     git_fsck_strict(root);

@@ -10,11 +10,11 @@ use std::process::Command;
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, drop as history_drop, ApplyOptions, EmptyPolicy, HistoryError, RefScope,
-    RewriteOptions,
+    ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
 };
 
 use support::{build_commit_dag, commit_file, git, git_fsck_strict, git_rev_parse, HistoryRepo};
@@ -110,7 +110,10 @@ fn drop_head_maps_to_parent_in_ref_updates() {
     let tip = git_rev_parse(wt, "HEAD").expect("tip");
     let parent = git_rev_parse(wt, "HEAD~").expect("parent");
     let grit = open_grit(wt);
-    let plan = history_drop(&grit, tip, &opts(0)).expect("drop head");
+    let plan = grit
+        .history()
+        .drop_commit(tip, &opts(0))
+        .expect("drop head");
     assert!(plan.head.commit_changes);
     assert_eq!(plan.mapped_tip(tip), Some(parent));
     assert_eq!(plan.replacement(tip), None);
@@ -123,20 +126,23 @@ fn drop_reports_replacements_and_head_change() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let plan = history_drop(&grit, oids["b"], &opts(9)).expect("drop");
+    let plan = grit
+        .history()
+        .drop_commit(oids["b"], &opts(9))
+        .expect("drop");
     assert_eq!(plan.replacement(oids["b"]), None);
     assert_eq!(plan.replacement(oids["a"]), None);
     let new_c = plan.replacement(oids["c"]).expect("c replayed");
     assert_ne!(new_c, oids["c"]);
     assert_eq!(plan.head_change(), Some((oids["c"], new_c)));
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(new_c));
     git_fsck_strict(wt);
 }
@@ -147,7 +153,10 @@ fn drop_replays_descendants_onto_parent() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let plan = history_drop(&grit, oids["b"], &opts(1)).expect("drop");
+    let plan = grit
+        .history()
+        .drop_commit(oids["b"], &opts(1))
+        .expect("drop");
     let dropped = plan
         .commits
         .iter()
@@ -175,15 +184,18 @@ fn drop_moves_branch_at_dropped_commit_to_parent() {
         &["update-ref", "refs/heads/points-at-b", &oids["b"].to_hex()],
     );
     let grit = open_grit(wt);
-    let plan = history_drop(&grit, oids["b"], &opts(2)).expect("drop");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit
+        .history()
+        .drop_commit(oids["b"], &opts(2))
+        .expect("drop");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     let tip = git_rev_parse(wt, "refs/heads/points-at-b").expect("ref");
     assert_eq!(tip, oids["a"]);
     git_fsck_strict(wt);
@@ -195,7 +207,7 @@ fn drop_rejects_root_commit() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let err = history_drop(&grit, oids["a"], &opts(3)).unwrap_err();
+    let err = grit.history().drop_commit(oids["a"], &opts(3)).unwrap_err();
     assert!(matches!(
         err,
         HistoryError::RootCommit { commit } if commit == oids["a"]
@@ -212,7 +224,10 @@ fn drop_before_merge_replays_merge_onto_parent() {
         &[("d", "refs/heads/main")],
     );
     let grit = open_grit(wt);
-    let plan = history_drop(&grit, oids["b"], &opts(7)).expect("drop before merge");
+    let plan = grit
+        .history()
+        .drop_commit(oids["b"], &opts(7))
+        .expect("drop before merge");
     let merge_row = plan
         .commits
         .iter()
@@ -235,7 +250,7 @@ fn drop_rejects_merge_commit() {
         &[("m", "refs/heads/main")],
     );
     let grit = open_grit(wt);
-    let err = history_drop(&grit, oids["m"], &opts(4)).unwrap_err();
+    let err = grit.history().drop_commit(oids["m"], &opts(4)).unwrap_err();
     assert!(matches!(
         err,
         HistoryError::MergeCommitInReplay { commit } if commit == oids["m"]
@@ -264,7 +279,10 @@ fn drop_conflict_changes_nothing() {
     let c = write_test_commit(&grit, tree_right, &[b], "c", &ident).expect("c");
     write_ref(grit.git_dir(), "refs/heads/main", &c).expect("ref");
     let before = resolve_ref(grit.git_dir(), "refs/heads/main").expect("resolve");
-    let err = history_drop(&grit, b, &opts(5)).expect_err("conflict");
+    let err = grit
+        .history()
+        .drop_commit(b, &opts(5))
+        .expect_err("conflict");
     let HistoryError::Conflict {
         commit,
         subject,
@@ -314,7 +332,10 @@ fn drop_conflict_in_sibling_branch_names_that_branch() {
     let fx = sibling_conflict_repo();
     let wt = fx.repo.worktree();
     let grit = open_grit(wt);
-    let err = history_drop(&grit, fx.c2, &opts(10)).expect_err("other cannot be replayed");
+    let err = grit
+        .history()
+        .drop_commit(fx.c2, &opts(10))
+        .expect_err("other cannot be replayed");
     let HistoryError::Conflict {
         commit,
         subject,
@@ -338,23 +359,24 @@ fn drop_with_head_scope_leaves_conflicting_sibling_alone() {
     let fx = sibling_conflict_repo();
     let wt = fx.repo.worktree();
     let grit = open_grit(wt);
-    let plan = history_drop(
-        &grit,
-        fx.c2,
-        &RewriteOptions {
-            scope: RefScope::Head,
-            ..opts(11)
-        },
-    )
-    .expect("HEAD's branch replays cleanly");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit
+        .history()
+        .drop_commit(
+            fx.c2,
+            &RewriteOptions {
+                scope: RefScope::Head,
+                ..opts(11)
+            },
+        )
+        .expect("HEAD's branch replays cleanly");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     assert_eq!(git_rev_parse(wt, "refs/heads/other"), Some(fx.o1));
     assert_ne!(git_rev_parse(wt, "refs/heads/topic"), Some(fx.topic));
     assert_eq!(git(wt, &["show", "topic:a.txt"]), "1\n");
@@ -373,15 +395,15 @@ fn drop_syncs_worktree_when_head_affected() {
     let b = git_rev_parse(wt, "HEAD").expect("b");
     commit_file(wt, "third.t", "3\n", "third");
     let grit = open_grit(wt);
-    let plan = history_drop(&grit, b, &opts(6)).expect("drop");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit.history().drop_commit(b, &opts(6)).expect("drop");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     assert!(wt.join("first.t").is_file());
     assert!(wt.join("third.t").is_file());
     assert!(
@@ -415,26 +437,27 @@ fn history_drop_matches_git_rebase_drop() {
     git(grit_dir.path(), &["config", "grit.changeIds", "false"]);
     let replay_committer = "Test User <test@example.com> 1700000002 +0000".to_string();
     let grit = open_grit(grit_dir.path());
-    let plan = history_drop(
-        &grit,
-        b.parse().expect("oid"),
-        &RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: replay_committer.parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
-    )
-    .expect("plan");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit
+        .history()
+        .drop_commit(
+            b.parse().expect("oid"),
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: replay_committer.parse().expect("signature"),
+                preserve_committer: false,
+                sign: true,
+            },
+        )
+        .expect("plan");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     let editor = git_dir.path().join("rebase-drop.sh");
     fs::write(&editor, "#!/bin/sh\nsed -i '2s/^pick/drop/' \"$1\"\n").expect("write editor");
     #[cfg(unix)]
@@ -504,26 +527,27 @@ fn history_drop_matches_git_history_when_available() {
     git(grit_dir.path(), &["config", "grit.changeIds", "false"]);
     // The same committer `git history drop` records from the environment below.
     let replay_committer = "Test User <test@example.com> 1700000002 +0000".to_string();
-    let plan = history_drop(
-        &grit,
-        b.parse().expect("oid"),
-        &RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: replay_committer.parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
-    )
-    .expect("plan");
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    let plan = grit
+        .history()
+        .drop_commit(
+            b.parse().expect("oid"),
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: replay_committer.parse().expect("signature"),
+                preserve_committer: false,
+                sign: true,
+            },
+        )
+        .expect("plan");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     let git_out = Command::new("git")
         .current_dir(git_dir.path())
         .args(["history", "drop", "HEAD~"])

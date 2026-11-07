@@ -20,10 +20,9 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
-    apply_rewrite, drop, read_history_last, reword, squash, start_rebase, undo_last_rewrite,
-    verify_rebase_with_exec, AppliedRewrite, ApplyOptions, ExecSpec, HistoryError,
-    RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions, RewritePlan,
-    SquashMessage, SquashOptions, StartRebaseOptions,
+    AppliedRewrite, ApplyOptions, ExecSpec, HistoryError, RebaseOntoOptions, RebaseOutcome,
+    RebaseRequest, RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
+    StartRebaseOptions,
 };
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 
@@ -53,7 +52,8 @@ fn apply(
     plan: &RewritePlan,
     opts: &ApplyOptions,
 ) -> grit_lib::error::Result<AppliedRewrite> {
-    apply_rewrite(repo, plan, opts, &mut NullProgress, &CancelToken::never())
+    repo.history()
+        .apply(plan, opts, &mut NullProgress, &CancelToken::never())
 }
 
 /// Repository with memory object and ref stores and an on-disk work tree only.
@@ -183,7 +183,14 @@ fn reword_on_memory_backends_moves_refs_in_the_store() {
     let tips = three_commits(&repo, &wt);
     assert_eq!(main_tip(&refs), tips[2]);
 
-    let plan = reword(&repo, tips[1], "reworded\n".into(), &rewrite_opts()).expect("plan");
+    let plan = repo
+        .history()
+        .reword(
+            tips[1],
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &rewrite_opts(),
+        )
+        .expect("plan");
     assert_eq!(
         plan.head.old_commit,
         Some(tips[2]),
@@ -208,9 +215,16 @@ fn reword_on_memory_backends_moves_refs_in_the_store() {
         "the HEAD reflog follows the branch in the store"
     );
 
-    let record = read_history_last(&repo).expect("read").expect("record");
+    let record = repo.history().last().expect("read").expect("record");
     assert_eq!(record.head_new_commit, Some(new_tip));
-    let undo = undo_last_rewrite(&repo, &apply_opts("undo", None), false).expect("undo");
+    let undo = repo
+        .history()
+        .undo_last(
+            &apply_opts("undo", None),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(undo.head, tips[2]);
     assert_eq!(main_tip(&refs), tips[2]);
     assert_eq!(head_commit(&repo), tips[2]);
@@ -222,7 +236,10 @@ fn drop_and_squash_on_memory_backends_move_refs_and_worktree() {
     let (repo, refs, wt) = open_memory_repo(dir.path());
     let tips = three_commits(&repo, &wt);
 
-    let plan = drop(&repo, tips[1], &rewrite_opts()).expect("drop plan");
+    let plan = repo
+        .history()
+        .drop_commit(tips[1], &rewrite_opts())
+        .expect("drop plan");
     let applied = apply(&repo, &plan, &apply_opts("drop", Some("drop"))).expect("drop");
     let dropped = main_tip(&refs);
     assert_eq!(applied.head, dropped);
@@ -233,15 +250,16 @@ fn drop_and_squash_on_memory_backends_move_refs_and_worktree() {
     let c4 = commit_file(&repo, &wt, "f4", "c4");
     let base = tips[0].to_hex();
     let range = format!("{base}..{}", c4.to_hex());
-    let plan = squash(
-        &repo,
-        &[range.as_str()],
-        &SquashOptions {
-            message: SquashMessage::Custom("squashed\n".into()),
-            rewrite: rewrite_opts(),
-        },
-    )
-    .expect("squash plan");
+    let plan = repo
+        .history()
+        .squash(
+            &[range.as_str()],
+            &SquashOptions {
+                message: SquashMessage::Custom("squashed\n".into()),
+                rewrite: rewrite_opts(),
+            },
+        )
+        .expect("squash plan");
     let applied = apply(&repo, &plan, &apply_opts("squash", None)).expect("squash");
     let squashed = main_tip(&refs);
     assert_eq!(applied.head, squashed);
@@ -277,25 +295,27 @@ fn clean_start_rebase_on_memory_backends_moves_the_branch_in_the_store() {
     switch("main", tips[2]);
     let main_only = commit_file(&repo, &wt, "m", "main only");
 
-    let outcome = start_rebase(
-        &repo,
-        &StartRebaseOptions {
-            request: RebaseRequest {
-                upstream: side,
-                onto: None,
-                branch_tip: main_only,
+    let outcome = repo
+        .history()
+        .start_rebase(
+            &StartRebaseOptions {
+                request: RebaseRequest {
+                    upstream: side,
+                    onto: None,
+                    branch_tip: main_only,
+                },
+                rebase: RebaseOntoOptions::new(RewriteOptions {
+                    scope: RefScope::Head,
+                    ..rewrite_opts()
+                }),
+                apply: apply_opts("rebase", Some("rebase")),
+                exec: None,
             },
-            rebase: RebaseOntoOptions::new(RewriteOptions {
-                scope: RefScope::Head,
-                ..rewrite_opts()
-            }),
-            apply: apply_opts("rebase", Some("rebase")),
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("start_rebase");
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("start_rebase");
     let RebaseOutcome::Done { applied, .. } = outcome else {
         panic!("a clean replay finishes in one call");
     };
@@ -308,7 +328,13 @@ fn clean_start_rebase_on_memory_backends_moves_the_branch_in_the_store() {
     );
     assert!(wt.join("s").exists() && wt.join("m").exists());
 
-    undo_last_rewrite(&repo, &apply_opts("undo", None), false).expect("undo");
+    repo.history()
+        .undo_last(
+            &apply_opts("undo", None),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(main_tip(&refs), main_only);
     assert!(!wt.join("s").exists());
 }
@@ -321,11 +347,24 @@ fn rewrite_on_disk_repository_with_injected_store_leaves_disk_refs_alone() {
     let disk_head = fs::read_to_string(git_dir.join("HEAD")).expect("HEAD");
     let tips = three_commits(&repo, dir.path());
 
-    let plan = reword(&repo, tips[0], "first\n".into(), &rewrite_opts()).expect("plan");
+    let plan = repo
+        .history()
+        .reword(
+            tips[0],
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("first\n".into()),
+            &rewrite_opts(),
+        )
+        .expect("plan");
     let applied = apply(&repo, &plan, &apply_opts("reword", Some("reword"))).expect("apply");
     assert_eq!(applied.head, main_tip(&refs));
     assert_eq!(subjects(&repo, applied.head), ["c3", "c2", "first"]);
-    undo_last_rewrite(&repo, &apply_opts("undo", None), false).expect("undo");
+    repo.history()
+        .undo_last(
+            &apply_opts("undo", None),
+            grit_lib::revwalk::history::UndoMode::Apply,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("undo");
     assert_eq!(main_tip(&refs), tips[2]);
 
     assert_eq!(
@@ -346,17 +385,25 @@ fn rebase_exec_detaches_and_restores_head_in_the_store() {
     let disk_head = fs::read_to_string(git_dir.join("HEAD")).expect("HEAD");
     let tips = three_commits(&repo, dir.path());
 
-    let mut plan = reword(&repo, tips[1], "reworded\n".into(), &rewrite_opts()).expect("plan");
-    let report = verify_rebase_with_exec(
-        &repo,
-        &mut plan,
-        &ExecSpec {
-            commands: vec!["test -f f2".into()],
-        },
-        &rewrite_opts(),
-        system_command_runner().as_ref(),
-    )
-    .expect("exec");
+    let mut plan = repo
+        .history()
+        .reword(
+            tips[1],
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &rewrite_opts(),
+        )
+        .expect("plan");
+    let report = repo
+        .history()
+        .verify_rebase(
+            &mut plan,
+            &ExecSpec {
+                commands: vec!["test -f f2".into()],
+            },
+            &rewrite_opts(),
+            system_command_runner().as_ref(),
+        )
+        .expect("exec");
     assert_eq!(report.runs.len(), 2);
     assert!(report.runs.iter().all(|run| run.exit_code == 0));
     assert_eq!(
@@ -378,7 +425,14 @@ fn head_moved_in_store_after_plan_fails_before_any_ref_moves() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (repo, refs, wt) = open_memory_repo(dir.path());
     let tips = three_commits(&repo, &wt);
-    let plan = reword(&repo, tips[1], "reworded\n".into(), &rewrite_opts()).expect("plan");
+    let plan = repo
+        .history()
+        .reword(
+            tips[1],
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &rewrite_opts(),
+        )
+        .expect("plan");
 
     refs.set_ref("HEAD", RawRef::Direct(tips[2]))
         .expect("detach");
@@ -393,5 +447,5 @@ fn head_moved_in_store_after_plan_fails_before_any_ref_moves() {
             .expect("HEAD"),
         Some(RawRef::Direct(tips[2]))
     );
-    assert!(read_history_last(&repo).expect("read").is_none());
+    assert!(repo.history().last().expect("read").is_none());
 }

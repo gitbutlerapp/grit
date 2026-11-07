@@ -24,9 +24,9 @@ use grit_lib::porcelain::merge::{
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    plan_rebase_with_hook, start_rebase, ApplyOptions, EmptyPolicy, HistoryEngineError,
-    HistoryError, PreRebase, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
-    RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, EmptyPolicy, HistoryEngineError, HistoryError, PreRebase, RebaseOntoOptions,
+    RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 
 const IDENT: &str = "Hook Tester <hooks@grit.test> 1700000000 +0000";
@@ -630,25 +630,33 @@ fn rebase_opts(upstream: ObjectId, tip: ObjectId, pre_rebase: PreRebase) -> Star
             onto: None,
             branch_tip: tip,
         },
-        rebase: RebaseOntoOptions::new(RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: IDENT.parse().expect("signature"),
-            preserve_committer: false,
-            sign: false,
-        }),
+        rebase: RebaseOntoOptions {
+            pre_rebase,
+            ..RebaseOntoOptions::new(RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: IDENT.parse().expect("signature"),
+                preserve_committer: false,
+                sign: false,
+            })
+        },
         apply: ApplyOptions {
             identity: IDENT.parse().expect("signature"),
             reflog_message: "rebase".into(),
             record_operation: None,
             hooks: PostOperationHooks::Skip,
         },
-        pre_rebase,
+        exec: None,
     }
 }
 
 fn rebase(repo: &Repository, opts: &StartRebaseOptions) -> grit_lib::error::Result<RebaseOutcome> {
-    start_rebase(repo, opts, &mut NullProgress, &CancelToken::never())
+    repo.history().start_rebase(
+        opts,
+        repo.command_runner().as_ref(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
 }
 
 fn history_hook_failed(err: &HistoryError) -> Option<&str> {
@@ -701,8 +709,11 @@ fn refused_pre_rebase_wins_over_a_replay_conflict_like_git() {
         onto: None,
         branch_tip: topic,
     };
-    let opts = rebase_opts(main, topic, PreRebase::Skip).rebase;
-    let err = plan_rebase_with_hook(&repo, &request, &opts, &hook).expect_err("refused");
+    let hooked = rebase_opts(main, topic, hook).rebase;
+    let err = repo
+        .history()
+        .plan_rebase(&request, &hooked)
+        .expect_err("refused");
     assert_eq!(history_hook_failed(&err), Some("pre-rebase"), "{err:?}");
     assert_eq!(
         fx.git(&["count-objects"]),
@@ -710,7 +721,9 @@ fn refused_pre_rebase_wins_over_a_replay_conflict_like_git() {
         "a refused rebase writes no objects"
     );
     assert!(matches!(
-        plan_rebase_with_hook(&repo, &request, &opts, &PreRebase::Skip).expect("plan"),
+        repo.history()
+            .plan_rebase(&request, &rebase_opts(main, topic, PreRebase::Skip).rebase)
+            .expect("plan"),
         RebasePlan::Conflict { .. }
     ));
     assert_eq!(

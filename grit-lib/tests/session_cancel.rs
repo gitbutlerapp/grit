@@ -18,8 +18,8 @@ use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink}
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
-    continue_rebase, start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome,
-    RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RebaseSessionError,
+    RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::stash::{StashApplyOptions, StashError, StashMode, StashPushOptions};
 
@@ -666,6 +666,7 @@ fn rebase_start(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
             branch_tip: tip,
         },
         rebase: RebaseOntoOptions {
+            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
@@ -684,7 +685,7 @@ fn rebase_start(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
             record_operation: None,
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+        exec: None,
     }
 }
 
@@ -723,13 +724,15 @@ fn repo_for_conflicting_rebase() -> (tempfile::TempDir, Repository, ObjectId, Ob
 #[test]
 fn conflicting_rebase_cancelled_before_the_stop_changes_nothing() {
     let (tmp, repo, main, topic) = repo_for_conflicting_rebase();
-    let err = start_rebase(
-        &repo,
-        &rebase_start(main, topic),
-        &mut NullProgress,
-        &cancelled_flag(),
-    )
-    .expect_err("cancelled");
+    let err = repo
+        .history()
+        .start_rebase(
+            &rebase_start(main, topic),
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &cancelled_flag(),
+        )
+        .expect_err("cancelled");
     assert!(
         err.is_cancelled(),
         "expected a cancelled rebase, got {err:?}"
@@ -747,13 +750,15 @@ fn conflicting_rebase_cancelled_before_the_stop_changes_nothing() {
 fn conflicting_rebase_stop_completes_once_published_and_continue_needs_resolution() {
     let (_tmp, repo, main, topic) = repo_for_conflicting_rebase();
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 0);
-    let outcome = start_rebase(
-        &repo,
-        &rebase_start(main, topic),
-        &mut sink,
-        &CancelToken::never(),
-    )
-    .expect("a published stop finishes installing");
+    let outcome = repo
+        .history()
+        .start_rebase(
+            &rebase_start(main, topic),
+            repo.command_runner().as_ref(),
+            &mut sink,
+            &CancelToken::never(),
+        )
+        .expect("a published stop finishes installing");
     assert!(
         matches!(outcome, RebaseOutcome::Stopped(_)),
         "got {outcome:?}"
@@ -768,13 +773,14 @@ fn conflicting_rebase_stop_completes_once_published_and_continue_needs_resolutio
         "conflict stages are installed"
     );
 
-    let err = continue_rebase(
-        &repo,
-        &rebase_start(main, topic),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect_err("continue must require resolution");
+    let err = repo
+        .history()
+        .continue_rebase(
+            &rebase_start(main, topic),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect_err("continue must require resolution");
     assert!(
         matches!(
             &err,
@@ -789,13 +795,15 @@ fn conflicting_rebase_stop_completes_once_published_and_continue_needs_resolutio
 #[test]
 fn rebase_stops_on_cancel_argument_before_touching_anything() {
     let (_tmp, repo, side, topic) = repo_for_rebase();
-    let err = start_rebase(
-        &repo,
-        &rebase_start(side, topic),
-        &mut NullProgress,
-        &cancelled_flag(),
-    )
-    .expect_err("cancelled");
+    let err = repo
+        .history()
+        .start_rebase(
+            &rebase_start(side, topic),
+            repo.command_runner().as_ref(),
+            &mut NullProgress,
+            &cancelled_flag(),
+        )
+        .expect_err("cancelled");
     assert!(
         err.is_cancelled(),
         "expected a cancelled rebase, got {err:?}"
@@ -809,8 +817,15 @@ fn rebase_cancelled_during_checkout_rolls_back() {
     let (tmp, repo, side, topic) = repo_for_rebase();
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
     let cancel = sink.flag.clone();
-    let err =
-        start_rebase(&repo, &rebase_start(side, topic), &mut sink, &cancel).expect_err("cancelled");
+    let err = repo
+        .history()
+        .start_rebase(
+            &rebase_start(side, topic),
+            repo.command_runner().as_ref(),
+            &mut sink,
+            &cancel,
+        )
+        .expect_err("cancelled");
     assert!(
         matches!(&err, grit_lib::error::Error::Cancelled),
         "expected Error::Cancelled, got {err:?}"
@@ -823,13 +838,15 @@ fn rebase_cancelled_during_checkout_rolls_back() {
     );
 
     let mut sink = CancelAfter::recorder();
-    let outcome = start_rebase(
-        &repo,
-        &rebase_start(side, topic),
-        &mut sink,
-        &CancelToken::never(),
-    )
-    .expect("rebase");
+    let outcome = repo
+        .history()
+        .start_rebase(
+            &rebase_start(side, topic),
+            repo.command_runner().as_ref(),
+            &mut sink,
+            &CancelToken::never(),
+        )
+        .expect("rebase");
     assert!(matches!(outcome, RebaseOutcome::Done { .. }));
     assert!(sink.started.contains(&ProgressPhase::CheckingOutFiles));
     assert!(tmp.path().join("side/f0299.txt").exists());

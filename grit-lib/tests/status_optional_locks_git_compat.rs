@@ -161,8 +161,7 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
     use grit_lib::objects::{parse_commit, parse_tree, ObjectKind};
     use grit_lib::revwalk::history::{
-        apply_rewrite, plan_rewrite, rewrite_apply_journal_active, ApplyOptions, CommitEdit,
-        EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
+        ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
     };
 
     use support::{build_commit_dag, git_rev_parse, HistoryRepo};
@@ -250,32 +249,34 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
             parents: None,
         },
     );
-    let plan = plan_rewrite(
-        &grit,
-        &edits,
-        &RewriteOptions {
-            scope: RefScope::Branches,
-            empty: EmptyPolicy::Drop,
-            committer: "Applier <apply@grit.test> 1 +0000"
-                .parse()
-                .expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
-    )
-    .expect("plan");
+    let plan = grit
+        .history()
+        .plan_rewrite(
+            &edits,
+            &RewriteOptions {
+                scope: RefScope::Branches,
+                empty: EmptyPolicy::Drop,
+                committer: "Applier <apply@grit.test> 1 +0000"
+                    .parse()
+                    .expect("signature"),
+                preserve_committer: false,
+                sign: true,
+            },
+        )
+        .expect("plan");
     let tip_before = git_rev_parse(wt, "refs/heads/main").expect("tip");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
-    let _err = apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect_err("injected abort");
+    let _err = grit
+        .history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect_err("injected abort");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
-    assert!(rewrite_apply_journal_active(grit.git_dir()));
+    assert!(grit.history().apply_journal_active());
     assert_ne!(git_rev_parse(wt, "refs/heads/main"), Some(tip_before));
 
     let model = status(
@@ -289,5 +290,5 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     )
     .expect("status");
     assert_eq!(model.interrupted_rewrite, Some(InterruptedRewrite::Pending));
-    assert!(rewrite_apply_journal_active(grit.git_dir()));
+    assert!(grit.history().apply_journal_active());
 }

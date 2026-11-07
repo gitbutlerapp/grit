@@ -10,8 +10,8 @@ use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink}
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
-    start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RebaseSessionError,
-    RefScope, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RebaseSessionError, RefScope,
+    RewriteOptions, StartRebaseOptions,
 };
 
 const FILES: usize = 300;
@@ -126,6 +126,7 @@ fn run_rebase(
             branch_tip: topic,
         },
         rebase: RebaseOntoOptions {
+            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
@@ -144,19 +145,20 @@ fn run_rebase(
             record_operation: None,
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+        exec: None,
     };
     let start = Instant::now();
     let result = if cancel_at_checkout {
         let mut sink = CancelAfterCheckoutUnits::new();
         let cancel = sink.flag.clone();
-        start_rebase(repo, &opts, &mut sink, &cancel)
+        repo.history()
+            .start_rebase(&opts, repo.command_runner().as_ref(), &mut sink, &cancel)
     } else {
-        start_rebase(
-            repo,
+        repo.history().start_rebase(
             &opts,
+            repo.command_runner().as_ref(),
             &mut NullProgress,
-            &grit_lib::progress::CancelToken::never(),
+            &CancelToken::never(),
         )
     };
     let elapsed = start.elapsed();

@@ -15,13 +15,12 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    absorb, apply_absorb_rewrite, apply_fixup_hunk_selection, apply_rewrite, drop as history_drop,
-    fixup, move_commit, rebase_onto, reword, split, squash, AbsorbOptions, ApplyOptions,
-    EmptyPolicy, FixupOptions, Placement, RebaseOntoOptions, RefScope, RewriteOptions,
-    SplitOptions, SquashMessage, SquashOptions,
+    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, Placement, RebaseOntoOptions, RefScope,
+    RewriteOptions, SplitOptions, SquashMessage, SquashOptions,
 };
 
 use support::{commit_file, git, git_fsck_strict, git_rev_parse, HistoryRepo};
@@ -164,19 +163,19 @@ fn rewrite_opts(seq: i64) -> RewriteOptions {
 }
 
 fn apply_plan(grit: &Repository, plan: &grit_lib::revwalk::history::RewritePlan) {
-    apply_rewrite(
-        grit,
-        plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Rewriter <r@grit.test>"),
-            reflog_message: "history change-id test".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    grit.history()
+        .apply(
+            plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Rewriter <r@grit.test>"),
+                reflog_message: "history change-id test".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
 }
 
 fn replacement_id(plan: &grit_lib::revwalk::history::RewritePlan, old: ObjectId) -> ObjectId {
@@ -206,7 +205,15 @@ fn history_change_ids_survive_every_rewrite() {
         ],
     );
     let b = chain[1];
-    let plan = reword(&grit, b, "b reworded\n".into(), &rewrite_opts(1)).expect("reword");
+    let plan = grit
+        .history()
+        .reword(
+            b,
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("b reworded\n".into()),
+            &rewrite_opts(1),
+        )
+        .expect("reword");
     let new_b = replacement_id(&plan, b);
     apply_plan(&grit, &plan);
     assert_change_id_on_oid(wt, &new_b, "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy");
@@ -233,31 +240,33 @@ fn history_change_ids_survive_every_rewrite() {
     git(wt, &["reset", "--hard", &f2.to_hex()]);
     std::fs::write(wt.join("fix.txt"), b"base\nextra\n").expect("write");
     git(wt, &["add", "fix.txt"]);
-    let plan = fixup(
-        &grit,
-        f1,
-        &FixupOptions {
-            message: None,
-            empty: EmptyPolicy::Drop,
-            rewrite: rewrite_opts(2),
-            selection: None,
-            pathspecs: Vec::new(),
-        },
-    )
-    .expect("fixup");
+    let plan = grit
+        .history()
+        .fixup(
+            f1,
+            &FixupOptions {
+                message: None,
+                empty: EmptyPolicy::Drop,
+                rewrite: rewrite_opts(2),
+                selection: None,
+                pathspecs: Vec::new(),
+            },
+        )
+        .expect("fixup");
     let new_f1 = replacement_id(&plan, f1);
-    grit_lib::revwalk::history::apply_fixup_rewrite(
-        &grit,
-        &plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Rewriter <r@grit.test>"),
-            reflog_message: "fixup".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &grit_lib::revwalk::history::staged_fixup_paths(&grit).expect("staged"),
-    )
-    .expect("apply fixup");
+    grit.history()
+        .apply_fixup(
+            &plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Rewriter <r@grit.test>"),
+                reflog_message: "fixup".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &grit_lib::revwalk::history::staged_fixup_paths(&grit).expect("staged"),
+            &CancelToken::never(),
+        )
+        .expect("apply fixup");
     assert_change_id_on_oid(wt, &new_f1, "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww");
 
     // absorb
@@ -283,25 +292,25 @@ fn history_change_ids_survive_every_rewrite() {
     git(wt, &["reset", "--hard", &tip.to_hex()]);
     std::fs::write(wt.join("absorb.txt"), b"one\ntwo\nthree\n").expect("write");
     git(wt, &["add", "absorb.txt"]);
-    let plan = absorb(
-        &grit,
-        &AbsorbOptions {
+    let plan = grit
+        .history()
+        .absorb(&AbsorbOptions {
             base: Some(base),
             rewrite: rewrite_opts(3),
-        },
-    )
-    .expect("absorb");
-    apply_absorb_rewrite(
-        &grit,
-        &plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Rewriter <r@grit.test>"),
-            reflog_message: "absorb".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-    )
-    .expect("apply absorb");
+        })
+        .expect("absorb");
+    grit.history()
+        .apply_absorb(
+            &plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Rewriter <r@grit.test>"),
+                reflog_message: "absorb".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &CancelToken::never(),
+        )
+        .expect("apply absorb");
     let main = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
     let parent = parse_commit(&grit.odb().read(&main).expect("read").data)
         .expect("parse")
@@ -322,7 +331,10 @@ fn history_change_ids_survive_every_rewrite() {
     );
     let m2 = moved[1];
     let m3 = moved[2];
-    let plan = move_commit(&grit, m3, Placement::Before(m2), &rewrite_opts(4)).expect("move");
+    let plan = grit
+        .history()
+        .move_commit(m3, Placement::Before(m2), &rewrite_opts(4))
+        .expect("move");
     let new_m3 = replacement_id(&plan, m3);
     apply_plan(&grit, &plan);
     assert_change_id_on_oid(wt, &new_m3, "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzv");
@@ -339,7 +351,10 @@ fn history_change_ids_survive_every_rewrite() {
         ],
     );
     let d2 = dropped[1];
-    let plan = history_drop(&grit, d2, &rewrite_opts(5)).expect("drop");
+    let plan = grit
+        .history()
+        .drop_commit(d2, &rewrite_opts(5))
+        .expect("drop");
     apply_plan(&grit, &plan);
     let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("tip");
     let replayed = parse_commit(&grit.odb().read(&tip).expect("read").data).expect("parse");
@@ -358,15 +373,16 @@ fn history_change_ids_survive_every_rewrite() {
     );
     let s1 = squashed[0];
     let s3 = squashed[2];
-    let plan = squash(
-        &grit,
-        &[&format!("{}..{}", s1.to_hex(), s3.to_hex())],
-        &SquashOptions {
-            message: SquashMessage::Oldest,
-            rewrite: rewrite_opts(6),
-        },
-    )
-    .expect("squash");
+    let plan = grit
+        .history()
+        .squash(
+            &[&format!("{}..{}", s1.to_hex(), s3.to_hex())],
+            &SquashOptions {
+                message: SquashMessage::Oldest,
+                rewrite: rewrite_opts(6),
+            },
+        )
+        .expect("squash");
     let new_s1 = replacement_id(&plan, s1);
     apply_plan(&grit, &plan);
     assert_change_id_on_oid(wt, &new_s1, "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk");
@@ -387,17 +403,18 @@ fn history_change_ids_survive_every_rewrite() {
     write_ref(grit.git_dir(), "refs/heads/main", &head).expect("ref");
     git(wt, &["reset", "--hard", &head.to_hex()]);
     let grit_split = open_grit_with_policy(wt, true, Some(Arc::new(FixedGenerator([0xab; 16]))));
-    let plan = split(
-        &grit_split,
-        head,
-        &["split-a".to_string()],
-        "inserted\n".into(),
-        &SplitOptions {
-            rest_message: Some("rest\n".into()),
-        },
-        &rewrite_opts(7),
-    )
-    .expect("split");
+    let plan = grit_split
+        .history()
+        .split(
+            head,
+            &["split-a".to_string()],
+            "inserted\n".into(),
+            &SplitOptions {
+                rest_message: Some("rest\n".into()),
+            },
+            &rewrite_opts(7),
+        )
+        .expect("split");
     let new_head = replacement_id(&plan, head);
     apply_plan(&grit_split, &plan);
     assert_change_id_on_oid(wt, &new_head, "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzq");
@@ -442,20 +459,22 @@ fn history_change_ids_survive_every_rewrite() {
         &[],
     );
     write_ref(grit.git_dir(), "refs/heads/onto", &onto).expect("onto ref");
-    let plan = rebase_onto(
-        &grit,
-        r1,
-        onto,
-        &[r3],
-        &RebaseOntoOptions {
-            rewrite: rewrite_opts(8),
-            skip_applied: true,
-            flatten_leaf_merges: false,
-            favor: grit_lib::diff::merge_file::MergeFavor::default(),
-            drop: Vec::new(),
-        },
-    )
-    .expect("rebase");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            r1,
+            onto,
+            &[r3],
+            &RebaseOntoOptions {
+                pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+                rewrite: rewrite_opts(8),
+                skip_applied: true,
+                flatten_leaf_merges: false,
+                favor: grit_lib::diff::merge_file::MergeFavor::default(),
+                drop: Vec::new(),
+            },
+        )
+        .expect("rebase");
     let new_r3 = replacement_id(&plan, r3);
     apply_plan(&grit, &plan);
     assert_change_id_on_oid(wt, &new_r3, "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzn");
@@ -468,7 +487,14 @@ fn rewrite_stores_derived_id_for_headerless_commit() {
     let grit = open_grit(wt);
     commit_file(wt, "f.txt", "x\n", "only");
     let old = git_rev_parse(wt, "HEAD").expect("head");
-    let plan = reword(&grit, old, "reworded\n".into(), &rewrite_opts(1)).expect("plan");
+    let plan = grit
+        .history()
+        .reword(
+            old,
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &rewrite_opts(1),
+        )
+        .expect("plan");
     let new_oid = replacement_id(&plan, old);
     apply_plan(&grit, &plan);
     let want = ChangeId::derived_from_commit_id(&old).as_str().to_owned();
@@ -487,7 +513,15 @@ x-custom custom-value\n";
     let old = grit_commit_with_id(&grit, tree, &[], "hdr\n", None, extra);
     write_ref(grit.git_dir(), "refs/heads/main", &old).expect("ref");
     git(wt, &["reset", "--hard", &old.to_hex()]);
-    let plan = reword(&grit, old, "reworded hdr\n".into(), &rewrite_opts(1)).expect("plan");
+    let plan = grit
+        .history()
+        .reword(
+            old,
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("reworded hdr\n".into()),
+            &rewrite_opts(1),
+        )
+        .expect("plan");
     let new_oid = replacement_id(&plan, old);
     apply_plan(&grit, &plan);
     let raw = git_cat_file_commit(wt, &new_oid);
@@ -515,7 +549,15 @@ fn rewrite_strips_signature_but_keeps_change_id() {
     let old = grit_commit_with_id(&grit, tree, &[], "signed\n", None, &extra);
     write_ref(grit.git_dir(), "refs/heads/main", &old).expect("ref");
     git(wt, &["reset", "--hard", &old.to_hex()]);
-    let plan = reword(&grit, old, "still signed id\n".into(), &rewrite_opts(1)).expect("plan");
+    let plan = grit
+        .history()
+        .reword(
+            old,
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("still signed id\n".into()),
+            &rewrite_opts(1),
+        )
+        .expect("plan");
     let new_oid = replacement_id(&plan, old);
     apply_plan(&grit, &plan);
     let raw = git_cat_file_commit(wt, &new_oid);
@@ -535,7 +577,14 @@ fn change_ids_disabled_adds_nothing() {
     let grit = open_grit(wt);
     commit_file(wt, "f.txt", "x\n", "plain");
     let old = git_rev_parse(wt, "HEAD").expect("head");
-    let plan = reword(&grit, old, "no id\n".into(), &rewrite_opts(1)).expect("plan");
+    let plan = grit
+        .history()
+        .reword(
+            old,
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("no id\n".into()),
+            &rewrite_opts(1),
+        )
+        .expect("plan");
     let new_oid = replacement_id(&plan, old);
     apply_plan(&grit, &plan);
     let raw = git_cat_file_commit(wt, &new_oid);
@@ -579,32 +628,34 @@ fn fixup_hunks_preserves_change_id() {
         ids: vec![ids[0].clone()],
         ranges: Vec::new(),
     };
-    let plan = fixup(
-        &grit,
-        pick1,
-        &FixupOptions {
-            message: None,
-            empty: EmptyPolicy::Drop,
-            rewrite: rewrite_opts(1),
-            selection: Some(selection.clone()),
-            pathspecs: Vec::new(),
-        },
-    )
-    .expect("fixup hunks");
+    let plan = grit
+        .history()
+        .fixup(
+            pick1,
+            &FixupOptions {
+                message: None,
+                empty: EmptyPolicy::Drop,
+                rewrite: rewrite_opts(1),
+                selection: Some(selection.clone()),
+                pathspecs: Vec::new(),
+            },
+        )
+        .expect("fixup hunks");
     let new_pick1 = replacement_id(&plan, pick1);
-    apply_fixup_hunk_selection(
-        &grit,
-        &plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Rewriter <r@grit.test>"),
-            reflog_message: "fixup hunks".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &selection,
-        &[],
-    )
-    .expect("apply fixup hunks");
+    grit.history()
+        .apply_fixup_hunks(
+            &plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Rewriter <r@grit.test>"),
+                reflog_message: "fixup hunks".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &selection,
+            &[],
+            &CancelToken::never(),
+        )
+        .expect("apply fixup hunks");
     assert_change_id_on_oid(wt, &new_pick1, "pppppppppppppppppppppppppppppppp");
     git_fsck_strict(wt);
 }

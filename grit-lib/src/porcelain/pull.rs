@@ -897,7 +897,7 @@ fn rebase_fetched_upstream(
     // The upstream already has these commits: they are its copies of local ones.
     rebase.drop = copies.to_vec();
     // Git's pull hands rebase the fork point (or the fetched tip) as a commit id.
-    let pre_rebase = PreRebase::Run {
+    rebase.pre_rebase = PreRebase::Run {
         upstream: Some(request.upstream.to_hex()),
     };
     let start = StartRebaseOptions {
@@ -909,7 +909,7 @@ fn rebase_fetched_upstream(
             record_operation: Some("rebase".into()),
             hooks: crate::hooks::PostOperationHooks::Run,
         },
-        pre_rebase,
+        exec: None,
     };
     match start_rebase(repo, &start, progress, cancel).map_err(map_history_error)? {
         RebaseOutcome::Stopped(stop) if stop_on_conflict => Ok(PullOutcome {
@@ -1548,7 +1548,7 @@ mod tests {
 
     fn abort(repo: &Repository) {
         let identity = "T <t@example.com> 0 +0000".parse().expect("signature");
-        crate::history::abort_rebase(repo, &identity).expect("abort");
+        repo.history().abort_rebase(&identity).expect("abort");
     }
 
     #[cfg_attr(

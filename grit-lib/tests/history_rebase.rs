@@ -8,11 +8,12 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::merge_file::MergeFavor;
 use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
-    apply_rewrite, plan_rebase, plan_rebase_check, rebase_onto, ApplyOptions, EmptyPolicy,
-    RebaseCheckPlan, RebaseOntoOptions, RebasePlan, RebaseRequest, RefScope, RewriteOptions,
+    ApplyOptions, EmptyPolicy, RebaseCheckPlan, RebaseOntoOptions, RebasePlan, RebaseRequest,
+    RefScope, RewriteOptions,
 };
 use support::assert_git_fsck_strict;
 use support::{
@@ -32,6 +33,7 @@ const PINNED_COMMITTER: &str = "Refs Harness Author <refs-harness@example.com> 1
 
 fn rebase_opts(scope: RefScope, empty: EmptyPolicy, skip: bool) -> RebaseOntoOptions {
     RebaseOntoOptions {
+        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
         rewrite: RewriteOptions {
             scope,
             empty,
@@ -107,19 +109,19 @@ fn git_rebase_onto(wt: &std::path::Path, onto: &ObjectId, upstream: &ObjectId, b
 }
 
 fn apply_plan(repo: &Repository, plan: &grit_lib::revwalk::history::RewritePlan) {
-    apply_rewrite(
-        repo,
-        plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Test <t@grit.test>"),
-            reflog_message: "rebase onto".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    repo.history()
+        .apply(
+            plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Test <t@grit.test>"),
+                reflog_message: "rebase onto".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
 }
 
 #[test]
@@ -128,14 +130,15 @@ fn rebase_onto_replays_range_and_moves_branch() {
     let wt = repo.worktree();
     let (upstream, onto, tip) = init_rebase_fixture(wt);
     let grit = open_grit(wt);
-    let plan = rebase_onto(
-        &grit,
-        upstream,
-        onto,
-        &[tip],
-        &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
-    )
-    .expect("plan");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            upstream,
+            onto,
+            &[tip],
+            &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
+        )
+        .expect("plan");
     assert!(plan.ref_updates.iter().any(|u| u.name.ends_with("main")));
     apply_plan(&grit, &plan);
     let new_tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("ref");
@@ -193,7 +196,7 @@ fn assert_rebase_moves_stacked_abc(
     let grit = open_grit(wt);
     let request = rebase_request(oids["main_m"], None, git_rev_parse(wt, "a"));
     let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true);
-    let plan = match plan_rebase(&grit, &request, &opts).expect("plan") {
+    let plan = match grit.history().plan_rebase(&request, &opts).expect("plan") {
         RebasePlan::Plan(plan) => plan,
         other => panic!("expected plan, got {other:?}"),
     };
@@ -254,12 +257,13 @@ fn rebase_onto_moves_branch_forked_from_middle_of_range() {
     );
     git(wt, &["checkout", "a"]);
     let grit = open_grit(wt);
-    let plan = match plan_rebase(
-        &grit,
-        &rebase_request(oids["main_m"], None, oids["a2"]),
-        &rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true),
-    )
-    .expect("plan")
+    let plan = match grit
+        .history()
+        .plan_rebase(
+            &rebase_request(oids["main_m"], None, oids["a2"]),
+            &rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true),
+        )
+        .expect("plan")
     {
         RebasePlan::Plan(plan) => plan,
         other => panic!("expected plan, got {other:?}"),
@@ -299,12 +303,13 @@ fn rebase_onto_moves_stacked_merge_with_unrelated_second_parent() {
     );
     git(wt, &["checkout", "a"]);
     let grit = open_grit(wt);
-    let plan = match plan_rebase(
-        &grit,
-        &rebase_request(oids["main_m"], None, oids["a2"]),
-        &rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true),
-    )
-    .expect("plan")
+    let plan = match grit
+        .history()
+        .plan_rebase(
+            &rebase_request(oids["main_m"], None, oids["a2"]),
+            &rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true),
+        )
+        .expect("plan")
     {
         RebasePlan::Plan(plan) => plan,
         other => panic!("expected plan, got {other:?}"),
@@ -345,12 +350,13 @@ fn rebase_onto_moves_stacked_merge_with_unrelated_first_parent() {
     );
     git(wt, &["checkout", "a"]);
     let grit = open_grit(wt);
-    let plan = match plan_rebase(
-        &grit,
-        &rebase_request(oids["main_m"], None, oids["a2"]),
-        &rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true),
-    )
-    .expect("plan")
+    let plan = match grit
+        .history()
+        .plan_rebase(
+            &rebase_request(oids["main_m"], None, oids["a2"]),
+            &rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true),
+        )
+        .expect("plan")
     {
         RebasePlan::Plan(plan) => plan,
         other => panic!("expected plan, got {other:?}"),
@@ -379,14 +385,15 @@ fn rebase_onto_moves_stacked_branches() {
     );
     let onto = commit_file(wt, "base.txt", "base\n", "onto");
     let grit = open_grit(wt);
-    let plan = rebase_onto(
-        &grit,
-        oids["u"],
-        onto,
-        &[oids["c"]],
-        &rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true),
-    )
-    .expect("plan");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            oids["u"],
+            onto,
+            &[oids["c"]],
+            &rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true),
+        )
+        .expect("plan");
     let main_update = plan
         .ref_updates
         .iter()
@@ -416,14 +423,15 @@ fn rebase_onto_skips_already_applied_by_patch_id() {
     let (upstream, onto, tip) = init_rebase_fixture(wt);
     let second = git_rev_parse(wt, "main~1");
     let grit = open_grit(wt);
-    let plan = rebase_onto(
-        &grit,
-        upstream,
-        onto,
-        &[tip],
-        &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
-    )
-    .expect("plan");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            upstream,
+            onto,
+            &[tip],
+            &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
+        )
+        .expect("plan");
     let second_row = plan
         .commits
         .iter()
@@ -444,14 +452,15 @@ fn rebase_onto_keep_applied() {
     let (upstream, onto, tip) = init_rebase_fixture(wt);
     let second = git_rev_parse(wt, "main~1");
     let grit = open_grit(wt);
-    let plan = rebase_onto(
-        &grit,
-        upstream,
-        onto,
-        &[tip],
-        &rebase_opts(RefScope::Head, EmptyPolicy::Keep, false),
-    )
-    .expect("plan");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            upstream,
+            onto,
+            &[tip],
+            &rebase_opts(RefScope::Head, EmptyPolicy::Keep, false),
+        )
+        .expect("plan");
     let second_row = plan
         .commits
         .iter()
@@ -480,14 +489,15 @@ fn rebase_onto_replays_merge_in_range() {
     );
     let onto = commit_file(wt, "onto.txt", "x\n", "onto");
     let grit = open_grit(wt);
-    let plan = rebase_onto(
-        &grit,
-        oids["u"],
-        onto,
-        &[oids["d"]],
-        &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
-    )
-    .expect("rebase with merge");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            oids["u"],
+            onto,
+            &[oids["d"]],
+            &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
+        )
+        .expect("rebase with merge");
     let merge_row = plan
         .commits
         .iter()
@@ -513,14 +523,15 @@ fn rebase_onto_conflict_changes_nothing() {
     let onto = git_rev_parse(wt, "HEAD");
     git(wt, &["checkout", "topic"]);
     let grit = open_grit(wt);
-    let err = rebase_onto(
-        &grit,
-        upstream,
-        onto,
-        &[tip],
-        &rebase_opts(RefScope::Head, EmptyPolicy::Abort, true),
-    )
-    .expect_err("conflict");
+    let err = grit
+        .history()
+        .rebase_onto(
+            upstream,
+            onto,
+            &[tip],
+            &rebase_opts(RefScope::Head, EmptyPolicy::Abort, true),
+        )
+        .expect_err("conflict");
     assert!(matches!(
         err,
         grit_lib::revwalk::history::HistoryError::Conflict { .. }
@@ -673,14 +684,15 @@ fn rebase_onto_bare_repository() {
         .expect("onto");
     write_ref(grit.git_dir(), "refs/heads/main", &tip).expect("ref");
     let open = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let plan = rebase_onto(
-        &open,
-        u,
-        onto,
-        &[tip],
-        &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
-    )
-    .expect("plan bare");
+    let plan = open
+        .history()
+        .rebase_onto(
+            u,
+            onto,
+            &[tip],
+            &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
+        )
+        .expect("plan bare");
     apply_plan(&open, &plan);
     assert_ne!(
         resolve_ref(open.git_dir(), "refs/heads/main").expect("ref"),
@@ -708,7 +720,10 @@ fn history_rebase_matches_git_replay_onto() {
     let mut replay_opts = rebase_opts(RefScope::Head, EmptyPolicy::Drop, false);
     replay_opts.skip_applied = false;
     replay_opts.rewrite.preserve_committer = true;
-    let plan = rebase_onto(&grit, u_g, o_g, &[t_g], &replay_opts).expect("grit plan");
+    let plan = grit
+        .history()
+        .rebase_onto(u_g, o_g, &[t_g], &replay_opts)
+        .expect("grit plan");
     apply_plan(&grit, &plan);
     let replay = std::process::Command::new("git")
         .current_dir(wt_git)
@@ -752,7 +767,11 @@ fn rebase_request(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> 
 }
 
 fn plan_apply(grit: &Repository, request: RebaseRequest, opts: &RebaseOntoOptions) -> ObjectId {
-    match plan_rebase(grit, &request, opts).expect("plan_rebase") {
+    match grit
+        .history()
+        .plan_rebase(&request, opts)
+        .expect("plan_rebase")
+    {
         RebasePlan::UpToDate => request.branch_tip,
         RebasePlan::Conflict { .. } => panic!("unexpected conflict"),
         RebasePlan::Plan(plan) => {
@@ -791,7 +810,10 @@ fn plan_rebase_matches_git_rebase_linear() {
     let grit = open_grit(wt);
     let opts = rebase_opts(RefScope::Head, EmptyPolicy::Drop, true);
     let before = git_rev_parse(wt, "HEAD");
-    let plan = plan_rebase(&grit, &rebase_request(upstream, None, tip), &opts).expect("plan");
+    let plan = grit
+        .history()
+        .plan_rebase(&rebase_request(upstream, None, tip), &opts)
+        .expect("plan");
     assert_eq!(plan, RebasePlan::UpToDate);
     assert_eq!(before, tip);
     git(wt, &["rebase", &upstream.to_hex()]);
@@ -813,7 +835,10 @@ fn plan_rebase_up_to_date_is_noop() {
     let tip = git_rev_parse(wt, "HEAD");
     let grit = open_grit(wt);
     let opts = rebase_opts(RefScope::Head, EmptyPolicy::Drop, true);
-    let plan = plan_rebase(&grit, &rebase_request(upstream, None, tip), &opts).expect("plan");
+    let plan = grit
+        .history()
+        .plan_rebase(&rebase_request(upstream, None, tip), &opts)
+        .expect("plan");
     assert_eq!(plan, RebasePlan::UpToDate);
     assert_eq!(
         resolve_ref(grit.git_dir(), "refs/heads/main").expect("main"),
@@ -836,11 +861,14 @@ fn plan_rebase_does_not_skip_when_onto_patch_differs() {
     git(wt, &["checkout", "main"]);
     let grit = open_grit(wt);
     let opts = rebase_opts(RefScope::Head, EmptyPolicy::Drop, true);
-    let plan =
-        match plan_rebase(&grit, &rebase_request(fork, Some(onto), tip), &opts).expect("plan") {
-            RebasePlan::Plan(p) => p,
-            other => panic!("expected plan, got {other:?}"),
-        };
+    let plan = match grit
+        .history()
+        .plan_rebase(&rebase_request(fork, Some(onto), tip), &opts)
+        .expect("plan")
+    {
+        RebasePlan::Plan(p) => p,
+        other => panic!("expected plan, got {other:?}"),
+    };
     let topic_row = plan
         .commits
         .iter()
@@ -860,7 +888,9 @@ fn plan_rebase_skips_applied_only_from_fork_to_onto() {
     let second = git_rev_parse(wt, "main~1");
     let grit = open_grit(wt);
     let opts = rebase_opts(RefScope::Head, EmptyPolicy::Drop, true);
-    let plan = match plan_rebase(&grit, &rebase_request(upstream, Some(onto), tip), &opts)
+    let plan = match grit
+        .history()
+        .plan_rebase(&rebase_request(upstream, Some(onto), tip), &opts)
         .expect("plan")
     {
         RebasePlan::Plan(p) => p,
@@ -973,12 +1003,13 @@ fn plan_rebase_conflict_reports_paths_changes_nothing() {
     let onto = git_rev_parse(wt, "HEAD");
     git(wt, &["checkout", "topic"]);
     let grit = open_grit(wt);
-    let plan = plan_rebase(
-        &grit,
-        &rebase_request(upstream, Some(onto), tip),
-        &rebase_opts(RefScope::Head, EmptyPolicy::Abort, true),
-    )
-    .expect("plan");
+    let plan = grit
+        .history()
+        .plan_rebase(
+            &rebase_request(upstream, Some(onto), tip),
+            &rebase_opts(RefScope::Head, EmptyPolicy::Abort, true),
+        )
+        .expect("plan");
     match plan {
         RebasePlan::Conflict { conflicts, .. } => {
             assert_eq!(
@@ -1028,7 +1059,11 @@ fn plan_rebase_over_merged_unrelated_root_matches_git_rebase() {
 
     let grit = open_grit(wt);
     let opts = rebase_opts(RefScope::Head, EmptyPolicy::Drop, true);
-    let plan = match plan_rebase(&grit, &rebase_request(main, None, tip), &opts).expect("plan") {
+    let plan = match grit
+        .history()
+        .plan_rebase(&rebase_request(main, None, tip), &opts)
+        .expect("plan")
+    {
         RebasePlan::Plan(plan) => plan,
         other => panic!("expected plan, got {other:?}"),
     };
@@ -1061,14 +1096,15 @@ fn history_rebase_matches_git_rebase() {
     assert_eq!(t_g, t_git);
     git(wt_g, &["config", "grit.changeIds", "false"]);
     let grit = open_grit(wt_g);
-    let plan = rebase_onto(
-        &grit,
-        u_g,
-        o_g,
-        &[t_g],
-        &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
-    )
-    .expect("grit plan");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            u_g,
+            o_g,
+            &[t_g],
+            &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
+        )
+        .expect("grit plan");
     apply_plan(&grit, &plan);
     git_rebase_onto(wt_git, &o_git, &u_git, "main");
     let grit_tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("grit tip");
@@ -1158,14 +1194,15 @@ fn rebase_favor_theirs_matches_git_rebase_x_theirs() {
     let (u_g, o_g, t_g) = init_rebase_favor_fixture(wt_g);
     let (u_git, o_git, _t_git) = init_rebase_favor_fixture(wt_git);
     let grit = open_grit(wt_g);
-    let plan = rebase_onto(
-        &grit,
-        u_g,
-        o_g,
-        &[t_g],
-        &rebase_opts_with_favor(MergeFavor::Theirs),
-    )
-    .expect("grit plan");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            u_g,
+            o_g,
+            &[t_g],
+            &rebase_opts_with_favor(MergeFavor::Theirs),
+        )
+        .expect("grit plan");
     apply_plan(&grit, &plan);
     git_rebase_onto_with_strategy(wt_git, &o_git, &u_git, "topic", "theirs");
     let grit_tip = git_rev_parse(wt_g, "topic");
@@ -1189,14 +1226,10 @@ fn rebase_favor_ours_matches_git_rebase_x_ours() {
     let (u_g, o_g, t_g) = init_rebase_favor_fixture(wt_g);
     let (u_git, o_git, _t_git) = init_rebase_favor_fixture(wt_git);
     let grit = open_grit(wt_g);
-    let plan = rebase_onto(
-        &grit,
-        u_g,
-        o_g,
-        &[t_g],
-        &rebase_opts_with_favor(MergeFavor::Ours),
-    )
-    .expect("grit plan");
+    let plan = grit
+        .history()
+        .rebase_onto(u_g, o_g, &[t_g], &rebase_opts_with_favor(MergeFavor::Ours))
+        .expect("grit plan");
     apply_plan(&grit, &plan);
     git_rebase_onto_with_strategy(wt_git, &o_git, &u_git, "topic", "ours");
     let grit_tip = git_rev_parse(wt_g, "topic");
@@ -1241,7 +1274,10 @@ fn rebase_check_reports_conflict_without_side_effects() {
     };
     let opts = rebase_opts(RefScope::Head, EmptyPolicy::Abort, true);
     let before = snapshot_repo_side_effects(wt);
-    let check = plan_rebase_check(&grit, &request, &opts).expect("check");
+    let check = grit
+        .history()
+        .plan_rebase_check(&request, &opts)
+        .expect("check");
     let after = snapshot_repo_side_effects(wt);
     assert_eq!(before, after, "refs, index, worktree and reflog must match");
     match check {
@@ -1273,7 +1309,11 @@ fn rebase_check_names_sibling_branch_whose_replay_conflicts() {
     };
 
     let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true);
-    match plan_rebase_check(&grit, &request, &opts).expect("check") {
+    match grit
+        .history()
+        .plan_rebase_check(&request, &opts)
+        .expect("check")
+    {
         RebaseCheckPlan::Conflict {
             commit,
             subject,
@@ -1290,7 +1330,9 @@ fn rebase_check_names_sibling_branch_whose_replay_conflicts() {
 
     let head_only = rebase_opts(RefScope::Head, EmptyPolicy::Drop, true);
     assert!(matches!(
-        plan_rebase_check(&grit, &request, &head_only).expect("check"),
+        grit.history()
+            .plan_rebase_check(&request, &head_only)
+            .expect("check"),
         RebaseCheckPlan::Clean { .. }
     ));
     assert_eq!(git_rev_parse(wt, "refs/heads/other"), o1);
@@ -1329,7 +1371,10 @@ fn rebase_onto_flatten_keeps_local_commit_under_merge_of_upstream_like_git() {
     git(wt, &["config", "grit.changeIds", "false"]);
     let grit = open_grit(wt);
 
-    let plan = rebase_onto(&grit, s2, s3, &[merge], &flatten_opts()).expect("plan");
+    let plan = grit
+        .history()
+        .rebase_onto(s2, s3, &[merge], &flatten_opts())
+        .expect("plan");
 
     let merge_row = plan.commits.iter().find(|r| r.old == merge).expect("row");
     assert_eq!(merge_row.new, None, "the merge of upstream is dropped");
@@ -1362,7 +1407,10 @@ fn rebase_onto_flatten_linearizes_topic_merge_like_git() {
     git(wt, &["config", "grit.changeIds", "false"]);
     let grit = open_grit(wt);
 
-    let plan = rebase_onto(&grit, fork, onto, &[merge], &flatten_opts()).expect("plan");
+    let plan = grit
+        .history()
+        .rebase_onto(fork, onto, &[merge], &flatten_opts())
+        .expect("plan");
     let tip = planned_ref_tip(&plan, "refs/heads/main");
 
     git_rebase_onto(wt, &onto, &fork, "main");
@@ -1421,7 +1469,11 @@ fn rebase_feat_onto_main(wt: &std::path::Path) -> grit_lib::revwalk::history::Re
     let grit = open_grit(wt);
     let request = rebase_request(git_rev_parse(wt, "main"), None, git_rev_parse(wt, "feat"));
     let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true);
-    let plan = match plan_rebase(&grit, &request, &opts).expect("plan_rebase") {
+    let plan = match grit
+        .history()
+        .plan_rebase(&request, &opts)
+        .expect("plan_rebase")
+    {
         RebasePlan::Plan(plan) => plan,
         other => panic!("expected a plan, got {other:?}"),
     };
@@ -1878,14 +1930,22 @@ fn rebase_merge_only_integration_branch_replays_issue_2321() {
 
     let grit = open_grit(wt_g);
     let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, false);
-    match plan_rebase(&grit, &rebase_request(fork, Some(onto), tip), &opts).expect("plan") {
+    match grit
+        .history()
+        .plan_rebase(&rebase_request(fork, Some(onto), tip), &opts)
+        .expect("plan")
+    {
         RebasePlan::UpToDate => panic!("merge-only integration branch must not be up to date"),
         RebasePlan::Conflict { .. } => panic!("unexpected conflict"),
         RebasePlan::Plan(plan) => {
             assert_eq!(plan.commits.len(), 2, "topic commit and merge");
         }
     }
-    match plan_rebase_check(&grit, &rebase_request(fork, Some(onto), tip), &opts).expect("check") {
+    match grit
+        .history()
+        .plan_rebase_check(&rebase_request(fork, Some(onto), tip), &opts)
+        .expect("check")
+    {
         RebaseCheckPlan::UpToDate => panic!("check must not report up to date"),
         RebaseCheckPlan::Clean { commits } => assert_eq!(commits.len(), 2),
         other => panic!("unexpected check plan: {other:?}"),
@@ -1987,7 +2047,11 @@ fn rebase_multi_commit_boundary_topic_reparents_root_issue_2321() {
 
     let grit = open_grit(wt_g);
     let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, false);
-    match plan_rebase(&grit, &rebase_request(fork, Some(onto), tip), &opts).expect("plan") {
+    match grit
+        .history()
+        .plan_rebase(&rebase_request(fork, Some(onto), tip), &opts)
+        .expect("plan")
+    {
         RebasePlan::UpToDate => panic!("must not be up to date"),
         RebasePlan::Conflict { .. } => panic!("unexpected conflict"),
         RebasePlan::Plan(plan) => assert_eq!(plan.commits.len(), 3, "topic1, topic2, merge"),
@@ -2106,7 +2170,11 @@ fn rebase_chain_of_merge_only_integration_branches_replays_issue_2321() {
 
     let grit = open_grit(wt_g);
     let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, false);
-    match plan_rebase(&grit, &rebase_request(fork, Some(onto), tip), &opts).expect("plan") {
+    match grit
+        .history()
+        .plan_rebase(&rebase_request(fork, Some(onto), tip), &opts)
+        .expect("plan")
+    {
         RebasePlan::UpToDate => panic!("merge-only chain must not be up to date"),
         RebasePlan::Conflict { .. } => panic!("unexpected conflict"),
         RebasePlan::Plan(plan) => assert_eq!(plan.commits.len(), 6, "3 topics + 3 merges"),
@@ -2171,7 +2239,11 @@ fn rebase_leaves_backup_branch_at_checked_out_tip() {
     let grit = open_grit(wt);
     let request = rebase_request(git_rev_parse(wt, "main"), None, old_tip);
     let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true);
-    let plan = match plan_rebase(&grit, &request, &opts).expect("plan_rebase") {
+    let plan = match grit
+        .history()
+        .plan_rebase(&request, &opts)
+        .expect("plan_rebase")
+    {
         RebasePlan::Plan(plan) => plan,
         other => panic!("expected a plan, got {other:?}"),
     };
@@ -2220,14 +2292,15 @@ fn rebase_replay_delete_last_file_in_dir_matches_git_tree() {
     let tip = git_rev_parse(wt, "HEAD");
 
     let grit = open_grit(wt);
-    let plan = rebase_onto(
-        &grit,
-        fork,
-        onto,
-        &[tip],
-        &rebase_opts(RefScope::Head, EmptyPolicy::Drop, false),
-    )
-    .expect("grit plan");
+    let plan = grit
+        .history()
+        .rebase_onto(
+            fork,
+            onto,
+            &[tip],
+            &rebase_opts(RefScope::Head, EmptyPolicy::Drop, false),
+        )
+        .expect("grit plan");
     apply_plan(&grit, &plan);
     let grit_tree = git_rev_parse_verify(wt, "HEAD^{tree}");
 
@@ -2268,7 +2341,11 @@ fn fast_forward_rebase_leaves_backup_branch_at_checked_out_tip() {
     let grit = open_grit(wt);
     let request = rebase_request(main, None, old_tip);
     let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true);
-    let plan = match plan_rebase(&grit, &request, &opts).expect("plan_rebase") {
+    let plan = match grit
+        .history()
+        .plan_rebase(&request, &opts)
+        .expect("plan_rebase")
+    {
         RebasePlan::Plan(plan) => plan,
         other => panic!("expected a plan, got {other:?}"),
     };

@@ -178,11 +178,8 @@ pub struct AbsorbPlan {
 
 /// Plan absorption of staged hunks into commits between `opts.base` and `HEAD`.
 ///
-/// # Errors
-///
-/// Returns [`HistoryError::BareRepository`], [`HistoryError::NothingStaged`], merge
-/// [`HistoryError::Conflict`], and other planning errors.
-pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> crate::error::Result<AbsorbPlan> {
+/// See [`History::absorb`](super::History::absorb).
+pub(crate) fn absorb(repo: &Repository, opts: &AbsorbOptions) -> crate::error::Result<AbsorbPlan> {
     if repo.is_bare() {
         return Err(HistoryError::BareRepository.into());
     }
@@ -341,10 +338,8 @@ fn empty_absorb_plan() -> AbsorbPlan {
 
 /// Paths touched by staged hunks that would be consumed on apply.
 ///
-/// # Errors
-///
-/// Returns [`HistoryError::BareRepository`] or diff failures.
-pub fn staged_absorb_paths(repo: &Repository) -> crate::error::Result<Vec<String>> {
+/// See [`History::staged_paths`](super::History::staged_paths).
+pub(crate) fn staged_absorb_paths(repo: &Repository) -> crate::error::Result<Vec<String>> {
     staged_fixup_paths(repo)
 }
 
@@ -1363,10 +1358,11 @@ fn restore_index_path_from_tree(
 
 /// Default exclusive base for absorb when `--base` is omitted.
 ///
-/// # Errors
-///
-/// Returns planning failures when `HEAD` or branch metadata cannot be read.
-pub fn default_absorb_base(repo: &Repository, head: ObjectId) -> crate::error::Result<ObjectId> {
+/// See [`History::default_absorb_base`](super::History::default_absorb_base).
+pub(crate) fn default_absorb_base(
+    repo: &Repository,
+    head: ObjectId,
+) -> crate::error::Result<ObjectId> {
     let stack = build_absorb_stack(repo, head, None)?;
     Ok(stack
         .commits

@@ -256,21 +256,9 @@ pub(crate) fn apply_index_to_worktree_delta(
     join_blob_lines(&out)
 }
 
-/// Apply an absorb [`AbsorbPlan`] and leave unassigned hunks staged.
-///
-/// # Errors
-///
-/// Same as [`apply_fixup_rewrite`].
-pub fn apply_absorb_rewrite(
-    repo: &Repository,
-    absorb: &AbsorbPlan,
-    opts: &ApplyOptions,
-) -> crate::error::Result<AppliedRewrite> {
-    apply_absorb_rewrite_with_cancel(repo, absorb, opts, &CancelToken::never())
-}
-
-/// Like [`apply_absorb_rewrite`], but stops when `cancel` is set and rolls back partial work.
-pub fn apply_absorb_rewrite_with_cancel(
+/// Apply an absorb [`AbsorbPlan`] and leave unassigned hunks staged; see
+/// [`History::apply_absorb`](super::History::apply_absorb).
+pub(crate) fn apply_absorb_rewrite(
     repo: &Repository,
     absorb: &AbsorbPlan,
     opts: &ApplyOptions,
@@ -441,22 +429,9 @@ fn apply_absorb_worktree_after_refs(
     Ok(())
 }
 
-/// Apply a fixup [`RewritePlan`] and align the index with the new `HEAD` on paths that were staged.
-///
-/// # Errors
-///
-/// Same as [`apply_rewrite`], plus index update failures after a successful ref move.
-pub fn apply_fixup_rewrite(
-    repo: &Repository,
-    plan: &RewritePlan,
-    opts: &ApplyOptions,
-    staged_paths: &[String],
-) -> crate::error::Result<AppliedRewrite> {
-    apply_fixup_rewrite_with_cancel(repo, plan, opts, staged_paths, &CancelToken::never())
-}
-
-/// Like [`apply_fixup_rewrite`], but stops when `cancel` is set and rolls back partial work.
-pub fn apply_fixup_rewrite_with_cancel(
+/// Apply a fixup [`RewritePlan`] and align the index with the new `HEAD` on paths that were
+/// staged; see [`History::apply_fixup`](super::History::apply_fixup).
+pub(crate) fn apply_fixup_rewrite(
     repo: &Repository,
     plan: &RewritePlan,
     opts: &ApplyOptions,
@@ -980,10 +955,11 @@ pub(crate) fn commit_tree_for_apply(
 
 /// Runs the same worktree safety checks as [`apply_rewrite`] without moving refs.
 ///
-/// # Errors
-///
-/// Returns [`HistoryError::LocalChangesWouldBeOverwritten`] or [`HistoryError::WorktreeApply`].
-pub fn verify_rewrite_plan(repo: &Repository, plan: &RewritePlan) -> crate::error::Result<()> {
+/// See [`History::verify_plan`](super::History::verify_plan).
+pub(crate) fn verify_rewrite_plan(
+    repo: &Repository,
+    plan: &RewritePlan,
+) -> crate::error::Result<()> {
     let (old_tree, new_tree) = head_tree_transition(plan);
     if repo.is_bare() {
         return Ok(());
@@ -994,9 +970,10 @@ pub fn verify_rewrite_plan(repo: &Repository, plan: &RewritePlan) -> crate::erro
     Ok(())
 }
 
-/// Returns [`HistoryError::LocalChangesWouldBeOverwritten`], [`HistoryError::HeadMovedSincePlan`],
-/// [`HistoryError::RefCasMismatch`], [`HistoryError::RefApply`], or [`HistoryError::WorktreeApply`].
-pub fn apply_rewrite(
+/// Apply `plan`: move every planned ref in one transaction, then update the work tree.
+///
+/// See [`History::apply`](super::History::apply).
+pub(crate) fn apply_rewrite(
     repo: &Repository,
     plan: &RewritePlan,
     opts: &ApplyOptions,
@@ -2104,9 +2081,10 @@ pub(crate) fn restore_worktree_path(
 #[path = "rewrite_journal.rs"]
 mod rewrite_journal;
 
-pub use rewrite_journal::{
+pub use rewrite_journal::RewriteApplyRecovery;
+pub(crate) use rewrite_journal::{
     abort_interrupted_rewrite_apply, ensure_rewrite_apply_ready, recover_interrupted_rewrite_apply,
-    rewrite_apply_journal_active, RewriteApplyRecovery,
+    rewrite_apply_journal_active,
 };
 
 #[cfg(test)]
@@ -2117,9 +2095,8 @@ mod inject_and_apply_tests {
     use std::sync::Arc;
 
     use crate::error::Error;
-    use crate::history::{
-        plan_rewrite, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
-    };
+    use crate::history::plan::plan_rewrite;
+    use crate::history::{CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions};
     use crate::objects::{parse_commit, ObjectKind};
     use crate::reflog::ReflogEntry;
     use crate::refs::store::{
@@ -2882,6 +2859,7 @@ mod inject_and_apply_tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &staged_paths,
+            &CancelToken::never(),
         )
         .expect_err("inject");
         assert!(matches!(

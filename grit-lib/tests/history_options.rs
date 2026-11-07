@@ -7,11 +7,11 @@ use crate::support;
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, ObjectKind};
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::write_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, drop as history_drop, reword, squash, ApplyOptions, EmptyPolicy, HistoryError,
-    RefScope, RewriteOptions, SquashMessage, SquashOptions,
+    ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions, SquashMessage, SquashOptions,
 };
 
 use support::{git_fsck_strict, HistoryRepo};
@@ -113,18 +113,19 @@ fn drop_keep_empty_keeps_replayed_empty_commit() {
     let wt = repo.worktree();
     let grit = open_grit(wt);
     let (_a, b, c) = init_undo_redo_chain(&grit);
-    let plan = history_drop(
-        &grit,
-        b,
-        &RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Keep,
-            committer: committer(1).parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
-    )
-    .expect("drop with keep");
+    let plan = grit
+        .history()
+        .drop_commit(
+            b,
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Keep,
+                committer: committer(1).parse().expect("signature"),
+                preserve_committer: false,
+                sign: true,
+            },
+        )
+        .expect("drop with keep");
     let c_row = plan.commits.iter().find(|r| r.old == c).expect("c row");
     let new_c = c_row.new.expect("empty replay kept as commit");
     assert_ne!(
@@ -135,14 +136,14 @@ fn drop_keep_empty_keeps_replayed_empty_commit() {
     let parent_tree = write_tree_with_blob(&grit, "f.txt", b"a\n").expect("parent tree");
     assert_eq!(parsed.tree, parent_tree);
     assert_eq!(parsed.parents, vec![_a]);
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     git_fsck_strict(wt);
 }
 
@@ -153,8 +154,7 @@ fn squash_empty_abort_at_head_fast_path() {
     let grit = open_grit(wt);
     let (a, _b, c) = init_undo_redo_chain(&grit);
     let range = format!("{}..{}", a.to_hex(), c.to_hex());
-    match squash(
-        &grit,
+    match grit.history().squash(
         &[&range],
         &SquashOptions {
             message: SquashMessage::Oldest,
@@ -188,21 +188,22 @@ fn squash_keep_committer_at_head_fast_path() {
     let c = write_test_commit(&grit, tree_c, &[b], "c", author, original_committer).expect("c");
     write_ref(grit.git_dir(), "refs/heads/main", &c).expect("ref");
     let range = format!("{}..{}", a.to_hex(), c.to_hex());
-    let plan = squash(
-        &grit,
-        &[&range],
-        &SquashOptions {
-            message: SquashMessage::Oldest,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: committer(1800).parse().expect("signature"),
-                preserve_committer: true,
-                sign: true,
+    let plan = grit
+        .history()
+        .squash(
+            &[&range],
+            &SquashOptions {
+                message: SquashMessage::Oldest,
+                rewrite: RewriteOptions {
+                    scope: RefScope::Head,
+                    empty: EmptyPolicy::Drop,
+                    committer: committer(1800).parse().expect("signature"),
+                    preserve_committer: true,
+                    sign: true,
+                },
             },
-        },
-    )
-    .expect("squash at head");
+        )
+        .expect("squash at head");
     let new_b = plan.replacement(b).expect("squashed");
     let old_raw = grit.odb().read(&b).expect("read old b").data;
     let new_raw = grit.odb().read(&new_b).expect("read new").data;
@@ -230,8 +231,7 @@ fn squash_empty_abort_returns_became_empty() {
     let d = write_test_commit(&grit, tree_d, &[c], "d", author, ident).expect("d");
     write_ref(grit.git_dir(), "refs/heads/main", &d).expect("ref");
     let range = format!("{}..{}", a.to_hex(), c.to_hex());
-    match squash(
-        &grit,
+    match grit.history().squash(
         &[&range],
         &SquashOptions {
             message: SquashMessage::Oldest,
@@ -257,19 +257,21 @@ fn reword_keep_committer_preserves_committer_line() {
     support::commit_file(wt, "one.txt", "1\n", "subject");
     let b = support::git_rev_parse(wt, "HEAD").expect("tip");
     let grit = open_grit(wt);
-    let plan = reword(
-        &grit,
-        b,
-        "new subject line\n".into(),
-        &RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: committer(99).parse().expect("signature"),
-            preserve_committer: true,
-            sign: true,
-        },
-    )
-    .expect("reword");
+    let plan = grit
+        .history()
+        .reword(
+            b,
+            &grit_lib::revwalk::history::RewordOptions::default()
+                .with_message("new subject line\n".into()),
+            &RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: committer(99).parse().expect("signature"),
+                preserve_committer: true,
+                sign: true,
+            },
+        )
+        .expect("reword");
     let new_b = plan.replacement(b).expect("replacement");
     let old_raw = grit.odb().read(&b).expect("read old").data;
     let new_raw = grit.odb().read(&new_b).expect("read new").data;
@@ -282,13 +284,13 @@ fn reword_keep_committer_preserves_committer_line() {
         .find_map(|line| line.strip_prefix(b"committer "))
         .expect("new committer line");
     assert_eq!(new_committer, old_committer);
-    apply_rewrite(
-        &grit,
-        &plan,
-        &apply_opts(),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    grit.history()
+        .apply(
+            &plan,
+            &apply_opts(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
     git_fsck_strict(wt);
 }

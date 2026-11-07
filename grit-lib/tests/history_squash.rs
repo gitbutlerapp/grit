@@ -5,11 +5,12 @@
 use crate::support;
 
 use grit_lib::objects::parse_commit;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, squash, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-    RewritePlan, SquashMessage, SquashOptions,
+    ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions, RewritePlan, SquashMessage,
+    SquashOptions,
 };
 
 use support::{
@@ -42,19 +43,19 @@ fn squash_opts(scope: RefScope) -> SquashOptions {
 }
 
 fn apply_plan(repo: &Repository, plan: &RewritePlan) {
-    apply_rewrite(
-        repo,
-        plan,
-        &ApplyOptions {
-            identity: support::reflog_signature("Squasher <s@grit.test>"),
-            reflog_message: "history squash".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("apply");
+    repo.history()
+        .apply(
+            plan,
+            &ApplyOptions {
+                identity: support::reflog_signature("Squasher <s@grit.test>"),
+                reflog_message: "history squash".into(),
+                record_operation: None,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("apply");
 }
 
 fn range_spec(from: &grit_lib::objects::ObjectId, to: &grit_lib::objects::ObjectId) -> String {
@@ -71,12 +72,13 @@ fn squash_folds_linear_range_into_oldest() {
         &[("d", "refs/heads/main")],
     );
     let grit = open_grit(wt);
-    let plan = squash(
-        &grit,
-        &[&range_spec(&oids["a"], &oids["d"])],
-        &squash_opts(RefScope::Branches),
-    )
-    .expect("squash");
+    let plan = grit
+        .history()
+        .squash(
+            &[&range_spec(&oids["a"], &oids["d"])],
+            &squash_opts(RefScope::Branches),
+        )
+        .expect("squash");
     apply_plan(&grit, &plan);
     let main = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
     let parents = parse_commit(&grit.odb().read(&main).expect("read").data)
@@ -105,12 +107,13 @@ fn squash_interior_range_replays_newer_commits() {
         &[("d", "refs/heads/main")],
     );
     let grit = open_grit(wt);
-    let plan = squash(
-        &grit,
-        &[&range_spec(&oids["a"], &oids["c"])],
-        &squash_opts(RefScope::Branches),
-    )
-    .expect("squash");
+    let plan = grit
+        .history()
+        .squash(
+            &[&range_spec(&oids["a"], &oids["c"])],
+            &squash_opts(RefScope::Branches),
+        )
+        .expect("squash");
     apply_plan(&grit, &plan);
     let subjects: Vec<_> = git(
         wt,
@@ -153,12 +156,10 @@ fn squash_keeps_oldest_author_and_tip_tree() {
     let c = git_rev_parse_verify(wt, "HEAD").expect("c");
     git(wt, &["update-ref", "refs/heads/main", &c.to_hex()]);
     let grit = open_grit(wt);
-    let plan = squash(
-        &grit,
-        &[&range_spec(&a, &c)],
-        &squash_opts(RefScope::Branches),
-    )
-    .expect("squash");
+    let plan = grit
+        .history()
+        .squash(&[&range_spec(&a, &c)], &squash_opts(RefScope::Branches))
+        .expect("squash");
     let folded = plan
         .commits
         .iter()
@@ -184,16 +185,17 @@ fn squash_rejects_disconnected_range() {
     );
     let grit = open_grit(wt);
     let exclude = format!("^{}", oids["a"].to_hex());
-    let err = squash(
-        &grit,
-        &[
-            exclude.as_str(),
-            oids["side"].to_hex().as_str(),
-            oids["c"].to_hex().as_str(),
-        ],
-        &squash_opts(RefScope::Branches),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .squash(
+            &[
+                exclude.as_str(),
+                oids["side"].to_hex().as_str(),
+                oids["c"].to_hex().as_str(),
+            ],
+            &squash_opts(RefScope::Branches),
+        )
+        .unwrap_err();
     assert!(matches!(err, HistoryError::MultipleTips), "{err:?}");
 }
 
@@ -203,12 +205,13 @@ fn squash_rejects_root() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
     let grit = open_grit(wt);
-    let err = squash(
-        &grit,
-        &[&format!("{}..{}", oids["a"].to_hex(), oids["b"].to_hex())],
-        &squash_opts(RefScope::Branches),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .squash(
+            &[&format!("{}..{}", oids["a"].to_hex(), oids["b"].to_hex())],
+            &squash_opts(RefScope::Branches),
+        )
+        .unwrap_err();
     assert!(
         matches!(err, HistoryError::Planning { .. }) && err.to_string().contains("single commit")
     );
@@ -227,12 +230,13 @@ fn squash_rejects_multiple_tips() {
     let exclude = format!("^{}", oids["a"].to_hex());
     let tip_hex = oids["tip"].to_hex();
     let c_hex = oids["c"].to_hex();
-    let err = squash(
-        &grit,
-        &[exclude.as_str(), tip_hex.as_str(), c_hex.as_str()],
-        &squash_opts(RefScope::Branches),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .squash(
+            &[exclude.as_str(), tip_hex.as_str(), c_hex.as_str()],
+            &squash_opts(RefScope::Branches),
+        )
+        .unwrap_err();
     assert!(matches!(err, HistoryError::MultipleTips), "{err:?}");
 }
 
@@ -246,12 +250,13 @@ fn squash_marker_outside_range_refused() {
     let one = git_rev_parse_verify(wt, "HEAD").expect("one");
     commit_file(wt, "f", "3", "fixup! one");
     let grit = open_grit(wt);
-    let err = squash(
-        &grit,
-        &[&format!("{}..HEAD", one.to_hex())],
-        &squash_opts(RefScope::Branches),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .squash(
+            &[&format!("{}..HEAD", one.to_hex())],
+            &squash_opts(RefScope::Branches),
+        )
+        .unwrap_err();
     assert!(matches!(
         err,
         HistoryError::MarkerTargetOutsideRange { .. } | HistoryError::Planning { .. }
@@ -279,12 +284,13 @@ fn squash_amend_marker_replaces_message() {
     commit_file(wt, "f", "3", "tail");
     git(wt, &["update-ref", "refs/heads/main", "HEAD"]);
     let grit = open_grit(wt);
-    let plan = squash(
-        &grit,
-        &[&format!("{}..HEAD~1", a.to_hex())],
-        &squash_opts(RefScope::Branches),
-    )
-    .expect("squash");
+    let plan = grit
+        .history()
+        .squash(
+            &[&format!("{}..HEAD~1", a.to_hex())],
+            &squash_opts(RefScope::Branches),
+        )
+        .expect("squash");
     let new_target = plan
         .commits
         .iter()
@@ -314,16 +320,17 @@ fn squash_oldest_merge_preserves_parents() {
     let tip = git_rev_parse_verify(wt, "HEAD").expect("tip");
     let exclude = format!("^{}", mainline.to_hex());
     let grit = open_grit(wt);
-    let plan = squash(
-        &grit,
-        &[
-            exclude.as_str(),
-            merge.to_hex().as_str(),
-            tip.to_hex().as_str(),
-        ],
-        &squash_opts(RefScope::Head),
-    )
-    .expect("squash");
+    let plan = grit
+        .history()
+        .squash(
+            &[
+                exclude.as_str(),
+                merge.to_hex().as_str(),
+                tip.to_hex().as_str(),
+            ],
+            &squash_opts(RefScope::Head),
+        )
+        .expect("squash");
     let folded = plan
         .commits
         .iter()
@@ -348,23 +355,25 @@ fn squash_divergent_branch_refused_unless_update_refs_head() {
     );
     write_ref(open_grit(wt).git_dir(), "refs/heads/mid", &oids["b"]).expect("mid ref");
     let grit = open_grit(wt);
-    let err = squash(
-        &grit,
-        &[&range_spec(&oids["a"], &oids["d"])],
-        &squash_opts(RefScope::Branches),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .squash(
+            &[&range_spec(&oids["a"], &oids["d"])],
+            &squash_opts(RefScope::Branches),
+        )
+        .unwrap_err();
     assert!(
         matches!(err, HistoryError::DivergentBranch { .. }),
         "{err:?}"
     );
     let side_before = resolve_ref(grit.git_dir(), "refs/heads/mid").expect("mid");
-    let plan = squash(
-        &grit,
-        &[&range_spec(&oids["a"], &oids["d"])],
-        &squash_opts(RefScope::Head),
-    )
-    .expect("head-only");
+    let plan = grit
+        .history()
+        .squash(
+            &[&range_spec(&oids["a"], &oids["d"])],
+            &squash_opts(RefScope::Head),
+        )
+        .expect("head-only");
     apply_plan(&grit, &plan);
     let side_after = resolve_ref(grit.git_dir(), "refs/heads/mid").expect("mid after");
     assert_eq!(side_before, side_after);
@@ -386,12 +395,13 @@ fn squash_divergent_side_branch_forked_from_range() {
     commit_file(wt, "f", "3", "two");
     let two = git_rev_parse_verify(wt, "HEAD").expect("two");
     let grit = open_grit(wt);
-    let err = squash(
-        &grit,
-        &[&format!("{}..{}", base.to_hex(), two.to_hex())],
-        &squash_opts(RefScope::Branches),
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .squash(
+            &[&format!("{}..{}", base.to_hex(), two.to_hex())],
+            &squash_opts(RefScope::Branches),
+        )
+        .unwrap_err();
     assert!(
         matches!(err, HistoryError::DivergentBranch { .. }),
         "{err:?}"
@@ -415,15 +425,16 @@ fn squash_refuses_mixed_range_outside_target_with_combine() {
     commit_file(wt, "f", "2", "tail");
     git(wt, &["update-ref", "refs/heads/main", "HEAD"]);
     let grit = open_grit(wt);
-    let err = squash(
-        &grit,
-        &[&format!("{}..HEAD", alpha.to_hex())],
-        &SquashOptions {
-            message: SquashMessage::Combine,
-            rewrite: squash_opts(RefScope::Head).rewrite,
-        },
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .squash(
+            &[&format!("{}..HEAD", alpha.to_hex())],
+            &SquashOptions {
+                message: SquashMessage::Combine,
+                rewrite: squash_opts(RefScope::Head).rewrite,
+            },
+        )
+        .unwrap_err();
     assert!(
         matches!(err, HistoryError::MarkerTargetOutsideRange { .. }),
         "{err:?}"
@@ -442,15 +453,16 @@ fn squash_refuses_mixed_range_outside_target_with_custom_message() {
     commit_file(wt, "f", "2", "tail");
     git(wt, &["update-ref", "refs/heads/main", "HEAD"]);
     let grit = open_grit(wt);
-    let err = squash(
-        &grit,
-        &[&format!("{}..HEAD", alpha.to_hex())],
-        &SquashOptions {
-            message: SquashMessage::Custom("replacement\n".into()),
-            rewrite: squash_opts(RefScope::Head).rewrite,
-        },
-    )
-    .unwrap_err();
+    let err = grit
+        .history()
+        .squash(
+            &[&format!("{}..HEAD", alpha.to_hex())],
+            &SquashOptions {
+                message: SquashMessage::Custom("replacement\n".into()),
+                rewrite: squash_opts(RefScope::Head).rewrite,
+            },
+        )
+        .unwrap_err();
     assert!(
         matches!(err, HistoryError::MarkerTargetOutsideRange { .. }),
         "{err:?}"
@@ -469,13 +481,13 @@ fn squash_all_markers_for_one_target_allowed() {
     git(wt, &["commit", "--allow-empty", "-m", "fixup! alpha"]);
     git(wt, &["update-ref", "refs/heads/main", "HEAD"]);
     let grit = open_grit(wt);
-    squash(
-        &grit,
-        &[&format!("{}..HEAD", alpha.to_hex())],
-        &SquashOptions {
-            message: SquashMessage::Combine,
-            rewrite: squash_opts(RefScope::Head).rewrite,
-        },
-    )
-    .expect("all-marker outside target squash");
+    grit.history()
+        .squash(
+            &[&format!("{}..HEAD", alpha.to_hex())],
+            &SquashOptions {
+                message: SquashMessage::Combine,
+                rewrite: squash_opts(RefScope::Head).rewrite,
+            },
+        )
+        .expect("all-marker outside target squash");
 }

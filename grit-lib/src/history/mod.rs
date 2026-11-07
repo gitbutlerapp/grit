@@ -12,11 +12,12 @@
 //! (commit signatures are omitted). When change ids are enabled, headerless sources get a
 //! stored derived id; newly inserted commits get fresh ids (see [`crate::change_id`]).
 //!
-//! Library guide: history rewrite planning (see [`plan_rewrite`]).
+//! Every operation is a method on [`History`], from
+//! [`Repository::history`](crate::repo::Repository::history).
 //!
 //! ```rust
 //! use grit_lib::revwalk::history::{
-//!     plan_rewrite, CommitEdit, HistoryEdits, RefScope, RewriteOptions, EmptyPolicy,
+//!     CommitEdit, HistoryEdits, RefScope, RewriteOptions, EmptyPolicy,
 //! };
 //! use grit_lib::objects::ObjectId;
 //! use grit_lib::repo::Repository;
@@ -39,7 +40,7 @@
 //!     preserve_committer: false,
 //!     sign: true,
 //! };
-//! let _plan = plan_rewrite(repo, &edits, &opts)?;
+//! let _plan = repo.history().plan_rewrite(&edits, &opts)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -50,6 +51,7 @@ mod drop;
 mod error;
 mod exec;
 mod fixup;
+mod handle;
 mod last;
 mod message;
 mod r#move;
@@ -69,47 +71,39 @@ mod undo;
 mod undo_work;
 
 pub use absorb::{
-    absorb, default_absorb_base, format_hunk_range_header, staged_absorb_paths, AbsorbExcludedRef,
-    AbsorbOptions, AbsorbPlan, HunkAssignment, HunkRange, UnassignedHunk, UnassignedReason,
-    DEFAULT_ABSORB_STACK_LIMIT,
+    format_hunk_range_header, AbsorbExcludedRef, AbsorbOptions, AbsorbPlan, HunkAssignment,
+    HunkRange, UnassignedHunk, UnassignedReason, DEFAULT_ABSORB_STACK_LIMIT,
 };
-pub use apply::{
-    abort_interrupted_rewrite_apply, apply_absorb_rewrite, apply_absorb_rewrite_with_cancel,
-    apply_fixup_rewrite, apply_fixup_rewrite_with_cancel, apply_rewrite,
-    ensure_rewrite_apply_ready, recover_interrupted_rewrite_apply, rewrite_apply_journal_active,
-    verify_rewrite_plan, RewriteApplyRecovery,
+pub use apply::RewriteApplyRecovery;
+pub(crate) use apply::{
+    abort_interrupted_rewrite_apply, apply_rewrite, ensure_rewrite_apply_ready,
+    recover_interrupted_rewrite_apply, rewrite_apply_journal_active,
 };
-pub use drop::drop;
 pub use error::HistoryError;
-pub use exec::{verify_rebase_with_exec, ExecReport, ExecRunRecord, ExecSpec};
-pub use fixup::{
-    apply_fixup_hunk_selection, apply_fixup_hunk_selection_with_cancel, fixup,
-    fixup_selection_paths, staged_fixup_paths, FixupOptions,
-};
-pub use last::{read_history_last, HistoryLastRecord};
-pub use plan::plan_rewrite;
+pub(crate) use exec::verify_rebase_with_exec;
+pub use exec::{ExecReport, ExecRunRecord, ExecSpec};
+pub use fixup::FixupOptions;
+pub use handle::History;
+pub use last::HistoryLastRecord;
 pub use planning_error::PlanningError;
-pub use r#move::{move_commit, Placement};
+pub use r#move::Placement;
+pub(crate) use rebase::{plan_rebase_check, rebase_request_after_fetch};
 pub use rebase::{
-    plan_rebase, plan_rebase_check, plan_rebase_with_hook, rebase_onto, rebase_request_after_fetch,
-    rebase_run_request, resolve_rebase_use_fork_point, PreRebase, RebaseCheckPlan,
-    RebaseOntoOptions, RebasePlan, RebaseRequest,
+    resolve_rebase_use_fork_point, PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebasePlan,
+    RebaseRequest,
 };
-pub(crate) use rebase_session::persist_rebase_stopped_head_if_missing;
+pub(crate) use rebase_session::{persist_rebase_stopped_head_if_missing, start_rebase};
 pub use rebase_session::{
-    abort_rebase, continue_rebase, skip_rebase, start_rebase, start_rebase_with_exec, RebaseAbort,
-    RebaseOutcome, RebaseSessionError, RebaseStop, StartRebaseOptions,
+    RebaseAbort, RebaseOutcome, RebaseSessionError, RebaseStop, StartRebaseOptions,
 };
-pub use reword::{normalize_rewrite_message, reword, reword_with, RewordOptions};
-pub use split::split;
-pub use squash::{squash, SquashMessage, SquashOptions};
-pub use subject::{commit_message_subject_line, rewritten_row_subject};
+pub use reword::{normalize_rewrite_message, RewordOptions};
+pub use squash::{SquashMessage, SquashOptions};
+pub use subject::commit_message_subject_line;
 pub use types::{
     AppliedRewrite, ApplyOptions, CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, NewCommit,
     Pathspec, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,
-    SplitOptions, UndoOutcome,
+    SplitOptions, UndoMode, UndoOutcome,
 };
-pub use undo::{undo_last_rewrite, undo_last_rewrite_with_cancel};
 
 /// Read and parse commit `oid`.
 ///
@@ -238,7 +232,10 @@ mod tests {
     #[test]
     fn drop_of_a_non_commit_is_a_typed_library_error() {
         let (_dir, repo, _tip, blob) = repo_with_history();
-        let err = drop(&repo, blob, &rewrite_opts()).unwrap_err();
+        let err = repo
+            .history()
+            .drop_commit(blob, &rewrite_opts())
+            .unwrap_err();
         assert!(
             matches!(&err, Error::Object(ObjectError::UnexpectedKind { .. })),
             "{err:?}"
@@ -252,7 +249,10 @@ mod tests {
             message: SquashMessage::Oldest,
             rewrite: rewrite_opts(),
         };
-        let err = squash(&repo, &["no-such-branch..main"], &opts).unwrap_err();
+        let err = repo
+            .history()
+            .squash(&["no-such-branch..main"], &opts)
+            .unwrap_err();
         assert!(
             matches!(
                 &err,

@@ -18,9 +18,10 @@ use grit_lib::porcelain::merge::{
     MergePredictionOptions,
 };
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
+use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    rebase_onto, EmptyPolicy, HistoryError, RebaseOntoOptions, RefScope, RewriteOptions,
+    EmptyPolicy, HistoryError, RebaseOntoOptions, RefScope, RewriteOptions,
 };
 use grit_test_support::git;
 use support::{
@@ -221,7 +222,7 @@ fn integrate_branch_stops_with_git_index_stages() {
         "topic",
         &MergeOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Conflicts { paths, details, .. } = outcome else {
@@ -282,7 +283,7 @@ fn pick_of_the_other_rename_conflicts() {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("pick");
     let ReplayOutcome::Conflicts { paths } = outcome else {
@@ -301,7 +302,10 @@ fn rebase_onto_the_other_rename_conflicts() {
         preserve_committer: false,
         sign: true,
     });
-    let err = rebase_onto(&fx.repo, fx.base, fx.topic, &[fx.main], &opts)
+    let err = fx
+        .repo
+        .history()
+        .rebase_onto(fx.base, fx.topic, &[fx.main], &opts)
         .expect_err("rebase must stop on the rename/rename conflict");
     let HistoryError::Conflict {
         commit,
@@ -393,7 +397,7 @@ fn assert_clean_merge_matches_git(root: &Path) {
         "topic",
         &MergeOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {

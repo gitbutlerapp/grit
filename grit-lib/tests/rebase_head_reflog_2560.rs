@@ -7,8 +7,8 @@ mod support;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
 use grit_lib::revwalk::history::{
-    abort_rebase, start_rebase, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest,
-    RefScope, RewriteOptions, StartRebaseOptions,
+    EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 use grit_lib::state::resolve_head;
 use support::{git, git_rev_parse_verify, open_grit_repo, HistoryRepo};
@@ -53,6 +53,7 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
             branch_tip: tip,
         },
         rebase: RebaseOntoOptions {
+            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
@@ -71,7 +72,7 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
             record_operation: Some("rebase".into()),
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
+        exec: None,
     }
 }
 
@@ -98,13 +99,15 @@ fn conflict_stop_logs_head_detach() {
     let wt = repo.worktree();
     let grit = open_grit_repo(wt);
     git(wt, &["switch", "topic"]);
-    let out = start_rebase(
-        &grit,
-        &start_opts(upstream, Some(onto), tip),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("start");
+    let out = grit
+        .history()
+        .start_rebase(
+            &start_opts(upstream, Some(onto), tip),
+            grit.command_runner().as_ref(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("start");
     assert!(matches!(out, RebaseOutcome::Stopped(_)));
     assert_eq!(
         resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap(),
@@ -132,13 +135,14 @@ fn conflict_stop_abort_logs_head_reattach() {
     let grit = open_grit_repo(wt);
     git(wt, &["switch", "topic"]);
     assert!(matches!(
-        start_rebase(
-            &grit,
-            &start_opts(upstream, Some(onto), tip),
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("start"),
+        grit.history()
+            .start_rebase(
+                &start_opts(upstream, Some(onto), tip),
+                grit.command_runner().as_ref(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never()
+            )
+            .expect("start"),
         RebaseOutcome::Stopped(_)
     ));
     let detached = git_oid(wt, "HEAD");
@@ -149,7 +153,7 @@ fn conflict_stop_abort_logs_head_reattach() {
         .last()
         .expect("detach")
         .to_owned();
-    abort_rebase(&grit, &test_ident()).expect("abort");
+    grit.history().abort_rebase(&test_ident()).expect("abort");
     assert_eq!(
         resolve_head(grit.git_dir()).unwrap().branch_name(),
         Some("topic")

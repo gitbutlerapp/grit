@@ -18,15 +18,8 @@ use super::PlanningError;
 
 /// Plan a pathspec-limited split of `commit`: matching changes move into a new parent commit.
 ///
-/// The target commit keeps its tree (and message unless [`SplitOptions::rest_message`] is set).
-/// Descendants replay with parent-only updates when their trees are unchanged.
-///
-/// # Errors
-///
-/// Returns [`HistoryError::SplitSelectsNothing`], [`HistoryError::SplitSelectsEverything`],
-/// [`HistoryError::InsertBeforeOnMerge`], [`HistoryError::EmptyMessage`], or errors from
-/// [`plan_rewrite`].
-pub fn split(
+/// See [`History::split`](super::History::split).
+pub(crate) fn split(
     repo: &Repository,
     commit: ObjectId,
     pathspec: Pathspec<'_>,
