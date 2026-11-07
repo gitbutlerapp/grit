@@ -6225,6 +6225,8 @@ pub grit_lib::error::RepositoryError::ForbiddenBareRepository::path: alloc::stri
 pub grit_lib::error::RepositoryError::GitDirPathIo(grit_lib::error::PathIoError)
 pub grit_lib::error::RepositoryError::InitBareWithSeparateGitDir
 pub grit_lib::error::RepositoryError::InitObjectFormatChange
+pub grit_lib::error::RepositoryError::InitRefStorageWithInjectedRefStore
+pub grit_lib::error::RepositoryError::InitRefStorageWithInjectedRefStore::requested: grit_lib::refs::ref_storage::RefStorageFormat
 pub grit_lib::error::RepositoryError::InvalidRefStorageFormat
 pub grit_lib::error::RepositoryError::InvalidRefStorageFormat::value: alloc::string::String
 pub grit_lib::error::RepositoryError::NotARepository(grit_lib::error::NotARepositoryReason)
@@ -15487,6 +15489,8 @@ pub grit_lib::prelude::RepositoryError::ForbiddenBareRepository::path: alloc::st
 pub grit_lib::prelude::RepositoryError::GitDirPathIo(grit_lib::error::PathIoError)
 pub grit_lib::prelude::RepositoryError::InitBareWithSeparateGitDir
 pub grit_lib::prelude::RepositoryError::InitObjectFormatChange
+pub grit_lib::prelude::RepositoryError::InitRefStorageWithInjectedRefStore
+pub grit_lib::prelude::RepositoryError::InitRefStorageWithInjectedRefStore::requested: grit_lib::refs::ref_storage::RefStorageFormat
 pub grit_lib::prelude::RepositoryError::InvalidRefStorageFormat
 pub grit_lib::prelude::RepositoryError::InvalidRefStorageFormat::value: alloc::string::String
 pub grit_lib::prelude::RepositoryError::NotARepository(grit_lib::error::NotARepositoryReason)
@@ -15871,6 +15875,7 @@ pub grit_lib::prelude::InitOptions::init_filesystem: grit_lib::config::init_file
 pub grit_lib::prelude::InitOptions::initial_branch: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::InitOptions::object_format: core::option::Option<grit_lib::objects::HashAlgo>
 pub grit_lib::prelude::InitOptions::ref_storage: grit_lib::refs::ref_storage::RefStorageFormat
+pub grit_lib::prelude::InitOptions::repository: grit_lib::config::environment::RepositoryOptions
 pub grit_lib::prelude::InitOptions::separate_git_dir: core::option::Option<std::path::PathBuf>
 pub grit_lib::prelude::InitOptions::template_dir: core::option::Option<std::path::PathBuf>
 impl grit_lib::repo::InitOptions
@@ -15882,6 +15887,7 @@ pub fn grit_lib::repo::InitOptions::with_init_filesystem(self, grit_lib::config:
 pub fn grit_lib::repo::InitOptions::with_initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::repo::InitOptions::with_object_format(self, grit_lib::objects::HashAlgo) -> Self
 pub fn grit_lib::repo::InitOptions::with_ref_storage(self, grit_lib::refs::ref_storage::RefStorageFormat) -> Self
+pub fn grit_lib::repo::InitOptions::with_repository_options(self, grit_lib::config::environment::RepositoryOptions) -> Self
 pub fn grit_lib::repo::InitOptions::with_separate_git_dir(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::repo::InitOptions::with_template_dir(self, core::option::Option<std::path::PathBuf>) -> Self
 impl core::clone::Clone for grit_lib::repo::InitOptions
@@ -15890,13 +15896,13 @@ impl core::default::Default for grit_lib::repo::InitOptions
 pub fn grit_lib::repo::InitOptions::default() -> Self
 impl core::fmt::Debug for grit_lib::repo::InitOptions
 pub fn grit_lib::repo::InitOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::InitOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::InitOptions
 impl core::marker::Freeze for grit_lib::repo::InitOptions
 impl core::marker::Send for grit_lib::repo::InitOptions
 impl core::marker::Sync for grit_lib::repo::InitOptions
 impl core::marker::Unpin for grit_lib::repo::InitOptions
 impl core::marker::UnsafeUnpin for grit_lib::repo::InitOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::InitOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::InitOptions
 pub struct grit_lib::prelude::InitOutcome
 pub grit_lib::prelude::InitOutcome::initial_branch: alloc::string::String
 pub grit_lib::prelude::InitOutcome::reinitialized: bool
@@ -23686,6 +23692,8 @@ pub grit_lib::repo::error::RepositoryError::ForbiddenBareRepository::path: alloc
 pub grit_lib::repo::error::RepositoryError::GitDirPathIo(grit_lib::error::PathIoError)
 pub grit_lib::repo::error::RepositoryError::InitBareWithSeparateGitDir
 pub grit_lib::repo::error::RepositoryError::InitObjectFormatChange
+pub grit_lib::repo::error::RepositoryError::InitRefStorageWithInjectedRefStore
+pub grit_lib::repo::error::RepositoryError::InitRefStorageWithInjectedRefStore::requested: grit_lib::refs::ref_storage::RefStorageFormat
 pub grit_lib::repo::error::RepositoryError::InvalidRefStorageFormat
 pub grit_lib::repo::error::RepositoryError::InvalidRefStorageFormat::value: alloc::string::String
 pub grit_lib::repo::error::RepositoryError::NotARepository(grit_lib::error::NotARepositoryReason)
@@ -23771,6 +23779,8 @@ pub grit_lib::repo::RepositoryError::ForbiddenBareRepository::path: alloc::strin
 pub grit_lib::repo::RepositoryError::GitDirPathIo(grit_lib::error::PathIoError)
 pub grit_lib::repo::RepositoryError::InitBareWithSeparateGitDir
 pub grit_lib::repo::RepositoryError::InitObjectFormatChange
+pub grit_lib::repo::RepositoryError::InitRefStorageWithInjectedRefStore
+pub grit_lib::repo::RepositoryError::InitRefStorageWithInjectedRefStore::requested: grit_lib::refs::ref_storage::RefStorageFormat
 pub grit_lib::repo::RepositoryError::InvalidRefStorageFormat
 pub grit_lib::repo::RepositoryError::InvalidRefStorageFormat::value: alloc::string::String
 pub grit_lib::repo::RepositoryError::NotARepository(grit_lib::error::NotARepositoryReason)
@@ -23835,6 +23845,7 @@ pub grit_lib::repo::InitOptions::init_filesystem: grit_lib::config::init_filesys
 pub grit_lib::repo::InitOptions::initial_branch: core::option::Option<alloc::string::String>
 pub grit_lib::repo::InitOptions::object_format: core::option::Option<grit_lib::objects::HashAlgo>
 pub grit_lib::repo::InitOptions::ref_storage: grit_lib::refs::ref_storage::RefStorageFormat
+pub grit_lib::repo::InitOptions::repository: grit_lib::config::environment::RepositoryOptions
 pub grit_lib::repo::InitOptions::separate_git_dir: core::option::Option<std::path::PathBuf>
 pub grit_lib::repo::InitOptions::template_dir: core::option::Option<std::path::PathBuf>
 impl grit_lib::repo::InitOptions
@@ -23846,6 +23857,7 @@ pub fn grit_lib::repo::InitOptions::with_init_filesystem(self, grit_lib::config:
 pub fn grit_lib::repo::InitOptions::with_initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::repo::InitOptions::with_object_format(self, grit_lib::objects::HashAlgo) -> Self
 pub fn grit_lib::repo::InitOptions::with_ref_storage(self, grit_lib::refs::ref_storage::RefStorageFormat) -> Self
+pub fn grit_lib::repo::InitOptions::with_repository_options(self, grit_lib::config::environment::RepositoryOptions) -> Self
 pub fn grit_lib::repo::InitOptions::with_separate_git_dir(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::repo::InitOptions::with_template_dir(self, core::option::Option<std::path::PathBuf>) -> Self
 impl core::clone::Clone for grit_lib::repo::InitOptions
@@ -23854,13 +23866,13 @@ impl core::default::Default for grit_lib::repo::InitOptions
 pub fn grit_lib::repo::InitOptions::default() -> Self
 impl core::fmt::Debug for grit_lib::repo::InitOptions
 pub fn grit_lib::repo::InitOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::InitOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::InitOptions
 impl core::marker::Freeze for grit_lib::repo::InitOptions
 impl core::marker::Send for grit_lib::repo::InitOptions
 impl core::marker::Sync for grit_lib::repo::InitOptions
 impl core::marker::Unpin for grit_lib::repo::InitOptions
 impl core::marker::UnsafeUnpin for grit_lib::repo::InitOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::InitOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::InitOptions
 pub struct grit_lib::repo::InitOutcome
 pub grit_lib::repo::InitOutcome::initial_branch: alloc::string::String
 pub grit_lib::repo::InitOutcome::reinitialized: bool
