@@ -3,24 +3,24 @@
 
 [meta]
 updated = "2026-11-07"
-semver_baseline = "fdc9059ccca97a63dd6d14a0af2c917caa889e62"
+semver_baseline = "951b33fb7b9e65a1a2578732031760f035afe3ac"
 
 [counts]
 pub_repo_constructors = 3
 pub_repo_constructor_offenders = 4
-public_api_lines = 29900
+public_api_lines = 30863
 pub_fn_impl_suffix = 0
-pub_fn_with_in_name = 39
-pub_fn_too_many_arguments_allow = 12
+pub_fn_with_in_name = 38
+pub_fn_too_many_arguments_allow = 9
 pub_fn_two_plus_bare_bool = 17
 pub_fn_result_string_err = 0
-pub_free_fn_repository_first = 175
+pub_free_fn_repository_first = 139
 pub_free_fn_git_dir_path_first = 32
 pub_free_fn_config_write = 12
-pub_items_multiple_paths = 27
+pub_items_multiple_paths = 52
 pub_libc_types = 0
 pub_unsafe_fn = 0
-pub_cancel_types = 82
+pub_cancel_types = 80
 pub_progress_interfaces = 4
 pub_refname_validators = 0
 pub_fn_refname_str = 8

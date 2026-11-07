@@ -39,7 +39,7 @@ pub fn integrate_branch(
 }
 
 /// Integrate with explicit [`MergeOptions`].
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // legacy positional shape for integration tests
 pub fn integrate_branch_with(
     repo: &Repository,
     into_ref: &str,

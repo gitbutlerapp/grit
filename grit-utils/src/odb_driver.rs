@@ -786,8 +786,8 @@ pub fn hash_object_stdin_write(repo: &Repository) -> Result<()> {
     Ok(())
 }
 
-/// Run [`predict_merge`](grit_lib::porcelain::merge::predict_merge) for the pick/merge
-/// hot-path fixture metadata in `repo` (matches `git merge-tree --write-tree` oids).
+/// Run [`Merge::predict`](grit_lib::merge::Merge::predict) for the pick/merge hot-path fixture
+/// metadata in `repo` (matches `git merge-tree --write-tree` oids).
 pub fn merge_predict_hot_path(repo_path: &Path) -> Result<()> {
     use grit_lib::merge::MergePredictionOptions;
     use grit_lib::objects::ObjectId;
