@@ -131,7 +131,7 @@ fn memory_primary_example_writes_to_memory_only() {
         "{stdout}"
     );
     assert!(stdout.contains("in_memory=true"), "{stdout}");
-    assert!(stdout.contains("on_disk=false"), "{stdout}");
+    assert!(stdout.contains("objects_dir=false"), "{stdout}");
 }
 
 #[test]

@@ -4,7 +4,7 @@
 
 use std::ffi::OsString;
 
-use grit_lib::config::environment::Environment;
+use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::porcelain::commit::CommitRequest;
@@ -33,7 +33,7 @@ fn main() -> Result<(), Error> {
         &root,
         &InitOptions::new()
             .with_initial_branch("main")
-            .with_environment(env),
+            .with_repository_options(RepositoryOptions::with_environment(env)),
     )?;
 
     let author = repo.identity(IdentRole::Author, repo.identity_now())?;

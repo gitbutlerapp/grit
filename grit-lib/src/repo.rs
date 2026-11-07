@@ -129,13 +129,18 @@ pub struct InitOptions {
     pub bare_with_worktree_at_path: bool,
     /// Object hash algorithm for a new repository (`extensions.objectformat`).
     ///
-    /// When `None`, new repositories default to SHA-1; reinit preserves the existing format.
+    /// When `None`, new repositories use the hash algorithm of an injected object store
+    /// ([`RepositoryOptions::with_object_store`]), or SHA-1; reinit preserves the existing
+    /// format.
     pub object_format: Option<HashAlgo>,
-    /// Environment used to resolve `init.defaultBranch` and other init-time config, and stored
-    /// on the returned [`Repository`] when set (identity, `core.autocrlf`, `safe.directory`, and
-    /// related cascade). When `None`, init uses [`Environment::empty`] and the handle stays
-    /// hermetic like [`RepositoryOptions::empty`].
-    pub environment: Option<Environment>,
+    /// Options the new repository is created and opened with (see
+    /// [`Self::with_repository_options`]): the environment that resolves `init.defaultBranch`,
+    /// injected object and ref stores, and everything else the returned [`Repository`] keeps.
+    ///
+    /// Init picks the work tree itself, so [`RepositoryOptions::work_tree`] and
+    /// [`RepositoryOptions::open_for_serving`] are ignored, and the initial branch comes from
+    /// [`Self::initial_branch`], not [`RepositoryOptions::initial_branch`].
+    pub repository: RepositoryOptions,
     /// Init-time filesystem probes (`InitFilesystemConfigOptions`).
     pub init_filesystem: InitFilesystemConfigOptions,
 }
@@ -150,7 +155,7 @@ impl Default for InitOptions {
             separate_git_dir: None,
             bare_with_worktree_at_path: false,
             object_format: None,
-            environment: None,
+            repository: RepositoryOptions::default(),
             init_filesystem: InitFilesystemConfigOptions::default(),
         }
     }
@@ -184,10 +189,64 @@ impl InitOptions {
         self
     }
 
-    /// Set [`Self::environment`].
+    /// Set [`Self::repository`]: the environment, stores and handle options of the new
+    /// repository.
+    ///
+    /// With an injected object store ([`RepositoryOptions::with_object_store`]) init creates
+    /// no `objects/` directory, and the repository's object format is the store's
+    /// [`hash_algo`](crate::odb::store::ObjectStore::hash_algo). With an injected ref store
+    /// ([`RepositoryOptions::with_ref_store`]) init creates no `HEAD` file and no `refs/`, and
+    /// seeds `HEAD` in the store at the initial branch. With both, the git directory holds
+    /// only `config`. The returned [`Repository`] reads and writes through the stores.
+    ///
+    /// [`Repository::init`] fails before writing anything with
+    /// [`RepositoryError::ObjectFormatMismatch`] when [`Self::object_format`] (or the format
+    /// of an existing repository) differs from the store's, and with
+    /// [`RepositoryError::InitRefStorageWithInjectedRefStore`] when [`Self::ref_storage`]
+    /// asks for reftable alongside an injected ref store.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use grit_lib::config::environment::RepositoryOptions;
+    /// use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
+    /// use grit_lib::objects::{HashAlgo, ObjectKind};
+    /// use grit_lib::refs::store::MemoryRefStore;
+    /// use grit_lib::repo::{InitOptions, Repository};
+    ///
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// let dir = tempfile::tempdir()?;
+    /// let git_dir = dir.path().join("in-memory.git");
+    /// let objects = Arc::new(MemoryStore::new(HashAlgo::Sha256));
+    /// let (repo, outcome) = Repository::init(
+    ///     &git_dir,
+    ///     &InitOptions::new()
+    ///         .with_bare(true)
+    ///         .with_initial_branch("main")
+    ///         .with_repository_options(
+    ///             RepositoryOptions::empty()
+    ///                 .with_object_store(objects.clone())
+    ///                 .with_ref_store(Arc::new(MemoryRefStore::new())),
+    ///         ),
+    /// )?;
+    /// assert_eq!(outcome.initial_branch, "main");
+    /// assert_eq!(repo.odb().hash_algo(), HashAlgo::Sha256);
+    ///
+    /// let entries: Vec<_> = std::fs::read_dir(&git_dir)?
+    ///     .map(|entry| entry.map(|e| e.file_name()))
+    ///     .collect::<Result<_, _>>()?;
+    /// assert_eq!(entries, ["config"]);
+    ///
+    /// let blob = repo.odb().write(ObjectKind::Blob, b"hello")?;
+    /// assert!(objects.contains(&blob)?);
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
-    pub fn with_environment(mut self, environment: Environment) -> Self {
-        self.environment = Some(environment);
+    pub fn with_repository_options(mut self, repository: RepositoryOptions) -> Self {
+        self.repository = repository;
         self
     }
 
@@ -1511,33 +1570,73 @@ impl Repository {
 
     /// Initialise a repository at `path` and return an open handle plus init metadata.
     ///
+    /// The stores injected through [`InitOptions::with_repository_options`] own their part of
+    /// the layout: init creates no `objects/` for an injected object store, and no `HEAD` or
+    /// `refs/` for an injected ref store, whose `HEAD` it seeds at the initial branch instead.
+    /// The returned handle reads and writes through those stores.
+    ///
     /// # Errors
     ///
-    /// Propagates filesystem and layout errors from the underlying init helpers.
+    /// - [`RepositoryError::InitBareWithSeparateGitDir`] for a bare repository with a separate
+    ///   git directory.
+    /// - [`RepositoryError::InitRefStorageWithInjectedRefStore`] when reftable is requested
+    ///   with an injected ref store.
+    /// - [`RepositoryError::ObjectFormatMismatch`] when an injected store's hash algorithm
+    ///   differs from [`InitOptions::object_format`] or from an existing repository's format.
+    /// - [`RepositoryError::InitObjectFormatChange`] when reinitializing with another format.
+    ///
+    /// These are reported before anything is written. Filesystem and layout errors from
+    /// creating the repository propagate.
     pub fn init(path: &Path, options: &InitOptions) -> Result<(Self, InitOutcome)> {
         if options.bare && options.separate_git_dir.is_some() {
             return Err(RepositoryError::InitBareWithSeparateGitDir.into());
         }
-        let env = options
-            .environment
-            .clone()
-            .unwrap_or_else(Environment::empty);
+        let repository = &options.repository;
+        let injected_refs = repository.ref_store.as_deref();
+        if injected_refs.is_some() && options.ref_storage.is_reftable() {
+            return Err(RepositoryError::InitRefStorageWithInjectedRefStore {
+                requested: options.ref_storage,
+            }
+            .into());
+        }
         let git_dir = resolve_git_dir_for_init(path, options)?;
-        let reinitialized = git_dir.join("config").is_file() && git_dir.join("HEAD").is_file();
+        let reinitialized = existing_repository_at(&git_dir, injected_refs.is_some());
         let existing_format = hash_algo_from_git_dir(&git_dir)?;
+        let store_format = repository
+            .object_store
+            .as_ref()
+            .map(|store| store.hash_algo());
         let object_format = match (reinitialized, options.object_format) {
             (true, None) => existing_format,
             (true, Some(requested)) if requested != existing_format => {
                 return Err(RepositoryError::InitObjectFormatChange.into());
             }
             (true, Some(requested)) => requested,
-            (false, None) => HashAlgo::Sha1,
+            (false, None) => store_format.unwrap_or(HashAlgo::Sha1),
             (false, Some(requested)) => requested,
         };
-        let initial_branch = if reinitialized {
-            head_branch_name_for_outcome(&git_dir)?
-        } else {
-            resolve_initial_branch(&env, options.initial_branch.as_deref())?
+        let layers = repository.odb_builder.as_ref();
+        if let Some(store) = store_format
+            .into_iter()
+            .chain(layers.into_iter().flat_map(|b| b.injected_hash_algos()))
+            .find(|algo| *algo != object_format)
+        {
+            return Err(RepositoryError::ObjectFormatMismatch {
+                repository: object_format,
+                store,
+            }
+            .into());
+        }
+        let existing_head = match injected_refs {
+            Some(store) if reinitialized => store.read_raw(RefNameRef::from_trusted("HEAD"))?,
+            _ => None,
+        };
+        let initial_branch = match (&existing_head, injected_refs) {
+            (Some(head), _) => branch_name_for_outcome(head),
+            (None, None) if reinitialized => head_branch_name_for_outcome(&git_dir)?,
+            (None, _) => {
+                resolve_initial_branch(&repository.environment, options.initial_branch.as_deref())?
+            }
         };
 
         let separate_layout = options.separate_git_dir.is_some()
@@ -1545,40 +1644,24 @@ impl Repository {
                 && !options.bare_with_worktree_at_path
                 && path.join(".git").is_file());
 
-        let repo = if options.bare_with_worktree_at_path {
-            init_bare_with_env_worktree(
-                path,
-                path,
-                &initial_branch,
-                options.template_dir.as_deref(),
-                options.ref_storage,
-                object_format,
-                options.init_filesystem,
-                &env,
-            )?
-        } else if separate_layout {
-            init_repository_separate_git_dir(
-                path,
-                &git_dir,
-                &initial_branch,
-                options.template_dir.as_deref(),
-                options.ref_storage,
-                object_format,
-                options.init_filesystem,
-                &env,
-            )?
-        } else {
-            init_repository_with_object_format(
-                path,
-                options.bare,
-                &initial_branch,
-                options.template_dir.as_deref(),
-                options.ref_storage,
-                object_format,
-                options.init_filesystem,
-                &env,
-            )?
+        let layout = InitLayout {
+            initial_branch: &initial_branch,
+            template_dir: options.template_dir.as_deref(),
+            ref_storage: options.ref_storage,
+            object_format,
+            init_filesystem: options.init_filesystem,
+            repository,
         };
+        let repo = if options.bare_with_worktree_at_path {
+            init_bare_with_env_worktree(path, path, &layout)?
+        } else if separate_layout {
+            init_repository_separate_git_dir(path, &git_dir, &layout)?
+        } else {
+            init_repository_at(path, options.bare, &layout)?
+        };
+        if injected_refs.is_some() {
+            seed_unborn_head(repo.ref_store(), &initial_branch)?;
+        }
         Ok((
             repo,
             InitOutcome {
@@ -4016,14 +4099,9 @@ fn resolve_git_dir_for_init(path: &Path, options: &InitOptions) -> Result<PathBu
 /// Branch short name for init outcome reporting; tolerates detached `HEAD` on reinit.
 fn head_branch_name_for_outcome(git_dir: &Path) -> Result<String> {
     if let Some(target) = crate::refs::read_symbolic_ref(git_dir, "HEAD")? {
-        if let Some(short) = target.strip_prefix("refs/heads/") {
-            return Ok(short.to_owned());
-        }
-        return Ok(target
-            .rsplit('/')
-            .next()
-            .unwrap_or(target.as_str())
-            .to_owned());
+        return Ok(branch_name_for_outcome(
+            &crate::refs::store::RawRef::Symbolic(target),
+        ));
     }
     let head_text = fs::read_to_string(git_dir.join("HEAD"))?;
     let oid = head_text.trim();
@@ -4031,6 +4109,69 @@ fn head_branch_name_for_outcome(git_dir: &Path) -> Result<String> {
         return Ok(crate::objects::short_hex(oid).to_owned());
     }
     Ok("HEAD".to_owned())
+}
+
+/// Branch short name for init outcome reporting from a `HEAD` value.
+fn branch_name_for_outcome(head: &crate::refs::store::RawRef) -> String {
+    match head {
+        crate::refs::store::RawRef::Symbolic(target) => target
+            .strip_prefix("refs/heads/")
+            .or_else(|| target.rsplit('/').next())
+            .unwrap_or(target)
+            .to_owned(),
+        crate::refs::store::RawRef::Direct(oid) => {
+            crate::objects::short_hex(&oid.to_hex()).to_owned()
+        }
+    }
+}
+
+/// Whether `git_dir` already holds a repository [`Repository::init`] should reinitialize.
+///
+/// With an injected ref store `HEAD` lives in the store, so an existing `config` alone marks
+/// the repository as existing and is never overwritten.
+fn existing_repository_at(git_dir: &Path, refs_injected: bool) -> bool {
+    git_dir.join("config").is_file() && (refs_injected || git_dir.join("HEAD").is_file())
+}
+
+/// Everything [`Repository::init`] resolved before touching the filesystem, shared by the
+/// layout helpers.
+struct InitLayout<'a> {
+    initial_branch: &'a str,
+    template_dir: Option<&'a Path>,
+    ref_storage: crate::ref_storage::RefStorageFormat,
+    object_format: HashAlgo,
+    init_filesystem: InitFilesystemConfigOptions,
+    /// Stores and handle options; injected stores own their part of the layout.
+    repository: &'a RepositoryOptions,
+}
+
+impl InitLayout<'_> {
+    fn objects_on_disk(&self) -> bool {
+        self.repository.object_store.is_none()
+    }
+
+    fn refs_on_disk(&self) -> bool {
+        self.repository.ref_store.is_none()
+    }
+
+    /// With both stores injected the git directory holds only `config` (plus what an explicit
+    /// template brings): no `description`, `hooks/` or `info/`.
+    fn fully_injected(&self) -> bool {
+        !self.objects_on_disk() && !self.refs_on_disk()
+    }
+
+    fn existing(&self, git_dir: &Path) -> bool {
+        existing_repository_at(git_dir, !self.refs_on_disk())
+    }
+
+    /// Options that open the initialized repository at `work_tree` (`None` when bare).
+    fn open_options(&self, work_tree: Option<&Path>) -> RepositoryOptions {
+        let mut options = self.repository.clone();
+        options.work_tree = work_tree.map(Path::to_path_buf);
+        options.open_for_serving = false;
+        options.initial_branch = None;
+        options
+    }
 }
 
 fn hash_algo_from_git_dir(git_dir: &Path) -> Result<HashAlgo> {
@@ -4043,17 +4184,26 @@ fn hash_algo_from_git_dir(git_dir: &Path) -> Result<HashAlgo> {
 }
 
 /// Ensure standard git directory layout without overwriting `HEAD`, `config`, or refs.
+///
+/// Directories an injected store owns (`objects/`, `refs/`) are not created.
 fn ensure_git_directory_layout(
     git_dir: &Path,
     bare: bool,
-    ref_storage: crate::ref_storage::RefStorageFormat,
+    layout: &InitLayout<'_>,
     skip_hooks_and_info: bool,
 ) -> Result<()> {
-    let mut subs = vec!["objects", "objects/info", "objects/pack", "refs"];
-    if !ref_storage.is_reftable() {
-        subs.extend(["refs/heads", "refs/tags"]);
+    let ref_storage = layout.ref_storage;
+    let mut subs = Vec::new();
+    if layout.objects_on_disk() {
+        subs.extend(["objects", "objects/info", "objects/pack"]);
     }
-    if !bare && !skip_hooks_and_info {
+    if layout.refs_on_disk() {
+        subs.push("refs");
+        if !ref_storage.is_reftable() {
+            subs.extend(["refs/heads", "refs/tags"]);
+        }
+    }
+    if !bare && !skip_hooks_and_info && !layout.fully_injected() {
         subs.push("info");
         subs.push("hooks");
     }
@@ -4061,7 +4211,7 @@ fn ensure_git_directory_layout(
         fs::create_dir_all(git_dir.join(sub))?;
     }
 
-    if ref_storage.is_reftable() {
+    if layout.refs_on_disk() && ref_storage.is_reftable() {
         let reftable_dir = git_dir.join("reftable");
         fs::create_dir_all(&reftable_dir)?;
         let tables_list = reftable_dir.join("tables.list");
@@ -4072,19 +4222,16 @@ fn ensure_git_directory_layout(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn write_fresh_git_directory(
     git_dir: &Path,
     bare: bool,
-    initial_branch: &str,
-    template_dir: Option<&Path>,
-    ref_storage: crate::ref_storage::RefStorageFormat,
-    object_format: HashAlgo,
+    layout: &InitLayout<'_>,
     skip_hooks_and_info: bool,
-    init_filesystem: InitFilesystemConfigOptions,
-    environment: &Environment,
 ) -> Result<()> {
-    ensure_git_directory_layout(git_dir, bare, ref_storage, skip_hooks_and_info)?;
+    let template_dir = layout.template_dir;
+    let ref_storage = layout.ref_storage;
+    let object_format = layout.object_format;
+    ensure_git_directory_layout(git_dir, bare, layout, skip_hooks_and_info)?;
 
     if let Some(tmpl) = template_dir {
         if tmpl.is_dir() {
@@ -4142,17 +4289,25 @@ fn write_fresh_git_directory(
         }
     }
 
-    crate::refs::store::initialize_head(
+    if layout.refs_on_disk() {
+        crate::refs::store::initialize_head(
+            git_dir,
+            crate::refs::store::RawRef::Symbolic(format!("refs/heads/{}", layout.initial_branch)),
+        )?;
+    }
+
+    apply_init_filesystem_config(
         git_dir,
-        crate::refs::store::RawRef::Symbolic(format!("refs/heads/{initial_branch}")),
+        layout.init_filesystem,
+        &layout.repository.environment,
     )?;
 
-    apply_init_filesystem_config(git_dir, init_filesystem, environment)?;
-
-    fs::write(
-        git_dir.join("description"),
-        "Unnamed repository; edit this file 'description' to name the repository.\n",
-    )?;
+    if !layout.fully_injected() {
+        fs::write(
+            git_dir.join("description"),
+            "Unnamed repository; edit this file 'description' to name the repository.\n",
+        )?;
+    }
     Ok(())
 }
 
@@ -4164,18 +4319,14 @@ fn write_fresh_git_directory(
 /// # Errors
 ///
 /// Returns [`Error::WorktreePathIo`] or [`RepositoryError::git_dir_path_io`] on filesystem failures.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn init_repository_separate_git_dir(
+fn init_repository_separate_git_dir(
     work_tree: &Path,
     git_dir: &Path,
-    initial_branch: &str,
-    template_dir: Option<&Path>,
-    ref_storage: crate::ref_storage::RefStorageFormat,
-    object_format: HashAlgo,
-    init_filesystem: InitFilesystemConfigOptions,
-    environment: &Environment,
+    layout: &InitLayout<'_>,
 ) -> Result<Repository> {
-    let skip_hooks_info = template_dir.is_some_and(|p| p.as_os_str().is_empty());
+    let skip_hooks_info = layout
+        .template_dir
+        .is_some_and(|p| p.as_os_str().is_empty());
     fs::create_dir_all(work_tree).map_err(|source| {
         map_worktree_io(
             path_for_error_message(work_tree),
@@ -4186,21 +4337,10 @@ pub(crate) fn init_repository_separate_git_dir(
     fs::create_dir_all(git_dir).map_err(|source| {
         map_git_dir_io(git_dir, git_dir, GitDirPathOperation::CreateDir, source)
     })?;
-    let existing = git_dir.join("config").is_file() && git_dir.join("HEAD").is_file();
-    if existing {
-        ensure_git_directory_layout(git_dir, false, ref_storage, skip_hooks_info)?;
+    if layout.existing(git_dir) {
+        ensure_git_directory_layout(git_dir, false, layout, skip_hooks_info)?;
     } else {
-        write_fresh_git_directory(
-            git_dir,
-            false,
-            initial_branch,
-            template_dir,
-            ref_storage,
-            object_format,
-            skip_hooks_info,
-            init_filesystem,
-            environment,
-        )?;
+        write_fresh_git_directory(git_dir, false, layout, skip_hooks_info)?;
     }
 
     // Write an absolute `gitdir:` path, matching C Git's `init_db` →
@@ -4212,10 +4352,7 @@ pub(crate) fn init_repository_separate_git_dir(
     let abs_git_dir = crate::git_path::absolute_path_for_gitfile_stored_path(git_dir);
     fs::write(gitfile, format!("gitdir: {abs_git_dir}\n"))?;
 
-    Repository::open(
-        git_dir,
-        &RepositoryOptions::with_environment(environment.clone()).with_work_tree(work_tree),
-    )
+    Repository::open(git_dir, &layout.open_options(Some(work_tree)))
 }
 
 /// Initialise a **minimal** bare repository directory layout matching `git clone --template= --bare`.
@@ -4259,30 +4396,49 @@ pub(crate) fn init_repository(
     template_dir: Option<&Path>,
     ref_storage: crate::ref_storage::RefStorageFormat,
 ) -> Result<Repository> {
-    init_repository_with_object_format(
+    let repository = RepositoryOptions::default();
+    init_repository_at(
         path,
         bare,
-        initial_branch,
-        template_dir,
-        ref_storage,
-        HashAlgo::Sha1,
-        InitFilesystemConfigOptions::default(),
-        &Environment::empty(),
+        &InitLayout {
+            initial_branch,
+            template_dir,
+            ref_storage,
+            object_format: HashAlgo::Sha1,
+            init_filesystem: InitFilesystemConfigOptions::default(),
+            repository: &repository,
+        },
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+/// A files-backed repository at `path` with `object_format`, no template and a hermetic
+/// handle (the destination of a clone).
 pub(crate) fn init_repository_with_object_format(
     path: &Path,
     bare: bool,
     initial_branch: &str,
-    template_dir: Option<&Path>,
-    ref_storage: crate::ref_storage::RefStorageFormat,
     object_format: HashAlgo,
-    init_filesystem: InitFilesystemConfigOptions,
-    environment: &Environment,
 ) -> Result<Repository> {
-    let skip_hooks_info = !bare && template_dir.is_some_and(|p| p.as_os_str().is_empty());
+    let repository = RepositoryOptions::default();
+    init_repository_at(
+        path,
+        bare,
+        &InitLayout {
+            initial_branch,
+            template_dir: None,
+            ref_storage: crate::ref_storage::RefStorageFormat::Files,
+            object_format,
+            init_filesystem: InitFilesystemConfigOptions::default(),
+            repository: &repository,
+        },
+    )
+}
+
+fn init_repository_at(path: &Path, bare: bool, layout: &InitLayout<'_>) -> Result<Repository> {
+    let skip_hooks_info = !bare
+        && layout
+            .template_dir
+            .is_some_and(|p| p.as_os_str().is_empty());
     let git_dir = if bare {
         path.to_path_buf()
     } else {
@@ -4309,35 +4465,14 @@ pub(crate) fn init_repository_with_object_format(
             map_git_dir_io(&git_dir, &git_dir, GitDirPathOperation::CreateDir, source)
         }
     })?;
-    let existing = git_dir.join("config").is_file() && git_dir.join("HEAD").is_file();
-    if existing {
-        ensure_git_directory_layout(&git_dir, bare, ref_storage, skip_hooks_info)?;
+    if layout.existing(&git_dir) {
+        ensure_git_directory_layout(&git_dir, bare, layout, skip_hooks_info)?;
     } else {
-        write_fresh_git_directory(
-            &git_dir,
-            bare,
-            initial_branch,
-            template_dir,
-            ref_storage,
-            object_format,
-            skip_hooks_info,
-            init_filesystem,
-            environment,
-        )?;
+        write_fresh_git_directory(&git_dir, bare, layout, skip_hooks_info)?;
     }
 
-    if bare {
-        Repository::open(
-            &git_dir,
-            &RepositoryOptions::with_environment(environment.clone()),
-        )
-    } else {
-        Repository::open(
-            &git_dir,
-            &RepositoryOptions::with_environment(environment.clone())
-                .with_work_tree(path.to_path_buf()),
-        )
-    }
+    let work_tree = (!bare).then_some(path);
+    Repository::open(&git_dir, &layout.open_options(work_tree))
 }
 
 /// Initialise a **bare** repository at `git_dir` with `core.worktree` set to `work_tree`.
@@ -4348,34 +4483,17 @@ pub(crate) fn init_repository_with_object_format(
 /// # Errors
 ///
 /// Returns [`Error::WorktreePathIo`] or [`RepositoryError::git_dir_path_io`] on filesystem failures.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn init_bare_with_env_worktree(
+fn init_bare_with_env_worktree(
     git_dir: &Path,
     work_tree: &Path,
-    initial_branch: &str,
-    template_dir: Option<&Path>,
-    ref_storage: crate::ref_storage::RefStorageFormat,
-    object_format: HashAlgo,
-    init_filesystem: InitFilesystemConfigOptions,
-    environment: &Environment,
+    layout: &InitLayout<'_>,
 ) -> Result<Repository> {
     fs::create_dir_all(git_dir)?;
     fs::create_dir_all(work_tree)?;
-    let existing = git_dir.join("config").is_file() && git_dir.join("HEAD").is_file();
-    if existing {
-        ensure_git_directory_layout(git_dir, true, ref_storage, false)?;
+    if layout.existing(git_dir) {
+        ensure_git_directory_layout(git_dir, true, layout, false)?;
     } else {
-        write_fresh_git_directory(
-            git_dir,
-            true,
-            initial_branch,
-            template_dir,
-            ref_storage,
-            object_format,
-            false,
-            init_filesystem,
-            environment,
-        )?;
+        write_fresh_git_directory(git_dir, true, layout, false)?;
     }
     let work_tree_abs = work_tree
         .canonicalize_simplified()
@@ -4387,10 +4505,7 @@ pub(crate) fn init_bare_with_env_worktree(
     };
     config.set("core.worktree", &work_tree_abs.to_string_lossy())?;
     config.write()?;
-    Repository::open(
-        git_dir,
-        &RepositoryOptions::with_environment(environment.clone()).with_work_tree(work_tree),
-    )
+    Repository::open(git_dir, &layout.open_options(Some(work_tree)))
 }
 
 /// Recursively copy template files from `src` to `dst`.
@@ -4559,7 +4674,7 @@ mod config_session_tests {
         Repository::init(
             &work,
             &InitOptions {
-                environment: Some(options.environment.clone()),
+                repository: options.clone(),
                 ..InitOptions::default()
             },
         )
@@ -4603,7 +4718,7 @@ mod config_session_tests {
         Repository::init(
             &work,
             &InitOptions {
-                environment: Some(options.environment.clone()),
+                repository: options.clone(),
                 ..InitOptions::default()
             },
         )

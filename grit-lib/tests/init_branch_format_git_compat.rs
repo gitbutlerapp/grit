@@ -3,7 +3,7 @@
 use std::fs;
 use std::process::Command;
 
-use grit_lib::config::environment::Environment;
+use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::NullProgress;
@@ -55,8 +55,11 @@ fn init_honors_init_default_branch_from_global_config() {
         "production"
     );
     let wt = TempDir::new().expect("tempdir");
-    let (repo, _) =
-        Repository::init(wt.path(), &InitOptions::new().with_environment(env)).expect("init");
+    let (repo, _) = Repository::init(
+        wt.path(),
+        &InitOptions::new().with_repository_options(RepositoryOptions::with_environment(env)),
+    )
+    .expect("init");
     let head = fs::read_to_string(repo.git_dir().join("HEAD")).expect("read HEAD");
     assert_eq!(head.trim(), "ref: refs/heads/production");
 }

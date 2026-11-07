@@ -1658,6 +1658,8 @@ mod repo_handles_core;
 #[cfg(feature = "full-tests")]
 #[path = "repo_handles_more.rs"]
 mod repo_handles_more;
+#[path = "repo_init_injected_stores.rs"]
+mod repo_init_injected_stores;
 #[cfg(feature = "full-tests")]
 #[path = "repo_open_init.rs"]
 mod repo_open_init;

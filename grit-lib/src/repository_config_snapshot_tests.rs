@@ -24,7 +24,7 @@ mod tests {
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::{CancelToken, NullProgress};
     use crate::ref_storage::RefStorageFormat;
-    use crate::repo::{init_repository, init_repository_separate_git_dir, Repository};
+    use crate::repo::{init_repository, Repository};
     use crate::rev_list::{rev_list, RevListOptions};
 
     fn init_repo(root: &Path) -> Repository {
@@ -455,16 +455,13 @@ mod tests {
         // Gitfile + separate git dir layout.
         let wt = root.join("gitfile-wt");
         let gd = root.join("gitfile-store.git");
-        let gitfile_repo = init_repository_separate_git_dir(
+        let gitfile_repo = crate::repo::Repository::init(
             &wt,
-            &gd,
-            "main",
-            None,
-            crate::RefStorageFormat::Files,
-            crate::objects::HashAlgo::Sha1,
-            crate::init_filesystem::InitFilesystemConfigOptions::default(),
-            &crate::environment::Environment::empty(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main")
+                .with_separate_git_dir(Some(gd.to_path_buf())),
         )
+        .map(|(repo, _)| repo)
         .unwrap();
         fs::write(
             gd.join("config"),

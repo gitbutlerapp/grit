@@ -1137,23 +1137,16 @@ mod git_path_component_tests {
 
     #[test]
     fn separate_git_dir_gitfile_is_plain_absolute_path() {
-        use crate::objects::HashAlgo;
-        use crate::ref_storage::RefStorageFormat;
-        use crate::repo::init_repository_separate_git_dir;
-
         let tmp = tempfile::tempdir().expect("tempdir");
         let work = tmp.path().join("wt");
         let git_dir = tmp.path().join("store.git");
-        let repo = init_repository_separate_git_dir(
+        let repo = crate::repo::Repository::init(
             &work,
-            &git_dir,
-            "main",
-            None,
-            RefStorageFormat::Files,
-            HashAlgo::Sha1,
-            crate::init_filesystem::InitFilesystemConfigOptions::default(),
-            &crate::environment::Environment::empty(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main")
+                .with_separate_git_dir(Some(git_dir.to_path_buf())),
         )
+        .map(|(repo, _)| repo)
         .expect("init separate git dir");
         let gitfile = std::fs::read_to_string(work.join(".git")).expect("read gitfile");
         let stored = gitfile

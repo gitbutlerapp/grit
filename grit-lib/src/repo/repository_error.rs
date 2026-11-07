@@ -215,6 +215,15 @@ pub enum RepositoryError {
     #[error("cannot combine bare repository with separate git directory")]
     InitBareWithSeparateGitDir,
 
+    /// [`super::Repository::init`] was asked for an on-disk ref storage format while
+    /// [`RepositoryOptions::with_ref_store`](crate::config::environment::RepositoryOptions::with_ref_store)
+    /// injects the ref backend.
+    #[error("cannot create {requested} ref storage: the ref store is injected")]
+    InitRefStorageWithInjectedRefStore {
+        /// The ref storage format [`InitOptions::ref_storage`](super::InitOptions::ref_storage) requested.
+        requested: crate::ref_storage::RefStorageFormat,
+    },
+
     /// Command requires a working tree but the repository is bare.
     #[error("this operation needs a working tree")]
     RequiresWorkTree,
@@ -279,6 +288,9 @@ impl RepositoryError {
             Self::InvalidRefStorageFormat { .. } => "invalid_ref_storage_format",
             Self::InitObjectFormatChange => "init_object_format_change",
             Self::InitBareWithSeparateGitDir => "init_bare_with_separate_git_dir",
+            Self::InitRefStorageWithInjectedRefStore { .. } => {
+                "init_ref_storage_with_injected_ref_store"
+            }
             Self::RequiresWorkTree => "requires_work_tree",
             Self::PromisorFetcherMissing => "message",
             Self::UnknownRepositoryExtensions(_) | Self::V1OnlyExtensionsInFormatZero(_) => {

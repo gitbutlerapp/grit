@@ -3,7 +3,7 @@
 use std::fs;
 use std::process::Command;
 
-use grit_lib::config::environment::{ConfigOverride, Environment};
+use grit_lib::config::environment::{ConfigOverride, Environment, RepositoryOptions};
 use grit_lib::config::ident_resolve::{IdentRole, IdentityError};
 use grit_lib::error::Error;
 use grit_lib::porcelain::add::{stage, StageOptions};
@@ -67,8 +67,11 @@ fn init_with_environment_keeps_identity_for_first_commit() {
     write_user_global_config(&cfg_home);
     let env = env_with_global(&cfg_home.path().join("gitconfig"));
     let wt = TempDir::new().expect("tempdir");
-    let (repo, _) =
-        Repository::init(wt.path(), &InitOptions::new().with_environment(env)).expect("init");
+    let (repo, _) = Repository::init(
+        wt.path(),
+        &InitOptions::new().with_repository_options(RepositoryOptions::with_environment(env)),
+    )
+    .expect("init");
     let committer = repo
         .identity(IdentRole::Committer, repo.identity_now())
         .expect("committer from init environment");
@@ -112,7 +115,9 @@ fn init_bare_with_environment_resolves_identity() {
     let bare = TempDir::new().expect("tempdir");
     let (repo, _) = Repository::init(
         bare.path(),
-        &InitOptions::new().with_bare(true).with_environment(env),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_repository_options(RepositoryOptions::with_environment(env)),
     )
     .expect("init bare");
     assert!(repo.work_tree().is_none());
@@ -132,7 +137,7 @@ fn init_separate_git_dir_with_environment_commits() {
     let (repo, _) = Repository::init(
         wt.path(),
         &InitOptions::new()
-            .with_environment(env)
+            .with_repository_options(RepositoryOptions::with_environment(env))
             .with_separate_git_dir(Some(separate.path().to_path_buf())),
     )
     .expect("init separate");
@@ -153,8 +158,11 @@ fn init_honors_git_config_parameters_for_filesystem_config() {
             .parse::<ConfigOverride>()
             .expect("override"),
     );
-    let (repo, _) =
-        Repository::init(wt.path(), &InitOptions::new().with_environment(env)).expect("init");
+    let (repo, _) = Repository::init(
+        wt.path(),
+        &InitOptions::new().with_repository_options(RepositoryOptions::with_environment(env)),
+    )
+    .expect("init");
     let config = fs::read_to_string(repo.git_dir().join("config")).expect("read config");
     assert!(
         config.contains("filemode = false"),

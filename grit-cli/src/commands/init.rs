@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use grit_lib::config::git_path::user_display_path;
 use grit_lib::objects::HashAlgo;
-use grit_lib::prelude::Environment;
+use grit_lib::prelude::RepositoryOptions;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use schemars::JsonSchema;
@@ -98,7 +98,7 @@ pub fn run(
     let mut init_options = InitOptions::new()
         .with_bare(bare)
         .with_ref_storage(ref_format)
-        .with_environment(Environment::capture_process());
+        .with_repository_options(RepositoryOptions::from_process());
     if let Some(branch) = initial_branch {
         init_options = init_options.with_initial_branch(branch);
     }

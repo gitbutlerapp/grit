@@ -17,7 +17,6 @@ use crate::objects::{HashAlgo, ObjectId};
 use crate::partial_clone::{ObjectFilterSpec, PartialCloneConfig};
 use crate::progress::CancelToken;
 use crate::promisor_fetch::PromisorFetcher;
-use crate::ref_storage::RefStorageFormat;
 use crate::refs;
 use crate::remote::{
     fold_peeled_refs, HttpClientFactory, ListRefsOptions, Remote, RemoteError, DEFAULT_REMOTE,
@@ -758,17 +757,8 @@ pub fn clone(
     let discovery_cwd = opts.environment.discovery_cwd();
     let object_format =
         local_clone_source_hash_algo(&opts.url, &discovery_cwd).unwrap_or(HashAlgo::Sha1);
-    init_repository_with_object_format(
-        &opts.dest,
-        bare,
-        &opts.initial_branch,
-        None,
-        RefStorageFormat::Files,
-        object_format,
-        crate::init_filesystem::InitFilesystemConfigOptions::default(),
-        &Environment::empty(),
-    )
-    .map_err(CloneError::from)?;
+    init_repository_with_object_format(&opts.dest, bare, &opts.initial_branch, object_format)
+        .map_err(CloneError::from)?;
     let git_dir = if bare {
         opts.dest.clone()
     } else {

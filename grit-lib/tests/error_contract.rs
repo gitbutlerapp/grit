@@ -30,6 +30,7 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "invalid_ref_storage_format",
     "init_object_format_change",
     "init_bare_with_separate_git_dir",
+    "init_ref_storage_with_injected_ref_store",
     "requires_work_tree",
     "message",
     "git_dir_path_io",

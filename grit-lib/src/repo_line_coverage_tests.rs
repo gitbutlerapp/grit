@@ -10,9 +10,8 @@ use crate::objects::ObjectKind;
 use crate::parallel::ThreadPolicy;
 use crate::ref_storage::RefStorageFormat;
 use crate::repo::{
-    init_bare_with_env_worktree, init_repository, init_repository_separate_git_dir,
-    init_worktree_config, repository_format_warning, resolve_git_directory_arg,
-    validate_repo_format, InitOptions, Repository,
+    init_bare_with_env_worktree, init_repository, init_worktree_config, repository_format_warning,
+    resolve_git_directory_arg, validate_repo_format, InitOptions, Repository,
 };
 use crate::write_tree::write_tree_from_index;
 use tempfile::tempdir;
@@ -96,16 +95,13 @@ fn repository_open_discover_and_index_roundtrip() -> crate::error::Result<()> {
 fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
     let wt = tempdir().map_err(crate::error::Error::Io)?;
     let separate = wt.path().join("repo.git");
-    init_repository_separate_git_dir(
+    crate::repo::Repository::init(
         wt.path(),
-        &separate,
-        "main",
-        None,
-        RefStorageFormat::Files,
-        crate::objects::HashAlgo::Sha1,
-        crate::init_filesystem::InitFilesystemConfigOptions::default(),
-        &crate::environment::Environment::empty(),
-    )?;
+        &crate::repo::InitOptions::new()
+            .with_initial_branch("main")
+            .with_separate_git_dir(Some(separate.to_path_buf())),
+    )
+    .map(|(repo, _)| repo)?;
     let repo = Repository::open(
         &separate,
         &(RepositoryOptions::empty().with_work_tree(wt.path())),
@@ -121,12 +117,14 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
     init_bare_with_env_worktree(
         &git,
         bare_wt.path(),
-        "main",
-        None,
-        RefStorageFormat::Files,
-        crate::objects::HashAlgo::Sha1,
-        crate::init_filesystem::InitFilesystemConfigOptions::default(),
-        &crate::environment::Environment::empty(),
+        &super::InitLayout {
+            initial_branch: "main",
+            template_dir: None,
+            ref_storage: RefStorageFormat::Files,
+            object_format: crate::objects::HashAlgo::Sha1,
+            init_filesystem: crate::init_filesystem::InitFilesystemConfigOptions::default(),
+            repository: &RepositoryOptions::default(),
+        },
     )?;
 
     let nested = tempdir().map_err(crate::error::Error::Io)?;
