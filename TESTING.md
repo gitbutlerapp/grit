@@ -262,6 +262,15 @@ make api-ratchet-check
 
 The check fails if any count **increases**, or **decreases** without updating the baseline (same ratchet rule as hygiene). When the pinned nightly is not installed, **`make gate`** prints a skip line instead of running the check; CI always runs it in the **public-api** job after **`make public-api-check`**.
 
+**Find what to consolidate next:**
+
+```bash
+make api-ratchet-report             # offenders per top-level module
+make api-ratchet-report MODULE=diff # one module
+```
+
+The report groups the `_with_`, `too_many_arguments`, two-bool, `&Repository`-first and git-dir-first offenders by public module (see **Canonical forms** in [`grit-lib/API.md`](grit-lib/API.md#canonical-forms)). It is informational and never fails.
+
 Unit tests: `python3 -m unittest scripts/tests/test_api_ratchet.py` (also covered by the **scripts** CI job).
 
 | Metric | What increases the count |

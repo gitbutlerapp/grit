@@ -75,6 +75,128 @@ Operations return structured results (counts, classifications, names, conflict s
 
 Every public item has rustdoc. Entry points include examples. Crate-level documentation states the current release line (major.minor) and links here for stability policy.
 
+## Canonical forms
+
+Each public operation should end up in one of the shapes below. The API 0.6 steps move every operation into one of them, one area at a time. To list what is left in an area, run `make api-ratchet-report` (or `make api-ratchet-report MODULE=diff`, see [Ratchet report](#ratchet-report)).
+
+### Handle map
+
+An operation on a repository is a method on the handle that owns its area. Extend an existing handle before adding a new accessor; a new accessor is only for an area no handle owns yet.
+
+| Area | Accessor | Handle type | Owns |
+| --- | --- | --- | --- |
+| Objects and maintenance | `repo.objects()` | `objects::Objects` | Object read/write, packs, MIDX, commit-graph, gc, repack, fsck, promisor fetches |
+| References | `repo.references()` | `refs::References` | Resolve, list and update refs; `HEAD`; branches and tags; ref transactions |
+| Reflogs | `repo.reflogs()` | `repo_handles::RepositoryReflogs` | Reflog read, append, expire |
+| Index and staging | `repo.index()` | `index::IndexFile` | Index read/write; add, rm and mv; sparse checkout |
+| Config | `repo.config()` | `config::Config` | Config cascade reads, edits and typed values |
+| Revisions | `repo.revwalk()` | `revwalk::RevWalk` | Rev-parse, rev-list, merge-base, log walks, ahead/behind |
+| Diff | `repo.diff()` | `diff::Diff` | Tree, index and work-tree diffs; text rendering; blame; patch-ids; apply |
+| Remotes and transport | `repo.remotes()` | `repo_handles::RepositoryRemotes` | Remote config, fetch, push, ls-remote, serving, snapshot checkouts |
+| Bundles | `repo.bundles()` | `repo_handles::RepositoryBundles` | Bundle create, verify, unbundle |
+| Notes | `repo.notes()` | `repo_handles::RepositoryNotes` | Notes read, add, remove, rewrite |
+| Stash | `repo.stash()` | `repo_handles::RepositoryStash` | Stash push, apply, pop, drop, list |
+| Hooks | `repo.hooks()` | `repo_handles::RepositoryHooks` | Hook lookup and dispatch |
+| Linked worktrees | `repo.worktrees()` | `repo_handles::RepositoryWorktrees` | Add, list, lock, move, remove and prune linked worktrees |
+| Workspace snapshots | `repo.workspace_snapshot()` | `repo_handles::RepositoryWorkspaceSnapshot` | GitButler workspace snapshots |
+| Current checkout (new) | `repo.checkout()` | *to be added* | Status, switch, checkout, reset, restore, clean |
+| Merge family (new) | `repo.merge()` | *to be added* | Merge, pick, revert, replay, `--check` predictions, operation state (`--continue`, `--abort`, `--skip`) |
+| History (new) | `repo.history()` | *to be added* | Commit creation and amend, history edits (reword, drop, move, fixup, squash), rebase |
+
+The three new accessors are added by the first step that needs each one. `repo.work_tree()` already returns the work-tree path, so the current-checkout handle is `checkout()`. Linked-worktree administration stays on `worktrees()`.
+
+### Options structs
+
+Optional behavior goes in one options struct per operation (an illustrative example):
+
+```rust
+/// Options for repacking the object database.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct RepackOptions {
+    /// Which objects end up in the new pack.
+    pub scope: RepackScope,
+    /// Pack window size; `None` uses `pack.window`.
+    pub window: Option<u32>,
+}
+
+impl RepackOptions {
+    /// Sets [`scope`](Self::scope).
+    #[must_use]
+    pub fn with_scope(mut self, scope: RepackScope) -> Self {
+        self.scope = scope;
+        self
+    }
+
+    /// Sets [`window`](Self::window).
+    #[must_use]
+    pub fn with_window(mut self, window: Option<u32>) -> Self {
+        self.window = window;
+        self
+    }
+}
+
+/// Which objects a repack writes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RepackScope {
+    /// Only loose objects and packs not yet in the main pack.
+    #[default]
+    Incremental,
+    /// Everything reachable, into one pack.
+    All,
+}
+```
+
+- `#[non_exhaustive]` and `Default`, so new fields are additive and callers write `RepackOptions::default().with_window(Some(50))`.
+- One `with_<field>` setter per field. These setters are the only `with_` names in the API. A `_with_` after a prefix (`diff_trees_with_renames`) marks a variant to fold into an options struct, and the `pub_fn_with_in_name` ratchet counts it. Legitimate names that contain `_with_` are renamed, with no exemption list.
+- Use enums instead of bools whenever a choice has a name (`RepackScope::All`, not `all: bool`). One bare `bool` parameter is the most a public function takes.
+- The options struct is the last value parameter: `repo.objects().repack(&RepackOptions::default(), progress, cancel)`.
+
+### Progress and cancellation
+
+Long-running operations take progress and cancellation as **trailing parameters**, in this order:
+
+```rust
+pub fn repack(
+    &self,
+    options: &RepackOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<RepackOutcome, ObjectError>
+```
+
+[`ProgressSink`](https://docs.rs/grit-lib/latest/grit_lib/progress/trait.ProgressSink.html) and [`CancelToken`](https://docs.rs/grit-lib/latest/grit_lib/progress/struct.CancelToken.html) are the only progress and cancel types. Callers that don't care pass `&mut NullProgress` and `&CancelToken::never()`. There are no `_with_progress` / `_with_cancel` copies of an operation, and no progress or cancel fields on options structs.
+
+### Free functions
+
+A free function is only for a **pure computation on values**: parsing, formatting, hashing, or validating bytes and strings the caller already has. A function whose first parameter is `&Repository`, or a git-dir `&Path` such as `repo.git_dir()`, is an operation on a repository and becomes a method on the owning handle. The `pub_free_fn_repository_first` and `pub_free_fn_git_dir_path_first` ratchet metrics count the ones that remain.
+
+Rustdoc examples on the crate root and on handle types show the handle form. The `doc_example_free_fn_calls` metric counts calls in those examples to repository free functions (for example `resolve_head(repo.git_dir())`). It may only go down.
+
+### Superseded functions
+
+When a handle method or options struct replaces a function:
+
+- If internal hot paths still call the old function, it becomes `pub(crate)` and stays as the implementation.
+- Otherwise it is deleted.
+- Before 0.6.0, neither case gets a deprecated public shim. From 0.6.0 the [stability policy](#stability-policy) applies.
+- Measure before and after. A consolidation may not make anything slower.
+
+### Errors pass through
+
+Consolidation steps keep each operation's error type unchanged: the new method returns the same `Result<_, E>` as the function it replaces. Typed per-area errors (convention 4) are a separate roadmap item. Don't change error types during a move.
+
+### Ratchet report
+
+```bash
+make api-ratchet-report             # every top-level module, largest first
+make api-ratchet-report MODULE=diff # one module
+python3 scripts/api_ratchet.py report --module porcelain
+```
+
+The report lists the offenders for `pub_fn_with_in_name`, `pub_fn_too_many_arguments_allow`, `pub_fn_two_plus_bare_bool`, `pub_free_fn_repository_first` and `pub_free_fn_git_dir_path_first`. It groups them by the top-level public module a caller imports them from. Items defined in private implementation modules (`history_root`, `rev_parse`, …) are grouped under the public module that re-exports them. The totals match `make api-ratchet-check`.
+
 ## Stability policy
 
 **Before 0.6.0:** breaking changes are acceptable when they **consolidate** the API (fewer, clearer ways to do each thing, following the conventions above). Do not break the public API for unrelated refactors.
@@ -107,6 +229,8 @@ grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/public-api.txt
 **External users** counts are the number of files under each consumer tree that reference `grit_lib::<module>` (or `grit_lib::<module>::`), counted with `rg -l`. **Ratchet** columns use approximate per-module counts from `public-api.txt`: free functions whose first parameter is `&Repository` / `Repository`, and public functions whose name contains `_with_`. Workspace totals from [`api-ratchet.toml`](api-ratchet.toml) (rustdoc JSON via `make api-ratchet-check`) are **385** repo-first and **112** `_with_`-style function names; the baseline records **27 980** `public_api_lines`, matching the committed snapshot file.
 
 ### Regenerating counts
+
+For current per-module offender lists (from rustdoc JSON, matching the ratchet totals), use `make api-ratchet-report`; the script below reproduces this audit's `public-api.txt` approximation.
 
 From the repository root:
 

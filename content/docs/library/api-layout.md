@@ -37,6 +37,8 @@ Each [`Repository`](rustdoc:grit_lib::repo::Repository) accessor returns a handl
 
 Use [`references`](rustdoc:grit_lib::repo::Repository::references) for resolve/list/update; the raw backend is [`references().store()`](rustdoc:grit_lib::refs::References::store) (same trait object as [`ref_store`](rustdoc:grit_lib::repo::Repository::ref_store)).
 
+Which area belongs on which accessor, including the accessors the API 0.6 work still has to add, is in the [handle map](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/API.md#handle-map) in `grit-lib/API.md`. The same section covers the other canonical forms: options structs, trailing progress and cancel parameters, and when a free function is allowed.
+
 ## Flat → canonical map
 
 The authoritative map lives in [`grit-lib/canonical-modules.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/canonical-modules.toml). CI checks that every `grit_lib::…` import in `grit-cli`, `grit-protocol`, `grit-examples`, `grit-utils`, `grit-test-support`, and `grit-lib/tests` appears in that file (`scripts/check_canonical_layout.py`, wired from `canonical_paths` integration test). Imports must use the **canonical domain path** (for example `grit_lib::objects::odb`, not the private flat `odb` module); `scripts/check_noncanonical_grit_lib_imports.py` enforces that (`no_noncanonical_grit_lib_imports` in the same integration test, and `scripts/tests/test_canonical_layout.py` in the docs CI job).
