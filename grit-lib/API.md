@@ -28,9 +28,9 @@ Use one cancellation type, one progress sink, [`RefName`](https://docs.rs/grit-l
 
 Each functional area exposes its own `#[non_exhaustive]` `thiserror` enum with structured fields. The public API must not use a catch-all `Message(String)` variant or `Result<_, String>` as the primary error shape.
 
-**Target area map** (one enum per row; fold one-off variants into the neighbour — see [library/errors guide](https://grit-scm.com/docs/library/errors)):
+**Area map** (one umbrella variant and enum per row; fold one-off variants into the neighbour — see [library/errors guide](https://grit-scm.com/docs/library/errors)):
 
-| Area | Enum (target) | Module home |
+| Area | Enum | Module home |
 | --- | --- | --- |
 | Repository | `RepositoryError` | `repo` |
 | Config | `ConfigError` | `config` |
@@ -46,19 +46,18 @@ Each functional area exposes its own `#[non_exhaustive]` `thiserror` enum with s
 | Merge | `MergeError` | merge, pick, revert, `operation` |
 | History | `HistoryError` | `revwalk::history` |
 | Stash | `StashError` | `stash` |
-| Remote | `RemoteError` | `remote`, serve |
-| Bundle | `BundleError` | `bundle` |
+| Remote | `RemoteError` (wraps `BundleError`, `CloneError`, `ServeError`, …) | `remote`, `bundle`, clone, serve |
 
 **Contract rules**
 
 - `#[non_exhaustive]` `thiserror` on every public `*Error` enum; structured named fields (`PathBuf`, ids, ref names, reason enums); `#[source]` for causes.
 - No tuple variant whose only payload is `String`; no area-level catch-alls. `String` fields only for external text (for example remote stderr), always named.
-- Public APIs return `Result<T, AreaError>` (no `type FooResult = Result<…>` aliases in the public API).
-- Cross-area: wrap the inner area enum. Temporary `Nested(Box<crate::error::Error>)` on the umbrella is allowed until the collapse step; ratchet `pub_area_error_wraps_umbrella` must reach zero before that step merges.
+- The umbrella `Error` has exactly one variant per area (plus `Io`, `LockHeld` and `Cancelled`); `grit-lib/src/error/mod.rs` pins this with `umbrella_error_has_one_variant_per_area`. Operations return `grit_lib::error::Result<T>`; area enums convert into the umbrella with `From` (no `type FooResult = Result<…>` aliases in the public API).
+- Area enums never hold an umbrella `Error` (ratchet `pub_area_error_wraps_umbrella` is zero): a lower area's failure surfaces as its own umbrella variant. A variant that must also report a secondary failure (rollback, per-remote failures) keeps an [`ErrorSummary`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.ErrorSummary.html).
 - Path I/O: [`PathIoError`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.PathIoError.html) everywhere a path is involved — not bare `#[from] io::Error` on area enums.
-- Shared leaves: [`LockHeldError`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.LockHeldError.html), [`PathIoError`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.PathIoError.html), [`Cancelled`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.Cancelled.html).
+- Shared leaves: [`LockHeldError`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.LockHeldError.html), [`PathIoError`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.PathIoError.html), [`Cancelled`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.Cancelled.html), [`ErrorSummary`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.ErrorSummary.html).
 - CLI-only clashes do not belong in the library.
-- Tests assert on **variants**, not message strings. Pin `kind_name` slugs in `grit-lib/tests/error_contract.rs`.
+- Tests assert on **variants**, not message strings. Pin `kind_name` slugs in `grit-lib/tests/error_contract.rs` (legacy slugs plus every area table's slugs).
 
 ### 5. Typed outcomes
 

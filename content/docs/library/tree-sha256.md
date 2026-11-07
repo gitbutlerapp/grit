@@ -32,7 +32,7 @@ println!("{}", report.digest);
 
 ## Missing submodules
 
-When a gitlink submodule is not checked out or its commit is absent, hashing returns [`Error::TreeSha256MissingSubmodules`](rustdoc:grit_lib::error::Error::TreeSha256MissingSubmodules) listing every path.
+When a gitlink submodule is not checked out or its commit is absent, hashing returns [`TagError::TreeSha256MissingSubmodules`](rustdoc:grit_lib::porcelain::tag::TagError::TreeSha256MissingSubmodules) listing every path.
 
 ## Tag header claim
 

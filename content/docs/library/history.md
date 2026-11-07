@@ -46,7 +46,7 @@ History planning preserves [`change-id`](rustdoc:grit_lib::change_id::change_id)
 
 ## Errors
 
-[`HistoryError`](rustdoc:grit_lib::revwalk::history::HistoryError) covers planning failures (conflicts, out-of-scope commits, branch checked out elsewhere) and apply failures. There is no string catch-all variant: repository and object failures use [`HistoryError::Engine`](rustdoc:grit_lib::revwalk::history::HistoryError::Engine) (typed [`HistoryEngineError`](rustdoc:grit_lib::revwalk::history::HistoryEngineError) instead of wrapping the umbrella [`Error`](rustdoc:grit_lib::error::Error)), and structured fields carry paths, commit ids, and ref names where scripts need them.
+[`HistoryError`](rustdoc:grit_lib::revwalk::history::HistoryError) covers planning failures (conflicts, out-of-scope commits, branch checked out elsewhere) and apply failures. There is no string catch-all variant: history operations return the umbrella [`Error`](rustdoc:grit_lib::error::Error), with history-specific failures under [`Error::History`](rustdoc:grit_lib::error::Error::History) and repository, object, ref or revision failures under their own area variants, and structured fields carry paths, commit ids, and ref names where scripts need them.
 
 - [`LocalChangesWouldBeOverwritten`](rustdoc:grit_lib::revwalk::history::HistoryError::LocalChangesWouldBeOverwritten) — staged, unstaged, or untracked paths would be clobbered by the planned tree checkout.
 - [`RefCasMismatch`](rustdoc:grit_lib::revwalk::history::HistoryError::RefCasMismatch) — a ref tip changed after planning; nothing is written.

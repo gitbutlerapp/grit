@@ -53,7 +53,7 @@ With `core.protectNTFS` on, every platform rejects the NTFS spellings of `.git` 
 
 ## Errors
 
-[`PathComponentError`](rustdoc:grit_lib::path_validate::PathComponentError) is a typed, non-exhaustive enum (empty, `.`, `..`, slash/NUL, ASCII and platform `.git` aliases, NTFS backslash/drive/stream spellings, NTFS illegal characters, trailing space/period, reserved DOS device names, and symlinked dot-files). Checkout and index population return [`Error::InvalidPathComponent`](rustdoc:grit_lib::error::Error::InvalidPathComponent) with the full path and reason. User-facing `add`/`mv` path arguments use the same typed error; legacy [`Error::InvalidPath`](rustdoc:grit_lib::error::Error) remains for empty or escaping paths.
+[`PathComponentError`](rustdoc:grit_lib::path_validate::PathComponentError) is a typed, non-exhaustive enum (empty, `.`, `..`, slash/NUL, ASCII and platform `.git` aliases, NTFS backslash/drive/stream spellings, NTFS illegal characters, trailing space/period, reserved DOS device names, and symlinked dot-files). Checkout and index population return [`WorktreeError::InvalidPathComponent`](rustdoc:grit_lib::worktree::WorktreeError::InvalidPathComponent) with the full path and reason. User-facing `add`/`mv` path arguments use the same typed error; legacy [`Error::InvalidPath`](rustdoc:grit_lib::error::Error) remains for empty or escaping paths.
 
 ## Related
 

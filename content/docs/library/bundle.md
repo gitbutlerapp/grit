@@ -17,7 +17,7 @@ Git bundle files combine a header and thin pack for offline transfer. The [`bund
 | `unbundle` | Ingest the pack without updating refs |
 | `fetch` | `git fetch` from a bundle file: verify, ingest, and update refs per `FetchOptions` |
 
-Failed or cancelled `write` calls leave an existing destination file unchanged. Grit writes to a sibling `path.bundle.part` and renames onto `path` only after the pack stream succeeds. Missing objects surface as [`BundleError::ObjectNotFound`](rustdoc:grit_lib::bundle::BundleError::ObjectNotFound), not a generic I/O string.
+Failed or cancelled `write` calls leave an existing destination file unchanged. Grit writes to a sibling `path.bundle.part` and renames onto `path` only after the pack stream succeeds. Missing objects surface as [`ObjectError::NotFound`](rustdoc:grit_lib::error::ObjectError::NotFound) under [`Error::Object`](rustdoc:grit_lib::error::Error::Object), not a generic I/O string.
 
 With a files-backed repository `unbundle` installs the pack under `objects/pack/`. With a custom primary object store it writes every object of the pack into that store instead (see [Object stores](object-stores.md#receiving-packs-into-a-custom-store)).
 
