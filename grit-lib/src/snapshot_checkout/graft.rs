@@ -104,37 +104,8 @@ enum Refused {
     MergeConflict(Vec<String>),
 }
 
-/// Replay `tip` and the commits under it, down to the checkout's snapshot
-/// commits (`roots`) and the commits `known` records, onto the real history.
-///
-/// A commit `known` records stands for the real commit it records there and
-/// is not replayed: the tip itself, answered before anything is walked, or a
-/// commit under it, such as a projected commit the branch builds on. The walk
-/// stops at the snapshot commits and at `hide`, so a tip on the real history
-/// is refused without walking all of it.
-///
-/// # Parameters
-///
-/// - `repo`: the served repository, holding the checkout's pushed commits.
-/// - `roots`: the checkout's snapshot commits and the real commits they stand for.
-/// - `paths`: the checkout's paths (empty: the whole tree), which decide
-///   what a merge commit's tree is the answer for.
-/// - `known`: the repository's graft log, or `None` to graft from the
-///   snapshot commits alone. A real commit it names that the repository
-///   doesn't have is ignored.
-/// - `hide`: tips of real history to stop at (the target branch's).
-/// - `tip`: the branch tip the checkout pushed.
-///
-/// # Returns
-///
-/// The graft, with the commits replayed (not those `known` answered); the
-/// caller records those once it has set a branch to it. `Ok(Err(..))` when
-/// the branch cannot be grafted (see [`GraftError`]).
-///
-/// # Errors
-///
-/// Object read and write failures, and graft log read failures.
-pub fn graft(
+/// [`RepositorySnapshotCheckouts::graft`](crate::repo_handles::RepositorySnapshotCheckouts::graft) for `repo`.
+pub(crate) fn graft(
     repo: &Repository,
     roots: &[SnapshotRoot],
     paths: &[String],

@@ -1004,6 +1004,13 @@ impl Repository {
         crate::diff::Diff::new(self)
     }
 
+    /// Snapshot-checkout operations for this repository: making and projecting snapshots
+    /// on a server, and refreshing and checking in from a checkout.
+    #[must_use]
+    pub fn snapshot_checkouts(&self) -> crate::repo_handles::RepositorySnapshotCheckouts<'_> {
+        crate::repo_handles::RepositorySnapshotCheckouts::new(self)
+    }
+
     /// Remote configuration, `ls-remote`, fetch, and push for this repository.
     #[must_use]
     pub fn remotes(&self) -> crate::repo_handles::RepositoryRemotes<'_> {

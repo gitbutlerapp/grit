@@ -57,11 +57,12 @@ Larger subsystems use [`repo_handles`](rustdoc:grit_lib::repo_handles):
 
 | Method | Handle | Role |
 | --- | --- | --- |
-| `Repository::remotes` | `Remotes` | List/get remotes, `ls-remote`, fetch, push |
+| `Repository::remotes` | `Remotes` | List/get remotes, `ls-remote`, fetch, push, push planning, fetch/push over a caller-supplied transport (`fetch_from` / `push_to`) |
 | `Repository::worktrees` | `Worktrees` | List/add/remove/lock/unlock linked worktrees |
 | `Repository::stash` | `RepositoryStash` | Stash list/push/apply/pop/drop/branch/clear (the one stash API) |
 | `Repository::notes` | `RepositoryNotes` | Notes list/read/add/remove via `NotesRef` |
-| `Repository::bundles` | `Bundles` | Bundle create/verify/list-heads/unbundle |
+| `Repository::bundles` | `Bundles` | Bundle write/verify/list-heads/unbundle/fetch |
+| `Repository::snapshot_checkouts` | `SnapshotCheckouts` | Snapshot checkouts: make and project snapshots (server), refresh and check in (checkout) |
 
 Transport options, the stash identity, and notes authors and committers are passed in as arguments on those methods (no hidden wall-clock reads in the handle layer).
 

@@ -105,64 +105,16 @@ pub struct RefreshOutcome {
     pub gave_change_ids: usize,
 }
 
-/// Refuse to refresh a checkout that is in the middle of an operation, such
-/// as a refresh's rebase that stopped on a conflict: that has to be
-/// continued or aborted first. Check this before asking the server for a new
-/// snapshot.
-///
-/// # Errors
-///
-/// [`CheckoutError::OperationInProgress`] naming the operation.
-pub fn ensure_refreshable(repo: &Repository) -> Result<()> {
+/// [`RepositorySnapshotCheckouts::ensure_refreshable`](crate::repo_handles::RepositorySnapshotCheckouts::ensure_refreshable) for `repo`.
+pub(crate) fn ensure_refreshable(repo: &Repository) -> Result<()> {
     match detect_in_progress(repo.git_dir()).into_iter().next() {
         Some(operation) => Err(CheckoutError::OperationInProgress(operation)),
         None => Ok(()),
     }
 }
 
-/// Bring the checkout onto `info`, the snapshot the server answered
-/// [`super::CheckoutClient::update`] with.
-///
-/// 0. With `HEAD` on a branch, gives that branch's commits made with plain
-///    Git a change id ([`give_change_ids`]; not with `options.check`), so the
-///    rebase below keeps a key the server can match them by. Those moves are
-///    logged at the time of the repository handle's clock
-///    ([`Repository::identity_now`]), as the rebase's commits and reflog
-///    entries are.
-/// 1. Fetches the snapshot from the marker's URL into [`upstream_ref`] and
-///    records it in the marker ([`fetch_snapshot`]).
-/// 2. With `HEAD` on a branch, integrates the snapshot as [`pull`] does with
-///    `options` (a rebase unless `options.mode` says otherwise). A rebase that
-///    conflicts stops in a resumable rebase session
-///    ([`PullOptions::stop_on_conflict`]). Commits up to a tip that landed in
-///    the target ([`CheckoutMarker::landed`]) are not replayed: a branch with
-///    nothing above one moves to the snapshot keeping uncommitted changes
-///    ([`crate::porcelain::pull::PullResult::Landed`]), and one with commits
-///    above it rebases only those ([`FetchedUpstream::landed`]). With `HEAD`
-///    detached, nothing else moves.
-/// 3. Moves `refs/heads/<target>`, when it is not the current branch and has
-///    no commits of its own, to the new snapshot, and every other branch but
-///    the current one whose commits all landed (not with `options.check`).
-/// 4. Lists the other branches with work that still build on an older
-///    snapshot, and forgets landed tips no branch builds on any more (not
-///    with `options.check`).
-///
-/// # Parameters
-///
-/// - `repo`: the checkout.
-/// - `marker`: its marker as it is now.
-/// - `info`: the checkout as the server has it after the update.
-/// - `options`: how to integrate (mode, autostash, check) and the fetch's
-///   environment and threads; its remote, branch, fetch refspecs and
-///   upstream are replaced.
-/// - `progress`, `cancel`, `http_factory`: as for [`pull`].
-///
-/// # Errors
-///
-/// [`CheckoutError::OperationInProgress`] before anything is fetched, the
-/// errors of [`fetch_snapshot`], and [`CheckoutError::Pull`] when the branch
-/// could not be integrated (the new snapshot is fetched and recorded by then).
-pub fn refresh<P: Progress>(
+/// [`RepositorySnapshotCheckouts::refresh`](crate::repo_handles::RepositorySnapshotCheckouts::refresh) for `repo`.
+pub(crate) fn refresh<P: Progress>(
     repo: &Repository,
     marker: &CheckoutMarker,
     info: &CheckoutInfo,

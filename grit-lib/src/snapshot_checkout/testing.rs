@@ -12,7 +12,10 @@ use crate::objects::ObjectId;
 use crate::remote::fetch::NoProgress;
 use crate::repo::Repository;
 
-use super::{make_snapshot, materialize, target_ref, CheckoutInfo, CheckoutMarker, SnapshotRoot};
+use super::{
+    make_snapshot, materialize, target_ref, CheckoutInfo, CheckoutMarker, MaterializeRequest,
+    SnapshotRoot,
+};
 use crate::progress::CancelToken;
 
 pub(crate) const ID: &str = "0123456789abcdef0123";
@@ -179,11 +182,13 @@ pub(crate) fn check_out(served: &mut Served, at: &Path) -> (PathBuf, Repository)
     .expect("bundle");
     let dest = at.join("co");
     let made = materialize(
-        &dest,
-        &info,
-        &bundle,
-        &served.url(),
-        "work",
+        &MaterializeRequest {
+            dest: &dest,
+            info: &info,
+            bundle: &bundle,
+            repo_url: &served.url(),
+            work: "work",
+        },
         &mut NoProgress,
         &CancelToken::never(),
     )

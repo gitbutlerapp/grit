@@ -174,36 +174,8 @@ pub(crate) fn record_landed(
     Ok(current)
 }
 
-/// Decide what the integration the server answered with `response`
-/// ([`CheckoutClient::integrate`]) means for the checkout `repo`, and record
-/// what landed. Call it right after the integration, then refresh the
-/// checkout ([`super::refresh`]), then call [`Landing::move_off`].
-///
-/// The work landed here when the branch the server merged into
-/// ([`IntegrateResponse::target`]) is exactly the one the checkout snapshots
-/// ([`CheckoutMarker::branch`]); a case variant may be another branch on the
-/// server, and treating it as this one would drop the branch's commits from
-/// the next snapshot. A merge and an answer that the target already had the
-/// branch both mean the tip this integration checked in, `checked_in`, is in
-/// the target, so it is recorded as landed ([`record_landed`]): later
-/// refreshes never replay its commits. Otherwise nothing is recorded.
-///
-/// # Parameters
-///
-/// - `repo`: the checkout.
-/// - `marker`: its marker, used when the one on disk can't be read.
-/// - `response`: the server's answer to the integration.
-/// - `checked_in`: the tip of the integrated branch this integration checked
-///   in first (its raw, local commit), if any.
-///
-/// # Returns
-///
-/// [`Landing::Here`] or [`Landing::Elsewhere`].
-///
-/// # Errors
-///
-/// Marker write failures.
-pub fn land_integration(
+/// [`RepositorySnapshotCheckouts::land_integration`](crate::repo_handles::RepositorySnapshotCheckouts::land_integration) for `repo`.
+pub(crate) fn land_integration(
     repo: &Repository,
     marker: &CheckoutMarker,
     response: &IntegrateResponse,

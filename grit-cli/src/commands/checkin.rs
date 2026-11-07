@@ -8,9 +8,8 @@ use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::remote::{
     redact_url_for_display,
     snapshot_checkout::{
-        branches_with_work, give_change_ids, land_integration, push_for_checkin, same_branch_name,
-        suggest_work_branch, valid_branch_name, CheckinBranch, CheckinRequest, CheckinRule,
-        CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus, Landing,
+        same_branch_name, suggest_work_branch, valid_branch_name, CheckinBranch, CheckinRequest,
+        CheckinRule, CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus, Landing,
     },
 };
 use grit_lib::revwalk::ReachableWalkOptions;
@@ -214,18 +213,20 @@ fn check_in(
 ) -> Result<CheckinOutcome> {
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let mut progress = TerminalProgress::new(mode);
-    let pushed = push_for_checkin(
-        &co.repo,
-        &co.marker,
-        branches,
-        &mut progress,
-        &crate::interrupt::process_cancel_token(),
-        Some(&crate::context::http_client_factory()),
-    )
-    .map_err(|e| match e {
-        CheckoutError::Remote(remote) => crate::commands::fetch::map_remote_error(*remote),
-        other => other.into(),
-    })?;
+    let pushed = co
+        .repo
+        .snapshot_checkouts()
+        .push_for_checkin(
+            &co.marker,
+            branches,
+            &mut progress,
+            &crate::interrupt::process_cancel_token(),
+            Some(&crate::context::http_client_factory()),
+        )
+        .map_err(|e| match e {
+            CheckoutError::Remote(remote) => crate::commands::fetch::map_remote_error(*remote),
+            other => other.into(),
+        })?;
     drop(progress);
     if let Some(bad) = pushed.results.iter().find(|r| r.status.is_error()) {
         bail!(
@@ -277,7 +278,7 @@ fn check_in(
 /// (possibly none).
 fn chosen_branches(co: &OpenCheckout, names: &[String]) -> Result<Vec<(String, ObjectId)>> {
     if names.is_empty() {
-        return Ok(branches_with_work(&co.repo, &co.marker)?);
+        return Ok(co.repo.snapshot_checkouts().work_branches(&co.marker)?);
     }
     names
         .iter()
@@ -295,8 +296,7 @@ fn chosen_branches(co: &OpenCheckout, names: &[String]) -> Result<Vec<(String, O
 /// nothing to do, and that is not an error.
 pub fn run(names: &[String], force: bool, mode: OutputMode) -> Result<CheckinOutcome> {
     let co = require_checkout()?;
-    let gave = give_change_ids(
-        &co.repo,
+    let gave = co.repo.snapshot_checkouts().give_change_ids(
         &co.marker,
         (!names.is_empty()).then_some(names),
         co.repo.identity_now(),
@@ -596,13 +596,15 @@ pub fn integrate(name: &str, without: &[String], mode: OutputMode) -> Result<Int
     if !valid_branch_name(name) {
         bail!("{name} is not a valid branch name");
     }
-    let gave = give_change_ids(
-        &co.repo,
+    let gave = co.repo.snapshot_checkouts().give_change_ids(
         &co.marker,
         Some(&[name.to_owned()]),
         co.repo.identity_now(),
     )?;
-    let local = branches_with_work(&co.repo, &co.marker)?
+    let local = co
+        .repo
+        .snapshot_checkouts()
+        .work_branches(&co.marker)?
         .into_iter()
         .find(|(n, _)| n == name);
     let (checkin, checked_in) = match local {
@@ -625,7 +627,11 @@ pub fn integrate(name: &str, without: &[String], mode: OutputMode) -> Result<Int
         name: name.to_owned(),
         author: co.author(),
     })?;
-    let (follow, follows) = match land_integration(&co.repo, &co.marker, &response, checked_in) {
+    let (follow, follows) = match co
+        .repo
+        .snapshot_checkouts()
+        .land_integration(&co.marker, &response, checked_in)
+    {
         Ok(landing) => (
             follow_up(&co, name, &landing, mode),
             matches!(landing, Landing::Elsewhere { .. }).then(|| co.marker.branch.clone()),

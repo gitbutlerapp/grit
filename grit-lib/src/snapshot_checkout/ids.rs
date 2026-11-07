@@ -77,32 +77,8 @@ pub(crate) fn change_keys(
         .collect()
 }
 
-/// Whether `grafted` has every commit of `previous` that the target lacks,
-/// matched by change key ([`change_keys`]): a rebase of it, perhaps with more
-/// on top.
-///
-/// It holds when every commit of `previous --not grafted <targets>` has a
-/// copy with its key among `grafted --not previous <targets>`, so commits the
-/// target already has never count as dropped. A copy counts only when its
-/// tree holds what the original changed (against its first parent) outside
-/// `paths`, the checkout's paths: the checkout never sees those files, so a
-/// teammate's amend that also changed one must not be dropped unnoticed.
-/// Inside the paths the copy's version wins, as the checkout's own edit of
-/// the change.
-///
-/// # Parameters
-///
-/// - `repo`: the served repository.
-/// - `previous`: where the server's branch is.
-/// - `grafted`: what a check-in would set it to.
-/// - `targets`: the tips of the target branch.
-/// - `paths`: the checking-in checkout's paths (empty: the whole tree, so
-///   nothing is outside them).
-///
-/// # Errors
-///
-/// Walk and object read failures.
-pub fn keeps_every_commit(
+/// [`RepositorySnapshotCheckouts::keeps_every_commit`](crate::repo_handles::RepositorySnapshotCheckouts::keeps_every_commit) for `repo`.
+pub(crate) fn keeps_every_commit(
     repo: &Repository,
     previous: ObjectId,
     grafted: ObjectId,
@@ -168,49 +144,8 @@ fn one_holds(repo: &Repository, commits: &[ObjectId], changes: &[Change]) -> Res
     Ok(false)
 }
 
-/// Give a change id to every commit made with plain Git on the checkout's
-/// branches above its snapshots, so the server can tell a rebased copy of it
-/// from new work later.
-///
-/// A commit without a `change-id` header is rewritten with the id
-/// [`ChangeId::derived_from_commit_id`] gives its own commit id (what
-/// [`resolved_change_id`] already reports for it, and what the server's graft
-/// would give it). A commit whose parent was rewritten is rewritten onto the
-/// new parent, keeping its id. Rewritten commits drop signatures, which no
-/// longer hold. Trees are unchanged, so the index and worktree stay as they
-/// are.
-///
-/// Only branches with work on a snapshot ([`branches_with_work`]) are
-/// rewritten, never history under the snapshots, a remote-tracking ref or a
-/// tip that landed in the target ([`CheckoutMarker::landed`]). Each branch
-/// moves by compare-and-swap with a reflog entry (one that moved meanwhile
-/// is left alone), and so does a detached `HEAD` on a rewritten commit. The
-/// reflog entries are by the committer Git would log (from the repository's
-/// environment and config) at `now`.
-///
-/// Nothing happens while an operation is in progress in any of the
-/// checkout's worktrees (a rebase, merge, cherry-pick or revert, one paused
-/// between the commits of a sequence too, am or bisect), whose state names
-/// the commits as they are, or when `grit.changeIds` is off
-/// ([`ChangeIdPolicy`]).
-///
-/// # Parameters
-///
-/// - `repo`: the checkout.
-/// - `marker`: its marker.
-/// - `only`: the branches (without `refs/heads/`) to give ids on; `None` for
-///   every branch with work.
-/// - `now`: the time the reflog entries record.
-///
-/// # Returns
-///
-/// How many commits were given an id (commits rewritten only because their
-/// parent was are not counted).
-///
-/// # Errors
-///
-/// Config, worktree, walk, object and ref failures.
-pub fn give_change_ids(
+/// [`RepositorySnapshotCheckouts::give_change_ids`](crate::repo_handles::RepositorySnapshotCheckouts::give_change_ids) for `repo`.
+pub(crate) fn give_change_ids(
     repo: &Repository,
     marker: &CheckoutMarker,
     only: Option<&[String]>,

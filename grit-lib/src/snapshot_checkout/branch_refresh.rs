@@ -1,6 +1,6 @@
 //! Bringing a local branch onto the server's branch of its name, as the
 //! checkout sees it: what `grit pull <branch>` does in a checkout once the
-//! server has projected its branch ([`super::project_branch`]) and the
+//! server has projected its branch ([`project_branch`](crate::repo_handles::RepositorySnapshotCheckouts::project_branch)) and the
 //! projection has been fetched ([`super::fetch_branch`]).
 //!
 //! A branch the checkout doesn't have is created at the projection. One that
@@ -117,47 +117,8 @@ struct OwnCommits {
     own: usize,
 }
 
-/// Bring the local branch `info.name` onto the server's branch as the
-/// checkout sees it, `info.projected`, fetched already (see the module
-/// docs).
-///
-/// First the branch's commits made with plain Git are given a change id
-/// ([`give_change_ids`], not with `check`), logged at the repository
-/// handle's clock ([`Repository::identity_now`]). The branch's own commits
-/// are then those above `from`, the newer of its merge base with the
-/// projection and the newest snapshot it builds on, past the copies of the
-/// server's commits right above it; other copies among them (same change key
-/// as one of the projection's commits above the snapshots, or same patch-id
-/// as one of the projection's commits the branch lacks) are left out of the
-/// rebase too.
-///
-/// When the branch is not the current one, it is moved by compare-and-swap
-/// to the projection when it has nothing of its own, and otherwise `HEAD` is
-/// switched to it first (as `git rebase <upstream> <branch>` does) and it is
-/// rebased in place, with the worktree. When that rebase fails or refuses
-/// (local changes it would overwrite, say), `HEAD` is switched back.
-///
-/// # Parameters
-///
-/// - `repo`: the checkout.
-/// - `marker`: its marker.
-/// - `info`: the server's answer to [`super::CheckoutClient::branch`], whose
-///   projection must be at [`upstream_ref`]`(<name>)` here.
-/// - `check`: say what would happen without changing anything.
-///
-/// # Errors
-///
-/// [`CheckoutError::OperationInProgress`] while a rebase or merge is in
-/// progress; [`CheckoutError::BranchMoved`] when the projection is not at
-/// [`upstream_ref`]`(<name>)`; [`CheckoutError::UnrelatedBranch`] for a local
-/// branch that shares nothing with the projection;
-/// [`CheckoutError::RefKeptMoving`] when the branch moved meanwhile;
-/// [`CheckoutError::Library`] for a branch checked out (or being rebased or
-/// bisected) in another worktree, or a switch that would overwrite local
-/// changes; [`CheckoutError::Pull`] when the rebase fails;
-/// [`CheckoutError::StillSwitched`] when it fails and `HEAD` can't be
-/// switched back; and ref, walk and object failures.
-pub fn refresh_branch(
+/// [`RepositorySnapshotCheckouts::refresh_branch`](crate::repo_handles::RepositorySnapshotCheckouts::refresh_branch) for `repo`.
+pub(crate) fn refresh_branch(
     repo: &Repository,
     marker: &CheckoutMarker,
     info: &BranchInfo,
@@ -486,7 +447,7 @@ mod tests {
     use crate::objects::{serialize_commit, ObjectKind};
     use crate::snapshot_checkout::testing::*;
     use crate::snapshot_checkout::{
-        branches_with_work, fetch_branch, project_branch, refresh, CheckoutStore,
+        branches_with_work, fetch_branch, project::project_branch, refresh, CheckoutStore,
     };
     use std::path::Path;
 

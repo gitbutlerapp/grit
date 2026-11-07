@@ -15,7 +15,7 @@ use grit_lib::remote::resumable::{
 use grit_lib::remote::snapshot_checkout::{
     materialize, normalize_paths, suggest_work_branch, BranchInfo, BranchRefresh,
     BranchRefreshResult, CheckoutClient, CheckoutMarker, CheckoutRequest, CheckoutState,
-    RefreshOutcome,
+    MaterializeRequest, RefreshOutcome,
 };
 use grit_lib::remote::{redact_url_for_display, HttpClientFactory};
 use schemars::JsonSchema;
@@ -259,11 +259,13 @@ pub fn run(
 
     let existed = dest.exists();
     let made = materialize(
-        &dest,
-        &info,
-        &bundle,
-        &client.url().repo_url,
-        &work,
+        &MaterializeRequest {
+            dest: &dest,
+            info: &info,
+            bundle: &bundle,
+            repo_url: &client.url().repo_url,
+            work: &work,
+        },
         &mut progress,
         &crate::interrupt::process_cancel_token(),
     );

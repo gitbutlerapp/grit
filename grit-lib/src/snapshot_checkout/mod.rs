@@ -15,13 +15,13 @@
 //! resumes) and turns into a new repository whose history is that one commit,
 //! with the snapshot at [`upstream_ref`] (`refs/remotes/origin/<branch>`) and a
 //! new work branch on top of it checked out. Its `origin` fetches only the
-//! checkout's snapshots ([`snapshot_fetch_refspec`], no tags) and pushes to the
-//! check-in area ([`out_push_refspec`]), so plain `git` and `grit` fetches and
-//! pushes in a checkout never bring the full history or touch the server's
-//! real branches.
+//! checkout's snapshots (no tags) and pushes to the check-in area, so plain
+//! `git` and `grit` fetches and pushes in a checkout never bring the full
+//! history or touch the server's real branches.
 //!
 //! - Wire types: [`CheckoutServerInfo`], [`CheckoutRequest`], [`CheckoutInfo`].
-//! - Server side: [`normalize_paths`], [`filtered_tree`], [`snapshot_object`],
+//! - Server side: [`normalize_paths`], [`filtered_tree`], [`snapshot_object`], and
+//!   on the [`RepositorySnapshotCheckouts`] handle ([`Repository::snapshot_checkouts`]):
 //!   [`make_snapshot`], [`fetch_promised_blobs`], [`project_branch`].
 //! - Client side: [`CheckoutUrl`], [`CheckoutClient`], [`materialize`],
 //!   [`CheckoutMarker`], [`push_for_checkin`], [`fetch_snapshot`], [`refresh`],
@@ -29,7 +29,7 @@
 //!
 //! Work comes back with a **check-in**: the client gives commits made with
 //! plain Git a change id ([`give_change_ids`]), pushes its branches' raw tips
-//! to [`out_ref`] ([`push_for_checkin`]) and asks the server to [`graft`] them
+//! to [`out_ref`] ([`push_for_checkin`]) and asks the server to graft them
 //! onto the real history ([`graft_checkin_branch`]) and set the server's
 //! branches ([`set_checked_in_branch`], deciding with [`decide_checkin`],
 //! which also accepts a rebase that keeps every commit by change id:
@@ -49,7 +49,7 @@
 //!
 //! Checkouts share a branch through **projection**, the reverse of a graft:
 //! the server shows a checkout one of its branches cut down to the
-//! checkout's paths on its snapshots ([`project`], [`project_branch`], asked
+//! checkout's paths on its snapshots ([`project_branch`], asked
 //! for with [`CheckoutClient::branch`]) at [`in_ref`], the client fetches it
 //! ([`fetch_branch`]) and brings its branch of that name onto it
 //! ([`refresh_branch`]). Grafts and projections record the pairs they make in
@@ -58,12 +58,29 @@
 //!
 //! The server keeps each checkout's record, the work-branch names it has
 //! given out, and the graft log in a [`CheckoutStore`].
+//!
+//! [`RepositorySnapshotCheckouts`]: crate::repo_handles::RepositorySnapshotCheckouts
+//! [`edit_slices`]: crate::repo_handles::RepositorySnapshotCheckouts::edit_slices
+//! [`fetch_branch`]: crate::repo_handles::RepositorySnapshotCheckouts::fetch_branch
+//! [`fetch_promised_blobs`]: crate::repo_handles::RepositorySnapshotCheckouts::fetch_promised_blobs
+//! [`give_change_ids`]: crate::repo_handles::RepositorySnapshotCheckouts::give_change_ids
+//! [`graft_checkin_branch`]: crate::repo_handles::RepositorySnapshotCheckouts::graft_checkin_branch
+//! [`integrate`]: crate::repo_handles::RepositorySnapshotCheckouts::integrate
+//! [`keeps_every_commit`]: crate::repo_handles::RepositorySnapshotCheckouts::keeps_every_commit
+//! [`land_integration`]: crate::repo_handles::RepositorySnapshotCheckouts::land_integration
+//! [`make_snapshot`]: crate::repo_handles::RepositorySnapshotCheckouts::make_snapshot
+//! [`project_branch`]: crate::repo_handles::RepositorySnapshotCheckouts::project_branch
+//! [`push_for_checkin`]: crate::repo_handles::RepositorySnapshotCheckouts::push_for_checkin
+//! [`refresh`]: crate::repo_handles::RepositorySnapshotCheckouts::refresh
+//! [`refresh_branch`]: crate::repo_handles::RepositorySnapshotCheckouts::refresh_branch
+//! [`set_checked_in_branch`]: crate::repo_handles::RepositorySnapshotCheckouts::set_checked_in_branch
 
 mod branch_refresh;
 mod checkin;
 mod graft;
 mod graft_log;
 mod guard;
+pub(crate) mod handle;
 mod ids;
 mod landing;
 mod project;
@@ -76,23 +93,26 @@ mod testing;
 mod transfer;
 mod tree;
 
-pub use branch_refresh::{refresh_branch, BranchRefresh, BranchRefreshResult};
-pub use checkin::{
-    graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinRefusal, CheckinRule,
-};
-pub use graft::{graft, Grafted};
+pub use branch_refresh::{BranchRefresh, BranchRefreshResult};
+pub use checkin::{BranchSet, CheckinRefusal, CheckinRule, CheckinUpdate};
+pub use graft::Grafted;
 pub use graft_log::GraftLog;
 pub use guard::TargetGuard;
-pub use ids::{give_change_ids, keeps_every_commit};
-pub use landing::{land_integration, Landing};
-pub use project::{project, project_branch, ProjectError};
-pub use refresh::{ensure_refreshable, refresh, RefreshOutcome, RefreshedHead};
+pub(crate) use ids::give_change_ids;
+pub use landing::Landing;
+pub use project::ProjectError;
+pub use refresh::{RefreshOutcome, RefreshedHead};
 pub use store::{valid_checkout_id, CheckoutRecord, CheckoutStore, ReservedName, StoredCheckout};
+pub(crate) use target::target_branch;
 pub use target::{
-    edit_slices, integrate, read_slices, same_branch_name, target_branch, Integration, SliceEdit,
-    SlicesEdited, TargetChange, TargetRefusal, SLICES_PATH,
+    same_branch_name, Integration, SliceEdit, SlicesEdited, TargetChange, TargetRefusal,
+    SLICES_PATH,
 };
-pub use transfer::{fetch_branch, push_for_checkin};
+#[cfg(test)]
+pub(crate) use {
+    graft::graft, landing::land_integration, refresh::refresh, transfer::fetch_branch,
+    transfer::push_for_checkin,
+};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -1020,20 +1040,8 @@ pub struct Snapshot {
     pub bytes: u64,
 }
 
-/// Write the snapshot of `base` filtered to `paths` (see [`filtered_tree`])
-/// on `parent` into `repo`, with the number and size of its files.
-///
-/// A snapshot holds every file it names, so in a repository whose large blobs
-/// live on a promisor remote, the ones the snapshot needs are fetched first
-/// ([`fetch_promised_blobs`]).
-///
-/// # Errors
-///
-/// [`CheckoutError::MissingPath`] for a path `base` lacks,
-/// [`CheckoutError::PromisedBlobs`] and [`CheckoutError::PromisedBlobsNotFetched`]
-/// for blobs on a promisor remote that cannot be fetched, and object read or
-/// write failures.
-pub fn make_snapshot(
+/// [`RepositorySnapshotCheckouts::make_snapshot`](crate::repo_handles::RepositorySnapshotCheckouts::make_snapshot) for `repo`.
+pub(crate) fn make_snapshot(
     repo: &Repository,
     base: ObjectId,
     paths: &[String],
@@ -1065,36 +1073,8 @@ pub fn make_snapshot(
     })
 }
 
-/// Make sure `repo` stores every blob of the snapshot commit `snapshot`, fetching
-/// the ones it keeps on a promisor remote.
-///
-/// A server whose large blobs were offloaded to a large-object promisor lacks
-/// them locally, but a snapshot (and its bundle) must hold every file. This
-/// follows upload-pack's rule for a client that accepted no promisor remote: the
-/// blobs are fetched from the repository's promisor remotes when lazy fetch is on,
-/// which the host decides by installing a
-/// [`PromisorFetcher`](crate::promisor_fetch::PromisorFetcher) on the repository
-/// (as [`crate::serve::ServeOptions::attach_promisor_fetcher`] does for
-/// upload-pack), and the request fails otherwise. Every missing blob is fetched in
-/// one request. A repository without promisor remotes is not checked.
-///
-/// # Parameters
-///
-/// - `repo`: the served repository.
-/// - `snapshot`: a snapshot commit (or any commit) whose tree must be complete.
-///
-/// # Returns
-///
-/// How many blobs were fetched (`0` when nothing was missing).
-///
-/// # Errors
-///
-/// [`CheckoutError::PromisedBlobs`] when blobs are missing and the repository has
-/// no promisor fetcher, [`CheckoutError::PromisedBlobsNotFetched`] when the fetch
-/// failed or left some missing, [`CheckoutError::Library`] with
-/// [`crate::error::Error::ObjectNotFound`] for a missing blob nothing promises,
-/// and object read failures.
-pub fn fetch_promised_blobs(repo: &Repository, snapshot: ObjectId) -> Result<usize> {
+/// [`RepositorySnapshotCheckouts::fetch_promised_blobs`](crate::repo_handles::RepositorySnapshotCheckouts::fetch_promised_blobs) for `repo`.
+pub(crate) fn fetch_promised_blobs(repo: &Repository, snapshot: ObjectId) -> Result<usize> {
     let tree = parse_commit(&repo.odb().read(&snapshot)?.data)?.tree;
     fetch_promised_tree_blobs(repo, tree)
 }
@@ -1457,13 +1437,8 @@ impl<'a> CheckoutClient<'a> {
     }
 }
 
-/// Local branches with work to check in: every branch whose tip is a commit
-/// on top of one of the checkout's snapshots (not a snapshot itself).
-///
-/// # Errors
-///
-/// Ref and ancestry failures.
-pub fn branches_with_work(
+/// [`RepositorySnapshotCheckouts::work_branches`](crate::repo_handles::RepositorySnapshotCheckouts::work_branches) for `repo`.
+pub(crate) fn branches_with_work(
     repo: &Repository,
     marker: &CheckoutMarker,
 ) -> Result<Vec<(String, ObjectId)>> {
@@ -1581,31 +1556,49 @@ pub struct Materialized {
     pub files: u64,
 }
 
-/// Build the checkout described by `info` in `dest` from its downloaded
-/// `bundle`.
+/// A checkout to build on disk with [`materialize`].
+#[derive(Debug, Clone, Copy)]
+pub struct MaterializeRequest<'a> {
+    /// The directory to create the repository in; it must be missing or empty.
+    pub dest: &'a Path,
+    /// The checkout, as the server described it.
+    pub info: &'a CheckoutInfo,
+    /// The downloaded snapshot bundle.
+    pub bundle: &'a Path,
+    /// The repository URL `origin` is configured with.
+    pub repo_url: &'a str,
+    /// The work branch to create and check out.
+    pub work: &'a str,
+}
+
+/// Build the checkout described by `request.info` in `request.dest` from its
+/// downloaded `request.bundle`, reporting progress through `progress` and
+/// stopping when `cancel` fires.
 ///
 /// Creates the repository, unpacks the bundle, checks that the snapshot
 /// commit is byte for byte the one the server described, points
 /// [`upstream_ref`] (`refs/remotes/origin/<branch>`, which
 /// `refs/remotes/origin/HEAD` names) and the new branch `work` at it,
-/// configures `origin` as `repo_url` fetching [`snapshot_fetch_refspec`] with
-/// no tags and pushing [`out_push_refspec`], writes the [`CheckoutMarker`] and
-/// checks out the files.
+/// configures `origin` as `repo_url` fetching only the checkout's snapshots
+/// with no tags and pushing to its check-in area, writes the [`CheckoutMarker`]
+/// and checks out the files.
 ///
 /// # Errors
 ///
 /// [`CheckoutError::DestinationNotEmpty`], [`CheckoutError::Mismatch`] for a
 /// download that is not the described snapshot, and repository failures.
-#[allow(clippy::too_many_arguments)]
 pub fn materialize(
-    dest: &Path,
-    info: &CheckoutInfo,
-    bundle: &Path,
-    repo_url: &str,
-    work: &str,
+    request: &MaterializeRequest<'_>,
     progress: &mut dyn Progress,
     cancel: &CancelToken,
 ) -> Result<Materialized> {
+    let MaterializeRequest {
+        dest,
+        info,
+        bundle,
+        repo_url,
+        work,
+    } = *request;
     if dest.is_dir() && std::fs::read_dir(dest)?.next().is_some() {
         return Err(CheckoutError::DestinationNotEmpty(dest.to_path_buf()));
     }

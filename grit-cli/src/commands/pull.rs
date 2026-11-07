@@ -18,8 +18,7 @@ use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch_request::resolve_pull_invocation;
 use grit_lib::remote::snapshot_checkout::{
-    ensure_refreshable, fetch_branch, refresh, refresh_branch, same_branch_name, valid_branch_name,
-    CheckoutClient, CheckoutError, CheckoutMarker,
+    same_branch_name, valid_branch_name, CheckoutClient, CheckoutError, CheckoutMarker,
 };
 use grit_lib::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags, FetchOptions};
 use grit_lib::remote::HttpClientFactory;
@@ -231,7 +230,9 @@ fn pull_server_branch(
             "`grit pull {name}` in a snapshot checkout rebases {name} onto the server's; it takes no --ff-only, --no-rebase, --autostash or --dry-run"
         );
     }
-    ensure_refreshable(repo).map_err(refresh_error)?;
+    repo.snapshot_checkouts()
+        .ensure_refreshable()
+        .map_err(refresh_error)?;
     let http = crate::context::http_client_factory()
         .create(config)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -247,17 +248,21 @@ fn pull_server_branch(
     let mut fetch = FetchOptions::new();
     fetch.thread_policy = repo.thread_policy();
     fetch.environment = context::environment();
-    let transfer = fetch_branch(
-        repo,
-        marker,
-        &info,
-        fetch,
-        &mut progress,
-        &CancelToken::never(),
-        Some(&crate::context::http_client_factory()),
-    )
-    .map_err(refresh_error)?;
-    let refreshed = refresh_branch(repo, marker, &info, args.check).map_err(refresh_error)?;
+    let transfer = repo
+        .snapshot_checkouts()
+        .fetch_branch(
+            marker,
+            &info,
+            fetch,
+            &mut progress,
+            &CancelToken::never(),
+            Some(&crate::context::http_client_factory()),
+        )
+        .map_err(refresh_error)?;
+    let refreshed = repo
+        .snapshot_checkouts()
+        .refresh_branch(marker, &info, args.check)
+        .map_err(refresh_error)?;
     let mut outcome = PullOutcome::from_server_branch(&info, &refreshed, transfer);
     outcome.transfer.records = progress.phases().to_vec();
     outcome.transfer.milestones = progress.milestones().to_vec();
@@ -275,7 +280,9 @@ fn refresh_checkout(
     args: &PullRunArgs,
     mode: OutputMode,
 ) -> Result<PullOutcome> {
-    ensure_refreshable(repo).map_err(refresh_error)?;
+    repo.snapshot_checkouts()
+        .ensure_refreshable()
+        .map_err(refresh_error)?;
     let http = crate::context::http_client_factory()
         .create(config)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -309,16 +316,17 @@ fn refresh_checkout(
         },
         ..Default::default()
     };
-    let refreshed = refresh(
-        repo,
-        marker,
-        &info,
-        &options,
-        &mut progress,
-        &CancelToken::never(),
-        Some(&crate::context::http_client_factory()),
-    )
-    .map_err(refresh_error)?;
+    let refreshed = repo
+        .snapshot_checkouts()
+        .refresh(
+            marker,
+            &info,
+            &options,
+            &mut progress,
+            &CancelToken::never(),
+            Some(&crate::context::http_client_factory()),
+        )
+        .map_err(refresh_error)?;
     let mut outcome = PullOutcome::from_refresh(refreshed);
     outcome.transfer.records = progress.phases().to_vec();
     outcome.transfer.milestones = progress.milestones().to_vec();

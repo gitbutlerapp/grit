@@ -57,14 +57,13 @@ use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::serve::ServeOptions;
 use grit_lib::remote::snapshot_checkout::{
-    edit_slices, fetch_promised_blobs, graft_checkin_branch, integrate, make_snapshot,
-    normalize_paths, project_branch, read_slices, set_checked_in_branch, target_branch, target_ref,
-    valid_checkout_id, BranchRequest, CheckinBranch, CheckinRefusal, CheckinRequest,
-    CheckinResponse, CheckinResult, CheckinRule, CheckinStatus, CheckoutError, CheckoutErrorBody,
-    CheckoutInfo, CheckoutRecord, CheckoutRequest, CheckoutServerInfo, CheckoutState,
-    CheckoutStore, Ident, IntegrateRequest, IntegrateResponse, ProjectError, Slice, SliceChange,
-    SliceDeleteRequest, SliceEdit, SliceRequest, SlicesEdited, SlicesResponse, SnapshotRoot,
-    StoredCheckout, TargetChange, TargetRefusal, WorkBranchRequest, WorkBranchResponse,
+    normalize_paths, target_ref, valid_checkout_id, BranchRequest, CheckinBranch, CheckinRefusal,
+    CheckinRequest, CheckinResponse, CheckinResult, CheckinRule, CheckinStatus, CheckinUpdate,
+    CheckoutError, CheckoutErrorBody, CheckoutInfo, CheckoutRecord, CheckoutRequest,
+    CheckoutServerInfo, CheckoutState, CheckoutStore, Ident, IntegrateRequest, IntegrateResponse,
+    ProjectError, Slice, SliceChange, SliceDeleteRequest, SliceEdit, SliceRequest, SlicesEdited,
+    SlicesResponse, SnapshotRoot, StoredCheckout, TargetChange, TargetRefusal, WorkBranchRequest,
+    WorkBranchResponse,
 };
 use grit_lib::repo::Repository;
 use grit_protocol::RepositoryOptions;
@@ -328,7 +327,7 @@ fn branch_tip(repo: &Repository, branch: &str) -> Result<ObjectId, Rejection> {
 
 /// The target branch's short name and tip.
 fn target(repo: &Repository) -> Result<(String, ObjectId), Rejection> {
-    let branch = target_branch(repo);
+    let branch = repo.snapshot_checkouts().target_branch();
     let tip = branch_tip(repo, &branch)?;
     Ok((branch, tip))
 }
@@ -491,12 +490,15 @@ fn create_blocking(
     let paths = normalize_paths(&request.paths)
         .map_err(|e| error(StatusCode::BAD_REQUEST, e.to_string()))?;
     let (branch, head) = target(repo)?;
-    let snapshot = make_snapshot(repo, head, &paths, None).map_err(|e| match e {
-        CheckoutError::MissingPath { .. } | CheckoutError::InvalidPath { .. } => {
-            error(StatusCode::BAD_REQUEST, e.to_string())
-        }
-        other => snapshot_failed(&other),
-    })?;
+    let snapshot = repo
+        .snapshot_checkouts()
+        .make_snapshot(head, &paths, None)
+        .map_err(|e| match e {
+            CheckoutError::MissingPath { .. } | CheckoutError::InvalidPath { .. } => {
+                error(StatusCode::BAD_REQUEST, e.to_string())
+            }
+            other => snapshot_failed(&other),
+        })?;
     let store = CheckoutStore::for_repository(repo);
     std::fs::create_dir_all(store.dir().join("bundles")).map_err(|e| internal(&e))?;
     let bundle = bundle_path(&store, &snapshot.commit.to_hex());
@@ -585,7 +587,9 @@ fn build_bundle(
     branch: &str,
     path: &Path,
 ) -> Result<(), Rejection> {
-    fetch_promised_blobs(repo, commit).map_err(|e| snapshot_failed(&e))?;
+    repo.snapshot_checkouts()
+        .fetch_promised_blobs(commit)
+        .map_err(|e| snapshot_failed(&e))?;
     write_bundle_file(repo, commit, branch, path).map_err(|e| internal(&e))
 }
 
@@ -854,7 +858,7 @@ async fn update<H: CheckoutHost>(
                 }
                 let parent = ObjectId::from_hex(&info.root).map_err(|e| internal(&e))?;
                 let snapshot =
-                    make_snapshot(&repo, head, &info.paths, Some(parent)).map_err(|e| match e {
+                    repo.snapshot_checkouts().make_snapshot(head, &info.paths, Some(parent)).map_err(|e| match e {
                         CheckoutError::MissingPath { .. } => error(
                             StatusCode::CONFLICT,
                             format!("{e}; the checkout's paths are gone from {}", info.branch),
@@ -942,7 +946,9 @@ async fn branch<H: CheckoutHost>(
                 let repo = open(&served, &options)?;
                 let (_, stored) = load_held(slot, &repo, &id)?;
                 let log = CheckoutStore::for_repository(&repo).graft_log();
-                let shown = project_branch(&repo, &stored.info, &log, &request.name)
+                let shown = repo
+                    .snapshot_checkouts()
+                    .project_branch(&stored.info, &log, &request.name)
                     .map_err(|e| internal(&e))?
                     .map_err(|refusal| {
                         eprintln!(
@@ -1037,7 +1043,7 @@ fn checkin_blocking(
 ) -> Result<CheckinResponse, Rejection> {
     let (record, mut stored) = load_held(slot, repo, id)?;
     let before = stored.set_last.clone();
-    let target = target_branch(repo);
+    let target = repo.snapshot_checkouts().target_branch();
     // Commits on the target are never dropped by a check-in: the branch the
     // checkout snapshots, and the one HEAD names now if that differs.
     let mut targets: Vec<ObjectId> = [stored.info.branch.as_str(), target.as_str()]
@@ -1050,37 +1056,38 @@ fn checkin_blocking(
     let log = CheckoutStore::for_repository(repo).graft_log();
     let mut results = Vec::new();
     for branch in &request.branches {
-        let grafted =
-            match graft_checkin_branch(repo, &stored.info, &target, branch, Some(&log), &targets)
-                .map_err(|e| internal(&e))?
-            {
-                Ok(grafted) => grafted,
-                Err(refusal) => {
-                    results.push(refused(
-                        served,
-                        id,
-                        branch,
-                        &stored.info.branch,
-                        &target,
-                        refusal,
-                    ));
-                    continue;
-                }
-            };
+        let grafted = match repo
+            .snapshot_checkouts()
+            .graft_checkin_branch(&stored.info, &target, branch, Some(&log), &targets)
+            .map_err(|e| internal(&e))?
+        {
+            Ok(grafted) => grafted,
+            Err(refusal) => {
+                results.push(refused(
+                    served,
+                    id,
+                    branch,
+                    &stored.info.branch,
+                    &target,
+                    refusal,
+                ));
+                continue;
+            }
+        };
         let set = {
             let _branches = locks.branches();
-            set_checked_in_branch(
-                repo,
-                &branch.name,
-                grafted.tip,
-                &targets,
-                &stored.info.paths,
-                stored.last_set(&branch.name),
-                request.force,
-                &who,
-                &reflog,
-            )
-            .map_err(|e| internal(&e))?
+            repo.snapshot_checkouts()
+                .set_checked_in_branch(&CheckinUpdate {
+                    name: &branch.name,
+                    grafted: grafted.tip,
+                    targets: &targets,
+                    paths: &stored.info.paths,
+                    set_last: stored.last_set(&branch.name),
+                    force: request.force,
+                    who: &who,
+                    message: &reflog,
+                })
+                .map_err(|e| internal(&e))?
         };
         let set = match set {
             Ok(set) => set,
@@ -1232,22 +1239,19 @@ async fn integrate_branch<H: CheckoutHost>(
         Access::Write,
         move |served, email, options, slot| {
             let repo = open(&served, &options)?;
-            let target_name = target_branch(&repo);
+            let target_name = repo.snapshot_checkouts().target_branch();
             let who = signature(request.author.as_ref(), &email)?;
-            let done = integrate(
-                &repo,
-                &format!("refs/heads/{target_name}"),
-                &request.name,
-                &who,
-            )
-            .map_err(|e| internal(&e))?
-            .map_err(|refusal| {
-                eprintln!(
-                    "integrate: {} into {target_name} of {} refused: {refusal}",
-                    request.name, served.name
-                );
-                target_refused(&refusal)
-            })?;
+            let done = repo
+                .snapshot_checkouts()
+                .integrate(&format!("refs/heads/{target_name}"), &request.name, &who)
+                .map_err(|e| internal(&e))?
+                .map_err(|refusal| {
+                    eprintln!(
+                        "integrate: {} into {target_name} of {} refused: {refusal}",
+                        request.name, served.name
+                    );
+                    target_refused(&refusal)
+                })?;
             let change = done.change;
             eprintln!(
                 "integrate: {} into {target_name} of {}: {:?} {} → {}{}",
@@ -1285,7 +1289,10 @@ async fn list_slices<H: CheckoutHost>(
         with_repo(state, headers, &name, |served, options| {
             let repo = open(&served, &options)?;
             let (target_name, head) = target(&repo)?;
-            let slices = read_slices(&repo, head).map_err(|e| internal(&e))?;
+            let slices = repo
+                .snapshot_checkouts()
+                .read_slices(head)
+                .map_err(|e| internal(&e))?;
             Ok(SlicesResponse {
                 target: target_name,
                 head: head.to_hex(),
@@ -1369,12 +1376,14 @@ fn change_slices(
     edit: &SliceEdit,
     who: &Signature,
 ) -> Result<SliceChange, Rejection> {
-    let target_name = target_branch(repo);
+    let target_name = repo.snapshot_checkouts().target_branch();
     let SlicesEdited {
         slice,
         message,
         change,
-    } = edit_slices(repo, &format!("refs/heads/{target_name}"), edit, who)
+    } = repo
+        .snapshot_checkouts()
+        .edit_slices(&format!("refs/heads/{target_name}"), edit, who)
         .map_err(|e| internal(&e))?
         .map_err(|refusal| target_refused(&refusal))?;
     if change.head != change.previous {

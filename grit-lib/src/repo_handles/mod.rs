@@ -27,6 +27,7 @@ mod workspace_snapshot;
 mod worktree;
 
 pub use crate::reflog::MessageMatcher;
+pub use crate::snapshot_checkout::handle::RepositorySnapshotCheckouts;
 pub use bundle::RepositoryBundles;
 pub use hooks::{HookInfo, HookSource, RepositoryHooks};
 pub use notes::{
@@ -50,6 +51,8 @@ pub use worktree::{LockWorktreeOptions, RepositoryWorktrees};
 
 /// Short alias for [`RepositoryBundles`].
 pub type Bundles<'repo> = RepositoryBundles<'repo>;
+/// Short alias for [`RepositorySnapshotCheckouts`].
+pub type SnapshotCheckouts<'repo> = RepositorySnapshotCheckouts<'repo>;
 /// Short alias for [`RepositoryRemotes`].
 pub type Remotes<'repo> = RepositoryRemotes<'repo>;
 /// Short alias for [`RepositoryWorktrees`].

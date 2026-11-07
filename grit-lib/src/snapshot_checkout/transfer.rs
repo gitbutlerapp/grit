@@ -32,27 +32,8 @@ impl CheckoutMarker {
     }
 }
 
-/// Push `branches` (each a branch name and its tip) to their [`out_ref`]s on
-/// the server the checkout came from, replacing what was there, for a
-/// check-in to graft.
-///
-/// # Parameters
-///
-/// - `repo`: the checkout.
-/// - `marker`: its marker, which names the server and the checkout's id.
-/// - `branches`: the branches to push, by name (without `refs/heads/`) and tip.
-/// - `progress`, `cancel`: as for [`Remote::push`].
-/// - `http_factory`: builds the HTTP client, as for [`Remote::push`].
-///
-/// # Returns
-///
-/// The push's per-ref results; a ref the server refused is reported there,
-/// not as an error.
-///
-/// # Errors
-///
-/// [`CheckoutError::Remote`] when the server can't be reached or read.
-pub fn push_for_checkin(
+/// [`RepositorySnapshotCheckouts::push_for_checkin`](crate::repo_handles::RepositorySnapshotCheckouts::push_for_checkin) for `repo`.
+pub(crate) fn push_for_checkin(
     repo: &Repository,
     marker: &CheckoutMarker,
     branches: &[(String, ObjectId)],
@@ -182,35 +163,8 @@ pub(crate) fn fetch_snapshot(
     })
 }
 
-/// Fetch the server's branch as the checkout sees it, which `info` describes
-/// (the server's answer to [`super::CheckoutClient::branch`]), from
-/// [`in_ref`] into [`upstream_ref`]`(<name>)` (`refs/remotes/origin/<name>`)
-/// from the server at the marker's URL, and check that it is that
-/// projection.
-///
-/// Nothing is fetched when the projection is already there. No tags are
-/// fetched, and nothing else.
-///
-/// # Parameters
-///
-/// - `repo`: the checkout.
-/// - `marker`: its marker.
-/// - `info`: the projection the server described.
-/// - `fetch`: environment and thread settings for the fetch; its refspecs,
-///   tags, prune and dry-run settings are replaced.
-/// - `progress`, `cancel`, `http_factory`: as for [`Remote::fetch`].
-///
-/// # Returns
-///
-/// What the fetch received.
-///
-/// # Errors
-///
-/// [`CheckoutError::Protocol`] for an answer naming no valid branch, or the
-/// branch the checkout follows, or no commit; [`CheckoutError::Remote`] when
-/// the fetch fails; [`CheckoutError::BranchMoved`] when what arrived is not
-/// `info`'s projection.
-pub fn fetch_branch(
+/// [`RepositorySnapshotCheckouts::fetch_branch`](crate::repo_handles::RepositorySnapshotCheckouts::fetch_branch) for `repo`.
+pub(crate) fn fetch_branch(
     repo: &Repository,
     marker: &CheckoutMarker,
     info: &BranchInfo,

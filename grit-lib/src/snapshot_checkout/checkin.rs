@@ -234,34 +234,8 @@ impl From<GraftError> for CheckinRefusal {
     }
 }
 
-/// Check a branch of a check-in and graft it onto the real history.
-///
-/// The branch is refused when its name is not a valid branch name; when it
-/// names, in any case, the branch the checkout was made from or the
-/// repository's current `target`; when its tip is not an object id or is not
-/// what the server has at [`out_ref`]; and when the graft fails
-/// ([`graft`]).
-///
-/// # Parameters
-///
-/// - `repo`: the served repository.
-/// - `checkout`: the checkout checking in.
-/// - `target`: the repository's target branch now ([`super::target_branch`]).
-/// - `branch`: the branch and the tip the client pushed.
-/// - `known`: the repository's graft log ([`super::CheckoutStore::graft_log`]),
-///   so commits built on projected commits, or grafted before, graft onto the
-///   real commits they stand for; `None` to graft from the snapshots alone.
-/// - `targets`: the tips of the target branch, where the graft's walk stops.
-///
-/// # Returns
-///
-/// The graft, or `Ok(Err(..))` with why the branch is refused. Once the
-/// branch is set, record [`Grafted::commits`] in `known`.
-///
-/// # Errors
-///
-/// Ref, object and graft log failures.
-pub fn graft_checkin_branch(
+/// [`RepositorySnapshotCheckouts::graft_checkin_branch`](crate::repo_handles::RepositorySnapshotCheckouts::graft_checkin_branch) for `repo`.
+pub(crate) fn graft_checkin_branch(
     repo: &Repository,
     checkout: &CheckoutInfo,
     target: &str,
@@ -305,49 +279,43 @@ pub struct BranchSet {
     pub rule: Option<CheckinRule>,
 }
 
-/// Set the server's branch `name` to `grafted` when [`decide_checkin`]
-/// allows it, as one compare-and-swap against the tip it decided on (a new
-/// branch must still be missing), logged by `who` with `message` where the
-/// repository keeps a reflog for it.
-///
-/// When the branch moves between deciding and setting, it decides again with
-/// the branch's new tip. On a case-insensitive repository (`core.ignorecase`)
-/// a name that differs only in case from an existing branch is refused, since
-/// both would be one file.
-///
-/// # Parameters
-///
-/// - `repo`: the served repository.
-/// - `name`: the branch, without `refs/heads/`.
-/// - `grafted`: the graft of the checked-in tip.
-/// - `targets`: the tips of the target branch, whose commits a check-in never
-///   counts as dropped (see [`decide_checkin`]).
-/// - `paths`: the checking-in checkout's paths (see [`decide_checkin`]).
-/// - `set_last`: what this checkout last set the branch to, if it did.
-/// - `force`: set it even where it drops commits the server's branch has.
-/// - `who`, `message`: the reflog entry's identity, time and message.
-///
-/// # Returns
-///
-/// What happened, or `Ok(Err(..))` with [`CheckinRefusal::Diverged`] or
-/// [`CheckinRefusal::CaseConflict`].
-///
-/// # Errors
-///
-/// [`CheckoutError::RefKeptMoving`] when the branch moved under every one of
-/// several attempts, and ref, reflog and ancestry failures.
-#[allow(clippy::too_many_arguments)]
-pub fn set_checked_in_branch(
+/// One of the server's branches to move to a check-in's graft, for
+/// [`RepositorySnapshotCheckouts::set_checked_in_branch`](crate::repo_handles::RepositorySnapshotCheckouts::set_checked_in_branch).
+#[derive(Debug, Clone, Copy)]
+pub struct CheckinUpdate<'a> {
+    /// The branch, without `refs/heads/`.
+    pub name: &'a str,
+    /// The graft of the checked-in tip.
+    pub grafted: ObjectId,
+    /// The tips of the target branch, whose commits a check-in never counts as dropped.
+    pub targets: &'a [ObjectId],
+    /// The checking-in checkout's paths.
+    pub paths: &'a [String],
+    /// What this checkout last set the branch to, if it did.
+    pub set_last: Option<ObjectId>,
+    /// Set it even where it drops commits the server's branch has.
+    pub force: bool,
+    /// The reflog entry's identity and time.
+    pub who: &'a Signature,
+    /// The reflog entry's message.
+    pub message: &'a str,
+}
+
+/// [`RepositorySnapshotCheckouts::set_checked_in_branch`](crate::repo_handles::RepositorySnapshotCheckouts::set_checked_in_branch) for `repo`.
+pub(crate) fn set_checked_in_branch(
     repo: &Repository,
-    name: &str,
-    grafted: ObjectId,
-    targets: &[ObjectId],
-    paths: &[String],
-    set_last: Option<ObjectId>,
-    force: bool,
-    who: &Signature,
-    message: &str,
+    update: &CheckinUpdate<'_>,
 ) -> Result<std::result::Result<BranchSet, CheckinRefusal>> {
+    let CheckinUpdate {
+        name,
+        grafted,
+        targets,
+        paths,
+        set_last,
+        force,
+        who,
+        message,
+    } = *update;
     let refname = format!("refs/heads/{name}");
     let decide = Decide {
         grafted,
@@ -481,14 +449,16 @@ mod tests {
         let set = |grafted, last, force| {
             set_checked_in_branch(
                 &repo,
-                "topic",
-                grafted,
-                &[],
-                &[],
-                last,
-                force,
-                &who(),
-                "checkin",
+                &CheckinUpdate {
+                    name: "topic",
+                    grafted: grafted,
+                    targets: &[],
+                    paths: &[],
+                    set_last: last,
+                    force: force,
+                    who: &who(),
+                    message: "checkin",
+                },
             )
             .expect("set")
         };
@@ -675,14 +645,16 @@ mod tests {
         assert_eq!(
             set_checked_in_branch(
                 &repo,
-                "shared",
-                y,
-                &[m1],
-                &[],
-                None,
-                false,
-                &who(),
-                "checkin",
+                &CheckinUpdate {
+                    name: "shared",
+                    grafted: y,
+                    targets: &[m1],
+                    paths: &[],
+                    set_last: None,
+                    force: false,
+                    who: &who(),
+                    message: "checkin"
+                }
             )
             .expect("set"),
             Ok(BranchSet {
@@ -783,14 +755,16 @@ mod tests {
         assert_eq!(
             set_checked_in_branch(
                 &repo,
-                "Feature",
-                b,
-                &[],
-                &[],
-                None,
-                false,
-                &who(),
-                "checkin",
+                &CheckinUpdate {
+                    name: "Feature",
+                    grafted: b,
+                    targets: &[],
+                    paths: &[],
+                    set_last: None,
+                    force: false,
+                    who: &who(),
+                    message: "checkin"
+                }
             )
             .expect("set"),
             Err(CheckinRefusal::CaseConflict {
@@ -800,14 +774,16 @@ mod tests {
         assert_eq!(
             set_checked_in_branch(
                 &repo,
-                "feature",
-                b,
-                &[],
-                &[],
-                None,
-                false,
-                &who(),
-                "checkin",
+                &CheckinUpdate {
+                    name: "feature",
+                    grafted: b,
+                    targets: &[],
+                    paths: &[],
+                    set_last: None,
+                    force: false,
+                    who: &who(),
+                    message: "checkin"
+                }
             )
             .expect("set")
             .map(|s| s.status),

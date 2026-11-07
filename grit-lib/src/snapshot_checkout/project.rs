@@ -143,40 +143,8 @@ fn root_pairs(roots: &[SnapshotRoot]) -> Vec<(ObjectId, ObjectId)> {
         .collect()
 }
 
-/// Show the branch at `tip` to a checkout: the reverse of
-/// [`super::graft`] (see the module docs).
-///
-/// The commits projected are those of `tip` that neither `targets` nor any
-/// snapshot's real commit has; a branch at the real commit a snapshot stands
-/// for projects to that snapshot.
-///
-/// # Parameters
-///
-/// - `repo`: the served repository.
-/// - `roots`: the checkout's snapshot commits and the real commits they
-///   stand for, oldest first.
-/// - `paths`: the checkout's paths (empty: the whole tree).
-/// - `known`: the repository's graft log, whose checkout commits for a real
-///   commit are reused when their parents are the projected parents and
-///   their tree is the one the projection would make, or they are the
-///   checkout's own; `None` to make every commit afresh. Nothing is recorded
-///   in it here.
-/// - `own`: the tips the checkout pushed its branches to (its
-///   [`super::out_ref`]s). A logged commit they reach is the checkout's own
-///   and is shown as it is, with the files outside `paths` it carries.
-/// - `targets`: the tips of the target branch the checkout follows.
-/// - `tip`: the branch's tip.
-///
-/// # Returns
-///
-/// The projection, whose new pairs ([`Projection::made`]) the caller
-/// records; `Ok(Err(..))` with [`ProjectError::OnTarget`] or
-/// [`ProjectError::BeforeFirstSnapshot`].
-///
-/// # Errors
-///
-/// Walk, object and graft log failures.
-pub fn project(
+/// [`RepositorySnapshotCheckouts::project`](crate::repo_handles::RepositorySnapshotCheckouts::project) for `repo`.
+pub(crate) fn project(
     repo: &Repository,
     roots: &[SnapshotRoot],
     paths: &[String],
@@ -379,34 +347,8 @@ fn outside_files(
     Ok(())
 }
 
-/// Project the server's branch `name` for `checkout` (see [`project`]),
-/// record the new pairs in `known`, and point [`in_ref`] at the projection
-/// for the checkout to fetch.
-///
-/// The commits hidden are those of the branch the checkout follows
-/// ([`CheckoutInfo::branch`]), which refreshes bring as snapshots.
-///
-/// # Parameters
-///
-/// - `repo`: the served repository.
-/// - `checkout`: the checkout the branch is shown to.
-/// - `known`: the repository's graft log
-///   ([`super::CheckoutStore::graft_log`]).
-/// - `name`: the branch, without `refs/heads/`. Where the repository ignores
-///   case (`core.ignorecase`), a name that differs from one of its branches
-///   only in case is that branch.
-///
-/// # Returns
-///
-/// What the checkout fetches, named as the server spells the branch
-/// ([`BranchInfo::name`]), or `Ok(Err(..))` with why the branch can't be
-/// shown: an invalid name, the branch the checkout follows (in any case), a
-/// branch the server doesn't have, or the refusals of [`project`].
-///
-/// # Errors
-///
-/// Ref, walk, object and graft log failures.
-pub fn project_branch(
+/// [`RepositorySnapshotCheckouts::project_branch`](crate::repo_handles::RepositorySnapshotCheckouts::project_branch) for `repo`.
+pub(crate) fn project_branch(
     repo: &Repository,
     checkout: &CheckoutInfo,
     known: &GraftLog,
