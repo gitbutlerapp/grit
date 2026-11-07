@@ -144,7 +144,10 @@ fn rev_walk_resolve_and_list_match_git() {
     let repo = open_grit_repo(history.worktree());
     let wt = history.worktree();
 
-    let head = repo.revwalk().resolve("HEAD").expect("resolve HEAD");
+    let head = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("resolve HEAD");
     let git_head = git(wt, &["rev-parse", "HEAD"]).trim().to_owned();
     assert_eq!(head.to_hex(), git_head);
 
@@ -171,8 +174,14 @@ fn diff_tree_to_tree_matches_git_diff_raw() {
     let repo = open_grit_repo(history.worktree());
     let wt = history.worktree();
 
-    let head = repo.revwalk().resolve("HEAD").expect("head");
-    let parent = repo.revwalk().resolve("HEAD~1").expect("parent");
+    let head = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("head");
+    let parent = repo
+        .revwalk()
+        .resolve("HEAD~1", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("parent");
 
     let head_tree = grit_lib::diff::tree_oid_of_commit(repo.odb(), &head).expect("head tree");
     let parent_tree = grit_lib::diff::tree_oid_of_commit(repo.odb(), &parent).expect("parent tree");
@@ -208,7 +217,7 @@ fn diff_index_to_tree_matches_git_diff_cached_raw() {
     let idx = repo.index().load().expect("load");
     let head_tree = repo
         .revwalk()
-        .resolve("HEAD")
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
         .ok()
         .and_then(|oid| grit_lib::diff::tree_oid_of_commit(repo.odb(), &oid).ok());
 

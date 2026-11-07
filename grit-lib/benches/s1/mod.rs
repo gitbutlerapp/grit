@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 
 pub struct S1Fixture {
     pub repo: Repository,
@@ -50,6 +50,9 @@ pub fn run_rev_list_objects_v1(repo: &Repository) -> usize {
         objects: true,
         ..Default::default()
     };
-    let result = rev_list(repo, &[String::from("v1.0.0")], &[], &opts).expect("rev-list s1");
+    let result = repo
+        .revwalk()
+        .rev_list(&[String::from("v1.0.0")], &[], &opts)
+        .expect("rev-list s1");
     result.objects.len()
 }

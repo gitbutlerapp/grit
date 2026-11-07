@@ -6,7 +6,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use tempfile::TempDir;
 
 fn git(root: &Path, args: &[&str]) -> String {
@@ -59,7 +59,8 @@ fn grit_rev_list(repo: &Repository, spec: &str) -> Vec<ObjectId> {
         paths: vec![spec.to_owned()],
         ..RevListOptions::default()
     };
-    rev_list(repo, &["HEAD".into()], &[], &opts)
+    repo.revwalk()
+        .rev_list(&["HEAD".into()], &[], &opts)
         .expect("rev_list")
         .commits
 }
@@ -84,7 +85,9 @@ fn rev_list_attr_pathspec_non_matching_attr_is_empty_while_unfiltered_is_not() {
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).expect("open");
     assert!(grit_rev_list(&repo, ":(attr:no-such-attr)").is_empty());
     assert!(git_rev_list(dir.path(), ":(attr:no-such-attr)").is_empty());
-    let all = rev_list(&repo, &["HEAD".into()], &[], &RevListOptions::default())
+    let all = repo
+        .revwalk()
+        .rev_list(&["HEAD".into()], &[], &RevListOptions::default())
         .expect("all")
         .commits;
     assert!(all.len() > 5);

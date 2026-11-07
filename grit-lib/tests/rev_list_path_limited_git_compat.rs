@@ -881,7 +881,7 @@ fn path_limited_packed_delta_trees_match_git_log() {
 
 #[test]
 fn packed_path_history_modes_match_git_with_bloom_and_both_hashes() {
-    use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+    use grit_lib::revwalk::rev_list::RevListOptions;
 
     for hash in ["sha1", "sha256"] {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -917,21 +917,22 @@ fn packed_path_history_modes_match_git_with_bloom_and_both_hashes() {
                     }
                     args.extend(["--", path]);
                     let expected: Vec<String> = git(wt, &args).lines().map(str::to_owned).collect();
-                    let actual = rev_list(
-                        &repo,
-                        &["HEAD".to_owned()],
-                        &[],
-                        &RevListOptions {
-                            paths: vec![path.to_owned()],
-                            sparse,
-                            show_pulls,
-                            first_parent,
-                            use_commit_graph: with_graph,
-                            use_commit_graph_bloom: with_graph,
-                            ..RevListOptions::default()
-                        },
-                    )
-                    .expect("path history");
+                    let actual = repo
+                        .revwalk()
+                        .rev_list(
+                            &["HEAD".to_owned()],
+                            &[],
+                            &RevListOptions {
+                                paths: vec![path.to_owned()],
+                                sparse,
+                                show_pulls,
+                                first_parent,
+                                use_commit_graph: with_graph,
+                                use_commit_graph_bloom: with_graph,
+                                ..RevListOptions::default()
+                            },
+                        )
+                        .expect("path history");
                     assert_eq!(
                         actual
                             .commits

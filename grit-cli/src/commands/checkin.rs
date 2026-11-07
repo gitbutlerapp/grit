@@ -13,6 +13,7 @@ use grit_lib::remote::{
         CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus, Landing,
     },
 };
+use grit_lib::revwalk::ReachableWalkOptions;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -739,16 +740,17 @@ fn integrate_hosted(name: &str, without: &[String], mode: OutputMode) -> Result<
         .as_deref()
         .and_then(|p| ObjectId::from_hex(p).ok())
     {
-        Some(previous) => {
-            grit_lib::revwalk::merge_base::walk_commits_reachable_excluding_ancestors_of(
-                &repo,
+        Some(previous) => repo
+            .revwalk()
+            .reachable_excluding(
                 &[tip],
                 &[previous],
-                grit_lib::revwalk::merge_base::ReachableWalkLimit::CountAllRetainNewest(0),
+                &ReachableWalkOptions::default().with_limit(
+                    grit_lib::revwalk::merge_base::ReachableWalkLimit::CountAllRetainNewest(0),
+                ),
             )
             .map(|(count, _)| count)
-            .unwrap_or(0)
-        }
+            .unwrap_or(0),
         None => 0,
     };
     Ok(IntegrateOutcome {

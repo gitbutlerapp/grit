@@ -17,7 +17,6 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_parse::resolve_revision;
 
 fn commit_from_tree(
     repo: &grit_lib::repo::Repository,
@@ -130,8 +129,12 @@ fn main() -> grit_lib::error::Result<()> {
     refs::write_ref(repo.git_dir(), "refs/heads/topic", &commit_b)?;
 
     // Cherry-pick `topic` onto `main` (still at A).
-    let head = resolve_revision(&repo, "main")?;
-    let picked = resolve_revision(&repo, "topic")?;
+    let head = repo
+        .revwalk()
+        .resolve("main", &grit_lib::revwalk::ResolveOptions::default())?;
+    let picked = repo
+        .revwalk()
+        .resolve("topic", &grit_lib::revwalk::ResolveOptions::default())?;
     let picked_obj = repo.odb().read(&picked)?;
     let picked_data = parse_commit(&picked_obj.data)?;
     let parent = picked_data.parents.first().copied().ok_or_else(|| {

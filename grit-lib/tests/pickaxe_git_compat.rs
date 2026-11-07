@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{Pickaxe, RenameDetection};
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 
 use support::{commit_file, git, open_grit_repo, HistoryRepo};
 
@@ -36,7 +36,8 @@ fn grit_pickaxe_log(
         use_commit_graph: true,
         ..RevListOptions::default()
     };
-    rev_list(&repo, &["HEAD".into()], &[], &opts)
+    repo.revwalk()
+        .rev_list(&["HEAD".into()], &[], &opts)
         .expect("rev-list")
         .commits
         .into_iter()
@@ -590,7 +591,9 @@ fn pickaxe_first_parent_diffs_merges_against_first_parent_matches_git() {
         use_commit_graph: true,
         ..RevListOptions::default()
     };
-    let grit_oids: Vec<String> = rev_list(&repo, &["HEAD".into()], &[], &opts)
+    let grit_oids: Vec<String> = repo
+        .revwalk()
+        .rev_list(&["HEAD".into()], &[], &opts)
         .expect("rev-list")
         .commits
         .into_iter()

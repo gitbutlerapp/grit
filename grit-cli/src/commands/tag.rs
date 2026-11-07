@@ -18,7 +18,8 @@ use grit_lib::porcelain::tag::{
 use grit_lib::refs::check_ref_format::RefName;
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::ResolveOptions;
+
 use grit_lib::tree_sha256::{
     MissingSubmodule, MissingSubmoduleReason, SignatureVerdict, TagVerifyOptions,
     TreeSha256Options, TreeSha256Verdict,
@@ -599,7 +600,9 @@ fn list(
             repo.head_commit()
                 .context("could not resolve HEAD for --contains")?
         } else {
-            resolve_revision(repo, &rev).context("could not resolve --contains")?
+            repo.revwalk()
+                .resolve(&rev, &ResolveOptions::default())
+                .context("could not resolve --contains")?
         };
         contains_ids.push(oid);
     }
@@ -626,7 +629,8 @@ fn resolve_points_at(
 ) -> Result<Vec<grit_lib::objects::ObjectId>> {
     revs.iter()
         .map(|rev| {
-            resolve_revision(repo, rev)
+            repo.revwalk()
+                .resolve(rev, &ResolveOptions::default())
                 .with_context(|| format!("could not resolve --points-at {rev}"))
         })
         .collect()
@@ -688,7 +692,9 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
 
     let rev = opts.target.clone().or_else(|| opts.object.clone());
     let target_oid = if let Some(rev) = rev {
-        resolve_revision(repo, &rev).context("could not resolve tag target")?
+        repo.revwalk()
+            .resolve(&rev, &ResolveOptions::default())
+            .context("could not resolve tag target")?
     } else {
         repo.head_commit()
             .context("could not resolve HEAD to tag")?

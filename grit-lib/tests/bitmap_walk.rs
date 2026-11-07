@@ -11,7 +11,7 @@ use grit_lib::objects::bitmap::{BitmapWalkError, ReachabilityQuery, ReachableSet
 use grit_lib::objects::pack_rev::append_hashfile_checksum;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, MissingAction, ObjectFilter, RevListOptions};
+use grit_lib::revwalk::rev_list::{MissingAction, ObjectFilter, RevListOptions};
 use grit_test_support::{HashAlgo, RepoFixture};
 
 fn git_ok(repo: &RepoFixture, args: &[&str]) {
@@ -63,7 +63,10 @@ fn grit_object_set(
         filter: filter.cloned(),
         ..Default::default()
     };
-    let result = rev_list(repo, &wants, &haves, &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&wants, &haves, &opts)
+        .expect("rev-list");
     let mut set = HashSet::new();
     for oid in &result.commits {
         set.insert(*oid);

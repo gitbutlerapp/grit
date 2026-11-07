@@ -18,7 +18,6 @@ use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{collect_revision_specs_from_stdin_lines, tag_targets};
 use grit_lib::revwalk::{RefSelection, RevWalkListOptions};
 use grit_lib::state::HeadState;
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch, WorktreeEntry};
@@ -146,19 +145,34 @@ fn battery(repo: &Repository, wt: &Path, linked: &Path) -> Observed {
     let second = commit_all(repo, "second change");
 
     let walk = repo.revwalk();
-    let main = walk.resolve("main").expect("resolve main");
-    let hello = walk.resolve(":/hello").expect("resolve :/hello");
+    let main = walk
+        .resolve("main", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("resolve main");
+    let hello = walk
+        .resolve(":/hello", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("resolve :/hello");
     assert_eq!(hello, first);
-    assert_eq!(walk.resolve(":/second").expect(":/second"), second);
+    assert_eq!(
+        walk.resolve(":/second", &grit_lib::revwalk::ResolveOptions::default())
+            .expect(":/second"),
+        second
+    );
 
     let stdin = |lines: &[&str]| {
-        collect_revision_specs_from_stdin_lines(repo, &[], lines).expect("stdin specs")
+        repo.revwalk()
+            .parse_stdin_specs(&[], lines)
+            .expect("stdin specs")
     };
     let (_, stdin_all_negated, all_flag, _) = stdin(&["--not", "--all"]);
     assert!(!all_flag);
     let (stdin_branches, _, _, _) = stdin(&["--branches"]);
     let (stdin_tags_glob, _, _, _) = stdin(&["--tags=v*"]);
-    let mut tags: Vec<ObjectId> = tag_targets(repo).expect("tags").into_iter().collect();
+    let mut tags: Vec<ObjectId> = repo
+        .revwalk()
+        .tag_targets()
+        .expect("tags")
+        .into_iter()
+        .collect();
     tags.sort();
 
     let added: WorktreeEntry = repo
@@ -202,7 +216,9 @@ fn battery(repo: &Repository, wt: &Path, linked: &Path) -> Observed {
         stdin_tags_glob,
         linked_head: added.head.clone(),
         linked_listed_head: linked_row.head.clone(),
-        linked_branch_tip: walk.resolve("linked").expect("linked branch"),
+        linked_branch_tip: walk
+            .resolve("linked", &grit_lib::revwalk::ResolveOptions::default())
+            .expect("linked branch"),
     };
 
     repo.worktrees()
@@ -336,11 +352,15 @@ fn mid_component_ref_globs_match_packed_refs() {
     git(wt, &["pack-refs", "--all"]);
     let repo = Repository::open(&wt.join(".git"), &options().with_work_tree(wt)).expect("open");
 
-    let (tags, _, _, _) =
-        collect_revision_specs_from_stdin_lines(&repo, &[], &["--tags=v*"]).expect("stdin");
+    let (tags, _, _, _) = repo
+        .revwalk()
+        .parse_stdin_specs(&[], &["--tags=v*"])
+        .expect("stdin");
     assert_eq!(tags, vec![tip.to_hex()]);
-    let (branches, _, _, _) =
-        collect_revision_specs_from_stdin_lines(&repo, &[], &["--branches=b05*"]).expect("stdin");
+    let (branches, _, _, _) = repo
+        .revwalk()
+        .parse_stdin_specs(&[], &["--branches=b05*"])
+        .expect("stdin");
     assert_eq!(branches, vec![tip.to_hex()]);
     assert_eq!(count(&repo, vec![RefSelection::Tags(Some("v*".into()))]), 1);
     assert_eq!(

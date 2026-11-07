@@ -3,9 +3,7 @@
 
 use crate::support;
 
-use grit_lib::revwalk::rev_list::{
-    collect_revision_specs_from_stdin_lines, rev_list, RevListOptions,
-};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use support::{assert_grit_commits_match_git, commit_file, git, HistoryRepo};
 
 fn git_stdin_rev_list(
@@ -52,9 +50,10 @@ fn grit_stdin_rev_list(
         &grit_lib::config::environment::RepositoryOptions::empty(),
     )
     .expect("discover");
-    let (pos, neg, all_refs, paths) =
-        collect_revision_specs_from_stdin_lines(&grit_repo, args_specs, lines)
-            .expect("stdin specs");
+    let (pos, neg, all_refs, paths) = grit_repo
+        .revwalk()
+        .parse_stdin_specs(args_specs, lines)
+        .expect("stdin specs");
     let mut walk_opts = opts.clone();
     if all_refs {
         walk_opts.all_refs = true;
@@ -62,7 +61,9 @@ fn grit_stdin_rev_list(
     if !paths.is_empty() {
         walk_opts.paths = paths;
     }
-    rev_list(&grit_repo, &pos, &neg, &walk_opts)
+    grit_repo
+        .revwalk()
+        .rev_list(&pos, &neg, &walk_opts)
         .expect("rev-list")
         .commits
 }
@@ -130,7 +131,9 @@ fn stdin_not_all_expands_negative_refs() {
         &grit_lib::config::environment::RepositoryOptions::empty(),
     )
     .expect("discover");
-    let (_pos, neg, all, _paths) = collect_revision_specs_from_stdin_lines(&grit_repo, &[], &lines)
+    let (_pos, neg, all, _paths) = grit_repo
+        .revwalk()
+        .parse_stdin_specs(&[], &lines)
         .expect("stdin --not --all specs");
     assert!(!neg.is_empty(), "expected negative refs from --not --all");
     assert!(!all, "--not --all must not set all_refs positive mode");

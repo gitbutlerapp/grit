@@ -14,7 +14,6 @@ use grit_lib::diff::{
 };
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::repo::{Repository, RepositoryError};
-use grit_lib::revwalk::rev_parse::resolve_revision;
 use tempfile::TempDir;
 
 fn git_in(dir: &std::path::Path, args: &[&str]) {
@@ -64,8 +63,14 @@ fn git_diff_binary(dir: &std::path::Path, base: &str, tip: &str) -> Vec<u8> {
 }
 
 fn grit_patch_structured(repo: &Repository, base: &str, tip: &str) -> Vec<u8> {
-    let base_oid = resolve_revision(repo, base).expect("base");
-    let tip_oid = resolve_revision(repo, tip).expect("tip");
+    let base_oid = repo
+        .revwalk()
+        .resolve(base, &grit_lib::revwalk::ResolveOptions::default())
+        .expect("base");
+    let tip_oid = repo
+        .revwalk()
+        .resolve(tip, &grit_lib::revwalk::ResolveOptions::default())
+        .expect("tip");
     let config = repo.config().snapshot().expect("config").clone();
     let thread_policy = repo.thread_policy();
     let mut entries = diff_commits_with_renames_and_policy(
@@ -117,8 +122,14 @@ fn apply_patch_git_index(
 fn assert_lib_apply_materializes_binary(repo: &Repository, base: &str, patch: &[u8], tip: &str) {
     let text = std::str::from_utf8(patch).expect("utf8 patch");
     let files = parse_patch(text, 1, "patch", false, None).expect("parse grit patch");
-    let base_oid = resolve_revision(repo, base).expect("base");
-    let tip_oid = resolve_revision(repo, tip).expect("tip");
+    let base_oid = repo
+        .revwalk()
+        .resolve(base, &grit_lib::revwalk::ResolveOptions::default())
+        .expect("base");
+    let tip_oid = repo
+        .revwalk()
+        .resolve(tip, &grit_lib::revwalk::ResolveOptions::default())
+        .expect("tip");
     let tip_tree = parse_commit(&repo.odb().read(&tip_oid).expect("read tip").data)
         .expect("parse tip")
         .tree;

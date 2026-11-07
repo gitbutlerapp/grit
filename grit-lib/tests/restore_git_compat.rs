@@ -149,7 +149,10 @@ fn restore_source_head_parent() {
     git_cmd(dir.path(), &["add", "c.txt"]);
     git_cmd(dir.path(), &["commit", "-qm", "second"]);
 
-    let tree = grit_lib::revwalk::rev_parse::resolve_revision(&repo, "HEAD~1").unwrap();
+    let tree = repo
+        .revwalk()
+        .resolve("HEAD~1", &grit_lib::revwalk::ResolveOptions::default())
+        .unwrap();
     restore_paths(
         &repo,
         &RestoreOptions {
@@ -186,7 +189,10 @@ fn restore_source_worktree_only_leaves_index_at_head() {
     git_cmd(dir.path(), &["add", "file"]);
     git_cmd(dir.path(), &["commit", "-qm", "second"]);
 
-    let parent = grit_lib::revwalk::rev_parse::resolve_revision(&repo, "HEAD~1").unwrap();
+    let parent = repo
+        .revwalk()
+        .resolve("HEAD~1", &grit_lib::revwalk::ResolveOptions::default())
+        .unwrap();
     let parent_tree = {
         let obj = repo.odb().read(&parent).unwrap();
         grit_lib::objects::parse_commit(&obj.data).unwrap().tree
@@ -232,7 +238,10 @@ fn restore_deletion_skips_directory_collision() {
     fs::create_dir(dir.path().join("victim")).unwrap();
     fs::write(dir.path().join("victim/untracked"), "stay\n").unwrap();
 
-    let head_tree = grit_lib::revwalk::rev_parse::resolve_revision(&repo, "HEAD").unwrap();
+    let head_tree = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .unwrap();
     let head_tree_oid = {
         let obj = repo.odb().read(&head_tree).unwrap();
         grit_lib::objects::parse_commit(&obj.data).unwrap().tree
@@ -272,7 +281,10 @@ fn restore_removes_path_missing_in_source() {
     git_cmd(dir.path(), &["rm", "gone.txt"]);
     git_cmd(dir.path(), &["commit", "-qm", "drop gone"]);
 
-    let head_tree = grit_lib::revwalk::rev_parse::resolve_revision(&repo, "HEAD").unwrap();
+    let head_tree = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .unwrap();
     let head_obj = repo.odb().read(&head_tree).unwrap();
     let head_tree_oid = grit_lib::objects::parse_commit(&head_obj.data)
         .unwrap()

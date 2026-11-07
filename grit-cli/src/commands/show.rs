@@ -17,9 +17,10 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use grit_lib::diff::DiffMerges;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::revwalk::object_inspect::{
-    abbreviate_for_display, format_tree_entries_cat_file_p, tree_entry_cat_file_type,
-    tree_entry_mode_cat_file_p, RevisionLabel,
+    format_tree_entries_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
+    RevisionLabel,
 };
+use grit_lib::revwalk::{AbbrevLength, IndexDwim, ResolveOptions};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -324,7 +325,12 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
         None => (ShowKind::Commit, None, None),
     };
 
-    let resolved = grit_lib::revwalk::rev_parse::resolve_revision_without_index_dwim(&repo, spec)
+    let resolved = repo
+        .revwalk()
+        .resolve(
+            spec,
+            &ResolveOptions::default().with_index_dwim(IndexDwim::Off),
+        )
         .with_context(|| format!("could not resolve '{spec}'"))?;
     let commit_oid = repo
         .odb()
@@ -606,7 +612,9 @@ impl MarkdownRender for ShowOutcome {
             .oid
             .parse()
             .context("invalid commit oid in show outcome")?;
-        let short = abbreviate_for_display(&repo, commit_oid, true)?;
+        let short = repo
+            .revwalk()
+            .abbreviate(commit_oid, AbbrevLength::Configured)?;
         outln!(w, "# Commit `{short}`");
         outln!(w);
         outln!(w, "**Oid:** `{}`", self.commit.oid);
@@ -617,7 +625,10 @@ impl MarkdownRender for ShowOutcome {
                 .iter()
                 .map(|p| {
                     let oid: ObjectId = p.parse().context("invalid parent oid in show outcome")?;
-                    Ok(format!("`{}`", abbreviate_for_display(&repo, oid, true)?))
+                    Ok(format!(
+                        "`{}`",
+                        repo.revwalk().abbreviate(oid, AbbrevLength::Configured)?
+                    ))
                 })
                 .collect::<Result<_>>()?;
             outln!(w, "**Merge parents:** {}", parents.join(", "));
@@ -686,7 +697,9 @@ impl HumanRender for ShowOutcome {
                 .iter()
                 .map(|p| -> Result<String> {
                     let oid: ObjectId = p.parse().context("invalid parent oid in show outcome")?;
-                    abbreviate_for_display(&repo, oid, true).map_err(Into::into)
+                    repo.revwalk()
+                        .abbreviate(oid, AbbrevLength::Configured)
+                        .map_err(Into::into)
                 })
                 .collect::<Result<_>>()?;
             outln!(w, "Merge:  {}", abbrev.join(" "));

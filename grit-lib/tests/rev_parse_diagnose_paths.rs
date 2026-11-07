@@ -7,9 +7,6 @@ use std::path::Path;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::{
-    resolve_at_minus_to_oid, resolve_revision_for_verify, resolve_treeish_blob_at_path,
-};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 
 use support::{commit_file, git, HistoryRepo};
@@ -23,7 +20,15 @@ fn open_grit_at(wt: &Path, cwd: &Path) -> Repository {
 }
 
 fn expect_rev_parse(repo: &Repository, spec: &str, pred: fn(&RevParseError) -> bool) {
-    let err = resolve_revision_for_verify(repo, spec).expect_err(spec);
+    let err = repo
+        .revwalk()
+        .resolve(
+            spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        )
+        .expect_err(spec);
     let Error::RevParse(inner) = err else {
         panic!("{spec}: expected RevParse, got {err}");
     };
@@ -40,7 +45,7 @@ fn tree_path_prefix_exists_from_subdirectory() {
     expect_rev_parse(&repo, "HEAD:leaf.txt", |e| {
         matches!(e, RevParseError::PathPrefixExists { .. })
     });
-    let _ = resolve_treeish_blob_at_path(&repo, "HEAD:nested/leaf.txt");
+    let _ = repo.revwalk().blob_at_path("HEAD:nested/leaf.txt");
 }
 
 #[test]
@@ -87,7 +92,9 @@ fn at_minus_resolves_previous_branch_oid() {
     commit_file(wt, "f.txt", "3\n", "three");
     git(wt, &["checkout", "main"]);
     let repo = open_grit_at(wt, wt);
-    let oid = resolve_at_minus_to_oid(&repo, "@{-1}")
+    let oid = repo
+        .revwalk()
+        .resolve("@{-1}", &grit_lib::revwalk::ResolveOptions::default())
         .expect("resolve")
         .expect("some");
     let git_oid = support::git_rev_parse_verify(wt, "@{-1}").expect("git @{-1}");

@@ -13,7 +13,7 @@ use grit_lib::diff::{
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use support::{assert_raw_matches_git, git_raw_lines, tree_diff_raw};
 use tempfile::TempDir;
 
@@ -63,7 +63,10 @@ fn grit_log_patch(repo: &Repository, limit: usize, diff: DiffOptions) -> Vec<u8>
         max_count: Some(limit),
         ..Default::default()
     };
-    let result = rev_list(repo, &["HEAD".to_owned()], &[], &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&["HEAD".to_owned()], &[], &opts)
+        .expect("rev-list");
     let config = repo
         .config()
         .snapshot()
@@ -114,16 +117,17 @@ fn log_patch_full_header_separates_commits_like_git() {
     init_corpus_repo(std::path::Path::new("git"), dir.path());
     let git_out = git_in(dir.path(), &["log", "-p", "--no-color", "-15"]);
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let result = rev_list(
-        &repo,
-        &["HEAD".to_owned()],
-        &[],
-        &RevListOptions {
-            max_count: Some(15),
-            ..Default::default()
-        },
-    )
-    .expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &RevListOptions {
+                max_count: Some(15),
+                ..Default::default()
+            },
+        )
+        .expect("rev-list");
     let config = repo
         .config()
         .snapshot()

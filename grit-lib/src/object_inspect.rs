@@ -33,10 +33,9 @@ use crate::refs::{
 };
 use crate::repo::Repository;
 use crate::rev_parse::{
-    abbreviate_object_id, ambiguous_object_hint_lines, expand_at_minus_to_branch_name,
-    parse_peel_suffix, resolve_revision, resolve_revision_for_verify,
-    resolve_upstream_symbolic_name, split_double_dot_range, split_triple_dot_range,
-    upstream_suffix_info,
+    ambiguous_object_hint_lines, expand_at_minus_to_branch_name, parse_peel_suffix,
+    resolve_revision, resolve_revision_for_verify, resolve_upstream_symbolic_name,
+    split_double_dot_range, split_triple_dot_range, upstream_suffix_info,
 };
 use crate::rev_parse_error::{AmbiguousChangeIdHint, AmbiguousObjectHint, RevParseError};
 
@@ -577,17 +576,6 @@ mod tree_entry_cat_file_type_tests {
     }
 }
 
-/// Abbreviate `oid` for human output using repository uniqueness rules.
-pub fn abbreviate_for_display(repo: &Repository, oid: ObjectId, short: bool) -> Result<String> {
-    if short {
-        let config = repo.config().snapshot()?.clone();
-        let min_len = crate::commit_pretty::resolve_core_abbrev_len(&config, repo.odb())?;
-        abbreviate_object_id(repo, oid, min_len)
-    } else {
-        Ok(oid.to_hex())
-    }
-}
-
 #[cfg(test)]
 mod abbreviate_for_display_tests {
     use std::collections::HashMap;
@@ -597,7 +585,7 @@ mod abbreviate_for_display_tests {
     use crate::repo::{InitOptions, Repository};
     use crate::rev_parse::resolve_revision;
 
-    use super::abbreviate_for_display;
+    use crate::revwalk::AbbrevLength;
 
     fn two_blobs_sharing_seven_hex_prefix() -> (ObjectId, ObjectId, Vec<u8>, Vec<u8>) {
         let mut first_by_prefix: HashMap<String, (ObjectId, Vec<u8>)> = HashMap::new();
@@ -626,7 +614,7 @@ mod abbreviate_for_display_tests {
         repo.odb().write(ObjectKind::Blob, &data_a)?;
         repo.odb().write(ObjectKind::Blob, &data_b)?;
         for oid in [a, b] {
-            let abbrev = abbreviate_for_display(&repo, oid, true)?;
+            let abbrev = repo.revwalk().abbreviate(oid, AbbrevLength::Configured)?;
             assert!(abbrev.len() > 7);
             assert_eq!(resolve_revision(&repo, &abbrev)?, oid);
         }

@@ -7,11 +7,7 @@ use std::path::Path;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::{
-    abbreviate_object_id, peel_to_tree, resolve_revision, resolve_revision_as_commit,
-    resolve_revision_for_verify, resolve_treeish_blob_at_path, split_double_dot_range,
-    split_triple_dot_range,
-};
+use grit_lib::revwalk::rev_parse::{split_double_dot_range, split_triple_dot_range};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 
 use super::history_harness::git_rev_parse_verify;
@@ -80,14 +76,30 @@ impl std::fmt::Display for OracleMismatch {
 
 fn grit_resolve(repo: &Repository, spec: &str, mode: ResolveMode) -> Result<ObjectId, Error> {
     match mode {
-        ResolveMode::Revision => resolve_revision(repo, spec),
-        ResolveMode::Verify => resolve_revision_for_verify(repo, spec),
-        ResolveMode::AsCommit => resolve_revision_as_commit(repo, spec),
+        ResolveMode::Revision => repo
+            .revwalk()
+            .resolve(spec, &grit_lib::revwalk::ResolveOptions::default()),
+        ResolveMode::Verify => repo.revwalk().resolve(
+            spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        ),
+        ResolveMode::AsCommit => repo.revwalk().resolve(
+            spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit),
+        ),
         ResolveMode::PeelTree => {
-            let oid = resolve_revision_for_verify(repo, spec)?;
-            peel_to_tree(repo, oid)
+            let oid = repo.revwalk().resolve(
+                spec,
+                &grit_lib::revwalk::ResolveOptions::default()
+                    .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                    .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+            )?;
+            repo.revwalk().peel_to_tree(oid)
         }
-        ResolveMode::TreeishBlobAtPath => Ok(resolve_treeish_blob_at_path(repo, spec)?.oid),
+        ResolveMode::TreeishBlobAtPath => Ok(repo.revwalk().blob_at_path(spec)?.oid),
     }
 }
 
@@ -158,7 +170,10 @@ pub fn oracle_table(repo: &Repository, worktree: &Path, mode: ResolveMode, specs
 
 /// `git rev-parse --short` vs [`abbreviate_object_id`] for a full oid.
 pub fn oracle_abbrev(repo: &Repository, worktree: &Path, oid: ObjectId, min_len: usize) {
-    let grit = abbreviate_object_id(repo, oid, min_len).expect("grit abbrev");
+    let grit = repo
+        .revwalk()
+        .abbreviate(oid, grit_lib::revwalk::AbbrevLength::AtLeast(min_len))
+        .expect("grit abbrev");
     let git = super::history_harness::git(worktree, &["rev-parse", "--short", &oid.to_hex()]);
     let git = git.trim().to_string();
     assert_eq!(

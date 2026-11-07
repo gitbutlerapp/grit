@@ -5,7 +5,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{serialize_commit, serialize_tree, CommitData, ObjectKind, TreeEntry};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 
 #[test]
 fn pathspec_log_skips_commit_when_tree_header_points_at_blob() {
@@ -61,7 +61,7 @@ fn pathspec_log_skips_commit_when_tree_header_points_at_blob() {
         paths: vec!["tracked.txt".to_owned()],
         ..Default::default()
     };
-    let result = rev_list(&open, &["HEAD".to_owned()], &[], &opts);
+    let result = open.revwalk().rev_list(&["HEAD".to_owned()], &[], &opts);
     match result {
         Err(_) => {}
         Ok(out) => assert!(

@@ -18,7 +18,6 @@ use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::refs::refs_fsck::refs_fsck;
 use grit_lib::refs::store::{MemoryRefStore, RefName};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_parse::abbreviate_object_id;
 
 #[derive(Debug)]
 struct Flaky {
@@ -191,9 +190,15 @@ fn refs_fsck_reports_backend_failure_not_missing_object() {
 fn abbreviate_object_id_reports_backend_failure() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (repo, flaky, commit) = flaky_repo(dir.path());
-    assert!(abbreviate_object_id(&repo, commit, 7).is_ok());
+    assert!(repo
+        .revwalk()
+        .abbreviate(commit, grit_lib::revwalk::AbbrevLength::AtLeast(7))
+        .is_ok());
 
     flaky.fail.store(true, Ordering::Relaxed);
-    let err = abbreviate_object_id(&repo, commit, 7).unwrap_err();
+    let err = repo
+        .revwalk()
+        .abbreviate(commit, grit_lib::revwalk::AbbrevLength::AtLeast(7))
+        .unwrap_err();
     assert!(is_backend_down(&err), "{err:?}");
 }

@@ -3,7 +3,6 @@
 use grit_lib::objects::odb::BULK_NEW_LOOSE_WRITE;
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::object_inspect::abbreviate_for_display;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
@@ -134,7 +133,10 @@ fn lookup_prefix_finds_loose_collision_when_pack_object_is_also_loose() {
     let grit_hex: Vec<String> = grit_matches.iter().map(|o| o.to_hex()).collect();
     assert_eq!(grit_hex, git_matches, "prefix `{prefix}` disambiguate set");
 
-    let grit_abbrev = abbreviate_for_display(&repo, packed_oid, true).expect("abbrev");
+    let grit_abbrev = repo
+        .revwalk()
+        .abbreviate(packed_oid, grit_lib::revwalk::AbbrevLength::Configured)
+        .expect("abbrev");
     let git_abbrev = git(dir, &["rev-parse", "--short=7", &packed_oid.to_hex()]);
     assert_eq!(
         grit_abbrev, git_abbrev,

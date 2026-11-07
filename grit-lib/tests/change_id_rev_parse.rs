@@ -7,7 +7,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::{resolve_revision, resolve_revision_as_commit};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 use grit_test_support::git;
 
@@ -111,7 +110,10 @@ fn resolves_full_and_prefix_change_id() {
         ],
     );
     let repo = open_repo(dir.path());
-    let root = resolve_revision(&repo, "HEAD").expect("head");
+    let root = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("head");
     let id = ChangeId::parse_reverse_hex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").expect("id");
     let tip = write_commit_with_id(&repo, Some(root), "tip", &id);
     git(
@@ -119,9 +121,15 @@ fn resolves_full_and_prefix_change_id() {
         &["update-ref", "refs/heads/main", &tip.to_hex()],
     );
 
-    let full = resolve_revision(&repo, id.as_str()).expect("full id");
+    let full = repo
+        .revwalk()
+        .resolve(id.as_str(), &grit_lib::revwalk::ResolveOptions::default())
+        .expect("full id");
     assert_eq!(full, tip);
-    let prefix = resolve_revision(&repo, &id.short(8)).expect("prefix");
+    let prefix = repo
+        .revwalk()
+        .resolve(&id.short(8), &grit_lib::revwalk::ResolveOptions::default())
+        .expect("prefix");
     assert_eq!(prefix, tip);
 }
 
@@ -141,12 +149,27 @@ fn resolves_derived_id_of_headerless_commit() {
         ],
     );
     let repo = open_repo(dir.path());
-    let oid = resolve_revision(&repo, "HEAD").expect("head");
+    let oid = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("head");
     let derived = ChangeId::derived_from_commit_id(&oid);
     assert!(derived.is_reverse_hex());
-    let resolved = resolve_revision(&repo, derived.as_str()).expect("derived full");
+    let resolved = repo
+        .revwalk()
+        .resolve(
+            derived.as_str(),
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect("derived full");
     assert_eq!(resolved, oid);
-    let resolved = resolve_revision(&repo, &derived.short(10)).expect("derived prefix");
+    let resolved = repo
+        .revwalk()
+        .resolve(
+            &derived.short(10),
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect("derived prefix");
     assert_eq!(resolved, oid);
 }
 
@@ -168,7 +191,10 @@ fn change_id_with_nav_suffix_and_range() {
         );
     }
     let repo = open_repo(dir.path());
-    let parent = resolve_revision(&repo, "HEAD~1").expect("parent");
+    let parent = repo
+        .revwalk()
+        .resolve("HEAD~1", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("parent");
     let id = ChangeId::parse_reverse_hex("yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy").expect("id");
     let tip = write_commit_with_id(&repo, Some(parent), "marked", &id);
     git(
@@ -176,11 +202,23 @@ fn change_id_with_nav_suffix_and_range() {
         &["update-ref", "refs/heads/main", &tip.to_hex()],
     );
 
-    let parent_again = resolve_revision(&repo, &format!("{}~1", id.short(8))).expect("nav");
+    let parent_again = repo
+        .revwalk()
+        .resolve(
+            &format!("{}~1", id.short(8)),
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect("nav");
     assert_eq!(parent_again, parent);
 
-    let range_tip =
-        resolve_revision_as_commit(&repo, &format!("{}..main", id.short(8))).expect("range end");
+    let range_tip = repo
+        .revwalk()
+        .resolve(
+            &format!("{}..main", id.short(8)),
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit),
+        )
+        .expect("range end");
     assert_eq!(range_tip, tip);
 }
 
@@ -200,7 +238,10 @@ fn refs_take_precedence_over_change_id() {
         ],
     );
     let repo = open_repo(dir.path());
-    let root = resolve_revision(&repo, "HEAD").expect("head");
+    let root = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("head");
     let branch_id = ChangeId::parse_reverse_hex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").expect("id");
     let other_id = ChangeId::parse_reverse_hex("yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy").expect("id2");
     let branch_tip = write_commit_with_id(&repo, Some(root), "branch tip", &branch_id);
@@ -214,7 +255,10 @@ fn refs_take_precedence_over_change_id() {
         &["update-ref", "refs/heads/main", &other.to_hex()],
     );
 
-    let resolved = resolve_revision(&repo, "zzzz").expect("branch wins");
+    let resolved = repo
+        .revwalk()
+        .resolve("zzzz", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("branch wins");
     assert_eq!(resolved, branch_tip);
 }
 
@@ -234,14 +278,23 @@ fn ambiguous_change_id_lists_all_candidates() {
         ],
     );
     let repo = open_repo(dir.path());
-    let root = resolve_revision(&repo, "HEAD").expect("head");
+    let root = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("head");
     let shared = ChangeId::parse_reverse_hex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").expect("id");
     let a = write_commit_with_id(&repo, Some(root), "a", &shared);
     let b = write_commit_with_id(&repo, Some(root), "b", &shared);
     git(dir.path(), &["update-ref", "refs/heads/a", &a.to_hex()]);
     git(dir.path(), &["update-ref", "refs/heads/b", &b.to_hex()]);
 
-    let err = resolve_revision(&repo, shared.as_str()).expect_err("ambiguous full");
+    let err = repo
+        .revwalk()
+        .resolve(
+            shared.as_str(),
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect_err("ambiguous full");
     match err {
         Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
             assert_eq!(candidates.len(), 2);
@@ -269,7 +322,10 @@ fn ambiguous_change_id_prefix_lists_candidates() {
         ],
     );
     let repo = open_repo(dir.path());
-    let root = resolve_revision(&repo, "HEAD").expect("head");
+    let root = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("head");
     let id_a = ChangeId::parse_reverse_hex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzy").expect("a id");
     let id_b = ChangeId::parse_reverse_hex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").expect("b id");
     let ca = write_commit_with_id(&repo, Some(root), "ca", &id_a);
@@ -277,7 +333,13 @@ fn ambiguous_change_id_prefix_lists_candidates() {
     git(dir.path(), &["update-ref", "refs/heads/c1", &ca.to_hex()]);
     git(dir.path(), &["update-ref", "refs/heads/c2", &cb.to_hex()]);
 
-    let err = resolve_revision(&repo, "zzzzzzzzzzzzzzzz").expect_err("prefix ambiguous");
+    let err = repo
+        .revwalk()
+        .resolve(
+            "zzzzzzzzzzzzzzzz",
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect_err("prefix ambiguous");
     match err {
         Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
             assert_eq!(candidates.len(), 2);
@@ -302,7 +364,10 @@ fn ambiguous_when_derived_prefix_collides_with_stored_prefix() {
         ],
     );
     let repo = open_repo(dir.path());
-    let root = resolve_revision(&repo, "HEAD").expect("head");
+    let root = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("head");
     let headerless = write_headerless_commit(&repo, Some(root), "headerless");
     let derived = ChangeId::derived_from_commit_id(&headerless);
     let prefix = derived.short(4);
@@ -340,7 +405,10 @@ fn ambiguous_when_derived_prefix_collides_with_stored_prefix() {
     assert!(oids.contains(&headerless));
     assert!(oids.contains(&with_header));
 
-    let err = resolve_revision(&repo, &prefix).expect_err("ambiguous");
+    let err = repo
+        .revwalk()
+        .resolve(&prefix, &grit_lib::revwalk::ResolveOptions::default())
+        .expect_err("ambiguous");
     match err {
         Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
             assert_eq!(candidates.len(), 2);
@@ -377,7 +445,10 @@ fn stored_change_id_resolves_after_stale_negative_probe_marker() {
     );
     git(dir.path(), &["gc", "--prune=now"]);
     let repo = open_repo(dir.path());
-    let packed_tip = resolve_revision(&repo, "HEAD").expect("head");
+    let packed_tip = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("head");
     let derived = ChangeId::derived_from_commit_id(&packed_tip);
     let _ = find_commits_by_change_id_prefix(&repo, derived.short(8)).expect("prime probe");
 
@@ -425,7 +496,16 @@ fn short_or_non_reverse_hex_specs_unaffected() {
         &["commit", "-m", "track tmp", "--author", "T <t@example.com>"],
     );
     let repo = open_repo(dir.path());
-    assert!(resolve_revision(&repo, "tmp").is_err());
-    assert!(resolve_revision(&repo, "dead").is_err());
-    assert!(resolve_revision(&repo, "abc").is_err());
+    assert!(repo
+        .revwalk()
+        .resolve("tmp", &grit_lib::revwalk::ResolveOptions::default())
+        .is_err());
+    assert!(repo
+        .revwalk()
+        .resolve("dead", &grit_lib::revwalk::ResolveOptions::default())
+        .is_err());
+    assert!(repo
+        .revwalk()
+        .resolve("abc", &grit_lib::revwalk::ResolveOptions::default())
+        .is_err());
 }

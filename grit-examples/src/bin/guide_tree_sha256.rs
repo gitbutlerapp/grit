@@ -3,7 +3,8 @@
 //! Source for the library guide "Tree SHA-256" page.
 
 use grit_lib::error::Error;
-use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
+use grit_lib::revwalk::{Peel, ResolveOptions};
+
 use grit_lib::tree_sha256::TreeSha256Options;
 
 fn main() -> Result<(), Error> {
@@ -12,7 +13,9 @@ fn main() -> Result<(), Error> {
     let options = grit_lib::config::environment::RepositoryOptions::with_environment(env);
     let repo = grit_lib::repo::Repository::discover(None, &options)?;
     let rev = std::env::args().nth(1).unwrap_or_else(|| "HEAD".into());
-    let oid = resolve_revision_as_commit(&repo, &rev)?;
+    let oid = repo
+        .revwalk()
+        .resolve(&rev, &ResolveOptions::default().with_peel(Peel::Commit))?;
     let report = repo.tree_sha256(oid, &TreeSha256Options::default())?;
     println!("{}", report.digest);
     println!("files={} submodules={}", report.files, report.submodules);

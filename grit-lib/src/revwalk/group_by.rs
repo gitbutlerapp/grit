@@ -17,7 +17,7 @@ use crate::revwalk::queries::{
     positive_specs_for_walk, rev_list_commits_for_author_group, rev_list_options_from_walk,
     MergeFilter, RevWalkParsedSpecs,
 };
-use crate::revwalk::RevWalkListOptions;
+use crate::revwalk::{RevWalk, RevWalkListOptions};
 
 /// One author's commits after grouping a walk result.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,23 +32,72 @@ pub struct AuthorGroup {
     pub commits: Vec<ObjectId>,
 }
 
-/// Options for [`group_commits_by_author`].
+/// Options for [`RevWalk::group_by_author`] and [`RevWalk::group_by_author_in_walk`].
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GroupByAuthorOptions {
     /// When true, omit per-commit oid lists (counts only; faster for `--count`).
     pub count_only: bool,
 }
 
-/// Group `oids` by mapped author identity, sorted like `git shortlog -sne`.
-///
-/// When `mailmap` is `None`, authors are taken from each commit header unchanged.
-/// Sort order is descending commit count, then ascending `Name <email>` string
-/// (matching Git's `compareAuthors`).
-///
-/// # Errors
-///
-/// Returns ODB and commit parse errors when an oid is missing or corrupt.
-pub fn group_commits_by_author(
+impl RevWalk<'_> {
+    /// Group `oids` by mapped author identity, sorted like `git shortlog -sne`.
+    ///
+    /// When `mailmap` is `None`, authors are taken from each commit header unchanged.
+    /// Sort order is descending commit count, then ascending `Name <email>` string
+    /// (matching Git's `compareAuthors`).
+    ///
+    /// # Errors
+    ///
+    /// Returns ODB and commit parse errors when an oid is missing or corrupt.
+    pub fn group_by_author(
+        &self,
+        oids: &[ObjectId],
+        mailmap: Option<&MailmapTable>,
+        options: GroupByAuthorOptions,
+    ) -> Result<Vec<AuthorGroup>> {
+        group_commits_by_author(self.repository(), oids, mailmap, options)
+    }
+
+    /// Walk `tokens` and group the commits by author, like [`Self::group_by_author`] on the
+    /// result of [`Self::commits`].
+    ///
+    /// With [`GroupByAuthorOptions::count_only`] the walk uses pack bitmaps and pack-order
+    /// reads when it can.
+    ///
+    /// # Errors
+    ///
+    /// Propagates rev-parse, rev-list, ODB, and commit header errors.
+    pub fn group_by_author_in_walk(
+        &self,
+        tokens: &[&str],
+        walk_options: &RevWalkListOptions,
+        mailmap: Option<&MailmapTable>,
+        options: GroupByAuthorOptions,
+    ) -> Result<Vec<AuthorGroup>> {
+        let repo = self.repository();
+        if options.count_only {
+            return count_authors_from_rev_walk(repo, tokens, walk_options, mailmap);
+        }
+        let oids = self.commits(tokens, walk_options)?;
+        group_commits_by_author(repo, &oids, mailmap, options)
+    }
+
+    /// The repository's mailmap for grouping when `use_mailmap` is true (the same sources as
+    /// `log.mailmap`), or [`None`] when it is false or the mailmap is empty.
+    ///
+    /// # Errors
+    ///
+    /// Propagates mailmap load errors from the repository.
+    pub fn mailmap_for_grouping(&self, use_mailmap: bool) -> Result<Option<MailmapTable>> {
+        if !use_mailmap {
+            return Ok(None);
+        }
+        let table = load_mailmap_table(self.repository())?;
+        Ok((!table.is_empty()).then_some(table))
+    }
+}
+
+fn group_commits_by_author(
     repo: &Repository,
     oids: &[ObjectId],
     mailmap: Option<&MailmapTable>,
@@ -77,38 +126,6 @@ pub fn group_commits_by_author(
 
     sort_author_groups(&mut groups);
     Ok(groups)
-}
-
-/// Resolve `tokens` and group by author (`--count` uses bitmap rev-list + pack-order reads).
-///
-/// # Errors
-///
-/// Propagates rev-parse, rev-list, ODB, and commit header errors.
-pub fn group_commits_by_author_from_rev(
-    repo: &Repository,
-    tokens: &[&str],
-    walk_options: &RevWalkListOptions,
-    mailmap: Option<&MailmapTable>,
-    options: GroupByAuthorOptions,
-) -> Result<Vec<AuthorGroup>> {
-    if options.count_only {
-        return count_authors_from_rev_walk(repo, tokens, walk_options, mailmap);
-    }
-    let oids = repo.revwalk().commits(tokens, walk_options)?;
-    group_commits_by_author(repo, &oids, mailmap, options)
-}
-
-/// Load `.mailmap` when `use_mailmap` is true (same sources as `log.mailmap`).
-///
-/// # Errors
-///
-/// Propagates mailmap load errors from the repository.
-pub fn mailmap_for_grouping(repo: &Repository, use_mailmap: bool) -> Result<Option<MailmapTable>> {
-    if !use_mailmap {
-        return Ok(None);
-    }
-    let table = load_mailmap_table(repo)?;
-    Ok((!table.is_empty()).then_some(table))
 }
 
 struct AuthorCounter {

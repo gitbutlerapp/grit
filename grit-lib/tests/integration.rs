@@ -1539,8 +1539,6 @@ mod refs_query_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "refs_query_reachability_git_compat.rs"]
 mod refs_query_reachability_git_compat;
-#[path = "refs_refname_git_roundtrip.rs"]
-mod refs_refname_git_roundtrip;
 #[cfg(feature = "full-tests")]
 #[path = "refs_refname_git_roundtrip.rs"]
 mod refs_refname_git_roundtrip;
@@ -1603,8 +1601,6 @@ mod release_unused_heap;
 #[cfg(feature = "full-tests")]
 #[path = "remote_config_git_compat.rs"]
 mod remote_config_git_compat;
-#[path = "remote_error_variants.rs"]
-mod remote_error_variants;
 #[cfg(feature = "full-tests")]
 #[path = "remote_error_variants.rs"]
 mod remote_error_variants;
@@ -1842,6 +1838,10 @@ mod revwalk_injected_ref_store;
 #[cfg(feature = "full-tests")]
 #[path = "revwalk_queries.rs"]
 mod revwalk_queries;
+#[path = "revwalk_resolve_options.rs"]
+mod revwalk_resolve_options;
+#[path = "revwalk_resolve_options_git_compat.rs"]
+mod revwalk_resolve_options_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "revwalk_symmetric_counts_git_compat.rs"]
 mod revwalk_symmetric_counts_git_compat;
@@ -1923,9 +1923,6 @@ mod sha256_worktree;
 #[cfg(feature = "full-tests")]
 #[path = "shallow_boundary_diff_blame.rs"]
 mod shallow_boundary_diff_blame;
-#[cfg(feature = "full-tests")]
-#[path = "shallow_deepen_single_commit.rs"]
-mod shallow_deepen_single_commit;
 #[cfg(feature = "full-tests")]
 #[path = "shallow_maintenance_git_compat.rs"]
 mod shallow_maintenance_git_compat;

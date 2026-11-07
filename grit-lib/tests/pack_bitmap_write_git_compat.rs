@@ -10,7 +10,7 @@ use grit_lib::objects::pack_name_hash::pack_name_hash;
 use grit_lib::objects::pack_rev::{rev_path_for_index, verify_pack_rev_file_contents};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::test_support::objects_pack::{read_local_pack_indexes, read_pack_index};
 use grit_test_support::{HashAlgo, RepoFixture};
 
@@ -87,7 +87,10 @@ fn reachability_positions(repo: &Repository, index: &BitmapIndex, tip: &ObjectId
         quiet: true,
         ..Default::default()
     };
-    let result = rev_list(repo, &[hex], &[], &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&[hex], &[], &opts)
+        .expect("rev-list");
     let mut out = HashSet::new();
     for oid in result
         .commits

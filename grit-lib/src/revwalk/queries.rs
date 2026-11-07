@@ -3,8 +3,7 @@ use crate::error::{Error, Result};
 use crate::git_date::parse::DateParseError;
 use crate::git_date::parse_date_cutoff;
 use crate::merge_base::{
-    count_commits_reachable_excluding_ancestors_of, is_ancestor as merge_base_is_ancestor,
-    merge_bases_all, merge_bases_first_vs_rest, ReachableCountFilter,
+    count_commits_reachable_excluding_ancestors_of, merge_bases_all, ReachableCountFilter,
 };
 use crate::objects::ObjectId;
 use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
@@ -19,9 +18,8 @@ use crate::rev_list::{
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
-    is_top_level_range, peel_to_commit_for_merge_base, resolve_revision,
-    resolve_revision_for_range_end, resolve_walk_range_end, split_top_level_triple_dot_range,
-    try_peel_to_commit_for_merge_base,
+    is_top_level_range, peel_to_commit_for_merge_base, resolve_revision_for_range_end,
+    resolve_walk_range_end, split_top_level_triple_dot_range, try_peel_to_commit_for_merge_base,
 };
 use crate::revwalk::filter::CommitFilter;
 
@@ -191,7 +189,10 @@ pub struct RevWalkParsedSpecs {
 /// # Errors
 ///
 /// Returns rev-parse and merge-base errors from symmetric-diff expansion.
-pub fn parse_rev_walk_tokens(repo: &Repository, tokens: &[&str]) -> Result<RevWalkParsedSpecs> {
+pub(crate) fn parse_rev_walk_tokens(
+    repo: &Repository,
+    tokens: &[&str],
+) -> Result<RevWalkParsedSpecs> {
     let mut positive = Vec::new();
     let mut negative = Vec::new();
     let mut symmetric_left = None;
@@ -374,7 +375,7 @@ pub fn committer_cutoff_from_date(
 /// # Errors
 ///
 /// Propagates rev-parse errors from resolving revision tokens and ref globs.
-pub fn resolve_log_walk_tips_and_hide(
+pub(crate) fn resolve_log_walk_tips_and_hide(
     repo: &Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
@@ -395,7 +396,7 @@ pub fn resolve_log_walk_tips_and_hide(
 /// # Errors
 ///
 /// Propagates rev-parse and rev-list errors.
-pub fn rev_list_commits_for_author_group(
+pub(crate) fn rev_list_commits_for_author_group(
     repo: &Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
@@ -689,7 +690,7 @@ impl<'repo> RevWalk<'repo> {
                 until: options.until,
             };
             if let Some(list) =
-                crate::merge_base::try_linear_chain_commits_with_cutoffs(repo, tip, need, cutoffs)?
+                crate::merge_base::try_linear_chain_commits(repo, tip, need, cutoffs)?
             {
                 return Ok(list.len());
             }
@@ -812,36 +813,19 @@ impl<'repo> RevWalk<'repo> {
         })
     }
 
-    /// Merge bases of two revisions (`git merge-base`, or `--all` when `all` is true).
+    /// Split user revision `tokens` into positive and negative specs for [`Self::rev_list`].
+    ///
+    /// Supports plain tips, `A..B`, `A...B`, and `^X` exclusions across several tokens. An
+    /// empty side of a range defaults to `HEAD`. `A...B` expands to both tips as positive
+    /// specs and all of their merge bases as negative specs. Dots inside `{…}` selectors or
+    /// after a `:` are literal, so `:/fix...up`, `main^{/fix...up}` and `HEAD:a...b` stay
+    /// single revisions, as in Git.
     ///
     /// # Errors
     ///
-    /// Propagates rev-parse, peel, and merge-base errors.
-    pub fn merge_bases(&self, a: &str, b: &str, all: bool) -> Result<Vec<ObjectId>> {
-        let repo = self.repository();
-        let a_tip = resolve_revision(repo, a)?;
-        let b_tip = resolve_revision(repo, b)?;
-        let a_commit = peel_to_commit_for_merge_base(repo, a_tip)?;
-        let b_commit = peel_to_commit_for_merge_base(repo, b_tip)?;
-        if all {
-            merge_bases_all(repo, &[a_commit, b_commit])
-        } else {
-            merge_bases_first_vs_rest(repo, a_commit, &[b_commit])
-        }
-    }
-
-    /// Whether `ancestor` is reachable from `descendant` (`git merge-base --is-ancestor`).
-    ///
-    /// # Errors
-    ///
-    /// Propagates rev-parse, peel, and merge-base errors.
-    pub fn is_ancestor(&self, ancestor: &str, descendant: &str) -> Result<bool> {
-        let repo = self.repository();
-        let ancestor_tip = resolve_revision(repo, ancestor)?;
-        let descendant_tip = resolve_revision(repo, descendant)?;
-        let ancestor_commit = peel_to_commit_for_merge_base(repo, ancestor_tip)?;
-        let descendant_commit = peel_to_commit_for_merge_base(repo, descendant_tip)?;
-        merge_base_is_ancestor(repo, ancestor_commit, descendant_commit)
+    /// Returns rev-parse and merge-base errors from symmetric-diff expansion.
+    pub fn parse_tokens(&self, tokens: &[&str]) -> Result<RevWalkParsedSpecs> {
+        parse_rev_walk_tokens(self.repository(), tokens)
     }
 }
 

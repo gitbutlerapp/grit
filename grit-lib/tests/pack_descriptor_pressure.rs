@@ -6,7 +6,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::log::{collect_decorations_for_commits, DecorationKind};
+use grit_lib::porcelain::log::DecorationKind;
 use grit_lib::repo::Repository;
 use grit_test_support::objects::many_tag_packs;
 
@@ -69,7 +69,14 @@ fn descriptor_pressure_child() {
     } else {
         let commits: Vec<_> = refs.iter().map(|(_, commit)| *commit).collect();
         for _ in 0..2 {
-            let decorations = collect_decorations_for_commits(&repo, false, &commits).unwrap();
+            let decorations = repo
+                .revwalk()
+                .decorations(
+                    &grit_lib::porcelain::log::DecorationOptions::default()
+                        .with_full_ref_names(false)
+                        .with_commits(Some((&commits).to_vec())),
+                )
+                .unwrap();
             let tags = decorations
                 .values()
                 .flatten()

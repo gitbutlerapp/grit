@@ -27,8 +27,7 @@ use grit_lib::objects::pack_receive::copy_reader_to_writer;
 use grit_lib::objects::promisor_remote::parse_advertisement;
 use grit_lib::objects::{CommitData, HashAlgo, ObjectId};
 use grit_lib::porcelain::log::{
-    collect_decorations, collect_decorations_inner, current_branch_decoration_index,
-    normalize_glob_ref, peel_to_commit_hex, DecorationFilter,
+    current_branch_decoration_index, normalize_glob_ref, peel_to_commit_hex, DecorationFilter,
 };
 use grit_lib::porcelain::revert::commits_to_revert;
 use grit_lib::refs::store::paths::{logs_refs_dir_path, logs_refs_subdir_path};
@@ -178,8 +177,15 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
     let git_dir = dir.path().join(".git");
     let seed = support::stored_commit(&git_dir, 1);
     grit_lib::refs::write_ref(git_dir.as_path(), "refs/heads/main", &seed).expect("seed main");
-    let _ = collect_decorations(&repo, false);
-    let _ = collect_decorations_inner(&repo, true, true, &DecorationFilter::default());
+    let _ = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+    );
+    let _ = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default()
+            .with_full_ref_names(true)
+            .with_clear_decorations(true)
+            .with_filter((&DecorationFilter::default()).clone()),
+    );
     let _ = normalize_glob_ref("heads/*");
     let odb = repo.odb();
     let head = grit_lib::refs::resolve_ref(repo.git_dir(), "HEAD").expect("resolve");

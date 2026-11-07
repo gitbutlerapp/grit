@@ -701,8 +701,10 @@ fn custom_primary_ingest_and_write_skip_read_source_contains_probes() {
     git(&src, &["add", "."]);
     git(&src, &["commit", "-q", "-m", "files"]);
     let source = Repository::open(&src.join(".git"), &RepositoryOptions::empty()).expect("open");
-    let tip =
-        grit_lib::revwalk::rev_parse::resolve_revision(&source, "HEAD").expect("resolve HEAD");
+    let tip = source
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("resolve HEAD");
     let pack = build_pack(source.odb(), &[tip], &[], &PackBuildOptions::default()).expect("pack");
 
     let gd = tmp.path().join("custom.git");

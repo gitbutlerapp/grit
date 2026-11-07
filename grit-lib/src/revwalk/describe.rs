@@ -652,6 +652,7 @@ mod tests {
     use crate::progress::{CancelToken, NullProgress};
     use crate::refs::store::RefName;
     use crate::repo::{InitOptions, Repository};
+    use crate::revwalk::ResolveOptions;
 
     fn init_repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -729,7 +730,7 @@ mod tests {
         let _c2 = empty_commit(&repo, "c2");
         let c3 = empty_commit(&repo, "c3");
         tag_light(&repo, "v1", c1);
-        let head = repo.revwalk().resolve("HEAD")?;
+        let head = repo.revwalk().resolve("HEAD", &ResolveOptions::default())?;
         assert_eq!(head, c3);
         let d = repo
             .revwalk()
@@ -919,7 +920,10 @@ mod tests {
         assert_eq!(tag_short_name(&d), "atag");
         assert_eq!(d.distance, 1);
         assert_eq!(d.peeled, c1);
-        assert_eq!(c2, repo.revwalk().resolve("HEAD")?);
+        assert_eq!(
+            c2,
+            repo.revwalk().resolve("HEAD", &ResolveOptions::default())?
+        );
         Ok(())
     }
 

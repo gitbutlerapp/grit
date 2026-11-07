@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::divergence::{classify, common_base, Did, Scenario};
+use grit_lib::divergence::{Did, Scenario};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 
@@ -166,9 +166,15 @@ fn check(
     want: Scenario,
 ) -> grit_lib::divergence::Divergence {
     let repo = f.repo();
-    let d = classify(&repo, &[oid(main)], Some(oid(base)), oid(ours), oid(theirs)).unwrap();
+    let d = repo
+        .revwalk()
+        .classify_divergence(&[oid(main)], Some(oid(base)), oid(ours), oid(theirs))
+        .unwrap();
     assert_eq!(d.scenario, want, "ours vs theirs: {d:#?}");
-    let back = classify(&repo, &[oid(main)], Some(oid(base)), oid(theirs), oid(ours)).unwrap();
+    let back = repo
+        .revwalk()
+        .classify_divergence(&[oid(main)], Some(oid(base)), oid(theirs), oid(ours))
+        .unwrap();
     let mirrored = match want {
         Scenario::Ahead => Scenario::Behind,
         Scenario::Behind => Scenario::Ahead,
@@ -323,14 +329,11 @@ fn amended_on_both_sides() {
     );
     // The very same amend.
     let same = amend("c1\nOURS\nc3\n", "d1\nd2\nd3\n", "Add C");
-    let d = classify(
-        &f.repo(),
-        &[oid(&main)],
-        Some(oid(&b)),
-        oid(&ours),
-        oid(&same),
-    )
-    .unwrap();
+    let d = f
+        .repo()
+        .revwalk()
+        .classify_divergence(&[oid(&main)], Some(oid(&b)), oid(&ours), oid(&same))
+        .unwrap();
     assert!(
         matches!(
             d.scenario,
@@ -618,14 +621,16 @@ fn rebased_and_reset() {
         Some(&id('l')),
     );
     let three_c = f.commit(Some(&b), &[("g.txt", Some("g\n"))], "Add G", Some(&id('p')));
-    let d = classify(
-        &f.repo(),
-        &[oid(&main2)],
-        Some(oid(&three_c)),
-        oid(&three_c),
-        oid(&theirs),
-    )
-    .unwrap();
+    let d = f
+        .repo()
+        .revwalk()
+        .classify_divergence(
+            &[oid(&main2)],
+            Some(oid(&three_c)),
+            oid(&three_c),
+            oid(&theirs),
+        )
+        .unwrap();
     assert!(d.scenarios.contains(&Scenario::ResetOne), "{d:#?}");
 }
 
@@ -662,17 +667,16 @@ fn the_base_is_the_newest_head_both_had() {
     let theirs = f.commit(Some(&a), &[("f.txt", Some("f\n"))], "Add F", Some(&id('o')));
     let repo = f.repo();
     // Both held b at some point.
-    let base = common_base(
-        &repo,
-        oid(&ours),
-        oid(&theirs),
-        &[oid(&b), oid(&a)],
-        &[oid(&b)],
-    )
-    .unwrap();
+    let base = repo
+        .revwalk()
+        .divergence_base(oid(&ours), oid(&theirs), &[oid(&b), oid(&a)], &[oid(&b)])
+        .unwrap();
     assert_eq!(base, Some(oid(&b)));
     // Nothing in common: the merge base.
-    let base = common_base(&repo, oid(&ours), oid(&theirs), &[], &[]).unwrap();
+    let base = repo
+        .revwalk()
+        .divergence_base(oid(&ours), oid(&theirs), &[], &[])
+        .unwrap();
     assert_eq!(base, Some(oid(&a)));
     let _ = main;
 }
@@ -687,7 +691,7 @@ fn every_scenario_has_a_code_and_a_rank() {
     assert!(all.iter().take_while(|s| s.needs_decision()).count() == 10);
 }
 
-use grit_lib::divergence::{combine, Choice};
+use grit_lib::divergence::Choice;
 
 /// The file at `path` in commit `c`, or `None`.
 fn file(f: &Fixture, c: &str, path: &str) -> Option<String> {
@@ -727,15 +731,17 @@ fn combined(
     theirs: &str,
     choice: Choice,
 ) -> String {
-    let c = combine(
-        &f.repo(),
-        &[oid(main)],
-        Some(oid(base)),
-        oid(ours),
-        oid(theirs),
-        choice,
-    )
-    .unwrap();
+    let c = f
+        .repo()
+        .revwalk()
+        .combine_divergence(
+            &[oid(main)],
+            Some(oid(base)),
+            oid(ours),
+            oid(theirs),
+            choice,
+        )
+        .unwrap();
     assert!(c.conflicts.is_empty(), "{c:?}");
     c.head.unwrap().to_hex()
 }
@@ -809,15 +815,17 @@ fn choices_for_decisions() {
     let ours = amend("c1\nOURS\nc3\n", "Add C");
     let theirs = amend("c1\nTHEIRS\nc3\n", "Add C");
     // Combining conflicts.
-    let c = combine(
-        &f.repo(),
-        &[oid(&main)],
-        Some(oid(&b)),
-        oid(&ours),
-        oid(&theirs),
-        Choice::Combine,
-    )
-    .unwrap();
+    let c = f
+        .repo()
+        .revwalk()
+        .combine_divergence(
+            &[oid(&main)],
+            Some(oid(&b)),
+            oid(&ours),
+            oid(&theirs),
+            Choice::Combine,
+        )
+        .unwrap();
     assert_eq!(c.head, None);
     assert_eq!(c.conflicts, ["c.txt"]);
     // Keeping both: theirs, then ours on top.
@@ -872,14 +880,11 @@ fn every_scenario_offers_options() {
     let Base { f, main, a, b } = base();
     let ours = f.commit(Some(&b), &[("e.txt", Some("e\n"))], "Add E", Some(&id('n')));
     let theirs = f.commit(Some(&a), &[("f.txt", Some("f\n"))], "Add F", Some(&id('o')));
-    let d = classify(
-        &f.repo(),
-        &[oid(&main)],
-        Some(oid(&b)),
-        oid(&ours),
-        oid(&theirs),
-    )
-    .unwrap();
+    let d = f
+        .repo()
+        .revwalk()
+        .classify_divergence(&[oid(&main)], Some(oid(&b)), oid(&ours), oid(&theirs))
+        .unwrap();
     let options = d.options("alice");
     assert_eq!(options[0].choice, Choice::Combine);
     assert_eq!(options[0].loses, None);
@@ -890,8 +895,6 @@ fn every_scenario_offers_options() {
         assert_eq!(Choice::parse(choice.id()), Some(choice));
     }
 }
-
-use grit_lib::divergence::{keyed_commits, missing_from, replay_onto};
 
 #[test]
 fn what_integrating_one_head_leaves_out() {
@@ -915,7 +918,10 @@ fn what_integrating_one_head_leaves_out() {
         Some(&id('m')),
     );
     let repo = f.repo();
-    let missing = missing_from(&repo, &[oid(&main)], oid(&ours), oid(&theirs)).unwrap();
+    let missing = repo
+        .revwalk()
+        .missing_from(&[oid(&main)], oid(&ours), oid(&theirs))
+        .unwrap();
     assert_eq!(
         missing
             .iter()
@@ -924,11 +930,15 @@ fn what_integrating_one_head_leaves_out() {
         ["Add E"]
     );
     // A head ours builds on leaves nothing out.
-    assert!(missing_from(&repo, &[oid(&main)], oid(&theirs), oid(&a))
+    assert!(repo
+        .revwalk()
+        .missing_from(&[oid(&main)], oid(&theirs), oid(&a))
         .unwrap()
         .is_empty());
     // Keys come oldest first, by change id.
-    let keys: Vec<String> = keyed_commits(&repo, oid(&ours), &[oid(&main)])
+    let keys: Vec<String> = repo
+        .revwalk()
+        .keyed_commits(oid(&ours), &[oid(&main)])
         .unwrap()
         .into_iter()
         .map(|k| k.key)
@@ -954,7 +964,11 @@ fn replaying_what_is_new_onto_the_target() {
     let tip = f.commit(Some(&b), &[("f.txt", Some("f\n"))], "Add F", Some(&id('o')));
     let repo = f.repo();
     let skip = [id('l'), id('m')].into_iter().collect();
-    let head = match replay_onto(&repo, oid(&tip), &[oid(&merge)], oid(&merge), &skip).unwrap() {
+    let head = match repo
+        .revwalk()
+        .replay_onto(oid(&tip), &[oid(&merge)], oid(&merge), &skip)
+        .unwrap()
+    {
         grit_lib::divergence::ReplayOntoOutcome::Ok { tip } => tip,
         other => panic!("expected Ok, got {other:?}"),
     };
@@ -988,13 +1002,21 @@ a3
         "Add G",
         Some(&id('p')),
     );
-    let head = match replay_onto(&repo, oid(&g), &[oid(&merge)], oid(&merge), &skip).unwrap() {
+    let head = match repo
+        .revwalk()
+        .replay_onto(oid(&g), &[oid(&merge)], oid(&merge), &skip)
+        .unwrap()
+    {
         grit_lib::divergence::ReplayOntoOutcome::Ok { tip } => tip,
         other => panic!("expected Ok, got {other:?}"),
     };
     assert_eq!(subjects(&f, &merge, &head.to_hex()), ["Add G"]);
     // Nothing new: the target itself.
-    let head = match replay_onto(&repo, oid(&b), &[oid(&merge)], oid(&merge), &skip).unwrap() {
+    let head = match repo
+        .revwalk()
+        .replay_onto(oid(&b), &[oid(&merge)], oid(&merge), &skip)
+        .unwrap()
+    {
         grit_lib::divergence::ReplayOntoOutcome::Ok { tip } => tip,
         other => panic!("expected Ok, got {other:?}"),
     };
@@ -1109,14 +1131,11 @@ fn keep_both_builds_on_their_head() {
     assert_eq!(file(&f, &head, "a.txt").as_deref(), Some("a1\nours\na3\n"));
     assert_eq!(subjects(&f, &main, &head), ["Add A", "Add C", "Add A"]);
     // Their side then sees a head that builds on theirs.
-    let d = classify(
-        &f.repo(),
-        &[oid(&main)],
-        Some(oid(&b)),
-        oid(&theirs),
-        oid(&head),
-    )
-    .unwrap();
+    let d = f
+        .repo()
+        .revwalk()
+        .classify_divergence(&[oid(&main)], Some(oid(&b)), oid(&theirs), oid(&head))
+        .unwrap();
     assert_eq!(d.scenario, Scenario::Behind, "{d:#?}");
 }
 
@@ -1200,14 +1219,11 @@ fn a_restored_head_is_taken_by_the_one_who_reset() {
     );
     let restored = combined(&f, &main, &b, &b, &ours, Choice::Restore);
     assert!(builds_on(&f, &b, &restored));
-    let d = classify(
-        &f.repo(),
-        &[oid(&main)],
-        Some(oid(&b)),
-        oid(&ours),
-        oid(&restored),
-    )
-    .unwrap();
+    let d = f
+        .repo()
+        .revwalk()
+        .classify_divergence(&[oid(&main)], Some(oid(&b)), oid(&ours), oid(&restored))
+        .unwrap();
     assert!(!d.scenario.needs_decision(), "{d:#?}");
     // Combining from our side takes theirs, dropping nothing.
     let head = combined(&f, &main, &b, &ours, &restored, Choice::Combine);
@@ -1241,14 +1257,11 @@ fn a_reword_survives_a_combine_from_either_side() {
         ["Add A, reworded", "Add C", "Add N"]
     );
     // They then compare their head with ours combined, from the head before N.
-    let d = classify(
-        &f.repo(),
-        &[oid(&main)],
-        Some(oid(&b)),
-        oid(&theirs),
-        oid(&head),
-    )
-    .unwrap();
+    let d = f
+        .repo()
+        .revwalk()
+        .classify_divergence(&[oid(&main)], Some(oid(&b)), oid(&theirs), oid(&head))
+        .unwrap();
     assert!(!d.scenario.needs_decision(), "{d:#?}");
     let back = combined(&f, &main, &b, &theirs, &head, Choice::Combine);
     assert_eq!(
@@ -1258,14 +1271,11 @@ fn a_reword_survives_a_combine_from_either_side() {
     );
     // And we, with our combined head, compare it with theirs (N, without
     // the reword): their head lacks the reword, so nothing of theirs is new.
-    let d = classify(
-        &f.repo(),
-        &[oid(&main)],
-        Some(oid(&b)),
-        oid(&head),
-        oid(&theirs),
-    )
-    .unwrap();
+    let d = f
+        .repo()
+        .revwalk()
+        .classify_divergence(&[oid(&main)], Some(oid(&b)), oid(&head), oid(&theirs))
+        .unwrap();
     let mine = combined(&f, &main, &b, &head, &theirs, Choice::Combine);
     assert_eq!(
         subjects(&f, &main, &mine),

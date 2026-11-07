@@ -7,9 +7,9 @@ use grit_lib::porcelain::hunk_select::{
 use grit_lib::porcelain::restore::{
     restore_paths, ConflictSide, RestoreOptions, RestoreOutcome, RestoreSource,
 };
+use grit_lib::revwalk::ResolveOptions;
 
 use crate::conflict_style::{self, ConflictStyleArg};
-use grit_lib::revwalk::rev_parse::resolve_revision;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -182,7 +182,9 @@ pub fn run(
     let restore_source = match source {
         None => RestoreSource::Index,
         Some(rev) => {
-            let oid = resolve_revision(&repo, &rev)
+            let oid = repo
+                .revwalk()
+                .resolve(&rev, &ResolveOptions::default())
                 .with_context(|| format!("could not resolve '{rev}'"))?;
             let obj = repo.odb().read(&oid).context("reading source object")?;
             use grit_lib::objects::{parse_commit, ObjectKind};

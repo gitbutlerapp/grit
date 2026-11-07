@@ -908,10 +908,15 @@ fn restore_source_cancel_restores_directory_replacing_tracked_file() {
     fs::create_dir_all(wt.join(victim)).expect("mkdir victim");
     fs::write(wt.join(victim).join("sentinel.txt"), "keep me\n").expect("sentinel");
 
-    let old_commit = grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim(
-        &repo, "HEAD~1",
-    )
-    .expect("old commit");
+    let old_commit = repo
+        .revwalk()
+        .resolve(
+            "HEAD~1",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit)
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+        )
+        .expect("old commit");
     let old_obj = repo.odb().read(&old_commit).expect("read commit");
     let old_tree = grit_lib::objects::parse_commit(&old_obj.data)
         .expect("parse")

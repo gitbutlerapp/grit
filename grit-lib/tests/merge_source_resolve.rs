@@ -257,9 +257,14 @@ fn ranges_over_brace_containing_branch_are_not_found() {
                 .trim()
                 .parse()
                 .expect("merge base");
-            let actual =
-                grit_lib::revwalk::rev_parse::resolve_revision_without_index_dwim(&repo, spec)
-                    .unwrap_or_else(|e| panic!("{spec}: {e}"));
+            let actual = repo
+                .revwalk()
+                .resolve(
+                    spec,
+                    &grit_lib::revwalk::ResolveOptions::default()
+                        .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+                )
+                .unwrap_or_else(|e| panic!("{spec}: {e}"));
             assert_eq!(actual, expected, "{spec}");
         }
     }

@@ -5,8 +5,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::GroupByAuthorOptions;
 use grit_lib::revwalk::RevWalkListOptions;
-use grit_lib::revwalk::{group_commits_by_author, mailmap_for_grouping, GroupByAuthorOptions};
 use grit_test_support::git;
 
 fn git_stdout(root: &std::path::Path, args: &[&str]) -> String {
@@ -65,13 +65,10 @@ fn group_by_author_mailmap_issue_2551_matches_git_shortlog_sne() -> grit_lib::er
     let oids = repo
         .revwalk()
         .commits(&["HEAD"], &RevWalkListOptions::default())?;
-    let table = mailmap_for_grouping(&repo, true)?;
-    let groups = group_commits_by_author(
-        &repo,
-        &oids,
-        table.as_ref(),
-        GroupByAuthorOptions::default(),
-    )?;
+    let table = repo.revwalk().mailmap_for_grouping(true)?;
+    let groups =
+        repo.revwalk()
+            .group_by_author(&oids, table.as_ref(), GroupByAuthorOptions::default())?;
 
     let git_out = git_stdout(root, &["shortlog", "-sne", "HEAD"]);
     let git_lines: Vec<&str> = git_out

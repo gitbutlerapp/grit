@@ -5,7 +5,6 @@ use crate::support;
 use grit_lib::objects::ObjectId;
 use grit_lib::objects::ObjectKind;
 use grit_lib::porcelain::log::{
-    collect_decorations, collect_decorations_for_commits, collect_decorations_inner,
     current_branch_decoration_index, normalize_glob_ref, peel_to_commit_hex, DecorationFilter,
     DecorationKind,
 };
@@ -33,8 +32,12 @@ fn log_decorations_cover_all_ref_namespaces() -> grit_lib::error::Result<()> {
     git(wt, &["stash", "push", "-m", "stash me"]);
 
     let repo = open_grit_repo(wt);
-    let map_full = collect_decorations(&repo, true)?;
-    let map_short = collect_decorations(&repo, false)?;
+    let map_full = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(true),
+    )?;
+    let map_short = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+    )?;
     assert!(!map_full.is_empty());
     assert!(!map_short.is_empty());
     assert_targeted_matches_full(&repo, wt);
@@ -47,13 +50,23 @@ fn log_decorations_cover_all_ref_namespaces() -> grit_lib::error::Result<()> {
     assert!(filter.matches("refs/heads/main"));
     assert!(!filter.matches("refs/heads/topic"));
 
-    let cleared = collect_decorations_inner(&repo, false, true, &DecorationFilter::default())?;
+    let cleared = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default()
+            .with_full_ref_names(false)
+            .with_clear_decorations(true)
+            .with_filter((&DecorationFilter::default()).clone()),
+    )?;
     assert!(cleared
         .values()
         .flatten()
         .any(|it| it.kind == DecorationKind::Other));
 
-    let filtered = collect_decorations_inner(&repo, true, false, &filter)?;
+    let filtered = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default()
+            .with_full_ref_names(true)
+            .with_clear_decorations(false)
+            .with_filter((&filter).clone()),
+    )?;
     assert!(!filtered.is_empty());
 
     fs::write(
@@ -62,7 +75,9 @@ fn log_decorations_cover_all_ref_namespaces() -> grit_lib::error::Result<()> {
     )
     .map_err(grit_lib::error::Error::Io)?;
     repo.reload_config()?;
-    let _ = collect_decorations(&repo, false)?;
+    let _ = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+    )?;
 
     let tip_hex = git(wt, &["rev-parse", "HEAD"]).trim().to_string();
     let peeled = peel_to_commit_hex(repo.odb(), &tip_hex).expect("peel tip");
@@ -115,16 +130,28 @@ fn decoration_rows(
     rows
 }
 
-/// `collect_decorations_for_commits` must equal the full map restricted to its commits.
+/// `DecorationOptions::commits` must give the full map restricted to its commits.
 fn assert_targeted_matches_full(repo: &grit_lib::repo::Repository, wt: &std::path::Path) {
     let all: Vec<ObjectId> = git(wt, &["rev-list", "--all"])
         .lines()
         .map(|l| l.parse().expect("oid"))
         .collect();
     for full in [false, true] {
-        let whole = collect_decorations(repo, full).expect("full map");
+        let whole = repo
+            .revwalk()
+            .decorations(
+                &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(full),
+            )
+            .expect("full map");
         for chunk in all.chunks(1).chain(std::iter::once(&all[..])) {
-            let targeted = collect_decorations_for_commits(repo, full, chunk).expect("targeted");
+            let targeted = repo
+                .revwalk()
+                .decorations(
+                    &grit_lib::porcelain::log::DecorationOptions::default()
+                        .with_full_ref_names(full)
+                        .with_commits(Some((chunk).to_vec())),
+                )
+                .expect("targeted");
             let mut expected = whole.clone();
             expected.retain(|hex, _| chunk.iter().any(|oid| &oid.to_hex() == hex));
             assert_eq!(
@@ -154,8 +181,12 @@ fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<(
     // Exercise sparse pack reads while every tag ref is still loose.
     git(wt, &["repack", "-adf", "--window=0"]);
     let repo = open_grit_repo(wt);
-    let loose = decoration_rows(&collect_decorations(&repo, false)?);
-    let loose_full = decoration_rows(&collect_decorations(&repo, true)?);
+    let loose = decoration_rows(&repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+    )?);
+    let loose_full = decoration_rows(&repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(true),
+    )?);
     assert!(
         loose
             .iter()
@@ -169,9 +200,16 @@ fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<(
     assert!(packed_refs.contains("fully-peeled"), "{packed_refs}");
     assert!(packed_refs.lines().any(|l| l.starts_with('^')));
     let repo = open_grit_repo(wt);
-    assert_eq!(decoration_rows(&collect_decorations(&repo, false)?), loose);
     assert_eq!(
-        decoration_rows(&collect_decorations(&repo, true)?),
+        decoration_rows(&repo.revwalk().decorations(
+            &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false)
+        )?),
+        loose
+    );
+    assert_eq!(
+        decoration_rows(&repo.revwalk().decorations(
+            &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(true)
+        )?),
         loose_full
     );
 
@@ -180,7 +218,9 @@ fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<(
     // A loose ref now overrides the packed `moving` tag (and its stale peel line).
     git(wt, &["tag", "-f", "-a", "-m", "moved", "moving", "HEAD"]);
     let repo = open_grit_repo(wt);
-    let moved = decoration_rows(&collect_decorations(&repo, false)?);
+    let moved = decoration_rows(&repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+    )?);
     let head = git(wt, &["rev-parse", "HEAD"]).trim().to_string();
     let decorated_with_moving = |rows: &[(String, Vec<(Option<String>, String)>)]| {
         rows.iter()
@@ -223,7 +263,9 @@ fn targeted_decorations_match_full_for_every_packed_refs_header() -> grit_lib::e
     // Exercise sparse pack reads while every tag ref is still loose.
     git(wt, &["repack", "-adf", "--window=0"]);
     let repo = open_grit_repo(wt);
-    let loose = decoration_rows(&collect_decorations(&repo, false)?);
+    let loose = decoration_rows(&repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+    )?);
     assert!(
         loose
             .iter()
@@ -250,7 +292,9 @@ fn targeted_decorations_match_full_for_every_packed_refs_header() -> grit_lib::e
         fs::write(&packed_path, body).map_err(grit_lib::error::Error::Io)?;
         let repo = open_grit_repo(wt);
         assert_eq!(
-            decoration_rows(&collect_decorations(&repo, false)?),
+            decoration_rows(&repo.revwalk().decorations(
+                &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false)
+            )?),
             loose,
             "header {header:?}"
         );
@@ -325,8 +369,14 @@ fn targeted_tag_decorations_keep_injected_backends_and_broken_tags_working(
         })?;
     }
     refs.prepare(transaction)?.commit()?;
-    let targeted = collect_decorations_for_commits(&repo, false, &[commit])?;
-    let mut expected = collect_decorations(&repo, false)?;
+    let targeted = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default()
+            .with_full_ref_names(false)
+            .with_commits(Some((&[commit]).to_vec())),
+    )?;
+    let mut expected = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+    )?;
     expected.retain(|key, _| key == &commit.to_hex());
     assert_eq!(decoration_rows(&targeted), decoration_rows(&expected));
     let names: Vec<_> = targeted[&commit.to_hex()]

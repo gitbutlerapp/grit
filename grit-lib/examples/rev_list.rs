@@ -6,7 +6,7 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 
 fn make_initial_commit(repo: &Repository) -> grit_lib::error::Result<grit_lib::objects::ObjectId> {
     use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
@@ -66,7 +66,9 @@ fn main() -> grit_lib::error::Result<()> {
     let _root_commit = make_initial_commit(&repo)?;
 
     let opts = RevListOptions::default();
-    let result = rev_list(&repo, &[String::from("HEAD")], &[], &opts)?;
+    let result = repo
+        .revwalk()
+        .rev_list(&[String::from("HEAD")], &[], &opts)?;
 
     println!("commits from HEAD (oldest-first internal order may vary):");
     for oid in &result.commits {

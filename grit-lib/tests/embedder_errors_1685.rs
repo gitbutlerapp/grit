@@ -121,7 +121,10 @@ fn deep_parent_navigation_is_revision_out_of_range() {
     let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
     create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
 
-    let err = repo.revwalk().resolve("main~99").unwrap_err();
+    let err = repo
+        .revwalk()
+        .resolve("main~99", &grit_lib::revwalk::ResolveOptions::default())
+        .unwrap_err();
     assert!(
         matches!(
             err,

@@ -15,8 +15,8 @@ use grit_lib::refs::gc::prune_loose_unreachable;
 use grit_lib::refs::write_ref;
 use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
-use grit_lib::revwalk::rev_parse::{abbreviate_object_id, resolve_revision};
+use grit_lib::revwalk::rev_list::RevListOptions;
+
 use std::process::Command;
 
 fn canonical_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
@@ -251,8 +251,10 @@ fn memory_primary_revwalk_diff_without_loose_objects() {
     .expect("ref");
 
     let tip = commit.to_hex();
-    let listed =
-        rev_list(&repo, &[tip.clone()], &[], &RevListOptions::default()).expect("rev-list");
+    let listed = repo
+        .revwalk()
+        .rev_list(&[tip.clone()], &[], &RevListOptions::default())
+        .expect("rev-list");
     assert_eq!(listed.commits.len(), 1);
     assert_eq!(listed.commits[0], commit);
 
@@ -287,7 +289,10 @@ fn memory_primary_resolve_abbrev_via_lookup_prefix() {
         .write(ObjectKind::Blob, b"abbrev-test\n")
         .expect("blob");
     let prefix = &blob.to_hex()[..8];
-    let resolved = resolve_revision(&repo, prefix).expect("abbrev");
+    let resolved = repo
+        .revwalk()
+        .resolve(prefix, &grit_lib::revwalk::ResolveOptions::default())
+        .expect("abbrev");
     assert_eq!(resolved, blob);
 }
 
@@ -409,7 +414,10 @@ fn memory_primary_abbrev_unique_prefix_considers_store_collisions() {
     let (first, second) = pair.expect("find blob pair with shared 4-char prefix");
     assert_ne!(first, second);
     assert_eq!(first.to_hex()[..4], second.to_hex()[..4]);
-    let abbrev = abbreviate_object_id(&repo, first, 4).expect("abbrev");
+    let abbrev = repo
+        .revwalk()
+        .abbreviate(first, grit_lib::revwalk::AbbrevLength::AtLeast(4))
+        .expect("abbrev");
     assert_ne!(
         abbrev.len(),
         4,

@@ -15,7 +15,7 @@ use grit_lib::objects::pack::{
 use grit_lib::objects::{parse_commit, Object, ObjectId, ObjectKind};
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions, RevListResult};
+use grit_lib::revwalk::rev_list::{RevListOptions, RevListResult};
 use grit_lib::revwalk::CommitFilterBuilder;
 use grit_lib::revwalk::{DescribeOptions, RevWalkListOptions};
 use std::sync::Arc;
@@ -223,7 +223,7 @@ pub fn rev_list_objects(repo: &Repository) -> Result<()> {
     };
     let result = repo
         .odb()
-        .with_pack_read_context(|| rev_list(repo, &[], &[], &opts))
+        .with_pack_read_context(|| repo.revwalk().rev_list(&[], &[], &opts))
         .context("rev-list --objects --all")?;
     let mut stdout = io::stdout().lock();
     for commit in &result.commits {
@@ -247,8 +247,10 @@ pub fn log_patch(repo: &Repository, limit: usize) -> Result<()> {
             use_commit_graph: true,
             ..Default::default()
         };
-        let result =
-            rev_list(repo, &["HEAD".to_owned()], &[], &opts).context("rev-list for log")?;
+        let result = repo
+            .revwalk()
+            .rev_list(&["HEAD".to_owned()], &[], &opts)
+            .context("rev-list for log")?;
         let config = repo
             .config()
             .snapshot()
@@ -329,7 +331,9 @@ pub fn rev_list_count_author_head(repo: &Repository, author: &str) -> Result<()>
         use_commit_graph: true,
         ..Default::default()
     };
-    let result = rev_list(repo, &["HEAD".to_string()], &[], &opts)
+    let result = repo
+        .revwalk()
+        .rev_list(&["HEAD".to_string()], &[], &opts)
         .context("rev-list --count --author HEAD")?;
     println!("{}", result.commit_count());
     Ok(())
@@ -343,8 +347,10 @@ pub fn rev_list_author_n_head(repo: &Repository, author: &str, max_count: usize)
         use_commit_graph: true,
         ..Default::default()
     };
-    let result =
-        rev_list(repo, &["HEAD".to_string()], &[], &opts).context("rev-list --author -n HEAD")?;
+    let result = repo
+        .revwalk()
+        .rev_list(&["HEAD".to_string()], &[], &opts)
+        .context("rev-list --author -n HEAD")?;
     println!("{}", result.commits.len());
     Ok(())
 }
@@ -357,7 +363,10 @@ pub fn rev_list_head(repo: &Repository) -> Result<()> {
         use_commit_graph: true,
         ..Default::default()
     };
-    let result = rev_list(repo, &["HEAD".to_string()], &[], &opts).context("rev-list HEAD")?;
+    let result = repo
+        .revwalk()
+        .rev_list(&["HEAD".to_string()], &[], &opts)
+        .context("rev-list HEAD")?;
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
     for oid in &result.commits {
         writeln!(out, "{oid}")?;
@@ -372,8 +381,10 @@ pub fn rev_list_count_head(repo: &Repository) -> Result<()> {
         use_commit_graph: true,
         ..Default::default()
     };
-    let result =
-        rev_list(repo, &["HEAD".to_string()], &[], &opts).context("rev-list --count HEAD")?;
+    let result = repo
+        .revwalk()
+        .rev_list(&["HEAD".to_string()], &[], &opts)
+        .context("rev-list --count HEAD")?;
     let n = result.commit_count();
     println!("{n}");
     Ok(())
@@ -542,7 +553,10 @@ pub fn rev_list_count(repo: &Repository) -> Result<()> {
         use_commit_graph: true,
         ..Default::default()
     };
-    let result = rev_list(repo, &[], &[], &opts).context("rev-list --count --all")?;
+    let result = repo
+        .revwalk()
+        .rev_list(&[], &[], &opts)
+        .context("rev-list --count --all")?;
     let n = result.commit_count();
     println!("{n}");
     Ok(())
@@ -560,7 +574,7 @@ pub fn rev_list_count_objects(repo: &Repository) -> Result<()> {
     };
     let result = repo
         .odb()
-        .with_pack_read_context(|| rev_list(repo, &[], &[], &opts))
+        .with_pack_read_context(|| repo.revwalk().rev_list(&[], &[], &opts))
         .context("rev-list --count --objects --all")?;
     let n = result.count_with_objects_total();
     println!("{n}");

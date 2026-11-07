@@ -8,6 +8,7 @@ use grit_lib::ident::Signature;
 use grit_lib::refs::reflog::{parse_reflog_ref, reflog_identity_timestamp, ReflogSelector};
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{ExpireOptions, IndexedReflogEntry, MessageMatcher, ReflogQuery};
+use grit_lib::revwalk::AbbrevLength;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -332,9 +333,10 @@ fn indexed_to_json(repo: &Repository, entry: &IndexedReflogEntry, now: i64) -> R
         .unwrap_or_default();
     let committer = signature.as_ref().map(person_from_signature);
     let new_hex = entry.entry.new_oid.to_hex();
-    let abbreviated_oid =
-        grit_lib::revwalk::object_inspect::abbreviate_for_display(repo, entry.entry.new_oid, true)
-            .unwrap_or_else(|_| new_hex.clone());
+    let abbreviated_oid = repo
+        .revwalk()
+        .abbreviate(entry.entry.new_oid, AbbrevLength::Configured)
+        .unwrap_or_else(|_| new_hex.clone());
     ReflogListEntry {
         index: entry.index,
         oid: new_hex.clone(),

@@ -9,16 +9,12 @@ use grit_lib::diff::{CommitFilesManyOptions, DiffOptions};
 use grit_lib::gitbutler::GitButlerWorkspace;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::log::CommitReuse;
-use grit_lib::revwalk::group_by::{
-    group_commits_by_author, group_commits_by_author_from_rev, mailmap_for_grouping,
-    GroupByAuthorOptions,
-};
+use grit_lib::revwalk::group_by::GroupByAuthorOptions;
 use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
 use grit_lib::revwalk::object_inspect::OidAbbrevBatch;
 use grit_lib::revwalk::CommitExtent;
 use grit_lib::revwalk::{
-    display_parents_for_graph, log_graph_materialize, GraphCharset, GraphCommitInput, GraphLayout,
-    GraphLineKind, GraphRenderedLine,
+    GraphCharset, GraphCommitInput, GraphLayout, GraphLineKind, GraphRenderedLine,
 };
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
@@ -961,7 +957,7 @@ fn run_log_group_by_author(
     let use_mailmap = rev_select::log_mailmap_enabled(repo, rev.no_mailmap);
     let max_count = rev.max_count();
     let reverse = rev.reverse;
-    let mailmap = mailmap_for_grouping(repo, use_mailmap)?;
+    let mailmap = repo.revwalk().mailmap_for_grouping(use_mailmap)?;
     let need_commit_json = output_mode == OutputMode::Json && !display.group_count_only;
     let group_options = GroupByAuthorOptions {
         count_only: !need_commit_json,
@@ -976,13 +972,14 @@ fn run_log_group_by_author(
                 .commits(token_refs, &fetch_opts)
                 .context("could not list commits")?;
             let (oids, truncated) = truncate_oid_list(oids, Some(limit), reverse);
-            let grouped = group_commits_by_author(
-                repo,
-                &oids,
-                mailmap.as_ref(),
-                GroupByAuthorOptions { count_only: false },
-            )
-            .context("could not group commits by author")?;
+            let grouped = repo
+                .revwalk()
+                .group_by_author(
+                    &oids,
+                    mailmap.as_ref(),
+                    GroupByAuthorOptions { count_only: false },
+                )
+                .context("could not group commits by author")?;
             return build_author_group_outcome_from_groups(
                 repo,
                 grouped,
@@ -991,26 +988,23 @@ fn run_log_group_by_author(
                 output_mode,
             );
         }
-        let grouped = group_commits_by_author_from_rev(
-            repo,
-            token_refs,
-            walk_opts,
-            mailmap.as_ref(),
-            GroupByAuthorOptions { count_only: false },
-        )
-        .context("could not group commits by author")?;
+        let grouped = repo
+            .revwalk()
+            .group_by_author_in_walk(
+                token_refs,
+                walk_opts,
+                mailmap.as_ref(),
+                GroupByAuthorOptions { count_only: false },
+            )
+            .context("could not group commits by author")?;
         return build_author_group_outcome_from_groups(repo, grouped, false, display, output_mode);
     }
 
     if max_count.is_none() {
-        let grouped = group_commits_by_author_from_rev(
-            repo,
-            token_refs,
-            walk_opts,
-            mailmap.as_ref(),
-            group_options,
-        )
-        .context("could not group commits by author")?;
+        let grouped = repo
+            .revwalk()
+            .group_by_author_in_walk(token_refs, walk_opts, mailmap.as_ref(), group_options)
+            .context("could not group commits by author")?;
         return build_author_group_outcome_from_groups(repo, grouped, false, display, output_mode);
     }
 
@@ -1021,7 +1015,9 @@ fn run_log_group_by_author(
         .commits(token_refs, &fetch_opts)
         .context("could not list commits")?;
     let (oids, truncated) = truncate_oid_list(oids, max_count, reverse);
-    let grouped = group_commits_by_author(repo, &oids, mailmap.as_ref(), group_options)
+    let grouped = repo
+        .revwalk()
+        .group_by_author(&oids, mailmap.as_ref(), group_options)
         .context("could not group commits by author")?;
     build_author_group_outcome_from_groups(repo, grouped, truncated, display, output_mode)
 }
@@ -1640,7 +1636,8 @@ fn build_graph_oneline_stream(
     let (parent_map, subjects) = if let Some(linkage) = graph.linkage.take() {
         (linkage.parents, linkage.subjects)
     } else {
-        log_graph_materialize(repo, oids, graph.parent_rewrite)?
+        repo.revwalk()
+            .graph_materialize(oids, graph.parent_rewrite)?
     };
     let charset = if display.graph_ascii {
         GraphCharset::ASCII
@@ -1674,7 +1671,12 @@ fn build_graph_text_lines(
     let parent_map = if let Some(linkage) = graph.linkage.take() {
         linkage.parents
     } else {
-        display_parents_for_graph(repo, &visible, graph.parent_rewrite)?
+        repo.revwalk()
+            .graph_materialize(
+                &visible.iter().copied().collect::<Vec<_>>(),
+                graph.parent_rewrite,
+            )
+            .map(|(parents, _)| parents)?
     };
     let blocks = graph_blocks(oids, &parent_map, display);
     let leads = commit_prefix_widths(&blocks);

@@ -11,14 +11,11 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use grit_lib::diff::{count_changes_with_algorithm, diff_trees};
 use grit_lib::refs::branch_tracking::TipComparison;
 use grit_lib::refs::write_ref;
-use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
-use grit_lib::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
-use grit_lib::revwalk::rev_parse::resolve_revision;
+
+use grit_lib::revwalk::rev_list::{OrderingMode, RevListOptions};
+
 use grit_lib::revwalk::CommitFilterBuilder;
-use grit_lib::revwalk::{
-    group_commits_by_author_from_rev, mailmap_for_grouping, DescribeOptions, GroupByAuthorOptions,
-    RevWalkListOptions,
-};
+use grit_lib::revwalk::{DescribeOptions, GroupByAuthorOptions, RevWalkListOptions};
 use similar::Algorithm;
 use std::sync::{Arc, OnceLock};
 
@@ -34,7 +31,11 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
                 paths: vec![String::from("f00000.txt")],
                 ..Default::default()
             };
-            let result = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+            let result = fx
+                .repo
+                .revwalk()
+                .rev_list(&[String::from("HEAD")], &[], &opts)
+                .expect("rev-list");
             black_box(result.commits.len())
         });
     });
@@ -47,7 +48,11 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
                 use_commit_graph_bloom: true,
                 ..Default::default()
             };
-            let result = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+            let result = fx
+                .repo
+                .revwalk()
+                .rev_list(&[String::from("HEAD")], &[], &opts)
+                .expect("rev-list");
             black_box(result.commit_count())
         });
     });
@@ -60,7 +65,11 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
                 use_commit_graph_bloom: true,
                 ..Default::default()
             };
-            let result = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+            let result = fx
+                .repo
+                .revwalk()
+                .rev_list(&[String::from("HEAD")], &[], &opts)
+                .expect("rev-list");
             black_box(result.commits.len())
         });
     });
@@ -92,7 +101,10 @@ fn revwalk_group(c: &mut Criterion, ordering: OrderingMode, label: &str) {
                             use_commit_graph: *with_graph,
                             ..Default::default()
                         };
-                        let result = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts)
+                        let result = fx
+                            .repo
+                            .revwalk()
+                            .rev_list(&[String::from("HEAD")], &[], &opts)
                             .expect("rev-list");
                         black_box(result.commits.len())
                     });
@@ -133,7 +145,11 @@ fn bench_log_group_by_author(c: &mut Criterion) {
     let mut group = c.benchmark_group("log-group-by-author");
     group.throughput(Throughput::Elements(fx.commit_count as u64));
     let walk = RevWalkListOptions::default();
-    let mailmap = mailmap_for_grouping(&fx.repo, true).expect("mailmap");
+    let mailmap = fx
+        .repo
+        .revwalk()
+        .mailmap_for_grouping(true)
+        .expect("mailmap");
     for (label, use_graph) in [("no_commit_graph", false), ("commit_graph", true)] {
         if use_graph {
             fx.ensure_commit_graph();
@@ -141,14 +157,15 @@ fn bench_log_group_by_author(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("count_only", label), &use_graph, |b, _| {
             b.iter(|| {
                 black_box(
-                    group_commits_by_author_from_rev(
-                        &fx.repo,
-                        &["HEAD"],
-                        &walk,
-                        mailmap.as_ref(),
-                        GroupByAuthorOptions { count_only: true },
-                    )
-                    .expect("group"),
+                    fx.repo
+                        .revwalk()
+                        .group_by_author_in_walk(
+                            &["HEAD"],
+                            &walk,
+                            mailmap.as_ref(),
+                            GroupByAuthorOptions { count_only: true },
+                        )
+                        .expect("group"),
                 )
             });
         });
@@ -174,7 +191,11 @@ fn bench_revwalk_filter(c: &mut Criterion) {
                 use_commit_graph: true,
                 ..Default::default()
             };
-            let result = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+            let result = fx
+                .repo
+                .revwalk()
+                .rev_list(&[String::from("HEAD")], &[], &opts)
+                .expect("rev-list");
             black_box(result.commits.len())
         });
     });
@@ -195,16 +216,21 @@ fn bench_revwalk_filter(c: &mut Criterion) {
                         retain_commit_data: true,
                         ..Default::default()
                     };
-                    let mut result = rev_list(&fixture.repo, &[String::from("HEAD")], &[], &opts)
+                    let mut result = fixture
+                        .repo
+                        .revwalk()
+                        .rev_list(&[String::from("HEAD")], &[], &opts)
                         .expect("rev-list");
                     black_box(
-                        grit_lib::porcelain::log::load_commits_with_decorations_reusing(
-                            &fixture.repo,
-                            &result.commits,
-                            &Default::default(),
-                            &mut result.commit_data,
-                        )
-                        .expect("log metadata"),
+                        fixture
+                            .repo
+                            .revwalk()
+                            .load_commits(
+                                &result.commits,
+                                &Default::default(),
+                                &mut result.commit_data,
+                            )
+                            .expect("log metadata"),
                     )
                 });
             });
@@ -252,8 +278,11 @@ fn bench_revwalk_limit_near_full_history(c: &mut Criterion) {
                         use_commit_graph: true,
                         ..Default::default()
                     };
-                    let result =
-                        rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+                    let result = fx
+                        .repo
+                        .revwalk()
+                        .rev_list(&[String::from("HEAD")], &[], &opts)
+                        .expect("rev-list");
                     black_box(result.commits.len())
                 });
             },
@@ -284,8 +313,11 @@ fn bench_revwalk_log_limit(c: &mut Criterion) {
                     retain_commit_data,
                     ..Default::default()
                 };
-                let result =
-                    rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+                let result = fx
+                    .repo
+                    .revwalk()
+                    .rev_list(&[String::from("HEAD")], &[], &opts)
+                    .expect("rev-list");
                 black_box((result.commits.len(), result.commit_data.len()))
             });
         });
@@ -301,7 +333,10 @@ fn bench_describe_many_tags(c: &mut Criterion) {
             use_commit_graph: false,
             ..Default::default()
         };
-        let commits = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts)
+        let commits = fx
+            .repo
+            .revwalk()
+            .rev_list(&[String::from("HEAD")], &[], &opts)
             .expect("rev-list")
             .commits;
         for (i, oid) in commits.iter().enumerate().step_by(50) {
@@ -362,8 +397,11 @@ fn bench_log_first_1000_gitgit_like(c: &mut Criterion) {
                         use_commit_graph: *with_graph,
                         ..Default::default()
                     };
-                    let result =
-                        rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts).expect("rev-list");
+                    let result = fx
+                        .repo
+                        .revwalk()
+                        .rev_list(&[String::from("HEAD")], &[], &opts)
+                        .expect("rev-list");
                     black_box(result.commits.len())
                 });
             },
@@ -389,7 +427,9 @@ fn bench_merge_base_deep(c: &mut Criterion) {
                 }
                 b.iter(|| {
                     black_box(
-                        merge_bases_first_vs_rest(&fx.repo, fx.head, &[mid])
+                        fx.repo
+                            .revwalk()
+                            .merge_bases(&[fx.head, mid], grit_lib::revwalk::MergeBaseMode::Best)
                             .expect("merge-base")
                             .len(),
                     )
@@ -441,7 +481,14 @@ fn bench_rev_parse(c: &mut Criterion) {
     let mut group = c.benchmark_group("rev_parse");
     for (name, spec) in specs {
         group.bench_with_input(BenchmarkId::from_parameter(name), &spec, |b, spec| {
-            b.iter(|| black_box(resolve_revision(&fx.repo, spec).expect("rev-parse")));
+            b.iter(|| {
+                black_box(
+                    fx.repo
+                        .revwalk()
+                        .resolve(spec, &grit_lib::revwalk::ResolveOptions::default())
+                        .expect("rev-parse"),
+                )
+            });
         });
     }
     group.finish();

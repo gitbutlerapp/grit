@@ -12,7 +12,7 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
 };
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::ResolveOptions;
 
 fn main() -> grit_lib::error::Result<()> {
     let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
@@ -23,7 +23,9 @@ fn main() -> grit_lib::error::Result<()> {
     let counting = Arc::new(CountingRefStore::new(memory));
     let repo = repo.with_ref_store(counting.clone());
 
-    let resolved = resolve_revision(&repo, "refs/heads/custom-demo")?;
+    let resolved = repo
+        .revwalk()
+        .resolve("refs/heads/custom-demo", &ResolveOptions::default())?;
     let listed = list_refs_for_repository(&repo, "refs/heads/")?;
 
     println!("resolved={resolved}");

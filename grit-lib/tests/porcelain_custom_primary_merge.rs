@@ -70,7 +70,10 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
 fn switch_to(repo: &Repository, branch: &str) {
     let oid = repo
         .revwalk()
-        .resolve(&format!("refs/heads/{branch}"))
+        .resolve(
+            &format!("refs/heads/{branch}"),
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
         .expect("branch tip");
     switch_repository(
         repo,

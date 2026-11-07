@@ -12,7 +12,8 @@ use grit_lib::refs::branch_tracking::{
 };
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::ResolveOptions;
+
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 use grit_lib::state::{
     operation_blocking_switch, resolve_head_for_repository, wt_status_get_state, HeadState,
@@ -634,7 +635,10 @@ fn resolve_filter_revs(
     let Some(rev) = rev else {
         return Ok(Vec::new());
     };
-    let oid = resolve_revision(repo, rev).map_err(map_branch_error)?;
+    let oid = repo
+        .revwalk()
+        .resolve(rev, &ResolveOptions::default())
+        .map_err(map_branch_error)?;
     Ok(vec![oid])
 }
 
@@ -729,8 +733,10 @@ fn create(
     opts: &BranchRunOptions,
 ) -> Result<BranchOutcome> {
     let start_point = if let Some(rev) = start {
-        let oid =
-            resolve_revision(repo, rev).map_err(|err| map_create_start_revision_error(rev, err))?;
+        let oid = repo
+            .revwalk()
+            .resolve(rev, &ResolveOptions::default())
+            .map_err(|err| map_create_start_revision_error(rev, err))?;
         Some(StartPoint {
             oid,
             label: rev.to_owned(),

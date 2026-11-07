@@ -6,9 +6,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::merge_base::{
-    walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit,
-};
+use grit_lib::revwalk::merge_base::ReachableWalkLimit;
 use std::path::Path;
 
 const FIXTURE_CLIENT: &str = "/tmp/grit-bench-network-cache/deep-history-prod.git-client";
@@ -23,13 +21,15 @@ fn push_fast_hide_window_is_incremental_not_full_history() {
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open client");
     let tip = resolve_ref(&git_dir, "refs/heads/main").expect("main");
     let base = ObjectId::from_hex(FETCH_BASE).expect("base hex");
-    let (_, commits) = walk_commits_reachable_excluding_ancestors_of(
-        &repo,
-        &[tip],
-        &[base],
-        ReachableWalkLimit::Unlimited,
-    )
-    .expect("walk");
+    let (_, commits) = repo
+        .revwalk()
+        .reachable_excluding(
+            &[tip],
+            &[base],
+            &grit_lib::revwalk::ReachableWalkOptions::default()
+                .with_limit(ReachableWalkLimit::Unlimited),
+        )
+        .expect("walk");
     assert!(
         commits.len() <= 128,
         "expected incremental push window, got {} commits",

@@ -8,6 +8,7 @@ use grit_lib::ident::Signature;
 use grit_lib::objects::{NewCommit, ObjectId};
 use grit_lib::porcelain::merge::{write_merge_tree, MergePredictionOptions};
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::ResolveOptions;
 use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
 
@@ -37,8 +38,10 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("missing repository path"))?;
     let repo = open_repo(&root)?;
 
-    let ours: ObjectId = repo.revwalk().resolve("ours")?;
-    let theirs: ObjectId = repo.revwalk().resolve("theirs")?;
+    let ours: ObjectId = repo.revwalk().resolve("ours", &ResolveOptions::default())?;
+    let theirs: ObjectId = repo
+        .revwalk()
+        .resolve("theirs", &ResolveOptions::default())?;
 
     // Merges over the first merge base and stores the result, like `git merge-tree --write-tree`.
     let merged = write_merge_tree(&repo, ours, theirs, &MergePredictionOptions::default())?;

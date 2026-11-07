@@ -6,7 +6,7 @@ use crate::support;
 use std::collections::HashSet;
 
 use grit_lib::objects::ObjectId;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use support::{
     assert_rev_list_commits_match_git, build_commit_dag, commit_file, expand_token_for_rev_list,
     git, git_rev_list, git_rev_list_object_set, grit_rev_list_object_set, open_grit_repo,
@@ -180,17 +180,18 @@ fn t6019_criss_cross_ancestry_path_empty_matches_git() {
     );
     let xcb = oids["Y"].to_hex();
     let xbc = oids["X"].to_hex();
-    let grit_empty = rev_list(
-        &grit,
-        &[xbc.clone()],
-        &[xcb.clone()],
-        &RevListOptions {
-            ancestry_path: true,
-            ..RevListOptions::default()
-        },
-    )
-    .expect("grit xcb..xbc")
-    .commits;
+    let grit_empty = grit
+        .revwalk()
+        .rev_list(
+            &[xbc.clone()],
+            &[xcb.clone()],
+            &RevListOptions {
+                ancestry_path: true,
+                ..RevListOptions::default()
+            },
+        )
+        .expect("grit xcb..xbc")
+        .commits;
     assert_eq!(grit_empty, git_empty);
 }
 
@@ -225,20 +226,21 @@ fn t6000_rev_list_unpacked_objects_matches_git() {
     assert_eq!(grit_expect, git_expect, "grit unpacked~1..unpacked objects");
 
     let grit_repo = open_grit_repo(wt);
-    let result = rev_list(
-        &grit_repo,
-        &[],
-        &[],
-        &RevListOptions {
-            all_refs: true,
-            objects: true,
-            no_object_names: true,
-            unpacked_only: true,
-            quiet: true,
-            ..RevListOptions::default()
-        },
-    )
-    .expect("grit --all --unpacked --objects");
+    let result = grit_repo
+        .revwalk()
+        .rev_list(
+            &[],
+            &[],
+            &RevListOptions {
+                all_refs: true,
+                objects: true,
+                no_object_names: true,
+                unpacked_only: true,
+                quiet: true,
+                ..RevListOptions::default()
+            },
+        )
+        .expect("grit --all --unpacked --objects");
     let mut grit_set: HashSet<ObjectId> = HashSet::new();
     grit_set.extend(result.commits);
     grit_set.extend(result.objects.iter().map(|(o, _)| *o));

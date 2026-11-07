@@ -6,7 +6,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, ObjectFilter, OrderingMode, RevListOptions};
+use grit_lib::revwalk::rev_list::{ObjectFilter, OrderingMode, RevListOptions};
 use grit_test_support::{HashAlgo, RepoFixture};
 
 fn git_ok(repo: &RepoFixture, args: &[&str]) {
@@ -80,7 +80,7 @@ fn write_commit_graph(repo: &RepoFixture) {
 }
 
 fn grit_count(repo: &Repository, opts: RevListOptions) -> usize {
-    let result = rev_list(repo, &[], &[], &opts).expect("rev-list");
+    let result = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
     if opts.count && opts.objects {
         result.count_with_objects_total()
     } else {
@@ -89,7 +89,7 @@ fn grit_count(repo: &Repository, opts: RevListOptions) -> usize {
 }
 
 fn grit_object_set(repo: &Repository, opts: RevListOptions) -> HashSet<ObjectId> {
-    let result = rev_list(repo, &[], &[], &opts).expect("rev-list");
+    let result = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
     let mut set = HashSet::new();
     set.extend(result.commits);
     set.extend(result.objects.iter().map(|(o, _)| *o));
@@ -110,7 +110,7 @@ fn count_all_matches_git() {
         use_commit_graph: false,
         ..Default::default()
     };
-    let listed = rev_list(&repo, &[], &[], &opts).expect("rev-list");
+    let listed = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
     assert!(
         listed.bitmap_object_format,
         "pure count-only --all should use pack bitmaps"
@@ -135,7 +135,7 @@ fn count_objects_matches_git_use_bitmap_index() {
         ..Default::default()
     };
     assert_eq!(grit_count(&repo, opts.clone()), git_n);
-    let listed = rev_list(&repo, &[], &[], &opts).expect("rev-list");
+    let listed = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
     assert!(listed.bitmap_object_format);
 }
 
@@ -154,7 +154,7 @@ fn count_objects_auto_bitmap_without_flag() {
         ..Default::default()
     };
     assert_eq!(grit_count(&repo, opts.clone()), git_n);
-    let listed = rev_list(&repo, &[], &[], &opts).expect("rev-list");
+    let listed = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
     assert!(listed.bitmap_object_format);
 }
 
@@ -228,7 +228,7 @@ fn incompatible_options_fall_back() {
     ];
 
     for opts in cases {
-        let result = rev_list(&repo, &[], &[], &opts).expect("rev-list");
+        let result = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
         assert!(
             !result.bitmap_object_format,
             "expected fallback for incompatible rev-list options"
@@ -271,18 +271,19 @@ fn objects_max_count_one_use_bitmap_index_matches_git_and_skips_bitmap() {
         &["--objects", "--max-count=1", "--use-bitmap-index", "HEAD"],
     );
     let git_n = git_lines.len();
-    let unlimited = rev_list(
-        &repo,
-        &["HEAD".into()],
-        &[],
-        &RevListOptions {
-            objects: true,
-            use_bitmap_index: true,
-            use_commit_graph: true,
-            ..Default::default()
-        },
-    )
-    .expect("rev-list unlimited");
+    let unlimited = repo
+        .revwalk()
+        .rev_list(
+            &["HEAD".into()],
+            &[],
+            &RevListOptions {
+                objects: true,
+                use_bitmap_index: true,
+                use_commit_graph: true,
+                ..Default::default()
+            },
+        )
+        .expect("rev-list unlimited");
     assert!(
         unlimited.bitmap_object_format,
         "fixture should exercise bitmap for unlimited object walk"
@@ -300,7 +301,10 @@ fn objects_max_count_one_use_bitmap_index_matches_git_and_skips_bitmap() {
         use_commit_graph: true,
         ..Default::default()
     };
-    let result = rev_list(&repo, &["HEAD".into()], &[], &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&["HEAD".into()], &[], &opts)
+        .expect("rev-list");
     assert!(
         !result.bitmap_object_format,
         "limited --objects walk must not use pack bitmap acceleration"
@@ -397,7 +401,10 @@ fn grit_rev_list_object_set(
         use_commit_graph: true,
         ..Default::default()
     };
-    let result = rev_list(repo, &pos, &neg, &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&pos, &neg, &opts)
+        .expect("rev-list");
     let mut set = HashSet::new();
     set.extend(result.commits);
     set.extend(result.objects.iter().map(|(o, _)| *o));
@@ -566,7 +573,10 @@ fn grit_rev_list_object_set_with_filter(
         use_commit_graph: true,
         ..Default::default()
     };
-    let result = rev_list(repo, &pos, &neg, &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&pos, &neg, &opts)
+        .expect("rev-list");
     let mut set = HashSet::new();
     set.extend(result.commits);
     set.extend(result.objects.iter().map(|(o, _)| *o));

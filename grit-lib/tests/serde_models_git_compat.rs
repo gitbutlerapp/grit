@@ -3,7 +3,7 @@
 #![cfg(feature = "serde-models")]
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::log::{load_commits_with_decorations, DecorationMap};
+use grit_lib::porcelain::log::DecorationMap;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -79,8 +79,10 @@ fn loaded_commit_signatures_match_git_log_dates() {
     let head = git(root, &["rev-parse", "HEAD"]);
     let oid = grit_lib::objects::ObjectId::from_hex(head.trim()).expect("oid");
     let repo = open(root);
-    let loaded =
-        load_commits_with_decorations(&repo, &[oid], &DecorationMap::default()).expect("load");
+    let loaded = repo
+        .revwalk()
+        .load_commits(&[oid], &DecorationMap::default(), &mut ())
+        .expect("load");
     let json = serde_json::to_value(&loaded[0]).expect("serialize commit");
 
     let git_dates = git(root, &["log", "-1", "--format=%aI%n%cI"]);

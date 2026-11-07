@@ -9,7 +9,8 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     apply_rewrite, reword, ApplyOptions, EmptyPolicy, RefScope, RewriteOptions,
 };
-use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
+use grit_lib::revwalk::{Peel, ResolveOptions};
+
 use std::path::{Path, PathBuf};
 
 fn open_repo(root: &Path) -> Result<Repository> {
@@ -34,7 +35,9 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("missing new message"))?;
 
     let repo = open_repo(&root)?;
-    let commit: ObjectId = resolve_revision_as_commit(&repo, &spec)?;
+    let commit: ObjectId = repo
+        .revwalk()
+        .resolve(&spec, &ResolveOptions::default().with_peel(Peel::Commit))?;
 
     let plan = reword(
         &repo,

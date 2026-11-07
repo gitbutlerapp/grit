@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 
 fn git_git_bare() -> std::path::PathBuf {
     std::env::var("GRIT_GIT_GIT_BARE")
@@ -26,7 +26,9 @@ fn main() -> grit_lib::error::Result<()> {
     let mut object_count = 0usize;
     for _ in 0..7 {
         let start = Instant::now();
-        let result = rev_list(&repo, &[String::from("v1.0.0")], &[], &opts)?;
+        let result = repo
+            .revwalk()
+            .rev_list(&[String::from("v1.0.0")], &[], &opts)?;
         object_count = result.objects.len();
         times.push(start.elapsed().as_secs_f64());
     }

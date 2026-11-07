@@ -6,7 +6,6 @@
 use grit_lib::objects::{serialize_tag, ObjectId, ObjectKind, TagData};
 use grit_lib::refs::store::RefName;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::merge_base::is_ancestor;
 use grit_lib::revwalk::DescribeOptions;
 
 mod support;
@@ -129,7 +128,11 @@ fn describe_seed6593_skewed_merge_matches_git_rev_list_without_commit_graph() {
                 .peel_to_commit(peel)
                 .expect("peel")
                 .expect("commit");
-            if !is_ancestor(&repo, peel_commit, head).expect("ancestor") {
+            if !repo
+                .revwalk()
+                .is_ancestor(peel_commit, head)
+                .expect("ancestor")
+            {
                 continue;
             }
             has_ancestor_tag = true;

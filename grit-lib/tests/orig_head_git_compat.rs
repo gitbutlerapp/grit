@@ -24,7 +24,6 @@ use grit_lib::revwalk::history::{
     ExecSpec, HistoryError, PreRebase, RebaseOntoOptions, RebaseOutcome, RebaseRequest,
     RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
-use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::state::{read_orig_head_for_repository, write_orig_head};
 use grit_test_support::{git, git_cmd};
 use tempfile::TempDir;
@@ -130,7 +129,10 @@ fn assert_orig_head_undoes(dir: &Path, before: ObjectId) {
         "ORIG_HEAD has no reflog"
     );
     git(dir, &["fsck", "--strict"]);
-    let target = resolve_revision(&repo, "ORIG_HEAD").expect("ORIG_HEAD resolves");
+    let target = repo
+        .revwalk()
+        .resolve("ORIG_HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("ORIG_HEAD resolves");
     assert_eq!(target, before);
     reset(&repo, target, ResetMode::Hard).expect("reset --hard ORIG_HEAD");
     assert_eq!(rev(dir, "HEAD"), before);
@@ -735,7 +737,12 @@ fn reftable_reset_stores_orig_head_in_the_ref_store() {
         read_orig_head_for_repository(&repo).expect("read"),
         Some(second)
     );
-    assert_eq!(resolve_revision(&repo, "ORIG_HEAD").expect("rev"), second);
+    assert_eq!(
+        repo.revwalk()
+            .resolve("ORIG_HEAD", &grit_lib::revwalk::ResolveOptions::default())
+            .expect("rev"),
+        second
+    );
     if support::git_supports_reftable() {
         assert_eq!(git_orig_head(tmp.path()), Some(second));
         git(tmp.path(), &["fsck", "--strict"]);

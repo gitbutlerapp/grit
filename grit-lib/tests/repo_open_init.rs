@@ -12,7 +12,6 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_parse::resolve_revision;
 use tempfile::TempDir;
 
 fn git_fsck_ok(git_dir: &std::path::Path) {
@@ -190,7 +189,13 @@ fn open_discover_and_init_roundtrip_fsck() {
         "builder ref_store injection should list injected ref"
     );
     assert_eq!(
-        resolve_revision(&built, "refs/heads/builder-injected").expect("rev-parse"),
+        built
+            .revwalk()
+            .resolve(
+                "refs/heads/builder-injected",
+                &grit_lib::revwalk::ResolveOptions::default()
+            )
+            .expect("rev-parse"),
         oid
     );
 }

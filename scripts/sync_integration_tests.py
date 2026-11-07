@@ -61,6 +61,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "commit_show_untracked_no_2523"),
     ("grit-cli", "clone_url_redaction"),
     ("grit-lib", "refname_policy"),
+    ("grit-lib", "revwalk_resolve_options_git_compat"),
 }
 MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {
     ("grit-cli", "rebase_exec_interrupt"): "unix",

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::commit_graph::BloomWalkStats;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 
 fn git_cmd(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -47,7 +47,10 @@ fn rev_list_uses_bloom_filters_with_pathspec() {
         bloom_stats: Some(stats.clone()),
         ..Default::default()
     };
-    let out = rev_list(&repo, &["HEAD".to_owned()], &[], &opts).expect("rev-list");
+    let out = repo
+        .revwalk()
+        .rev_list(&["HEAD".to_owned()], &[], &opts)
+        .expect("rev-list");
     assert!(!out.commits.is_empty());
     let guard = stats.lock().unwrap_or_else(|e| e.into_inner());
     assert!(guard.maybe + guard.definitely_not + guard.filter_not_present > 0 || guard.maybe == 0);

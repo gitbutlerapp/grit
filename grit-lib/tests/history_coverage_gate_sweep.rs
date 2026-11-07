@@ -13,11 +13,7 @@ use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{merge_bases, rev_list, OrderingMode, RevListOptions};
-use grit_lib::revwalk::rev_parse::{
-    resolve_revision, resolve_revision_as_commit, resolve_revision_for_range_end,
-    resolve_revision_for_verify, try_parse_double_dot_log_range,
-};
+use grit_lib::revwalk::rev_list::{OrderingMode, RevListOptions};
 use std::fs;
 use tempfile::tempdir;
 
@@ -107,16 +103,36 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
             format!("HEAD~{n}^{{commit}}"),
             format!(":/c{n}"),
         ] {
-            let _ = resolve_revision_for_verify(&repo, &spec)?;
-            let _ = resolve_revision(&repo, &spec)?;
-            let _ = resolve_revision_for_range_end(&repo, &spec)?;
+            let _ = repo.revwalk().resolve(
+                &spec,
+                &grit_lib::revwalk::ResolveOptions::default()
+                    .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                    .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+            )?;
+            let _ = repo
+                .revwalk()
+                .resolve(&spec, &grit_lib::revwalk::ResolveOptions::default())?;
+            let _ = repo.revwalk().resolve(
+                &spec,
+                &grit_lib::revwalk::ResolveOptions::default()
+                    .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+            )?;
         }
         for spec in [format!("HEAD~{n}"), format!("main~{n}"), format!(":/c{n}")] {
-            let _ = resolve_revision_as_commit(&repo, &spec)?;
+            let _ = repo.revwalk().resolve(
+                &spec,
+                &grit_lib::revwalk::ResolveOptions::default()
+                    .with_peel(grit_lib::revwalk::Peel::Commit),
+            )?;
         }
     }
-    let _ = try_parse_double_dot_log_range(&repo, "main~10..main")?;
-    let _ = merge_bases(&repo, tip, tip, false)?;
+    let _ = repo.revwalk().resolve(
+        "main~10..main",
+        &grit_lib::revwalk::ResolveOptions::default().with_peel(grit_lib::revwalk::Peel::Commit),
+    )?;
+    let _ = repo
+        .revwalk()
+        .merge_bases(&[tip, tip], grit_lib::revwalk::MergeBaseMode::All)?;
 
     let orderings = [
         OrderingMode::Default,
@@ -135,7 +151,9 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
             max_count: Some(20),
             ..RevListOptions::default()
         };
-        let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let out = repo
+            .revwalk()
+            .rev_list(&[String::from("main")], &[], &opts)?;
         assert!(!out.commits.is_empty());
     }
 

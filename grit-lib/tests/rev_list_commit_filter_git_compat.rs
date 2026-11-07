@@ -9,7 +9,7 @@ use std::sync::Arc;
 use grit_lib::config::mailmap::load_mailmap_table;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, MissingAction, RevListOptions};
+use grit_lib::revwalk::rev_list::{MissingAction, RevListOptions};
 use grit_lib::revwalk::{CommitFilter, CommitFilterBuilder};
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use support::{
@@ -259,7 +259,10 @@ fn assert_rev_list_filter_matches_git(worktree: &Path, repo: &Repository, args: 
             git_commit_graph_write(worktree);
         }
         opts.use_commit_graph = use_graph;
-        let result = rev_list(repo, &positive, &negative, &opts).expect("rev_list");
+        let result = repo
+            .revwalk()
+            .rev_list(&positive, &negative, &opts)
+            .expect("rev_list");
         if parsed.count {
             let git_n = git_rev_list_count(worktree, args);
             let grit_n = result.commit_count();
@@ -567,18 +570,19 @@ fn mailmap_author_matches_git() {
         if use_graph {
             git_commit_graph_write(wt);
         }
-        let grit_oids = rev_list(
-            &repo,
-            &[String::from("main")],
-            &[],
-            &RevListOptions {
-                commit_filter: Some(filter.clone()),
-                use_commit_graph: use_graph,
-                ..RevListOptions::default()
-            },
-        )
-        .expect("rev_list")
-        .commits;
+        let grit_oids = repo
+            .revwalk()
+            .rev_list(
+                &[String::from("main")],
+                &[],
+                &RevListOptions {
+                    commit_filter: Some(filter.clone()),
+                    use_commit_graph: use_graph,
+                    ..RevListOptions::default()
+                },
+            )
+            .expect("rev_list")
+            .commits;
         assert_eq!(grit_oids, git_oids, "mailmap (graph={use_graph})");
         let count = repo
             .revwalk()
@@ -659,9 +663,6 @@ fn count_with_filter_matches_git() {
 #[test]
 fn bounded_filters_retain_only_selected_rows_across_git_storage_formats() {
     use grit_lib::objects::{parse_commit, ObjectKind};
-    use grit_lib::porcelain::log::{
-        load_commits_with_decorations, load_commits_with_decorations_reusing,
-    };
 
     let hist = HistoryRepo::init();
     let wt = hist.worktree();
@@ -735,21 +736,22 @@ fn bounded_filters_retain_only_selected_rows_across_git_storage_formats() {
                     }
                     let expected = git_rev_list(wt, &args);
                     for retain in [false, true] {
-                        let mut result = rev_list(
-                            &repo,
-                            &["main".to_owned()],
-                            &[base.to_hex()],
-                            &RevListOptions {
-                                max_count: Some(2),
-                                skip,
-                                reverse,
-                                commit_filter: Some(Arc::clone(&filter)),
-                                retain_commit_data: retain,
-                                use_commit_graph: storage == "commit-graph",
-                                ..Default::default()
-                            },
-                        )
-                        .expect("bounded walk");
+                        let mut result = repo
+                            .revwalk()
+                            .rev_list(
+                                &["main".to_owned()],
+                                &[base.to_hex()],
+                                &RevListOptions {
+                                    max_count: Some(2),
+                                    skip,
+                                    reverse,
+                                    commit_filter: Some(Arc::clone(&filter)),
+                                    retain_commit_data: retain,
+                                    use_commit_graph: storage == "commit-graph",
+                                    ..Default::default()
+                                },
+                            )
+                            .expect("bounded walk");
                         assert_eq!(
                             result.commits, expected,
                             "{storage}, skip={skip}, reverse={reverse}"
@@ -767,16 +769,14 @@ fn bounded_filters_retain_only_selected_rows_across_git_storage_formats() {
                             );
                         }
                         let decorations = Default::default();
-                        let loaded = load_commits_with_decorations_reusing(
-                            &repo,
-                            &result.commits,
-                            &decorations,
-                            &mut result.commit_data,
-                        )
-                        .expect("reused rows");
+                        let loaded = repo
+                            .revwalk()
+                            .load_commits(&result.commits, &decorations, &mut result.commit_data)
+                            .expect("reused rows");
                         assert_eq!(
                             loaded,
-                            load_commits_with_decorations(&repo, &expected, &decorations)
+                            repo.revwalk()
+                                .load_commits(&expected, &decorations, &mut ())
                                 .expect("rows")
                         );
                     }
@@ -1008,7 +1008,10 @@ fn bounded_filter_since_until_matches_git() {
         use_commit_graph: false,
         ..RevListOptions::default()
     };
-    let result = rev_list(&repo, &positive, &negative, &opts).expect("rev_list without max_count");
+    let result = repo
+        .revwalk()
+        .rev_list(&positive, &negative, &opts)
+        .expect("rev_list without max_count");
     assert_eq!(result.commits, git_oids);
 }
 
@@ -1111,7 +1114,10 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
         use_commit_graph: false,
         ..RevListOptions::default()
     };
-    let result = rev_list(&repo, &positive, &negative, &opts).expect("rev_list");
+    let result = repo
+        .revwalk()
+        .rev_list(&positive, &negative, &opts)
+        .expect("rev_list");
     assert_eq!(result.commits, git_oids);
 
     let parsed_count = parse_rev_list_cli(&[
@@ -1143,7 +1149,9 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
             "main",
         ],
     );
-    let grit_n = rev_list(&repo, &positive, &negative, &opts)
+    let grit_n = repo
+        .revwalk()
+        .rev_list(&positive, &negative, &opts)
         .expect("count rev_list")
         .commit_count();
     assert_eq!(grit_n, git_n);
@@ -1160,7 +1168,9 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
         ..RevListOptions::default()
     };
     assert!(
-        rev_list(&repo, &["main".to_owned()], &[], &opts).is_err(),
+        repo.revwalk()
+            .rev_list(&["main".to_owned()], &[], &opts)
+            .is_err(),
         "unbounded walk must read the missing grandparent"
     );
     let list_filter = CommitFilterBuilder::new()
@@ -1175,7 +1185,10 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
         use_commit_graph: false,
         ..RevListOptions::default()
     };
-    let result = rev_list(&repo, &positive, &negative, &opts).expect("since-bounded without -n");
+    let result = repo
+        .revwalk()
+        .rev_list(&positive, &negative, &opts)
+        .expect("since-bounded without -n");
     assert_eq!(result.commits, git_oids);
     let count_filter = CommitFilterBuilder::new()
         .author("Alice")
@@ -1189,7 +1202,9 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
         ..RevListOptions::default()
     };
     assert!(
-        rev_list(&repo, &["main".to_owned()], &[], &opts).is_err(),
+        repo.revwalk()
+            .rev_list(&["main".to_owned()], &[], &opts)
+            .is_err(),
         "count without --since must read the missing grandparent"
     );
 }
@@ -1425,7 +1440,10 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
         use_commit_graph: false,
         ..RevListOptions::default()
     };
-    let result = rev_list(&repo, &positive, &negative, &opts).expect("since path filter walk");
+    let result = repo
+        .revwalk()
+        .rev_list(&positive, &negative, &opts)
+        .expect("since path filter walk");
     let git_oids = git_rev_list(
         wt,
         &[
@@ -1463,7 +1481,9 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
         ..RevListOptions::default()
     };
     assert!(
-        rev_list(&repo, &["main".to_owned()], &[], &opts).is_err(),
+        repo.revwalk()
+            .rev_list(&["main".to_owned()], &[], &opts)
+            .is_err(),
         "unbounded path filter walk must read the missing grandparent"
     );
 }

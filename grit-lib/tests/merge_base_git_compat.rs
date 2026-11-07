@@ -10,10 +10,6 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::merge_base::{
-    fork_point, independent_commits, is_ancestor, merge_bases_all, merge_bases_first_vs_rest,
-    merge_bases_octopus, resolve_fork_point_reflog_ref, try_reflog_fork_point,
-};
 
 use support::{
     build_commit_dag, commit_labeled_with_dates, git_commit_graph_write, git_merge_base,
@@ -64,29 +60,41 @@ fn t6010_merge_base_variants_match_git() {
 
     let git_single = git_merge_base(wt, &["G", "H"]);
     assert_eq!(git_single, vec![b]);
-    let grit_single = merge_bases_first_vs_rest(&repo, g, &[h]).expect("merge-base");
+    let grit_single = repo
+        .revwalk()
+        .merge_bases(&[g, h], grit_lib::revwalk::MergeBaseMode::Best)
+        .expect("merge-base");
     assert_eq!(grit_single, git_single);
 
     let git_all = git_merge_base(wt, &["--all", "G", "H"]);
-    let grit_all = merge_bases_all(&repo, &[g, h]).expect("all");
+    let grit_all = repo
+        .revwalk()
+        .merge_bases(&[g, h], grit_lib::revwalk::MergeBaseMode::All)
+        .expect("all");
     assert_eq!(grit_all, git_all);
 
     let git_oct = git_merge_base(wt, &["--octopus", "G", "H"]);
-    let grit_oct = merge_bases_octopus(&repo, &[g, h]).expect("octopus");
+    let grit_oct = repo
+        .revwalk()
+        .merge_bases(&[g, h], grit_lib::revwalk::MergeBaseMode::Octopus)
+        .expect("octopus");
     assert_eq!(grit_oct, git_oct);
 
     assert_eq!(
         git_merge_base_is_ancestor(wt, "B", "H"),
-        is_ancestor(&repo, b, h).expect("is-ancestor")
+        repo.revwalk().is_ancestor(b, h).expect("is-ancestor")
     );
 
     let git_indep = git_merge_base(wt, &["--independent", "H"]);
-    let grit_indep = independent_commits(&repo, &[h]).expect("independent");
+    let grit_indep = repo.revwalk().independent(&[h]).expect("independent");
     assert_eq!(grit_indep, git_indep);
 
     let git_indep3 = git_merge_base(wt, &["--independent", "A", "H", "G"]);
     let a = git_rev_parse_verify(wt, "A").expect("A");
-    let grit_indep3 = independent_commits(&repo, &[a, h, g]).expect("independent3");
+    let grit_indep3 = repo
+        .revwalk()
+        .independent(&[a, h, g])
+        .expect("independent3");
     assert_eq!(grit_indep3, git_indep3);
 }
 
@@ -97,10 +105,16 @@ fn merge_base_identical_with_and_without_commit_graph() {
     let (g, h, _) = setup_t6010(wt);
     let repo = open_grit(wt);
 
-    let without = merge_bases_first_vs_rest(&repo, g, &[h]).expect("without graph");
+    let without = repo
+        .revwalk()
+        .merge_bases(&[g, h], grit_lib::revwalk::MergeBaseMode::Best)
+        .expect("without graph");
 
     git(wt, &["commit-graph", "write", "--reachable"]);
-    let with = merge_bases_first_vs_rest(&repo, g, &[h]).expect("with graph");
+    let with = repo
+        .revwalk()
+        .merge_bases(&[g, h], grit_lib::revwalk::MergeBaseMode::Best)
+        .expect("with graph");
 
     assert_eq!(without, with);
     assert_eq!(without, git_merge_base(wt, &["G", "H"]));
@@ -109,7 +123,10 @@ fn merge_base_identical_with_and_without_commit_graph() {
     let _ = fs::remove_file(info_dir.join("commit-graph"));
     let _ = fs::remove_dir_all(info_dir.join("commit-graphs"));
     let repo_after_delete = open_grit(wt);
-    let after_stale = merge_bases_first_vs_rest(&repo_after_delete, g, &[h]).expect("stale graph");
+    let after_stale = repo_after_delete
+        .revwalk()
+        .merge_bases(&[g, h], grit_lib::revwalk::MergeBaseMode::Best)
+        .expect("stale graph");
     assert_eq!(after_stale, without);
     assert_eq!(after_stale, git_merge_base(wt, &["G", "H"]));
 }
@@ -143,7 +160,10 @@ fn merge_base_disconnected_histories_with_commit_graph_matches_git() {
     assert!(git_out.stdout.is_empty());
 
     let repo = open_grit(wt);
-    let grit_bases = merge_bases_first_vs_rest(&repo, tip_a, &[tip_b]).expect("merge-base");
+    let grit_bases = repo
+        .revwalk()
+        .merge_bases(&[tip_a, tip_b], grit_lib::revwalk::MergeBaseMode::Best)
+        .expect("merge-base");
     assert!(grit_bases.is_empty());
 }
 
@@ -225,7 +245,10 @@ fn merge_base_default_skewed_dates_without_commit_graph_matches_git() {
 
     let repo = open_grit(wt);
     let git_one = git_merge_base(wt, &["G", "H"]);
-    let grit_one = merge_bases_first_vs_rest(&repo, g, &[h]).expect("default merge-base");
+    let grit_one = repo
+        .revwalk()
+        .merge_bases(&[g, h], grit_lib::revwalk::MergeBaseMode::Best)
+        .expect("default merge-base");
     assert_eq!(
         grit_one, git_one,
         "merge_bases_first_vs_rest vs git merge-base"
@@ -281,13 +304,19 @@ fn merge_base_all_skewed_dates_without_commit_graph_matches_git() {
     assert!(!graph_path.exists(), "fixture must not use commit-graph");
 
     let git_all = git_merge_base(wt, &["--all", "G", "H"]);
-    let grit_all = merge_bases_all(&repo, &[g, h]).expect("all");
+    let grit_all = repo
+        .revwalk()
+        .merge_bases(&[g, h], grit_lib::revwalk::MergeBaseMode::All)
+        .expect("all");
     assert_eq!(grit_all, git_all);
     for oid in &grit_all {
         for other in &grit_all {
             if oid != other {
                 assert!(
-                    !is_ancestor(&repo, *other, *oid).expect("ancestor check"),
+                    !repo
+                        .revwalk()
+                        .is_ancestor(*other, *oid)
+                        .expect("ancestor check"),
                     "merge-base --all must be mutually minimal: {other} should not reach {oid}"
                 );
             }
@@ -325,18 +354,27 @@ fn t6099_side_exhaustion_merge_base_matches_git() {
     let b = git_rev_parse_verify(wt, "B").expect("B");
 
     let git_all = git_merge_base(wt, &["--all", "A", "X"]);
-    let grit_all = merge_bases_all(&repo, &[a, x]).expect("all");
+    let grit_all = repo
+        .revwalk()
+        .merge_bases(&[a, x], grit_lib::revwalk::MergeBaseMode::All)
+        .expect("all");
     assert_eq!(grit_all, git_all);
     assert_eq!(git_all, vec![b]);
 
     let git_one = git_merge_base(wt, &["A", "X"]);
-    let grit_one = merge_bases_first_vs_rest(&repo, a, &[x]).expect("one");
+    let grit_one = repo
+        .revwalk()
+        .merge_bases(&[a, x], grit_lib::revwalk::MergeBaseMode::Best)
+        .expect("one");
     assert_eq!(grit_one, git_one);
 
     let graph_path = wt.join(".git/objects/info/commit-graph");
     let _ = fs::remove_file(&graph_path);
     let git_no_graph = git_merge_base(wt, &["--all", "A", "X"]);
-    let grit_no_graph = merge_bases_all(&repo, &[a, x]).expect("all no graph");
+    let grit_no_graph = repo
+        .revwalk()
+        .merge_bases(&[a, x], grit_lib::revwalk::MergeBaseMode::All)
+        .expect("all no graph");
     assert_eq!(grit_no_graph, git_no_graph);
 }
 
@@ -379,41 +417,38 @@ fn fork_point_reflog_matches_git_t6010_fixture() {
         let git_fp = git_merge_base(wt, &["--fork-point", "base", &derived_tip.to_hex()]);
         assert_eq!(git_fp, vec![expect[idx]]);
         let upstream = git_rev_parse_verify(wt, "base").expect("base");
-        let grit_fp = fork_point(&repo, "base", upstream, *derived_tip).expect("grit fork-point");
-        assert_eq!(grit_fp, expect[idx]);
+        let grit_fp = repo
+            .revwalk()
+            .fork_point("base", upstream, *derived_tip)
+            .expect("grit fork-point");
+        assert_eq!(grit_fp, Some(expect[idx]));
+        assert_eq!(
+            grit_fp,
+            git_fork_point_optional(wt, "base", Some(&derived_tip.to_hex())),
+            "fork_point must match git merge-base --fork-point on derived #{idx}"
+        );
     }
     git(wt, &["checkout", "derived"]);
     let git_default = git_merge_base(wt, &["--fork-point", "base"]);
     assert_eq!(git_default, vec![expect[2]]);
     let upstream = git_rev_parse_verify(wt, "base").expect("base");
     let head = git_rev_parse_verify(wt, "HEAD").expect("derived");
-    let grit_default = fork_point(&repo, "base", upstream, head).expect("grit default");
-    assert_eq!(grit_default, expect[2]);
+    let grit_default = repo
+        .revwalk()
+        .fork_point("base", upstream, head)
+        .expect("grit default");
+    assert_eq!(grit_default, Some(expect[2]));
     assert_eq!(
-        resolve_fork_point_reflog_ref(&repo, "base"),
-        "refs/heads/base"
-    );
-    for (idx, derived_tip) in derived.iter().enumerate() {
-        let upstream = git_rev_parse_verify(wt, "base").expect("base");
-        let grit_fp = try_reflog_fork_point(&repo, "refs/heads/base", upstream, *derived_tip)
-            .expect("try_reflog_fork_point");
-        assert_eq!(
-            grit_fp,
-            Some(expect[idx]),
-            "try_reflog_fork_point vs git on derived #{idx}"
-        );
-        assert_eq!(
-            grit_fp,
-            git_fork_point_optional(wt, "base", Some(&derived_tip.to_hex())),
-            "try_reflog_fork_point must match git merge-base --fork-point"
-        );
-    }
-    let head = git_rev_parse_verify(wt, "HEAD").expect("derived");
-    let upstream = git_rev_parse_verify(wt, "base").expect("base");
-    assert_eq!(
-        try_reflog_fork_point(&repo, "refs/heads/base", upstream, head).expect("try"),
+        grit_default,
         git_fork_point_optional(wt, "base", None),
         "default HEAD fork point"
+    );
+    assert_eq!(
+        repo.revwalk()
+            .fork_point("refs/heads/base", upstream, head)
+            .expect("full ref name"),
+        grit_default,
+        "a full ref name reads the same reflog"
     );
 }
 
@@ -449,7 +484,7 @@ fn setup_two_base_fork_point_fixture(wt: &std::path::Path) -> (ObjectId, ObjectI
 }
 
 #[test]
-fn try_reflog_fork_point_none_when_git_has_no_fork_point() {
+fn fork_point_none_when_git_has_no_fork_point() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();
     let (a, b, head) = setup_two_base_fork_point_fixture(wt);
@@ -467,9 +502,12 @@ fn try_reflog_fork_point_none_when_git_has_no_fork_point() {
         git_fp.is_none(),
         "system git must not resolve a fork point with two merge bases"
     );
-    let grit_fp = try_reflog_fork_point(&repo, "refs/heads/upstream", upstream, head).expect("try");
+    let grit_fp = repo
+        .revwalk()
+        .fork_point("upstream", upstream, head)
+        .expect("fork point");
     assert_eq!(
         grit_fp, git_fp,
-        "try_reflog_fork_point must not truncate multiple merge bases to one"
+        "fork_point must not truncate multiple merge bases to one"
     );
 }

@@ -5,11 +5,8 @@ use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{rev_list, ObjectFilter, RevListOptions};
+use grit_lib::revwalk::rev_list::{ObjectFilter, RevListOptions};
 use grit_lib::revwalk::rev_list_error::RevListError;
-use grit_lib::revwalk::rev_parse::{
-    resolve_push_full_ref_for_branch, resolve_revision, resolve_upstream_symbolic_name,
-};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 use std::fs;
 use std::path::Path;
@@ -53,7 +50,10 @@ fn upstream_missing_reports_no_upstream_variant() {
         repo.git_dir(),
         "[core]\n\trepositoryformatversion = 0\n[branch \"main\"]\n",
     );
-    let err = resolve_upstream_symbolic_name(&repo, "main@{u}").unwrap_err();
+    let err = repo
+        .revwalk()
+        .upstream_symbolic_name("main@{u}")
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::RevParse(RevParseError::NoUpstream { .. })
@@ -77,7 +77,10 @@ fn push_default_nothing_reports_variant() {
         b"0000000000000000000000000000000000000001\n",
     )
     .expect("tracking ref");
-    let err = resolve_push_full_ref_for_branch(&repo, "main").unwrap_err();
+    let err = repo
+        .revwalk()
+        .upstream_symbolic_name("main@{push}")
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::RevParse(RevParseError::PushDefaultNothing)
@@ -88,7 +91,13 @@ fn push_default_nothing_reports_variant() {
 fn ambiguous_spec_reports_ambiguous_argument() {
     let dir = tempdir().expect("tempdir");
     let (repo, _) = open_bare_with_main(dir.path()).expect("repo");
-    let err = resolve_revision(&repo, "not-a-ref-or-path").unwrap_err();
+    let err = repo
+        .revwalk()
+        .resolve(
+            "not-a-ref-or-path",
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::RevParse(RevParseError::AmbiguousArgument { .. })
@@ -101,7 +110,10 @@ fn sparse_blob_unreadable_for_missing_spec() {
     let (repo, tip) = open_bare_with_main(dir.path()).expect("repo");
     let mut opts = RevListOptions::default();
     opts.filter = Some(ObjectFilter::SparseOid("missing:path".into()));
-    let err = rev_list(&repo, &[tip.to_hex()], &[], &opts).unwrap_err();
+    let err = repo
+        .revwalk()
+        .rev_list(&[tip.to_hex()], &[], &opts)
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::RevList(RevListError::SparseBlobUnreadable { .. })
@@ -114,7 +126,10 @@ fn sparse_filter_unparsable_when_commit_not_blob() {
     let (repo, tip) = open_bare_with_main(dir.path()).expect("repo");
     let mut opts = RevListOptions::default();
     opts.filter = Some(ObjectFilter::SparseOid(tip.to_hex()));
-    let err = rev_list(&repo, &[tip.to_hex()], &[], &opts).unwrap_err();
+    let err = repo
+        .revwalk()
+        .rev_list(&[tip.to_hex()], &[], &opts)
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::RevList(RevListError::SparseFilterUnparsable { .. })
@@ -131,7 +146,10 @@ fn sparse_filter_unparsable_on_invalid_utf8_blob() {
         .expect("blob");
     let mut opts = RevListOptions::default();
     opts.filter = Some(ObjectFilter::SparseOid(blob.to_hex()));
-    let err = rev_list(&repo, &[tip.to_hex()], &[], &opts).unwrap_err();
+    let err = repo
+        .revwalk()
+        .rev_list(&[tip.to_hex()], &[], &opts)
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::RevList(RevListError::SparseFilterUnparsable { .. })
@@ -149,7 +167,10 @@ fn push_refspec_missing_when_branch_not_mapped() {
          \tpush = refs/heads/other:refs/heads/other\n\
          [branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n",
     );
-    let err = resolve_push_full_ref_for_branch(&repo, "main").unwrap_err();
+    let err = repo
+        .revwalk()
+        .upstream_symbolic_name("main@{push}")
+        .unwrap_err();
     assert!(
         matches!(
             err,

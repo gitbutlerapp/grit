@@ -12,7 +12,7 @@ use grit_lib::objects::commit_graph::{
 use grit_lib::objects::commit_graph::{CommitGraphChain, CommitGraphLayer};
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use std::collections::HashMap;
 
 fn git_cmd(dir: &Path, args: &[&str]) -> String {
@@ -387,7 +387,8 @@ fn grit_rev_list(repo: &Repository, tip: &str, use_graph: bool) -> Vec<ObjectId>
         use_commit_graph: use_graph,
         ..Default::default()
     };
-    rev_list(repo, &[tip.to_owned()], &[], &opts)
+    repo.revwalk()
+        .rev_list(&[tip.to_owned()], &[], &opts)
         .expect("rev_list")
         .commits
 }

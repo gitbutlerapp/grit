@@ -36,7 +36,6 @@ use grit_lib::revwalk::history::{
     apply_rewrite, reword, verify_rebase_with_exec, ApplyOptions, EmptyPolicy, ExecSpec, RefScope,
     RewriteOptions,
 };
-use grit_lib::revwalk::rev_parse::resolve_revision;
 
 #[derive(Clone, Default)]
 struct DurabilityState {
@@ -413,7 +412,13 @@ fn create_tag_flushes_before_ref_update() {
     )
     .expect("tag");
 
-    let tag_oid = resolve_revision(&repo, "refs/tags/v1").expect("tag ref");
+    let tag_oid = repo
+        .revwalk()
+        .resolve(
+            "refs/tags/v1",
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect("tag ref");
     assert!(
         store.durable(&tag_oid),
         "tag object must be flushed before ref update"
@@ -439,7 +444,13 @@ fn notes_add_flushes_before_ref_update() {
         .add(&NotesRef::commits(), &tip, b"note\n", &opts, false)
         .expect("add note");
 
-    let notes_tip = resolve_revision(&repo, "refs/notes/commits").expect("notes ref");
+    let notes_tip = repo
+        .revwalk()
+        .resolve(
+            "refs/notes/commits",
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect("notes ref");
     assert!(store.durable(&notes_tip));
     assert_flush_before_first_ref_commit(&store.events());
 }
@@ -463,7 +474,13 @@ fn reword_apply_flushes_before_ref_update() {
     )
     .expect("apply");
 
-    let main = resolve_revision(&repo, "refs/heads/main").expect("main");
+    let main = repo
+        .revwalk()
+        .resolve(
+            "refs/heads/main",
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect("main");
     assert_ne!(main, base);
     assert!(
         store.durable(&main),
@@ -521,7 +538,10 @@ fn write_commit_object_flush_failure_rolls_back_staged() {
     store.set_fail_flush(true);
     let data = CommitData {
         tree: repo.odb().empty_tree_oid().expect("empty tree"),
-        parents: vec![resolve_revision(&repo, "HEAD").expect("head")],
+        parents: vec![repo
+            .revwalk()
+            .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+            .expect("head")],
         author: "T <t@example.com> 1700000000 +0000".into(),
         committer: "T <t@example.com> 1700000000 +0000".into(),
         author_raw: Vec::new(),

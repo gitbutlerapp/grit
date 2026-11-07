@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 
 fn git_git_bare() -> std::path::PathBuf {
     std::env::var("GRIT_GIT_GIT_BARE")
@@ -37,7 +37,10 @@ fn rev_list_objects_v1_s1_median_under_ceiling() {
     let mut times = Vec::with_capacity(7);
     for _ in 0..7 {
         let start = Instant::now();
-        let result = rev_list(&repo, &[String::from("v1.0.0")], &[], &opts).expect("rev-list");
+        let result = repo
+            .revwalk()
+            .rev_list(&[String::from("v1.0.0")], &[], &opts)
+            .expect("rev-list");
         assert!(
             !result.objects.is_empty(),
             "expected objects from v1.0.0 walk"

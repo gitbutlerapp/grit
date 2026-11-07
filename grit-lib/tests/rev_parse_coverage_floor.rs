@@ -9,10 +9,6 @@ use std::path::Path;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::repo::{Repository, RepositoryError};
-use grit_lib::revwalk::rev_parse::{
-    expand_at_minus_to_branch_name, resolve_at_minus_to_oid, resolve_push_full_ref_for_branch,
-    resolve_revision, resolve_revision_for_verify, resolve_upstream_symbolic_name,
-};
 
 use support::{commit_file, git, HistoryRepo};
 
@@ -41,15 +37,43 @@ fn unknown_abbreviated_object_id_errors() {
     let wt = hist.worktree();
     commit_file(wt, "f.txt", "x\n", "c");
     let repo = open_grit(wt);
-    let err = resolve_revision_for_verify(&repo, "0000000").expect_err("missing abbrev");
+    let err = repo
+        .revwalk()
+        .resolve(
+            "0000000",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        )
+        .expect_err("missing abbrev");
     assert!(matches!(err, Error::ObjectNotFound(_)));
-    let err = resolve_revision_for_verify(&repo, "00000000").expect_err("missing abbrev8");
+    let err = repo
+        .revwalk()
+        .resolve(
+            "00000000",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        )
+        .expect_err("missing abbrev8");
     assert!(matches!(err, Error::ObjectNotFound(_)));
-    let _ = expand_at_minus_to_branch_name(&repo, "@{-0}");
-    let _ = expand_at_minus_to_branch_name(&repo, "@{-99}");
-    let _ = resolve_at_minus_to_oid(&repo, "@{-99}");
-    let _ = resolve_revision(&repo, "HEAD");
-    let err = resolve_revision_for_verify(&repo, "1234567").expect_err("7hex");
+    let _ = repo.revwalk().symbolic_full_name("@{-0}");
+    let _ = repo.revwalk().symbolic_full_name("@{-99}");
+    let _ = repo
+        .revwalk()
+        .resolve("@{-99}", &grit_lib::revwalk::ResolveOptions::default());
+    let _ = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default());
+    let err = repo
+        .revwalk()
+        .resolve(
+            "1234567",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        )
+        .expect_err("7hex");
     assert!(matches!(err, Error::ObjectNotFound(_)));
 }
 
@@ -63,8 +87,15 @@ fn disambiguate_config_with_ambiguous_prefix() {
         "[core]\n\tdisambiguate = treeish\n",
     )
     .expect("config");
-    let _ = resolve_revision(&repo, &prefix);
-    let _ = resolve_revision_for_verify(&repo, &format!("{prefix}^{{commit}}"));
+    let _ = repo
+        .revwalk()
+        .resolve(&prefix, &grit_lib::revwalk::ResolveOptions::default());
+    let _ = repo.revwalk().resolve(
+        &format!("{prefix}^{commit}"),
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
 }
 
 #[test]
@@ -93,11 +124,26 @@ fn push_and_upstream_config_paths() {
     )
     .expect("append");
     let repo = open_grit(wt);
-    let _ = resolve_push_full_ref_for_branch(&repo, "main");
-    let _ = resolve_upstream_symbolic_name(&repo, "main@{push}");
-    let _ = resolve_upstream_symbolic_name(&repo, "main@{u}");
-    let _ = resolve_revision(&repo, "origin");
-    let _ = resolve_revision_for_verify(&repo, "remotes/origin/main");
-    let _ = resolve_revision_for_verify(&repo, "000000000");
-    let _ = resolve_revision(&repo, "main@{upstream}");
+    let _ = repo.revwalk().upstream_symbolic_name("main@{push}");
+    let _ = repo.revwalk().upstream_symbolic_name("main@{push}");
+    let _ = repo.revwalk().upstream_symbolic_name("main@{u}");
+    let _ = repo
+        .revwalk()
+        .resolve("origin", &grit_lib::revwalk::ResolveOptions::default());
+    let _ = repo.revwalk().resolve(
+        "remotes/origin/main",
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
+    let _ = repo.revwalk().resolve(
+        "000000000",
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
+    let _ = repo.revwalk().resolve(
+        "main@{upstream}",
+        &grit_lib::revwalk::ResolveOptions::default(),
+    );
 }

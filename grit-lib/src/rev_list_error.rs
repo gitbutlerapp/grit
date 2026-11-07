@@ -56,11 +56,12 @@ pub enum RevListError {
         spec: String,
     },
 
-    /// [`crate::rev_list::rev_list`] got a raw `A...B` spec; symmetric ranges must be expanded
-    /// first with [`crate::revwalk::parse_rev_walk_tokens`] (positive tips, merge-base
-    /// exclusions, and the `symmetric_left` / `symmetric_right` options).
+    /// [`RevWalk::rev_list`](crate::revwalk::RevWalk::rev_list) got a raw `A...B` spec;
+    /// symmetric ranges must be expanded first with
+    /// [`RevWalk::parse_tokens`](crate::revwalk::RevWalk::parse_tokens) (positive tips,
+    /// merge-base exclusions, and the `symmetric_left` / `symmetric_right` options).
     #[error(
-        "symmetric range '{spec}' must be expanded with parse_rev_walk_tokens before rev_list"
+        "symmetric range '{spec}' must be expanded with RevWalk::parse_tokens before rev_list"
     )]
     UnexpandedSymmetricRange {
         /// The unexpanded `A...B` spec.

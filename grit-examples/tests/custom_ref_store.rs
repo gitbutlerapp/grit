@@ -11,7 +11,7 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
 };
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::ResolveOptions;
 
 #[test]
 fn counting_ref_store_tracks_operations() -> grit_lib::error::Result<()> {
@@ -23,7 +23,11 @@ fn counting_ref_store_tracks_operations() -> grit_lib::error::Result<()> {
     let counting = Arc::new(CountingRefStore::new(memory));
     let repo = repo.with_ref_store(counting.clone());
 
-    assert_eq!(resolve_revision(&repo, "refs/heads/wrapped")?, oid);
+    assert_eq!(
+        repo.revwalk()
+            .resolve("refs/heads/wrapped", &ResolveOptions::default())?,
+        oid
+    );
     assert!(counting.read_raw_calls() >= 1);
 
     let listed = list_refs_for_repository(&repo, "refs/heads/")?;

@@ -10,10 +10,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::{
-    resolve_revision, resolve_revision_for_verify, resolve_upstream_symbolic_name,
-    split_double_dot_range, split_triple_dot_range,
-};
+use grit_lib::revwalk::rev_parse::{split_double_dot_range, split_triple_dot_range};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 
 use support::{
@@ -155,7 +152,15 @@ fn t1503_verify_rejects_missing_ref() {
     let wt = hist.worktree();
     let repo = open_grit(wt);
     assert!(git_rev_parse_verify(wt, "no-such-ref").is_none());
-    assert!(resolve_revision_for_verify(&repo, "no-such-ref").is_err());
+    assert!(repo
+        .revwalk()
+        .resolve(
+            "no-such-ref",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd)
+        )
+        .is_err());
 }
 
 #[test]
@@ -167,7 +172,15 @@ fn t1505_rev_parse_last_at_minus_n_matches_git() {
         oracle_one(&repo, wt, spec, ResolveMode::Verify).unwrap_or_else(|e| panic!("{spec}: {e}"));
     }
     assert!(git_rev_parse_verify(wt, "@{-3}").is_none());
-    assert!(resolve_revision_for_verify(&repo, "@{-3}").is_err());
+    assert!(repo
+        .revwalk()
+        .resolve(
+            "@{-3}",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd)
+        )
+        .is_err());
 }
 
 #[test]
@@ -188,13 +201,21 @@ fn t1506_ambiguous_path_vs_rev_typed_errors() {
             git_rev_parse_verify(wt, spec).is_none(),
             "git --verify should reject ambiguous path {spec}"
         );
-        match resolve_revision(&repo, spec) {
+        match repo
+            .revwalk()
+            .resolve(spec, &grit_lib::revwalk::ResolveOptions::default())
+        {
             Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {}
             other => panic!("expected AmbiguousArgument for {spec}, got {other:?}"),
         }
     }
     assert!(git_rev_parse_verify(wt, "missing:path").is_none());
-    match resolve_revision_for_verify(&repo, "missing:path") {
+    match repo.revwalk().resolve(
+        "missing:path",
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    ) {
         Err(Error::RevParse(
             RevParseError::PathNotInRevision { .. } | RevParseError::InvalidObjectName { .. },
         )) => {}
@@ -217,7 +238,10 @@ fn t1507_upstream_and_push_shorthand_match_git() {
     ] {
         oracle_one(&repo, wt, spec, ResolveMode::Verify).unwrap_or_else(|e| panic!("{spec}: {e}"));
     }
-    let sym = resolve_upstream_symbolic_name(&repo, "main@{u}").expect("upstream sym");
+    let sym = repo
+        .revwalk()
+        .upstream_symbolic_name("main@{u}")
+        .expect("upstream sym");
     assert!(sym.contains("refs/remotes/origin"));
 }
 
@@ -356,7 +380,15 @@ fn t1512_disambiguation_matches_git() {
             git_rev_parse_verify(&bare, prefix).is_none(),
             "git should reject ambiguous short oid {prefix}"
         );
-        assert!(resolve_revision_for_verify(&bare_repo, prefix).is_err());
+        assert!(bare_repo
+            .revwalk()
+            .resolve(
+                prefix,
+                &grit_lib::revwalk::ResolveOptions::default()
+                    .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                    .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd)
+            )
+            .is_err());
     }
 
     let hist = HistoryRepo::init();
@@ -577,7 +609,15 @@ fn colon_path_and_index_stage_match_git() {
         git_rev_parse_verify(cwt, ":0:file.txt").is_none(),
         "git should reject stage 0 while path is unmerged"
     );
-    assert!(resolve_revision_for_verify(&crepo, ":0:file.txt").is_err());
+    assert!(crepo
+        .revwalk()
+        .resolve(
+            ":0:file.txt",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd)
+        )
+        .is_err());
     for spec in [":1:file.txt", ":2:file.txt", ":3:file.txt"] {
         oracle_one(&crepo, cwt, spec, ResolveMode::Verify)
             .unwrap_or_else(|e| panic!("{spec}: {e}"));

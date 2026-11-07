@@ -3,6 +3,7 @@
 use anyhow::{bail, Context, Result};
 use grit_lib::commit::{normalize_commit_date_override, parse_trailer_command_line_arg};
 use grit_lib::index::IndexError;
+use grit_lib::revwalk::{Peel, ResolveOptions};
 
 use crate::message_input::parse_author_cli;
 use grit_lib::config::ident_resolve::IdentRole;
@@ -15,7 +16,6 @@ use grit_lib::porcelain::commit::{
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
 use grit_lib::porcelain::CommitError;
 use grit_lib::progress::{NullProgress, ProgressSink};
-use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -394,7 +394,8 @@ fn build_commit_request(
 ) -> Result<CommitRequest> {
     let reuse_message_from = if let Some(rev) = reuse_message.as_deref() {
         Some(
-            resolve_revision_as_commit(repo, rev)
+            repo.revwalk()
+                .resolve(rev, &ResolveOptions::default().with_peel(Peel::Commit))
                 .with_context(|| format!("could not resolve reuse-message commit '{rev}'"))?,
         )
     } else {

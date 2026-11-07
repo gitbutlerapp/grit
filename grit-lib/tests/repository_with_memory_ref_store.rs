@@ -14,7 +14,6 @@ use grit_lib::refs::store::{
     ReflogUpdate,
 };
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::resolve_revision;
 use time::OffsetDateTime;
 
 fn open_memory_ref_repo(git_dir: &Path) -> Repository {
@@ -90,10 +89,22 @@ fn repository_with_memory_ref_store() {
         "list_refs_for_repository should list injected ref"
     );
 
-    let resolved = resolve_revision(&repo, "refs/heads/injected").expect("rev-parse");
+    let resolved = repo
+        .revwalk()
+        .resolve(
+            "refs/heads/injected",
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect("rev-parse");
     assert_eq!(resolved, oid);
 
-    let at_zero = resolve_revision(&repo, "refs/heads/injected@{0}").expect("reflog @{0}");
+    let at_zero = repo
+        .revwalk()
+        .resolve(
+            "refs/heads/injected@{0}",
+            &grit_lib::revwalk::ResolveOptions::default(),
+        )
+        .expect("reflog @{0}");
     assert_eq!(at_zero, oid);
 }
 
@@ -150,7 +161,10 @@ fn repository_injected_head_reflog_uses_ref_store() {
             .expect("HEAD"),
         oid
     );
-    let head_at_zero = resolve_revision(&repo, "HEAD@{0}").expect("HEAD reflog");
+    let head_at_zero = repo
+        .revwalk()
+        .resolve("HEAD@{0}", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("HEAD reflog");
     assert_eq!(head_at_zero, oid);
 }
 

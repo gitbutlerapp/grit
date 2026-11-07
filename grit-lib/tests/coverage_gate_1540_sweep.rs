@@ -17,19 +17,9 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR, MODE_SYMLINK};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::merge_base::{
-    ancestor_closure, commits_reachable_excluding_ancestors_of, count_symmetric_ahead_behind,
-    fork_point, independent_commits, is_ancestor, merge_bases_all, merge_bases_octopus,
-    MergeBaseForDiffError,
-};
-use grit_lib::revwalk::rev_list::{
-    merge_bases, resolve_revision_specs_to_commits, rev_list, ObjectFilter, OrderingMode,
-    RevListOptions,
-};
-use grit_lib::revwalk::rev_parse::{
-    resolve_revision, resolve_revision_as_commit, resolve_revision_for_range_end,
-    resolve_revision_for_verify,
-};
+use grit_lib::revwalk::merge_base::MergeBaseForDiffError;
+use grit_lib::revwalk::rev_list::{ObjectFilter, OrderingMode, RevListOptions};
+
 use std::fs;
 use tempfile::tempdir;
 
@@ -98,19 +88,39 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
         .parse()
         .expect("old");
 
-    let _ = merge_bases_all(&repo, &[tip, feature])?;
-    let _ = merge_bases_octopus(&repo, &[tip, feature, old_main])?;
-    let _ = independent_commits(&repo, &[tip, feature, old_main])?;
-    assert!(is_ancestor(&repo, old_main, tip)?);
+    let _ = repo
+        .revwalk()
+        .merge_bases(&[tip, feature], grit_lib::revwalk::MergeBaseMode::All)?;
+    let _ = repo.revwalk().merge_bases(
+        &[tip, feature, old_main],
+        grit_lib::revwalk::MergeBaseMode::Octopus,
+    )?;
+    let _ = repo.revwalk().independent(&[tip, feature, old_main])?;
+    assert!(repo.revwalk().is_ancestor(old_main, tip)?);
     let main_base: ObjectId = git(wt, &["rev-parse", "main~30"])
         .trim()
         .parse()
         .expect("main base");
-    let _ = fork_point(&repo, "main", main_base, tip)?;
-    let _ = ancestor_closure(&repo, tip)?;
-    let (ahead, behind) = count_symmetric_ahead_behind(&repo, tip, feature)?;
+    let _ = repo.revwalk().fork_point("main", main_base, tip)?;
+    let _ = repo.revwalk().ancestor_closure(tip)?;
+    let counts = repo.revwalk().ahead_behind(
+        tip,
+        feature,
+        &grit_lib::revwalk::AheadBehindOptions::default(),
+    )?;
+    let (ahead, behind) = (counts.ahead, counts.behind);
     let _ = (ahead, behind);
-    let _ = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[old_main], None)?;
+    let _ = repo
+        .revwalk()
+        .reachable_excluding(
+            &[tip],
+            &[old_main],
+            &grit_lib::revwalk::ReachableWalkOptions::default().with_limit((None).map_or(
+                grit_lib::revwalk::merge_base::ReachableWalkLimit::Unlimited,
+                grit_lib::revwalk::merge_base::ReachableWalkLimit::StopAfter,
+            )),
+        )
+        .map(|(_, commits)| commits)?;
 
     for n in 0..90 {
         for spec in [
@@ -120,10 +130,35 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
             format!("HEAD~{n}^{{tree}}"),
             format!(":/add {n}"),
         ] {
-            let _ = resolve_revision_for_verify(&repo, &spec).ok();
-            let _ = resolve_revision(&repo, &spec).ok();
-            let _ = resolve_revision_for_range_end(&repo, &spec).ok();
-            let _ = resolve_revision_as_commit(&repo, &spec).ok();
+            let _ = repo
+                .revwalk()
+                .resolve(
+                    &spec,
+                    &grit_lib::revwalk::ResolveOptions::default()
+                        .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                        .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+                )
+                .ok();
+            let _ = repo
+                .revwalk()
+                .resolve(&spec, &grit_lib::revwalk::ResolveOptions::default())
+                .ok();
+            let _ = repo
+                .revwalk()
+                .resolve(
+                    &spec,
+                    &grit_lib::revwalk::ResolveOptions::default()
+                        .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+                )
+                .ok();
+            let _ = repo
+                .revwalk()
+                .resolve(
+                    &spec,
+                    &grit_lib::revwalk::ResolveOptions::default()
+                        .with_peel(grit_lib::revwalk::Peel::Commit),
+                )
+                .ok();
         }
     }
 
@@ -164,18 +199,18 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
                 count: false,
                 ..RevListOptions::default()
             };
-            let _ = rev_list(
-                &repo,
+            let _ = repo.revwalk().rev_list(
                 &[String::from("main"), String::from("feature")],
                 &[],
                 &opts,
             )?;
-            let _ = merge_bases(&repo, tip, feature, false)?;
+            let _ = repo
+                .revwalk()
+                .merge_bases(&[tip, feature], grit_lib::revwalk::MergeBaseMode::All)?;
         }
     }
 
-    let roots = rev_list(
-        &repo,
+    let roots = repo.revwalk().rev_list(
         &[
             String::from("main^{tree}"),
             String::from("HEAD^{commit}"),
@@ -188,7 +223,9 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
         },
     )?;
     assert!(!roots.commits.is_empty());
-    let _ = resolve_revision_specs_to_commits(&repo, &["main".to_owned(), "feature".to_owned()])?;
+    let _ = repo
+        .revwalk()
+        .resolve_commits(&["main".to_owned(), "feature".to_owned()])?;
 
     let tree: ObjectId = git(wt, &["rev-parse", "HEAD^{tree}"])
         .trim()
@@ -284,12 +321,16 @@ fn index_symlink_and_merge_base_diff_errors() -> grit_lib::error::Result<()> {
     let head_tree = write_tree_from_index(repo.odb(), &index, "")?;
     let _ = diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false)?;
 
-    let same = grit_lib::revwalk::merge_base::merge_base_for_diff_two_commits(&repo, tip, tip)
+    let same = repo
+        .revwalk()
+        .merge_base_for_diff(tip, tip)
         .expect("same commit merge base");
     assert_eq!(same, tip);
 
     let missing = ObjectId::from_hex("0000000000000000000000000000000000000001").expect("hex");
-    let err = grit_lib::revwalk::merge_base::merge_base_for_diff_two_commits(&repo, tip, missing)
+    let err = repo
+        .revwalk()
+        .merge_base_for_diff(tip, missing)
         .expect_err("missing");
     assert!(matches!(
         err,

@@ -6,8 +6,7 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
-    expand_object_filter_for_protocol, merge_bases, rev_list, ObjectFilter, OrderingMode,
-    RevListOptions,
+    expand_object_filter_for_protocol, ObjectFilter, OrderingMode, RevListOptions,
 };
 use grit_lib::revwalk::RevWalk;
 use std::collections::HashSet;
@@ -162,8 +161,7 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
                 ignore_missing: true,
                 ..RevListOptions::default()
             };
-            let _out = rev_list(
-                &repo,
+            let _out = repo.revwalk().rev_list(
                 &[String::from("main"), String::from("side")],
                 &[],
                 &opts,
@@ -172,7 +170,9 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
     }
 
     let walk = RevWalk::new(&repo);
-    let _ = merge_bases(&repo, tip, side, true)?;
+    let _ = repo
+        .revwalk()
+        .merge_bases(&[tip, side], grit_lib::revwalk::MergeBaseMode::All)?;
     // Every commit has the same tree, so only the root (below the merge base) touches the path;
     // `git rev-list --left-right main...side -- tracked.txt` is empty here.
     let path_limited = walk.walk(

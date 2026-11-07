@@ -6,7 +6,6 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 
 fn commit_tree(
     repo: &grit_lib::repo::Repository,
@@ -76,7 +75,10 @@ fn main() -> grit_lib::error::Result<()> {
     refs::write_ref(repo.git_dir(), "refs/heads/feature", &feature_tip)?;
 
     let main_tip = base;
-    let bases = merge_bases_first_vs_rest(&repo, feature_tip, &[main_tip])?;
+    let bases = repo.revwalk().merge_bases(
+        &[feature_tip, main_tip],
+        grit_lib::revwalk::MergeBaseMode::Best,
+    )?;
     println!("merge base(s) of feature and main: {bases:?}");
     assert!(bases.contains(&main_tip));
 

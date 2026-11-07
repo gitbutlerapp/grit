@@ -14,7 +14,6 @@ use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::clone::{clone_into, CloneIntoOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_test_support::{git, rev_parse};
 
 fn git_upstream() -> tempfile::TempDir {
@@ -110,6 +109,16 @@ fn clone_into_injected_ref_store_keeps_clone_reflogs_in_store() {
             .with_work_tree(wt.path())),
     )
     .expect("reopen");
-    assert_eq!(resolve_revision(&repo, "HEAD@{0}").expect("HEAD@{0}"), tip);
-    assert_eq!(resolve_revision(&repo, "main@{0}").expect("main@{0}"), tip);
+    assert_eq!(
+        repo.revwalk()
+            .resolve("HEAD@{0}", &grit_lib::revwalk::ResolveOptions::default())
+            .expect("HEAD@{0}"),
+        tip
+    );
+    assert_eq!(
+        repo.revwalk()
+            .resolve("main@{0}", &grit_lib::revwalk::ResolveOptions::default())
+            .expect("main@{0}"),
+        tip
+    );
 }

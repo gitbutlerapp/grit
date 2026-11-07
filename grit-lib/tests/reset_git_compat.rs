@@ -13,7 +13,6 @@ use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::refs;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
 use grit_test_support::git_cmd;
 use support::{
     assert_porcelain_v2_matches_git, git_status_porcelain_v2_lines, grit_status_porcelain_v2_lines,
@@ -138,7 +137,15 @@ fn reset_keep_preserves_unrelated_local_changes_like_git() {
     two_commit_history(dir2.path());
     std::fs::write(dir2.path().join("b"), "local\n").expect("local b");
     let repo = open_grit_repo(dir2.path());
-    let parent = resolve_revision_as_commit_without_index_dwim(&repo, "HEAD~1").expect("parent");
+    let parent = repo
+        .revwalk()
+        .resolve(
+            "HEAD~1",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit)
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+        )
+        .expect("parent");
     reset_to_commit(
         &repo,
         &ResetOptions::new(
@@ -172,7 +179,15 @@ fn reset_keep_refuses_when_changed_file_has_local_edits() {
     std::fs::write(dir2.path().join("a"), "edited\n").expect("edit a");
     let repo = open_grit_repo(dir2.path());
     let head_before = refs::resolve_ref(repo.git_dir(), "HEAD").expect("head");
-    let parent = resolve_revision_as_commit_without_index_dwim(&repo, "HEAD~1").expect("parent");
+    let parent = repo
+        .revwalk()
+        .resolve(
+            "HEAD~1",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit)
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+        )
+        .expect("parent");
     let err = reset_to_commit(
         &repo,
         &ResetOptions::new(
@@ -274,7 +289,15 @@ fn reset_orphaned_commits_main_only_git_init() {
         .to_owned();
 
     let repo = open_grit_repo(dir.path());
-    let c1 = resolve_revision_as_commit_without_index_dwim(&repo, "HEAD~2").expect("c1");
+    let c1 = repo
+        .revwalk()
+        .resolve(
+            "HEAD~2",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit)
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+        )
+        .expect("c1");
     assert_eq!(c1, ObjectId::from_hex(&c1_hex).expect("c1 hex"));
 
     let mut opts = ResetOptions::new(

@@ -1,6 +1,7 @@
 //! `grit merge-base` — find common ancestors or test reachability.
 
 use anyhow::Result;
+use grit_lib::revwalk::{MergeBaseMode, ResolveOptions};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -57,6 +58,8 @@ impl MarkdownRender for MergeBaseOutcome {
 pub fn run(a: &str, b: &str, all: bool, is_ancestor: bool) -> Result<MergeBaseOutcome> {
     let repo = context::discover()?;
     let walk = repo.revwalk();
+    let commit = |spec: &str| walk.peel_to_commit(walk.resolve(spec, &ResolveOptions::default())?);
+    let (a, b) = (commit(a)?, commit(b)?);
     if is_ancestor {
         let ok = walk.is_ancestor(a, b)?;
         return Ok(MergeBaseOutcome {
@@ -64,7 +67,12 @@ pub fn run(a: &str, b: &str, all: bool, is_ancestor: bool) -> Result<MergeBaseOu
             is_ancestor: Some(ok),
         });
     }
-    let bases = walk.merge_bases(a, b, all)?;
+    let mode = if all {
+        MergeBaseMode::All
+    } else {
+        MergeBaseMode::Best
+    };
+    let bases = walk.merge_bases(&[a, b], mode)?;
     Ok(MergeBaseOutcome {
         merge_bases: bases.into_iter().map(|oid| oid.to_hex()).collect(),
         is_ancestor: None,

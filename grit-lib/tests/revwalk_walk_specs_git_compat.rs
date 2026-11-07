@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::revwalk::rev_list_error::RevListError;
-use grit_lib::revwalk::{parse_rev_walk_tokens, RevWalkListOptions};
+use grit_lib::revwalk::RevWalkListOptions;
 use grit_test_support::{git, git_cmd, unique_tmp, write_file};
 
 /// The issue's scratch repository: three base commits, `topic` with two commits, `main` with
@@ -243,21 +243,28 @@ fn walk_keeps_literal_ellipses_in_selectors_and_paths() {
     }
 
     let path_spec = "HEAD:dir/a...b";
-    let parsed = parse_rev_walk_tokens(&repo, &[path_spec]).expect("parse path spec");
+    let parsed = repo
+        .revwalk()
+        .parse_tokens(&[path_spec])
+        .expect("parse path spec");
     assert_eq!(parsed.positive, vec![path_spec.to_owned()]);
     assert!(parsed.negative.is_empty() && parsed.symmetric_left.is_none());
     assert_eq!(
-        repo.revwalk().resolve(path_spec).expect("resolve").to_hex(),
+        repo.revwalk()
+            .resolve(path_spec, &grit_lib::revwalk::ResolveOptions::default())
+            .expect("resolve")
+            .to_hex(),
         git(&wt, &["rev-parse", path_spec]).trim()
     );
 
-    let direct = rev_list(
-        &repo,
-        &[":/fix...up".to_owned(), "main^{/fix...up}".to_owned()],
-        &[],
-        &RevListOptions::default(),
-    )
-    .expect("selectors with literal dots are single revisions");
+    let direct = repo
+        .revwalk()
+        .rev_list(
+            &[":/fix...up".to_owned(), "main^{/fix...up}".to_owned()],
+            &[],
+            &RevListOptions::default(),
+        )
+        .expect("selectors with literal dots are single revisions");
     assert_eq!(
         direct
             .commits
@@ -272,13 +279,14 @@ fn walk_keeps_literal_ellipses_in_selectors_and_paths() {
 fn rev_list_rejects_unexpanded_symmetric_range() {
     let wt = diverged_repo();
     let repo = open(&wt);
-    let err = rev_list(
-        &repo,
-        &["main...topic".to_owned()],
-        &[],
-        &RevListOptions::default(),
-    )
-    .expect_err("raw A...B must not resolve to its merge base");
+    let err = repo
+        .revwalk()
+        .rev_list(
+            &["main...topic".to_owned()],
+            &[],
+            &RevListOptions::default(),
+        )
+        .expect_err("raw A...B must not resolve to its merge base");
     assert!(
         matches!(
             &err,

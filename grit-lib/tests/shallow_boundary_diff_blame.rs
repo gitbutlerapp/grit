@@ -7,7 +7,6 @@ use grit_lib::error::Error;
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::git;
 use std::path::Path;
@@ -86,7 +85,9 @@ fn shallow_boundary_commit_diff_is_against_empty_tree() {
     );
 
     assert!(
-        resolve_revision(&repo, "HEAD~1").is_err(),
+        repo.revwalk()
+            .resolve("HEAD~1", &grit_lib::revwalk::ResolveOptions::default())
+            .is_err(),
         "HEAD~1 must not resolve past a depth-1 boundary"
     );
 }
@@ -134,7 +135,10 @@ fn depth_two_child_still_diffs_against_parent() {
     let clone_dir = dir.path().join("shallow2");
     let repo = grit_shallow_clone(&bare, &clone_dir, 2);
     let tip = resolve_ref(repo.git_dir(), "HEAD").unwrap();
-    let parent = resolve_revision(&repo, "HEAD~1").expect("parent exists at depth 2");
+    let parent = repo
+        .revwalk()
+        .resolve("HEAD~1", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("parent exists at depth 2");
     let config = repo.config().snapshot().unwrap().clone();
     let thread = repo.thread_policy();
     let out = commit_diff_files(
@@ -180,7 +184,10 @@ fn head_caret_one_errors_without_reading_missing_parent() {
     build_linear_bare(&bare);
     let clone_dir = dir.path().join("shallow");
     let repo = grit_shallow_clone(&bare, &clone_dir, 1);
-    match resolve_revision(&repo, "HEAD~1") {
+    match repo
+        .revwalk()
+        .resolve("HEAD~1", &grit_lib::revwalk::ResolveOptions::default())
+    {
         Err(Error::RevisionNotFound { .. })
         | Err(Error::InvalidRef(_))
         | Err(Error::RevParse(_)) => {}

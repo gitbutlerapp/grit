@@ -24,7 +24,8 @@ use grit_lib::revwalk::history::{
     RewordOptions, RewriteOptions, RewritePlan, SplitOptions, SquashMessage, SquashOptions,
     StartRebaseOptions, UnassignedHunk,
 };
-use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
+use grit_lib::revwalk::{Peel, ResolveOptions};
+
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -826,7 +827,8 @@ impl Rewrite {
 }
 
 fn resolve_commit(repo: &Repository, rev: &str, what: &str) -> Result<ObjectId> {
-    resolve_revision_as_commit(repo, rev)
+    repo.revwalk()
+        .resolve(rev, &ResolveOptions::default().with_peel(Peel::Commit))
         .with_context(|| format!("could not resolve {what} '{rev}'"))
 }
 
@@ -1676,7 +1678,8 @@ fn resolve_rebase_upstream(repo: &Repository, upstream: Option<&str>) -> Result<
     crate::error_map::resolve_rebase_upstream_revision(
         spec,
         upstream.is_none(),
-        resolve_revision_as_commit(repo, spec),
+        repo.revwalk()
+            .resolve(spec, &ResolveOptions::default().with_peel(Peel::Commit)),
     )
 }
 

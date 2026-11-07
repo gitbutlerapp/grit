@@ -10,7 +10,10 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::RevListOptions;
-use grit_lib::revwalk::{LeftRightCounts, MergeFilter, RefSelection, RevWalkListOptions};
+use grit_lib::revwalk::{
+    LeftRightCounts, MergeBaseMode, MergeFilter, Peel, RefSelection, ResolveOptions, RevWalk,
+    RevWalkListOptions,
+};
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 use support::{
@@ -18,6 +21,11 @@ use support::{
     git_commit_graph_write, git_merge_base, git_merge_base_is_ancestor, git_rev_list,
     setup_path_simplify_history, HistoryRepo,
 };
+
+fn commit(walk: &RevWalk<'_>, spec: &str) -> ObjectId {
+    walk.resolve(spec, &ResolveOptions::default().with_peel(Peel::Commit))
+        .unwrap_or_else(|e| panic!("resolve {spec}: {e}"))
+}
 
 fn open_grit(wt: &Path) -> Repository {
     let mut env = Environment::empty();
@@ -172,12 +180,23 @@ fn merge_bases_match_git_merge_base_all() {
     let h = oids["H"];
     let git_single = git_merge_base(wt, &["G", "H"]);
     assert_eq!(
-        walk.merge_bases("G", "H", false).expect("single"),
+        walk.merge_bases(
+            &[commit(&walk, "G"), commit(&walk, "H")],
+            MergeBaseMode::Best
+        )
+        .expect("single"),
         git_single
     );
 
     let git_all = git_merge_base(wt, &["--all", "G", "H"]);
-    assert_eq!(walk.merge_bases("G", "H", true).expect("all"), git_all);
+    assert_eq!(
+        walk.merge_bases(
+            &[commit(&walk, "G"), commit(&walk, "H")],
+            MergeBaseMode::All
+        )
+        .expect("all"),
+        git_all
+    );
     let _ = (g, h);
 }
 
@@ -218,13 +237,19 @@ fn merge_bases_default_one_base_when_two_minimal_bases_exist() {
     );
 
     let grit_default = walk
-        .merge_bases(m1.as_str(), m2.as_str(), false)
+        .merge_bases(
+            &[commit(&walk, &m1), commit(&walk, &m2)],
+            MergeBaseMode::Best,
+        )
         .expect("default");
     assert_eq!(grit_default, git_default);
     assert_eq!(grit_default.len(), 1);
 
     let grit_all = walk
-        .merge_bases(m1.as_str(), m2.as_str(), true)
+        .merge_bases(
+            &[commit(&walk, &m1), commit(&walk, &m2)],
+            MergeBaseMode::All,
+        )
         .expect("all");
     assert_eq!(grit_all, git_all);
 }
@@ -238,7 +263,11 @@ fn merge_bases_criss_cross_side_exhaustion_matches_git() {
     let walk = repo.revwalk();
     let git_all = git_merge_base(wt, &["--all", "A", "X"]);
     assert_eq!(
-        walk.merge_bases("A", "X", true).expect("criss-cross"),
+        walk.merge_bases(
+            &[commit(&walk, "A"), commit(&walk, "X")],
+            MergeBaseMode::All
+        )
+        .expect("criss-cross"),
         git_all
     );
 }
@@ -254,11 +283,13 @@ fn is_ancestor_matches_git() {
     let h = oids["H"];
     assert_eq!(
         git_merge_base_is_ancestor(wt, "B", "H"),
-        walk.is_ancestor("B", "H").expect("ancestor")
+        walk.is_ancestor(commit(&walk, "B"), commit(&walk, "H"))
+            .expect("ancestor")
     );
     assert_eq!(
         git_merge_base_is_ancestor(wt, "H", "B"),
-        walk.is_ancestor("H", "B").expect("not ancestor")
+        walk.is_ancestor(commit(&walk, "H"), commit(&walk, "B"))
+            .expect("not ancestor")
     );
     let _ = (b, h);
 }

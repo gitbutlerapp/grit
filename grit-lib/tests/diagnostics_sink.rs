@@ -3,7 +3,6 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::resolve_revision;
 use std::process::Command;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -57,7 +56,10 @@ fn ambiguous_refname_reaches_collecting_sink() {
         .with_work_tree(tmp.path().to_path_buf());
     let repo = Repository::open(&tmp.path().join(".git"), &options).expect("open");
 
-    let _ = resolve_revision(&repo, &prefix).expect("resolve");
+    let _ = repo
+        .revwalk()
+        .resolve(&prefix, &grit_lib::revwalk::ResolveOptions::default())
+        .expect("resolve");
     assert!(
         sink.warnings().iter().any(|w| matches!(
             w,

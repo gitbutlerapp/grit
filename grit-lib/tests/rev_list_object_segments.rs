@@ -4,7 +4,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -72,7 +72,10 @@ fn rev_list_object_segments_one_per_commit_plus_roots_trailer() {
         in_commit_order: false,
         ..Default::default()
     };
-    let result = rev_list(&repo, &[child.to_hex()], &[], &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&[child.to_hex()], &[], &opts)
+        .expect("rev-list");
 
     assert_eq!(result.commits.len(), 2);
     assert_eq!(

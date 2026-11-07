@@ -528,7 +528,7 @@ pub fn run_sqlite_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
     use grit_lib::objects::{serialize_tree, TreeEntry};
     use grit_lib::refs::store::RefName;
     use grit_lib::repo::{InitOptions, Repository};
-    use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+    use grit_lib::revwalk::rev_list::RevListOptions;
 
     Repository::init(
         repo_root,
@@ -568,12 +568,9 @@ pub fn run_sqlite_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
     )?;
 
     let tip = commit.to_hex();
-    let listed = rev_list(
-        &repo,
-        std::slice::from_ref(&tip),
-        &[],
-        &RevListOptions::default(),
-    )?;
+    let listed =
+        repo.revwalk()
+            .rev_list(std::slice::from_ref(&tip), &[], &RevListOptions::default())?;
     let grit_log: Vec<String> = listed.commits.iter().map(ObjectId::to_hex).collect();
 
     sqlite.flush()?;

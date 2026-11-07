@@ -14,7 +14,7 @@ use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
+use grit_lib::revwalk::rev_list::{OrderingMode, RevListOptions};
 use support::{commit_labeled_with_dates, git, git_rev_list, open_grit_repo, HistoryRepo};
 use tempfile::TempDir;
 
@@ -99,23 +99,30 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
         use_commit_graph: false,
         ..Default::default()
     };
-    let without = rev_list(&repo, &["HEAD".to_owned()], &[], &opts_base).expect("walk");
+    let without = repo
+        .revwalk()
+        .rev_list(&["HEAD".to_owned()], &[], &opts_base)
+        .expect("walk");
     let with_graph = RevListOptions {
         count: true,
         ..Default::default()
     };
-    let with = rev_list(&repo, &["HEAD".to_owned()], &[], &with_graph).expect("graph walk");
+    let with = repo
+        .revwalk()
+        .rev_list(&["HEAD".to_owned()], &[], &with_graph)
+        .expect("graph walk");
     // A count may come from a count-only walk that lists nothing; the listing is checked apart.
-    let listed = rev_list(
-        &repo,
-        &["HEAD".to_owned()],
-        &[],
-        &RevListOptions {
-            use_commit_graph: false,
-            ..Default::default()
-        },
-    )
-    .expect("list walk");
+    let listed = repo
+        .revwalk()
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &RevListOptions {
+                use_commit_graph: false,
+                ..Default::default()
+            },
+        )
+        .expect("list walk");
     assert_eq!(listed.commits.len(), 80);
     assert_eq!(without.commit_count(), 80);
     assert_eq!(without.commit_count(), with.commit_count());
@@ -183,7 +190,8 @@ fn list(
         use_commit_graph: use_graph,
         ..options.clone()
     };
-    rev_list(repo, &["HEAD".to_owned()], &[], &options)
+    repo.revwalk()
+        .rev_list(&["HEAD".to_owned()], &[], &options)
         .expect("rev_list")
         .commits
 }

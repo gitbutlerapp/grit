@@ -1781,12 +1781,11 @@ fn parse_sequencer_todo(repo: &Repository, path: &Path) -> Result<Vec<TodoEntry>
             .ok_or_else(|| MergeError::SequencerUnknownCommand {
                 command: cmd.to_owned(),
             })?;
-        let oid =
-            repo.revwalk()
-                .resolve(oid_token)
-                .map_err(|_| MergeError::SequencerUnknownCommand {
-                    command: cmd.to_owned(),
-                })?;
+        let oid = crate::rev_parse::resolve_revision(repo, oid_token).map_err(|_| {
+            MergeError::SequencerUnknownCommand {
+                command: cmd.to_owned(),
+            }
+        })?;
         let subject = parts.collect::<Vec<_>>().join(" ");
         let subject = if subject.is_empty() {
             commit_subject(repo, oid)?

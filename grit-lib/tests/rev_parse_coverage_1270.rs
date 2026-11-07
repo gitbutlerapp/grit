@@ -8,11 +8,7 @@ use std::path::Path;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::{
-    abbreviate_ref_name, expand_rev_token_circ_bang, resolve_at_minus_to_oid,
-    resolve_push_full_ref_for_branch, resolve_reflog_walk_log_ref, resolve_revision_for_verify,
-    resolve_treeish_blob_at_path, resolve_upstream_symbolic_name, upstream_suffix_info,
-};
+use grit_lib::revwalk::rev_parse::{abbreviate_ref_name, upstream_suffix_info};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 
 use support::{
@@ -29,7 +25,15 @@ fn open_grit_at(wt: &Path, cwd: &Path) -> Repository {
 }
 
 fn expect_rev_parse_variant(repo: &Repository, spec: &str, pred: fn(&RevParseError) -> bool) {
-    let err = resolve_revision_for_verify(repo, spec).expect_err(spec);
+    let err = repo
+        .revwalk()
+        .resolve(
+            spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        )
+        .expect_err(spec);
     let Error::RevParse(inner) = err else {
         panic!("{spec}: expected RevParse error, got {err}");
     };
@@ -91,7 +95,7 @@ fn treeish_missing_path_diagnose() {
             RevParseError::PathNotInRevision { .. } | RevParseError::PathOnDiskNotInRevision { .. }
         )
     });
-    let _ = resolve_treeish_blob_at_path(&repo, "HEAD:present.txt");
+    let _ = repo.revwalk().blob_at_path("HEAD:present.txt");
 }
 
 #[test]
@@ -142,18 +146,19 @@ fn remote_shorthand_stash_and_outside_paths() {
         ":0:/etc/passwd",
         ":2:/etc/passwd",
     ] {
-        let _ = resolve_revision_for_verify(&repo, spec);
-        let _ = resolve_treeish_blob_at_path(&repo, spec);
+        let _ = repo.revwalk().resolve(
+            spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        );
+        let _ = repo.revwalk().blob_at_path(spec);
     }
-    let _ = resolve_reflog_walk_log_ref(&repo, "main");
-    let _ = resolve_reflog_walk_log_ref(&repo, "@{-1}");
-    let _ = resolve_reflog_walk_log_ref(&repo, "main@{upstream}");
-    let _ = expand_rev_token_circ_bang(&repo, "HEAD^!");
     assert_eq!(abbreviate_ref_name("refs/heads/main"), "main");
     assert!(upstream_suffix_info("main@{u}").is_some());
     assert!(upstream_suffix_info("main@{push}").is_some());
-    let _ = resolve_upstream_symbolic_name(&repo, "main@{u}");
-    let _ = resolve_push_full_ref_for_branch(&repo, "main");
+    let _ = repo.revwalk().upstream_symbolic_name("main@{u}");
+    let _ = repo.revwalk().upstream_symbolic_name("main@{push}");
 }
 
 #[test]
@@ -168,9 +173,23 @@ fn at_minus_and_reflog_edge_specs() {
     commit_file(wt, "f.txt", "3\n", "three");
     git(wt, &["checkout", "main"]);
     let repo = open_grit_at(wt, wt);
-    let _ = resolve_at_minus_to_oid(&repo, "@{-1}");
-    let _ = resolve_at_minus_to_oid(&repo, "@{-2}");
-    let _ = resolve_revision_for_verify(&repo, "main@{999}");
-    let _ = resolve_revision_for_verify(&repo, "main@{0}");
+    let _ = repo
+        .revwalk()
+        .resolve("@{-1}", &grit_lib::revwalk::ResolveOptions::default());
+    let _ = repo
+        .revwalk()
+        .resolve("@{-2}", &grit_lib::revwalk::ResolveOptions::default());
+    let _ = repo.revwalk().resolve(
+        "main@{999}",
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
+    let _ = repo.revwalk().resolve(
+        "main@{0}",
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
     oracle_one(&repo, wt, "main@{1}", ResolveMode::Verify).unwrap_or_else(|e| panic!("{e}"));
 }

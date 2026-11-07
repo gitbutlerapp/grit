@@ -26,8 +26,7 @@ use grit_lib::repo::{
     validate_repo_config, validate_repo_format, worktree_config_enabled, InitOptions, Repository,
 };
 use grit_lib::revwalk::rev_list::{
-    merge_bases, resolve_revision_specs_to_commits, rev_list, shallow_borders_reachable_from_wants,
-    shallow_boundary_oids, tag_targets, MissingAction, ObjectFilter, OrderingMode, RevListOptions,
+    shallow_boundary_oids, MissingAction, ObjectFilter, OrderingMode, RevListOptions,
 };
 
 use support::{commit_file, git, open_grit_repo, HistoryRepo};
@@ -264,15 +263,18 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
                 filter_print_omitted: true,
                 ..RevListOptions::default()
             };
-            let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+            let out = repo
+                .revwalk()
+                .rev_list(&[String::from("main")], &[], &opts)?;
             assert!(!out.commits.is_empty());
         }
     }
 
-    let _ = resolve_revision_specs_to_commits(&repo, &["main".to_owned(), "side".to_owned()])?;
-    let _ = tag_targets(&repo)?;
+    let _ = repo
+        .revwalk()
+        .resolve_commits(&["main".to_owned(), "side".to_owned()])?;
+    let _ = repo.revwalk().tag_targets()?;
     let _ = shallow_boundary_oids(repo.git_dir());
-    let _ = shallow_borders_reachable_from_wants(&repo, &[tip]);
     let filtered = RevListOptions {
         all_refs: true,
         objects: true,
@@ -280,8 +282,10 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
         filter: Some(ObjectFilter::BlobLimit(4096)),
         ..RevListOptions::default()
     };
-    let _ = rev_list(&repo, &[], &[], &filtered)?;
-    let _ = merge_bases(&repo, tip, mid, false)?;
+    let _ = repo.revwalk().rev_list(&[], &[], &filtered)?;
+    let _ = repo
+        .revwalk()
+        .merge_bases(&[tip, mid], grit_lib::revwalk::MergeBaseMode::All)?;
     Ok(())
 }
 

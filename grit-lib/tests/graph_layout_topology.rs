@@ -7,8 +7,8 @@ use std::collections::HashSet;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::{list_commits_for_log_graph, RevWalkListOptions};
-use grit_lib::revwalk::{rewrite_display_parents, GraphCommitInput, GraphLayout};
+use grit_lib::revwalk::RevWalkListOptions;
+use grit_lib::revwalk::{GraphCommitInput, GraphLayout};
 use support::{build_commit_dag, git};
 
 #[test]
@@ -32,14 +32,21 @@ fn graph_layout_criss_cross_topology() -> grit_lib::error::Result<()> {
         &[("m2", "refs/heads/main")],
     );
     let repo = Repository::discover(Some(wt), &RepositoryOptions::default())?;
-    let walk = list_commits_for_log_graph(&repo, &["main"], &RevWalkListOptions::default())?;
+    let walk = repo.revwalk().commits(&["main"], &{
+        let mut walk = (&RevWalkListOptions::default()).clone();
+        walk.graph = true;
+        walk
+    })?;
     let visible: HashSet<ObjectId> = walk.iter().copied().collect();
     let inputs: Vec<GraphCommitInput> = walk
         .iter()
         .map(|&id| {
             Ok(GraphCommitInput {
                 id,
-                parents: rewrite_display_parents(&repo, id, &visible)?,
+                parents: repo
+                    .revwalk()
+                    .rewrite_display_parents(&visible)
+                    .map(|parents| parents.get(&id).cloned().unwrap_or_default())?,
             })
         })
         .collect::<grit_lib::error::Result<_>>()?;
@@ -79,22 +86,26 @@ fn graph_layout_filtered_parents_rewrite() -> grit_lib::error::Result<()> {
         .grep("history harness".to_owned())
         .build()
         .expect("grep pattern");
-    let walk = list_commits_for_log_graph(
-        &repo,
-        &["main"],
-        &RevWalkListOptions {
+    let walk = repo.revwalk().commits(&["main"], &{
+        let mut walk = (&RevWalkListOptions {
             commit_filter: Some(std::sync::Arc::new(filter)),
             limit: Some(10),
             ..Default::default()
-        },
-    )?;
+        })
+            .clone();
+        walk.graph = true;
+        walk
+    })?;
     assert!(
         walk.len() >= 2,
         "grep filter should still emit multiple matching commits"
     );
     let visible: HashSet<ObjectId> = walk.iter().copied().collect();
     let tip = walk[0];
-    let parents = rewrite_display_parents(&repo, tip, &visible)?;
+    let parents = repo
+        .revwalk()
+        .rewrite_display_parents(&visible)
+        .map(|parents| parents.get(&tip).cloned().unwrap_or_default())?;
     assert!(
         !parents.is_empty(),
         "filtered graph must connect through skipped commits"

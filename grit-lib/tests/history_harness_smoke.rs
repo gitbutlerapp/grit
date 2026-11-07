@@ -4,7 +4,7 @@ use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 
 use support::{build_commit_dag, git_rev_list, HistoryRepo};
 
@@ -22,7 +22,10 @@ fn history_harness_smoke_three_commit_dag_matches_grit_rev_list() {
         reverse: true,
         ..RevListOptions::default()
     };
-    let grit_result = rev_list(&grit_repo, &[String::from("main")], &[], &opts).expect("rev-list");
+    let grit_result = grit_repo
+        .revwalk()
+        .rev_list(&[String::from("main")], &[], &opts)
+        .expect("rev-list");
     let grit_oids = grit_result.commits;
 
     assert_eq!(

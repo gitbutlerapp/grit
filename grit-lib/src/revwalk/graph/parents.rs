@@ -6,106 +6,87 @@ use crate::error::Result;
 use crate::objects::{read_commit_subject_line, ObjectId};
 use crate::repo::Repository;
 use crate::rev_list::CommitGraph;
+use crate::revwalk::RevWalk;
 
 /// Parents and oneline subjects keyed by commit id.
 pub type LogGraphMaterialized = (HashMap<ObjectId, Vec<ObjectId>>, HashMap<ObjectId, String>);
 
-/// Parent lists for graph layout: direct ODB parents, or rewritten when filters hide commits.
-///
-/// When `rewrite_through_hidden` is false (plain `log --graph` without path or commit filters),
-/// parents are read once through the commit-graph cache.
-///
-/// # Errors
-///
-/// Propagates object read and parse errors.
-pub fn display_parents_for_graph(
-    repo: &Repository,
-    visible: &HashSet<ObjectId>,
-    rewrite_through_hidden: bool,
-) -> Result<HashMap<ObjectId, Vec<ObjectId>>> {
-    let oids: Vec<ObjectId> = visible.iter().copied().collect();
-    log_graph_materialize(repo, &oids, rewrite_through_hidden).map(|(parents, _)| parents)
-}
-
-/// Parents and oneline subjects for graph rendering in one commit-graph pass.
-///
-/// # Errors
-///
-/// Propagates object read and parse errors.
-pub fn log_graph_materialize(
-    repo: &Repository,
-    oids: &[ObjectId],
-    rewrite_through_hidden: bool,
-) -> Result<LogGraphMaterialized> {
-    if rewrite_through_hidden {
-        let visible: HashSet<ObjectId> = oids.iter().copied().collect();
-        let parents = rewrite_display_parents_map(repo, &visible)?;
+impl RevWalk<'_> {
+    /// Parents and oneline subjects of `oids` for `log --graph`, in one commit-graph pass.
+    ///
+    /// With `rewrite_through_hidden` (a path or commit filter hides some commits), each
+    /// commit's parents are rewritten to its nearest ancestors among `oids`, as
+    /// [`Self::rewrite_display_parents`] does; otherwise they are the commits' own parents.
+    ///
+    /// # Errors
+    ///
+    /// Propagates object read and parse errors.
+    pub fn graph_materialize(
+        &self,
+        oids: &[ObjectId],
+        rewrite_through_hidden: bool,
+    ) -> Result<LogGraphMaterialized> {
+        let repo = self.repository();
+        if rewrite_through_hidden {
+            let visible: HashSet<ObjectId> = oids.iter().copied().collect();
+            let parents = self.rewrite_display_parents(&visible)?;
+            let mut subjects = HashMap::with_capacity(oids.len());
+            for &oid in oids {
+                subjects.insert(oid, read_subject_only(repo, oid)?);
+            }
+            return Ok((parents, subjects));
+        }
+        let mut graph = CommitGraph::with_commit_graph(repo, false, true);
+        let mut parents = HashMap::with_capacity(oids.len());
         let mut subjects = HashMap::with_capacity(oids.len());
         for &oid in oids {
-            subjects.insert(oid, read_subject_only(repo, oid)?);
+            parents.insert(oid, graph.parents_of(oid)?);
+            let subject = match graph.subject_of(oid) {
+                Some(s) => s.to_owned(),
+                None => read_subject_only(repo, oid)?,
+            };
+            subjects.insert(oid, subject);
         }
-        return Ok((parents, subjects));
+        Ok((parents, subjects))
     }
-    let mut graph = CommitGraph::with_commit_graph(repo, false, true);
-    let mut parents = HashMap::with_capacity(oids.len());
-    let mut subjects = HashMap::with_capacity(oids.len());
-    for &oid in oids {
-        parents.insert(oid, graph.parents_of(oid)?);
-        let subject = match graph.subject_of(oid) {
-            Some(s) => s.to_owned(),
-            None => read_subject_only(repo, oid)?,
-        };
-        subjects.insert(oid, subject);
+
+    /// Rewrite the parents of every commit in `visible` to its nearest ancestors in
+    /// `visible`, skipping filtered-out commits.
+    ///
+    /// Hidden merges keep connectivity: every visible ancestor reachable through any
+    /// parent edge of a hidden commit is retained.
+    ///
+    /// # Errors
+    ///
+    /// Propagates object read and parse errors while walking parents.
+    pub fn rewrite_display_parents(
+        &self,
+        visible: &HashSet<ObjectId>,
+    ) -> Result<HashMap<ObjectId, Vec<ObjectId>>> {
+        let repo = self.repository();
+        let mut raw_parents: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+        let mut out = HashMap::new();
+        for &oid in visible {
+            let parents = load_parents(repo, oid, &mut raw_parents)?;
+            let mut rewritten = Vec::new();
+            for &parent in &parents {
+                for visible_ancestor in
+                    visible_through_hidden(repo, parent, visible, &mut raw_parents)?
+                {
+                    if !rewritten.contains(&visible_ancestor) {
+                        rewritten.push(visible_ancestor);
+                    }
+                }
+            }
+            out.insert(oid, rewritten);
+        }
+        Ok(out)
     }
-    Ok((parents, subjects))
 }
 
 fn read_subject_only(repo: &Repository, oid: ObjectId) -> Result<String> {
     let bytes = repo.read_commit_bytes_with_replace(&oid)?;
     read_commit_subject_line(&bytes)
-}
-
-/// Rewrite parents for every commit in `visible`, skipping filtered-out ancestors.
-///
-/// Hidden merges keep connectivity: every visible ancestor reachable through any
-/// parent edge of a hidden commit is retained.
-///
-/// # Errors
-///
-/// Propagates object read and parse errors while walking parents.
-pub fn rewrite_display_parents_map(
-    repo: &Repository,
-    visible: &HashSet<ObjectId>,
-) -> Result<HashMap<ObjectId, Vec<ObjectId>>> {
-    let mut raw_parents: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-    let mut out = HashMap::new();
-    for &oid in visible {
-        let parents = load_parents(repo, oid, &mut raw_parents)?;
-        let mut rewritten = Vec::new();
-        for &parent in &parents {
-            for visible_ancestor in visible_through_hidden(repo, parent, visible, &mut raw_parents)?
-            {
-                if !rewritten.contains(&visible_ancestor) {
-                    rewritten.push(visible_ancestor);
-                }
-            }
-        }
-        out.insert(oid, rewritten);
-    }
-    Ok(out)
-}
-
-/// Rewrite `oid`'s parents to the nearest ancestors present in `visible`.
-///
-/// # Errors
-///
-/// Propagates object read and parse errors while walking parents.
-pub fn rewrite_display_parents(
-    repo: &Repository,
-    oid: ObjectId,
-    visible: &HashSet<ObjectId>,
-) -> Result<Vec<ObjectId>> {
-    rewrite_display_parents_map(repo, visible).map(|map| map.get(&oid).cloned().unwrap_or_default())
 }
 
 /// Visible commits reachable from `start` by walking through non-visible commits only.

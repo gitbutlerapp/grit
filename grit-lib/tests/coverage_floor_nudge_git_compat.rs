@@ -12,8 +12,8 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::revwalk::merge_base::{merge_bases_all, merge_bases_octopus};
-use grit_lib::revwalk::rev_list::{rev_list, ObjectFilter, OrderingMode, RevListOptions};
+
+use grit_lib::revwalk::rev_list::{ObjectFilter, OrderingMode, RevListOptions};
 use support::{commit_file, git, open_grit_repo, HistoryRepo};
 
 #[test]
@@ -93,8 +93,7 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
                 max_count: Some(128),
                 ..RevListOptions::default()
             };
-            let _ = rev_list(
-                &repo,
+            let _ = repo.revwalk().rev_list(
                 &[String::from("HEAD")],
                 &[String::from("HEAD~15")],
                 &opts,
@@ -102,12 +101,11 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
         }
     }
 
-    let _ = merge_bases_all(
-        &repo,
+    let _ = repo.revwalk().merge_bases(
         &[tip.parse().expect("tip"), mid.parse().expect("mid")],
+        grit_lib::revwalk::MergeBaseMode::All,
     )?;
-    let _ = merge_bases_octopus(
-        &repo,
+    let _ = repo.revwalk().merge_bases(
         &[
             tip.parse().expect("tip"),
             mid.parse().expect("mid"),
@@ -116,6 +114,7 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
                 .parse()
                 .expect("fork tip"),
         ],
+        grit_lib::revwalk::MergeBaseMode::Octopus,
     )?;
 
     for start in [None, Some(tip.parse().expect("tip"))] {
@@ -157,7 +156,9 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
             max_count: Some(96),
             ..RevListOptions::default()
         };
-        let _ = rev_list(&repo, &[String::from("HEAD")], &[], &opts)?;
+        let _ = repo
+            .revwalk()
+            .rev_list(&[String::from("HEAD")], &[], &opts)?;
     }
 
     let merge_tip = repo.odb().read(&tip.parse().expect("tip"))?;

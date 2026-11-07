@@ -5,19 +5,9 @@ use crate::support;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::{
-    abbreviate_object_id, ambiguous_object_hint_lines, expand_at_minus_to_branch_name,
-    expand_parent_shorthand_rev_parse_lines, expand_rev_token_circ_bang, list_all_abbrev_matches,
-    list_loose_abbrev_matches, load_graft_parents, parse_index_colon_spec, parse_peel_suffix,
-    peel_to_commit_for_merge_base, peel_to_tree, reflog_date_selector_timestamp,
-    reflog_date_selector_timestamp_at, reflog_walk_refname, resolve_at_minus_to_oid,
-    resolve_index_path_entry, resolve_push_full_ref_for_branch, resolve_reflog_walk_log_ref,
-    resolve_revision, resolve_revision_as_commit, resolve_revision_as_commit_without_index_dwim,
-    resolve_revision_for_checkout_guess, resolve_revision_for_commit_tree_tree,
-    resolve_revision_for_patch_old_blob, resolve_revision_for_range_end,
-    resolve_revision_for_range_end_without_index_dwim, resolve_revision_for_verify,
-    resolve_revision_without_index_dwim, resolve_treeish_blob_at_path,
-    resolve_upstream_symbolic_name, split_double_dot_range, split_treeish_colon,
-    split_triple_dot_range, symbolic_full_name, try_peel_to_commit_for_merge_base,
+    load_graft_parents, parse_index_colon_spec, parse_peel_suffix, reflog_date_selector_timestamp,
+    reflog_date_selector_timestamp_at, split_double_dot_range, split_treeish_colon,
+    split_triple_dot_range,
 };
 
 use support::{build_commit_dag, commit_file, git, HistoryRepo};
@@ -31,19 +21,58 @@ fn open_grit(wt: &std::path::Path) -> Repository {
 }
 
 fn exercise_all(repo: &Repository, spec: &str) {
-    let _ = resolve_revision_for_verify(repo, spec);
-    let _ = resolve_revision(repo, spec);
-    let _ = resolve_revision_without_index_dwim(repo, spec);
-    let _ = resolve_revision_for_range_end(repo, spec);
-    let _ = resolve_revision_for_range_end_without_index_dwim(repo, spec);
-    let _ = resolve_revision_as_commit(repo, spec);
-    let _ = resolve_revision_as_commit_without_index_dwim(repo, spec);
-    let _ = resolve_revision_for_checkout_guess(repo, spec, true);
-    let _ = resolve_revision_for_checkout_guess(repo, spec, false);
-    let _ = resolve_revision_for_commit_tree_tree(repo, spec);
-    let _ = resolve_revision_for_patch_old_blob(repo, spec);
-    let _ = resolve_treeish_blob_at_path(repo, spec);
-    let _ = resolve_index_path_entry(repo, spec);
+    let _ = repo.revwalk().resolve(
+        spec,
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
+    let _ = repo
+        .revwalk()
+        .resolve(spec, &grit_lib::revwalk::ResolveOptions::default());
+    let _ = repo.revwalk().resolve(
+        spec,
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+    );
+    let _ = repo.revwalk().resolve(
+        spec,
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
+    let _ = repo.revwalk().resolve(
+        spec,
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
+    let _ = repo.revwalk().resolve(
+        spec,
+        &grit_lib::revwalk::ResolveOptions::default().with_peel(grit_lib::revwalk::Peel::Commit),
+    );
+    let _ = repo.revwalk().resolve(
+        spec,
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_peel(grit_lib::revwalk::Peel::Commit)
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+    );
+    let _ = repo
+        .revwalk()
+        .resolve(spec, &grit_lib::revwalk::ResolveOptions::default());
+    let _ = repo.revwalk().resolve(
+        spec,
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::CheckoutNoGuess),
+    );
+    let _ = repo.revwalk().resolve(
+        spec,
+        &grit_lib::revwalk::ResolveOptions::default().with_peel(grit_lib::revwalk::Peel::Tree),
+    );
+    let _ = repo.revwalk().resolve(
+        spec,
+        &grit_lib::revwalk::ResolveOptions::default().with_peel(grit_lib::revwalk::Peel::Blob),
+    );
+    let _ = repo.revwalk().blob_at_path(spec);
 }
 
 #[test]
@@ -85,26 +114,37 @@ fn deep_history_resolver_sweep() {
     git(wt, &["fetch", "origin"]);
 
     let repo = open_grit(wt);
-    let head = resolve_revision_for_verify(&repo, "HEAD").expect("head");
-    let _ = peel_to_tree(&repo, head);
-    let _ = peel_to_commit_for_merge_base(&repo, head);
-    let _ = try_peel_to_commit_for_merge_base(&repo, head);
+    let head = repo
+        .revwalk()
+        .resolve(
+            "HEAD",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        )
+        .expect("head");
+    let _ = repo.revwalk().peel_to_tree(head);
+    let _ = repo.revwalk().peel_to_commit(head);
+    let _ = repo.revwalk().peel_to_commit(head);
     let prefix = &head.to_hex()[..7];
-    let _ = list_all_abbrev_matches(&repo, prefix);
-    let _ = list_loose_abbrev_matches(&repo, prefix);
-    let _ = ambiguous_object_hint_lines(&repo, prefix, Some("commit"));
-    let _ = ambiguous_object_hint_lines(&repo, prefix, None);
-    let _ = abbreviate_object_id(&repo, head, 7);
-    let _ = symbolic_full_name(&repo, "main");
-    let _ = resolve_upstream_symbolic_name(&repo, "main@{upstream}");
-    let _ = resolve_push_full_ref_for_branch(&repo, "main");
-    let _ = expand_at_minus_to_branch_name(&repo, "@{-1}");
-    let _ = resolve_at_minus_to_oid(&repo, "@{-1}");
-    let _ = reflog_walk_refname(&repo, "HEAD@{0}");
-    let _ = resolve_reflog_walk_log_ref(&repo, "HEAD");
-    let _ = resolve_reflog_walk_log_ref(&repo, "main");
-    let _ = expand_rev_token_circ_bang(&repo, "main^!");
-    let _ = expand_parent_shorthand_rev_parse_lines(&repo, "main^@", false, Some(7));
+    let _ = repo.revwalk().abbrev_matches(prefix);
+    let _ = repo.revwalk().abbrev_matches(prefix);
+    let _ = repo
+        .revwalk()
+        .resolve(prefix, &grit_lib::revwalk::ResolveOptions::default());
+    let _ = repo
+        .revwalk()
+        .resolve(prefix, &grit_lib::revwalk::ResolveOptions::default());
+    let _ = repo
+        .revwalk()
+        .abbreviate(head, grit_lib::revwalk::AbbrevLength::AtLeast(7));
+    let _ = repo.revwalk().symbolic_full_name("main");
+    let _ = repo.revwalk().upstream_symbolic_name("main@{upstream}");
+    let _ = repo.revwalk().upstream_symbolic_name("main@{push}");
+    let _ = repo.revwalk().symbolic_full_name("@{-1}");
+    let _ = repo
+        .revwalk()
+        .resolve("@{-1}", &grit_lib::revwalk::ResolveOptions::default());
     let _ = load_graft_parents(repo.git_dir());
     assert!(reflog_date_selector_timestamp("1.day.ago").is_some());
     let _ = reflog_date_selector_timestamp_at("2.weeks.ago", 1_700_000_000);
@@ -116,12 +156,23 @@ fn deep_history_resolver_sweep() {
     assert!(split_double_dot_range("main..feature").is_some());
     assert!(split_triple_dot_range("main...feature").is_some());
 
-    if let Ok(prefixes) = list_all_abbrev_matches(&repo, &head.to_hex()[..8]) {
+    if let Ok(prefixes) = repo.revwalk().abbrev_matches(&head.to_hex()[..8]) {
         if prefixes.len() > 1 {
             let p = &prefixes[0].to_hex()[..8];
-            let _ = resolve_revision_as_commit(&repo, p);
-            let _ = resolve_revision_for_verify(&repo, p);
-            let _ = ambiguous_object_hint_lines(&repo, p, Some("commit"));
+            let _ = repo.revwalk().resolve(
+                p,
+                &grit_lib::revwalk::ResolveOptions::default()
+                    .with_peel(grit_lib::revwalk::Peel::Commit),
+            );
+            let _ = repo.revwalk().resolve(
+                p,
+                &grit_lib::revwalk::ResolveOptions::default()
+                    .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                    .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+            );
+            let _ = repo
+                .revwalk()
+                .resolve(p, &grit_lib::revwalk::ResolveOptions::default());
         }
     }
 

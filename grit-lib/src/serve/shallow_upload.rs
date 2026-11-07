@@ -189,3 +189,106 @@ fn relative_deepen_depth_for_request(
     }
     Some(max_to_shallow.saturating_add(deepen))
 }
+
+#[cfg(test)]
+mod depth_tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    use super::{compute_shallow_response, ShallowRequest};
+    use crate::objects::{ObjectId, ObjectKind};
+    use crate::repo::{InitOptions, Repository};
+
+    const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    fn init_single_commit_bare(dir: &Path) -> (Repository, ObjectId) {
+        let (repo, _) = Repository::init(
+            dir,
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("main".to_owned()),
+        )
+        .expect("init");
+        let commit_body = format!(
+            "tree {EMPTY_TREE}\nauthor T <t@x> 1 +0000\ncommitter T <t@x> 1 +0000\n\nonly\n"
+        );
+        let tip = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Commit, commit_body.as_bytes())
+            .expect("commit");
+        crate::refs::write_ref(dir, "refs/heads/main", &tip).expect("ref");
+        (repo, tip)
+    }
+
+    fn shallow_for_depth(repo: &Repository, wants: &[ObjectId], depth: u32) -> Vec<ObjectId> {
+        let req = ShallowRequest {
+            depth: Some(depth),
+            ..ShallowRequest::default()
+        };
+        compute_shallow_response(repo, wants, &req)
+            .expect("shallow response")
+            .shallow
+    }
+
+    #[test]
+    fn deepen_one_on_root_commit_advertises_it_shallow() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (repo, tip) = init_single_commit_bare(dir.path());
+        assert_eq!(shallow_for_depth(&repo, &[tip], 1), vec![tip]);
+    }
+
+    #[test]
+    fn deepen_beyond_history_advertises_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (repo, tip) = init_single_commit_bare(dir.path());
+        assert!(shallow_for_depth(&repo, &[tip], 5).is_empty());
+    }
+
+    #[test]
+    fn tag_wants_count_from_the_tagged_commit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (repo, tip) = init_single_commit_bare(dir.path());
+        let tag_body = format!(
+            "object {}\ntype commit\ntag v1\ntagger T <t@x> 1 +0000\n\nv1\n",
+            tip.to_hex()
+        );
+        let tag = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Tag, tag_body.as_bytes())
+            .expect("tag");
+        assert_eq!(shallow_for_depth(&repo, &[tag], 1), vec![tip]);
+        assert_eq!(shallow_for_depth(&repo, &[tip, tag], 1), vec![tip]);
+        let tree = ObjectId::from_hex(EMPTY_TREE).expect("empty tree");
+        assert!(shallow_for_depth(&repo, &[tree], 1).is_empty());
+    }
+
+    fn git_clone_depth(bare: &Path, dest: &Path, depth: u32) -> bool {
+        Command::new("git")
+            .args(["clone", "-q", "--depth", &depth.to_string()])
+            .arg(format!("file://{}", bare.display()))
+            .arg(dest)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn single_commit_shallow_borders_match_git_clone_depth() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (repo, tip) = init_single_commit_bare(dir.path());
+        assert_eq!(shallow_for_depth(&repo, &[tip], 1).len(), 1);
+        assert!(shallow_for_depth(&repo, &[tip], 5).is_empty());
+
+        let d1 = dir.path().join("git-d1");
+        let d5 = dir.path().join("git-d5");
+        assert!(git_clone_depth(dir.path(), &d1, 1), "git clone --depth 1");
+        assert!(git_clone_depth(dir.path(), &d5, 5), "git clone --depth 5");
+        assert!(d1.join(".git/shallow").is_file());
+        assert!(!d5.join(".git/shallow").is_file());
+    }
+}

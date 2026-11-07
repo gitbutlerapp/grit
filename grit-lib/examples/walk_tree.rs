@@ -7,7 +7,6 @@ use grit_lib::index::MODE_TREE;
 use grit_lib::objects::{parse_tree, serialize_commit, CommitData, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_parse::resolve_revision;
 
 fn walk_tree(
     repo: &grit_lib::repo::Repository,
@@ -92,7 +91,9 @@ fn main() -> grit_lib::error::Result<()> {
         .write(ObjectKind::Commit, &serialize_commit(&commit))?;
     refs::write_ref(repo.git_dir(), "refs/heads/main", &commit_oid)?;
 
-    let head_commit = resolve_revision(&repo, "HEAD")?;
+    let head_commit = repo
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())?;
     let commit_obj = repo.odb().read(&head_commit)?;
     let parsed = grit_lib::objects::parse_commit(&commit_obj.data)?;
     println!("walking tree at {}", parsed.tree);

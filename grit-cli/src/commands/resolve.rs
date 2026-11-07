@@ -3,9 +3,11 @@
 use std::io::Write;
 
 use anyhow::{Context, Result};
-use grit_lib::objects::ObjectKind;
-use grit_lib::revwalk::object_inspect::{abbreviate_for_display, ResolvedObject};
+use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::repo::Repository;
+use grit_lib::revwalk::object_inspect::ResolvedObject;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
+use grit_lib::revwalk::AbbrevLength;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -191,9 +193,17 @@ pub fn run_verify(spec: String, short: bool, quiet: bool) -> Result<VerifyResolv
     let oid = repo
         .verify_object(&spec, None)
         .map_err(|e| map_resolve_error(&spec, e))?;
-    let oid = abbreviate_for_display(&repo, oid, short)
-        .with_context(|| format!("abbreviate oid for '{spec}'"))?;
+    let oid =
+        display_oid(&repo, oid, short).with_context(|| format!("abbreviate oid for '{spec}'"))?;
     Ok(VerifyResolveOutcome { spec, oid })
+}
+
+fn display_oid(repo: &Repository, oid: ObjectId, short: bool) -> grit_lib::error::Result<String> {
+    if short {
+        repo.revwalk().abbreviate(oid, AbbrevLength::Configured)
+    } else {
+        Ok(oid.to_hex())
+    }
 }
 
 /// Exit code for `grit resolve --verify` (0 = resolved, 1 = not).
@@ -239,7 +249,7 @@ pub fn run(specs: Vec<String>, short: bool, ref_output: RefNameOutput) -> Result
                 let resolved = repo
                     .resolve(&spec)
                     .map_err(|e| map_resolve_error(&spec, e))?;
-                let oid = abbreviate_for_display(&repo, resolved.oid, short)
+                let oid = display_oid(&repo, resolved.oid, short)
                     .with_context(|| format!("abbreviate oid for '{spec}'"))?;
                 results.push(entry_from_resolved(&spec, &resolved, oid));
             }

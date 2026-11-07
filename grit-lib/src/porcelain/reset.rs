@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn reset_committish_peels_annotated_tag() {
         use crate::objects::{serialize_tag, TagData};
-        use crate::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
+        use crate::revwalk::{IndexDwim, Peel, ResolveOptions};
 
         let (_dir, repo) = init_repo();
         let tip = commit_file(&repo, "f", "1\n", None);
@@ -571,8 +571,13 @@ mod tests {
         let tag_oid = repo.odb().write(ObjectKind::Tag, &tag_bytes).expect("tag");
         refs::write_ref(repo.git_dir(), "refs/tags/v1", &tag_oid).expect("tag ref");
 
-        let resolved =
-            resolve_revision_as_commit_without_index_dwim(&repo, "v1").expect("peel tag to commit");
+        let options = ResolveOptions::default()
+            .with_peel(Peel::Commit)
+            .with_index_dwim(IndexDwim::Off);
+        let resolved = repo
+            .revwalk()
+            .resolve("v1", &options)
+            .expect("peel tag to commit");
         assert_eq!(resolved, tip);
         reset_to_commit(
             &repo,

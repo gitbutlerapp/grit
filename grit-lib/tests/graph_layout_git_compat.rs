@@ -4,7 +4,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::{list_commits_for_log_graph, RevWalkListOptions};
+use grit_lib::revwalk::RevWalkListOptions;
 use grit_test_support::git;
 
 fn oid_token(line: &str) -> Option<String> {
@@ -52,18 +52,21 @@ fn log_graph_order_matches_git_on_merge_fixture() {
 
     let git_order = git_graph_oids(root);
     let repo = Repository::discover(Some(root), &RepositoryOptions::default()).expect("open");
-    let grit_order: Vec<String> = list_commits_for_log_graph(
-        &repo,
-        &["HEAD"],
-        &RevWalkListOptions {
-            limit: Some(100),
-            ..Default::default()
-        },
-    )
-    .expect("graph walk")
-    .into_iter()
-    .map(|o| o.to_hex())
-    .collect();
+    let grit_order: Vec<String> = repo
+        .revwalk()
+        .commits(&["HEAD"], &{
+            let mut walk = (&RevWalkListOptions {
+                limit: Some(100),
+                ..Default::default()
+            })
+                .clone();
+            walk.graph = true;
+            walk
+        })
+        .expect("graph walk")
+        .into_iter()
+        .map(|o| o.to_hex())
+        .collect();
 
     assert_eq!(grit_order, git_order, "topo graph order must match git");
 }

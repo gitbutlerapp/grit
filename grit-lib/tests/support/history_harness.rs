@@ -14,9 +14,9 @@ use grit_lib::error::Result;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{
-    rev_list, split_revision_token, ObjectFilter, OrderingMode, RevListOptions,
+    split_revision_token, ObjectFilter, OrderingMode, RevListOptions,
 };
-use grit_lib::revwalk::{parse_rev_walk_tokens, RevWalkParsedSpecs};
+use grit_lib::revwalk::RevWalkParsedSpecs;
 
 use super::refs_harness::{git as refs_git, null_device_for_tests, AUTHOR_EMAIL, AUTHOR_NAME};
 
@@ -563,7 +563,10 @@ pub fn grit_rev_list_commits_in_repo(
     negative: &[String],
     options: &RevListOptions,
 ) -> Result<Vec<ObjectId>> {
-    Ok(rev_list(repo, positive, negative, options)?.commits)
+    Ok(repo
+        .revwalk()
+        .rev_list(positive, negative, options)?
+        .commits)
 }
 
 /// Assert grit commit order matches `git rev-list` with the same argv tail (after `rev-list`).
@@ -608,7 +611,10 @@ pub fn grit_rev_list_object_set(
         filter,
         ..RevListOptions::default()
     };
-    let result = rev_list(&repo, positive, negative, &opts).expect("rev-list objects");
+    let result = repo
+        .revwalk()
+        .rev_list(positive, negative, &opts)
+        .expect("rev-list objects");
     let mut set = HashSet::new();
     for oid in result.commits {
         set.insert(oid);
@@ -857,7 +863,7 @@ pub fn expand_token_for_rev_list(
         negative,
         symmetric_left,
         symmetric_right,
-    } = parse_rev_walk_tokens(repo, &[token])?;
+    } = repo.revwalk().parse_tokens(&[token])?;
     opts.symmetric_left = symmetric_left;
     opts.symmetric_right = symmetric_right;
     Ok((positive, negative))

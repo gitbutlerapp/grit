@@ -173,7 +173,7 @@ fn grit_object_ids(bare: &Path, patterns: &str) -> HashSet<ObjectId> {
         filter: Some(filter),
         ..Default::default()
     };
-    let result = grit_lib::revwalk::rev_list::rev_list(&repo, &[head], &[], &opts).unwrap();
+    let result = repo.revwalk().rev_list(&[head], &[], &opts).unwrap();
     let mut out = HashSet::new();
     out.extend(result.commits);
     for (oid, _) in result.objects {
@@ -272,7 +272,7 @@ fn grit_blob_paths(bare: &Path, patterns: &str) -> Vec<String> {
         filter: Some(filter),
         ..Default::default()
     };
-    let result = grit_lib::revwalk::rev_list::rev_list(&repo, &[head], &[], &opts).unwrap();
+    let result = repo.revwalk().rev_list(&[head], &[], &opts).unwrap();
     let mut lines = String::new();
     for (oid, path) in result.objects {
         if path.is_empty() {

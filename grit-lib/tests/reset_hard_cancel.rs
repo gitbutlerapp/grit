@@ -171,10 +171,15 @@ fn hard_reset_returns_cancelled_and_stops_checkout_early() {
     .expect("init");
     let head = seed_many_file_repo(&repo, FILES);
 
-    let first = grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim(
-        &repo, "HEAD~119",
-    )
-    .expect("first commit");
+    let first = repo
+        .revwalk()
+        .resolve(
+            "HEAD~119",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit)
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+        )
+        .expect("first commit");
 
     reset_to_commit(
         &repo,
@@ -228,10 +233,15 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
     )
     .expect("init");
     let head = seed_many_file_repo(&repo, FILES);
-    let first = grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim(
-        &repo, "HEAD~119",
-    )
-    .expect("first commit");
+    let first = repo
+        .revwalk()
+        .resolve(
+            "HEAD~119",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit)
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+        )
+        .expect("first commit");
 
     let before = ref_and_index(&repo);
     let mut progress = CancelHardResetOnFiles::new(5);

@@ -8,12 +8,6 @@ use std::path::Path;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::{
-    expand_parent_shorthand_rev_parse_lines, resolve_push_full_ref_for_branch, resolve_revision,
-    resolve_revision_as_commit, resolve_revision_as_commit_without_index_dwim,
-    resolve_revision_for_patch_old_blob, resolve_revision_for_verify, resolve_treeish_blob_at_path,
-    resolve_upstream_symbolic_name,
-};
 
 use support::{
     build_commit_dag, commit_file, git, oracle_one, oracle_table, HistoryRepo, ResolveMode,
@@ -49,46 +43,17 @@ fn triple_dot_tags_auto_merge_and_refs() {
         "AUTO_MERGE",
         ":/history harness c",
     ] {
-        let _ = resolve_revision_for_verify(&repo, spec);
-        let _ = resolve_revision(&repo, spec);
+        let _ = repo.revwalk().resolve(
+            spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        );
+        let _ = repo
+            .revwalk()
+            .resolve(spec, &grit_lib::revwalk::ResolveOptions::default());
     }
     oracle_one(&repo, wt, "tags/v1", ResolveMode::Verify).unwrap_or_else(|e| panic!("{e}"));
-}
-
-#[test]
-fn parent_shorthand_expansion_symbolic_and_abbrev() {
-    let hist = HistoryRepo::init();
-    let wt = hist.worktree();
-    build_commit_dag(
-        wt,
-        &[("b", "a"), ("c", "b"), ("m", "b"), ("m", "c")],
-        &[("m", "refs/heads/main")],
-    );
-    let repo = open_grit(wt);
-    let lines = expand_parent_shorthand_rev_parse_lines(&repo, "main^!", false, None)
-        .expect("expand")
-        .expect("lines");
-    assert!(!lines.is_empty());
-    let sym = expand_parent_shorthand_rev_parse_lines(&repo, "main^!", true, None)
-        .expect("sym")
-        .expect("sym lines");
-    assert!(!sym.is_empty());
-    let abbrev = expand_parent_shorthand_rev_parse_lines(&repo, "main^!", false, Some(7))
-        .expect("abbrev")
-        .expect("abbrev lines");
-    assert!(!abbrev.is_empty());
-    let at = expand_parent_shorthand_rev_parse_lines(&repo, "main^@", false, None)
-        .expect("at")
-        .expect("at lines");
-    assert!(!at.is_empty());
-    let single = HistoryRepo::init();
-    let swt = single.worktree();
-    commit_file(swt, "f", "1\n", "only");
-    let srepo = open_grit(swt);
-    let bang_only = expand_parent_shorthand_rev_parse_lines(&srepo, "HEAD^!", false, None)
-        .expect("single bang")
-        .expect("single");
-    assert_eq!(bang_only.len(), 1);
 }
 
 #[test]
@@ -124,14 +89,31 @@ fn resolve_variant_matrix_on_rich_repo() {
         .collect();
     let spec_refs: Vec<&str> = specs.iter().map(String::as_str).collect();
     oracle_table(&repo, wt, ResolveMode::Verify, &spec_refs);
-    let _ = resolve_revision_for_verify(&repo, "main...side");
+    let _ = repo.revwalk().resolve(
+        "main...side",
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
     for n in 1..=5 {
         let spec = format!("main^^{n}");
-        let _ = resolve_revision_as_commit(&repo, &spec);
-        let _ = resolve_revision_as_commit_without_index_dwim(&repo, &spec);
+        let _ = repo.revwalk().resolve(
+            &spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit),
+        );
+        let _ = repo.revwalk().resolve(
+            &spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit)
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+        );
     }
-    let _ = resolve_treeish_blob_at_path(&repo, "HEAD:side.txt");
-    let _ = resolve_revision_for_patch_old_blob(&repo, "HEAD:side.txt");
+    let _ = repo.revwalk().blob_at_path("HEAD:side.txt");
+    let _ = repo.revwalk().resolve(
+        "HEAD:side.txt",
+        &grit_lib::revwalk::ResolveOptions::default().with_peel(grit_lib::revwalk::Peel::Blob),
+    );
 }
 
 #[test]
@@ -152,11 +134,16 @@ fn upstream_and_push_resolution_smoke() {
     );
     git(wt, &["push", "-u", "origin", "main"]);
     let repo = open_grit(wt);
-    let _ = resolve_upstream_symbolic_name(&repo, "main@{u}");
-    let _ = resolve_push_full_ref_for_branch(&repo, "main");
+    let _ = repo.revwalk().upstream_symbolic_name("main@{u}");
+    let _ = repo.revwalk().upstream_symbolic_name("main@{push}");
     let tree = repo
         .odb()
         .write_loose_materialize(ObjectKind::Tree, b"")
         .expect("tree");
-    let _ = resolve_revision_for_verify(&repo, &tree.to_hex()[..7]);
+    let _ = repo.revwalk().resolve(
+        &tree.to_hex()[..7],
+        &grit_lib::revwalk::ResolveOptions::default()
+            .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+            .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+    );
 }

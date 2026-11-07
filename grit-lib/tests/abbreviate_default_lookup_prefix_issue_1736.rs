@@ -15,7 +15,6 @@ use grit_lib::objects::odb::store::{ObjectStore, WritableObjectStore};
 use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_parse::{abbreviate_object_id, resolve_revision};
 
 /// Implements only the required trait methods and counts full enumerations.
 #[derive(Debug, Default)]
@@ -126,7 +125,9 @@ fn abbreviation_scans_a_minimal_store_once_per_id() {
     for (id, expected) in cases {
         let before = store.scans();
         assert_eq!(
-            abbreviate_object_id(&repo, id, 7).expect("abbreviate"),
+            repo.revwalk()
+                .abbreviate(id, grit_lib::revwalk::AbbrevLength::AtLeast(7))
+                .expect("abbreviate"),
             expected
         );
         assert_eq!(
@@ -137,27 +138,37 @@ fn abbreviation_scans_a_minimal_store_once_per_id() {
     }
 
     assert_eq!(
-        abbreviate_object_id(&repo, target, 4).expect("abbrev"),
+        repo.revwalk()
+            .abbreviate(target, grit_lib::revwalk::AbbrevLength::AtLeast(4))
+            .expect("abbrev"),
         "abcdef0123"
     );
     assert_eq!(
-        abbreviate_object_id(&repo, unrelated, 4).expect("abbrev"),
+        repo.revwalk()
+            .abbreviate(unrelated, grit_lib::revwalk::AbbrevLength::AtLeast(4))
+            .expect("abbrev"),
         "1234"
     );
     assert_eq!(
-        abbreviate_object_id(&repo, target, 12).expect("abbrev"),
+        repo.revwalk()
+            .abbreviate(target, grit_lib::revwalk::AbbrevLength::AtLeast(12))
+            .expect("abbrev"),
         "abcdef012300",
         "a longer minimum wins over the unique length"
     );
     assert_eq!(
-        abbreviate_object_id(&repo, target, 100).expect("abbrev"),
+        repo.revwalk()
+            .abbreviate(target, grit_lib::revwalk::AbbrevLength::AtLeast(100))
+            .expect("abbrev"),
         target.to_hex(),
         "minimum is clamped to the full id"
     );
 
     let missing = oid("abcdef0125000000000000000000000000000000");
     assert_eq!(
-        abbreviate_object_id(&repo, missing, 7).expect("abbrev"),
+        repo.revwalk()
+            .abbreviate(missing, grit_lib::revwalk::AbbrevLength::AtLeast(7))
+            .expect("abbrev"),
         "abcdef0"
     );
 }
@@ -278,8 +289,16 @@ fn short_ids_resolve_through_a_minimal_store() {
         .odb()
         .write(ObjectKind::Blob, b"short\n")
         .expect("write");
-    let short = abbreviate_object_id(&repo, blob, 7).expect("abbrev");
-    assert_eq!(resolve_revision(&repo, &short).expect("resolve"), blob);
+    let short = repo
+        .revwalk()
+        .abbreviate(blob, grit_lib::revwalk::AbbrevLength::AtLeast(7))
+        .expect("abbrev");
+    assert_eq!(
+        repo.revwalk()
+            .resolve(&short, &grit_lib::revwalk::ResolveOptions::default())
+            .expect("resolve"),
+        blob
+    );
 }
 
 fn git(dir: &Path) -> Command {
@@ -355,7 +374,11 @@ fn abbreviation_matches_git_rev_parse_short_over_pack_and_loose() {
             .collect();
         let actual: Vec<String> = sample
             .iter()
-            .map(|id| abbreviate_object_id(&repo, *id, min_len).expect("abbreviate"))
+            .map(|id| {
+                repo.revwalk()
+                    .abbreviate(*id, grit_lib::revwalk::AbbrevLength::AtLeast(min_len))
+                    .expect("abbreviate")
+            })
             .collect();
         assert_eq!(actual, expected, "min_len {min_len}");
         if min_len == 4 {

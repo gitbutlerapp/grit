@@ -1,13 +1,10 @@
-//! `load_commits_with_decorations` loads parents and ref labels in one pass.
+//! `RevWalk::load_commits` loads parents and ref labels in one pass.
 
 use crate::support;
 
 use grit_lib::change_id::{resolved_change_id, ChangeId};
 use grit_lib::objects::{parse_commit, serialize_commit, ObjectId, OidHashMap};
-use grit_lib::porcelain::log::{
-    collect_decorations, load_commits_with_decorations, load_commits_with_decorations_reusing,
-    DecorationKind,
-};
+use grit_lib::porcelain::log::DecorationKind;
 use support::{commit_file, open_grit_repo, HistoryRepo};
 
 #[test]
@@ -19,8 +16,12 @@ fn load_commits_attaches_branch_and_parents() -> grit_lib::error::Result<()> {
     let repo = open_grit_repo(wt);
     let head: ObjectId = repo.ref_store().resolve("HEAD")?;
 
-    let decorations = collect_decorations(&repo, false)?;
-    let loaded = load_commits_with_decorations(&repo, std::slice::from_ref(&head), &decorations)?;
+    let decorations = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+    )?;
+    let loaded = repo
+        .revwalk()
+        .load_commits(std::slice::from_ref(&head), &decorations, &mut ())?;
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].oid, head);
     assert_eq!(loaded[0].parents.len(), 1);
@@ -40,10 +41,12 @@ fn loaded_commit_reports_stored_and_derived_change_id() -> grit_lib::error::Resu
     let head: ObjectId = repo.ref_store().resolve("HEAD")?;
     let obj = repo.odb().read(&head)?;
     let data = parse_commit(&obj.data)?;
-    let derived = load_commits_with_decorations(
-        &repo,
+    let derived = repo.revwalk().load_commits(
         std::slice::from_ref(&head),
-        &collect_decorations(&repo, false)?,
+        &repo.revwalk().decorations(
+            &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+        )?,
+        &mut (),
     )?;
     assert!(!derived[0].change_id_stored);
     assert_eq!(
@@ -74,8 +77,10 @@ fn reusing_parsed_commits_matches_reading_them() -> grit_lib::error::Result<()> 
     let middle = parse_commit(&repo.odb().read(&tip)?.data)?.parents[0];
     let root = parse_commit(&repo.odb().read(&middle)?.data)?.parents[0];
     let oids = [tip, middle, root];
-    let decorations = collect_decorations(&repo, false)?;
-    let expected = load_commits_with_decorations(&repo, &oids, &decorations)?;
+    let decorations = repo.revwalk().decorations(
+        &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
+    )?;
+    let expected = repo.revwalk().load_commits(&oids, &decorations, &mut ())?;
 
     // Only some commits are pre-parsed; an unrelated entry must be left alone.
     let mut parsed = OidHashMap::default();
@@ -86,13 +91,17 @@ fn reusing_parsed_commits_matches_reading_them() -> grit_lib::error::Result<()> 
         .expect("oid");
     parsed.insert(unrelated, parse_commit(&repo.odb().read(&middle)?.data)?);
 
-    let reused = load_commits_with_decorations_reusing(&repo, &oids, &decorations, &mut parsed)?;
+    let reused = repo
+        .revwalk()
+        .load_commits(&oids, &decorations, &mut parsed)?;
     assert_eq!(reused, expected);
     assert_eq!(parsed.len(), 1, "listed commits are moved out of the map");
     assert!(parsed.contains_key(&unrelated));
 
     let mut empty = OidHashMap::default();
-    let read_all = load_commits_with_decorations_reusing(&repo, &oids, &decorations, &mut empty)?;
+    let read_all = repo
+        .revwalk()
+        .load_commits(&oids, &decorations, &mut empty)?;
     assert_eq!(read_all, expected);
     Ok(())
 }

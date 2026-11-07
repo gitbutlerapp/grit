@@ -19,11 +19,11 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::error::Result;
 
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
+use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::prelude::RepositoryOptions;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_parse::abbreviate_object_id;
 use tempfile::TempDir;
 
 const OBJECTS: usize = 200_000;
@@ -162,7 +162,11 @@ fn bench_case(c: &mut Criterion, name: &str, repo: &Repository, oids: &[ObjectId
     c.bench_function(&format!("abbreviate/{name}_200k_x200"), |b| {
         b.iter(|| {
             for oid in &oids[..ABBREVIATED] {
-                black_box(abbreviate_object_id(repo, *oid, 7).expect("abbreviate"));
+                black_box(
+                    repo.revwalk()
+                        .abbreviate(*oid, grit_lib::revwalk::AbbrevLength::AtLeast(7))
+                        .expect("abbreviate"),
+                );
             }
         });
     });

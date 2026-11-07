@@ -12,9 +12,7 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{
-    merge_bases, rev_list, ObjectFilter, OrderingMode, RevListOptions,
-};
+use grit_lib::revwalk::rev_list::{ObjectFilter, OrderingMode, RevListOptions};
 use std::collections::HashSet;
 use std::fs;
 use tempfile::tempdir;
@@ -80,7 +78,9 @@ fn symmetric_range_ancestry_and_object_roots() -> grit_lib::error::Result<()> {
         in_commit_order: true,
         ..RevListOptions::default()
     };
-    let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+    let out = repo
+        .revwalk()
+        .rev_list(&[String::from("main")], &[], &opts)?;
     assert_eq!(out.commits.len(), 2);
     Ok(())
 }
@@ -146,7 +146,9 @@ fn diff_postprocess_across_commit_pair() -> grit_lib::error::Result<()> {
 
     let via_commits = diff_commits(repo.odb(), &base, &tip)?;
     assert!(!via_commits.is_empty());
-    let _ = merge_bases(&repo, tip, base, false)?;
+    let _ = repo
+        .revwalk()
+        .merge_bases(&[tip, base], grit_lib::revwalk::MergeBaseMode::All)?;
     Ok(())
 }
 
@@ -226,15 +228,11 @@ fn long_merged_history_object_walk_and_decoration() -> grit_lib::error::Result<(
             max_count: Some(96),
             ..RevListOptions::default()
         };
-        let _ = rev_list(
-            &repo,
-            &[String::from("main"), String::from("side")],
-            &[],
-            &opts,
-        )?;
+        let _ =
+            repo.revwalk()
+                .rev_list(&[String::from("main"), String::from("side")], &[], &opts)?;
     }
-    let _ = rev_list(
-        &repo,
+    let _ = repo.revwalk().rev_list(
         &[
             String::from("main^{tree}"),
             String::from("refs/tags/v1"),

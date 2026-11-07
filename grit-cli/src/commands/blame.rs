@@ -16,6 +16,7 @@ use grit_lib::blame::{
     CopyDetection, IgnoreRevs, IgnoreRevsSources,
 };
 use grit_lib::diff::WhitespaceMode;
+use grit_lib::revwalk::{Peel, ResolveOptions};
 
 impl fmt::Display for BlameUsageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -24,7 +25,6 @@ impl fmt::Display for BlameUsageError {
 }
 
 impl std::error::Error for BlameUsageError {}
-use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -210,7 +210,9 @@ pub fn run(
     let rev_spec = explicit_rev.as_deref().unwrap_or("HEAD");
 
     let repo = context::discover()?;
-    let start = resolve_revision_as_commit(&repo, rev_spec)
+    let start = repo
+        .revwalk()
+        .resolve(rev_spec, &ResolveOptions::default().with_peel(Peel::Commit))
         .with_context(|| format!("could not resolve revision '{rev_spec}'"))?;
 
     let final_source = match contents.as_deref() {

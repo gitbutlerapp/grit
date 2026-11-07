@@ -13,7 +13,7 @@ use grit_lib::objects::bitmap::{BitmapWalkError, ReachabilityQuery};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::MissingAction;
-use grit_lib::revwalk::rev_parse::resolve_revision_for_range_end;
+use grit_lib::revwalk::{ResolveOptions, ResolvePurpose};
 
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
@@ -36,7 +36,10 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let commit: ObjectId = match resolve_revision_for_range_end(&repo, &rev) {
+    let commit: ObjectId = match repo.revwalk().resolve(
+        &rev,
+        &ResolveOptions::default().with_purpose(ResolvePurpose::RangeEnd),
+    ) {
         Ok(oid) => oid,
         Err(err) => {
             eprintln!("resolve {rev}: {err}");

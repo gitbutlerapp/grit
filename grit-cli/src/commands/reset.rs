@@ -7,7 +7,8 @@ use grit_lib::porcelain::reset::{
     reset_to_commit, OrphanedCommitSummary, ResetMode, ResetOptions, ResetOutcome,
     DEFAULT_ORPHAN_LIMIT,
 };
-use grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
+use grit_lib::revwalk::{IndexDwim, Peel, ResolveOptions};
+
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -239,7 +240,14 @@ pub fn run(
 
     let repo = context::discover()?;
     let spec = rev.unwrap_or_else(|| "HEAD".to_owned());
-    let target = resolve_revision_as_commit_without_index_dwim(&repo, &spec)
+    let target = repo
+        .revwalk()
+        .resolve(
+            &spec,
+            &ResolveOptions::default()
+                .with_peel(Peel::Commit)
+                .with_index_dwim(IndexDwim::Off),
+        )
         .map_err(|err| map_reset_committish_error(err, &spec))?;
 
     let env = repo.environment();

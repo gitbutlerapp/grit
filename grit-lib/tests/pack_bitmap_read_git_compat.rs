@@ -9,7 +9,7 @@ use grit_lib::diagnostics::{CollectingDiagnostics, DiagnosticsHandle, Warning};
 use grit_lib::objects::bitmap::BitmapIndex;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_test_support::{HashAlgo, RepoFixture};
 
 fn git_ok(repo: &RepoFixture, args: &[&str]) {
@@ -65,7 +65,10 @@ fn reachability_positions(repo: &Repository, index: &BitmapIndex, tip: &ObjectId
         quiet: true,
         ..Default::default()
     };
-    let result = rev_list(repo, &[hex], &[], &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&[hex], &[], &opts)
+        .expect("rev-list");
     let mut out = HashSet::new();
     for oid in result
         .commits

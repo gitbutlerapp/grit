@@ -153,13 +153,19 @@ fn assert_origin_tracking_in_store(repo: &Repository, store: &MemoryRefStore, ti
     );
     assert_eq!(
         repo.revwalk()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                "refs/remotes/origin/main",
+                &grit_lib::revwalk::ResolveOptions::default()
+            )
             .expect("resolve through handle"),
         tip
     );
     assert_eq!(
         repo.revwalk()
-            .resolve("refs/remotes/origin/HEAD")
+            .resolve(
+                "refs/remotes/origin/HEAD",
+                &grit_lib::revwalk::ResolveOptions::default()
+            )
             .expect("resolve HEAD"),
         tip
     );

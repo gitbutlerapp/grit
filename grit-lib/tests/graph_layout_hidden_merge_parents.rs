@@ -6,7 +6,6 @@ use std::collections::HashSet;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rewrite_display_parents;
 use support::{build_commit_dag, git};
 
 #[test]
@@ -24,7 +23,10 @@ fn filtered_hidden_merge_keeps_both_visible_ancestors() -> grit_lib::error::Resu
     let b = oids["b"];
     let tip = oids["tip"];
     let visible: HashSet<_> = [a, b, tip].into_iter().collect();
-    let parents = rewrite_display_parents(&repo, tip, &visible)?;
+    let parents = repo
+        .revwalk()
+        .rewrite_display_parents(&visible)
+        .map(|parents| parents.get(&tip).cloned().unwrap_or_default())?;
     assert!(
         parents.contains(&a) && parents.contains(&b),
         "parents={parents:?}"

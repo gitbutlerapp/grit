@@ -12,7 +12,6 @@ use grit_lib::ident::Signature;
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_parse::resolve_revision_for_verify;
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Tester <t@e.test> 1700000000 +0000";
@@ -59,7 +58,15 @@ fn cancelled_pre_commit_hook_leaves_no_index_lock() {
         &CancelToken::new(),
     )
     .expect("seed commit");
-    let head_before = resolve_revision_for_verify(&repo, "HEAD").expect("head");
+    let head_before = repo
+        .revwalk()
+        .resolve(
+            "HEAD",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        )
+        .expect("head");
 
     write_sleep_pre_commit(&repo, 60);
     std::fs::write(dir.path().join("a"), "dirty\n").expect("dirty");
@@ -74,7 +81,15 @@ fn cancelled_pre_commit_hook_leaves_no_index_lock() {
     kick.join().expect("join");
     assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
 
-    let head_after = resolve_revision_for_verify(&repo, "HEAD").expect("head");
+    let head_after = repo
+        .revwalk()
+        .resolve(
+            "HEAD",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        )
+        .expect("head");
     assert_eq!(head_before, head_after, "HEAD must not move on cancel");
 
     assert!(

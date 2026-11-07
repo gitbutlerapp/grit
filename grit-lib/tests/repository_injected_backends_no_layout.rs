@@ -15,8 +15,7 @@ use grit_lib::refs::store::{
     RefUpdateFlags,
 };
 use grit_lib::repo::{Repository, RepositoryError};
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
-use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::rev_list::RevListOptions;
 
 fn open_injected(git_dir: &Path) -> grit_lib::error::Result<(Repository, Arc<MemoryRefStore>)> {
     let refs = Arc::new(MemoryRefStore::new());
@@ -77,10 +76,22 @@ fn exercise(repo: &Repository, refs: &MemoryRefStore) {
     let second = commit(repo, Some(first), "second");
     advance_head(refs, Some(first), second);
 
-    assert_eq!(resolve_revision(repo, "HEAD").expect("HEAD"), second);
-    assert_eq!(resolve_revision(repo, "main~1").expect("main~1"), first);
-    let walked =
-        rev_list(repo, &["HEAD".to_owned()], &[], &RevListOptions::default()).expect("rev-list");
+    assert_eq!(
+        repo.revwalk()
+            .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+            .expect("HEAD"),
+        second
+    );
+    assert_eq!(
+        repo.revwalk()
+            .resolve("main~1", &grit_lib::revwalk::ResolveOptions::default())
+            .expect("main~1"),
+        first
+    );
+    let walked = repo
+        .revwalk()
+        .rev_list(&["HEAD".to_owned()], &[], &RevListOptions::default())
+        .expect("rev-list");
     assert_eq!(walked.commits, vec![second, first]);
 }
 

@@ -88,7 +88,7 @@ pub struct LogWalkPage {
     /// Commits whose parents and dates came from the commit-graph are absent.
     ///
     /// Pass this to
-    /// [`load_commits_with_decorations_reusing`](crate::porcelain::log::load_commits_with_decorations_reusing)
+    /// [`RevWalk::load_commits`](crate::revwalk::RevWalk::load_commits)
     /// to build output rows without reading those commits again.
     pub commit_data: WalkedCommits,
 }

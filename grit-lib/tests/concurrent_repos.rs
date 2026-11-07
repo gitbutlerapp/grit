@@ -496,9 +496,13 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
         let topic_tree = parse_commit(&repo.odb().read(&topic_tip).expect("topic obj").data)
             .expect("parse topic")
             .tree;
-        let bases =
-            grit_lib::revwalk::merge_base::merge_bases_first_vs_rest(&repo, main_tip, &[topic_tip])
-                .expect("merge base");
+        let bases = repo
+            .revwalk()
+            .merge_bases(
+                &[main_tip, topic_tip],
+                grit_lib::revwalk::MergeBaseMode::Best,
+            )
+            .expect("merge base");
         let merge_base = *bases.first().expect("non-empty merge base");
         let base_tree = parse_commit(&repo.odb().read(&merge_base).expect("base obj").data)
             .expect("parse base")

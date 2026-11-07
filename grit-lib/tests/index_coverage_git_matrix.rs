@@ -139,7 +139,10 @@ fn load_expand_sparse_optional_and_collapse_roundtrip() {
     git(wt, &["config", "index.sparse", "true"]);
     git(wt, &["add", "-A"]);
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let head_commit = rev_parse::resolve_revision(&grit, "HEAD").expect("head");
+    let head_commit = grit
+        .revwalk()
+        .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
+        .expect("head");
     let head_obj = grit.odb().read(&head_commit).expect("commit");
     let head = grit_lib::objects::parse_commit(&head_obj.data)
         .expect("parse")

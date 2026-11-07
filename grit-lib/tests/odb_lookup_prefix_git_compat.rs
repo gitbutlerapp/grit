@@ -3,7 +3,6 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::list_all_abbrev_matches;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -121,7 +120,7 @@ fn lookup_prefix_matches_git_disambiguate_loose_pack_midx_and_alternate() {
             .expect("lookup_prefix");
         grit_via_odb.sort_by_key(|o| o.to_hex());
 
-        let grit_via_rev_parse = list_all_abbrev_matches(&repo, &prefix).expect("rev_parse");
+        let grit_via_rev_parse = repo.revwalk().abbrev_matches(&prefix).expect("rev_parse");
         let mut grit_rev_hex: Vec<String> = grit_via_rev_parse.iter().map(|o| o.to_hex()).collect();
         grit_rev_hex.sort();
 

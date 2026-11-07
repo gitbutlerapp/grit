@@ -9,7 +9,7 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::mailmap::load_mailmap_table;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::revwalk::CommitFilterBuilder;
 
 fn main() -> Result<()> {
@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         commit_filter: Some(filter),
         ..RevListOptions::default()
     };
-    let result = rev_list(&repo, &tips, &[], &opts)?;
+    let result = repo.revwalk().rev_list(&tips, &[], &opts)?;
     for oid in &result.commits {
         println!("{oid}");
     }

@@ -17,29 +17,30 @@ pub mod filter;
 pub(crate) mod graph;
 pub mod group_by;
 pub mod handle;
+mod log;
+mod merge_bases;
 pub(crate) mod queries;
+mod resolve;
 
 pub use crate::diff::{Pickaxe, PickaxeError, PickaxeKind};
 pub use crate::rev_list::CommitExtent;
 pub use describe::{DescribeOptions, DescribedCommit};
 pub use filter::{CommitFilter, CommitFilterBuilder, CommitFilterError};
 pub use graph::{
-    display_parents_for_graph, list_commits_for_log_graph, log_graph_materialize,
-    rewrite_display_parents, rewrite_display_parents_map, GraphCharset, GraphCommitInput,
-    GraphLayout, GraphLineKind, GraphRenderedLine, GraphRowTopology,
+    GraphCharset, GraphCommitInput, GraphLayout, GraphLineKind, GraphRenderedLine,
+    GraphRowTopology, LogGraphMaterialized,
 };
-pub use group_by::{
-    group_commits_by_author, group_commits_by_author_from_rev, mailmap_for_grouping, AuthorGroup,
-    GroupByAuthorOptions,
-};
+pub use group_by::{AuthorGroup, GroupByAuthorOptions};
 pub use handle::RevWalk;
 pub use handle::RevWalkCommitIter;
+pub use merge_bases::{AheadBehind, AheadBehindOptions, MergeBaseMode, ReachableWalkOptions};
+pub(crate) use queries::parse_rev_walk_tokens;
 pub use queries::{
-    committer_cutoff_from_date, parse_rev_walk_tokens, resolve_log_walk_tips_and_hide,
-    rev_list_commits_for_author_group, rev_walk_list_supports_stream, LeftRightCounts, MergeFilter,
+    committer_cutoff_from_date, rev_walk_list_supports_stream, LeftRightCounts, MergeFilter,
     RefSelection, RevWalkCommitIterOptions, RevWalkCommitStream, RevWalkCommitStreamItem,
     RevWalkListOptions, RevWalkParsedSpecs,
 };
+pub use resolve::{AbbrevLength, IndexDwim, Peel, ResolveOptions, ResolvePurpose};
 
 pub mod rev_list {
     //! rev_list API (re-exported at this path).

@@ -4,6 +4,7 @@
 
 use anyhow::{Context, Result};
 use grit_lib::commit::signing::GpgConfig;
+use grit_lib::revwalk::ResolveOptions;
 use grit_lib::tree_sha256::TagVerifyOptions;
 
 fn main() -> Result<()> {
@@ -14,7 +15,7 @@ fn main() -> Result<()> {
     let tag = std::env::args()
         .nth(1)
         .context("usage: guide_tree_sha256_verify <tag>")?;
-    let oid = grit_lib::revwalk::rev_parse::resolve_revision(&repo, &tag)?;
+    let oid = repo.revwalk().resolve(&tag, &ResolveOptions::default())?;
     let gpg = GpgConfig::from_config(repo.config().snapshot()?.as_ref())?
         .with_command_runner(repo.command_runner());
     let report = repo.verify_tag(

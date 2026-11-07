@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::revwalk::RevWalkListOptions;
 use grit_test_support::{git, unique_tmp, write_file};
 
@@ -118,17 +118,18 @@ fn assert_counts_match_git(wt: &Path, specs: &[&str]) {
         .unwrap_or_else(|e| panic!("count({specs:?}): {e}"));
     assert_eq!(counted, expected, "RevWalk::count({specs:?}) vs git");
     let positive: Vec<String> = specs.iter().map(|s| (*s).to_owned()).collect();
-    let listed = rev_list(
-        &repo,
-        &positive,
-        &[],
-        &RevListOptions {
-            count: true,
-            ..RevListOptions::default()
-        },
-    )
-    .unwrap_or_else(|e| panic!("rev_list({specs:?}) count: {e}"))
-    .commit_count();
+    let listed = repo
+        .revwalk()
+        .rev_list(
+            &positive,
+            &[],
+            &RevListOptions {
+                count: true,
+                ..RevListOptions::default()
+            },
+        )
+        .unwrap_or_else(|e| panic!("rev_list({specs:?}) count: {e}"))
+        .commit_count();
     assert_eq!(listed, expected, "rev_list({specs:?}) count vs git");
 }
 
@@ -296,16 +297,16 @@ fn count_fails_like_git_on_a_bad_zlib_checksum_after_the_headers() {
         "RevWalk::count must reject the corrupt commit"
     );
     assert!(
-        rev_list(
-            &repo,
-            &["HEAD".to_owned()],
-            &[],
-            &RevListOptions {
-                count: true,
-                ..RevListOptions::default()
-            },
-        )
-        .is_err(),
+        repo.revwalk()
+            .rev_list(
+                &["HEAD".to_owned()],
+                &[],
+                &RevListOptions {
+                    count: true,
+                    ..RevListOptions::default()
+                }
+            )
+            .is_err(),
         "rev_list count must reject the corrupt commit"
     );
 }

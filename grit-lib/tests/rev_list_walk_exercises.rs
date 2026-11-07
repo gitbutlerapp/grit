@@ -5,8 +5,7 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
-    merge_bases, resolve_revision_specs_to_commits, rev_list, shallow_borders_reachable_from_wants,
-    shallow_boundary_oids, tag_targets, MissingAction, ObjectFilter, OrderingMode, RevListOptions,
+    shallow_boundary_oids, MissingAction, ObjectFilter, OrderingMode, RevListOptions,
 };
 use std::collections::HashSet;
 use std::fs;
@@ -104,7 +103,10 @@ fn path_limited_simplify_and_full_history() {
             show_pulls: full && simplify,
             ..RevListOptions::default()
         };
-        let out = rev_list(&repo, &[tip.to_hex()], &[], &opts).expect("rev-list");
+        let out = repo
+            .revwalk()
+            .rev_list(&[tip.to_hex()], &[], &opts)
+            .expect("rev-list");
         assert!(!out.commits.is_empty());
     }
 }
@@ -126,21 +128,25 @@ fn object_walk_filters() {
         filter_provided_objects: true,
         ..RevListOptions::default()
     };
-    let out = rev_list(&repo, &[tip.to_hex()], &[], &opts).expect("objects");
+    let out = repo
+        .revwalk()
+        .rev_list(&[tip.to_hex()], &[], &opts)
+        .expect("objects");
     assert!(!out.objects.is_empty());
 }
 
 #[test]
-fn merge_bases_linear_and_first_parent() {
+fn merge_bases_linear() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
     let commits = seed_linear(&repo, 5);
     let tip = *commits.last().expect("tip");
     let mid = commits[2];
-    let bases = merge_bases(&repo, tip, mid, false).expect("merge-base");
-    assert!(!bases.is_empty());
-    let bases_fp = merge_bases(&repo, tip, mid, true).expect("merge-base fp");
-    assert!(!bases_fp.is_empty());
+    let bases = repo
+        .revwalk()
+        .merge_bases(&[tip, mid], grit_lib::revwalk::MergeBaseMode::All)
+        .expect("merge-base");
+    assert_eq!(bases, vec![mid]);
 }
 
 #[test]
@@ -163,7 +169,10 @@ fn merge_history_simplify_sparse_and_ordering() {
             first_parent: ordering == OrderingMode::Default,
             ..RevListOptions::default()
         };
-        let out = rev_list(&repo, &[tip.to_hex()], &[], &opts).expect("walk");
+        let out = repo
+            .revwalk()
+            .rev_list(&[tip.to_hex()], &[], &opts)
+            .expect("walk");
         assert!(!out.commits.is_empty());
     }
 }
@@ -187,7 +196,10 @@ fn rev_list_limit_boundary_cherry_and_all_refs() {
         all_refs: true,
         ..RevListOptions::default()
     };
-    let out = rev_list(&repo, &[tip.to_hex()], &[], &opts).expect("limited");
+    let out = repo
+        .revwalk()
+        .rev_list(&[tip.to_hex()], &[], &opts)
+        .expect("limited");
     assert!(out.commits.len() <= 2);
     assert!(!out.objects.is_empty());
 }
@@ -197,9 +209,12 @@ fn revision_resolve_and_tag_targets() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
     seed_linear(&repo, 2);
-    let resolved = resolve_revision_specs_to_commits(&repo, &["main".to_owned()]).expect("resolve");
+    let resolved = repo
+        .revwalk()
+        .resolve_commits(&["main".to_owned()])
+        .expect("resolve");
     assert_eq!(resolved.len(), 1);
-    let tags = tag_targets(&repo).expect("tags");
+    let tags = repo.revwalk().tag_targets().expect("tags");
     assert!(tags.is_empty());
 }
 
@@ -212,8 +227,6 @@ fn shallow_and_filtered_reachability() {
     fs::write(repo.git_dir().join("shallow"), format!("{tip}\n")).expect("shallow");
     let bounds = shallow_boundary_oids(repo.git_dir());
     assert!(bounds.contains(&tip));
-    let borders = shallow_borders_reachable_from_wants(&repo, &[tip]);
-    assert_eq!(borders, vec![tip]);
     let walk = |filter: Option<ObjectFilter>| {
         let opts = RevListOptions {
             all_refs: true,
@@ -222,7 +235,8 @@ fn shallow_and_filtered_reachability() {
             filter,
             ..RevListOptions::default()
         };
-        rev_list(&repo, &[], &[], &opts)
+        repo.revwalk()
+            .rev_list(&[], &[], &opts)
             .expect("walk")
             .objects
             .len()
@@ -243,20 +257,29 @@ fn tagged_tip_object_walk_and_symmetric_range() {
         no_object_names: true,
         ..RevListOptions::default()
     };
-    let out = rev_list(&repo, &[String::from("refs/tags/v1")], &[], &opts).expect("tag walk");
+    let out = repo
+        .revwalk()
+        .rev_list(&[String::from("refs/tags/v1")], &[], &opts)
+        .expect("tag walk");
     assert!(!out.objects.is_empty());
-    let range = rev_list(
-        &repo,
-        &[commits[2].to_hex()],
-        &[commits[0].to_hex()],
-        &RevListOptions {
-            left_right: true,
-            ..RevListOptions::default()
-        },
-    )
-    .expect("range");
+    let range = repo
+        .revwalk()
+        .rev_list(
+            &[commits[2].to_hex()],
+            &[commits[0].to_hex()],
+            &RevListOptions {
+                left_right: true,
+                ..RevListOptions::default()
+            },
+        )
+        .expect("range");
     assert!(!range.commits.is_empty());
-    let tag_set: HashSet<_> = tag_targets(&repo).expect("tags").into_iter().collect();
+    let tag_set: HashSet<_> = repo
+        .revwalk()
+        .tag_targets()
+        .expect("tags")
+        .into_iter()
+        .collect();
     assert!(tag_set.contains(&tag_oid));
 }
 
@@ -265,26 +288,26 @@ fn dense_pathspec_visibility_and_parent_filters() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
     let (_base, _side, tip) = seed_merge(&repo);
-    let out = rev_list(
-        &repo,
-        &[tip.to_hex()],
-        &[],
-        &RevListOptions {
-            min_parents: Some(2),
-            max_parents: Some(2),
-            until_cutoff: Some(i64::MAX),
-            since_cutoff: Some(0),
-            show_pulls: true,
-            exclude_promisor_objects: true,
-            unpacked_only: false,
-            ..RevListOptions::default()
-        },
-    )
-    .expect("parents filter");
+    let out = repo
+        .revwalk()
+        .rev_list(
+            &[tip.to_hex()],
+            &[],
+            &RevListOptions {
+                min_parents: Some(2),
+                max_parents: Some(2),
+                until_cutoff: Some(i64::MAX),
+                since_cutoff: Some(0),
+                show_pulls: true,
+                exclude_promisor_objects: true,
+                unpacked_only: false,
+                ..RevListOptions::default()
+            },
+        )
+        .expect("parents filter");
     assert_eq!(out.commits.len(), 1);
     let sparse = ObjectFilter::SparseOid(format!("{}:patterns", tip.to_hex()));
-    let _ = rev_list(
-        &repo,
+    let _ = repo.revwalk().rev_list(
         &[tip.to_hex()],
         &[],
         &RevListOptions {

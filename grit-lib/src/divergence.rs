@@ -15,7 +15,8 @@
 //! For each commit of the base, each side either left it alone, moved it,
 //! reworded it, amended it, dropped it, squashed it into another, or split
 //! it; commits of a side that aren't in the base are new (or pieces of a
-//! split). [`classify`] puts the two sides together into a [`Divergence`].
+//! split). [`RevWalk::classify_divergence`] puts the two sides together into a
+//! [`Divergence`].
 //!
 //! ```rust
 //! use grit_lib::divergence::Choice;
@@ -40,6 +41,7 @@ use crate::objects::ObjectId;
 use crate::patch_ids::{compute_patch_id, PatchIdMode};
 use crate::repo::Repository;
 use crate::repo_relpath::StoredRelPath;
+use crate::revwalk::RevWalk;
 
 /// The most commits of one head looked at.
 const MAX_COMMITS: usize = 500;
@@ -895,7 +897,7 @@ fn tree_conflicts(
 /// The heads `refname` has held, newest first, from its reflog (empty when
 /// it has none).
 #[must_use]
-pub fn heads_seen(repo: &Repository, refname: &str) -> Vec<ObjectId> {
+pub(crate) fn heads_seen(repo: &Repository, refname: &str) -> Vec<ObjectId> {
     crate::reflog::read_reflog(repo.git_dir(), refname)
         .map(|entries| entries.into_iter().rev().map(|e| e.new_oid).collect())
         .unwrap_or_default()
@@ -908,7 +910,7 @@ pub fn heads_seen(repo: &Repository, refname: &str) -> Vec<ObjectId> {
 /// # Errors
 ///
 /// Fails when the object database can't be read.
-pub fn common_base(
+pub(crate) fn common_base(
     repo: &Repository,
     ours: ObjectId,
     theirs: ObjectId,
@@ -930,14 +932,14 @@ pub fn common_base(
 ///
 /// `floor` holds the commits the branch builds on (its target, such as
 /// `main`): their history is left out. `base` is the last head both had
-/// (see [`common_base`]); without one, the merge base of the two heads is
+/// (see [`RevWalk::divergence_base`]); without one, the merge base of the two heads is
 /// used, and commits both amended can't be told apart from commits only
 /// one did.
 ///
 /// # Errors
 ///
 /// Fails when the object database can't be read.
-pub fn classify(
+pub(crate) fn classify(
     repo: &Repository,
     floor: &[ObjectId],
     base: Option<ObjectId>,
@@ -1541,14 +1543,14 @@ struct Step {
 }
 
 /// Put `ours` and `theirs` back together as `choice` says (see
-/// [`classify`] for `floor` and `base`).
+/// [`RevWalk::classify_divergence`] for `floor` and `base`).
 ///
 /// [`Choice::Resolve`] makes nothing: it is done by hand.
 ///
 /// # Errors
 ///
 /// Fails when the object database can't be read or written.
-pub fn combine(
+pub(crate) fn combine(
     repo: &Repository,
     floor: &[ObjectId],
     base: Option<ObjectId>,
@@ -1985,7 +1987,11 @@ pub struct Keyed {
 /// # Errors
 ///
 /// When a commit can't be read.
-pub fn keyed_commits(repo: &Repository, head: ObjectId, floor: &[ObjectId]) -> Result<Vec<Keyed>> {
+pub(crate) fn keyed_commits(
+    repo: &Repository,
+    head: ObjectId,
+    floor: &[ObjectId],
+) -> Result<Vec<Keyed>> {
     Ok(sequence(repo, head, floor)?
         .into_iter()
         .map(|v| Keyed {
@@ -2003,7 +2009,7 @@ pub fn keyed_commits(repo: &Repository, head: ObjectId, floor: &[ObjectId]) -> R
 /// # Errors
 ///
 /// When a commit can't be read.
-pub fn missing_from(
+pub(crate) fn missing_from(
     repo: &Repository,
     floor: &[ObjectId],
     ours: ObjectId,
@@ -2044,7 +2050,7 @@ pub enum ReplayOntoOutcome {
 /// # Errors
 ///
 /// When a commit or tree can't be read or written.
-pub fn replay_onto(
+pub(crate) fn replay_onto(
     repo: &Repository,
     head: ObjectId,
     floor: &[ObjectId],
@@ -2071,4 +2077,112 @@ pub fn replay_onto(
         }
     }
     Ok(ReplayOntoOutcome::Ok { tip })
+}
+
+impl RevWalk<'_> {
+    /// The heads `refname` has held, newest first, from its reflog (empty when it has
+    /// none).
+    #[must_use]
+    pub fn heads_seen(&self, refname: &str) -> Vec<ObjectId> {
+        heads_seen(self.repository(), refname)
+    }
+
+    /// The last head two diverged heads both had: the newest commit in both `ours_seen` and
+    /// `theirs_seen` (heads each side has held, such as [`Self::heads_seen`]), else the
+    /// merge base of `ours` and `theirs`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the object database can't be read.
+    pub fn divergence_base(
+        &self,
+        ours: ObjectId,
+        theirs: ObjectId,
+        ours_seen: &[ObjectId],
+        theirs_seen: &[ObjectId],
+    ) -> Result<Option<ObjectId>> {
+        common_base(self.repository(), ours, theirs, ours_seen, theirs_seen)
+    }
+
+    /// Explain how `ours` and `theirs`, two heads of one shared branch, differ, as a
+    /// [`Divergence`] naming its [`Scenario`].
+    ///
+    /// `floor` holds the commits the branch builds on (its target, such as `main`): their
+    /// history is left out. `base` is the last head both had (see
+    /// [`Self::divergence_base`]); without one, the merge base of the two heads is used,
+    /// and commits both amended can't be told apart from commits only one did.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the object database can't be read.
+    pub fn classify_divergence(
+        &self,
+        floor: &[ObjectId],
+        base: Option<ObjectId>,
+        ours: ObjectId,
+        theirs: ObjectId,
+    ) -> Result<Divergence> {
+        classify(self.repository(), floor, base, ours, theirs)
+    }
+
+    /// Put `ours` and `theirs` back together as `choice` says (see
+    /// [`Self::classify_divergence`] for `floor` and `base`).
+    ///
+    /// [`Choice::Resolve`] makes nothing: it is done by hand.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the object database can't be read or written.
+    pub fn combine_divergence(
+        &self,
+        floor: &[ObjectId],
+        base: Option<ObjectId>,
+        ours: ObjectId,
+        theirs: ObjectId,
+        choice: Choice,
+    ) -> Result<Combined> {
+        combine(self.repository(), floor, base, ours, theirs, choice)
+    }
+
+    /// The commits of `head` that `floor` doesn't have, oldest first along first parents,
+    /// with the keys they are matched on.
+    ///
+    /// # Errors
+    ///
+    /// When a commit can't be read.
+    pub fn keyed_commits(&self, head: ObjectId, floor: &[ObjectId]) -> Result<Vec<Keyed>> {
+        keyed_commits(self.repository(), head, floor)
+    }
+
+    /// The commits of `theirs` whose change `ours` doesn't have, leaving out what `floor`
+    /// (the branch both are merged into) has: what merging `ours` would leave out.
+    ///
+    /// # Errors
+    ///
+    /// When a commit can't be read.
+    pub fn missing_from(
+        &self,
+        floor: &[ObjectId],
+        ours: ObjectId,
+        theirs: ObjectId,
+    ) -> Result<Vec<Keyed>> {
+        missing_from(self.repository(), floor, ours, theirs)
+    }
+
+    /// Replay the commits of `head` that `floor` doesn't have onto `onto`, leaving out those
+    /// whose key is in `skip`: the new tip (`onto` when nothing is left), or the paths of
+    /// the first commit that conflicts ([`ReplayOntoOutcome`]).
+    ///
+    /// # Errors
+    ///
+    /// When a commit or tree can't be read or written.
+    pub fn replay_onto(
+        &self,
+        head: ObjectId,
+        floor: &[ObjectId],
+        onto: ObjectId,
+        skip: &HashSet<String>,
+    ) -> Result<ReplayOntoOutcome> {
+        replay_onto(self.repository(), head, floor, onto, skip)
+    }
 }

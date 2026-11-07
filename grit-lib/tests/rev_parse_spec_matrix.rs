@@ -6,12 +6,6 @@ use std::path::Path;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::{
-    peel_to_commit_for_merge_base, peel_to_tree, resolve_reflog_walk_log_ref,
-    resolve_revision_as_commit_without_index_dwim, resolve_revision_for_commit_tree_tree,
-    resolve_revision_for_patch_old_blob, resolve_revision_for_verify,
-    try_peel_to_commit_for_merge_base,
-};
 
 use support::{
     build_commit_dag, commit_file, git, oracle_one, oracle_table, HistoryRepo, ResolveMode,
@@ -101,14 +95,41 @@ fn api_peel_and_reflog_helpers_on_linear_repo() {
     let wt = hist.worktree();
     build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let repo = open_grit(wt);
-    let head = resolve_revision_for_verify(&repo, "HEAD").expect("head");
-    let _ = peel_to_tree(&repo, head).expect("peel tree");
-    let _ = peel_to_commit_for_merge_base(&repo, head).expect("peel commit");
-    let _ = try_peel_to_commit_for_merge_base(&repo, head).expect("try peel");
-    let _ = resolve_revision_as_commit_without_index_dwim(&repo, "main").expect("as commit");
-    let _ = resolve_revision_for_commit_tree_tree(&repo, "main").expect("commit-tree");
-    let _ = resolve_revision_for_patch_old_blob(&repo, "HEAD:missing").ok();
-    let _ = resolve_reflog_walk_log_ref(&repo, "HEAD");
+    let head = repo
+        .revwalk()
+        .resolve(
+            "HEAD",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        )
+        .expect("head");
+    let _ = repo.revwalk().peel_to_tree(head).expect("peel tree");
+    let _ = repo.revwalk().peel_to_commit(head).expect("peel commit");
+    let _ = repo.revwalk().peel_to_commit(head).expect("try peel");
+    let _ = repo
+        .revwalk()
+        .resolve(
+            "main",
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit)
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+        )
+        .expect("as commit");
+    let _ = repo
+        .revwalk()
+        .resolve(
+            "main",
+            &grit_lib::revwalk::ResolveOptions::default().with_peel(grit_lib::revwalk::Peel::Tree),
+        )
+        .expect("commit-tree");
+    let _ = repo
+        .revwalk()
+        .resolve(
+            "HEAD:missing",
+            &grit_lib::revwalk::ResolveOptions::default().with_peel(grit_lib::revwalk::Peel::Blob),
+        )
+        .ok();
     for spec in ["main@{0}", "main@{1}", "HEAD@{0}"] {
         oracle_one(&repo, wt, spec, ResolveMode::Verify).unwrap_or_else(|e| panic!("{spec}: {e}"));
     }

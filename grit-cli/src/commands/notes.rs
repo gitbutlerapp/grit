@@ -9,7 +9,8 @@ use grit_lib::notes::{resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{NoteAddOutcome, NoteAddPlan, NotesWriteOptions};
-use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::ResolveOptions;
+
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -404,7 +405,9 @@ fn remove_notes(
 }
 
 fn resolve_object(repo: &Repository, rev: &str) -> Result<ObjectId> {
-    resolve_revision(repo, rev).map_err(map_notes_error)
+    repo.revwalk()
+        .resolve(rev, &ResolveOptions::default())
+        .map_err(map_notes_error)
 }
 
 fn notes_write_options(

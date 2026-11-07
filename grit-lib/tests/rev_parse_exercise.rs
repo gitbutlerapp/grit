@@ -6,12 +6,6 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use std::fs;
 
-use grit_lib::revwalk::rev_parse::{
-    resolve_revision, resolve_revision_as_commit, resolve_revision_for_checkout_guess,
-    resolve_revision_for_range_end, resolve_revision_for_verify,
-    resolve_revision_without_index_dwim,
-};
-
 use support::{build_commit_dag, commit_file, git, git_rev_parse_verify, HistoryRepo};
 
 fn open_grit(wt: &std::path::Path) -> Repository {
@@ -44,16 +38,44 @@ fn exercise_many_specs_on_deep_history() {
     let repo = open_grit(wt);
     for n in 0..100 {
         let spec = format!("HEAD~{n}");
-        let _ = resolve_revision_for_verify(&repo, &spec);
-        let _ = resolve_revision_without_index_dwim(&repo, &spec);
-        let _ = resolve_revision_for_range_end(&repo, &spec);
-        let _ = resolve_revision_as_commit(&repo, &spec);
-        let _ = resolve_revision_for_checkout_guess(&repo, &spec, true);
-        let _ = resolve_revision_for_checkout_guess(&repo, &spec, false);
+        let _ = repo.revwalk().resolve(
+            &spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        );
+        let _ = repo.revwalk().resolve(
+            &spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off),
+        );
+        let _ = repo.revwalk().resolve(
+            &spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        );
+        let _ = repo.revwalk().resolve(
+            &spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_peel(grit_lib::revwalk::Peel::Commit),
+        );
+        let _ = repo
+            .revwalk()
+            .resolve(&spec, &grit_lib::revwalk::ResolveOptions::default());
+        let _ = repo.revwalk().resolve(
+            &spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::CheckoutNoGuess),
+        );
     }
     for n in 1..=3 {
         let spec = format!("main^^{n}");
-        let _ = resolve_revision_for_verify(&repo, &spec);
+        let _ = repo.revwalk().resolve(
+            &spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        );
     }
     for spec in [
         "main^!",
@@ -70,8 +92,15 @@ fn exercise_many_specs_on_deep_history() {
         "@",
         "@{0}",
     ] {
-        let _ = resolve_revision_for_verify(&repo, spec);
-        let _ = resolve_revision(&repo, spec);
+        let _ = repo.revwalk().resolve(
+            spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        );
+        let _ = repo
+            .revwalk()
+            .resolve(spec, &grit_lib::revwalk::ResolveOptions::default());
     }
 }
 
@@ -89,7 +118,10 @@ fn head_tilde_matches_git_when_commit_graph_is_stale() {
     }
     let repo = open_grit(wt);
     let spec = "HEAD~20";
-    let grit_oid = resolve_revision(&repo, spec).expect("stale graph");
+    let grit_oid = repo
+        .revwalk()
+        .resolve(spec, &grit_lib::revwalk::ResolveOptions::default())
+        .expect("stale graph");
     let git_oid = git_rev_parse_verify(wt, spec).expect("git");
     assert_eq!(grit_oid, git_oid);
     assert_ne!(
@@ -112,13 +144,18 @@ fn head_tilde_matches_git_when_commit_graph_is_missing() {
     }
     let repo = open_grit(wt);
     let spec = "HEAD~20";
-    let grit_oid = resolve_revision(&repo, spec).expect("no graph");
+    let grit_oid = repo
+        .revwalk()
+        .resolve(spec, &grit_lib::revwalk::ResolveOptions::default())
+        .expect("no graph");
     assert_eq!(grit_oid, git_rev_parse_verify(wt, spec).expect("git"));
     let graph_path = wt.join(".git/objects/info/commit-graph");
     let _ = fs::remove_file(&graph_path);
     let _ = fs::remove_dir_all(wt.join(".git/objects/info/commit-graphs"));
     assert_eq!(
-        resolve_revision(&repo, spec).expect("after delete"),
+        repo.revwalk()
+            .resolve(spec, &grit_lib::revwalk::ResolveOptions::default())
+            .expect("after delete"),
         grit_oid
     );
 }
@@ -142,7 +179,14 @@ fn exercise_failure_specs_do_not_panic() {
         "@{-99}",
         "main@{upstream}@{upstream}",
     ] {
-        let _ = resolve_revision_for_verify(&repo, spec);
-        let _ = resolve_revision(&repo, spec);
+        let _ = repo.revwalk().resolve(
+            spec,
+            &grit_lib::revwalk::ResolveOptions::default()
+                .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+        );
+        let _ = repo
+            .revwalk()
+            .resolve(spec, &grit_lib::revwalk::ResolveOptions::default());
     }
 }

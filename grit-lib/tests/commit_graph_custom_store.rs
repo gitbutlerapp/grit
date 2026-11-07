@@ -19,7 +19,6 @@ use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::refs::write_ref;
 use grit_lib::repo::{Repository, RepositoryError};
-use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::RevWalkListOptions;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::{git, git_cmd, rev_parse};
@@ -313,11 +312,17 @@ fn attached_graph_answers_walks_like_the_files_backend_without_commit_reads() {
         git(dir.path(), &["merge-base", "main~5", "side~1"]).trim(),
     )];
     assert_eq!(
-        merge_bases_first_vs_rest(&files, tip, &[other]).expect("files"),
+        files
+            .revwalk()
+            .merge_bases(&[tip, other], grit_lib::revwalk::MergeBaseMode::Best)
+            .expect("files"),
         expected
     );
     assert_eq!(
-        merge_bases_first_vs_rest(&custom, tip, &[other]).expect("custom"),
+        custom
+            .revwalk()
+            .merge_bases(&[tip, other], grit_lib::revwalk::MergeBaseMode::Best)
+            .expect("custom"),
         expected
     );
     assert_eq!(

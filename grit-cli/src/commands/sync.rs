@@ -30,7 +30,6 @@ use grit_lib::remote::grit_server_space::{fetch_space, hosted_project, Space};
 use grit_lib::remote::HttpClientFactory as _;
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::RemoteUrlKind;
-use grit_lib::revwalk::merge_base::is_ancestor;
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -614,11 +613,11 @@ pub(crate) fn sync_target(
             TargetAction::Created
         }
         Some(ours) if ours == theirs => TargetAction::UpToDate,
-        Some(ours) if is_ancestor(repo, ours, theirs)? => {
+        Some(ours) if repo.revwalk().is_ancestor(ours, theirs)? => {
             fast_forward(repo, target, &format!("{upstream_remote}/{target}"), theirs)?;
             TargetAction::FastForwarded
         }
-        Some(ours) if is_ancestor(repo, theirs, ours)? => TargetAction::Ahead,
+        Some(ours) if repo.revwalk().is_ancestor(theirs, ours)? => TargetAction::Ahead,
         Some(_) => TargetAction::Diverged,
     };
     let tip = tips(repo, "refs/heads/")?.get(target).map(ObjectId::to_hex);
@@ -679,7 +678,7 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
         .collect();
 
     let merged = |oid: ObjectId| -> bool {
-        base.is_some_and(|base| is_ancestor(&repo, oid, base).unwrap_or(false))
+        base.is_some_and(|base| repo.revwalk().is_ancestor(oid, base).unwrap_or(false))
     };
     let shared: BTreeSet<&str> = setup.space.shared.iter().map(String::as_str).collect();
     let mut branches = Vec::new();
@@ -695,11 +694,13 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
             // ahead, when every head ahead of yours is on one line.
             let ahead: Vec<(String, ObjectId)> = shared_heads(&repo, &setup.remote, name)?
                 .into_iter()
-                .filter(|(_, tip)| *tip != mine && is_ancestor(&repo, mine, *tip).unwrap_or(false))
+                .filter(|(_, tip)| {
+                    *tip != mine && repo.revwalk().is_ancestor(mine, *tip).unwrap_or(false)
+                })
                 .collect();
             let furthest = ahead.iter().find(|(_, tip)| {
                 ahead.iter().all(|(_, other)| {
-                    other == tip || is_ancestor(&repo, *other, *tip).unwrap_or(false)
+                    other == tip || repo.revwalk().is_ancestor(*other, *tip).unwrap_or(false)
                 })
             });
             if let Some((user, tip)) = furthest {
@@ -775,11 +776,11 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
                 set_tracking(&repo, name, &setup.remote)?;
                 SyncAction::Created
             }
-            (Some(ours), Some(theirs)) if is_ancestor(&repo, ours, theirs)? => {
+            (Some(ours), Some(theirs)) if repo.revwalk().is_ancestor(ours, theirs)? => {
                 fast_forward(&repo, name, &format!("{}/{name}", setup.remote), theirs)?;
                 SyncAction::Pulled
             }
-            (Some(ours), Some(theirs)) if is_ancestor(&repo, theirs, ours)? => {
+            (Some(ours), Some(theirs)) if repo.revwalk().is_ancestor(theirs, ours)? => {
                 to_push.push(name.clone());
                 SyncAction::Pushed
             }

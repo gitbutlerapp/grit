@@ -16,7 +16,7 @@ use grit_lib::refs::branch_tracking::{
     status_ahead_behind_enabled, BranchStanding, Standing, StandingHeader, StandingOptions,
     StatusHeader, StatusIntegrationAction, StatusIntegrationHint, TrackedComparison,
 };
-use grit_lib::revwalk::object_inspect::abbreviate_for_display;
+use grit_lib::revwalk::AbbrevLength;
 use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation, NextStep};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -769,7 +769,9 @@ impl StatusOutcome {
                 .commit
                 .parse()
                 .context("invalid workspace head commit oid")?;
-            let short = abbreviate_for_display(&repo, commit_oid, true)?;
+            let short = repo
+                .revwalk()
+                .abbreviate(commit_oid, AbbrevLength::Configured)?;
             outln!(
                 w,
                 "- **{}** `{}` {}{ahead}",
@@ -1199,7 +1201,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     let head_short = model
         .head
         .oid()
-        .map(|oid| abbreviate_for_display(&repo, *oid, true))
+        .map(|oid| repo.revwalk().abbreviate(*oid, AbbrevLength::Configured))
         .transpose()?;
     let shared = branch
         .as_deref()

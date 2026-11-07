@@ -4,7 +4,7 @@ use crate::support;
 
 use std::collections::HashSet;
 
-use grit_lib::revwalk::rev_list::{rev_list, MissingAction, ObjectFilter, RevListOptions};
+use grit_lib::revwalk::rev_list::{MissingAction, ObjectFilter, RevListOptions};
 use support::{commit_file, git, git_rev_list_object_set, grit_rev_list_object_set, HistoryRepo};
 
 #[test]
@@ -62,17 +62,18 @@ fn object_walk_filters_and_missing_print_match_git() {
     let _restore = RestoreOnDrop(backup, loose);
 
     let git_missing = git(wt, &["rev-list", "--objects", "--missing=print", "HEAD"]);
-    let grit_missing = rev_list(
-        &grit_repo,
-        &[String::from("HEAD")],
-        &[],
-        &RevListOptions {
-            objects: true,
-            missing_action: MissingAction::Print,
-            ..RevListOptions::default()
-        },
-    )
-    .expect("missing=print");
+    let grit_missing = grit_repo
+        .revwalk()
+        .rev_list(
+            &[String::from("HEAD")],
+            &[],
+            &RevListOptions {
+                objects: true,
+                missing_action: MissingAction::Print,
+                ..RevListOptions::default()
+            },
+        )
+        .expect("missing=print");
     assert!(
         grit_missing
             .missing_objects
@@ -103,19 +104,20 @@ fn object_walk_combine_filter_provided_objects_match_git() {
     let combine = ObjectFilter::parse("combine:blob:none+tree:1").expect("combine");
     let git_set = git_rev_list_object_set(wt, &["--filter=combine:blob:none+tree:1", "HEAD"]);
     let grit_repo = support::open_grit_repo(wt);
-    let result = rev_list(
-        &grit_repo,
-        &[String::from("HEAD")],
-        &[],
-        &RevListOptions {
-            objects: true,
-            no_object_names: true,
-            filter: Some(combine),
-            filter_provided_objects: true,
-            ..RevListOptions::default()
-        },
-    )
-    .expect("combine walk");
+    let result = grit_repo
+        .revwalk()
+        .rev_list(
+            &[String::from("HEAD")],
+            &[],
+            &RevListOptions {
+                objects: true,
+                no_object_names: true,
+                filter: Some(combine),
+                filter_provided_objects: true,
+                ..RevListOptions::default()
+            },
+        )
+        .expect("combine walk");
     let mut grit_set = HashSet::new();
     grit_set.extend(result.commits);
     grit_set.extend(result.objects.iter().map(|(o, _)| *o));
@@ -131,16 +133,17 @@ fn object_walk_annotated_tag_on_blob_peels_like_git() {
     git(wt, &["tag", "-a", "blob-tag", "-m", "tag on blob", &blob]);
     let git_set = git_rev_list_object_set(wt, &["blob-tag"]);
     let grit_repo = support::open_grit_repo(wt);
-    let result = rev_list(
-        &grit_repo,
-        &[String::from("blob-tag")],
-        &[],
-        &RevListOptions {
-            objects: true,
-            ..RevListOptions::default()
-        },
-    )
-    .expect("tagged blob walk");
+    let result = grit_repo
+        .revwalk()
+        .rev_list(
+            &[String::from("blob-tag")],
+            &[],
+            &RevListOptions {
+                objects: true,
+                ..RevListOptions::default()
+            },
+        )
+        .expect("tagged blob walk");
     let mut grit_set = HashSet::new();
     grit_set.extend(result.commits);
     grit_set.extend(result.objects.iter().map(|(o, _)| *o));
@@ -160,18 +163,19 @@ fn object_walk_sparse_pathspec_limits_objects_match_git() {
     commit_file(wt, "other.txt", "other\n", "other");
     let git_set = git_rev_list_object_set(wt, &["HEAD", "--", "dir/"]);
     let grit_repo = support::open_grit_repo(wt);
-    let result = rev_list(
-        &grit_repo,
-        &[String::from("HEAD")],
-        &[],
-        &RevListOptions {
-            objects: true,
-            no_object_names: true,
-            paths: vec!["dir/".to_owned()],
-            ..RevListOptions::default()
-        },
-    )
-    .expect("sparse objects");
+    let result = grit_repo
+        .revwalk()
+        .rev_list(
+            &[String::from("HEAD")],
+            &[],
+            &RevListOptions {
+                objects: true,
+                no_object_names: true,
+                paths: vec!["dir/".to_owned()],
+                ..RevListOptions::default()
+            },
+        )
+        .expect("sparse objects");
     let mut grit_paths = HashSet::new();
     grit_paths.extend(result.commits);
     grit_paths.extend(result.objects.iter().map(|(o, _)| *o));
@@ -256,17 +260,18 @@ fn nested_annotated_tag_tips_peel_like_git() {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let git_commits: Vec<String> = git(wt, &args).lines().map(str::to_owned).collect();
         let owned = |specs: &[&str]| specs.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
-        let grit_commits: Vec<String> = rev_list(
-            &grit_repo,
-            &owned(positive),
-            &owned(negative),
-            &RevListOptions::default(),
-        )
-        .expect("commit walk")
-        .commits
-        .iter()
-        .map(|c| c.to_hex())
-        .collect();
+        let grit_commits: Vec<String> = grit_repo
+            .revwalk()
+            .rev_list(
+                &owned(positive),
+                &owned(negative),
+                &RevListOptions::default(),
+            )
+            .expect("commit walk")
+            .commits
+            .iter()
+            .map(|c| c.to_hex())
+            .collect();
         assert_eq!(grit_commits, git_commits, "{args:?}");
     }
 }

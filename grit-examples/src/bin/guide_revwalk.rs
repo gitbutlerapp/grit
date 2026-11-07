@@ -5,9 +5,10 @@
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
-use grit_lib::revwalk::rev_parse::{resolve_revision, split_double_dot_range};
+use grit_lib::revwalk::{MergeBaseMode, ResolveOptions};
+
+use grit_lib::revwalk::rev_list::RevListOptions;
+use grit_lib::revwalk::rev_parse::split_double_dot_range;
 use std::path::Path;
 
 fn main() -> Result<()> {
@@ -29,9 +30,10 @@ fn main() -> Result<()> {
         if !left.is_empty() {
             negative.push(left.to_owned());
         }
-        rev_list(&repo, &positive, &negative, &options)?
+        repo.revwalk().rev_list(&positive, &negative, &options)?
     } else {
-        rev_list(&repo, std::slice::from_ref(&range), &[], &options)?
+        repo.revwalk()
+            .rev_list(std::slice::from_ref(&range), &[], &options)?
     };
 
     for oid in &result.commits {
@@ -39,9 +41,15 @@ fn main() -> Result<()> {
     }
 
     let (left_name, right_name) = range_names(&range)?;
-    let left = resolve_revision(&repo, left_name)?;
-    let right = resolve_revision(&repo, right_name)?;
-    let bases = merge_bases_first_vs_rest(&repo, left, &[right])?;
+    let left = repo
+        .revwalk()
+        .resolve(left_name, &ResolveOptions::default())?;
+    let right = repo
+        .revwalk()
+        .resolve(right_name, &ResolveOptions::default())?;
+    let bases = repo
+        .revwalk()
+        .merge_bases(&[left, right], MergeBaseMode::Best)?;
     let Some(base) = bases.first() else {
         return Err(anyhow::anyhow!("no merge base for range tips".to_owned(),));
     };

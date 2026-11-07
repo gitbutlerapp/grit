@@ -7,11 +7,8 @@ use std::process::{Command, Stdio};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::GroupByAuthorOptions;
 use grit_lib::revwalk::RevWalkListOptions;
-use grit_lib::revwalk::{
-    group_commits_by_author, group_commits_by_author_from_rev, mailmap_for_grouping,
-    GroupByAuthorOptions,
-};
 use grit_test_support::git;
 
 fn commit_as(root: &std::path::Path, name: &str, email: &str, msg: &str) {
@@ -48,8 +45,7 @@ fn git_stdout(root: &std::path::Path, args: &[&str]) -> String {
 fn assert_shortlog_count_parity(root: &std::path::Path) -> grit_lib::error::Result<()> {
     let repo = Repository::discover(Some(root), &RepositoryOptions::default())?;
     let walk = RevWalkListOptions::default();
-    let grouped = group_commits_by_author_from_rev(
-        &repo,
+    let grouped = repo.revwalk().group_by_author_in_walk(
         &["HEAD"],
         &walk,
         None,
@@ -192,15 +188,13 @@ fn group_by_author_count_only_matches_full_for_case_distinct_authors() -> grit_l
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::default())?;
     let walk = RevWalkListOptions::default();
-    let full = group_commits_by_author_from_rev(
-        &repo,
+    let full = repo.revwalk().group_by_author_in_walk(
         &["HEAD"],
         &walk,
         None,
         GroupByAuthorOptions { count_only: false },
     )?;
-    let counts = group_commits_by_author_from_rev(
-        &repo,
+    let counts = repo.revwalk().group_by_author_in_walk(
         &["HEAD"],
         &walk,
         None,
@@ -248,13 +242,10 @@ fn group_by_author_matches_git_shortlog_sne() -> grit_lib::error::Result<()> {
     let oids = repo
         .revwalk()
         .commits(&["HEAD"], &RevWalkListOptions::default())?;
-    let table = mailmap_for_grouping(&repo, true)?;
-    let groups = group_commits_by_author(
-        &repo,
-        &oids,
-        table.as_ref(),
-        GroupByAuthorOptions::default(),
-    )?;
+    let table = repo.revwalk().mailmap_for_grouping(true)?;
+    let groups =
+        repo.revwalk()
+            .group_by_author(&oids, table.as_ref(), GroupByAuthorOptions::default())?;
 
     let git_out = Command::new("git")
         .args(["-C"])
@@ -333,8 +324,7 @@ fn group_by_author_accepts_non_utf8_author_header() -> grit_lib::error::Result<(
     git(root, &["init", "-b", "main"]);
     let oid = commit_with_raw_author_bytes(root, b"\xFFAlice <alice@example.com>");
     let repo = Repository::discover(Some(root), &RepositoryOptions::default())?;
-    let groups = group_commits_by_author(
-        &repo,
+    let groups = repo.revwalk().group_by_author(
         std::slice::from_ref(&oid),
         None,
         GroupByAuthorOptions { count_only: true },

@@ -15,10 +15,8 @@ use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{merge_bases, rev_list, OrderingMode, RevListOptions};
-use grit_lib::revwalk::rev_parse::{
-    resolve_revision, resolve_revision_as_commit, resolve_revision_for_verify,
-};
+use grit_lib::revwalk::rev_list::{OrderingMode, RevListOptions};
+
 use grit_lib::worktree::pathspec::{parse_pathspecs_from_source, Pathspec, PathspecGlobalFlags};
 use grit_lib::worktree::worktree_rules::WorktreeRules;
 use std::fs;
@@ -77,9 +75,27 @@ fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
     let tip = seed_long_history(dir.path(), &repo, 560)?;
     for n in 0..340 {
         for spec in [format!("HEAD~{n}"), format!("main~{n}"), format!(":/c{n}")] {
-            let _ = resolve_revision_for_verify(&repo, &spec).ok();
-            let _ = resolve_revision(&repo, &spec).ok();
-            let _ = resolve_revision_as_commit(&repo, &spec).ok();
+            let _ = repo
+                .revwalk()
+                .resolve(
+                    &spec,
+                    &grit_lib::revwalk::ResolveOptions::default()
+                        .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
+                        .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
+                )
+                .ok();
+            let _ = repo
+                .revwalk()
+                .resolve(&spec, &grit_lib::revwalk::ResolveOptions::default())
+                .ok();
+            let _ = repo
+                .revwalk()
+                .resolve(
+                    &spec,
+                    &grit_lib::revwalk::ResolveOptions::default()
+                        .with_peel(grit_lib::revwalk::Peel::Commit),
+                )
+                .ok();
         }
     }
     for ordering in [
@@ -99,9 +115,13 @@ fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
             max_count: Some(64),
             ..RevListOptions::default()
         };
-        let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let _ = repo
+            .revwalk()
+            .rev_list(&[String::from("main")], &[], &opts)?;
     }
-    let _ = merge_bases(&repo, tip, tip, false)?;
+    let _ = repo
+        .revwalk()
+        .merge_bases(&[tip, tip], grit_lib::revwalk::MergeBaseMode::All)?;
     let blame = blame_file(
         &repo,
         "a.txt",

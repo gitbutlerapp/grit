@@ -11,7 +11,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::resolve_revision;
 
 use support::HistoryRepo;
 
@@ -85,9 +84,12 @@ fn reflog_date_selectors_match_git_relaxed_grammar() {
     ] {
         let spec = format!("main@{{{date_inner}}}");
         let git_oid = git_rev_parse_reflog_date(wt, &spec);
-        let grit_oid = resolve_revision(&grit_repo, &spec).unwrap_or_else(|e| {
-            panic!("grit failed to resolve {spec:?}: {e}");
-        });
+        let grit_oid = grit_repo
+            .revwalk()
+            .resolve(&spec, &grit_lib::revwalk::ResolveOptions::default())
+            .unwrap_or_else(|e| {
+                panic!("grit failed to resolve {spec:?}: {e}");
+            });
         assert_eq!(
             git_oid, grit_oid,
             "mismatch for {spec}: git {git_oid} grit {grit_oid}"
@@ -117,7 +119,10 @@ fn reflog_date_older_than_oldest_emits_warning_and_matches_git() {
     let sink = Arc::new(CollectingDiagnostics::new());
     let options = RepositoryOptions::empty().with_diagnostics(sink.clone());
     let grit_repo = Repository::discover(Some(wt), &options).expect("open");
-    let grit_oid = resolve_revision(&grit_repo, spec).expect("resolve last year");
+    let grit_oid = grit_repo
+        .revwalk()
+        .resolve(spec, &grit_lib::revwalk::ResolveOptions::default())
+        .expect("resolve last year");
     assert_eq!(git_oid, grit_oid);
 
     let warnings = sink.warnings();

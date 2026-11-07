@@ -1094,11 +1094,10 @@ fn t6404_recursive_merge_matches_git() {
         .lines()
         .map(|l| l.parse().unwrap())
         .collect();
-    let grit_bases = grit_lib::revwalk::merge_base::merge_bases_all(
-        &open_grit_repo(root),
-        &[rev("F"), rev("G")],
-    )
-    .unwrap();
+    let grit_bases = (open_grit_repo(root))
+        .revwalk()
+        .merge_bases(&[rev("F"), rev("G")], grit_lib::revwalk::MergeBaseMode::All)
+        .unwrap();
     assert_eq!(
         grit_bases, git_bases,
         "tied merge bases must keep git's order"

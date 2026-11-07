@@ -1032,7 +1032,7 @@ fn retain_maximal_commits(
 /// Returns [`Error::ObjectNotFound`] / [`Error::InvalidRef`] for bad revision
 /// specs, [`RevListError::UnexpandedSymmetricRange`] for a raw `A...B` spec, and
 /// [`Error::CorruptObject`] for non-commit or malformed commit data.
-pub fn rev_list(
+pub(crate) fn rev_list(
     repo: &Repository,
     positive_specs: &[String],
     negative_specs: &[String],
@@ -2477,7 +2477,7 @@ pub(crate) fn resolve_specs_for_commit_stream(
 /// Each spec is interpreted like Git's `handle_revision_arg` for a plain commit tip: ranges
 /// (`A..B`), exclusions (`^rev`), and revision expressions are supported via
 /// [`split_revision_token`] and [`resolve_revision_for_range_end`].
-pub fn resolve_revision_specs_to_commits(
+pub(crate) fn resolve_revision_specs_to_commits(
     repo: &Repository,
     specs: &[String],
 ) -> Result<Vec<ObjectId>> {
@@ -7109,9 +7109,7 @@ fn try_bounded_limit_list(
         // path walks first-parent order and would keep scanning after an old commit even when
         // every queued commit is still older than the cutoff (clock-skewed histories).
         let linear = if options.since_cutoff.is_none() {
-            crate::merge_base::try_linear_chain_commits_with_cutoffs(
-                repo, include[0], need, cutoffs,
-            )?
+            crate::merge_base::try_linear_chain_commits(repo, include[0], need, cutoffs)?
         } else {
             None
         };
@@ -7715,7 +7713,7 @@ fn parse_revision_stdin_lines(repo: &Repository, lines: &[String]) -> Result<Std
 /// # Errors
 ///
 /// Propagates [`RevListError`] for invalid stdin pseudo-options and ref store failures.
-pub fn collect_revision_specs_from_stdin_lines(
+pub(crate) fn collect_revision_specs_from_stdin_lines(
     repo: &Repository,
     args_specs: &[String],
     lines: &[&str],
@@ -7742,7 +7740,7 @@ pub fn collect_revision_specs_from_stdin_lines(
 /// # Errors
 ///
 /// Propagates ref store failures.
-pub fn tag_targets(repo: &Repository) -> Result<HashSet<ObjectId>> {
+pub(crate) fn tag_targets(repo: &Repository) -> Result<HashSet<ObjectId>> {
     Ok(refs::list_refs_in(repo, "refs/tags/")?
         .into_iter()
         .map(|(_, oid)| oid)
@@ -8338,7 +8336,7 @@ pub fn shallow_boundary_oids(git_dir: &Path) -> HashSet<ObjectId> {
 /// commits (for protocol v2 `shallow-info` and `pack-objects --shallow`). Annotated tag wants are
 /// walked from the commit they name.
 #[must_use]
-pub fn shallow_borders_reachable_from_wants(
+pub(crate) fn shallow_borders_reachable_from_wants(
     repo: &Repository,
     wants: &[ObjectId],
 ) -> Vec<ObjectId> {
@@ -8366,57 +8364,6 @@ pub fn shallow_borders_reachable_from_wants(
     }
     out.sort();
     out
-}
-
-/// Compute new shallow boundary commits for `upload-pack` when the client sends `deepen <n>`.
-///
-/// Absolute depth from wanted tips (`fetch --depth N`, wire `deepen N` without
-/// `deepen-relative`). Returns shallow border commits for `shallow` lines and
-/// `pack-objects --shallow`. Each want is cut independently at `deepen`; client
-/// shallows outside that window are not unshallowed. Relative deepen first computes
-/// an absolute target depth, then uses [`shallow_grafts_for_upload_pack_target_depth`].
-///
-/// # Parameters
-///
-/// - `wants` — wanted OIDs (usually remote `HEAD` / ref tips). Annotated tags are peeled to the
-///   commit they name; wants that do not peel to a commit are ignored, so only commits are ever
-///   returned.
-/// - `client_shallow` — OIDs the client advertised with `shallow <oid>` before `deepen`.
-/// - `deepen` — positive integer from the `deepen` pkt-line (`deepen 2` → `2`).
-#[must_use]
-pub fn shallow_grafts_for_upload_pack_deepen(
-    repo: &Repository,
-    wants: &[ObjectId],
-    client_shallow: &[ObjectId],
-    deepen: usize,
-) -> Vec<ObjectId> {
-    let wants = peel_to_commit_tips(repo, wants);
-    if deepen == 0 || wants.is_empty() {
-        return Vec::new();
-    }
-    let wants = wants.as_slice();
-
-    shallow_grafts_for_upload_pack_target_depth(repo, wants, client_shallow, deepen)
-}
-
-/// Shallow borders when the client sent `deepen-relative` and the caller already computed
-/// the absolute target depth (Git `get_shallow_commits` after `deepen_relative` adjustment).
-///
-/// Wants are peeled like in [`shallow_grafts_for_upload_pack_deepen`].
-#[must_use]
-pub fn shallow_grafts_for_upload_pack_target_depth(
-    repo: &Repository,
-    wants: &[ObjectId],
-    client_shallow: &[ObjectId],
-    target_depth: usize,
-) -> Vec<ObjectId> {
-    shallow_grafts_for_upload_pack_target_depth_with_policy(
-        repo,
-        wants,
-        client_shallow,
-        target_depth,
-        true,
-    )
 }
 
 /// Shallow/unshallow classification for absolute `deepen <n>` (Git `get_shallows_or_depth`).
@@ -8526,33 +8473,6 @@ fn min_enter_depths_from_wants(
     enter_depth
 }
 
-/// Like [`shallow_grafts_for_upload_pack_target_depth`], but can treat commits the
-/// client already marked shallow as borders (for absolute `fetch --depth` retention).
-///
-/// With multiple wants, each tip gets its own generation-1 cut at `target_depth`.
-/// Upload-pack emits `unshallow` only for client-advertised shallows that lie strictly
-/// inside the new depth window, not for older boundaries outside the walk.
-pub(crate) fn shallow_grafts_for_upload_pack_target_depth_with_policy(
-    repo: &Repository,
-    wants: &[ObjectId],
-    client_shallow: &[ObjectId],
-    target_depth: usize,
-    omit_existing_client_shallows: bool,
-) -> Vec<ObjectId> {
-    let wants = peel_to_commit_tips(repo, wants);
-    if target_depth == 0 || wants.is_empty() {
-        return Vec::new();
-    }
-    let server_shallow = shallow_boundary_oids(repo.git_dir());
-    let client_set: HashSet<ObjectId> = client_shallow.iter().copied().collect();
-    let state = upload_pack_shallow_depth_state(repo, &wants, target_depth, &server_shallow);
-    let mut out = state.border_commits;
-    if omit_existing_client_shallows {
-        out.retain(|c| !client_set.contains(c));
-    }
-    out
-}
-
 /// Peel `wants` through annotated tags and keep the distinct commits, in order.
 ///
 /// Depth counting and shallow borders are defined on commits only: a tag want
@@ -8635,28 +8555,6 @@ pub(crate) fn upload_pack_shallow_rev_list_state(
         border_commits,
         interior_commits,
     })
-}
-
-/// Shallow boundary commits for `upload-pack` when the client uses `deepen-since` and/or
-/// `deepen-not` (Git runs `rev-list --max-age=…` / `--not` and derives border commits).
-///
-/// Returns commit OIDs to advertise as `shallow` lines and pass to `pack-objects --shallow`.
-/// Client-advertised shallows strictly inside the rev-list window may be unshallowed;
-/// boundaries outside the new set are left grafted.
-pub fn shallow_grafts_for_upload_pack_rev_list(
-    repo: &Repository,
-    wants: &[ObjectId],
-    client_shallow: &[ObjectId],
-    deepen_since: Option<i64>,
-    deepen_not: &[ObjectId],
-) -> Result<Vec<ObjectId>> {
-    let client_set: HashSet<ObjectId> = client_shallow.iter().copied().collect();
-    let state = upload_pack_shallow_rev_list_state(repo, wants, deepen_since, deepen_not)?;
-    Ok(state
-        .border_commits
-        .into_iter()
-        .filter(|c| !client_set.contains(c))
-        .collect())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -10210,42 +10108,6 @@ fn flatten_tree_with_mode(
     Ok(result)
 }
 
-/// Compute merge bases between two commits.
-pub fn merge_bases(
-    repo: &Repository,
-    a: ObjectId,
-    b: ObjectId,
-    first_parent_only: bool,
-) -> Result<Vec<ObjectId>> {
-    let mut graph = CommitGraph::new(repo, first_parent_only);
-    let ancestors_a = walk_closure(&mut graph, &[a])?;
-    let ancestors_b = walk_closure(&mut graph, &[b])?;
-    let common: HashSet<ObjectId> = ancestors_a.intersection(&ancestors_b).copied().collect();
-    if common.is_empty() {
-        return Ok(Vec::new());
-    }
-    // Merge bases: common ancestors not dominated by other common ancestors
-    let mut bases = Vec::new();
-    for &c in &common {
-        let is_dominated = common.iter().any(|&other| {
-            if other == c {
-                return false;
-            }
-            let other_anc = walk_closure(&mut graph, &[other]).unwrap_or_default();
-            other_anc.contains(&c)
-        });
-        if !is_dominated {
-            bases.push(c);
-        }
-    }
-    if bases.is_empty() {
-        let mut sorted: Vec<_> = common.into_iter().collect();
-        sorted.sort_by_key(|b| std::cmp::Reverse(graph.committer_time(*b)));
-        bases.push(sorted[0]);
-    }
-    Ok(bases)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -11567,8 +11429,8 @@ mod line_coverage_tests {
     }
 
     #[test]
-    fn shallow_graft_and_stdin_helpers() -> Result<()> {
-        let (_dir, repo, tip) = seed_repo(6, false);
+    fn shallow_boundary_and_stdin_helpers() -> Result<()> {
+        let (_dir, repo, _tip) = seed_repo(6, false);
         let commits = rev_list(
             &repo,
             &[String::from("main")],
@@ -11581,15 +11443,6 @@ mod line_coverage_tests {
         fs::write(repo.git_dir().join("shallow"), format!("{mid}\n")).expect("shallow");
         let borders = shallow_boundary_oids(&repo.git_dir());
         assert!(borders.contains(&mid));
-        let grafts = shallow_grafts_for_upload_pack_deepen(&repo, &[tip], &[], 2);
-        assert!(!grafts.is_empty() || commits.len() <= 2);
-        let grafts2 = shallow_grafts_for_upload_pack_deepen(&repo, &[tip], &[mid], 1);
-        let _ = grafts2;
-        let target = shallow_grafts_for_upload_pack_target_depth(&repo, &[tip], &[], 3);
-        let _ = target;
-        let since_grafts =
-            shallow_grafts_for_upload_pack_rev_list(&repo, &[tip], &[], Some(50), &[])?;
-        let _ = since_grafts;
         let (_specs, _neg, _all, paths) = collect_revision_specs_from_stdin_lines(
             &repo,
             &[String::from("HEAD")],
@@ -11610,9 +11463,8 @@ mod line_coverage_tests {
         )?
         .commits;
         let base = all[all.len() / 2];
-        let bases = merge_bases(&repo, tip, base, false)?;
+        let bases = crate::merge_base::merge_bases_all(&repo, &[tip, base])?;
         assert!(!bases.is_empty());
-        let _ = merge_bases(&repo, tip, base, true)?;
         let resolved =
             resolve_revision_specs_to_commits(&repo, &["main".to_owned(), "side".to_owned()])?;
         assert!(!resolved.is_empty());

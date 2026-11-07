@@ -30,7 +30,6 @@ use grit_lib::remote::grit_server_share::{
 };
 use grit_lib::remote::HttpClientFactory as _;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::merge_base::is_ancestor;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -285,7 +284,10 @@ pub(crate) fn explain(
     theirs: ObjectId,
 ) -> Option<DivergenceJson> {
     let (floor, base) = comparison(repo, remote, branch, user, ours, theirs)?;
-    let d = grit_lib::divergence::classify(repo, &floor, base, ours, theirs).ok()?;
+    let d = repo
+        .revwalk()
+        .classify_divergence(&floor, base, ours, theirs)
+        .ok()?;
     Some(DivergenceJson::from_divergence(&d, user, branch, remote))
 }
 
@@ -324,11 +326,13 @@ pub(crate) fn comparison(
             }
         }
     }
-    let seen = |name: &str| grit_lib::divergence::heads_seen(repo, name);
+    let seen = |name: &str| repo.revwalk().heads_seen(name);
     let ours_seen = seen(&format!("refs/heads/{branch}"));
     let theirs_seen = seen(&format!("refs/remotes/{remote}/shared/{branch}/{user}"));
-    let base =
-        grit_lib::divergence::common_base(repo, ours, theirs, &ours_seen, &theirs_seen).ok()?;
+    let base = repo
+        .revwalk()
+        .divergence_base(ours, theirs, &ours_seen, &theirs_seen)
+        .ok()?;
     Some((floor, base))
 }
 
@@ -345,7 +349,9 @@ pub(crate) fn put_together(
 ) -> Result<std::result::Result<ObjectId, String>> {
     let (floor, base) =
         comparison(repo, remote, branch, user, ours, theirs).context("comparing the two heads")?;
-    let made = grit_lib::divergence::combine(repo, &floor, base, ours, theirs, choice)
+    let made = repo
+        .revwalk()
+        .combine_divergence(&floor, base, ours, theirs, choice)
         .context("putting the two heads together")?;
     Ok(match made.head {
         Some(head) => Ok(head),
@@ -392,7 +398,10 @@ pub(crate) fn auto_combine(
     theirs: ObjectId,
 ) -> Option<ObjectId> {
     let (floor, base) = comparison(repo, remote, branch, user, ours, theirs)?;
-    let d = grit_lib::divergence::classify(repo, &floor, base, ours, theirs).ok()?;
+    let d = repo
+        .revwalk()
+        .classify_divergence(&floor, base, ours, theirs)
+        .ok()?;
     if !d.scenario.diverged() || d.scenario.needs_decision() {
         return None;
     }
@@ -578,8 +587,8 @@ pub(crate) fn compare(repo: &Repository, ours: Option<ObjectId>, theirs: ObjectI
         return HeadRelation::Unknown;
     }
     match (
-        is_ancestor(repo, ours, theirs).unwrap_or(false),
-        is_ancestor(repo, theirs, ours).unwrap_or(false),
+        repo.revwalk().is_ancestor(ours, theirs).unwrap_or(false),
+        repo.revwalk().is_ancestor(theirs, ours).unwrap_or(false),
     ) {
         (true, _) => HeadRelation::Ahead,
         (_, true) => HeadRelation::Behind,
@@ -1331,7 +1340,7 @@ fn integrated_share(
     if keys.is_empty() && carried {
         return Ok(None);
     }
-    let commits = grit_lib::divergence::keyed_commits(repo, tip, &[])?;
+    let commits = repo.revwalk().keyed_commits(tip, &[])?;
     let integrated = commits
         .iter()
         .filter(|k| keys.contains(k.key.as_str()))
@@ -1482,13 +1491,7 @@ fn resolve_integrated(
                 .filter_map(|s| s.integrated.as_ref())
                 .flat_map(|i| i.changes.iter().cloned())
                 .collect();
-            let head = match grit_lib::divergence::replay_onto(
-                &here.repo,
-                ours,
-                &[onto],
-                onto,
-                &skip,
-            )? {
+            let head = match here.repo.revwalk().replay_onto(ours, &[onto], onto, &skip)? {
                 grit_lib::divergence::ReplayOntoOutcome::Ok { tip } => tip,
                 grit_lib::divergence::ReplayOntoOutcome::Conflict { paths } => bail!(
                     "rebasing {branch} onto {target} conflicts in {}: run `grit rebase origin/{target}` and settle them by hand",
