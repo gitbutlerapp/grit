@@ -4,21 +4,30 @@
 //! (115 MiB-class packed upstream git.git). Measures repeated
 //! [`grit_lib::change_id::find_commits_by_change_id_prefix`] after the negative probe
 //! cache is primed — the regression that reread every pack byte per lookup.
+//!
+//! `find_by_prefix_warm_memory_store` runs the same lookup with the clone's commits and
+//! tags copied into a [`MemoryStore`] primary. A custom store has no on-disk probe to say
+//! that no commit carries a header, so every lookup scans each reachable commit's header
+//! through the store.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::change_id::{find_commits_by_change_id_prefix, ChangeId};
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::objects::odb::store::{MemoryStore, WritableObjectStore};
+use grit_lib::objects::odb::WriteOptions;
+use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::repo::Repository;
 
 struct ChangeIdResolveFixture {
     repo: Repository,
+    memory_repo: Repository,
     prefix: String,
 }
 
@@ -41,6 +50,45 @@ fn run_git(dir: &Path, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+fn git_stdout(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Open `bare` with its commits and tags (all a change-id lookup reads) copied into a
+/// memory store; refs stay in the bare repository's files ref store.
+fn open_memory_store_repo(bare: &Path, files: &Repository) -> Option<Repository> {
+    let listing = git_stdout(
+        bare,
+        &[
+            "cat-file",
+            "--batch-all-objects",
+            "--batch-check=%(objectname) %(objecttype)",
+        ],
+    )?;
+    let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+    for line in listing.lines() {
+        let (hex, kind) = line.split_once(' ')?;
+        if kind != "commit" && kind != "tag" {
+            continue;
+        }
+        let oid = ObjectId::from_hex(hex).ok()?;
+        let obj = files.odb().read(&oid).ok()?;
+        store
+            .write(obj.kind, &obj.data, WriteOptions::default())
+            .ok()?;
+    }
+    Repository::open(bare, &RepositoryOptions::empty().with_object_store(store)).ok()
+}
+
 fn load_fixture() -> Option<ChangeIdResolveFixture> {
     let bare = git_git_bare();
     if !bare.is_dir() {
@@ -59,22 +107,17 @@ fn load_fixture() -> Option<ChangeIdResolveFixture> {
     }
     let _ = run_git(&bare, &["gc", "--prune=now"]);
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).ok()?;
-    let out = Command::new("git")
-        .current_dir(&bare)
-        .args(["rev-parse", "HEAD"])
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let head_hex = std::str::from_utf8(&out.stdout).ok()?.trim();
-    let oid = grit_lib::objects::ObjectId::from_hex(head_hex).ok()?;
+    let head_hex = git_stdout(&bare, &["rev-parse", "HEAD"])?;
+    let oid = ObjectId::from_hex(head_hex.trim()).ok()?;
     let derived = ChangeId::derived_from_commit_id(&oid);
     let prefix = derived.short(12).to_string();
     find_commits_by_change_id_prefix(&repo, &prefix).ok()?;
-    Some(ChangeIdResolveFixture { repo, prefix })
+    let memory_repo = open_memory_store_repo(&bare, &repo)?;
+    Some(ChangeIdResolveFixture {
+        repo,
+        memory_repo,
+        prefix,
+    })
 }
 
 fn fixture() -> &'static ChangeIdResolveFixture {
@@ -97,6 +140,14 @@ fn bench_change_id_resolve(c: &mut Criterion) {
             black_box(
                 find_commits_by_change_id_prefix(&fx.repo, &fx.prefix)
                     .expect("resolve change-id prefix"),
+            );
+        });
+    });
+    group.bench_function("find_by_prefix_warm_memory_store", |b| {
+        b.iter(|| {
+            black_box(
+                find_commits_by_change_id_prefix(&fx.memory_repo, &fx.prefix)
+                    .expect("resolve change-id prefix through a memory store"),
             );
         });
     });
