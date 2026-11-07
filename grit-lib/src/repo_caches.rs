@@ -69,6 +69,9 @@ pub struct RepoCaches {
     pathspec_precompose: OnceLock<bool>,
     ref_storage_format: Mutex<HashMap<PathBuf, RefStorageFormat>>,
     pub(crate) ref_stores: Mutex<HashMap<PathBuf, Arc<dyn crate::refs::store::RefStore>>>,
+    /// The repository's objects when they are not the files database under the git
+    /// directory; files ref stores opened here peel `packed-refs` entries against it.
+    ref_peel_source: OnceLock<Arc<dyn crate::odb::ObjectStore>>,
     filters: FilterProcessState,
     promisor_hydrate: Mutex<Option<PromisorHydrateHook>>,
     promisor_fetcher: Mutex<Option<Arc<dyn PromisorFetcher>>>,
@@ -120,6 +123,7 @@ impl RepoCaches {
             pathspec_precompose: OnceLock::new(),
             ref_storage_format: Mutex::new(HashMap::new()),
             ref_stores: Mutex::new(HashMap::new()),
+            ref_peel_source: OnceLock::new(),
             filters: FilterProcessState::new(command_runner),
             promisor_hydrate: Mutex::new(None),
             promisor_fetcher: Mutex::new(None),
@@ -626,6 +630,19 @@ impl RepoCaches {
             guard.insert(key, Arc::clone(&store));
         }
         Ok(store)
+    }
+
+    /// Have files ref stores this cache opens compute `packed-refs` peel lines from `store`.
+    ///
+    /// Set once, before the first [`Self::open_ref_store`], for a repository whose primary
+    /// object store is not the files database; later calls are ignored.
+    pub(crate) fn set_ref_peel_source(&self, store: Arc<dyn crate::odb::ObjectStore>) {
+        let _ = self.ref_peel_source.set(store);
+    }
+
+    /// The store set by [`Self::set_ref_peel_source`], if any.
+    pub(crate) fn ref_peel_source(&self) -> Option<Arc<dyn crate::odb::ObjectStore>> {
+        self.ref_peel_source.get().cloned()
     }
 
     /// Make `store` the ref store [`Self::open_ref_store`] returns for `git_dir`.

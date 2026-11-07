@@ -13,6 +13,7 @@ use crate::git_dir::io_error::{
 use crate::git_path::CanonicalizeExt;
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
+use crate::odb::ObjectStore;
 use crate::reflog::{self, ReflogEntry};
 use crate::refs::{
     lock_path_for_ref, loose_ref_list_walk_root, packed_record_name, packed_record_oid,
@@ -28,7 +29,7 @@ use std::fs;
 use std::io;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use super::apply::{
     apply_case_only_ref_rename, apply_reflog_rename, apply_update, ref_change_target,
@@ -77,6 +78,9 @@ pub struct FilesRefStore {
     namespace_prefix: Option<String>,
     packed_cache: Mutex<PackedCacheEntry>,
     ignorecase: OnceLock<bool>,
+    /// Objects `packed-refs` peel lines are computed from: the repository's store when a
+    /// [`crate::repo::Repository`] installed one, else the files database under `common_dir`.
+    peel_source: Option<Arc<dyn ObjectStore>>,
 }
 
 /// What a cached `packed-refs` view was read from. Writers replace the file by rename, so the
@@ -159,7 +163,16 @@ impl FilesRefStore {
                 map_is_complete: false,
             }),
             ignorecase: OnceLock::new(),
+            peel_source: None,
         }
+    }
+
+    /// Compute `packed-refs` peel lines from `store` instead of the files object database
+    /// under the common git directory, for a repository whose objects live elsewhere.
+    #[must_use]
+    pub(crate) fn with_peel_source(mut self, store: Option<Arc<dyn ObjectStore>>) -> Self {
+        self.peel_source = store;
+        self
     }
 
     /// Whether ref names are compared with ASCII case folding for create availability.
@@ -1198,23 +1211,33 @@ impl FilesRefStore {
             verify_create_casefold_conflicts(self.refs_ignore_ascii_case(), &existing, updates)?;
         }
 
-        let odb = crate::odb::Odb::new(&self.common_dir.join("objects"))
-            .with_config_git_dir(self.git_dir.clone());
         let mut peels: HashMap<ObjectId, Option<ObjectId>> = HashMap::new();
-        let records = odb.with_pack_read_context(|| {
+        let mut records_with = |peel_of: &dyn Fn(ObjectId) -> Option<ObjectId>| -> Vec<String> {
             creates
-                .into_iter()
-                .map(|(name, oid)| {
-                    let peel = *peels
-                        .entry(oid)
-                        .or_insert_with(|| crate::refs::packed_ref_peel(&odb, oid));
+                .iter()
+                .map(|&(name, oid)| {
+                    let peel = *peels.entry(oid).or_insert_with(|| peel_of(oid));
                     match peel {
                         Some(peel) => format!("{oid} {name}\n^{peel}\n"),
                         None => format!("{oid} {name}\n"),
                     }
                 })
                 .collect()
-        });
+        };
+        let records = match &self.peel_source {
+            Some(store) => records_with(&|oid| {
+                crate::odb::peel_stored_tag_target_in(store.as_ref(), oid)
+                    .ok()
+                    .flatten()
+            }),
+            None => {
+                let odb = crate::odb::Odb::new(&self.common_dir.join("objects"))
+                    .with_config_git_dir(self.git_dir.clone());
+                odb.with_pack_read_context(|| {
+                    records_with(&|oid| crate::refs::packed_ref_peel(&odb, oid))
+                })
+            }
+        };
         Ok(Some(records))
     }
 

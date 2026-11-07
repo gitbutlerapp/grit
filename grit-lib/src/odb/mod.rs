@@ -34,6 +34,7 @@ pub(crate) use stream::deflate_stream_to_writer;
 
 #[doc(inline)]
 pub use builder::OdbBuilder;
+pub(crate) use peel::peel_stored_tag_target_in;
 
 pub(crate) use store::loose::{
     decompress_zlib_loose_bytes, for_each_loose_object_id, for_each_object_id_in_fanout_dir,

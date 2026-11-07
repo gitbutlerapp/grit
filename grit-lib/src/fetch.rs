@@ -2410,7 +2410,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
     }
     let git_dir = local.git_dir();
     if local.refs_on_disk() {
-        crate::refs::pack_imported_refs_for_clone(git_dir, opts.remote_name.as_deref())?;
+        crate::refs::pack_imported_refs_for_clone(local, opts.remote_name.as_deref())?;
     }
     let Some(remote) = opts.remote_name.as_deref() else {
         return Ok(());

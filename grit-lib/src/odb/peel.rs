@@ -7,8 +7,9 @@
 use std::collections::HashSet;
 
 use crate::error::{Error, Result};
-use crate::objects::{tag_object_line_oid, CommitRef, ObjectId, ObjectKind};
+use crate::objects::{tag_object_line_oid, CommitRef, Object, ObjectId, ObjectKind};
 
+use super::store::ObjectStore;
 use super::Odb;
 
 impl Odb {
@@ -112,35 +113,71 @@ impl Odb {
         if self.read_info(&oid)?.kind != ObjectKind::Tag {
             return Ok(None);
         }
-        let mut current = oid;
-        let mut visited: Option<HashSet<ObjectId>> = None;
-        loop {
-            if stored_only && !self.contains(&current)? {
+        follow_tag_chain(oid, |id| {
+            if stored_only && !self.contains(id)? {
                 return Ok(None);
             }
-            let tag = self.read(&current)?;
-            if tag.kind != ObjectKind::Tag {
-                return Err(Error::CorruptObject(format!(
-                    "{current} is named as a tag but is a {}",
-                    tag.kind
-                )));
-            }
-            let (target, names_tag) = tag_target_header(&tag.data);
-            let target = target.ok_or_else(|| {
-                Error::CorruptObject(format!("tag {current} has no valid object header"))
-            })?;
-            if !names_tag {
-                return Ok(Some(target));
-            }
-            if !visited.get_or_insert_with(HashSet::new).insert(current) {
-                return Err(Error::CorruptObject(format!(
-                    "tag chain from {oid} loops back to {current}"
-                )));
-            }
-            current = target;
-        }
+            self.read(id).map(Some)
+        })
     }
+}
 
+/// [`Odb::peel_stored_tag_target`] over a bare [`ObjectStore`]: the `packed-refs` peel value
+/// of `oid`, reading only objects `store` holds.
+///
+/// Returns `None` when `oid` is not a tag stored in `store`, or when an intermediate tag of
+/// the chain is missing. The final target comes from the last tag's header and may be missing.
+///
+/// # Errors
+///
+/// Backend failures from `store`, and [`Error::CorruptObject`] for the malformed chains
+/// [`Odb::peel_tag_target`] rejects.
+pub(crate) fn peel_stored_tag_target_in(
+    store: &dyn ObjectStore,
+    oid: ObjectId,
+) -> Result<Option<ObjectId>> {
+    if store.read_info(&oid)?.map(|info| info.kind) != Some(ObjectKind::Tag) {
+        return Ok(None);
+    }
+    follow_tag_chain(oid, |id| store.read(id))
+}
+
+/// Walk the annotated tag chain from `oid` (known to be a tag) to its first non-tag target,
+/// deciding from each tag's `type` header whether to continue. `read` returns `None` for a
+/// tag that is not available, which ends the walk with `Ok(None)`.
+fn follow_tag_chain(
+    oid: ObjectId,
+    mut read: impl FnMut(&ObjectId) -> Result<Option<Object>>,
+) -> Result<Option<ObjectId>> {
+    let mut current = oid;
+    let mut visited: Option<HashSet<ObjectId>> = None;
+    loop {
+        let Some(tag) = read(&current)? else {
+            return Ok(None);
+        };
+        if tag.kind != ObjectKind::Tag {
+            return Err(Error::CorruptObject(format!(
+                "{current} is named as a tag but is a {}",
+                tag.kind
+            )));
+        }
+        let (target, names_tag) = tag_target_header(&tag.data);
+        let target = target.ok_or_else(|| {
+            Error::CorruptObject(format!("tag {current} has no valid object header"))
+        })?;
+        if !names_tag {
+            return Ok(Some(target));
+        }
+        if !visited.get_or_insert_with(HashSet::new).insert(current) {
+            return Err(Error::CorruptObject(format!(
+                "tag chain from {oid} loops back to {current}"
+            )));
+        }
+        current = target;
+    }
+}
+
+impl Odb {
     /// Peel `oid` through annotated tags and a commit to a tree.
     ///
     /// Returns `None` when the chain ends at a blob. Errors are those of [`Self::peel_tags`],

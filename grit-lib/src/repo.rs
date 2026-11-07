@@ -667,6 +667,9 @@ impl Repository {
             Arc::clone(&self.diagnostics),
             self.caches.reftable_write(),
         );
+        if let Some(peel_source) = self.caches.ref_peel_source() {
+            caches.set_ref_peel_source(peel_source);
+        }
         let ref_store = if self.refs_on_disk() {
             caches.open_ref_store(&git_dir, &environment)?
         } else {
@@ -1710,6 +1713,17 @@ impl Repository {
             options.reftable_write,
         );
         caches.set_promisor_fetcher(options.promisor_fetcher.clone());
+        if let Some(primary) = &custom_primary {
+            // A second handle over the same stores, without this repository's caches: the
+            // ref store it feeds is cached in `caches`, so sharing them would form a cycle.
+            caches.set_ref_peel_source(
+                layers
+                    .clone()
+                    .build(&objects_dir, Some(Arc::clone(primary)))
+                    .with_config_git_dir(git_dir.clone())
+                    .read_store(),
+            );
+        }
         let odb = layers
             .build(&objects_dir, custom_primary)
             .with_resolved_work_tree(work_tree.clone())

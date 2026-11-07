@@ -3887,7 +3887,12 @@ pub(crate) fn pack_refs_for_repository(
     dry_run: bool,
 ) -> Result<(PathBuf, usize, usize)> {
     let git_dir = repo.git_dir();
-    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
+    let format = if repo.refs_on_disk() {
+        repo.ref_store().format()
+    } else {
+        open_ref_store(git_dir)?.format()
+    };
+    if format != RefStorageFormat::Files {
         return pack_refs_reftable(git_dir, dry_run);
     }
     let config = repo.config().snapshot().ok();
@@ -4683,15 +4688,9 @@ pub(crate) fn packed_ref_peel(odb: &crate::odb::Odb, oid: ObjectId) -> Option<Ob
 ///
 /// Returns ref-store, packed-ref parsing, lock, and filesystem errors.
 pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Result<()> {
-    pack_imported_refs_for_clone(git_dir, Some(remote))
-}
-
-/// Bare clones import tags without creating remote-tracking refs.
-pub(crate) fn pack_imported_refs_for_clone(git_dir: &Path, remote: Option<&str>) -> Result<()> {
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return Ok(());
     }
-    let prefix = remote.map(|name| format!("refs/remotes/{name}/"));
     let storage_git_dir = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
     let odb = crate::odb::Odb::new(&storage_git_dir.join("objects"))
         .with_config_git_dir(git_dir.to_path_buf());
@@ -4704,11 +4703,34 @@ pub(crate) fn pack_imported_refs_for_clone(git_dir: &Path, remote: Option<&str>)
         ),
     )
     .ok();
+    pack_imported_refs(git_dir, &odb, config.as_ref(), Some(remote))
+}
+
+/// [`pack_remote_tracking_refs_for_clone`] for `repo`, peeling tags through its object store.
+/// Bare clones (`remote` is `None`) import tags without creating remote-tracking refs.
+pub(crate) fn pack_imported_refs_for_clone(
+    repo: &crate::repo::Repository,
+    remote: Option<&str>,
+) -> Result<()> {
+    if repo.ref_store().format() != RefStorageFormat::Files {
+        return Ok(());
+    }
+    let config = repo.config().snapshot().ok();
+    pack_imported_refs(repo.git_dir(), repo.odb(), config.as_deref(), remote)
+}
+
+fn pack_imported_refs(
+    git_dir: &Path,
+    odb: &crate::odb::Odb,
+    config: Option<&crate::config::ConfigSet>,
+    remote: Option<&str>,
+) -> Result<()> {
+    let prefix = remote.map(|name| format!("refs/remotes/{name}/"));
     odb.with_pack_read_context(|| {
         pack_refs_files_matching(
             git_dir,
-            &odb,
-            config.as_ref(),
+            odb,
+            config,
             |name| {
                 name.starts_with("refs/tags/")
                     || prefix

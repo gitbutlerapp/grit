@@ -78,7 +78,10 @@ pub(crate) fn open_ref_store_uncached(
         OnDiskFormat::detect(git_dir)?
     };
     let store: Arc<dyn RefStore> = match format {
-        OnDiskFormat::Files => Arc::new(files_ref_store(git_dir, env)),
+        OnDiskFormat::Files => Arc::new(
+            files_ref_store(git_dir, env)
+                .with_peel_source(caches.and_then(|c| c.ref_peel_source())),
+        ),
         OnDiskFormat::Reftable => Arc::new(ReftableRefStore::open_with_environment(
             git_dir.to_path_buf(),
             env.clone(),
