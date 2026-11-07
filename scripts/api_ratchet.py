@@ -4,6 +4,9 @@
 Compares rustdoc JSON (pinned nightly, ``http-ureq`` feature; JSON at
 ``target/api-ratchet-doc/grit_lib.json``) and ``grit-lib/public-api.txt``
 against ``grit-lib/api-ratchet.toml``.
+
+Subcommands: ``check`` (CI gate), ``update`` (rewrite the baseline) and ``report``
+(consolidation offenders grouped by top-level public module; ``--module diff`` filters).
 """
 
 from __future__ import annotations
@@ -58,6 +61,38 @@ METRIC_KEYS = (
     "pub_error_enum_not_non_exhaustive",
     "pub_area_error_wraps_umbrella",
     "error_message_construction_sites",
+    "doc_example_free_fn_calls",
+)
+
+# Metrics `report` groups by top-level public module (the API 0.6 consolidation targets).
+REPORT_METRIC_KEYS = (
+    "pub_fn_with_in_name",
+    "pub_fn_too_many_arguments_allow",
+    "pub_fn_two_plus_bare_bool",
+    "pub_free_fn_repository_first",
+    "pub_free_fn_git_dir_path_first",
+)
+
+CANONICAL_MODULES_PATH = GRIT_LIB / "canonical-modules.toml"
+ROOT_MODULE_LABEL = "(crate root)"
+UNKNOWN_MODULE_LABEL = "(unknown)"
+
+# Fence info tokens rustdoc accepts on a Rust doctest (any other language tag is not Rust).
+RUST_FENCE_TOKENS = frozenset(
+    {
+        "rust",
+        "ignore",
+        "no_run",
+        "should_panic",
+        "compile_fail",
+        "test_harness",
+        "standalone_crate",
+    },
+)
+FENCE_RE = re.compile(r"^\s*(```+|~~~+)\s*(.*?)\s*$")
+CALL_RE = re.compile(r"(?<![\w.:!])((?:[A-Za-z_]\w*::)*)([a-z_]\w*)\s*\(")
+NON_CALL_KEYWORDS = frozenset(
+    {"if", "while", "for", "match", "return", "loop", "in", "as", "let", "move", "fn"},
 )
 
 ERROR_CATCH_ALL_VARIANTS = frozenset({"Message", "Other", "Generic", "Custom", "Msg"})
@@ -128,6 +163,8 @@ class MetricResult:
 
     count: int
     offenders: list[str] = field(default_factory=list)
+    # Top-level public module per offender (parallel to `offenders`), for `report`.
+    modules: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -748,6 +785,11 @@ def item_defined_in_refs(
     return False
 
 
+def has_with_in_name(name: str) -> bool:
+    """True for ``_with_`` variant names (``open_with_options``), not ``with_<field>`` setters."""
+    return name.find("_with_") > 0
+
+
 def is_bare_bool(type_node: Any) -> bool:
     if isinstance(type_node, dict) and "type" in type_node:
         type_node = type_node["type"]
@@ -1221,6 +1263,354 @@ def collect_public_paths(payload: dict[str, Any]) -> dict[str, list[str]]:
     return by_id
 
 
+def load_canonical_module_map(path: Path | None = None) -> dict[str, str]:
+    """Flat implementation module -> top-level public module, from ``canonical-modules.toml``."""
+    source = path or CANONICAL_MODULES_PATH
+    if not source.is_file():
+        return {}
+    table = tomllib.loads(source.read_text(encoding="utf-8")).get("map", {})
+    return {
+        str(flat): str(canonical).split("::")[0]
+        for flat, canonical in table.items()
+        if isinstance(canonical, str) and canonical
+    }
+
+
+def top_module_of_path(path: str) -> str | None:
+    """Top-level module of a ``grit_lib::…`` item path; crate-root items get a fixed label."""
+    parts = path.split("::")
+    if not parts or parts[0] != "grit_lib":
+        return None
+    if len(parts) <= 2:
+        return ROOT_MODULE_LABEL
+    return parts[1]
+
+
+def build_member_owner(index: dict[str, Any]) -> dict[str, str]:
+    """Map impl/trait member item id -> id of the type (or trait) that owns it."""
+    owners: dict[str, str] = {}
+    for item_id, item in index.items():
+        if item.get("crate_id") != 0:
+            continue
+        inner = item.get("inner") or {}
+        owner: str | None = None
+        members: list[Any] = []
+        if "impl" in inner:
+            for_node = inner["impl"].get("for") or {}
+            rp = for_node.get("resolved_path") if isinstance(for_node, dict) else None
+            if isinstance(rp, dict) and rp.get("id") is not None:
+                owner = str(rp["id"])
+            members = inner["impl"].get("items") or []
+        elif "trait" in inner:
+            owner = str(item_id)
+            members = inner["trait"].get("items") or []
+        if owner is None:
+            continue
+        for member_id in members:
+            owners.setdefault(str(member_id), owner)
+    return owners
+
+
+class ModuleResolver:
+    """Resolve an item id to the top-level public module a caller imports it from.
+
+    Order: the shortest public path (prelude excluded), then the owning type for impl and
+    trait members, then rustdoc's defining path or source file mapped through
+    ``canonical-modules.toml`` (flat implementation modules are private).
+    """
+
+    def __init__(
+        self,
+        payload: dict[str, Any],
+        public_paths: dict[str, list[str]],
+        canonical: dict[str, str] | None = None,
+    ) -> None:
+        self.index: dict[str, Any] = payload.get("index", {})
+        self.paths_map: dict[str, Any] = payload.get("paths", {})
+        self.public_paths = public_paths
+        self.canonical = load_canonical_module_map() if canonical is None else canonical
+        self.owners = build_member_owner(self.index)
+        self.reexported_flat = self._reexported_flat_modules()
+
+    def _defining_flat(self, item_id: Any) -> str | None:
+        meta = self.paths_map.get(str(item_id)) or {}
+        parts = list(meta.get("path") or [])
+        if len(parts) < 2 or parts[0] != "grit_lib" or meta.get("crate_id") not in (0, None):
+            return None
+        return parts[1]
+
+    def _reexported_flat_modules(self) -> dict[str, str]:
+        """Flat module -> public top-level module that re-exports its items (``pub use``).
+
+        Public modules are seeded from their public path; private implementation modules
+        inherit the top-level module of the first public (or already-resolved) module that
+        re-exports them, so a glob ``pub use crate::history_root::*`` under ``revwalk``
+        files ``history_root`` items under ``revwalk``.
+        """
+        resolved: dict[str, str] = {}
+        modules = [
+            (str(item_id), item)
+            for item_id, item in self.index.items()
+            if item.get("crate_id") == 0 and "module" in (item.get("inner") or {})
+        ]
+
+        def module_top(module_id: str, item: dict[str, Any]) -> str | None:
+            meta = self.paths_map.get(module_id) or {}
+            if item.get("visibility") == "public" and meta.get("path"):
+                return top_module_of_path("::".join(meta["path"]) + "::_")
+            flat = self._defining_flat(module_id) or item.get("name")
+            if not flat:
+                return None
+            return self.canonical.get(flat) or resolved.get(flat)
+
+        changed = True
+        while changed:
+            changed = False
+            for module_id, item in modules:
+                top = module_top(module_id, item)
+                if not top or top == ROOT_MODULE_LABEL:
+                    continue
+                for child_id in item["inner"]["module"].get("items") or []:
+                    child = index_entry(self.index, child_id) or {}
+                    use = (child.get("inner") or {}).get("use")
+                    if not use or child.get("visibility") != "public":
+                        continue
+                    segments = str(use.get("source", "")).split("::")
+                    if len(segments) < 2 or segments[0] != "crate":
+                        continue
+                    target_flat = segments[1]
+                    if target_flat in resolved or target_flat in self.canonical:
+                        continue
+                    resolved[target_flat] = top
+                    changed = True
+        return resolved
+
+    def _canonical_flat(self, flat: str) -> str:
+        return self.canonical.get(flat) or self.reexported_flat.get(flat, flat)
+
+    def _from_public_paths(self, item_id: str) -> str | None:
+        candidates = [
+            p
+            for p in self.public_paths.get(item_id) or []
+            if p != "grit_lib::prelude" and not p.startswith("grit_lib::prelude::")
+        ]
+        if not candidates:
+            return None
+        return top_module_of_path(min(candidates, key=lambda p: (p.count("::"), p)))
+
+    def _from_defining_path(self, item_id: str) -> str | None:
+        meta = self.paths_map.get(item_id)
+        if not meta or not meta.get("path") or meta.get("crate_id") not in (0, None):
+            return None
+        parts = list(meta["path"])
+        if not parts or parts[0] != "grit_lib":
+            return None
+        if len(parts) <= 2:
+            return ROOT_MODULE_LABEL
+        return self._canonical_flat(parts[1])
+
+    def _from_span(self, item_id: str) -> str | None:
+        item = index_entry(self.index, item_id) or {}
+        filename = str((item.get("span") or {}).get("filename", "")).replace("\\", "/")
+        marker = "grit-lib/src/"
+        if marker not in filename:
+            return None
+        rel = Path(filename.split(marker, 1)[1])
+        parts = [p for p in rel.parts if p not in ("", ".", "..")]
+        if not parts:
+            return None
+        first = parts[0]
+        if first in ("lib.rs", "main.rs"):
+            return ROOT_MODULE_LABEL
+        if first.endswith(".rs"):
+            first = first[: -len(".rs")]
+        return self._canonical_flat(first)
+
+    def label_of(self, item_id: str, fallback: str) -> str:
+        """``Owner (file:line)`` for members without their own rustdoc path."""
+        sid = str(item_id)
+        if (self.paths_map.get(sid) or {}).get("path"):
+            return fallback
+        owner = self.owners.get(sid)
+        owner_meta = (self.paths_map.get(owner) or {}) if owner is not None else {}
+        item = index_entry(self.index, sid) or {}
+        if not owner_meta.get("path") or not item.get("name"):
+            return fallback
+        span = item.get("span") or {}
+        begin = span.get("begin") or ["?"]
+        owner_path = "::".join(owner_meta["path"])
+        return f"{owner_path} ({span.get('filename', '?')}:{begin[0]})"
+
+    def module_of(self, item_id: str) -> str:
+        sid = str(item_id)
+        found = self._from_public_paths(sid)
+        if found:
+            return found
+        owner = self.owners.get(sid)
+        if owner is not None:
+            found = self._from_public_paths(owner) or self._from_defining_path(owner)
+            if found:
+                return found
+        return self._from_defining_path(sid) or self._from_span(sid) or UNKNOWN_MODULE_LABEL
+
+
+def rust_code_blocks(docs: str) -> list[str]:
+    """Rust doctest bodies in a rustdoc Markdown string (hidden ``# `` lines included)."""
+    blocks: list[str] = []
+    lines = docs.splitlines()
+    i = 0
+    while i < len(lines):
+        m = FENCE_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        fence, info = m.group(1), m.group(2)
+        tokens = [t.strip() for t in re.split(r"[,\s]+", info) if t.strip()]
+        is_rust = all(t in RUST_FENCE_TOKENS or t.startswith("edition") for t in tokens)
+        body: list[str] = []
+        i += 1
+        while i < len(lines):
+            close = FENCE_RE.match(lines[i])
+            if close and close.group(1).startswith(fence[0]) and len(close.group(1)) >= len(fence) and not close.group(2):
+                break
+            body.append(lines[i])
+            i += 1
+        i += 1
+        if not is_rust:
+            continue
+        code = []
+        for line in body:
+            stripped = line.lstrip()
+            if stripped == "#":
+                continue
+            if stripped.startswith("# "):
+                line = line.replace("# ", "", 1)
+            code.append(line)
+        blocks.append("\n".join(code))
+    return blocks
+
+
+def _call_arguments(code: str, open_paren: int) -> list[str]:
+    """Top-level comma-separated arguments of the call whose ``(`` is at ``open_paren``."""
+    depth = 0
+    args: list[str] = []
+    current: list[str] = []
+    for ch in code[open_paren:]:
+        if ch in "([{":
+            depth += 1
+            if depth == 1:
+                continue
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                break
+        if depth == 1 and ch == ",":
+            args.append("".join(current).strip())
+            current = []
+            continue
+        current.append(ch)
+    tail = "".join(current).strip()
+    if tail:
+        args.append(tail)
+    return args
+
+
+def count_repo_free_fn_calls(code: str, repo_free_fn_names: frozenset[str]) -> list[str]:
+    """Free-function calls in example ``code`` that take a repository or its git dir.
+
+    A call counts when its callee names a public free function whose first parameter is
+    ``&Repository`` or a git-dir ``&Path``, or when any argument passes ``….git_dir()``.
+    Method calls, associated functions (``Type::f``), macros and ``fn`` definitions do not.
+    """
+    found: list[str] = []
+    for m in CALL_RE.finditer(code):
+        prefix, name = m.group(1), m.group(2)
+        if name in NON_CALL_KEYWORDS:
+            continue
+        segments = [s for s in prefix.split("::") if s]
+        if segments and segments[-1][:1].isupper():
+            continue
+        before = code[: m.start()].rstrip()
+        if before.endswith("fn") and (len(before) == 2 or not before[-3].isalnum()):
+            continue
+        args = _call_arguments(code, m.end() - 1)
+        if name in repo_free_fn_names or any("git_dir()" in arg for arg in args):
+            found.append(f"{prefix}{name}")
+    return found
+
+
+def handle_type_ids(index: dict[str, Any], paths_map: dict[str, Any]) -> list[str]:
+    """``Repository`` plus each handle type its ``&self`` accessors return (borrowing types)."""
+    repo_ids = [
+        str(item_id)
+        for item_id, item in index.items()
+        if item.get("crate_id") == 0
+        and item.get("name") == REPOSITORY_TYPE_PLAIN
+        and "struct" in (item.get("inner") or {})
+        and (paths_map.get(str(item_id)) or {}).get("path", ["grit_lib", "repo", "Repository"])[-1]
+        == REPOSITORY_TYPE_PLAIN
+    ]
+    found: list[str] = list(repo_ids)
+    for repo_id in repo_ids:
+        for impl_id in (index_entry(index, repo_id) or {}).get("inner", {}).get("struct", {}).get("impls") or []:
+            impl = (index_entry(index, impl_id) or {}).get("inner", {}).get("impl") or {}
+            if impl.get("trait"):
+                continue
+            for member_id in impl.get("items") or []:
+                member = index_entry(index, member_id) or {}
+                fn = (member.get("inner") or {}).get("function")
+                if member.get("visibility") != "public" or not fn:
+                    continue
+                if len(function_inputs(fn)) != 1 or not is_method(fn):
+                    continue
+                output = (fn.get("sig") or {}).get("output")
+                rp = output.get("resolved_path") if isinstance(output, dict) else None
+                if not isinstance(rp, dict) or rp.get("id") is None:
+                    continue
+                target = index_entry(index, rp["id"]) or {}
+                if target.get("crate_id") != 0 or "struct" not in (target.get("inner") or {}):
+                    continue
+                generic_args = ((rp.get("args") or {}).get("angle_bracketed") or {}).get("args") or []
+                if not any(isinstance(a, dict) and "lifetime" in a for a in generic_args):
+                    continue
+                if str(rp["id"]) not in found:
+                    found.append(str(rp["id"]))
+    return found
+
+
+def collect_doc_example_free_fn_calls(
+    payload: dict[str, Any],
+    repo_free_fn_names: frozenset[str],
+) -> MetricResult:
+    """Calls in crate-root and handle-type rustdoc examples to repo/git-dir free functions."""
+    index = payload.get("index", {})
+    paths_map = payload.get("paths", {})
+    sources: list[tuple[str, str]] = []
+    root_id = payload.get("root")
+    if root_id is not None:
+        root = index_entry(index, root_id) or {}
+        sources.append(("grit_lib", root.get("docs") or ""))
+    for type_id in handle_type_ids(index, paths_map):
+        type_item = index_entry(index, type_id) or {}
+        type_path = public_path_for_item(index, paths_map, type_id)
+        sources.append((type_path, type_item.get("docs") or ""))
+        for impl_id in (type_item.get("inner") or {}).get("struct", {}).get("impls") or []:
+            impl = (index_entry(index, impl_id) or {}).get("inner", {}).get("impl") or {}
+            if impl.get("trait"):
+                continue
+            for member_id in impl.get("items") or []:
+                member = index_entry(index, member_id) or {}
+                if member.get("visibility") != "public":
+                    continue
+                sources.append((f"{type_path}::{member.get('name', '?')}", member.get("docs") or ""))
+    offenders: list[str] = []
+    for where, docs in sources:
+        for block in rust_code_blocks(docs):
+            for callee in count_repo_free_fn_calls(block, repo_free_fn_names):
+                offenders.append(f"{where} :: {callee}")
+    return MetricResult(len(offenders), offenders)
+
+
 def compute_metrics(
     *,
     public_api_text: str,
@@ -1254,6 +1644,9 @@ def compute_metrics(
     associated_fn_ids = build_associated_function_ids(index)
     fn_impl_for = build_function_impl_for(index)
     path_map = collect_public_paths(payload)
+    resolver = ModuleResolver(payload, path_map)
+    report_modules: dict[str, list[str]] = {key: [] for key in REPORT_METRIC_KEYS}
+    repo_free_fn_names: set[str] = set()
 
     def path_in_refname_str_modules(item_id: str, fallback: str) -> bool:
         if module_path_allowed(fallback, REFNAME_STR_MODULE_PREFIXES):
@@ -1328,16 +1721,21 @@ def compute_metrics(
 
         if name.endswith("_impl"):
             impl_suffix.append(f"{path} :: {name}")
-        if "_with_" in name:
-            with_in_name.append(f"{path} :: {name}")
+        module = resolver.module_of(item_id)
+        label = resolver.label_of(item_id, path)
+        if has_with_in_name(name):
+            with_in_name.append(f"{label} :: {name}")
+            report_modules["pub_fn_with_in_name"].append(module)
 
         if has_too_many_arguments_allow(item):
-            too_many_args.append(f"{path} :: {name}")
+            too_many_args.append(f"{label} :: {name}")
+            report_modules["pub_fn_too_many_arguments_allow"].append(module)
 
         inputs = function_inputs(fn)
         bool_count = sum(1 for _param, ty in inputs if is_bare_bool(ty))
         if bool_count >= 2:
-            two_plus_bool.append(f"{path} :: {name}")
+            two_plus_bool.append(f"{label} :: {name}")
+            report_modules["pub_fn_two_plus_bare_bool"].append(module)
 
         err_ty = result_error_type(fn.get("sig", {}).get("output"), index)
         if err_ty in STRING_RUST_TYPES:
@@ -1354,12 +1752,16 @@ def compute_metrics(
             param_name, param_ty = inputs[0]
             if is_exact_repository_ref(param_ty):
                 repo_first.append(f"{path} :: {name}")
+                report_modules["pub_free_fn_repository_first"].append(module)
+                repo_free_fn_names.add(name)
             if is_exact_path_ref(param_ty) and (
                 param_name in GIT_DIR_PARAM_NAMES
                 or param_name.endswith("_git_dir")
                 or param_name.endswith("_git_directory")
             ):
                 git_dir_first.append(f"{path} :: {name}")
+                report_modules["pub_free_fn_git_dir_path_first"].append(module)
+                repo_free_fn_names.add(name)
             if (
                 is_free_fn
                 and path.startswith("grit_lib::config::")
@@ -1497,12 +1899,36 @@ def compute_metrics(
         "pub_repo_constructors": MetricResult(repo_constructors),
         "public_api_lines": MetricResult(len(api_lines)),
         "pub_fn_impl_suffix": MetricResult(len(impl_suffix), impl_suffix),
-        "pub_fn_with_in_name": MetricResult(len(with_in_name), with_in_name),
-        "pub_fn_too_many_arguments_allow": MetricResult(len(too_many_args), too_many_args),
-        "pub_fn_two_plus_bare_bool": MetricResult(len(two_plus_bool), two_plus_bool),
+        "pub_fn_with_in_name": MetricResult(
+            len(with_in_name),
+            with_in_name,
+            report_modules["pub_fn_with_in_name"],
+        ),
+        "pub_fn_too_many_arguments_allow": MetricResult(
+            len(too_many_args),
+            too_many_args,
+            report_modules["pub_fn_too_many_arguments_allow"],
+        ),
+        "pub_fn_two_plus_bare_bool": MetricResult(
+            len(two_plus_bool),
+            two_plus_bool,
+            report_modules["pub_fn_two_plus_bare_bool"],
+        ),
         "pub_fn_result_string_err": MetricResult(len(result_string), result_string),
-        "pub_free_fn_repository_first": MetricResult(len(repo_first), repo_first),
-        "pub_free_fn_git_dir_path_first": MetricResult(len(git_dir_first), git_dir_first),
+        "pub_free_fn_repository_first": MetricResult(
+            len(repo_first),
+            repo_first,
+            report_modules["pub_free_fn_repository_first"],
+        ),
+        "pub_free_fn_git_dir_path_first": MetricResult(
+            len(git_dir_first),
+            git_dir_first,
+            report_modules["pub_free_fn_git_dir_path_first"],
+        ),
+        "doc_example_free_fn_calls": collect_doc_example_free_fn_calls(
+            payload,
+            frozenset(repo_free_fn_names),
+        ),
         "pub_free_fn_config_write": MetricResult(
             len(config_write_surface),
             config_write_surface,
@@ -1634,6 +2060,65 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 1
 
 
+def group_offenders_by_module(
+    snapshot: RatchetSnapshot,
+    keys: Iterable[str] = REPORT_METRIC_KEYS,
+) -> dict[str, dict[str, list[str]]]:
+    """``{module: {metric: [offender, …]}}`` for the given metrics, offenders sorted."""
+    grouped: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    for key in keys:
+        metric = snapshot.metrics[key]
+        modules = metric.modules or [UNKNOWN_MODULE_LABEL] * len(metric.offenders)
+        for module, offender in zip(modules, metric.offenders):
+            grouped[module][key].append(offender)
+    return {
+        module: {key: sorted(offs) for key, offs in by_key.items()}
+        for module, by_key in grouped.items()
+    }
+
+
+def render_report(snapshot: RatchetSnapshot, *, module: str | None = None) -> str:
+    """Per-module offender listing for the report metrics (optionally one module)."""
+    grouped = group_offenders_by_module(snapshot)
+    if module is not None:
+        grouped = {m: v for m, v in grouped.items() if m == module}
+    totals = {key: sum(len(by_key.get(key, [])) for by_key in grouped.values()) for key in REPORT_METRIC_KEYS}
+
+    def module_total(name: str) -> int:
+        return sum(len(offs) for offs in grouped[name].values())
+
+    order = sorted(grouped, key=lambda m: (-module_total(m), m))
+    scope = f"module `{module}`" if module is not None else f"{len(order)} modules"
+    lines = [f"api-ratchet report: {sum(totals.values())} offenders in {scope}", ""]
+    lines.append("Totals:")
+    for key in REPORT_METRIC_KEYS:
+        lines.append(f"  {key} = {totals[key]}")
+    if module is not None and not grouped:
+        lines.extend(["", f"No offenders in module `{module}`."])
+        return "\n".join(lines) + "\n"
+    for name in order:
+        by_key = grouped[name]
+        summary = ", ".join(f"{key} {len(by_key[key])}" for key in REPORT_METRIC_KEYS if by_key.get(key))
+        lines.extend(["", f"## {name} ({module_total(name)}: {summary})"])
+        for key in REPORT_METRIC_KEYS:
+            offenders = by_key.get(key)
+            if not offenders:
+                continue
+            lines.append(f"  {key} ({len(offenders)})")
+            lines.extend(f"    {line}" for line in offenders)
+    return "\n".join(lines) + "\n"
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    pins = parse_pins()
+    ensure_inputs(nightly=pins["nightly_date"], rustdoc_json=args.rustdoc_json)
+    payload = load_rustdoc(args.rustdoc_json)
+    public_api_text = PUBLIC_API_TXT.read_text(encoding="utf-8")
+    snapshot = compute_metrics(public_api_text=public_api_text, payload=payload)
+    sys.stdout.write(render_report(snapshot, module=args.module))
+    return 0
+
+
 def cmd_update(args: argparse.Namespace) -> int:
     pins = parse_pins()
     ensure_inputs(nightly=pins["nightly_date"], rustdoc_json=args.rustdoc_json)
@@ -1658,6 +2143,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check", help="fail if any metric increased or decreased without baseline update")
     sub.add_parser("update", help="rewrite grit-lib/api-ratchet.toml from current tree")
+    report = sub.add_parser(
+        "report",
+        help="list consolidation offenders grouped by top-level public module",
+    )
+    report.add_argument(
+        "--module",
+        help="only show one top-level module (for example `diff` or `porcelain`)",
+    )
     return parser
 
 
@@ -1668,6 +2161,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_check(args)
     if args.command == "update":
         return cmd_update(args)
+    if args.command == "report":
+        return cmd_report(args)
     parser.error(f"unknown command {args.command!r}")
     return 2
 

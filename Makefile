@@ -16,6 +16,7 @@
 #   make public-api-check - diff committed public API snapshot against a fresh run
 #   make api-ratchet       - regenerate grit-lib/api-ratchet.toml (API quality counts)
 #   make api-ratchet-check - fail if API quality counts rose or fell without baseline update
+#   make api-ratchet-report - list consolidation offenders per top-level module (MODULE=diff filters)
 #   make semver-check     - compare grit-lib API to latest v* tag (cargo-semver-checks; informational)
 #   make coverage     - llvm-cov on grit-lib with per-module floor ratchet
 #   make clean        - remove build artifacts
@@ -29,7 +30,7 @@ GRIT_PROFILE ?= dist
 LLVM_COV_TARGET ?= target/llvm-cov-target
 GRIT_COV_BIN := $(CURDIR)/$(LLVM_COV_TARGET)/debug/grit
 
-.PHONY: all build debug test test-full clippy fmt doc gate clean docs docs-check coverage public-api public-api-check api-ratchet api-ratchet-check semver-check bench-lib bench-scenarios
+.PHONY: all build debug test test-full clippy fmt doc gate clean docs docs-check coverage public-api public-api-check api-ratchet api-ratchet-check api-ratchet-report semver-check bench-lib bench-scenarios
 
 BENCH_DIR := target/bench
 CRITERION_DIR := target/criterion
@@ -108,6 +109,9 @@ api-ratchet:
 
 api-ratchet-check:
 	python3 scripts/api_ratchet.py check
+
+api-ratchet-report:
+	python3 scripts/api_ratchet.py report $(if $(MODULE),--module $(MODULE))
 
 semver-check:
 	./scripts/semver-check.sh check

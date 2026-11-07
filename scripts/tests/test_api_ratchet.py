@@ -1,6 +1,7 @@
 """Unit tests for scripts/api_ratchet.py."""
 from __future__ import annotations
 
+import io
 import json
 import sys
 import tempfile
@@ -1446,6 +1447,482 @@ class ApiRatchetMetricTests(unittest.TestCase):
         self.assertTrue(
             any("make api-ratchet" in line for line in failures),
         )
+
+
+def _free_fn(name: str, inputs: list | None = None) -> dict:
+    return {
+        "name": name,
+        "inner": {
+            "function": {
+                "sig": {"inputs": inputs or [], "output": None},
+                "header": {},
+            }
+        },
+    }
+
+
+REPO_REF = {
+    "borrowed_ref": {
+        "is_mutable": False,
+        "type": {"resolved_path": {"path": "Repository"}},
+    }
+}
+SELF_REF = {"borrowed_ref": {"is_mutable": False, "type": {"generic": "Self"}}}
+
+
+class WithInNameTests(unittest.TestCase):
+    def test_variant_names_count_and_builder_setters_do_not(self) -> None:
+        self.assertTrue(ar.has_with_in_name("open_with_options"))
+        self.assertTrue(ar.has_with_in_name("diff_trees_with_renames"))
+        self.assertFalse(ar.has_with_in_name("with_depth"))
+        self.assertFalse(ar.has_with_in_name("_with_leading_underscore"))
+        self.assertFalse(ar.has_with_in_name("without_renames"))
+
+    def test_options_builder_setter_not_counted(self) -> None:
+        payload = {
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": []}},
+                },
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "FetchOptions",
+                    "visibility": "public",
+                    "inner": {"struct": {"kind": {"plain": {"fields": []}}, "impls": [2]}},
+                },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "visibility": "public",
+                    "inner": {
+                        "impl": {
+                            "items": [3, 4],
+                            "for": {"resolved_path": {"path": "FetchOptions", "id": 1}},
+                        }
+                    },
+                },
+                "3": {
+                    "id": 3,
+                    "crate_id": 0,
+                    "name": "with_depth",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {"inputs": [["self", {"generic": "Self"}]], "output": None},
+                            "header": {},
+                        }
+                    },
+                },
+                "4": {
+                    "id": 4,
+                    "crate_id": 0,
+                    "name": "fetch_with_depth",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {"inputs": [["self", {"generic": "Self"}]], "output": None},
+                            "header": {},
+                        }
+                    },
+                },
+            },
+            "paths": {
+                "0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"},
+                "1": {"crate_id": 0, "path": ["grit_lib", "remote", "FetchOptions"], "kind": "struct"},
+            },
+        }
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        metric = snap.metrics["pub_fn_with_in_name"]
+        self.assertEqual(metric.count, 1)
+        self.assertIn("fetch_with_depth", metric.offenders[0])
+        self.assertTrue(metric.offenders[0].startswith("grit_lib::remote::FetchOptions ("))
+        self.assertEqual(metric.modules, ["remote"])
+
+
+class ModuleResolverTests(unittest.TestCase):
+    def test_top_module_of_path(self) -> None:
+        self.assertEqual(ar.top_module_of_path("grit_lib::diff::core::f"), "diff")
+        self.assertEqual(ar.top_module_of_path("grit_lib::f"), ar.ROOT_MODULE_LABEL)
+        self.assertIsNone(ar.top_module_of_path("std::fs::read"))
+
+    def test_public_path_wins_over_defining_path(self) -> None:
+        payload = {
+            "index": {"5": {"id": 5, "crate_id": 0, "name": "f", "inner": {}}},
+            "paths": {"5": {"crate_id": 0, "path": ["grit_lib", "rev_parse", "f"]}},
+        }
+        resolver = ar.ModuleResolver(
+            payload,
+            {"5": ["grit_lib::revwalk::rev_parse::f", "grit_lib::prelude::f"]},
+            canonical={},
+        )
+        self.assertEqual(resolver.module_of("5"), "revwalk")
+
+    def test_defining_path_goes_through_canonical_map(self) -> None:
+        payload = {
+            "index": {"5": {"id": 5, "crate_id": 0, "name": "f", "inner": {}}},
+            "paths": {"5": {"crate_id": 0, "path": ["grit_lib", "rev_parse", "f"]}},
+        }
+        resolver = ar.ModuleResolver(payload, {}, canonical={"rev_parse": "revwalk"})
+        self.assertEqual(resolver.module_of("5"), "revwalk")
+
+    def test_glob_reexport_of_private_module(self) -> None:
+        payload = {
+            "index": {
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "history",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [2]}},
+                },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "visibility": "public",
+                    "inner": {
+                        "use": {
+                            "source": "crate::history_root",
+                            "name": "history_root",
+                            "id": 3,
+                            "is_glob": True,
+                        }
+                    },
+                },
+                "4": {"id": 4, "crate_id": 0, "name": "reword", "inner": {}},
+            },
+            "paths": {
+                "1": {"crate_id": 0, "path": ["grit_lib", "revwalk", "history"]},
+                "4": {"crate_id": 0, "path": ["grit_lib", "history_root", "reword"]},
+            },
+        }
+        resolver = ar.ModuleResolver(payload, {}, canonical={})
+        self.assertEqual(resolver.module_of("4"), "revwalk")
+
+    def test_method_resolves_through_owner_type(self) -> None:
+        payload = {
+            "index": {
+                "1": {"id": 1, "crate_id": 0, "name": "Diff", "inner": {"struct": {}}},
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "inner": {"impl": {"items": [3], "for": {"resolved_path": {"path": "Diff", "id": 1}}}},
+                },
+                "3": {"id": 3, "crate_id": 0, "name": "trees", "inner": {"function": {}}},
+            },
+            "paths": {"1": {"crate_id": 0, "path": ["grit_lib", "diff", "handle", "Diff"]}},
+        }
+        resolver = ar.ModuleResolver(payload, {}, canonical={})
+        self.assertEqual(resolver.module_of("3"), "diff")
+
+    def test_span_fallback_and_unknown(self) -> None:
+        payload = {
+            "index": {
+                "7": {
+                    "id": 7,
+                    "crate_id": 0,
+                    "name": "g",
+                    "span": {"filename": "grit-lib/src/odb/store/files.rs", "begin": [1, 1]},
+                    "inner": {},
+                },
+                "8": {"id": 8, "crate_id": 0, "name": "h", "inner": {}},
+            },
+            "paths": {},
+        }
+        resolver = ar.ModuleResolver(payload, {}, canonical={"odb": "objects"})
+        self.assertEqual(resolver.module_of("7"), "objects")
+        self.assertEqual(resolver.module_of("8"), ar.UNKNOWN_MODULE_LABEL)
+
+    def test_canonical_map_loads_top_segment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "canonical-modules.toml"
+            path.write_text('[map]\nodb = "objects::odb"\ndiff = "diff"\n', encoding="utf-8")
+            self.assertEqual(
+                ar.load_canonical_module_map(path),
+                {"odb": "objects", "diff": "diff"},
+            )
+
+
+def _report_snapshot() -> ar.RatchetSnapshot:
+    metrics = {key: ar.MetricResult(0) for key in ar.METRIC_KEYS}
+    metrics["pub_fn_with_in_name"] = ar.MetricResult(
+        2,
+        ["grit_lib::diff::b_with_x :: b_with_x", "grit_lib::diff::a_with_x :: a_with_x"],
+        ["diff", "diff"],
+    )
+    metrics["pub_free_fn_repository_first"] = ar.MetricResult(
+        3,
+        [
+            "grit_lib::notes::read :: read",
+            "grit_lib::porcelain::commit :: commit",
+            "grit_lib::porcelain::status :: status",
+        ],
+        ["notes", "porcelain", "porcelain"],
+    )
+    metrics["pub_free_fn_git_dir_path_first"] = ar.MetricResult(
+        1,
+        ["grit_lib::diff::open :: open"],
+        ["diff"],
+    )
+    return ar.RatchetSnapshot(metrics=metrics)
+
+
+class ReportTests(unittest.TestCase):
+    def test_group_offenders_by_module(self) -> None:
+        grouped = ar.group_offenders_by_module(_report_snapshot())
+        self.assertEqual(set(grouped), {"diff", "notes", "porcelain"})
+        self.assertEqual(
+            grouped["diff"]["pub_fn_with_in_name"],
+            ["grit_lib::diff::a_with_x :: a_with_x", "grit_lib::diff::b_with_x :: b_with_x"],
+        )
+        self.assertEqual(len(grouped["porcelain"]["pub_free_fn_repository_first"]), 2)
+
+    def test_offenders_without_modules_group_as_unknown(self) -> None:
+        snap = _report_snapshot()
+        snap.metrics["pub_fn_two_plus_bare_bool"] = ar.MetricResult(1, ["x :: x"])
+        grouped = ar.group_offenders_by_module(snap)
+        self.assertEqual(grouped[ar.UNKNOWN_MODULE_LABEL]["pub_fn_two_plus_bare_bool"], ["x :: x"])
+
+    def test_render_report_orders_modules_by_offender_count(self) -> None:
+        text = ar.render_report(_report_snapshot())
+        self.assertIn("api-ratchet report: 6 offenders in 3 modules", text)
+        self.assertIn("  pub_free_fn_repository_first = 3", text)
+        headers = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(
+            headers,
+            [
+                "## diff (3: pub_fn_with_in_name 2, pub_free_fn_git_dir_path_first 1)",
+                "## porcelain (2: pub_free_fn_repository_first 2)",
+                "## notes (1: pub_free_fn_repository_first 1)",
+            ],
+        )
+        self.assertIn("    grit_lib::diff::a_with_x :: a_with_x", text)
+
+    def test_render_report_module_filter(self) -> None:
+        text = ar.render_report(_report_snapshot(), module="porcelain")
+        self.assertIn("2 offenders in module `porcelain`", text)
+        self.assertNotIn("## diff", text)
+        self.assertIn("  pub_fn_with_in_name = 0", text)
+        empty = ar.render_report(_report_snapshot(), module="bundle")
+        self.assertIn("No offenders in module `bundle`.", empty)
+
+    def test_report_command_uses_rustdoc_and_filters(self) -> None:
+        payload = _minimal_rustdoc(_free_fn("run", [["repo", REPO_REF]]))
+        payload["paths"]["1"]["path"] = ["grit_lib", "notes", "run"]
+        payload["index"]["0"]["inner"]["module"]["items"] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            api_txt = Path(tmp) / "public-api.txt"
+            api_txt.write_text("pub fn grit_lib::notes::run()\n", encoding="utf-8")
+            out = io.StringIO()
+            with (
+                mock.patch.object(ar, "parse_pins", return_value={"nightly_date": "x"}),
+                mock.patch.object(ar, "ensure_inputs"),
+                mock.patch.object(ar, "load_rustdoc", return_value=payload),
+                mock.patch.object(ar, "PUBLIC_API_TXT", api_txt),
+                mock.patch.object(sys, "stdout", out),
+            ):
+                self.assertEqual(ar.main(["report", "--module", "notes"]), 0)
+        text = out.getvalue()
+        self.assertIn("1 offenders in module `notes`", text)
+        self.assertIn("grit_lib::notes::run :: run", text)
+
+    def test_report_metric_keys_are_ratchet_metrics(self) -> None:
+        for key in ar.REPORT_METRIC_KEYS:
+            self.assertIn(key, ar.METRIC_KEYS)
+
+
+class DocExampleFreeFnCallTests(unittest.TestCase):
+    def test_rust_code_blocks_filters_languages_and_unhides_lines(self) -> None:
+        docs = textwrap.dedent(
+            """\
+            Intro.
+
+            ```
+            # fn main() {
+            let x = 1;
+            #
+            # }
+            ```
+
+            ```text
+            not_rust(&repo)
+            ```
+
+            ```no_run,edition2021
+            run(&repo);
+            ```
+
+            ```console
+            $ grit log
+            ```
+            """
+        )
+        blocks = ar.rust_code_blocks(docs)
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(blocks[0].splitlines(), ["fn main() {", "let x = 1;", "}"])
+        self.assertIn("run(&repo);", blocks[1])
+
+    def test_count_repo_free_fn_calls(self) -> None:
+        code = textwrap.dedent(
+            """\
+            use grit_lib::porcelain::commit::create_commit;
+            fn create_commit(x: u8) {}
+            let head = resolve_head(repo.git_dir())?;
+            let _ = grit_lib::porcelain::commit::create_commit(&repo, &req)?;
+            let reopened = Repository::open(repo.git_dir(), &opts)?;
+            assert_eq!(reopened.git_dir(), repo.git_dir());
+            let tree = repo.objects().read(&oid)?;
+            let parsed = parse_tree(&tree.data)?;
+            if (a) {}
+            let refs = list_refs(
+                &repo,
+                Some(prefix(1)),
+            )?;
+            """
+        )
+        found = ar.count_repo_free_fn_calls(code, frozenset({"create_commit", "list_refs"}))
+        self.assertEqual(
+            found,
+            ["resolve_head", "grit_lib::porcelain::commit::create_commit", "list_refs"],
+        )
+
+    def test_metric_scans_root_and_handle_docs_only(self) -> None:
+        example = "```\nlet _ = run(&repo);\nlet _ = resolve_head(repo.git_dir());\n```"
+        handle_return = {
+            "resolved_path": {
+                "path": "Objects",
+                "id": 20,
+                "args": {"angle_bracketed": {"args": [{"lifetime": "'_"}]}},
+            }
+        }
+        plain_return = {"resolved_path": {"path": "Info", "id": 30, "args": None}}
+        payload = {
+            "root": 0,
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "docs": example,
+                    "inner": {"module": {"items": [1, 5, 20, 30]}},
+                },
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "Repository",
+                    "visibility": "public",
+                    "docs": "No examples here.",
+                    "inner": {"struct": {"kind": {"plain": {"fields": []}}, "impls": [2]}},
+                },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "inner": {
+                        "impl": {
+                            "items": [3, 4],
+                            "for": {"resolved_path": {"path": "Repository", "id": 1}},
+                        }
+                    },
+                },
+                "3": {
+                    "id": 3,
+                    "crate_id": 0,
+                    "name": "objects",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {"inputs": [["self", SELF_REF]], "output": handle_return},
+                            "header": {},
+                        }
+                    },
+                },
+                "4": {
+                    "id": 4,
+                    "crate_id": 0,
+                    "name": "info",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {"inputs": [["self", SELF_REF]], "output": plain_return},
+                            "header": {},
+                        }
+                    },
+                },
+                "5": {
+                    "id": 5,
+                    "crate_id": 0,
+                    "name": "run",
+                    "visibility": "public",
+                    "docs": example,
+                    "inner": {
+                        "function": {
+                            "sig": {"inputs": [["repo", REPO_REF]], "output": None},
+                            "header": {},
+                        }
+                    },
+                },
+                "20": {
+                    "id": 20,
+                    "crate_id": 0,
+                    "name": "Objects",
+                    "visibility": "public",
+                    "inner": {"struct": {"kind": {"plain": {"fields": []}}, "impls": [21]}},
+                },
+                "21": {
+                    "id": 21,
+                    "crate_id": 0,
+                    "inner": {
+                        "impl": {
+                            "items": [22],
+                            "for": {"resolved_path": {"path": "Objects", "id": 20}},
+                        }
+                    },
+                },
+                "22": {
+                    "id": 22,
+                    "crate_id": 0,
+                    "name": "read",
+                    "visibility": "public",
+                    "docs": "```\nrun(&repo);\n```",
+                    "inner": {"function": {"sig": {"inputs": [], "output": None}, "header": {}}},
+                },
+                "30": {
+                    "id": 30,
+                    "crate_id": 0,
+                    "name": "Info",
+                    "visibility": "public",
+                    "docs": example,
+                    "inner": {"struct": {"kind": {"plain": {"fields": []}}, "impls": []}},
+                },
+            },
+            "paths": {
+                "0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"},
+                "1": {"crate_id": 0, "path": ["grit_lib", "repo", "Repository"], "kind": "struct"},
+                "5": {"crate_id": 0, "path": ["grit_lib", "run"], "kind": "function"},
+                "20": {"crate_id": 0, "path": ["grit_lib", "objects", "Objects"], "kind": "struct"},
+                "30": {"crate_id": 0, "path": ["grit_lib", "repo", "Info"], "kind": "struct"},
+            },
+        }
+        self.assertEqual(
+            ar.handle_type_ids(payload["index"], payload["paths"]),
+            ["1", "20"],
+        )
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        metric = snap.metrics["doc_example_free_fn_calls"]
+        self.assertEqual(
+            sorted(metric.offenders),
+            [
+                "grit_lib :: resolve_head",
+                "grit_lib :: run",
+                "grit_lib::objects::Objects::read :: run",
+            ],
+        )
+        self.assertEqual(metric.count, 3)
 
 
 if __name__ == "__main__":

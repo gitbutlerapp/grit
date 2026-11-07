@@ -32,3 +32,4 @@ pub_error_string_tuple_variants = 54
 pub_error_enum_not_non_exhaustive = 37
 pub_area_error_wraps_umbrella = 34
 error_message_construction_sites = 181
+doc_example_free_fn_calls = 4
