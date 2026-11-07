@@ -54,7 +54,7 @@ Push, apply, and pop either complete or change nothing. Pressing Ctrl+C, or send
 | `<path>…` | Limit what is stashed (after `--`); with `--staged`, only matching index changes are saved and reset. |
 | `--pathspec-from-file` | Read pathspecs from a file, or `-` for stdin (same rules as Git). |
 | `--pathspec-file-nul` | With `--pathspec-from-file`, entries are NUL-separated instead of line-based. |
-| `--index` | On `apply` / `pop`, restore the stashed index as well as the worktree. |
+| `--index` | On `apply` / `pop`, restore the stashed index as well as the worktree. Changes that were unstaged when you stashed come back unstaged, including when nothing was staged at all. |
 | `<n>` | Stash index for `show`, `apply`, `pop`, or `drop` (default `0`). |
 | `--stat` | Show a diffstat in `grit stash show` (default when `-p` is not set). |
 | `-p`, `--patch` | Show the full patch in `grit stash show` instead of a diffstat. |
@@ -65,7 +65,7 @@ Push, apply, and pop either complete or change nothing. Pressing Ctrl+C, or send
 | `apply` | Apply an entry without removing it. |
 | `pop` | Apply an entry and drop it when clean. |
 | `drop` | Remove an entry without applying it. |
-| `branch` | Create a branch at the stash base commit, check it out, apply with `--index`, and drop the entry on success. |
+| `branch` | Create a branch at the stash base commit, check it out, apply with `--index` (staged changes come back staged, unstaged ones unstaged), and drop the entry on success. |
 | `clear` | Remove every stash entry. Requires `--force`; without it the command exits non-zero and reports how many entries would be cleared. `--dry-run` reports the count without deleting. |
 
 ## Examples
