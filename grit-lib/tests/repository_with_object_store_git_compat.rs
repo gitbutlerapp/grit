@@ -16,7 +16,7 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope}
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::MemoryRefStore;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_test_support::{git, git_packed_history, rev_parse};
 
 const IDENT: &str = "A U Thor <author@example.com> 1700000000 +0000";
@@ -112,8 +112,10 @@ fn git_packed_history_reads_through_a_read_source() {
             .with_ref_store(Arc::new(MemoryRefStore::new())),
     )
     .expect("open layered");
-    let walked =
-        rev_list(&layered, &[tip.to_hex()], &[], &RevListOptions::default()).expect("rev-list");
+    let walked = layered
+        .revwalk()
+        .rev_list(&[tip.to_hex()], &[], &RevListOptions::default())
+        .expect("rev-list");
     let expected: Vec<String> = git(&history, &["rev-list", "main"])
         .lines()
         .map(str::to_owned)
