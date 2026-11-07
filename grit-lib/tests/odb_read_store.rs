@@ -15,6 +15,7 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStor
 use grit_lib::objects::odb::{Odb, OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::refs::store::MemoryRefStore;
+use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::{Repository, RepositoryError};
 use grit_test_support::odb_conformance::run_read_suite;
 use grit_test_support::{git, git_packed_history, rev_parse};
@@ -129,7 +130,7 @@ fn read_store_covers_primary_read_sources_and_alternates() {
     assert!(matches!(
         odb.primary(),
         Err(Error::Repository(RepositoryError::UnsupportedObjectStore {
-            operation: "primary",
+            operation: FilesOnlyOperation::FilesSource,
         }))
     ));
 }

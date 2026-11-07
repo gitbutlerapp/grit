@@ -6236,7 +6236,7 @@ pub grit_lib::error::RepositoryError::PromisorFetcherMissing
 pub grit_lib::error::RepositoryError::RequiresWorkTree
 pub grit_lib::error::RepositoryError::UnknownRepositoryExtensions(grit_lib::repo::error::UnknownRepositoryExtensions)
 pub grit_lib::error::RepositoryError::UnsupportedObjectStore
-pub grit_lib::error::RepositoryError::UnsupportedObjectStore::operation: &'static str
+pub grit_lib::error::RepositoryError::UnsupportedObjectStore::operation: grit_lib::repo::error::FilesOnlyOperation
 pub grit_lib::error::RepositoryError::UnsupportedRepositoryFormatVersion
 pub grit_lib::error::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
 pub grit_lib::error::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)
@@ -23427,6 +23427,44 @@ impl core::marker::UnsafeUnpin for grit_lib::repo::caches::RepoCaches
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::caches::RepoCaches
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::caches::RepoCaches
 pub mod grit_lib::repo::error
+#[non_exhaustive] pub enum grit_lib::repo::error::FilesOnlyOperation
+pub grit_lib::repo::error::FilesOnlyOperation::CommitGraphWrite
+pub grit_lib::repo::error::FilesOnlyOperation::DropLargeBlobs
+pub grit_lib::repo::error::FilesOnlyOperation::FilesSource
+pub grit_lib::repo::error::FilesOnlyOperation::Gc
+pub grit_lib::repo::error::FilesOnlyOperation::LargestPackIndex
+pub grit_lib::repo::error::FilesOnlyOperation::LooseWrite
+pub grit_lib::repo::error::FilesOnlyOperation::MidxWrite
+pub grit_lib::repo::error::FilesOnlyOperation::Offload
+pub grit_lib::repo::error::FilesOnlyOperation::PackInstall
+pub grit_lib::repo::error::FilesOnlyOperation::PackStore
+pub grit_lib::repo::error::FilesOnlyOperation::PartialFetch
+pub grit_lib::repo::error::FilesOnlyOperation::PromisorRewrite
+pub grit_lib::repo::error::FilesOnlyOperation::Prune
+pub grit_lib::repo::error::FilesOnlyOperation::ReceiveQuarantine
+pub grit_lib::repo::error::FilesOnlyOperation::Repack
+impl grit_lib::repo::error::FilesOnlyOperation
+pub const fn grit_lib::repo::error::FilesOnlyOperation::as_str(self) -> &'static str
+impl core::clone::Clone for grit_lib::repo::error::FilesOnlyOperation
+pub fn grit_lib::repo::error::FilesOnlyOperation::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo::error::FilesOnlyOperation
+impl core::cmp::PartialEq for grit_lib::repo::error::FilesOnlyOperation
+pub fn grit_lib::repo::error::FilesOnlyOperation::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo::error::FilesOnlyOperation
+pub fn grit_lib::repo::error::FilesOnlyOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::repo::error::FilesOnlyOperation
+pub fn grit_lib::repo::error::FilesOnlyOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::repo::error::FilesOnlyOperation
+pub fn grit_lib::repo::error::FilesOnlyOperation::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::repo::error::FilesOnlyOperation
+impl core::marker::StructuralPartialEq for grit_lib::repo::error::FilesOnlyOperation
+impl core::marker::Freeze for grit_lib::repo::error::FilesOnlyOperation
+impl core::marker::Send for grit_lib::repo::error::FilesOnlyOperation
+impl core::marker::Sync for grit_lib::repo::error::FilesOnlyOperation
+impl core::marker::Unpin for grit_lib::repo::error::FilesOnlyOperation
+impl core::marker::UnsafeUnpin for grit_lib::repo::error::FilesOnlyOperation
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::error::FilesOnlyOperation
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::error::FilesOnlyOperation
 #[non_exhaustive] pub enum grit_lib::repo::error::RepositoryError
 pub grit_lib::repo::error::RepositoryError::DubiousOwnership
 pub grit_lib::repo::error::RepositoryError::DubiousOwnership::effective_uid: core::option::Option<u32>
@@ -23452,7 +23490,7 @@ pub grit_lib::repo::error::RepositoryError::PromisorFetcherMissing
 pub grit_lib::repo::error::RepositoryError::RequiresWorkTree
 pub grit_lib::repo::error::RepositoryError::UnknownRepositoryExtensions(grit_lib::repo::error::UnknownRepositoryExtensions)
 pub grit_lib::repo::error::RepositoryError::UnsupportedObjectStore
-pub grit_lib::repo::error::RepositoryError::UnsupportedObjectStore::operation: &'static str
+pub grit_lib::repo::error::RepositoryError::UnsupportedObjectStore::operation: grit_lib::repo::error::FilesOnlyOperation
 pub grit_lib::repo::error::RepositoryError::UnsupportedRepositoryFormatVersion
 pub grit_lib::repo::error::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
 pub grit_lib::repo::error::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)
@@ -23539,7 +23577,7 @@ pub grit_lib::repo::RepositoryError::PromisorFetcherMissing
 pub grit_lib::repo::RepositoryError::RequiresWorkTree
 pub grit_lib::repo::RepositoryError::UnknownRepositoryExtensions(grit_lib::repo::error::UnknownRepositoryExtensions)
 pub grit_lib::repo::RepositoryError::UnsupportedObjectStore
-pub grit_lib::repo::RepositoryError::UnsupportedObjectStore::operation: &'static str
+pub grit_lib::repo::RepositoryError::UnsupportedObjectStore::operation: grit_lib::repo::error::FilesOnlyOperation
 pub grit_lib::repo::RepositoryError::UnsupportedRepositoryFormatVersion
 pub grit_lib::repo::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
 pub grit_lib::repo::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)

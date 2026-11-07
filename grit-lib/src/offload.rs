@@ -39,6 +39,7 @@ use crate::odb::Odb;
 use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
 use crate::partial_clone::{stored_remote_filter, ObjectFilterSpec};
+use crate::repo::error::FilesOnlyOperation;
 use crate::repo::Repository;
 
 /// Message written into the `.keep` marker of every pack offload adds to a LOP.
@@ -374,7 +375,7 @@ impl OffloadPack {
 /// without a files-backed object store, and read, write and config failures.
 pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
     let odb = repo.odb();
-    odb.require_files_primary("offload")?;
+    odb.require_files_primary(FilesOnlyOperation::Offload)?;
     let config = repo.config().snapshot()?;
     let remote = opts.remote.as_str();
     let url = config
@@ -582,7 +583,8 @@ fn open_lop(repo: &Repository, opts: &OffloadOptions, url: &str) -> Result<Repos
         }
         .into());
     }
-    lop.odb().require_files_primary("offload")?;
+    lop.odb()
+        .require_files_primary(FilesOnlyOperation::Offload)?;
     Ok(lop)
 }
 

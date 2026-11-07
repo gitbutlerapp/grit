@@ -13,6 +13,7 @@ use grit_lib::objects::{serialize_tag, TagData};
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::refs::gc::prune_loose_unreachable;
 use grit_lib::refs::write_ref;
+use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 use grit_lib::revwalk::rev_parse::{abbreviate_object_id, resolve_revision};
@@ -519,13 +520,13 @@ fn memory_primary_rejects_filesystem_gc_and_commit_graph() {
     assert!(matches!(
         repo.odb().gc(),
         Err(Error::Repository(RepositoryError::UnsupportedObjectStore {
-            operation: "gc",
+            operation: FilesOnlyOperation::Gc,
         }))
     ));
     assert!(matches!(
         repo.odb().write_commit_graph(),
         Err(Error::Repository(RepositoryError::UnsupportedObjectStore {
-            operation: "commit-graph write",
+            operation: FilesOnlyOperation::CommitGraphWrite,
         }))
     ));
 }

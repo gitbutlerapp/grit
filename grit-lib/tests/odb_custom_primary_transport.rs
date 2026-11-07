@@ -25,6 +25,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, UpdateMode};
 use grit_lib::remote::{Remote, RemoteError};
+use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::RepositoryError;
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -485,7 +486,7 @@ fn partial_fetch_custom_primary_is_refused() {
                 if matches!(
                     boxed.as_ref(),
                     Error::Repository(RepositoryError::UnsupportedObjectStore { operation })
-                        if operation == "partial fetch"
+                        if *operation == FilesOnlyOperation::PartialFetch
                 )
         ),
         "{err:?}"

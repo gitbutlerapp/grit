@@ -65,6 +65,7 @@ use crate::objects::{
 };
 use crate::pack;
 use crate::pack_store::PackStore;
+use crate::repo::error::FilesOnlyOperation;
 use crate::repo::RepositoryError;
 use filetime::{set_file_mtime, FileTime};
 use flate2::Compression;
@@ -1254,11 +1255,11 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`RepositoryError::UnsupportedObjectStore`] (`operation: "primary"`) when
+    /// - [`RepositoryError::UnsupportedObjectStore`] (`operation:` [`FilesOnlyOperation::FilesSource`](crate::repo::error::FilesOnlyOperation::FilesSource)) when
     ///   [`OdbBuilder::primary`] replaced the files-backed primary.
     /// - Failures while opening pack, MIDX, or loose backends.
     pub fn primary(&self) -> Result<Arc<FilesSource>> {
-        self.require_files_primary("primary")?;
+        self.require_files_primary(FilesOnlyOperation::FilesSource)?;
         if let Some(src) = self.primary_source.get() {
             return Ok(Arc::clone(src));
         }
@@ -1574,7 +1575,7 @@ impl Odb {
 
     /// Pack/MIDX read cache shared by this handle and its [`Clone`]s.
     pub fn pack_store(&self) -> Result<&Arc<PackStore>> {
-        self.require_files_primary("pack_store")?;
+        self.require_files_primary(FilesOnlyOperation::PackStore)?;
         Ok(&self.pack_store)
     }
 
@@ -1585,9 +1586,9 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidRef`] when the store is not files-backed.
+    /// Returns [`RepositoryError::UnsupportedObjectStore`] when the store is not files-backed.
     pub fn largest_pack_index_path(&self) -> Result<Option<PathBuf>> {
-        self.require_files_primary("largest_pack_index_path")?;
+        self.require_files_primary(FilesOnlyOperation::LargestPackIndex)?;
         let mut indexes = pack::read_local_pack_indexes_cached(self.objects_dir())?;
         indexes.sort_by_key(|idx| std::cmp::Reverse(idx.len()));
         Ok(indexes.first().map(|idx| idx.idx_path.clone()))
@@ -1655,7 +1656,7 @@ impl Odb {
         if matches!(retention, UnreachablePackRetention::DropAll) {
             return Ok(0);
         }
-        self.require_files_primary("repack")?;
+        self.require_files_primary(FilesOnlyOperation::Repack)?;
         let keep_idx = keep_pack.with_extension("idx");
         let keep_pack_oids = if keep_idx.is_file() {
             PackedObjects::object_ids_from_index_path(&keep_idx)?
@@ -2162,15 +2163,16 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Propagates the primary store failure. Only valid when [`Self::uses_files_primary`]
-    /// is false.
+    /// Propagates the primary store failure. A files-backed primary answers each id with
+    /// [`Self::exists_materialized_local`] instead.
     pub(crate) fn missing_materialized_many(&self, oids: &[ObjectId]) -> Result<Vec<ObjectId>> {
-        let primary =
-            self.custom_primary
-                .as_ref()
-                .ok_or(RepositoryError::UnsupportedObjectStore {
-                    operation: "missing_materialized_many",
-                })?;
+        let Some(primary) = self.custom_primary.as_ref() else {
+            return Ok(oids
+                .iter()
+                .filter(|oid| !self.exists_materialized_local(oid))
+                .copied()
+                .collect());
+        };
         if oids.is_empty() {
             return Ok(Vec::new());
         }
@@ -2633,7 +2635,7 @@ impl Odb {
     }
 
     fn local_loose(&self) -> Result<LooseStore> {
-        self.require_files_primary("loose_write")?;
+        self.require_files_primary(FilesOnlyOperation::LooseWrite)?;
         Ok(LooseStore::new_with_negative_cache(
             self.objects_dir.clone(),
             self.hash_algo(),
@@ -4058,7 +4060,7 @@ impl Odb {
     pub fn write_local(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
             return Err(RepositoryError::UnsupportedObjectStore {
-                operation: "write_local",
+                operation: FilesOnlyOperation::LooseWrite,
             }
             .into());
         }
@@ -4098,7 +4100,7 @@ impl Odb {
     ) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
             return Err(RepositoryError::UnsupportedObjectStore {
-                operation: "write_local_stream",
+                operation: FilesOnlyOperation::LooseWrite,
             }
             .into());
         }
@@ -4123,7 +4125,7 @@ impl Odb {
     pub fn write_loose_materialize(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
             return Err(RepositoryError::UnsupportedObjectStore {
-                operation: "write_loose_materialize",
+                operation: FilesOnlyOperation::LooseWrite,
             }
             .into());
         }
@@ -4187,7 +4189,7 @@ impl Odb {
     pub fn write_raw_local(&self, store_bytes: &[u8]) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
             return Err(RepositoryError::UnsupportedObjectStore {
-                operation: "write_raw_local",
+                operation: FilesOnlyOperation::LooseWrite,
             }
             .into());
         }

@@ -28,6 +28,7 @@ type LsRefsAdvertised = (
 );
 use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::remote::RemoteError;
+use crate::repo::error::FilesOnlyOperation;
 use crate::repo::RepositoryError;
 use crate::transfer::{
     classify_update, prune_tracking_refs, ref_excluded, validate_fetch_depth_local,
@@ -1739,7 +1740,7 @@ pub fn fetch_remote_into(
     let local_odb = local.odb();
     if opts.filter.is_some() && !local_odb.uses_files_primary() {
         return Err(RepositoryError::UnsupportedObjectStore {
-            operation: "partial fetch",
+            operation: FilesOnlyOperation::PartialFetch,
         }
         .into());
     }

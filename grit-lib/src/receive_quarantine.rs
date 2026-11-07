@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::error::{Error, Result};
 use crate::lockfile::{LockError, LockFile, LockWait};
 use crate::odb::Odb;
+use crate::repo::error::FilesOnlyOperation;
 use crate::repo::RepositoryError;
 
 static QUARANTINE_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -177,7 +178,7 @@ impl ReceiveQuarantine {
         let main_objects = source
             .files_objects_dir()
             .ok_or(RepositoryError::UnsupportedObjectStore {
-                operation: "receive quarantine",
+                operation: FilesOnlyOperation::ReceiveQuarantine,
             })?
             .to_path_buf();
         let seq = QUARANTINE_SEQ.fetch_add(1, Ordering::Relaxed);

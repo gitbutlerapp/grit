@@ -64,6 +64,7 @@ use crate::reflog::{
     ReflogExpireParams, ReflogExpiryCache,
 };
 use crate::repack_pack::{write_repack_pack, RepackPackSettings};
+use crate::repo::error::FilesOnlyOperation;
 use crate::repo::Repository;
 use crate::repo::RepositoryError;
 use crate::shallow::load_shallow_boundaries;
@@ -710,11 +711,11 @@ pub fn write_commit_graph(
     opts: &CommitGraphOptions,
 ) -> Result<CommitGraphWriteReport> {
     let odb = repo.odb();
-    odb.require_files_primary("commit-graph write")?;
+    odb.require_files_primary(FilesOnlyOperation::CommitGraphWrite)?;
     let objects_dir = odb
         .files_objects_dir()
         .ok_or(RepositoryError::UnsupportedObjectStore {
-            operation: "commit-graph write",
+            operation: FilesOnlyOperation::CommitGraphWrite,
         })?;
     let path = objects_dir.join("info").join("commit-graph");
 
@@ -788,7 +789,7 @@ pub fn write_commit_graph(
 /// [`Error::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
 pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteReport> {
     let odb = repo.odb();
-    odb.require_files_primary("midx write")?;
+    odb.require_files_primary(FilesOnlyOperation::MidxWrite)?;
     let requested = match opts.version {
         Some(v) => Some(v),
         None => midx_version_from_config(&*repo.config().snapshot()?)?,
@@ -797,7 +798,7 @@ pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteRepo
     let objects_dir = odb
         .files_objects_dir()
         .ok_or(RepositoryError::UnsupportedObjectStore {
-            operation: "midx write",
+            operation: FilesOnlyOperation::MidxWrite,
         })?;
     let pack_dir = objects_dir.join("pack");
     let pack_count = fs::read_dir(&pack_dir)
@@ -908,11 +909,11 @@ fn repack_detail(
 ) -> Result<RepackDetail> {
     poll_cancel(&mut NullProgress, cancel)?;
     let odb = repo.odb();
-    odb.require_files_primary("repack")?;
+    odb.require_files_primary(FilesOnlyOperation::Repack)?;
     let objects_dir = odb
         .files_objects_dir()
         .ok_or(RepositoryError::UnsupportedObjectStore {
-            operation: "repack",
+            operation: FilesOnlyOperation::Repack,
         })?;
     let pack_dir = objects_dir.join("pack");
 
@@ -1093,7 +1094,7 @@ fn repack_detail(
         let pack_path = ingested
             .pack_path
             .ok_or(RepositoryError::UnsupportedObjectStore {
-                operation: "repack",
+                operation: FilesOnlyOperation::Repack,
             })?;
 
         let idx_path = pack_path.with_extension("idx");
@@ -1224,7 +1225,7 @@ pub fn repack_all_with_cancel(
     let objects_dir = odb
         .files_objects_dir()
         .ok_or(RepositoryError::UnsupportedObjectStore {
-            operation: "repack",
+            operation: FilesOnlyOperation::Repack,
         })?;
     let pack_dir = objects_dir.join("pack");
     let mut stats = RepackStats {
@@ -1493,7 +1494,7 @@ fn skipping_repack_would_retain_prunable_packed_objects(
 /// Propagates config parse failures, unsupported ODB backends, and I/O errors.
 pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<PruneStats> {
     let odb = repo.odb();
-    odb.require_files_primary("prune")?;
+    odb.require_files_primary(FilesOnlyOperation::Prune)?;
     let cfg = repo.config().snapshot()?;
     let now = gc_now_unix(0);
     let keep_newer_than = match opts.older_than {
@@ -1514,7 +1515,7 @@ pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<Pru
     let objects_dir = odb
         .files_objects_dir()
         .ok_or(RepositoryError::UnsupportedObjectStore {
-            operation: "prune temporary objects",
+            operation: FilesOnlyOperation::Prune,
         })?;
     let temp =
         prune_stale_temporary_objects_with_cutoff(objects_dir, keep_newer_than, opts.dry_run)?;
@@ -1655,7 +1656,7 @@ pub fn gc_with_cancel(
     opts: &GcOptions,
     cancel: &CancelToken,
 ) -> Result<GcStats> {
-    repo.odb().require_files_primary("gc")?;
+    repo.odb().require_files_primary(FilesOnlyOperation::Gc)?;
     let now = gc_now_unix(opts.now_unix);
     let _lock = if opts.repack.dry_run {
         None
@@ -2050,7 +2051,9 @@ fn gc_locked(
         let temp = prune_stale_temporary_objects_with_cutoff(
             repo.odb()
                 .files_objects_dir()
-                .ok_or(RepositoryError::UnsupportedObjectStore { operation: "gc" })?,
+                .ok_or(RepositoryError::UnsupportedObjectStore {
+                    operation: FilesOnlyOperation::Gc,
+                })?,
             *keep_newer_than,
             dry_run,
         )?;
@@ -2529,7 +2532,7 @@ pub(crate) fn rewrite_local_objects_without(
     when: PromisorRewriteWhen,
 ) -> Result<PromisorRewrite> {
     let odb = repo.odb();
-    odb.require_files_primary("promisor rewrite")?;
+    odb.require_files_primary(FilesOnlyOperation::PromisorRewrite)?;
     if omit.is_empty() && when == PromisorRewriteWhen::Dropping {
         return Ok(PromisorRewrite::default());
     }

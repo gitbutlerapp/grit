@@ -110,7 +110,7 @@ pub(crate) fn prune_loose_unreachable_with(
     keep_newer_than: Option<SystemTime>,
     dry_run: bool,
 ) -> Result<PruneStats> {
-    odb.require_files_primary("gc")?;
+    odb.require_files_primary(crate::repo::error::FilesOnlyOperation::Prune)?;
     let mut stats = PruneStats::default();
 
     // Respect the grace window first: objects whose mtime is not strictly older than

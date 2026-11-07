@@ -29,6 +29,7 @@ use crate::fsck::reachability_roots;
 use crate::gc::prune_loose_unreachable;
 use crate::objects::HashAlgo;
 use crate::odb::store::{ObjectStore, WritableObjectStore};
+use crate::repo::error::FilesOnlyOperation;
 use crate::repo::Repository;
 use crate::repo::RepositoryError;
 
@@ -75,7 +76,7 @@ impl OdbBuilder {
     ///
     /// [`Remote::fetch`](crate::remote::Remote::fetch), [`Remote::push`](crate::remote::Remote::push),
     /// pull, bundles, and [`clone_into`](crate::clone::clone_into) read and write objects through
-    /// the custom primary. Partial-clone filters (`operation: "partial fetch"`) and filesystem
+    /// the custom primary. Partial-clone filters ([`FilesOnlyOperation::PartialFetch`]) and filesystem
     /// maintenance still refuse when they need on-disk pack layout:
     ///
     /// - maintenance: [`Odb::gc`], [`Odb::write_commit_graph`], repack, MIDX, and pack helpers
@@ -196,8 +197,9 @@ impl Odb {
         }
     }
 
-    /// Filesystem-only helper: error when the primary is not files-backed.
-    pub(crate) fn require_files_primary(&self, operation: &'static str) -> Result<()> {
+    /// Refuse `operation` with [`RepositoryError::UnsupportedObjectStore`] unless the primary
+    /// is files-backed.
+    pub(crate) fn require_files_primary(&self, operation: FilesOnlyOperation) -> Result<()> {
         if self.custom_primary.is_some() {
             return Err(RepositoryError::UnsupportedObjectStore { operation }.into());
         }
@@ -224,15 +226,20 @@ impl Odb {
     ///
     /// Propagates object-store or I/O failures during maintenance.
     pub fn gc(&self) -> Result<()> {
-        self.require_files_primary("gc")?;
+        self.require_files_primary(FilesOnlyOperation::Gc)?;
         let Some(git_dir) = self.config_git_dir() else {
-            return Err(RepositoryError::UnsupportedObjectStore { operation: "gc" }.into());
+            return Err(RepositoryError::UnsupportedObjectStore {
+                operation: FilesOnlyOperation::Gc,
+            }
+            .into());
         };
         let opts = crate::environment::RepositoryOptions::empty();
         let repo = if git_dir.file_name().is_some_and(|n| n == ".git") {
             let wt = git_dir
                 .parent()
-                .ok_or(RepositoryError::UnsupportedObjectStore { operation: "gc" })?;
+                .ok_or(RepositoryError::UnsupportedObjectStore {
+                    operation: FilesOnlyOperation::Gc,
+                })?;
             Repository::open(git_dir, &opts.with_work_tree(wt))?
         } else {
             Repository::open(git_dir, &opts)?
@@ -258,16 +265,16 @@ impl Odb {
     /// Returns [`RepositoryError::UnsupportedObjectStore`] for custom primaries, or errors from graph
     /// generation or I/O.
     pub fn write_commit_graph(&self) -> Result<()> {
-        self.require_files_primary("commit-graph write")?;
+        self.require_files_primary(FilesOnlyOperation::CommitGraphWrite)?;
         let Some(git_dir) = self.config_git_dir() else {
             return Err(RepositoryError::UnsupportedObjectStore {
-                operation: "commit-graph write",
+                operation: FilesOnlyOperation::CommitGraphWrite,
             }
             .into());
         };
         let Some(objects_dir) = self.files_objects_dir() else {
             return Err(RepositoryError::UnsupportedObjectStore {
-                operation: "commit-graph write",
+                operation: FilesOnlyOperation::CommitGraphWrite,
             }
             .into());
         };

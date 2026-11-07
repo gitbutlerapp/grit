@@ -67,6 +67,7 @@ use crate::offload::LOP_GIT_DIR_KEY;
 use crate::pack::PackedType;
 use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
+use crate::repo::error::FilesOnlyOperation;
 use crate::repo::Repository;
 use crate::repo::RepositoryError;
 use crate::state::InProgressOperation;
@@ -439,7 +440,8 @@ pub fn drop_promised_blobs(
     repo: &Repository,
     opts: &DropPromisedBlobsOptions,
 ) -> Result<DropPromisedBlobsReport> {
-    repo.odb().require_files_primary(OPERATION)?;
+    repo.odb()
+        .require_files_primary(FilesOnlyOperation::DropLargeBlobs)?;
     let config = repo.config().snapshot()?;
     if let Some(refusal) = gate(repo, &config)? {
         return Err(refusal.into());

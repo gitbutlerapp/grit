@@ -54,6 +54,121 @@ impl fmt::Display for V1OnlyExtensionsInFormatZero {
 use crate::git_dir::GitDirPathOperation;
 use crate::objects::HashAlgo;
 
+/// An operation that only the files-backed object store supports.
+///
+/// Carried by [`RepositoryError::UnsupportedObjectStore`] when a repository whose primary
+/// store is custom (for example a [`MemoryStore`](crate::objects::odb::store::MemoryStore))
+/// is asked to do something that reads or writes the on-disk `objects/` layout: loose
+/// files, packs, `.idx`, multi-pack-index or commit-graph files. Each variant names the
+/// APIs that refuse with it.
+///
+/// [`Self::as_str`] gives a stable snake_case name for scripts (the `operation` field of
+/// `grit --json` errors); [`Display`](fmt::Display) gives a short human phrase.
+///
+/// # Examples
+///
+/// ```
+/// use grit_lib::repo::error::FilesOnlyOperation;
+///
+/// assert_eq!(FilesOnlyOperation::CommitGraphWrite.as_str(), "commit_graph_write");
+/// assert_eq!(FilesOnlyOperation::Gc.to_string(), "garbage collection");
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum FilesOnlyOperation {
+    /// Garbage collection: [`Odb::gc`](crate::odb::Odb::gc), [`maintenance::gc`](crate::maintenance::gc) and [`maintenance::gc_with_cancel`](crate::maintenance::gc_with_cancel)
+    /// (and the matching `Repository` methods).
+    Gc,
+    /// Pruning unreachable loose objects: [`maintenance::prune_loose_objects`](crate::maintenance::prune_loose_objects) and
+    /// [`refs::gc::prune_loose_unreachable`](crate::gc::prune_loose_unreachable).
+    Prune,
+    /// Repacking into `objects/pack/`: [`maintenance::repack`](crate::maintenance::repack), [`maintenance::repack_all`](crate::maintenance::repack_all)
+    /// and [`maintenance::repack_all_with_cancel`](crate::maintenance::repack_all_with_cancel).
+    Repack,
+    /// Writing `objects/info/commit-graph`: [`Odb::write_commit_graph`](crate::odb::Odb::write_commit_graph) and
+    /// [`maintenance::write_commit_graph`](crate::maintenance::write_commit_graph). A custom store builds its graph in memory with
+    /// [`maintenance::build_commit_graph`](crate::maintenance::build_commit_graph) instead.
+    CommitGraphWrite,
+    /// Writing `objects/pack/multi-pack-index`: [`maintenance::write_midx`](crate::maintenance::write_midx).
+    MidxWrite,
+    /// The files backend's pack and MIDX read cache: [`Odb::pack_store`](crate::odb::Odb::pack_store).
+    PackStore,
+    /// Installing a pack file and its `.idx` under `objects/pack/`:
+    /// [`index_pack::install_pack_bytes`](crate::index_pack::install_pack_bytes) and [`index_pack::install_pack_path`](crate::index_pack::install_pack_path). Use
+    /// [`index_pack::ingest_received_pack`](crate::index_pack::ingest_received_pack) to write a pack into any primary.
+    PackInstall,
+    /// Finding the largest pack index in `objects/pack/`: [`Odb::largest_pack_index_path`](crate::odb::Odb::largest_pack_index_path).
+    LargestPackIndex,
+    /// Writing loose object files into `objects/`: [`Odb::write_local`](crate::odb::Odb::write_local),
+    /// [`Odb::write_raw_local`](crate::odb::Odb::write_raw_local) and [`Odb::write_loose_materialize`](crate::odb::Odb::write_loose_materialize). [`Odb::write`](crate::odb::Odb::write) works with
+    /// any primary.
+    LooseWrite,
+    /// The files-backed primary source itself: [`Odb::primary`](crate::odb::Odb::primary). Use [`Odb::primary_writable`](crate::odb::Odb::primary_writable)
+    /// for the primary of any kind.
+    FilesSource,
+    /// Moving blobs to a large-object promisor: [`maintenance::offload_blobs`](crate::maintenance::offload_blobs), for the main
+    /// repository and for the promisor repository.
+    Offload,
+    /// Rewriting packs to leave out promised objects, as offload and dropping promised
+    /// blobs do.
+    PromisorRewrite,
+    /// Fetching or cloning with an object filter (a partial clone) into a custom primary.
+    PartialFetch,
+    /// The receive-pack quarantine directory under `objects/`. A custom primary receives
+    /// pushes through an in-memory overlay instead.
+    ReceiveQuarantine,
+    /// Dropping promised blobs from promisor packs: [`maintenance::drop_promised_blobs`](crate::maintenance::drop_promised_blobs).
+    DropLargeBlobs,
+}
+
+impl FilesOnlyOperation {
+    /// Stable snake_case name (`"gc"`, `"commit_graph_write"`, …) for scripts and JSON.
+    ///
+    /// Names never change once released; new variants add new names.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Gc => "gc",
+            Self::Prune => "prune",
+            Self::Repack => "repack",
+            Self::CommitGraphWrite => "commit_graph_write",
+            Self::MidxWrite => "midx_write",
+            Self::PackStore => "pack_store",
+            Self::PackInstall => "pack_install",
+            Self::LargestPackIndex => "largest_pack_index",
+            Self::LooseWrite => "loose_write",
+            Self::FilesSource => "files_source",
+            Self::Offload => "offload",
+            Self::PromisorRewrite => "promisor_rewrite",
+            Self::PartialFetch => "partial_fetch",
+            Self::ReceiveQuarantine => "receive_quarantine",
+            Self::DropLargeBlobs => "drop_large_blobs",
+        }
+    }
+}
+
+impl fmt::Display for FilesOnlyOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Gc => "garbage collection",
+            Self::Prune => "pruning unreachable objects",
+            Self::Repack => "repacking",
+            Self::CommitGraphWrite => "writing a commit-graph file",
+            Self::MidxWrite => "writing a multi-pack-index",
+            Self::PackStore => "the pack read cache",
+            Self::PackInstall => "installing a pack file",
+            Self::LargestPackIndex => "finding the largest pack index",
+            Self::LooseWrite => "writing loose object files",
+            Self::FilesSource => "opening the files-backed primary",
+            Self::Offload => "offloading blobs",
+            Self::PromisorRewrite => "rewriting promisor packs",
+            Self::PartialFetch => "a partial fetch",
+            Self::ReceiveQuarantine => "the receive quarantine directory",
+            Self::DropLargeBlobs => "dropping promised blobs",
+        })
+    }
+}
+
 /// Failures opening, discovering, initializing, or validating a repository layout.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -123,10 +238,12 @@ pub enum RepositoryError {
     GitDirPathIo(PathIoError),
 
     /// The operation needs the files-backed `objects/` directory, but the repository uses a custom primary store.
-    #[error("{operation} requires the files-backed object store; it is not supported with a custom primary")]
+    #[error(
+        "{operation} needs the files-backed object store, but this repository's primary store is custom"
+    )]
     UnsupportedObjectStore {
-        /// Operation that was refused (for example `"fetch"`, `"push"`, `"gc"`).
-        operation: &'static str,
+        /// The operation that was refused.
+        operation: FilesOnlyOperation,
     },
 
     /// The operation would delete objects, and `extensions.preciousObjects` forbids it.
@@ -212,3 +329,7 @@ impl From<PathIoError> for RepositoryError {
 
 /// Convenience alias for repository open/discover/init APIs.
 pub type RepositoryResult<T> = std::result::Result<T, RepositoryError>;
+
+#[cfg(test)]
+#[path = "files_only_operation_tests.rs"]
+mod files_only_operation_tests;

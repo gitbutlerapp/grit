@@ -15,6 +15,7 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
+use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_test_support::git_fsck;
 use std::sync::Arc;
@@ -477,7 +478,7 @@ fn custom_backend_unsupported_error() {
     assert!(matches!(
         err,
         Error::Repository(RepositoryError::UnsupportedObjectStore {
-            operation: "repack",
+            operation: FilesOnlyOperation::Repack,
         })
     ));
 }

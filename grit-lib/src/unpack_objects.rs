@@ -25,7 +25,6 @@ use crate::odb::store::{ObjectStore, WritableObjectStore};
 use crate::odb::{Odb, WriteOptions};
 use crate::pack::{decode_pack_object_size_varint, decode_pack_object_size_varint_from_first};
 use crate::progress::{poll_cancel, CancelToken, NullProgress, ProgressPhase, ProgressSink};
-use crate::repo::RepositoryError;
 use crate::zlib_inflate::ZlibInflateScratch;
 use flate2::read::ZlibDecoder;
 use flate2::{Decompress, FlushDecompress, Status};
@@ -267,7 +266,9 @@ trait UnpackSink {
         false
     }
 
-    /// Inflate one pack object from `rd` and store it without holding the full payload in RAM.
+    /// Inflate one pack object from `rd` and store it. Sinks that report
+    /// [`Self::supports_streaming_inflate`] avoid holding the full payload in RAM; the
+    /// default inflates it into memory and calls [`Self::write`].
     fn write_inflated_from_pack(
         &self,
         kind: ObjectKind,
@@ -275,11 +276,8 @@ trait UnpackSink {
         rd: &mut StreamingPackReader<'_>,
         dry_run: bool,
     ) -> Result<ObjectId> {
-        let _ = (kind, size, rd, dry_run);
-        Err(RepositoryError::UnsupportedObjectStore {
-            operation: "write_inflated_from_pack",
-        }
-        .into())
+        let data = rd.decompress(size)?;
+        self.write(kind, &data, dry_run)
     }
 
     /// Read an object stored before or during this unpack (thin-pack bases, large blobs).

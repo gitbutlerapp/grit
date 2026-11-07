@@ -742,6 +742,8 @@ mod fetch_v0_http_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "fetch_v2_negotiation_rounds.rs"]
 mod fetch_v2_negotiation_rounds;
+#[path = "files_only_refusals.rs"]
+mod files_only_refusals;
 #[cfg(feature = "full-tests")]
 #[path = "files_store_git_roundtrip.rs"]
 mod files_store_git_roundtrip;
