@@ -979,6 +979,8 @@ mod local_transport_reachable;
 #[cfg(feature = "full-tests")]
 #[path = "lockfile_contention_git_compat.rs"]
 mod lockfile_contention_git_compat;
+#[path = "log_group_by_custom_store.rs"]
+mod log_group_by_custom_store;
 #[cfg(feature = "full-tests")]
 #[path = "log_oneline_abbrev_packed.rs"]
 mod log_oneline_abbrev_packed;

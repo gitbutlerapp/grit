@@ -477,8 +477,6 @@ mod tests {
         /// Step 4: the internal `PrimaryStore` enum in `Odb`, which gives fast
         /// paths and scratch stores a store handle instead of a directory.
         PrimaryStoreEnum,
-        /// Step 5: change-id resolution and log grouping through the store.
-        ChangeIdAndGroupBy,
     }
 
     struct ByDesign {
@@ -591,6 +589,11 @@ mod tests {
         // The thin-pack probe indexes a received pack against an empty database.
         by_design("unpack_objects.rs", JoinObjects, Area::ScratchDatabase),
         by_design("unpack_objects.rs", OdbNew, Area::ScratchDatabase),
+        by_design(
+            "revwalk/group_by.rs",
+            SingleLocalPackReader,
+            Area::GatedFastPath,
+        ),
     ];
 
     const KNOWN_LEAKS: &[Leak] = &[
@@ -623,17 +626,6 @@ mod tests {
         leak("fetch.rs", ObjectsDir, FixStep::PrimaryStoreEnum),
         // A scratch database in a temp dir that could be an in-memory store.
         leak("diff/no_index.rs", OdbNew, FixStep::PrimaryStoreEnum),
-        // `log --group-by` pack fast paths.
-        leak(
-            "revwalk/group_by.rs",
-            ObjectsDir,
-            FixStep::ChangeIdAndGroupBy,
-        ),
-        leak(
-            "revwalk/group_by.rs",
-            SingleLocalPackReader,
-            FixStep::ChangeIdAndGroupBy,
-        ),
     ];
 
     type Key = (&'static str, Access);
