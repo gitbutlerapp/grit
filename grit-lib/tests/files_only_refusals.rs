@@ -11,7 +11,7 @@ use grit_lib::maintenance::{
 };
 use grit_lib::objects::index_pack::{install_pack_bytes, install_pack_path, IngestPackOptions};
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
+use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::gc::prune_loose_unreachable;
@@ -27,13 +27,10 @@ fn memory_repo() -> (tempfile::TempDir, Repository) {
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
-    let builder = OdbBuilder::files(git_dir.join("objects"))
-        .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-        .alternates(false);
     let repo = Repository::open(
         &git_dir,
         &RepositoryOptions::empty()
-            .with_odb_builder(builder)
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_work_tree(dir.path()),
     )
     .expect("open");
@@ -230,7 +227,7 @@ fn standalone_files_odb_refuses_repository_maintenance() {
     let dir = tempfile::tempdir().expect("tempdir");
     let objects = dir.path().join("objects");
     std::fs::create_dir_all(&objects).expect("mkdir objects");
-    let odb = OdbBuilder::files(&objects).alternates(false).build();
+    let odb = Odb::new(&objects);
     assert_refused(odb.gc(), FilesOnlyOperation::Gc);
     assert_refused(
         odb.write_commit_graph(),

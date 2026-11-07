@@ -8,7 +8,6 @@ use crate::error::Error;
 use crate::maintenance::{rewrite_local_objects_without, PromisorRewriteWhen, RepackOptions};
 use crate::objects::{HashAlgo, ObjectKind, OidHashSet};
 use crate::odb::store::MemoryStore;
-use crate::odb::OdbBuilder;
 use crate::receive_quarantine::ReceiveQuarantine;
 use crate::repo::{InitOptions, Repository};
 
@@ -104,13 +103,10 @@ fn memory_repo() -> (tempfile::TempDir, Repository) {
     )
     .unwrap();
     let git_dir = dir.path().join(".git");
-    let builder = OdbBuilder::files(git_dir.join("objects"))
-        .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-        .alternates(false);
     let repo = Repository::open(
         &git_dir,
         &RepositoryOptions::empty()
-            .with_odb_builder(builder)
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_work_tree(dir.path()),
     )
     .unwrap();
