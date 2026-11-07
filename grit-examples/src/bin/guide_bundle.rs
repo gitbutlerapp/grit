@@ -6,6 +6,7 @@ use anyhow::Result;
 use grit_lib::bundle::BundleSpec;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
 use std::path::{Path, PathBuf};
@@ -46,12 +47,14 @@ fn main() -> Result<()> {
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("HEAD has no commit"))?;
 
-    repo.bundles().create(
+    repo.bundles().write(
         &BundleSpec {
             include: vec![(tip, "refs/heads/main".into())],
             ..Default::default()
         },
         &bundle_path,
+        &mut NullProgress,
+        &CancelToken::never(),
     )?;
 
     let report = repo.bundles().verify(&bundle_path)?;

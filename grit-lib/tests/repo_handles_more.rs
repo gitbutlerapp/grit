@@ -175,12 +175,14 @@ fn handle_bundle_verify_and_git_unbundle() {
     let bundle_path = dir.path().join("x.bundle");
     let repo = open_grit(dir.path());
     repo.bundles()
-        .create(
+        .write(
             &grit_lib::bundle::BundleSpec {
                 include: vec![(head, "refs/heads/main".into())],
                 ..Default::default()
             },
             &bundle_path,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
         )
         .expect("create");
 
@@ -205,7 +207,11 @@ fn handle_bundle_verify_and_git_unbundle() {
     let consumer_repo = open_grit(consumer.path());
     consumer_repo
         .bundles()
-        .unbundle(&bundle_path)
+        .unbundle(
+            &bundle_path,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
         .expect("unbundle");
     assert_fsck_strict(consumer.path());
 }
@@ -233,7 +239,13 @@ fn git_bundle_unbundles_via_handle() {
     let repo = open_grit(dst.path());
     let report = repo.bundles().verify(&bundle).expect("verify");
     assert!(report.is_ok(), "{report:?}");
-    repo.bundles().unbundle(&bundle).expect("unbundle");
+    repo.bundles()
+        .unbundle(
+            &bundle,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
+        .expect("unbundle");
     assert_fsck_strict(dst.path());
 }
 

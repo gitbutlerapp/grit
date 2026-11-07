@@ -386,7 +386,7 @@ fn seed_from(
         inner: progress,
         muted: false,
     };
-    let unbundled = match bundle.unbundle_with_progress(repo, &mut indexing, cancel) {
+    let unbundled = match bundle.unbundle(repo, &mut indexing, cancel) {
         Ok(u) => u,
         Err(e) => {
             // A corrupt download would fail the same way next time.

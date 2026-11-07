@@ -281,7 +281,14 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
     let (_dir, repo, store) = memory_repo();
     let before = object_files(repo.git_dir());
 
-    let outcome = repo.bundles().unbundle(&bundle).expect("unbundle");
+    let outcome = repo
+        .bundles()
+        .unbundle(
+            &bundle,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
+        .expect("unbundle");
     let tip = rev_parse(upstream.path(), "main");
     assert_eq!(outcome.refs.len(), 1);
     assert_eq!(outcome.refs[0].oid, tip);
@@ -342,7 +349,11 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
     );
     assert!(matches!(
         repo.bundles()
-            .unbundle(&incremental)
+            .unbundle(
+                &incremental,
+                &mut grit_lib::progress::NullProgress,
+                grit_lib::progress::CancelToken::never_ref()
+            )
             .expect_err("unbundle without connected prerequisite"),
         BundleError::PrerequisitesNotConnected
     ));
@@ -360,7 +371,11 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
     let new_tip = rev_parse(upstream.path(), "main");
     let outcome = repo
         .bundles()
-        .unbundle(&incremental)
+        .unbundle(
+            &incremental,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
         .expect("unbundle incremental");
     assert_eq!(outcome.refs[0].oid, new_tip);
     assert!(store.contains(&new_tip).expect("contains"));
@@ -383,7 +398,11 @@ fn unbundle_into_custom_primary_reports_a_corrupt_pack() {
 
     let err = repo
         .bundles()
-        .unbundle(&bundle)
+        .unbundle(
+            &bundle,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
         .expect_err("corrupt trailer must fail");
     assert!(
         matches!(&err, BundleError::Io(msg) if msg.contains("checksum")),

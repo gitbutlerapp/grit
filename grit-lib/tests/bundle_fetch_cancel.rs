@@ -1,10 +1,10 @@
 //! Cancellation during bundle fetch.
 
-use grit_lib::bundle::bundle_remote::fetch_from_bundle_with_progress;
 use grit_lib::error::Error;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
+use grit_lib::repo::Repository;
 use grit_test_support::git;
 
 #[test]
@@ -40,8 +40,15 @@ fn bundle_fetch_returns_cancelled_when_signalled_before_unbundle() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::Following;
-    let err =
-        fetch_from_bundle_with_progress(&dest.join(".git"), &bundle, &opts, &mut NoProgress, &flag)
-            .expect_err("cancelled before bundle ingest");
+    let err = Repository::open(
+        &dest.join(".git"),
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .bundles()
+    .fetch(&bundle, &opts, &mut NoProgress, &flag)
+    .expect_err("cancelled before bundle ingest");
     assert!(matches!(err, Error::Cancelled));
 }

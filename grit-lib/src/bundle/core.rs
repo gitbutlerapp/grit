@@ -359,7 +359,8 @@ impl Bundle {
         Ok(report)
     }
 
-    /// Stream the embedded pack into `repo`'s ODB (does not update refs).
+    /// Stream the embedded pack into `repo`'s ODB (does not update refs), reporting receive
+    /// and index-pack progress through `progress` and stopping when `cancel` fires.
     ///
     /// With a files-backed primary the pack is installed under `objects/pack/`. With a
     /// custom [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store) store the pack is
@@ -370,28 +371,15 @@ impl Bundle {
     /// Pack integrity is checked while building the pack index (object hashes and the
     /// pack trailer); there is no second full read of the pack after indexing.
     ///
-    /// # Errors
-    ///
-    /// Returns [`BundleError`] or ingest failures wrapped as [`BundleError::Io`].
-    pub fn unbundle(
-        &self,
-        repo: &Repository,
-    ) -> std::result::Result<Vec<UnbundledRef>, BundleError> {
-        Ok(self
-            .unbundle_with_progress(
-                repo,
-                &mut NullProgress,
-                &crate::progress::CancelToken::never(),
-            )?
-            .refs)
-    }
-
-    /// Like [`Self::unbundle`], reporting receive and index-pack progress through `progress`.
-    ///
     /// Refuses to ingest the pack when [`Self::verify`] reports missing prerequisites or
     /// disconnected prerequisite history (same checks as
-    /// [`fetch_from_bundle_with_progress`](crate::bundle::bundle_remote::fetch_from_bundle_with_progress)).
-    pub fn unbundle_with_progress(
+    /// [`RepositoryBundles::fetch`](crate::repo_handles::RepositoryBundles::fetch)).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BundleError`], [`BundleError::Cancelled`], or ingest failures wrapped as
+    /// [`BundleError::Io`].
+    pub fn unbundle(
         &self,
         repo: &Repository,
         progress: &mut dyn ProgressSink,
@@ -634,7 +622,7 @@ fn ensure_pack_magic(reader: &mut dyn BufRead) -> std::result::Result<(), Bundle
 /// # Errors
 ///
 /// Returns [`BundleError::EmptyRefs`] when `spec.include` is empty, or pack generation failures.
-pub fn plan_bundle_create(
+pub(crate) fn plan_bundle_create(
     repo: &Repository,
     spec: &BundleSpec,
 ) -> std::result::Result<BundleCreatePlan, BundleError> {
@@ -663,7 +651,7 @@ pub fn plan_bundle_create(
 /// # Errors
 ///
 /// Returns [`BundleError`] when the bundle cannot be read or verified.
-pub fn plan_bundle_unbundle(
+pub(crate) fn plan_bundle_unbundle(
     bundle: &Bundle,
     repo: &Repository,
 ) -> std::result::Result<BundleUnbundlePlan, BundleError> {
@@ -823,7 +811,8 @@ fn write_bundle_pack_with_cancel(
     })
 }
 
-/// Write a bundle to `out` from `repo` using `spec`.
+/// Write a bundle to `out` from `repo` using `spec`, reporting pack progress through
+/// `progress` and stopping pack generation when `cancel` is set.
 ///
 /// The header is written first, then the pack is streamed straight into `out`; the
 /// pack is never held in memory as a whole (filtered bundles excepted). Deltas and
@@ -834,35 +823,9 @@ fn write_bundle_pack_with_cancel(
 ///
 /// # Errors
 ///
-/// Returns [`BundleError::EmptyRefs`] when `spec.include` is empty, or I/O / pack errors.
-pub fn write_bundle(
-    repo: &Repository,
-    spec: &BundleSpec,
-    out: &mut dyn Write,
-) -> std::result::Result<(), BundleError> {
-    write_bundle_with_cancel(repo, spec, out, &crate::progress::CancelToken::never())
-}
-
-/// Like [`write_bundle`], but stops pack generation when `cancel` is set.
-///
-/// # Errors
-///
-/// Same as [`write_bundle`], plus [`BundleError::Cancelled`].
-pub fn write_bundle_with_cancel(
-    repo: &Repository,
-    spec: &BundleSpec,
-    out: &mut dyn Write,
-    cancel: &crate::progress::CancelToken,
-) -> std::result::Result<(), BundleError> {
-    write_bundle_with_cancel_and_progress(repo, spec, out, &mut NullProgress, cancel)
-}
-
-/// Like [`write_bundle_with_cancel`], reporting pack progress through `progress`.
-///
-/// # Errors
-///
-/// Same as [`write_bundle_with_cancel`].
-pub fn write_bundle_with_cancel_and_progress(
+/// Returns [`BundleError::EmptyRefs`] when `spec.include` is empty, [`BundleError::Cancelled`]
+/// when `cancel` fires, or I/O / pack errors.
+pub(crate) fn write_bundle(
     repo: &Repository,
     spec: &BundleSpec,
     out: &mut dyn Write,
@@ -935,37 +898,6 @@ fn write_header(
         writeln!(out, "{} {name}", oid.to_hex()).map_err(|e| BundleError::Io(e.to_string()))?;
     }
     writeln!(out).map_err(|e| BundleError::Io(e.to_string()))
-}
-
-/// Incremental writer for bundle bytes (header + pack).
-pub struct BundleWriter<W: Write> {
-    inner: W,
-    finished_header: bool,
-}
-
-impl<W: Write> BundleWriter<W> {
-    /// Create a writer; call [`Self::write_header_and_pack`] to emit a complete bundle.
-    pub fn new(inner: W) -> Self {
-        Self {
-            inner,
-            finished_header: false,
-        }
-    }
-
-    /// Write the header and pack in one step.
-    ///
-    /// # Errors
-    ///
-    /// Same as [`write_bundle`].
-    pub fn write_header_and_pack(
-        mut self,
-        repo: &Repository,
-        spec: &BundleSpec,
-    ) -> std::result::Result<(), BundleError> {
-        write_bundle(repo, spec, &mut self.inner)?;
-        self.finished_header = true;
-        Ok(())
-    }
 }
 
 fn write_signature(

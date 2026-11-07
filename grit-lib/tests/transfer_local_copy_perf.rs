@@ -189,7 +189,7 @@ fn cargo_mirror_for_repack_rewrite_build_time_when_fixture_present() {
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release-only: cargo mirror perf budget")]
 fn cargo_mirror_bundle_all_within_budget_when_fixture_present() {
-    use grit_lib::bundle::bundle_remote::{write_bundle_with_options, BundleCreateOptions};
+    use grit_lib::bundle::bundle_remote::BundleCreateOptions;
     let mirror = Path::new("/tmp/cargo.mirror");
     if !mirror.join("objects/pack").is_dir() {
         return;
@@ -203,15 +203,17 @@ fn cargo_mirror_bundle_all_within_budget_when_fixture_present() {
     let bundle_path = tmp.path().join("cargo.bundle");
 
     let t0 = Instant::now();
-    write_bundle_with_options(
-        &repo,
-        &bundle_path,
-        &BundleCreateOptions {
-            all_refs: true,
-            rev_tokens: Vec::new(),
-        },
-    )
-    .expect("bundle --all");
+    repo.bundles()
+        .write_from_revs(
+            &BundleCreateOptions {
+                all_refs: true,
+                rev_tokens: Vec::new(),
+            },
+            &bundle_path,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
+        .expect("bundle --all");
     let elapsed = t0.elapsed().as_secs_f64();
 
     let pack_len: u64 = std::fs::read_dir(mirror.join("objects/pack"))

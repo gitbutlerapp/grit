@@ -275,7 +275,14 @@ fn bundle_missing_prerequisites() {
     }
     let empty = Repository::open(&empty_git, &RepositoryOptions::empty()).expect("open");
     let bundle = Bundle::open(&inc).expect("open bundle");
-    let err = bundle.unbundle(&empty).expect_err("missing base");
+    let err = bundle
+        .unbundle(
+            &empty,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
+        .map(|o| o.refs)
+        .expect_err("missing base");
     assert!(matches!(err, BundleError::MissingPrerequisites { .. }));
 }
 

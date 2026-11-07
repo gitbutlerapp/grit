@@ -284,7 +284,7 @@ pub fn run_create(
     if dry_run {
         let plan = repo
             .bundles()
-            .plan_create_with_options(&options)
+            .plan_create_from_revs(&options)
             .map_err(map_bundle_error)?;
         let references: Vec<BundleRefJson> = plan
             .refs
@@ -308,7 +308,7 @@ pub fn run_create(
     let mut progress = grit_lib::progress::NullProgress;
     let refs = repo
         .bundles()
-        .create_with_options(
+        .write_from_revs(
             &options,
             &path,
             &mut progress,
@@ -381,7 +381,7 @@ pub fn run_unbundle(path: PathBuf, dry_run: bool) -> Result<BundleUnbundleOutcom
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = repo
         .bundles()
-        .unbundle_with_progress(
+        .unbundle(
             &path,
             &mut grit_lib::progress::NullProgress,
             &crate::interrupt::process_cancel_token(),

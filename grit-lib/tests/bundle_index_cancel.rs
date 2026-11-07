@@ -73,7 +73,7 @@ fn bundle_unbundle_returns_cancelled_during_index_pack() {
     };
 
     let err = bundle
-        .unbundle_with_progress(&repo, &mut progress, &flag)
+        .unbundle(&repo, &mut progress, &flag)
         .expect_err("cancel during index-pack");
     assert!(
         err.is_cancelled(),

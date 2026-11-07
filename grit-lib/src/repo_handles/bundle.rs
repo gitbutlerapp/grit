@@ -1,5 +1,6 @@
 //! Git bundle create/verify/list/unbundle scoped to a [`Repository`](crate::repo::Repository).
 
+use std::io::Write;
 use std::path::Path;
 
 use crate::bundle::bundle_remote::BundleCreateOptions;
@@ -9,8 +10,9 @@ use crate::bundle::{
 };
 use crate::list_limit::Limited;
 use crate::objects::ObjectId;
-use crate::progress::{NullProgress, ProgressSink};
+use crate::progress::{CancelToken, ProgressSink};
 use crate::repo::Repository;
+use crate::transfer::{FetchOptions, FetchOutcome};
 
 /// One ref tip from a bundle header (`git bundle list-heads`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,12 +52,13 @@ impl<'repo> RepositoryBundles<'repo> {
         plan_bundle_create(self.repo, spec)
     }
 
-    /// Plan bundle creation from CLI-style revision options.
+    /// Plan bundle creation from revision arguments ([`BundleCreateOptions`]) without writing
+    /// a file.
     ///
     /// # Errors
     ///
     /// Propagates rev-list, ref resolution, and pack failures.
-    pub fn plan_create_with_options(
+    pub fn plan_create_from_revs(
         &self,
         options: &BundleCreateOptions,
     ) -> std::result::Result<BundleCreatePlan, BundleError> {
@@ -77,20 +80,26 @@ impl<'repo> RepositoryBundles<'repo> {
         plan_bundle_unbundle(&bundle, self.repo)
     }
 
-    /// Write a bundle to `path` using `spec`.
+    /// Write a bundle file at `path` for `spec`, reporting pack enumeration and copy progress
+    /// through `progress` and stopping when `cancel` fires.
     ///
     /// Replaces an existing file at `path` only after the pack stream completes successfully
-    /// (writes to a sibling `*.bundle.part` first). On failure the previous file is unchanged.
+    /// (writes to a sibling `*.bundle.part` first). On failure or cancel the previous file is
+    /// unchanged and the part file is removed.
+    ///
+    /// Returns the number of ref tips written to the bundle header.
     ///
     /// # Errors
     ///
-    /// Returns [`BundleError`] when `spec.include` is empty or pack generation fails.
+    /// Returns [`BundleError::EmptyRefs`] when `spec.include` is empty,
+    /// [`BundleError::Cancelled`] when `cancel` fires, or pack generation errors.
     ///
     /// # Examples
     ///
     /// ```
     /// # use grit_lib::bundle::BundleSpec;
     /// # use grit_lib::objects::ObjectId;
+    /// # use grit_lib::progress::{CancelToken, NullProgress};
     /// # use grit_lib::repo::Repository;
     /// # use std::path::Path;
     /// # fn demo() -> Result<(), Box<dyn std::error::Error>> {
@@ -99,54 +108,65 @@ impl<'repo> RepositoryBundles<'repo> {
     ///     include: vec![(ObjectId::zero(), "refs/heads/main".into())],
     ///     ..Default::default()
     /// };
-    /// let _ = repo.bundles().create(&spec, Path::new("/tmp/x.bundle"));
+    /// let _ = repo.bundles().write(
+    ///     &spec,
+    ///     Path::new("/tmp/x.bundle"),
+    ///     &mut NullProgress,
+    ///     &CancelToken::never(),
+    /// );
     /// # Ok(())
     /// # }
     /// ```
-    pub fn create(&self, spec: &BundleSpec, path: &Path) -> std::result::Result<(), BundleError> {
-        self.create_with_progress(
-            spec,
-            path,
-            &mut NullProgress,
-            &crate::progress::CancelToken::never(),
-        )?;
-        Ok(())
-    }
-
-    /// Like [`Self::create`], reporting pack enumeration and copy progress through `progress`.
-    ///
-    /// Returns the number of ref tips written to the bundle header.
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Self::create`], plus [`BundleError::Cancelled`].
-    pub fn create_with_progress(
+    pub fn write(
         &self,
         spec: &BundleSpec,
         path: &Path,
         progress: &mut dyn ProgressSink,
-        cancel: &crate::progress::CancelToken,
+        cancel: &CancelToken,
     ) -> std::result::Result<usize, BundleError> {
-        crate::bundle_remote::write_bundle_spec_to_path_with_cancel(
-            self.repo, spec, path, progress, cancel,
-        )
+        crate::bundle_remote::write_bundle_spec_to_path(self.repo, spec, path, progress, cancel)
     }
 
-    /// Write a bundle from CLI-style [`BundleCreateOptions`].
+    /// Write a bundle file at `path` from revision arguments ([`BundleCreateOptions`]: tips,
+    /// `A..B` ranges, exclusions, `--all`), like `git bundle create`.
+    ///
+    /// Same file replacement, progress, and cancellation behavior as [`Self::write`]. Returns
+    /// the number of ref tips written to the bundle header.
     ///
     /// # Errors
     ///
     /// Propagates rev-list, ref resolution, and pack failures.
-    pub fn create_with_options(
+    pub fn write_from_revs(
         &self,
         options: &BundleCreateOptions,
         path: &Path,
         progress: &mut dyn ProgressSink,
-        cancel: &crate::progress::CancelToken,
+        cancel: &CancelToken,
     ) -> std::result::Result<usize, BundleError> {
         let spec = crate::bundle_remote::resolve_bundle_spec(self.repo, options)
             .map_err(lib_error_to_bundle_error)?;
-        self.create_with_progress(&spec, path, progress, cancel)
+        self.write(&spec, path, progress, cancel)
+    }
+
+    /// Stream a bundle for `spec` into `out`: the header first, then the pack.
+    ///
+    /// The pack is never held in memory as a whole (filtered bundles excepted). Deltas and
+    /// whole objects already stored in local packs are copied verbatim, and bundles with
+    /// prerequisites are thin. Pass a buffered writer: the pack is emitted in many small
+    /// writes. Nothing is cleaned up on failure; use [`Self::write`] for an atomic file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BundleError::EmptyRefs`] when `spec.include` is empty,
+    /// [`BundleError::Cancelled`] when `cancel` fires, or I/O / pack errors.
+    pub fn write_to(
+        &self,
+        spec: &BundleSpec,
+        out: &mut dyn Write,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> std::result::Result<(), BundleError> {
+        crate::bundle::write_bundle(self.repo, spec, out, progress, cancel)
     }
 
     /// Open and verify a bundle against this repository's object format and prerequisites.
@@ -194,27 +214,39 @@ impl<'repo> RepositoryBundles<'repo> {
         Ok(Limited::from_vec(heads, limit))
     }
 
-    /// Ingest the pack stream from `path` into this repository (refs are not updated).
+    /// Ingest the pack stream from `path` into this repository (refs are not updated),
+    /// reporting receive and index-pack progress through `progress`.
     ///
     /// # Errors
     ///
-    /// Returns [`BundleError`] or ingest failures.
-    pub fn unbundle(&self, path: &Path) -> std::result::Result<UnbundleOutcome, BundleError> {
-        Bundle::open(path)?.unbundle_with_progress(
-            self.repo,
-            &mut NullProgress,
-            &crate::progress::CancelToken::never(),
-        )
-    }
-
-    /// Like [`Self::unbundle`], reporting progress through `progress`.
-    pub fn unbundle_with_progress(
+    /// Returns [`BundleError`] (including [`BundleError::Cancelled`]) or ingest failures.
+    pub fn unbundle(
         &self,
         path: &Path,
         progress: &mut dyn ProgressSink,
-        cancel: &crate::progress::CancelToken,
+        cancel: &CancelToken,
     ) -> std::result::Result<UnbundleOutcome, BundleError> {
-        Bundle::open(path)?.unbundle_with_progress(self.repo, progress, cancel)
+        Bundle::open(path)?.unbundle(self.repo, progress, cancel)
+    }
+
+    /// Fetch from the bundle file at `path` into this repository, like `git fetch` from a
+    /// bundle: verify prerequisites, ingest the pack (unless [`FetchOptions::dry_run`]), and
+    /// update refs according to `options` (refspecs, tag mode, prune).
+    ///
+    /// Objects land in this repository's object store.
+    ///
+    /// # Errors
+    ///
+    /// Propagates bundle verification, pack ingest, refspec, and ref update failures, and
+    /// [`Error::Cancelled`](crate::error::Error::Cancelled) when `cancel` fires.
+    pub fn fetch(
+        &self,
+        path: &Path,
+        options: &FetchOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> crate::error::Result<FetchOutcome> {
+        crate::bundle_remote::fetch_from_bundle_into(self.repo, path, options, progress, cancel)
     }
 
     /// Open a bundle file handle for repeated operations.

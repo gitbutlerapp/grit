@@ -250,7 +250,12 @@ pub fn build(
     };
     {
         let mut out = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
-        grit_lib::bundle::write_bundle(&repo, &spec, &mut out)?;
+        repo.bundles().write_to(
+            &spec,
+            &mut out,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )?;
         out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
     }
     std::fs::rename(&tmp, dir.join(&file))?;

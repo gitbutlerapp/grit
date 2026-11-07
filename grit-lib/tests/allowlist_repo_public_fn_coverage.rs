@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::bundle::bundle_remote::fetch_from_bundle;
-use grit_lib::bundle::{Bundle, BundleSpec, BundleWriter};
+use grit_lib::bundle::{Bundle, BundleSpec};
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::commit::signing::verify_tag;
 use grit_lib::config::environment::RepositoryOptions;
@@ -51,7 +51,7 @@ use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::status::expand_untracked_for_staging;
 use grit_lib::porcelain::tag::creator_date;
 use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
 use grit_lib::refs::query_reachability::{ref_points_at, resolve_commit_filter_target};
 use grit_lib::refs::ref_storage::detect_format;
@@ -225,9 +225,8 @@ fn write_bundle_header_and_pack(repo: &Repository, tip: ObjectId, w: &mut dyn Wr
         exclude: Vec::new(),
         filter: None,
     };
-    let writer = BundleWriter::new(w);
-    writer
-        .write_header_and_pack(repo, &spec)
+    repo.bundles()
+        .write_to(&spec, w, &mut NullProgress, &CancelToken::never())
         .expect("bundle write");
 }
 

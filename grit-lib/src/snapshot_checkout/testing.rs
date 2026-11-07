@@ -173,6 +173,8 @@ pub(crate) fn check_out(served: &mut Served, at: &Path) -> (PathBuf, Repository)
             filter: None,
         },
         &mut out,
+        &mut crate::progress::NullProgress,
+        CancelToken::never_ref(),
     )
     .expect("bundle");
     let dest = at.join("co");
