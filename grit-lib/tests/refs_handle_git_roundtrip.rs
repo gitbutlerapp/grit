@@ -333,6 +333,7 @@ fn handles_round_trip_through_a_reopened_store_on_both_backends() {
             .expect("symref");
         refs.update("refs/tags/gone", &first).expect("tag");
         refs.delete("refs/tags/gone").expect("delete tag");
+        refs.update("refs/tags/v1.0", &first).expect("tag v1.0");
         let outcomes = refs
             .apply_each(vec![
                 RefUpdate {
@@ -379,8 +380,20 @@ fn handles_round_trip_through_a_reopened_store_on_both_backends() {
                 "refs/heads/ok",
                 "refs/heads/topic",
                 "refs/remotes/origin/HEAD",
+                "refs/tags/v1.0",
             ],
             "{format:?}"
+        );
+        let tags: Vec<String> = refs
+            .list_glob("refs/tags/v1*")
+            .expect("glob")
+            .into_iter()
+            .map(|(name, _)| name.into())
+            .collect();
+        assert_eq!(
+            tags,
+            ["refs/tags/v1.0"],
+            "{format:?}: glob prefix is not a directory"
         );
         assert_eq!(refs.resolve("refs/heads/topic").expect("topic"), first);
         assert_eq!(

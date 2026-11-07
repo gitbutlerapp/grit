@@ -4908,8 +4908,12 @@ pub(crate) fn list_refs_glob_in(
 ///
 /// Propagates ref-store open/read failures.
 pub(crate) fn list_refs(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
-    let prefix_norm = normalize_list_refs_prefix(git_dir, prefix);
-    let prefix = prefix_norm.as_str();
+    list_refs_with_name_prefix(git_dir, &normalize_list_refs_prefix(git_dir, prefix))
+}
+
+/// Refs under `git_dir` whose names start with `prefix`, taken literally (no directory
+/// normalization), sorted by name.
+fn list_refs_with_name_prefix(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
     let store = open_ref_store(git_dir)?;
     if store.format() != RefStorageFormat::Files {
         return crate::reftable::reftable_list_refs(git_dir, prefix);
@@ -5089,20 +5093,18 @@ pub(crate) fn list_refs_glob_for_repository(
 /// [`crate::refs::store::RefStore`]. Prefer `list_refs_glob_for_repository` when you
 /// already have a [`crate::repo::Repository`].
 pub(crate) fn list_refs_glob(git_dir: &Path, pattern: &str) -> Result<Vec<(String, ObjectId)>> {
-    let glob_pos = pattern.find(['*', '?', '[']);
-    let prefix_owned: String = match glob_pos {
-        // Literal segment before the first wildcard (e.g. `refs/heads/b05*` → `refs/heads/b05`).
-        Some(pos) => pattern[..pos].to_owned(),
+    // The text before a wildcard is a name prefix, not a directory (`refs/tags/v*` must list
+    // `refs/tags/v1.0`), so it skips the directory normalization of [`list_refs`].
+    let all = match pattern.find(['*', '?', '[']) {
+        Some(pos) => list_refs_with_name_prefix(git_dir, &pattern[..pos])?,
         None => {
-            let mut p = pattern.trim_end_matches('/').to_owned();
-            if !p.is_empty() {
-                p.push('/');
+            let mut dir = pattern.trim_end_matches('/').to_owned();
+            if !dir.is_empty() {
+                dir.push('/');
             }
-            p
+            list_refs(git_dir, &dir)?
         }
     };
-    let prefix = prefix_owned.as_str();
-    let all = list_refs(git_dir, prefix)?;
     let mut results = Vec::new();
     for (refname, oid) in all {
         if ref_matches_glob(&refname, pattern) {
