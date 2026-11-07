@@ -5,18 +5,12 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, dead_code)]
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use std::sync::OnceLock;
 
 use grit_lib::index::write_tree::{write_tree_from_index, write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
-use grit_lib::objects::commit_graph::BloomFilterSettings;
-use grit_lib::objects::commit_graph::{
-    build_commit_graph_bytes, collect_reachable_commit_oids, load_commit_graph_commit_info,
-    CommitGraphCommitInfo,
-};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{
     serialize_commit, serialize_tag, CommitData, ObjectId, ObjectKind, TagData,
@@ -68,39 +62,8 @@ fn git_commit_graph_write(repo_root: &Path) -> std::result::Result<(), String> {
     ))
 }
 
-fn write_grit_commit_graph(objects_dir: &Path, odb: &Odb) -> std::result::Result<(), String> {
-    let git_dir = objects_dir
-        .parent()
-        .expect("objects dir has parent git_dir");
-    let commits = collect_reachable_commit_oids(git_dir, odb).map_err(|e| e.to_string())?;
-    let mut sorted: Vec<ObjectId> = commits.into_iter().collect();
-    sorted.sort();
-    let mut infos: HashMap<ObjectId, CommitGraphCommitInfo> = HashMap::new();
-    for oid in &sorted {
-        infos.insert(
-            *oid,
-            load_commit_graph_commit_info(odb, *oid).map_err(|e| e.to_string())?,
-        );
-    }
-    let bloom = BloomFilterSettings::default();
-    let (bytes, _stats) = build_commit_graph_bytes(
-        &sorted,
-        &infos,
-        odb,
-        true,
-        &bloom,
-        None,
-        &[],
-        None,
-        &HashMap::new(),
-        &HashMap::new(),
-        true,
-    )
-    .map_err(|e| e.to_string())?;
-    let info_dir = objects_dir.join("info");
-    std::fs::create_dir_all(&info_dir).map_err(|e| e.to_string())?;
-    std::fs::write(info_dir.join("commit-graph"), bytes).map_err(|e| e.to_string())?;
-    Ok(())
+fn write_grit_commit_graph(_objects_dir: &Path, odb: &Odb) -> std::result::Result<(), String> {
+    odb.write_commit_graph().map_err(|e| e.to_string())
 }
 
 fn index_entry(path: &[u8], oid: ObjectId, size: usize, mode: u32) -> IndexEntry {
