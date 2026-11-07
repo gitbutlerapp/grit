@@ -5,9 +5,9 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::operation::ConflictKind;
 use grit_lib::porcelain::status::{
-    status, ConflictGroup, StatusAction, StatusGuidance, StatusModel, StatusOptions,
+    ConflictGroup, StatusAction, StatusGuidance, StatusModel, StatusOptions,
 };
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::branch_tracking::{BranchStanding, StandingOptions};
 use grit_lib::repo::Repository;
 use grit_lib::state::{InProgressOperation, NextStep};

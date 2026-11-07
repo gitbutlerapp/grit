@@ -46,7 +46,7 @@ use grit_lib::objects::pack_objects::{
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::apply_index_file_mode;
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::status::expand_untracked_for_staging;
+use grit_lib::porcelain::tag::creator_date;
 use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryOptions};
@@ -345,7 +345,9 @@ fn porcelain_stash_tag_status_and_worktree() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index");
     let work_tree = dir.path();
-    let _ = expand_untracked_for_staging(&repo, &mut index, work_tree, Vec::new(), &[]);
+    let _ = repo
+        .status()
+        .expand_untracked_for_staging(&mut index, Vec::new(), &[]);
 
     let file = work_tree.join("mode.txt");
     fs::write(&file, b"x\n").expect("write");

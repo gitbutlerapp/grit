@@ -12,9 +12,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::DiffStatus;
 use grit_lib::diff::{hunk_ids, DiffSide, HunkId};
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::hunk_select::{
-    unstaged_file_diffs, HunkSelectError, HunkSelection, LineRange,
-};
+use grit_lib::porcelain::hunk_select::{HunkSelectError, HunkSelection, LineRange};
 use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -611,7 +609,7 @@ fn two_hunk_edited_file() -> (String, String) {
 }
 
 fn unstaged_hunk_ids(repo: &Repository) -> Vec<HunkId> {
-    let files = unstaged_file_diffs(repo, &[]).expect("diff");
+    let files = repo.index().unstaged_file_diffs(&[]).expect("diff");
     assert_eq!(files.len(), 1);
     let (file, peer) = &files[0];
     hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer)
@@ -740,19 +738,19 @@ fn fixup_hunks_preserves_preexisting_staged_on_same_path() {
     let grit = open_grit(wt);
     let ids = unstaged_hunk_ids(&grit);
     assert!(ids.len() >= 2);
-    grit_lib::porcelain::hunk_select::stage_hunks(
-        &grit,
-        DiffSide::Unstaged,
-        &HunkSelection {
-            ids: vec![ids[0].clone()],
-            ranges: Vec::new(),
-        },
-        &[],
-        grit_lib::diff::DiffOptions::default(),
-        false,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage first hunk");
+    grit.index()
+        .stage_hunks(
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: vec![ids[0].clone()],
+                ranges: Vec::new(),
+            },
+            &[],
+            grit_lib::diff::DiffOptions::default(),
+            false,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage first hunk");
     let staged_before = Command::new("git")
         .current_dir(wt)
         .args(["diff", "--cached", "f.txt"])
@@ -823,19 +821,19 @@ fn fixup_lines_preserves_preexisting_staged_and_consumes_selected_line() {
     let grit = open_grit(wt);
     let ids = unstaged_hunk_ids(&grit);
     assert!(ids.len() >= 2);
-    grit_lib::porcelain::hunk_select::stage_hunks(
-        &grit,
-        DiffSide::Unstaged,
-        &HunkSelection {
-            ids: vec![ids[0].clone()],
-            ranges: Vec::new(),
-        },
-        &[],
-        grit_lib::diff::DiffOptions::default(),
-        false,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage line-5 hunk");
+    grit.index()
+        .stage_hunks(
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: vec![ids[0].clone()],
+                ranges: Vec::new(),
+            },
+            &[],
+            grit_lib::diff::DiffOptions::default(),
+            false,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage line-5 hunk");
     let selection = HunkSelection {
         ids: Vec::new(),
         ranges: vec![LineRange {
@@ -901,23 +899,23 @@ fn fixup_lines_same_structured_hunk_preserves_unselected_and_staged() {
     edited = edited.replacen("line18\n", "LINE18\n", 1);
     fs::write(wt.join("f.txt"), &edited).expect("write");
     let grit = open_grit(wt);
-    grit_lib::porcelain::hunk_select::stage_hunks(
-        &grit,
-        DiffSide::Unstaged,
-        &HunkSelection {
-            ids: Vec::new(),
-            ranges: vec![LineRange {
-                path: "f.txt".into(),
-                start: 19,
-                end: 19,
-            }],
-        },
-        &[],
-        grit_lib::diff::DiffOptions::default(),
-        false,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage line-18 only");
+    grit.index()
+        .stage_hunks(
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: Vec::new(),
+                ranges: vec![LineRange {
+                    path: "f.txt".into(),
+                    start: 19,
+                    end: 19,
+                }],
+            },
+            &[],
+            grit_lib::diff::DiffOptions::default(),
+            false,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage line-18 only");
     let selection = HunkSelection {
         ids: Vec::new(),
         ranges: vec![LineRange {
@@ -992,23 +990,23 @@ fn fixup_lines_pre_staged_same_hunk_preserves_unselected_and_staged() {
     edited = edited.replacen("line9\n", "LINE9\n", 1);
     fs::write(wt.join("f.txt"), &edited).expect("write");
     let grit = open_grit(wt);
-    grit_lib::porcelain::hunk_select::stage_hunks(
-        &grit,
-        DiffSide::Unstaged,
-        &HunkSelection {
-            ids: Vec::new(),
-            ranges: vec![LineRange {
-                path: "f.txt".into(),
-                start: 6,
-                end: 6,
-            }],
-        },
-        &[],
-        grit_lib::diff::DiffOptions::default(),
-        false,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage line-5 only");
+    grit.index()
+        .stage_hunks(
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: Vec::new(),
+                ranges: vec![LineRange {
+                    path: "f.txt".into(),
+                    start: 6,
+                    end: 6,
+                }],
+            },
+            &[],
+            grit_lib::diff::DiffOptions::default(),
+            false,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage line-5 only");
     let selection = HunkSelection {
         ids: Vec::new(),
         ranges: vec![LineRange {
@@ -1167,23 +1165,23 @@ fn fixup_lines_insertion_with_pre_staged_restores_shifted_unselected_below() {
     edited = edited.replacen("line22\n", "KEEP22\n", 1);
     fs::write(wt.join("f.txt"), &edited).expect("write");
     let grit = open_grit(wt);
-    grit_lib::porcelain::hunk_select::stage_hunks(
-        &grit,
-        DiffSide::Unstaged,
-        &HunkSelection {
-            ids: Vec::new(),
-            ranges: vec![LineRange {
-                path: "f.txt".into(),
-                start: 4,
-                end: 4,
-            }],
-        },
-        &[],
-        grit_lib::diff::DiffOptions::default(),
-        false,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage line-3");
+    grit.index()
+        .stage_hunks(
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: Vec::new(),
+                ranges: vec![LineRange {
+                    path: "f.txt".into(),
+                    start: 4,
+                    end: 4,
+                }],
+            },
+            &[],
+            grit_lib::diff::DiffOptions::default(),
+            false,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage line-3");
     let selection = HunkSelection {
         ids: Vec::new(),
         ranges: vec![LineRange {
@@ -1219,21 +1217,21 @@ fn fixup_hunk_selection_plans_against_index_worktree_base_non_head_target() {
     edited = edited.replacen("line25\n", "KEEP25\n", 1);
     fs::write(wt.join("f.txt"), &edited).expect("write");
     let grit = open_grit(wt);
-    let files = unstaged_file_diffs(&grit, &[]).expect("diff");
+    let files = grit.index().unstaged_file_diffs(&[]).expect("diff");
     let (file, peer) = &files[0];
     let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
     let selection = HunkSelection {
         ids: vec![ids[0].clone()],
         ranges: Vec::new(),
     };
-    grit_lib::porcelain::hunk_select::resolve_selection(
-        &grit,
-        DiffSide::Unstaged,
-        &selection,
-        &[],
-        grit_lib::diff::DiffOptions::default(),
-    )
-    .expect("resolve");
+    grit.index()
+        .resolve_hunk_selection(
+            DiffSide::Unstaged,
+            &selection,
+            &[],
+            grit_lib::diff::DiffOptions::default(),
+        )
+        .expect("resolve");
     plan_and_apply_hunks(
         &grit,
         wt,

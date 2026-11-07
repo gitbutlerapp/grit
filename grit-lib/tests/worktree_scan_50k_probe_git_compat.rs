@@ -4,7 +4,6 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::StageOptions;
-use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::counters::{
@@ -70,7 +69,10 @@ fn noop_tracked_scan_metadata_probe_budget_dense_leaf_50k() {
     let repo = open_repo(root);
 
     let _probe = reset_worktree_metadata_probe(root);
-    let summary = stage_tracked_modifications(&repo, root).expect("tracked scan");
+    let summary = repo
+        .index()
+        .stage_tracked_modifications(root)
+        .expect("tracked scan");
     assert_eq!(summary.change_count(), 0, "clean tree");
     let meta = worktree_metadata_probe_count();
     assert!(

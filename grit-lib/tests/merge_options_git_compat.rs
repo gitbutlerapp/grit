@@ -4,7 +4,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::merge::{FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
-use grit_lib::porcelain::commit::pending_commit_message;
 use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::merge::{
     abort_branch_merge, integrate_branch_with, FastForwardPolicy, IntegrateBranchOutcome,
@@ -444,7 +443,9 @@ fn squash_conflict_pending_message_prefers_merge_msg() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash conflicts");
-    let pending = pending_commit_message(&repo)
+    let pending = repo
+        .commits()
+        .pending_message()
         .expect("pending")
         .expect("message");
     assert!(

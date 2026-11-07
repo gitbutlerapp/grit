@@ -15,7 +15,7 @@ use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{hunk_ids, DiffSide};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
+use grit_lib::porcelain::hunk_select::HunkSelection;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -404,7 +404,7 @@ fn fixup_hunks_through_the_handle_fold_only_the_selected_hunk() {
 
     let grit = open(wt);
     let history = grit.history();
-    let files = unstaged_file_diffs(&grit, &[]).expect("diff");
+    let files = grit.index().unstaged_file_diffs(&[]).expect("diff");
     let (file, peer) = &files[0];
     let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
     assert_eq!(ids.len(), 2, "two separate hunks");

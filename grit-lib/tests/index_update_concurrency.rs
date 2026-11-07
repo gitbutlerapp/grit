@@ -15,9 +15,9 @@ use std::thread;
 use std::time::Duration;
 
 use grit_lib::error::Error;
-use grit_lib::porcelain::add::{stage_on_index, StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
-use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
+use grit_lib::progress::NullProgress;
 
 use support::{assert_git_fsck_strict, git, git_ls_files_stage0_map, open_grit_repo};
 
@@ -48,17 +48,15 @@ fn is_lock_contention(err: &Error) -> bool {
 fn write_entry_under_lock(dir: &Path, path: &str, lock: &mut grit_lib::index::IndexLock) {
     let repo = open_grit_repo(dir);
     let handle = repo.index();
-    let mut index = handle
-        .load(&grit_lib::index::IndexLoadOptions::default())
-        .expect("load index under lock");
-    stage_on_index(
-        &repo,
-        &mut index,
-        &stage_paths(&[path]),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage in memory");
+    let mut index = handle.load().expect("load index under lock");
+    repo.index()
+        .stage_on(
+            &mut index,
+            &stage_paths(&[path]),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage in memory");
     handle
         .commit_update(lock, &mut index, false)
         .expect("commit held lock");
@@ -236,7 +234,9 @@ fn stage_tracked_reads_index_after_waiting_for_lock() {
     let racer = thread::spawn(move || {
         let repo = open_grit_repo(&racer_dir);
         let work_tree = repo.work_tree().expect("work tree").to_path_buf();
-        stage_tracked_modifications(&repo, &work_tree).map(|s| s.modified)
+        repo.index()
+            .stage_tracked_modifications(&work_tree)
+            .map(|s| s.modified)
     });
     thread::sleep(HOLD_LOCK_FOR);
     write_entry_under_lock(dir, "a.txt", &mut lock);

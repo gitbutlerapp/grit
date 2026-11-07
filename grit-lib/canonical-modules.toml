@@ -22,6 +22,7 @@ commit_encoding = "commit::encoding"
 commit_graph_file = "objects::commit_graph"
 commit_graph_write = "objects::commit_graph"
 commit_trailers = "commit::trailers"
+commits = "commits"
 config = "config"
 credentials = "remote::credentials"
 crlf = "worktree::crlf"
@@ -123,6 +124,7 @@ sideband_lines = "remote::sideband_lines"
 signing = "commit::signing"
 sparse_checkout = "index::sparse_checkout"
 split_index = "index::split_index"
+status = "status"
 stash = "stash"
 state = "state"
 submodule_gitdir = "config::gitmodules::gitdir"
@@ -151,6 +153,7 @@ modules = [
   "bundle",
   "command_runner",
   "commit",
+  "commits",
   "config",
   "diagnostics",
   "diff",
@@ -172,6 +175,7 @@ modules = [
   "revwalk",
   "stash",
   "state",
+  "status",
   "tree_sha256",
   "worktree",
 ]

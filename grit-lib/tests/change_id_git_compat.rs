@@ -9,7 +9,8 @@ use grit_lib::change_id::{set_change_id, ChangeId};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
-use grit_lib::porcelain::commit::prepare_commit_bytes;
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -169,7 +170,7 @@ fn signed_commit_keeps_change_id_before_gpgsig() {
     };
     set_change_id(&mut data, &ChangeId::from_bytes(&[0x11; 16]));
     let config = repo.config().snapshot().expect("config");
-    let signed = prepare_commit_bytes(&repo, &data, None).expect("sign");
+    let signed = repo.commits().prepare_bytes(&data, None).expect("sign");
     let oid = repo
         .odb()
         .write(ObjectKind::Commit, &signed)

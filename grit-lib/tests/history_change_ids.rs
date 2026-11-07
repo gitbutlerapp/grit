@@ -14,7 +14,7 @@ use grit_lib::diff::{hunk_ids, DiffSide};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
-use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
+use grit_lib::porcelain::hunk_select::HunkSelection;
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -617,7 +617,7 @@ fn fixup_hunks_preserves_change_id() {
     grit_test_support::refs::set_ref(&grit, "refs/heads/main", &pick2).expect("ref");
     git(wt, &["reset", "--hard", &pick2.to_hex()]);
     std::fs::write(wt.join("pick.txt"), b"base\nextra\n").expect("write");
-    let files = unstaged_file_diffs(&grit, &[]).expect("diff");
+    let files = grit.index().unstaged_file_diffs(&[]).expect("diff");
     let (file, peer) = &files[0];
     let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
     let selection = HunkSelection {

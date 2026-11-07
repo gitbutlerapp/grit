@@ -11,7 +11,6 @@ use grit_lib::index::{entry_from_stat, Index, MODE_REGULAR};
 use grit_lib::objects::ObjectKind;
 use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
-use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
@@ -101,11 +100,10 @@ fn populated_checkout_reports_collisions_and_auto_stage_skips_losers() {
 
     fs::write(dest.join("unrelated.txt"), "edit\n").expect("unrelated");
 
-    stage_tracked_modifications(&repo, &dest).expect("stage tracked");
-    let mid = repo
-        .index()
-        .load(&grit_lib::index::IndexLoadOptions::default())
-        .expect("mid index");
+    repo.index()
+        .stage_tracked_modifications(&dest)
+        .expect("stage tracked");
+    let mid = repo.index().load().expect("mid index");
     assert!(
         mid.get(b"File.txt", 0).is_some(),
         "auto-stage scan must keep collision loser File.txt in the index"
@@ -185,7 +183,9 @@ fn keep_one_spelling_per_collision_group(dest: &Path) {
 
 fn auto_stage_unrelated_and_commit(repo: &Repository, dest: &Path) {
     fs::write(dest.join("unrelated.txt"), "edit\n").expect("unrelated");
-    stage_tracked_modifications(repo, dest).expect("stage tracked");
+    repo.index()
+        .stage_tracked_modifications(dest)
+        .expect("stage tracked");
     let id = "Tester <t@example.com> 1700000000 +0000".to_owned();
     let req = {
         let mut req = CommitRequest::new("unrelated change".to_owned());
@@ -257,7 +257,10 @@ fn deleting_dentry_winner_stages_removal_and_keeps_losers() {
 
     fs::remove_file(fx.dest.join("file.txt")).expect("delete winner");
     fs::remove_file(fx.dest.join("dir/A.txt")).expect("delete nested winner");
-    stage_tracked_modifications(&fx.repo, &fx.dest).expect("stage tracked");
+    fx.repo
+        .index()
+        .stage_tracked_modifications(&fx.dest)
+        .expect("stage tracked");
 
     let mid = fx
         .repo
@@ -464,7 +467,10 @@ fn directory_collision_auto_stage_commit_preserves_both_index_oids() {
     let (docs_upper_oid, docs_lower_oid) = commit_directory_collision_head(&fx);
 
     fs::write(fx.dest.join("unrelated.txt"), "edit\n").expect("unrelated");
-    stage_tracked_modifications(&fx.repo, &fx.dest).expect("stage tracked");
+    fx.repo
+        .index()
+        .stage_tracked_modifications(&fx.dest)
+        .expect("stage tracked");
 
     let mid = fx
         .repo
@@ -525,7 +531,10 @@ fn directory_collision_edited_winner_updates_only_dentry_spelling() {
     let (docs_upper_oid, docs_lower_oid) = commit_directory_collision_head(&fx);
 
     fs::write(fx.dest.join("Docs/guide.md"), b"brand-new\n").expect("edit");
-    stage_tracked_modifications(&fx.repo, &fx.dest).expect("stage");
+    fx.repo
+        .index()
+        .stage_tracked_modifications(&fx.dest)
+        .expect("stage");
 
     let mid = fx
         .repo

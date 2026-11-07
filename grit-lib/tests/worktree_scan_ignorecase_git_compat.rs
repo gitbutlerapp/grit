@@ -3,8 +3,7 @@
 //! directory, not once per tracked file, and still report the same changes as `git`.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{DiffStatus, TreeDiffOptions};
-use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
+use grit_lib::diff::{diff_index_to_worktree, DiffStatus};
 use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -130,7 +129,10 @@ fn clean_ignorecase_commit_scan_resolves_paths_per_directory() {
     let repo = open_repo(root);
 
     let _probe = reset_worktree_metadata_probe(root);
-    let summary = stage_tracked_modifications(&repo, root).expect("tracked scan");
+    let summary = repo
+        .index()
+        .stage_tracked_modifications(root)
+        .expect("tracked scan");
     assert_eq!(summary.change_count(), 0, "clean tree");
     assert_resolutions_per_directory("commit staging scan");
 }

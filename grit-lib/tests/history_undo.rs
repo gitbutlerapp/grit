@@ -9,7 +9,7 @@ use std::process::Command;
 
 use grit_lib::diff::{hunk_ids, DiffSide};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
+use grit_lib::porcelain::hunk_select::HunkSelection;
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -623,7 +623,7 @@ fn undo_after_hunk_selection_fixup_restores_the_work_tree() {
     let tip = commit_file(wt, "other.t", "x\n", "second");
     fs::write(wt.join("f.txt"), &edited).expect("edit");
     let grit = open_grit(wt);
-    let files = unstaged_file_diffs(&grit, &[]).expect("diff");
+    let files = grit.index().unstaged_file_diffs(&[]).expect("diff");
     let (file, peer) = &files[0];
     let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
     let selection = HunkSelection {
