@@ -21,6 +21,7 @@ use grit_lib::porcelain::merge::{
     continue_merge, integrate_branch_with, ContinueOptions, IntegrateBranchOutcome,
     MergeCommitMode, MergeOptions,
 };
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{

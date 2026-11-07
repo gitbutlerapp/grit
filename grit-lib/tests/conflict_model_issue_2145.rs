@@ -18,6 +18,7 @@ use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
 };
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{

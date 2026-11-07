@@ -63,7 +63,7 @@ fn tree_plus_file(
         path: path.as_bytes().to_vec(),
         base_index_pos: 0,
     });
-    write_tree_from_index(repo.odb(), &index, "")
+    write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
 }
 
 fn index_entry_from_tree(entry: &grit_lib::objects::TreeEntry, name: &str) -> IndexEntry {
@@ -111,7 +111,7 @@ fn write_tree_with_blob(
         path: path.as_bytes().to_vec(),
         base_index_pos: 0,
     });
-    write_tree_from_index(repo.odb(), &index, "")
+    write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
 }
 
 fn write_test_commit(
@@ -410,7 +410,7 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
 }
 
 #[test]
-fn plan_rewrite_non_commit_tip_returns_planning_error() {
+fn plan_rewrite_non_commit_tip_is_a_typed_engine_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (grit, _) = grit_lib::repo::Repository::init(
         dir.path(),
@@ -427,7 +427,7 @@ fn plan_rewrite_non_commit_tip_returns_planning_error() {
     // A corrupt branch on purpose: ref writes refuse a branch at a blob unless told not to check.
     let corrupt = grit_lib::refs::store::RefTransaction::new()
         .update(grit_lib::refs::store::RefUpdate {
-            name: "refs/heads/main".to_owned(),
+            name: grit_lib::refs::store::RefName::from_trusted("refs/heads/main"),
             new_value: Some(grit_lib::refs::store::RawRef::Direct(blob)),
             expected: grit_lib::refs::store::Expected::Any,
             reflog: None,
@@ -466,10 +466,18 @@ fn plan_rewrite_non_commit_tip_returns_planning_error() {
         .expect_err("blob tip is not a commit");
     assert!(
         matches!(
-            err,
-            grit_lib::revwalk::history::HistoryError::Planning { .. }
+            &err,
+            grit_lib::revwalk::history::HistoryError::Engine(engine)
+                if matches!(
+                    **engine,
+                    grit_lib::revwalk::history::HistoryEngineError::UnexpectedObjectKind {
+                        oid,
+                        expected: ObjectKind::Commit,
+                        actual: ObjectKind::Blob,
+                    } if oid == blob
+                )
         ),
-        "expected planning error, got {err:?}"
+        "expected a typed not-a-commit error, got {err:?}"
     );
 }
 
@@ -709,8 +717,14 @@ fn plan_rewrite_head_scope_updates_only_head() {
         )
         .expect("plan");
 
-    assert!(plan.ref_updates.iter().all(|u| u.name.contains("main")));
-    assert!(!plan.ref_updates.iter().any(|u| u.name.ends_with("feature")));
+    assert!(plan
+        .ref_updates
+        .iter()
+        .all(|u| u.name.as_str().contains("main")));
+    assert!(!plan
+        .ref_updates
+        .iter()
+        .any(|u| u.name.as_str().ends_with("feature")));
 }
 
 #[test]
@@ -1056,7 +1070,7 @@ fn plan_rewrite_detached_head() {
         )
         .expect("plan");
     assert!(plan.head.commit_changes);
-    assert!(plan.ref_updates.iter().any(|u| u.name == "HEAD"));
+    assert!(plan.ref_updates.iter().any(|u| u.name.as_str() == "HEAD"));
 }
 
 #[test]
@@ -1229,9 +1243,7 @@ fn history_public_api_coverage_smoke() {
         EmptyPolicy::Keep,
         RefScope::Head,
         HistoryError::EmptyMessage,
-        HistoryError::Planning {
-            message: "coverage".into(),
-        },
+        HistoryError::Planning(grit_lib::revwalk::history::PlanningError::EmptyReplayOrder),
         HistoryError::InsertBeforeOnMerge {
             commit: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
         },
@@ -1248,7 +1260,7 @@ fn history_public_api_coverage_smoke() {
             reused: false,
         }],
         ref_updates: vec![PlannedRefUpdate {
-            name: "refs/heads/x".into(),
+            name: grit_lib::refs::store::RefName::from_trusted("refs/heads/x"),
             old: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
             new: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
         }],

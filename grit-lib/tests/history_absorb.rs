@@ -16,6 +16,7 @@ use grit_lib::revwalk::history::{
     UnassignedReason,
 };
 
+use grit_lib::progress::CancelToken;
 use support::{commit_file, git, git_fsck_strict, git_rev_parse, HistoryRepo};
 
 fn open_grit(wt: &std::path::Path) -> Repository {

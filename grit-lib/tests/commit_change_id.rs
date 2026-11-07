@@ -711,8 +711,7 @@ fn rewritten_commit_records_change_id_on_reword() {
         .history()
         .reword(
             target,
-            &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("first reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("first reworded\n"),
             &RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
@@ -856,8 +855,7 @@ fn reword_preserves_derived_change_id_for_headerless_git_commit() {
         .history()
         .reword(
             target,
-            &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("first reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("first reworded\n"),
             &RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,

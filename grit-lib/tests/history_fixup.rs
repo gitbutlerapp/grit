@@ -22,6 +22,7 @@ use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, RefScope, RewriteOptions,
 };
 
+use grit_lib::progress::CancelToken;
 use support::{
     assert_fixup_tip_matches_git_oracle, assert_fixup_tip_structure_matches, commit_file,
     disable_grit_change_ids_for_git_oracle, git, git_fsck_strict, git_history_fixup_legacy_oracle,

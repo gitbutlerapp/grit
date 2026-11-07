@@ -209,8 +209,7 @@ fn history_change_ids_survive_every_rewrite() {
         .history()
         .reword(
             b,
-            &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("b reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("b reworded\n"),
             &rewrite_opts(1),
         )
         .expect("reword");
@@ -263,7 +262,7 @@ fn history_change_ids_survive_every_rewrite() {
                 record_operation: None,
                 hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            &grit_lib::revwalk::history::staged_fixup_paths(&grit).expect("staged"),
+            &grit.history().staged_paths().expect("staged"),
             &CancelToken::never(),
         )
         .expect("apply fixup");
@@ -491,7 +490,7 @@ fn rewrite_stores_derived_id_for_headerless_commit() {
         .history()
         .reword(
             old,
-            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n"),
             &rewrite_opts(1),
         )
         .expect("plan");
@@ -517,8 +516,7 @@ x-custom custom-value\n";
         .history()
         .reword(
             old,
-            &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("reworded hdr\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded hdr\n"),
             &rewrite_opts(1),
         )
         .expect("plan");
@@ -553,8 +551,7 @@ fn rewrite_strips_signature_but_keeps_change_id() {
         .history()
         .reword(
             old,
-            &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("still signed id\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("still signed id\n"),
             &rewrite_opts(1),
         )
         .expect("plan");
@@ -581,7 +578,7 @@ fn change_ids_disabled_adds_nothing() {
         .history()
         .reword(
             old,
-            &grit_lib::revwalk::history::RewordOptions::default().with_message("no id\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("no id\n"),
             &rewrite_opts(1),
         )
         .expect("plan");

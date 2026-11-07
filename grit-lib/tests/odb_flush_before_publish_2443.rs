@@ -24,6 +24,7 @@ use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, write_commit_object, CommitRequest};
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
@@ -184,7 +185,7 @@ impl RefStore for LoggingRefStore {
 
     fn for_each_reflog_ref(
         &self,
-        f: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        f: &mut dyn FnMut(&grit_lib::refs::store::RefNameRef) -> ControlFlow<()>,
     ) -> grit_lib::error::Result<()> {
         self.inner.for_each_reflog_ref(f)
     }
@@ -465,7 +466,7 @@ fn reword_apply_flushes_before_ref_update() {
         .history()
         .reword(
             base,
-            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n"),
             &rewrite_options(),
         )
         .expect("plan");
@@ -654,7 +655,7 @@ fn rebase_exec_flushes_before_head_ref_update() {
         .history()
         .reword(
             tips[1],
-            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n"),
             &rewrite_options(),
         )
         .expect("plan");

@@ -91,7 +91,7 @@ fn tree_plus_file(
         path: path.as_bytes().to_vec(),
         base_index_pos: 0,
     });
-    write_tree_from_index(repo.odb(), &index, "")
+    write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
 }
 
 fn tree_replace_file(
@@ -145,7 +145,7 @@ fn tree_replace_file(
         path: path_bytes.to_vec(),
         base_index_pos: 0,
     });
-    write_tree_from_index(repo.odb(), &index, "")
+    write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
 }
 
 fn plan_reword_tree_from_commit(
@@ -698,7 +698,11 @@ fn ref_update_lines_round_trip_through_git_update_ref_stdin() {
     let wt = repo.worktree();
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let plan = plan_reword(wt, oids["b"], "stdin roundtrip");
-    let lines = plan.ref_update_lines();
+    let lines: Vec<String> = plan
+        .ref_updates
+        .iter()
+        .map(|u| format!("update {} {} {}", u.name, u.new.to_hex(), u.old.to_hex()))
+        .collect();
     assert_eq!(lines.len(), 1);
     let mut child = Command::new("git")
         .current_dir(wt)
@@ -834,9 +838,10 @@ fn interrupted_rewrite_apply_recovers_and_blocks_commit_until_finished() {
         )
         .expect_err("injected abort after refs");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
-    let grit_lib::revwalk::history::HistoryError::WorktreeApply { message } = err else {
+    let grit_lib::revwalk::history::HistoryError::WorktreeApply { source } = err else {
         panic!("unexpected apply error");
     };
+    let message = source.to_string();
     assert!(
         message.contains("injected abort after rewrite ref updates"),
         "unexpected message: {message}"

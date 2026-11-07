@@ -6,6 +6,8 @@ use crate::support;
 use grit_lib::worktree::WorktreeError;
 
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::MergeError;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -987,10 +989,10 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
     .unwrap_err();
     assert!(
         matches!(
-            pull_err,
+            &pull_err,
             grit_lib::porcelain::pull::PullError::Nested(e) if matches!(
                 e.as_ref(),
-                Error::OperationInProgress(InProgressOperation::Rebase)
+                Error::Merge(MergeError::OperationInProgress(InProgressOperation::Rebase))
             )
         ),
         "pull: {pull_err:?}"
@@ -1102,13 +1104,14 @@ fn conflict_stop_abort_head_reflog_reattaches() {
     opts.apply = rebase_apply_opts("rebase: onto");
     let detached_before = git_oid(wt, "topic");
     assert!(matches!(
-        start_rebase(
-            &grit,
-            &opts,
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("start"),
+        grit.history()
+            .start_rebase(
+                &opts,
+                grit.command_runner().as_ref(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("start"),
         RebaseOutcome::Stopped(_)
     ));
     let detached = git_oid(wt, "HEAD");
@@ -1116,7 +1119,7 @@ fn conflict_stop_abort_head_reflog_reattaches() {
     assert_head_reflog_chain(wt);
     let log_before_abort = std::fs::read_to_string(wt.join(".git/logs/HEAD")).expect("HEAD log");
     let detach_line = log_before_abort.lines().last().expect("detach");
-    abort_rebase(&grit, &test_ident()).expect("abort");
+    grit.history().abort_rebase(&test_ident()).expect("abort");
     assert_eq!(
         resolve_head(grit.git_dir()).unwrap().branch_name(),
         Some("topic")
@@ -2252,7 +2255,9 @@ fn switch_refuses_during_git_started_rebase_and_git_continue_still_moves_only_to
         assert!(
             matches!(
                 err,
-                Error::OperationInProgress(InProgressOperation::RebaseInteractive)
+                Error::Merge(MergeError::OperationInProgress(
+                    InProgressOperation::RebaseInteractive
+                ))
             ),
             "dry_run={dry_run}: {err:?}"
         );
@@ -2307,7 +2312,10 @@ fn switch_refuses_during_merge_conflict() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::OperationInProgress(InProgressOperation::Merge)),
+        matches!(
+            err,
+            Error::Merge(MergeError::OperationInProgress(InProgressOperation::Merge))
+        ),
         "{err:?}"
     );
     assert_eq!(git(wt, &["symbolic-ref", "HEAD"]).trim(), "refs/heads/main");
@@ -2916,7 +2924,7 @@ fn rewrite_after_continue_extends_the_head_reflog_chain() {
         .history()
         .reword(
             rebased,
-            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n"),
             &rebase_opts().rewrite,
         )
         .expect("plan reword");
@@ -3212,7 +3220,7 @@ fn exec_continue_resumes_after_dirty_command_and_keeps_saved_edits() {
     );
     assert_eq!(
         applied.head,
-        plan.mapped_tip(opts.request.branch_tip).unwrap()
+        mapped_tip(&plan, opts.request.branch_tip).unwrap()
     );
     assert_eq!(git_oid(wt, "topic"), applied.head);
     assert_eq!(
@@ -3248,7 +3256,7 @@ fn exec_skip_skips_remaining_commands_without_dropping_replayed_commit() {
     };
     assert_eq!(
         applied.head,
-        plan.mapped_tip(opts.request.branch_tip).unwrap()
+        mapped_tip(&plan, opts.request.branch_tip).unwrap()
     );
     assert_eq!(
         std::fs::read_to_string(wt.join("exec-log")).unwrap(),
@@ -3404,7 +3412,7 @@ fn assert_abort_restores_moved_branch(
     assert_eq!(
         abort.overwritten,
         [PlannedRefUpdate {
-            name: "refs/heads/topic".into(),
+            name: grit_lib::refs::store::RefName::from_trusted("refs/heads/topic"),
             old: moved,
             new: opts.request.branch_tip,
         }]
@@ -3495,7 +3503,7 @@ fn conflict_stop_abort_reports_a_branch_moved_during_the_stop() {
     assert_eq!(
         abort.overwritten,
         [PlannedRefUpdate {
-            name: "refs/heads/topic".into(),
+            name: grit_lib::refs::store::RefName::from_trusted("refs/heads/topic"),
             old: moved,
             new: orig_tip,
         }]
@@ -3604,7 +3612,7 @@ fn exec_recovery_can_stop_again_at_next_command_and_final_commit() {
     result.unwrap();
     assert_eq!(
         git_oid(wt, "topic"),
-        plan.mapped_tip(opts.request.branch_tip).unwrap()
+        mapped_tip(&plan, opts.request.branch_tip).unwrap()
     );
     assert_eq!(git(wt, &["stash", "list"]).lines().count(), 4);
     assert!(!wt.join(".git/rebase-merge").exists());
@@ -3883,7 +3891,7 @@ fn exec_amend_is_adopted_and_later_commits_replay_onto_it() {
     assert_eq!(git_oid(wt, "topic"), opts.request.branch_tip);
     apply_exec_plan(wt, &opts, &plan);
 
-    let tip = plan.mapped_tip(opts.request.branch_tip).unwrap();
+    let tip = mapped_tip(&plan, opts.request.branch_tip).unwrap();
     assert_eq!(git_oid(wt, "topic"), tip);
     assert_eq!(
         git(wt, &["symbolic-ref", "HEAD"]).trim(),
@@ -3914,7 +3922,7 @@ fn exec_message_only_amend_rewords_the_replayed_commit() {
         wt,
         &format!(
             "{}^{{tree}}",
-            plan.mapped_tip(opts.request.branch_tip).unwrap()
+            mapped_tip(&plan, opts.request.branch_tip).unwrap()
         ),
     );
     let command = format!("if ! test -f two; then {EXEC_GIT} commit -q --amend -m reworded; fi");
@@ -4005,7 +4013,7 @@ fn exec_amend_with_leftover_edits_stops_at_the_amended_commit() {
     assert_eq!(git(wt, &["show", "topic:two"]), "two\n");
     assert!(!wt.join(".git/rebase-merge").exists());
     assert_eq!(
-        done.mapped_tip(opts.request.branch_tip),
+        mapped_tip(&done, opts.request.branch_tip),
         Some(git_oid(wt, "topic"))
     );
     assert_git_fsck_strict(wt);
@@ -4678,4 +4686,15 @@ fn stacked_continue_after_conflict_undo_restores_all_branch_tips_issue_2274() {
         "refs/heads/stacked"
     );
     assert_git_fsck_strict(wt);
+}
+
+/// Tip `old_tip` moves to under `plan`, read from its ref updates.
+fn mapped_tip(
+    plan: &grit_lib::revwalk::history::RewritePlan,
+    old_tip: ObjectId,
+) -> Option<ObjectId> {
+    plan.ref_updates
+        .iter()
+        .find(|update| update.old == old_tip)
+        .map(|update| update.new)
 }

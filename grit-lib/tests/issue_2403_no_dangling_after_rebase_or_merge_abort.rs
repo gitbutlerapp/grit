@@ -7,6 +7,7 @@ use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{

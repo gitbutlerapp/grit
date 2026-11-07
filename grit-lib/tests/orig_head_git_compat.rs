@@ -16,6 +16,8 @@ use grit_lib::porcelain::merge::{
     MergeCommitMode, MergeOptions,
 };
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::MergeError;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::refs::ref_storage::RefStorageFormat;

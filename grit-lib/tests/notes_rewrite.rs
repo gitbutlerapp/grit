@@ -174,8 +174,7 @@ fn reword_copies_note_to_rewritten_commit() {
         .history()
         .reword(
             feat1_old,
-            &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("feat 1 reworded".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("feat 1 reworded"),
             &rewrite_options(),
         )
         .expect("reword plan");

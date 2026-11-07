@@ -139,7 +139,10 @@ fn rebase_onto_replays_range_and_moves_branch() {
             &rebase_opts(RefScope::Head, EmptyPolicy::Drop, true),
         )
         .expect("plan");
-    assert!(plan.ref_updates.iter().any(|u| u.name.ends_with("main")));
+    assert!(plan
+        .ref_updates
+        .iter()
+        .any(|u| u.name.as_str().ends_with("main")));
     apply_plan(&grit, &plan);
     let new_tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("ref");
     assert_ne!(new_tip, tip);
@@ -269,7 +272,9 @@ fn rebase_onto_moves_branch_forked_from_middle_of_range() {
         other => panic!("expected plan, got {other:?}"),
     };
     assert!(
-        plan.ref_updates.iter().any(|u| u.name.ends_with("side")),
+        plan.ref_updates
+            .iter()
+            .any(|u| u.name.as_str().ends_with("side")),
         "{:?}",
         plan.ref_updates
     );
@@ -315,7 +320,9 @@ fn rebase_onto_moves_stacked_merge_with_unrelated_second_parent() {
         other => panic!("expected plan, got {other:?}"),
     };
     assert!(
-        plan.ref_updates.iter().any(|u| u.name.ends_with("b")),
+        plan.ref_updates
+            .iter()
+            .any(|u| u.name.as_str().ends_with("b")),
         "{:?}",
         plan.ref_updates
     );
@@ -362,7 +369,9 @@ fn rebase_onto_moves_stacked_merge_with_unrelated_first_parent() {
         other => panic!("expected plan, got {other:?}"),
     };
     assert!(
-        plan.ref_updates.iter().any(|u| u.name.ends_with("b")),
+        plan.ref_updates
+            .iter()
+            .any(|u| u.name.as_str().ends_with("b")),
         "{:?}",
         plan.ref_updates
     );
@@ -397,12 +406,12 @@ fn rebase_onto_moves_stacked_branches() {
     let main_update = plan
         .ref_updates
         .iter()
-        .find(|u| u.name.ends_with("main"))
+        .find(|u| u.name.as_str().ends_with("main"))
         .expect("main moves");
     let stacked_update = plan
         .ref_updates
         .iter()
-        .find(|u| u.name.ends_with("stacked"))
+        .find(|u| u.name.as_str().ends_with("stacked"))
         .expect("stacked moves");
     apply_plan(&grit, &plan);
     assert_eq!(
@@ -605,7 +614,7 @@ fn rebase_onto_bare_repository() {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         });
-        write_tree_from_index(repo.odb(), &index, "")
+        write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
     }
     let empty = grit.odb().write(ObjectKind::Tree, &[]).expect("empty tree");
     let root = grit
@@ -1348,7 +1357,7 @@ fn flatten_opts() -> RebaseOntoOptions {
 fn planned_ref_tip(plan: &grit_lib::revwalk::history::RewritePlan, name: &str) -> ObjectId {
     plan.ref_updates
         .iter()
-        .find(|update| update.name == name)
+        .find(|update| update.name.as_str() == name)
         .unwrap_or_else(|| panic!("{name} moves"))
         .new
 }

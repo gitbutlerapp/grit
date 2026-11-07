@@ -62,7 +62,7 @@ fn write_tree_with_blob(
         path: path.as_bytes().to_vec(),
         base_index_pos: 0,
     });
-    write_tree_from_index(repo.odb(), &index, "")
+    write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
 }
 
 fn write_test_commit(
@@ -262,7 +262,7 @@ fn reword_keep_committer_preserves_committer_line() {
         .reword(
             b,
             &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("new subject line\n".into()),
+                .with_message("new subject line\n"),
             &RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,

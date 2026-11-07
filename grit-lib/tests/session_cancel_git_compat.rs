@@ -122,7 +122,7 @@ fn cancelled_auto_stage_commit_leaves_git_view_unchanged() {
         &cancel,
     )
     .expect_err("cancelled");
-    assert!(matches!(err, Error::Cancelled), "got {err:?}");
+    assert!(err.is_cancelled(), "got {err:?}");
     assert_eq!(rev(root, "HEAD"), head);
     assert_eq!(status(root), status_before, "nothing became staged");
     assert_git_fsck_strict(root);
@@ -163,7 +163,10 @@ fn cancelled_stash_push_leaves_no_entry_and_git_pops_a_finished_one() {
         .stash()
         .push(&opts, &mut sink, &cancel)
         .expect_err("cancelled");
-    assert!(matches!(err, Error::Cancelled), "got {err:?}");
+    assert!(
+        matches!(err, grit_lib::stash::StashError::Cancelled),
+        "got {err:?}"
+    );
     assert_eq!(git(root, &["stash", "list"]), "");
     assert_eq!(status(root), status_before);
     assert_git_fsck_strict(root);

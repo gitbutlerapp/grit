@@ -16,6 +16,7 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::{InitOptions, Repository};
@@ -157,10 +158,14 @@ fn head_commit(repo: &Repository) -> ObjectId {
 
 fn reflog_messages(refs: &dyn RefStore, name: &str) -> Vec<String> {
     let mut out = Vec::new();
-    refs.for_each_reflog_entry(name, false, &mut |entry| {
-        out.push(entry.message.clone());
-        ControlFlow::Continue(())
-    })
+    refs.for_each_reflog_entry(
+        &grit_lib::refs::store::RefName::from_trusted(name),
+        false,
+        &mut |entry| {
+            out.push(entry.message.clone());
+            ControlFlow::Continue(())
+        },
+    )
     .expect("reflog");
     out
 }
@@ -187,7 +192,7 @@ fn reword_on_memory_backends_moves_refs_in_the_store() {
         .history()
         .reword(
             tips[1],
-            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n"),
             &rewrite_opts(),
         )
         .expect("plan");
@@ -351,7 +356,7 @@ fn rewrite_on_disk_repository_with_injected_store_leaves_disk_refs_alone() {
         .history()
         .reword(
             tips[0],
-            &grit_lib::revwalk::history::RewordOptions::default().with_message("first\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("first\n"),
             &rewrite_opts(),
         )
         .expect("plan");
@@ -389,7 +394,7 @@ fn rebase_exec_detaches_and_restores_head_in_the_store() {
         .history()
         .reword(
             tips[1],
-            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n"),
             &rewrite_opts(),
         )
         .expect("plan");
@@ -429,7 +434,7 @@ fn head_moved_in_store_after_plan_fails_before_any_ref_moves() {
         .history()
         .reword(
             tips[1],
-            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("reworded\n"),
             &rewrite_opts(),
         )
         .expect("plan");

@@ -75,7 +75,7 @@ fn write_tree_with_blob(
         path: path.as_bytes().to_vec(),
         base_index_pos: 0,
     });
-    write_tree_from_index(repo.odb(), &index, "")
+    write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
 }
 
 fn write_test_commit(
@@ -115,7 +115,7 @@ fn drop_head_maps_to_parent_in_ref_updates() {
         .drop_commit(tip, &opts(0))
         .expect("drop head");
     assert!(plan.head.commit_changes);
-    assert_eq!(plan.mapped_tip(tip), Some(parent));
+    assert_eq!(mapped_tip(&plan, tip), Some(parent));
     assert_eq!(plan.replacement(tip), None);
     assert_eq!(plan.head_change(), Some((tip, parent)));
 }
@@ -575,4 +575,15 @@ fn history_drop_matches_git_history_when_available() {
     assert_eq!(grit_tip, git_tip);
     git_fsck_strict(grit_dir.path());
     git_fsck_strict(git_dir.path());
+}
+
+/// Tip `old_tip` moves to under `plan`, read from its ref updates.
+fn mapped_tip(
+    plan: &grit_lib::revwalk::history::RewritePlan,
+    old_tip: ObjectId,
+) -> Option<ObjectId> {
+    plan.ref_updates
+        .iter()
+        .find(|update| update.old == old_tip)
+        .map(|update| update.new)
 }

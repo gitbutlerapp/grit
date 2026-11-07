@@ -47,7 +47,7 @@ fn reword_changes_only_message_and_replays_descendants() {
         .history()
         .reword(
             oids["b"],
-            &RewordOptions::default().with_message("second reworded\n".into()),
+            &RewordOptions::default().with_message("second reworded\n"),
             &RewriteOptions {
                 scope: RefScope::Branches,
                 empty: EmptyPolicy::Drop,
@@ -98,7 +98,7 @@ fn reword_rejects_unwritable_committer_before_writing_objects() {
         .history()
         .reword(
             oids["b"],
-            &RewordOptions::default().with_message("second reworded\n".into()),
+            &RewordOptions::default().with_message("second reworded\n"),
             &RewriteOptions {
                 scope: RefScope::Branches,
                 empty: EmptyPolicy::Drop,
@@ -157,10 +157,7 @@ fn reword_author_only_keeps_message_and_date() {
         .history()
         .reword(
             b,
-            &RewordOptions {
-                message: None,
-                author: Some("New Author <new@example.com>".into()),
-            },
+            &RewordOptions::default().with_author("New Author <new@example.com>"),
             &rewrite_opts(2),
         )
         .expect("reword author");
@@ -207,10 +204,9 @@ fn reword_author_and_message() {
         .history()
         .reword(
             oids["b"],
-            &RewordOptions {
-                message: Some("both changed\n".into()),
-                author: Some("Both Author <both@example.com>".into()),
-            },
+            &RewordOptions::default()
+                .with_message("both changed\n")
+                .with_author("Both Author <both@example.com>"),
             &rewrite_opts(3),
         )
         .expect("reword");
@@ -249,10 +245,9 @@ fn reword_message_with_whitespace_only_author_succeeds() {
         .history()
         .reword(
             oids["b"],
-            &RewordOptions {
-                message: Some("message only despite empty author opt\n".into()),
-                author: Some("   ".into()),
-            },
+            &RewordOptions::default()
+                .with_message("message only despite empty author opt\n")
+                .with_author("   "),
             &rewrite_opts(6),
         )
         .expect("reword message with ignored empty author");
@@ -270,14 +265,7 @@ fn reword_requires_message_or_author() {
     let grit = open_grit(wt);
     let err = grit
         .history()
-        .reword(
-            oids["b"],
-            &RewordOptions {
-                message: None,
-                author: None,
-            },
-            &rewrite_opts(4),
-        )
+        .reword(oids["b"], &RewordOptions::default(), &rewrite_opts(4))
         .unwrap_err();
     assert!(matches!(err, HistoryError::NothingToReword));
 }
@@ -292,10 +280,7 @@ fn reword_author_rejects_newline() {
         .history()
         .reword(
             oids["b"],
-            &RewordOptions {
-                message: None,
-                author: Some("Bad\nInjected <x@y.example>".into()),
-            },
+            &RewordOptions::default().with_author("Bad\nInjected <x@y.example>"),
             &rewrite_opts(5),
         )
         .unwrap_err();
@@ -314,7 +299,7 @@ fn reword_rejects_empty_message() {
         .history()
         .reword(
             oids["b"],
-            &RewordOptions::default().with_message("  \t\n".into()),
+            &RewordOptions::default().with_message("  \t\n"),
             &RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
@@ -364,7 +349,7 @@ fn reword_in_bare_repository() {
         .history()
         .reword(
             oid,
-            &RewordOptions::default().with_message("bare reword\n".into()),
+            &RewordOptions::default().with_message("bare reword\n"),
             &RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
@@ -431,7 +416,7 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
         .history()
         .reword(
             root,
-            &RewordOptions::default().with_message("rewritten root\n".into()),
+            &RewordOptions::default().with_message("rewritten root\n"),
             &RewriteOptions {
                 scope: RefScope::Branches,
                 empty: EmptyPolicy::Drop,
@@ -505,7 +490,7 @@ fn reword_head_leaves_backup_branch_at_old_tip() {
         .history()
         .reword(
             oids["c"],
-            &RewordOptions::default().with_message("c reworded\n".into()),
+            &RewordOptions::default().with_message("c reworded\n"),
             &rewrite_opts(1),
         )
         .expect("reword");
@@ -535,7 +520,7 @@ fn reword_keeps_moving_stacked_branches_but_not_same_tip_backup() {
         .history()
         .reword(
             oids["b"],
-            &RewordOptions::default().with_message("b reworded\n".into()),
+            &RewordOptions::default().with_message("b reworded\n"),
             &rewrite_opts(1),
         )
         .expect("reword");
@@ -563,7 +548,7 @@ fn reword_on_detached_head_leaves_branch_at_head_commit() {
         .history()
         .reword(
             oids["b"],
-            &RewordOptions::default().with_message("b reworded\n".into()),
+            &RewordOptions::default().with_message("b reworded\n"),
             &rewrite_opts(1),
         )
         .expect("reword");

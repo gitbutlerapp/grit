@@ -377,7 +377,10 @@ fn squash_divergent_branch_refused_unless_update_refs_head() {
     apply_plan(&grit, &plan);
     let side_after = resolve_ref(grit.git_dir(), "refs/heads/mid").expect("mid after");
     assert_eq!(side_before, side_after);
-    assert!(!plan.ref_updates.iter().any(|u| u.name.contains("mid")));
+    assert!(!plan
+        .ref_updates
+        .iter()
+        .any(|u| u.name.as_str().contains("mid")));
 }
 
 #[test]

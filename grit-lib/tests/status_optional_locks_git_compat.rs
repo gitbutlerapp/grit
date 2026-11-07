@@ -226,7 +226,7 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         });
-        write_tree_from_index(repo.odb(), &index, "")
+        write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
     }
 
     let repo = HistoryRepo::init();

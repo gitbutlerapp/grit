@@ -140,7 +140,7 @@ fn injected_ref_store_is_the_source_of_head() {
         .expect("oid");
     let txn = RefTransaction::new()
         .update(RefUpdate {
-            name: "HEAD".to_owned(),
+            name: grit_lib::refs::store::RefName::from_trusted("HEAD"),
             new_value: Some(RawRef::Direct(oid)),
             expected: Expected::Any,
             reflog: None,

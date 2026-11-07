@@ -179,7 +179,7 @@ fn history_rewrite_resigns_when_gpgsign() {
         .reword(
             signed,
             &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("reworded signed subject\n".into()),
+                .with_message("reworded signed subject\n"),
             &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", true),
         )
         .expect("reword plan");
@@ -249,7 +249,7 @@ fn history_rewrite_unsigned_when_gpgsign_off() {
         .reword(
             signed,
             &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("unsigned rewrite\n".into()),
+                .with_message("unsigned rewrite\n"),
             &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", true),
         )
         .expect("reword");
@@ -288,8 +288,7 @@ fn history_dry_run_does_not_invoke_signer() {
     grit.history()
         .reword(
             oids["a"],
-            &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("dry-run reword\n".into()),
+            &grit_lib::revwalk::history::RewordOptions::default().with_message("dry-run reword\n"),
             &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", false),
         )
         .expect("dry-run plan");
@@ -336,7 +335,7 @@ fn signing_failure_aborts_rewrite_without_ref_moves() {
         .reword(
             tip_before,
             &grit_lib::revwalk::history::RewordOptions::default()
-                .with_message("should fail signing\n".into()),
+                .with_message("should fail signing\n"),
             &rewrite_opts("Rewriter <r@grit.test> 1700000002 +0000", true),
         )
         .expect_err("signing should fail");

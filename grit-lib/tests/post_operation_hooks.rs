@@ -788,10 +788,7 @@ fn reword_runs_post_rewrite_without_post_checkout() {
         .history()
         .reword(
             c2,
-            &RewordOptions {
-                message: Some("c2 reworded\n".into()),
-                author: None,
-            },
+            &RewordOptions::default().with_message("c2 reworded\n"),
             &rewrite_options(),
         )
         .expect("plan reword");

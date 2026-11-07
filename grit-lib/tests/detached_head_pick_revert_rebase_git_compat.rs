@@ -9,6 +9,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayRequest};
 use grit_lib::porcelain::replay_sequence::{ReplayOptions, ReplaySequenceRequest};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
