@@ -47,8 +47,8 @@ use crate::objects::{
     oid_hash_map, tag_object_line_oid, CommitRef, FileMode, ObjectId, ObjectKind, OidHashMap,
     OidHashSet, TreeRefIter,
 };
-use crate::odb::Odb;
 use crate::odb::UnreachablePackRetention;
+use crate::odb::{Odb, PruneTarget};
 use crate::pack_bitmap::{PackBitmapWriteError, PackBitmapWriteOptions, PackBitmapWriter};
 use crate::pack_delta::{pack_delta_search_parallel_options, pack_write_parallel_options};
 use crate::pack_name_hash::pack_name_hash_child;
@@ -505,6 +505,27 @@ impl PruneOptions {
             ..Self::default()
         }
     }
+
+    /// Measure a relative `gc.pruneExpire` from `now` instead of the current time.
+    #[must_use]
+    pub fn with_now(mut self, now: OffsetDateTime) -> Self {
+        self.now = Some(now);
+        self
+    }
+}
+
+/// Fail with [`RepositoryError::PreciousObjectsRepository`] naming `operation` when
+/// `extensions.preciousObjects` is set, since `operation` would delete objects.
+pub(crate) fn refuse_precious_objects(repo: &Repository, operation: &'static str) -> Result<()> {
+    if precious_objects(&*repo.config().snapshot()?) {
+        return Err(RepositoryError::PreciousObjectsRepository { operation }.into());
+    }
+    Ok(())
+}
+
+/// Whether `extensions.preciousObjects` forbids deleting objects.
+fn precious_objects(config: &ConfigSet) -> bool {
+    config.bool_with_default("extensions.preciousobjects", false)
 }
 
 /// Object ids that must stay reachable during repack, prune, and fsck walks.
@@ -842,6 +863,9 @@ pub struct PruneOptions {
     pub older_than: Option<SystemTime>,
     /// Report without deleting objects.
     pub dry_run: bool,
+    /// Wall clock a relative `gc.pruneExpire` (`2.weeks.ago`) is measured from; `None`
+    /// uses the current time. Ignored when [`Self::older_than`] is set.
+    pub now: Option<OffsetDateTime>,
 }
 
 /// Wall-clock milliseconds for each phase of [`gc`].
@@ -1486,17 +1510,34 @@ fn skipping_repack_would_retain_prunable_packed_objects(
 
 /// Delete unreachable loose objects using `gc.pruneExpire` or an explicit cutoff.
 ///
-/// Also removes stale temporary object paths (interrupted fetch/repack/index-pack leftovers)
-/// under the same expiry rules as Git's `git gc` / `git prune` temporary-file sweep.
+/// Reachability starts from [`collect_maintenance_object_roots`]: refs, reflogs, every
+/// worktree's index and `HEAD`. Also removes stale temporary object paths (interrupted
+/// fetch/repack/index-pack leftovers) under the same expiry rules as Git's `git gc` /
+/// `git prune` temporary-file sweep.
+///
+/// A custom primary that can delete objects
+/// ([`WritableObjectStore::as_prunable`](crate::odb::store::WritableObjectStore::as_prunable))
+/// is pruned through that capability instead: every object it lists is a candidate, and
+/// the grace period uses [`PrunableObjectStore::object_mtime`](crate::odb::store::PrunableObjectStore::object_mtime),
+/// keeping objects whose time the store does not record unless the cutoff is `now`.
 ///
 /// # Errors
 ///
-/// Propagates config parse failures, unsupported ODB backends, and I/O errors.
+/// - [`RepositoryError::UnsupportedObjectStore`] with [`FilesOnlyOperation::Prune`] for a
+///   custom primary without the prune capability;
+/// - [`RepositoryError::PreciousObjectsRepository`] (`operation: "prune"`) when
+///   `extensions.preciousObjects` is set;
+/// - config parse failures, store failures and I/O errors.
 pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<PruneStats> {
     let odb = repo.odb();
-    odb.require_files_primary(FilesOnlyOperation::Prune)?;
+    let target = odb.prune_target()?;
     let cfg = repo.config().snapshot()?;
-    let now = gc_now_unix(0);
+    if precious_objects(&cfg) {
+        return Err(RepositoryError::PreciousObjectsRepository { operation: "prune" }.into());
+    }
+    let now = opts
+        .now
+        .map_or_else(|| gc_now_unix(0), OffsetDateTime::unix_timestamp);
     let keep_newer_than = match opts.older_than {
         Some(t) => Some(t),
         None => match gc_loose_prune_policy(&cfg, now)? {
@@ -1512,11 +1553,9 @@ pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<Pru
         keep_newer_than,
         opts.dry_run,
     )?;
-    let objects_dir = odb
-        .files_objects_dir()
-        .ok_or(RepositoryError::UnsupportedObjectStore {
-            operation: FilesOnlyOperation::Prune,
-        })?;
+    let (PruneTarget::Files, Some(objects_dir)) = (target, odb.files_objects_dir()) else {
+        return Ok(stats);
+    };
     let temp =
         prune_stale_temporary_objects_with_cutoff(objects_dir, keep_newer_than, opts.dry_run)?;
     stats.pruned += temp.pruned;
@@ -1641,10 +1680,19 @@ fn duration_ms(d: std::time::Duration) -> u64 {
 /// Unless [`RepackOptions::dry_run`] is set, holds the repository's `gc.pid` lock for the
 /// whole run, so it never overlaps another grit or Git gc (see [`GcLock`]).
 ///
+/// A custom primary that can delete objects
+/// ([`WritableObjectStore::as_prunable`](crate::odb::store::WritableObjectStore::as_prunable))
+/// gets pack-refs, reflog expiry and the unreachable prune of [`prune_loose_objects`] under
+/// `gc.pruneExpire` measured from [`GcOptions::now_unix`]. Repack, the drop-large-blobs
+/// phase and the commit-graph write need the files layout and are skipped
+/// ([`GcStats::repack`] stays empty, [`GcStats::commit_graph`] `None`). With
+/// `extensions.preciousObjects` such a run deletes nothing and [`GcStats::prune_ran`] is false.
+///
 /// # Errors
 ///
-/// [`Error::MaintenanceRunning`] when another process holds the `gc.pid` lock, plus failures
-/// from each maintenance step.
+/// [`Error::MaintenanceRunning`] when another process holds the `gc.pid` lock,
+/// [`RepositoryError::UnsupportedObjectStore`] with [`FilesOnlyOperation::Prune`] for a
+/// custom primary without the prune capability, plus failures from each maintenance step.
 pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
     gc_with_cancel(repo, opts, &CancelToken::never())
 }
@@ -1656,7 +1704,7 @@ pub fn gc_with_cancel(
     opts: &GcOptions,
     cancel: &CancelToken,
 ) -> Result<GcStats> {
-    repo.odb().require_files_primary(FilesOnlyOperation::Gc)?;
+    let target = repo.odb().prune_target()?;
     let now = gc_now_unix(opts.now_unix);
     let _lock = if opts.repack.dry_run {
         None
@@ -1666,7 +1714,77 @@ pub fn gc_with_cancel(
             GcLockAttempt::Held(holder) => return Err(Error::MaintenanceRunning { holder }),
         }
     };
-    gc_locked(repo, opts, now, cancel)
+    match target {
+        PruneTarget::Files => gc_locked(repo, opts, now, cancel),
+        PruneTarget::Store(_) => gc_store_locked(repo, opts, now, cancel),
+    }
+}
+
+/// [`gc_locked`] for a custom primary that can delete objects: pack-refs, reflog expiry,
+/// then pruning unreachable objects through the store. Repack, the drop-large-blobs phase
+/// and the commit-graph write need the files layout and are skipped.
+///
+/// With `extensions.preciousObjects` nothing is deleted and [`GcStats::prune_ran`] stays
+/// false, as Git's gc skips pruning there.
+fn gc_store_locked(
+    repo: &Repository,
+    opts: &GcOptions,
+    now: i64,
+    cancel: &CancelToken,
+) -> Result<GcStats> {
+    poll_cancel(&mut NullProgress, cancel)?;
+    let mut stats = GcStats::default();
+    let dry_run = opts.repack.dry_run;
+    let _ = crate::porcelain::commit::reap_stale_next_index_files(repo, dry_run)?;
+    let cfg = repo.config().snapshot()?;
+    let prune_policy = gc_loose_prune_policy(&cfg, now)?;
+    gc_ref_phases(repo, opts, &cfg, now, cancel, &mut stats)?;
+
+    let GcLoosePrunePolicy::Enabled { keep_newer_than } = prune_policy else {
+        return Ok(stats);
+    };
+    if precious_objects(&cfg) {
+        return Ok(stats);
+    }
+    poll_cancel(&mut NullProgress, cancel)?;
+    let start = Instant::now();
+    let odb = repo.odb();
+    let roots = collect_maintenance_object_roots(repo)?;
+    let shallow = load_shallow_boundaries(repo.git_dir());
+    stats.prune = prune_loose_unreachable_with(
+        odb,
+        &LazyReachable::new(odb, &roots, &shallow),
+        keep_newer_than,
+        dry_run,
+    )?;
+    stats.prune_ran = !dry_run;
+    stats.phase_timings.prune_ms = duration_ms(start.elapsed());
+    Ok(stats)
+}
+
+/// The pack-refs and reflog-expiry phases of a gc run, as `opts` asks for them.
+fn gc_ref_phases(
+    repo: &Repository,
+    opts: &GcOptions,
+    cfg: &ConfigSet,
+    now: i64,
+    cancel: &CancelToken,
+    stats: &mut GcStats,
+) -> Result<()> {
+    let dry_run = opts.repack.dry_run;
+    if opts.pack_refs && gc_should_pack_refs(repo, cfg)? && !dry_run {
+        poll_cancel(&mut NullProgress, cancel)?;
+        let start = Instant::now();
+        stats.pack_refs = Some(pack_refs(repo, &PackRefsOptions::with_all(true))?);
+        stats.phase_timings.pack_refs_ms = duration_ms(start.elapsed());
+    }
+
+    if opts.expire_reflog {
+        let start = Instant::now();
+        stats.reflog_entries_pruned = expire_reflogs_for_gc(repo, dry_run, now)?;
+        stats.phase_timings.reflog_ms = duration_ms(start.elapsed());
+    }
+    Ok(())
 }
 
 /// Why automatic maintenance is due, as decided by [`auto_gc_needed`].
@@ -1995,18 +2113,7 @@ fn gc_locked(
     } else {
         None
     };
-    if opts.pack_refs && gc_should_pack_refs(repo, &cfg)? && !dry_run {
-        poll_cancel(&mut NullProgress, cancel)?;
-        let start = Instant::now();
-        stats.pack_refs = Some(pack_refs(repo, &PackRefsOptions::with_all(true))?);
-        stats.phase_timings.pack_refs_ms = duration_ms(start.elapsed());
-    }
-
-    if opts.expire_reflog {
-        let start = Instant::now();
-        stats.reflog_entries_pruned = expire_reflogs_for_gc(repo, dry_run, now)?;
-        stats.phase_timings.reflog_ms = duration_ms(start.elapsed());
-    }
+    gc_ref_phases(repo, opts, &cfg, now, cancel, &mut stats)?;
 
     let mut repack_opts = opts.repack.clone();
     apply_gc_prune_policy_to_repack(&mut repack_opts, &prune_policy);

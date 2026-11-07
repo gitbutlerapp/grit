@@ -1390,6 +1390,11 @@ mod promisor_remote_git_compat;
 mod promisor_remote_handshake;
 #[path = "promisor_remote_local.rs"]
 mod promisor_remote_local;
+#[path = "prune_custom_store.rs"]
+mod prune_custom_store;
+#[cfg(feature = "full-tests")]
+#[path = "prune_custom_store_git_compat.rs"]
+mod prune_custom_store_git_compat;
 #[path = "pruned_modules.rs"]
 mod pruned_modules;
 #[path = "public_api_test_items.rs"]

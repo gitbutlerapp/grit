@@ -18,12 +18,14 @@
 
 use std::cell::OnceCell;
 use std::collections::{HashSet, VecDeque};
+use std::ops::ControlFlow;
 use std::path::Path;
 use std::time::SystemTime;
 
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet, TreeRefIter};
-use crate::odb::Odb;
+use crate::odb::store::PrunableObjectStore;
+use crate::odb::{Odb, PruneTarget};
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::refs::{self, Ref};
 
@@ -43,6 +45,13 @@ pub struct PruneStats {
 /// annotated tags → their target) and then removes every **loose** object whose
 /// id is not in that closure. Packed objects are never touched — only loose
 /// object files under `objects/??/` are candidates for deletion.
+///
+/// When the primary is a custom store, every object it lists is a candidate instead,
+/// and the unreachable ones are deleted through its [`PrunableObjectStore`] capability
+/// (see [`WritableObjectStore::as_prunable`](crate::odb::store::WritableObjectStore::as_prunable)),
+/// with [`PrunableObjectStore::object_mtime`] standing in for the file time. This
+/// primitive does not check `extensions.preciousObjects`;
+/// [`crate::maintenance::prune_loose_objects`] does.
 ///
 /// When `keep_newer_than` is `Some(t)`, a loose object is only deleted if its
 /// file modification time is strictly older than `t`. This mirrors Git's
@@ -71,6 +80,10 @@ pub struct PruneStats {
 /// Returns [`Error::ObjectNotFound`] if a non-promised root is missing, an error if the walk runs
 /// and a reachable object is missing or cannot be read or parsed, or on I/O failure
 /// while enumerating or deleting loose object files.
+/// [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore)
+/// with [`FilesOnlyOperation::Prune`](crate::repo::error::FilesOnlyOperation::Prune) when the
+/// primary is a custom store without the prune capability; that store's own failures
+/// propagate.
 pub fn prune_loose_unreachable(
     odb: &Odb,
     reachable_roots: &[ObjectId],
@@ -110,7 +123,79 @@ pub(crate) fn prune_loose_unreachable_with(
     keep_newer_than: Option<SystemTime>,
     dry_run: bool,
 ) -> Result<PruneStats> {
-    odb.require_files_primary(crate::repo::error::FilesOnlyOperation::Prune)?;
+    match odb.prune_target()? {
+        PruneTarget::Files => prune_files_unreachable(odb, reachable, keep_newer_than, dry_run),
+        PruneTarget::Store(store) => {
+            prune_store_unreachable(odb, store, reachable, keep_newer_than, dry_run)
+        }
+    }
+}
+
+/// Objects passed to one [`PrunableObjectStore::remove`] call.
+const PRUNE_REMOVE_BATCH: usize = 1024;
+
+/// Prune a custom primary through its [`PrunableObjectStore`] capability.
+///
+/// Every object the store lists is a candidate; the grace period uses
+/// [`PrunableObjectStore::object_mtime`], keeping objects without a known time.
+fn prune_store_unreachable(
+    odb: &Odb,
+    store: &dyn PrunableObjectStore,
+    reachable: &LazyReachable<'_>,
+    keep_newer_than: Option<SystemTime>,
+    dry_run: bool,
+) -> Result<PruneStats> {
+    let mut stats = PruneStats::default();
+    let mut listed = Vec::new();
+    store.for_each_object(&mut |oid| {
+        listed.push(*oid);
+        ControlFlow::Continue(())
+    })?;
+    let mut candidates = Vec::with_capacity(listed.len());
+    for oid in listed {
+        let too_new = match keep_newer_than {
+            None => false,
+            Some(cutoff) => store
+                .object_mtime(&oid)?
+                .is_none_or(|mtime| mtime >= cutoff),
+        };
+        if too_new {
+            stats.kept += 1;
+        } else {
+            candidates.push(oid);
+        }
+    }
+    if candidates.is_empty() {
+        reachable.require_roots_exist()?;
+        return Ok(stats);
+    }
+
+    let reachable = reachable.get()?;
+    let (kept, unreachable): (Vec<_>, Vec<_>) = candidates
+        .into_iter()
+        .partition(|oid| reachable.contains(oid));
+    stats.kept += kept.len();
+    if dry_run {
+        stats.pruned += unreachable.len();
+        return Ok(stats);
+    }
+    for batch in unreachable.chunks(PRUNE_REMOVE_BATCH) {
+        stats.pruned += store.remove(batch)?;
+    }
+    store.flush()?;
+    if !unreachable.is_empty() {
+        odb.forget_session_reads();
+    }
+    Ok(stats)
+}
+
+/// Prune unreachable loose object files of a files-backed primary.
+fn prune_files_unreachable(
+    odb: &Odb,
+    reachable: &LazyReachable<'_>,
+    keep_newer_than: Option<SystemTime>,
+    dry_run: bool,
+) -> Result<PruneStats> {
     let mut stats = PruneStats::default();
 
     // Respect the grace window first: objects whose mtime is not strictly older than

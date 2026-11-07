@@ -34,6 +34,7 @@ pub(crate) use stream::deflate_stream_to_writer;
 
 #[doc(inline)]
 pub use builder::OdbBuilder;
+pub(crate) use builder::PruneTarget;
 pub(crate) use peel::peel_stored_tag_target_in;
 
 pub(crate) use store::loose::{
@@ -707,6 +708,17 @@ impl Odb {
 
     fn session_cached_loose_read(&self, oid: &ObjectId) -> Option<Object> {
         self.session_loose_reads.lock().ok()?.get(oid).cloned()
+    }
+
+    /// Drop the session read and tree caches, so objects a prune just deleted from a
+    /// custom primary are not served from them afterwards.
+    pub(crate) fn forget_session_reads(&self) {
+        if let Ok(mut guard) = self.session_loose_reads.lock() {
+            *guard = SessionLooseReads::default();
+        }
+        if let Ok(mut guard) = self.session_tree_entries.lock() {
+            *guard = SessionTreeEntries::default();
+        }
     }
 
     /// Whether the session read cache holds a copy of `oid` (crate-internal tests only).

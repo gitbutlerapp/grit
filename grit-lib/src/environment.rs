@@ -1237,9 +1237,14 @@ impl RepositoryOptions {
     /// directory (honoring `GIT_OBJECT_DIRECTORY`), but never reads or writes objects there,
     /// and the directory need not exist. Alternates are off unless
     /// [`OdbBuilder::alternates`](crate::odb::OdbBuilder::alternates) turns them on. Partial
-    /// clone filters and filesystem maintenance ([`crate::odb::Odb::gc`],
-    /// [`crate::odb::Odb::write_commit_graph`], repack, multi-pack-index) refuse with
+    /// clone filters and filesystem maintenance ([`crate::odb::Odb::write_commit_graph`],
+    /// repack, multi-pack-index) refuse with
     /// [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore).
+    /// Garbage collection and pruning ([`crate::odb::Odb::gc`], [`crate::maintenance::gc`],
+    /// [`crate::maintenance::prune_loose_objects`]) work when the store can delete objects
+    /// ([`WritableObjectStore::as_prunable`](crate::odb::store::WritableObjectStore::as_prunable))
+    /// and refuse with [`FilesOnlyOperation::Prune`](crate::repo::error::FilesOnlyOperation::Prune)
+    /// otherwise.
     ///
     /// The store's [`ObjectStore::hash_algo`](crate::odb::store::ObjectStore::hash_algo) must
     /// match the repository's object format, or [`Repository::open`](crate::repo::Repository::open)

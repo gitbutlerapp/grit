@@ -1,6 +1,7 @@
 //! Every files-only API refuses a custom primary with the exact
 //! [`FilesOnlyOperation`] it is documented under.
 
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -10,16 +11,65 @@ use grit_lib::maintenance::{
     PruneOptions, RepackOptions,
 };
 use grit_lib::objects::index_pack::{install_pack_bytes, install_pack_path, IngestPackOptions};
-use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::Odb;
-use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
+use grit_lib::objects::odb::{Odb, WriteOptions};
+use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::gc::prune_loose_unreachable;
 use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use time::OffsetDateTime;
 
+/// A writable store that cannot delete objects: the default
+/// [`WritableObjectStore::as_prunable`] of `None`.
+#[derive(Debug)]
+struct UnprunableStore(MemoryStore);
+
+impl ObjectStore for UnprunableStore {
+    fn hash_algo(&self) -> HashAlgo {
+        self.0.hash_algo()
+    }
+
+    fn read(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<Object>> {
+        self.0.read(oid)
+    }
+
+    fn read_info(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<ObjectInfo>> {
+        self.0.read_info(oid)
+    }
+
+    fn for_each_object(
+        &self,
+        f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+    ) -> grit_lib::error::Result<()> {
+        self.0.for_each_object(f)
+    }
+}
+
+impl WritableObjectStore for UnprunableStore {
+    fn write(
+        &self,
+        kind: ObjectKind,
+        data: &[u8],
+        options: WriteOptions,
+    ) -> grit_lib::error::Result<ObjectId> {
+        self.0.write(kind, data, options)
+    }
+
+    fn freshen(&self, oid: &ObjectId) -> grit_lib::error::Result<bool> {
+        self.0.freshen(oid)
+    }
+}
+
 fn memory_repo() -> (tempfile::TempDir, Repository) {
+    custom_repo(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+}
+
+fn unprunable_repo() -> (tempfile::TempDir, Repository) {
+    custom_repo(Arc::new(UnprunableStore(MemoryStore::new(HashAlgo::Sha1))))
+}
+
+fn custom_repo(store: Arc<dyn WritableObjectStore>) -> (tempfile::TempDir, Repository) {
     let dir = tempfile::tempdir().expect("tempdir");
     Repository::init(
         dir.path(),
@@ -30,7 +80,7 @@ fn memory_repo() -> (tempfile::TempDir, Repository) {
     let repo = Repository::open(
         &git_dir,
         &RepositoryOptions::empty()
-            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+            .with_object_store(store)
             .with_work_tree(dir.path()),
     )
     .expect("open");
@@ -51,27 +101,27 @@ fn assert_refused<T: std::fmt::Debug>(
 }
 
 #[test]
-fn odb_gc_refuses_with_gc() {
-    let (_dir, repo) = memory_repo();
-    assert_refused(repo.odb().gc(), FilesOnlyOperation::Gc);
+fn odb_gc_without_prune_capability_refuses_with_prune() {
+    let (_dir, repo) = unprunable_repo();
+    assert_refused(repo.odb().gc(), FilesOnlyOperation::Prune);
 }
 
 #[test]
-fn maintenance_gc_refuses_with_gc() {
-    let (_dir, repo) = memory_repo();
+fn maintenance_gc_without_prune_capability_refuses_with_prune() {
+    let (_dir, repo) = unprunable_repo();
     assert_refused(
         maintenance::gc(&repo, &GcOptions::default()),
-        FilesOnlyOperation::Gc,
+        FilesOnlyOperation::Prune,
     );
     assert_refused(
         maintenance::gc_with_cancel(&repo, &GcOptions::default(), &CancelToken::never()),
-        FilesOnlyOperation::Gc,
+        FilesOnlyOperation::Prune,
     );
 }
 
 #[test]
-fn prune_loose_objects_refuses_with_prune() {
-    let (_dir, repo) = memory_repo();
+fn prune_loose_objects_without_prune_capability_refuses_with_prune() {
+    let (_dir, repo) = unprunable_repo();
     assert_refused(
         maintenance::prune_loose_objects(&repo, &PruneOptions::default()),
         FilesOnlyOperation::Prune,
@@ -79,8 +129,8 @@ fn prune_loose_objects_refuses_with_prune() {
 }
 
 #[test]
-fn prune_loose_unreachable_refuses_with_prune() {
-    let (_dir, repo) = memory_repo();
+fn prune_loose_unreachable_without_prune_capability_refuses_with_prune() {
+    let (_dir, repo) = unprunable_repo();
     assert_refused(
         prune_loose_unreachable(repo.odb(), &[], None),
         FilesOnlyOperation::Prune,
@@ -237,10 +287,13 @@ fn standalone_files_odb_refuses_repository_maintenance() {
 
 #[test]
 fn refusal_keeps_its_error_code_and_names_the_operation() {
-    let (_dir, repo) = memory_repo();
-    let err = repo.odb().gc().expect_err("gc on a custom primary");
+    let (_dir, repo) = unprunable_repo();
+    let err = repo
+        .odb()
+        .gc()
+        .expect_err("gc on a custom primary that cannot delete");
     assert_eq!(err.kind_name(), "unsupported_object_store");
     let message = err.to_string();
-    assert!(message.contains("garbage collection"), "{message}");
+    assert!(message.contains("pruning unreachable objects"), "{message}");
     assert!(message.contains("custom"), "{message}");
 }

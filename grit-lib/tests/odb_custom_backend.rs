@@ -478,14 +478,16 @@ fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
 }
 
 #[test]
-fn memory_primary_rejects_filesystem_gc_and_commit_graph() {
-    let (_dir, repo, _store) = memory_repo();
-    assert!(matches!(
-        repo.odb().gc(),
-        Err(Error::Repository(RepositoryError::UnsupportedObjectStore {
-            operation: FilesOnlyOperation::Gc,
-        }))
-    ));
+fn memory_primary_gc_prunes_but_commit_graph_write_refuses() {
+    let (_dir, repo, store) = memory_repo();
+    let orphan = repo
+        .odb()
+        .write(ObjectKind::Blob, b"orphan\n")
+        .expect("orphan");
+    repo.odb()
+        .gc()
+        .expect("gc prunes through MemoryStore's capability");
+    assert!(!store.contains(&orphan).expect("contains"));
     assert!(matches!(
         repo.odb().write_commit_graph(),
         Err(Error::Repository(RepositoryError::UnsupportedObjectStore {

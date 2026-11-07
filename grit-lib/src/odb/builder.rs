@@ -52,12 +52,20 @@ use crate::error::Result;
 use crate::fsck::reachability_roots;
 use crate::gc::prune_loose_unreachable;
 use crate::objects::HashAlgo;
-use crate::odb::store::{ObjectStore, WritableObjectStore};
+use crate::odb::store::{ObjectStore, PrunableObjectStore, WritableObjectStore};
 use crate::repo::error::FilesOnlyOperation;
 use crate::repo::Repository;
 use crate::repo::RepositoryError;
 
 use super::Odb;
+
+/// Where a prune deletes unreachable objects from ([`Odb::prune_target`]).
+pub(crate) enum PruneTarget<'a> {
+    /// Loose object files of the files-backed primary.
+    Files,
+    /// A custom primary, through its prune capability.
+    Store(&'a dyn PrunableObjectStore),
+}
 
 /// Read layers, an attached commit-graph and the alternates switch for a repository's
 /// object database.
@@ -194,22 +202,75 @@ impl Odb {
         Ok(self.primary()? as Arc<dyn WritableObjectStore>)
     }
 
-    /// In-process garbage collection for the files-backed object directory.
-    ///
-    /// Custom primaries return [`RepositoryError::UnsupportedObjectStore`].
+    /// Where a prune deletes from: the files layout, or the custom primary's
+    /// [`PrunableObjectStore`] capability.
     ///
     /// # Errors
     ///
-    /// Propagates object-store or I/O failures during maintenance.
+    /// [`RepositoryError::UnsupportedObjectStore`] with [`FilesOnlyOperation::Prune`] for a
+    /// custom primary whose [`WritableObjectStore::as_prunable`] is `None`.
+    pub(crate) fn prune_target(&self) -> Result<PruneTarget<'_>> {
+        let Some(primary) = &self.custom_primary else {
+            return Ok(PruneTarget::Files);
+        };
+        primary
+            .as_prunable()
+            .map(PruneTarget::Store)
+            .ok_or_else(|| {
+                RepositoryError::UnsupportedObjectStore {
+                    operation: FilesOnlyOperation::Prune,
+                }
+                .into()
+            })
+    }
+
+    /// In-process garbage collection: delete every object unreachable from the repository's
+    /// refs, reflogs, indexes and worktrees, with no grace period.
+    ///
+    /// A files-backed primary loses its unreachable loose objects (packs are left alone); a
+    /// custom primary loses its unreachable objects through its [`PrunableObjectStore`]
+    /// capability. Reachability uses the repository's own ref store, including one injected
+    /// with [`RepositoryOptions::with_ref_store`](crate::environment::RepositoryOptions::with_ref_store),
+    /// and the repository's [`Environment`](crate::environment::Environment), so config
+    /// overrides passed there (such as `extensions.preciousObjects` through
+    /// `GIT_CONFIG_COUNT`) apply.
+    ///
+    /// # Errors
+    ///
+    /// - [`RepositoryError::UnsupportedObjectStore`] with [`FilesOnlyOperation::Prune`] for a
+    ///   custom primary without the prune capability, and with [`FilesOnlyOperation::Gc`] for
+    ///   an `Odb` that does not belong to a repository;
+    /// - [`RepositoryError::PreciousObjectsRepository`] when `extensions.preciousObjects` is set;
+    /// - object-store or I/O failures during maintenance.
     pub fn gc(&self) -> Result<()> {
-        self.require_files_primary(FilesOnlyOperation::Gc)?;
+        self.prune_target()?;
         let Some(git_dir) = self.config_git_dir() else {
             return Err(RepositoryError::UnsupportedObjectStore {
                 operation: FilesOnlyOperation::Gc,
             }
             .into());
         };
-        let opts = crate::environment::RepositoryOptions::empty();
+        // The repository's own environment carries config overrides (`GIT_CONFIG_COUNT`,
+        // `-c`) that decide preciousObjects and the index location.
+        let environment = self
+            .shared_environment
+            .as_deref()
+            .cloned()
+            .unwrap_or_else(crate::environment::Environment::empty);
+        let mut opts = crate::environment::RepositoryOptions::with_environment(environment);
+        if let Some(primary) = &self.custom_primary {
+            let mut builder = OdbBuilder::new().alternates(self.alternates_enabled);
+            for source in &self.extra_read_sources {
+                builder = builder.push_read_source(Arc::clone(source));
+            }
+            opts = opts
+                .with_object_store(Arc::clone(primary))
+                .with_odb_builder(builder);
+            if let Some(caches) = &self.shared_config_state {
+                let ref_store = caches.open_ref_store(git_dir, &opts.environment)?;
+                opts = opts.with_ref_store(ref_store);
+            }
+        }
         let repo = if git_dir.file_name().is_some_and(|n| n == ".git") {
             let wt = git_dir
                 .parent()
@@ -220,6 +281,7 @@ impl Odb {
         } else {
             Repository::open(git_dir, &opts)?
         };
+        crate::maintenance::refuse_precious_objects(&repo, "gc")?;
         let roots = reachability_roots(&repo)?;
         prune_loose_unreachable(self, &roots, None)?;
         Ok(())

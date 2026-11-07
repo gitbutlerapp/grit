@@ -1073,16 +1073,19 @@ pub fn assert_error_map_contract() {
             }
         }
     }
-    let refused = classify(&Error::new(LibError::Repository(
-        RepositoryError::UnsupportedObjectStore {
-            operation: FilesOnlyOperation::PackInstall,
-        },
-    )));
-    let payload = refused.payload.expect("unsupported_object_store payload");
-    assert_eq!(payload.operation, Some("pack_install"));
-    let json = serde_json::to_value(&payload).expect("serialize payload");
-    assert_eq!(json["kind"], "unsupported_object_store");
-    assert_eq!(json["operation"], "pack_install");
+    for (operation, name) in [
+        (FilesOnlyOperation::PackInstall, "pack_install"),
+        (FilesOnlyOperation::Prune, "prune"),
+    ] {
+        let refused = classify(&Error::new(LibError::Repository(
+            RepositoryError::UnsupportedObjectStore { operation },
+        )));
+        let payload = refused.payload.expect("unsupported_object_store payload");
+        assert_eq!(payload.operation, Some(name));
+        let json = serde_json::to_value(&payload).expect("serialize payload");
+        assert_eq!(json["kind"], "unsupported_object_store");
+        assert_eq!(json["operation"], name);
+    }
     for kind in required_kinds {
         assert!(
             CONTRACT.iter().any(|r| r.kind == Some(*kind)),

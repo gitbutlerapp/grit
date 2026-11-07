@@ -74,11 +74,16 @@ use crate::objects::HashAlgo;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FilesOnlyOperation {
-    /// Garbage collection: [`Odb::gc`](crate::odb::Odb::gc), [`maintenance::gc`](crate::maintenance::gc) and [`maintenance::gc_with_cancel`](crate::maintenance::gc_with_cancel)
-    /// (and the matching `Repository` methods).
+    /// Garbage collection without a repository: [`Odb::gc`](crate::odb::Odb::gc) on an `Odb`
+    /// built standalone, with no git directory to find reachability roots in.
     Gc,
-    /// Pruning unreachable loose objects: [`maintenance::prune_loose_objects`](crate::maintenance::prune_loose_objects) and
-    /// [`refs::gc::prune_loose_unreachable`](crate::gc::prune_loose_unreachable).
+    /// Deleting unreachable objects from a custom primary that cannot delete
+    /// ([`WritableObjectStore::as_prunable`](crate::odb::store::WritableObjectStore::as_prunable)
+    /// is `None`): [`maintenance::prune_loose_objects`](crate::maintenance::prune_loose_objects),
+    /// [`refs::gc::prune_loose_unreachable`](crate::gc::prune_loose_unreachable),
+    /// [`Odb::gc`](crate::odb::Odb::gc), [`maintenance::gc`](crate::maintenance::gc) and
+    /// [`maintenance::gc_with_cancel`](crate::maintenance::gc_with_cancel). Implement
+    /// [`PrunableObjectStore`](crate::odb::store::PrunableObjectStore) to support them.
     Prune,
     /// Repacking into `objects/pack/`: [`maintenance::repack`](crate::maintenance::repack), [`maintenance::repack_all`](crate::maintenance::repack_all)
     /// and [`maintenance::repack_all_with_cancel`](crate::maintenance::repack_all_with_cancel).
