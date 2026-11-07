@@ -25028,9 +25028,6 @@ pub grit_lib::revwalk::history::HistoryEngineError::ObjectNotFound(alloc::string
 pub grit_lib::revwalk::history::HistoryEngineError::ObjectStreamTruncated
 pub grit_lib::revwalk::history::HistoryEngineError::ObjectStreamTruncated::actual: u64
 pub grit_lib::revwalk::history::HistoryEngineError::ObjectStreamTruncated::expected: u64
-pub grit_lib::revwalk::history::HistoryEngineError::OdbObjectsDirMismatch
-pub grit_lib::revwalk::history::HistoryEngineError::OdbObjectsDirMismatch::builder: std::path::PathBuf
-pub grit_lib::revwalk::history::HistoryEngineError::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::revwalk::history::HistoryEngineError::Offload(grit_lib::maintenance::OffloadError)
 pub grit_lib::revwalk::history::HistoryEngineError::PackDeltaBaseNotWritten
 pub grit_lib::revwalk::history::HistoryEngineError::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId

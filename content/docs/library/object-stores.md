@@ -128,7 +128,7 @@ Some parts of grit-lib read or write `objects/` on disk directly, because what t
 | Maintenance | `gc`, repack, prune, offload, commit-graph, multi-pack-index and pack bitmap writing rewrite the files layout. On a custom primary they are refused (see the table above). |
 | Pack install | Installing a received pack as `objects/pack/pack-*.pack` (index-pack, bundle install, fetch's pack spool) and receive-pack's on-disk quarantine. A custom primary takes the ingest path instead. |
 | Repository layout | Opening a repository with the default files primary, discovering a repository from a directory, and creating the directories of a new repository. |
-| Submodules and alternates | A submodule's git dir and `objects/info/alternates` name directories on disk. Alternates are read only when `OdbBuilder::alternates` is on. |
+| Submodules and alternates | A submodule's git dir and `objects/info/alternates` name directories on disk. Alternates are read for the files primary unless `OdbBuilder::alternates(false)`, and for a custom primary only with `OdbBuilder::alternates(true)`. |
 | Local-path transport | Fetch, push and clone from a peer repository given as a local path open that repository's own files store. |
 | Gated fast paths | Rev-list, merge-base, fsck and bitmap walks read packs directly only after checking that the primary is the files backend, or that a pack bitmap exists. A custom primary takes the general path through `ObjectStore`. |
 

@@ -74,13 +74,6 @@ fn repository_error_to_engine(err: crate::repo::RepositoryError) -> HistoryEngin
         RepositoryError::PreciousObjectsRepository { operation } => {
             HistoryEngineError::PreciousObjectsRepository { operation }
         }
-        RepositoryError::OdbObjectsDirMismatch {
-            builder,
-            repository,
-        } => HistoryEngineError::OdbObjectsDirMismatch {
-            builder,
-            repository,
-        },
         RepositoryError::ObjectFormatMismatch { repository, store } => {
             HistoryEngineError::ObjectFormatMismatch { repository, store }
         }
@@ -1475,8 +1468,8 @@ pub enum HistoryEngineError {
     Hook(crate::hooks::HookError),
 
     /// The operation needs the files-backed `objects/` directory, but the repository's
-    /// [`Odb`](crate::odb::Odb) uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
-    /// store. Nothing was written; use a files-backed repository for this operation.
+    /// [`Odb`](crate::odb::Odb) uses a custom primary store
+    /// ([`RepositoryOptions::with_object_store`](crate::config::environment::RepositoryOptions::with_object_store)). Nothing was written; use a files-backed repository for this operation.
     #[error("{operation} requires the files-backed object store; it is not supported with a custom primary")]
     UnsupportedObjectStore {
         /// Operation that was refused.
@@ -1501,26 +1494,9 @@ pub enum HistoryEngineError {
         operation: &'static str,
     },
 
-    /// [`Repository::open`](crate::repo::Repository::open) was given an
-    /// [`OdbBuilder`](crate::odb::OdbBuilder) through
-    /// [`RepositoryOptions::with_odb_builder`](crate::config::environment::RepositoryOptions::with_odb_builder)
-    /// rooted somewhere other than the repository's `objects/` directory.
-    #[error(
-        "object database {} is not the repository's objects directory {}",
-        builder.display(),
-        repository.display()
-    )]
-    OdbObjectsDirMismatch {
-        /// The builder's objects directory, canonicalized when it exists.
-        builder: std::path::PathBuf,
-        /// The repository's canonical objects directory.
-        repository: std::path::PathBuf,
-    },
-
-    /// [`Repository::open`](crate::repo::Repository::open) was given an
-    /// [`OdbBuilder`](crate::odb::OdbBuilder) through
-    /// [`RepositoryOptions::with_odb_builder`](crate::config::environment::RepositoryOptions::with_odb_builder)
-    /// whose custom primary or read source hashes objects with a different algorithm than the
+    /// [`Repository::open`](crate::repo::Repository::open) was given a custom primary
+    /// ([`RepositoryOptions::with_object_store`](crate::config::environment::RepositoryOptions::with_object_store))
+    /// or a read source ([`OdbBuilder`](crate::odb::OdbBuilder)) that hashes objects with a different algorithm than the
     /// repository's `extensions.objectformat` (SHA-1 when unset).
     #[error(
         "object store hashes with {} but the repository's object format is {}",

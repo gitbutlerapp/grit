@@ -466,8 +466,6 @@ mod tests {
     /// The step of the storage-backend plan that removes a known leak.
     #[derive(Clone, Copy, Debug)]
     enum FixStep {
-        /// Step 2: `RepositoryOptions::with_object_store` and a path-free `OdbBuilder`.
-        PathFreeOdbBuilder,
         /// Step 4: the internal `PrimaryStore` enum in `Odb`, which gives fast
         /// paths and scratch stores a store handle instead of a directory.
         PrimaryStoreEnum,
@@ -556,8 +554,7 @@ mod tests {
         by_design("serve/receive_pack.rs", ObjectsDir, Area::PackInstall),
         by_design("clone.rs", JoinObjects, Area::RepositoryLayout),
         by_design("repo.rs", JoinObjects, Area::RepositoryLayout),
-        by_design("repo.rs", OdbNew, Area::RepositoryLayout),
-        by_design("repo.rs", OdbWithWorkTree, Area::RepositoryLayout),
+        by_design("odb/builder.rs", OdbNew, Area::RepositoryLayout),
         by_design("diff/core.rs", JoinObjects, Area::SubmodulesAndAlternates),
         by_design("diff/core.rs", OdbNew, Area::SubmodulesAndAlternates),
         by_design(
@@ -578,8 +575,6 @@ mod tests {
     ];
 
     const KNOWN_LEAKS: &[Leak] = &[
-        // `RepositoryOptions` checks the builder's `objects_dir` against the git dir.
-        leak("repo.rs", ObjectsDir, FixStep::PathFreeOdbBuilder),
         // Parallel diff and checkout workers fetch the primary's pack store by path.
         leak(
             "diff/merge_commit.rs",
