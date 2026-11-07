@@ -6,7 +6,7 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::config::environment::Environment;
-use grit_lib::config::ConfigSet;
+use grit_lib::config::{ConfigSet, LoadConfigOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::push_plan::{PushPlanContext, PushRequest};
 use grit_lib::repo::{InitOptions, Repository};
