@@ -122,6 +122,8 @@ Partial clones can run maintenance offline, including after creating local commi
 
 Like `git prune`, `grit gc prune` returns immediately when there is no loose object older than the cutoff: it only checks that the objects named by refs, reflogs and the index exist instead of walking the object graph.
 
+Also like `git prune`, it refuses with an error and deletes nothing when `extensions.preciousObjects` is set.
+
 ### `grit gc offload`
 
 Moves large blobs out of the repository to a *large-object promisor* (LOP): a second repository that holds only the big blobs. The repository you run it in becomes a partial repository of the LOP. Its `remote.<REMOTE>.promisor` is set, and its remaining objects move into one `.promisor` pack, the blobs it keeps included. Those blobs exist only in this repository, but they have to be in the promisor pack: Git treats every blob a tree in a promisor pack names as promised, and `git repack -a -d`, `git gc --prune=now` and `git gc` keep a promised object only when it sits in a promisor pack. A kept blob in an ordinary pack beside it would be deleted (or moved to a cruft pack and pruned two weeks later), with `git fsck` still clean and nothing to fetch it back from. Clients that accept the LOP through the `promisor-remote` capability get packs without the offloaded blobs and fetch those from the LOP themselves (see [grit upload-pack](upload-pack.md#serving-a-repository-whose-large-blobs-live-elsewhere)). This is the layout Git's own large-object-promisor setup uses, built there with `git repack -a -d --filter=blob:limit=<n> --filter-to=<lop>`.

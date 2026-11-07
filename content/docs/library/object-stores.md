@@ -11,6 +11,7 @@ By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-back
 | ----- | ---- |
 | [`ObjectStore`](rustdoc:grit_lib::objects::odb::store::ObjectStore) | Read, metadata, streaming, enumeration |
 | [`WritableObjectStore`](rustdoc:grit_lib::objects::odb::store::WritableObjectStore) | Insert objects (idempotent writes) |
+| [`PrunableObjectStore`](rustdoc:grit_lib::objects::odb::store::PrunableObjectStore) | Optional: delete objects, so `gc` and `prune` work on the store (see [Garbage collection on a custom store](#garbage-collection-on-a-custom-store)) |
 
 Built-in backends live under [`grit_lib::objects::odb::store`](rustdoc:grit_lib::objects::odb::store) (`LooseStore`, `FilesSource`, `MemoryStore`, `CompositeStore`, and others).
 
@@ -53,7 +54,7 @@ assert!(mirror.odb().contains(&oid)?);
 # Ok::<(), grit_lib::error::Error>(())
 ```
 
-`Arc<T>`, `Box<T>` and `&T` implement `ObjectStore` (and `WritableObjectStore`) whenever `T` does, `dyn` included, by forwarding every method. A decorator written as `struct Counted<S: ObjectStore>(S)` can therefore wrap a shared `Arc<dyn ObjectStore>` and still be passed on as `Arc<dyn ObjectStore>`, with no hand-written forwarding newtype.
+`Arc<T>`, `Box<T>` and `&T` implement `ObjectStore` (and `WritableObjectStore` and `PrunableObjectStore`) whenever `T` does, `dyn` included, by forwarding every method, `as_prunable` among them. A decorator written as `struct Counted<S: ObjectStore>(S)` can therefore wrap a shared `Arc<dyn ObjectStore>` and still be passed on as `Arc<dyn ObjectStore>`, with no hand-written forwarding newtype.
 
 ## Where the primary store lives
 
@@ -130,7 +131,26 @@ An operation that needs the on-disk `objects/` layout refuses a custom primary w
 
 <!-- grit:variant-table grit_lib::repo::error::FilesOnlyOperation -->
 
-Maintenance stays files-only by design: packs, `.idx`, multi-pack-index and commit-graph files are how the files backend stores objects, and a custom store owns its own layout. A custom store still gets a commit-graph, built in memory and kept in its own storage (see [Commit-graphs for a custom store](#commit-graphs-for-a-custom-store)). Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
+Repack, multi-pack-index and commit-graph writes stay files-only by design: packs, `.idx`, multi-pack-index and commit-graph files are how the files backend stores objects, and a custom store owns its own layout. A custom store still gets a commit-graph, built in memory and kept in its own storage (see [Commit-graphs for a custom store](#commit-graphs-for-a-custom-store)), and garbage collection when it can delete objects (next section). Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
+
+## Garbage collection on a custom store
+
+A store that can delete objects implements [`PrunableObjectStore`](rustdoc:grit_lib::objects::odb::store::PrunableObjectStore) and returns `Some(self)` from [`WritableObjectStore::as_prunable`](rustdoc:grit_lib::objects::odb::store::WritableObjectStore::as_prunable). `MemoryStore` does. Then these work on a repository whose primary is that store:
+
+| API | What it does on a custom store |
+| --- | --- |
+| [`maintenance::prune_loose_objects`](rustdoc:grit_lib::maintenance::prune_loose_objects) | Deletes unreachable objects older than `gc.pruneExpire` (or `PruneOptions::older_than`) |
+| [`maintenance::gc`](rustdoc:grit_lib::maintenance::gc) | Pack-refs, reflog expiry, then the same prune; repack, drop-large-blobs and the commit-graph write are skipped |
+| [`Odb::gc`](rustdoc:grit_lib::objects::odb::Odb::gc) | Deletes every unreachable object, with no grace period |
+| [`refs::gc::prune_loose_unreachable`](rustdoc:grit_lib::refs::gc::prune_loose_unreachable) | Deletes what your own root set does not reach |
+
+Reachability is the same as for the files backend: every ref, every reflog entry (including linked worktrees' reflogs), `HEAD` and the index of each worktree, and the stash; walks stop at shallow boundaries. Grit lists your objects with `ObjectStore::for_each_object`, walks the graph once, passes the unreachable ids to `PrunableObjectStore::remove` in batches, and calls `WritableObjectStore::flush` at the end.
+
+The grace period comes from [`PrunableObjectStore::object_mtime`](rustdoc:grit_lib::objects::odb::store::PrunableObjectStore::object_mtime), which plays the part of a loose file's modification time. It defaults to `None`, and an object without a known time is kept whenever a grace period applies: with the default `gc.pruneExpire` of `2.weeks.ago`, a store that records no times (like `MemoryStore`) loses nothing until you prune with `now`. Record a time on `write` and `freshen` to get Git's behavior. The clock a relative expiry is measured from is passed in (`PruneOptions::with_now`, `GcOptions::now_unix`).
+
+With `extensions.preciousObjects` set, `prune_loose_objects` and `Odb::gc` fail with `RepositoryError::PreciousObjectsRepository` (on the files backend too), and `maintenance::gc` on a custom store skips its prune step (`GcStats::prune_ran` stays false).
+
+A store whose `as_prunable` is `None` is never pruned: those calls fail with `UnsupportedObjectStore` and `operation` `prune` before touching anything, and never fall back to the `objects/` directory.
 
 ## Filesystem-only by design
 
@@ -221,7 +241,7 @@ Fetch, clone, push and bundles move objects as a pack stream. [`ingest_pack_into
 
 The repository-level entry points use it automatically. [`ingest_received_pack`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack) and [`ingest_received_pack_path`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack_path) write into a custom primary instead of installing `objects/pack/pack-*.pack`, reading thin bases through the whole `Odb`; the returned [`IngestedPack`](rustdoc:grit_lib::objects::index_pack::IngestedPack) has `pack_path: None`. Each successful ingest ends with one [`Odb::flush`](rustdoc:grit_lib::objects::odb::Odb::flush) on the primary (one store round trip per new object during unpack, not a `contains` probe on read sources). [`Bundle::unbundle`](rustdoc:grit_lib::bundle::Bundle::unbundle) streams the bundle's pack straight from the file into your store, with no temporary copy.
 
-[`ReceivePack`](rustdoc:grit_lib::remote::serve::ReceivePack) uses the same quarantine contract on a custom primary: the pack is spooled to a system temp file, unpacked object-by-object into an in-memory overlay whose read side is the repository's [`Odb::read_store`](rustdoc:grit_lib::objects::odb::Odb::read_store), and nothing is copied into your primary until pre-receive succeeds. Then the overlay objects are written through [`Odb::primary_writable`](rustdoc:grit_lib::objects::odb::Odb::primary_writable) and [`Odb::flush_for_publish`](rustdoc:grit_lib::objects::odb::Odb::flush_for_publish). A declined push or a corrupt pack drops the overlay with no primary writes. Shell hooks do not get `GIT_OBJECT_DIRECTORY` / `GIT_QUARANTINE_PATH` for a memory overlay (only the files quarantine sets them). Unreachable objects still cannot be removed from a custom primary (`gc` / `prune` stay files-only), so objects that were published and then lose a later ref update remain in the store, matching files after quarantine migrate.
+[`ReceivePack`](rustdoc:grit_lib::remote::serve::ReceivePack) uses the same quarantine contract on a custom primary: the pack is spooled to a system temp file, unpacked object-by-object into an in-memory overlay whose read side is the repository's [`Odb::read_store`](rustdoc:grit_lib::objects::odb::Odb::read_store), and nothing is copied into your primary until pre-receive succeeds. Then the overlay objects are written through [`Odb::primary_writable`](rustdoc:grit_lib::objects::odb::Odb::primary_writable) and [`Odb::flush_for_publish`](rustdoc:grit_lib::objects::odb::Odb::flush_for_publish). A declined push or a corrupt pack drops the overlay with no primary writes. Shell hooks do not get `GIT_OBJECT_DIRECTORY` / `GIT_QUARANTINE_PATH` for a memory overlay (only the files quarantine sets them). Objects that were published and then lose a later ref update stay in the store, as on the files backend after the quarantine migrates, until garbage collection removes them: that needs a store with the prune capability (see [Garbage collection on a custom store](#garbage-collection-on-a-custom-store)).
 
 <!-- include: grit-examples/src/bin/ingest_pack_into_store.rs -->
 
