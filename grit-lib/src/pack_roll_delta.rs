@@ -13,6 +13,11 @@ const BUCKET_CAP: usize = 64;
 const COPY_GOOD_ENOUGH: usize = 4096;
 const MAX_INSERT_RUN: u8 = 0x7f;
 const MAX_COPY_SLICE: usize = 0x10000;
+/// Targets at least this large are probed before a size-bounded encode (see
+/// [`BaseMatchCatalog::shares_windows`]).
+const PROBE_TARGETS_FROM: usize = 64 * 1024;
+/// Evenly spaced places a target is probed at.
+const PROBES: usize = 64;
 
 #[derive(Clone, Copy, Debug)]
 struct WindowAnchor {
@@ -172,8 +177,39 @@ impl BaseMatchCatalog {
         (best_base, best_len)
     }
 
+    /// Whether any of [`PROBES`] evenly spaced stretches of `target` holds a window
+    /// this catalog indexes.
+    ///
+    /// Each probe fingerprints [`WINDOW`] consecutive positions, so it lines up with
+    /// one indexed base window wherever the stretch was copied from the base. A delta
+    /// that fits a size bound copies a large share of the target, so it shows up at
+    /// some probe; unrelated content (two compressed or encrypted files, say) shows up
+    /// at none, and is rejected without scanning the whole target byte by byte.
+    fn shares_windows(&self, target: &[u8]) -> bool {
+        let span = 2 * WINDOW;
+        if self.anchors.is_empty() {
+            return false;
+        }
+        if target.len() <= span {
+            return true;
+        }
+        let last = target.len() - span - 1;
+        (0..PROBES).any(|probe| {
+            let at = last * probe / (PROBES - 1);
+            (at..at + WINDOW).any(|start| {
+                let fp = Self::fingerprint_at(target, start);
+                self.candidates(fp).iter().any(|a| a.fingerprint == fp)
+            })
+        })
+    }
+
     #[must_use]
     pub fn encode(&self, target: &[u8], max_size: usize) -> Option<Vec<u8>> {
+        // With a size bound, a target that shares no window with the base cannot
+        // come in under it: skip the byte-by-byte scan that would find that out.
+        if max_size > 0 && target.len() >= PROBE_TARGETS_FROM && !self.shares_windows(target) {
+            return None;
+        }
         let mut out = Vec::with_capacity(8192.min(target.len() / 4 + 64));
         write_delta_varint(&mut out, self.base.len());
         write_delta_varint(&mut out, target.len());
@@ -345,4 +381,47 @@ fn pop_literal(out: &mut Vec<u8>, open_prefix: &mut Option<usize>, body_start: u
         out[prefix] = run_len;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn noise(len: usize, mut seed: u64) -> Vec<u8> {
+        (0..len)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unrelated_large_target_is_rejected_without_a_scan() {
+        let base = noise(256 * 1024, 1);
+        let target = noise(256 * 1024, 2);
+        let catalog = BaseMatchCatalog::build(&base);
+        assert!(!catalog.shares_windows(&target));
+        assert!(catalog.encode(&target, target.len() / 2).is_none());
+    }
+
+    #[test]
+    fn edited_large_target_still_deltas() {
+        let base = noise(256 * 1024, 3);
+        // A new version: a stretch replaced in the middle, bytes added at the end.
+        let mut target = base.clone();
+        target[100_000..110_000].copy_from_slice(&noise(10_000, 4));
+        target.extend_from_slice(&noise(5_000, 5));
+        let catalog = BaseMatchCatalog::build(&base);
+        assert!(catalog.shares_windows(&target));
+        let delta = catalog
+            .encode(&target, target.len() / 2)
+            .expect("an edited copy deltas");
+        assert!(delta.len() < 20_000, "delta of {} bytes", delta.len());
+        // Unbounded encodes are never probed.
+        let unrelated = noise(128 * 1024, 6);
+        assert!(catalog.encode(&unrelated, 0).is_some());
+    }
 }

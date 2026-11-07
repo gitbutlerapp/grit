@@ -95,6 +95,47 @@ pub(crate) fn flate2_compression_for_pack_level(level: i32) -> Compression {
     }
 }
 
+/// Payloads at least this large are sampled by [`compression_for_payload`].
+const SAMPLE_PAYLOADS_FROM: usize = 1 << 20;
+/// Size of each sample [`compression_for_payload`] deflates.
+const SAMPLE_LEN: usize = 32 * 1024;
+/// Number of evenly spaced samples [`compression_for_payload`] deflates.
+const SAMPLES: usize = 4;
+
+/// The level to deflate `data` at: `configured`, or stored blocks
+/// ([`Compression::none`]) for a large payload that deflate cannot shrink.
+///
+/// Already-compressed content (archives, media, encrypted files) comes out of
+/// deflate no smaller than it went in, at a cost of tens of milliseconds per
+/// megabyte; stored blocks give the same size at copy speed. A few evenly spaced
+/// samples decide, so a payload that compresses anywhere it was sampled keeps the
+/// configured level.
+pub(crate) fn compression_for_payload(data: &[u8], configured: Compression) -> Compression {
+    if configured.level() == 0 || data.len() < SAMPLE_PAYLOADS_FROM {
+        return configured;
+    }
+    let mut zlib = flate2::Compress::new(configured, false);
+    let mut out = vec![0u8; SAMPLE_LEN + SAMPLE_LEN / 8 + 64];
+    let stride = (data.len() - SAMPLE_LEN) / (SAMPLES - 1);
+    for sample in 0..SAMPLES {
+        let start = sample * stride;
+        zlib.reset();
+        let status = zlib.compress(
+            &data[start..start + SAMPLE_LEN],
+            &mut out,
+            flate2::FlushCompress::Finish,
+        );
+        if !matches!(status, Ok(flate2::Status::StreamEnd)) {
+            return configured;
+        }
+        // Saving at least 2% anywhere is worth the configured level.
+        if zlib.total_out() * 50 < zlib.total_in() * 49 {
+            return configured;
+        }
+    }
+    Compression::none()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +218,34 @@ mod tests {
             consumed > 0,
             "zlib wrapper must be consumed for 0-byte object"
         );
+    }
+
+    #[test]
+    fn incompressible_payloads_are_stored() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let noise: Vec<u8> = (0..(2 << 20))
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed as u8
+            })
+            .collect();
+        let level = Compression::default();
+        assert_eq!(compression_for_payload(&noise, level).level(), 0);
+        let stored = zlib_compress_pack_payload(&noise, 0).expect("stored");
+        assert!(stored.len() < noise.len() + noise.len() / 1000);
+
+        // Text, small payloads and an explicit level 0 keep the configured level.
+        let text = b"fn main() { println!(\"hello\"); }\n".repeat(64 * 1024);
+        assert_eq!(compression_for_payload(&text, level), level);
+        assert_eq!(compression_for_payload(&noise[..4096], level), level);
+        let none = Compression::none();
+        assert_eq!(compression_for_payload(&noise, none), none);
+
+        // Compressible anywhere sampled keeps the level, even if the rest is noise.
+        let mut mixed = noise.clone();
+        mixed[..64 * 1024].copy_from_slice(&text[..64 * 1024]);
+        assert_eq!(compression_for_payload(&mixed, level), level);
     }
 }

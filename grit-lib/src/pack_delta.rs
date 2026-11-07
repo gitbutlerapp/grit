@@ -410,7 +410,10 @@ fn prepare_whole(
         });
     }
     let payload = odb.read(&entry.oid)?.data;
-    let zlib = zlib_compress(&payload, compression)?;
+    let zlib = zlib_compress(
+        &payload,
+        crate::pack_zlib::compression_for_payload(&payload, compression),
+    )?;
     Ok(PreparedEntry {
         body: PreparedBody::Zlib(zlib),
         payload_len: payload.len(),

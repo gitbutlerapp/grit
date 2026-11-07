@@ -1761,7 +1761,8 @@ fn write_whole_pack_object_to(
         }
     }
     encode_pack_object_header_to(&mut counter, pack_type_code(kind), data.len())?;
-    write_zlib_to(&mut counter, data, odb.pack_compression()?)?;
+    let compression = crate::pack_zlib::compression_for_payload(data, odb.pack_compression()?);
+    write_zlib_to(&mut counter, data, compression)?;
     Ok(counter.n)
 }
 
