@@ -1683,6 +1683,11 @@ mod repository_config_hook_errors;
 mod repository_config_hook_errors_git;
 #[path = "repository_injected_backends_no_layout.rs"]
 mod repository_injected_backends_no_layout;
+#[path = "repository_no_filesystem.rs"]
+mod repository_no_filesystem;
+#[cfg(feature = "full-tests")]
+#[path = "repository_no_filesystem_git_compat.rs"]
+mod repository_no_filesystem_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "repository_refstore_git_namespace.rs"]
 mod repository_refstore_git_namespace;

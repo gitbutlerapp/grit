@@ -761,6 +761,20 @@ impl TempPackReceive {
         })
     }
 
+    /// Like [`Self::create`], but as a private `grit-pack-receive-*` file in the system temp
+    /// directory, for a repository whose primary object store is not the files layout: its
+    /// git directory may not exist, and the pack is ingested into the store and removed.
+    pub(crate) fn create_in_system_temp() -> Result<Self> {
+        let temp = std::env::temp_dir();
+        Self::create_named(|seq| {
+            let path = temp.join(format!(
+                "grit-pack-receive-{}_{seq}.tmp",
+                std::process::id()
+            ));
+            create_private_spool_file(&path).map(|file| (path, file))
+        })
+    }
+
     /// Create the spool with the first `open(seq)` whose name is not taken yet.
     fn create_named(open: impl Fn(u64) -> Result<(PathBuf, File)>) -> Result<Self> {
         static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -1118,6 +1132,21 @@ mod tests {
         let path = recv.path().to_path_buf();
         assert!(recv.finish().expect("finish").is_none());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn system_temp_spool_is_private_and_dropped_when_unfinished() {
+        let recv = TempPackReceive::create_in_system_temp().expect("create");
+        let path = recv.path().to_path_buf();
+        assert!(path.starts_with(std::env::temp_dir()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
+            assert_eq!(mode & 0o077, 0, "spool must not be readable by others");
+        }
+        drop(recv);
+        assert!(!path.exists(), "an unfinished spool is removed");
     }
 
     #[test]

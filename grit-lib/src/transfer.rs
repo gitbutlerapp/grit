@@ -1468,8 +1468,13 @@ fn copy_objects_for_local_fetch(
     crate::progress::poll_cancel(progress, cancel)?;
     let send_oids: HashSet<ObjectId> = send.iter().copied().collect();
     // Stream the pack into a spool in `objects/pack` rather than memory, as a local push
-    // does; a cancelled or failed copy removes the spool.
-    let mut spool = crate::pack_receive::TempPackReceive::create_in_pack_dir(local_objects)?;
+    // does; a cancelled or failed copy removes the spool. A custom primary ingests the pack
+    // object by object and may have no `objects/` directory, so it spools to the temp dir.
+    let mut spool = if local_odb.uses_files_primary() {
+        crate::pack_receive::TempPackReceive::create_in_pack_dir(local_objects)?
+    } else {
+        crate::pack_receive::TempPackReceive::create_in_system_temp()?
+    };
     let trusted_index_rows = write_pack_for_local_transfer(
         remote_odb,
         &send_set,
@@ -3661,7 +3666,9 @@ pub(crate) fn finish_anonymous_url_fetch(
         return Ok(());
     }
     let write_fetch_head = opts.remote_name.is_none() || explicit_refspec_fetch;
-    if !write_fetch_head {
+    // A repository whose stores are all injected may have no git directory at all; it gets
+    // no `FETCH_HEAD` rather than one created on its behalf.
+    if !write_fetch_head || !git_dir.is_dir() {
         return Ok(());
     }
     let source = opts.fetch_source.clone().or_else(|| {
