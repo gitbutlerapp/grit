@@ -1638,7 +1638,10 @@ impl Odb {
 
     fn invalidate_change_id_header_probe(&self) {
         if let Some(caches) = self.shared_config_state.as_ref() {
-            crate::change_id::invalidate_stored_change_id_header_probe(caches, self.objects_dir());
+            crate::change_id::invalidate_stored_change_id_header_probe(
+                caches,
+                self.files_objects_dir(),
+            );
         }
     }
 

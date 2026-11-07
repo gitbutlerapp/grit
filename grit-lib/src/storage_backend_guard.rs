@@ -571,6 +571,7 @@ mod tests {
         by_design("transfer.rs", ObjectsDir, Area::LocalTransport),
         by_design("transfer.rs", OdbNew, Area::LocalTransport),
         by_design("bitmap_walk.rs", ObjectsDir, Area::GatedFastPath),
+        by_design("change_id.rs", SingleLocalPackReader, Area::GatedFastPath),
         by_design("fsck/mod.rs", SingleLocalPackReader, Area::GatedFastPath),
         by_design("merge_base.rs", ObjectsDir, Area::GatedFastPath),
         by_design("merge_base.rs", SingleLocalPackReader, Area::GatedFastPath),
@@ -622,13 +623,6 @@ mod tests {
         leak("fetch.rs", ObjectsDir, FixStep::PrimaryStoreEnum),
         // A scratch database in a temp dir that could be an in-memory store.
         leak("diff/no_index.rs", OdbNew, FixStep::PrimaryStoreEnum),
-        // Stored change-id header probe and single-pack commit reader.
-        leak("change_id.rs", ObjectsDir, FixStep::ChangeIdAndGroupBy),
-        leak(
-            "change_id.rs",
-            SingleLocalPackReader,
-            FixStep::ChangeIdAndGroupBy,
-        ),
         // `log --group-by` pack fast paths.
         leak(
             "revwalk/group_by.rs",
