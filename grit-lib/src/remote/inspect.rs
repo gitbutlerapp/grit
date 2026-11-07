@@ -112,10 +112,13 @@ pub(crate) fn inspect_remote(
     name: &str,
     options: &InspectOptions,
     http_factory: Option<&dyn HttpClientFactory>,
-) -> std::result::Result<RemoteSummary, RemoteError> {
-    let config = repo.config().snapshot().map_err(RemoteError::from)?;
+) -> crate::error::Result<RemoteSummary> {
+    let config = repo.config().snapshot()?;
     if !has_remote_section(config.as_ref(), name) {
-        return Err(RemoteError::UnknownRemote(name.to_owned()));
+        return Err(RemoteError::UnknownRemote {
+            name: name.to_owned(),
+        }
+        .into());
     }
     let remote = Remote::from_config(config.as_ref(), name)?;
     let fetch_url = remote.fetch_url().to_url_string();
@@ -469,6 +472,8 @@ mod tests {
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let err = inspect_remote(&repo, "missing", &InspectOptions::default(), None)
             .expect_err("unknown");
-        assert!(matches!(err, RemoteError::UnknownRemote(name) if name == "missing"));
+        assert!(
+            matches!(err, crate::error::Error::Remote(RemoteError::UnknownRemote { name }) if name == "missing")
+        );
     }
 }

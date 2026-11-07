@@ -366,10 +366,10 @@ pub(crate) fn move_off_landed_branch(
                 }))
             }
             Err(crate::error::Error::Branch(BranchError::AlreadyExists { .. })) => last = name,
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         }
     }
-    Err(CheckoutError::WorkBranchTaken { name: last })
+    Err(CheckoutError::WorkBranchTaken { name: last }.into())
 }
 
 #[cfg(test)]

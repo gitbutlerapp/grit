@@ -12,6 +12,7 @@ use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
 /// Errors returned by Git-compatible path helper routines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum GitPathError {
     /// Normalization would escape above the root.
     EscapesRoot,

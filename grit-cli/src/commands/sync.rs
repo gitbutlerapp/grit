@@ -323,7 +323,7 @@ fn space_error(server: &ServerUrl, e: ServerAuthError) -> anyhow::Error {
             server.host(),
             server.root_url()
         ),
-        ServerAuthError::NotGritServer(_) => anyhow::anyhow!(
+        ServerAuthError::NotGritServer { .. } => anyhow::anyhow!(
             "{} has no space for this project: sync works with projects on a grit hosting server such as grithub, that you can read",
             server.host()
         ),

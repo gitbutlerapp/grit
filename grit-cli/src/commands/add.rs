@@ -168,7 +168,21 @@ impl AddOutcome {
 
 /// Exit code for `--hunks` / `--lines` failures (unknown, stale, or wrong-side ids).
 pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
-    if let Some(sel) = err.downcast_ref::<HunkSelectError>() {
+    if err
+        .downcast_ref::<grit_lib::error::Error>()
+        .is_some_and(grit_lib::error::Error::is_cancelled)
+    {
+        return 130;
+    }
+    let selection = err.downcast_ref::<HunkSelectError>().or_else(|| match err
+        .downcast_ref::<grit_lib::error::Error>()
+    {
+        Some(grit_lib::error::Error::Diff(grit_lib::error::DiffError::HunkSelection(sel))) => {
+            Some(sel)
+        }
+        _ => None,
+    });
+    if let Some(sel) = selection {
         match sel {
             HunkSelectError::UnknownId { .. }
             | HunkSelectError::StaleId { .. }
@@ -181,9 +195,8 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
             | HunkSelectError::InvalidMode { .. }
             | HunkSelectError::MissingPath
             | HunkSelectError::Apply(_)
-            | HunkSelectError::Repository(_)
             | HunkSelectError::PatchBuild => 1,
-            HunkSelectError::Cancelled => 130,
+            _ => 1,
         }
     } else {
         1
@@ -267,8 +280,15 @@ pub fn run_hunks(
     Ok(AddOutcome::from_hunks(outcome).with_path_display(&repo))
 }
 
-fn map_hunk_error(err: HunkSelectError) -> anyhow::Error {
-    anyhow::Error::new(err)
+/// Keep hunk-selection failures downcastable to [`HunkSelectError`] for the `--hunks` exit codes
+/// and JSON kinds.
+pub(crate) fn map_hunk_error(err: grit_lib::error::Error) -> anyhow::Error {
+    match err {
+        grit_lib::error::Error::Diff(grit_lib::error::DiffError::HunkSelection(sel)) => {
+            anyhow::Error::new(sel)
+        }
+        other => anyhow::Error::new(other),
+    }
 }
 
 pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {

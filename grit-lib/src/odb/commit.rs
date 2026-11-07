@@ -3,6 +3,7 @@
 //! Callers that need "the commit at this id" or "the root tree of this commit" share these
 //! [`Odb`] methods instead of reading the object, checking its kind and parsing it by hand.
 
+use crate::error::ObjectError;
 use std::path::Path;
 
 use crate::error::{Error, Result};
@@ -28,9 +29,9 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectNotFound`] when `oid` is missing.
-    /// - [`Error::UnexpectedObjectKind`] when `oid` names a tree, blob or tag.
-    /// - [`Error::CorruptObject`] when the commit's required headers are missing or malformed.
+    /// - [`crate::error::ObjectError::NotFound`] when `oid` is missing.
+    /// - [`crate::error::ObjectError::UnexpectedKind`] when `oid` names a tree, blob or tag.
+    /// - [`crate::error::ObjectError::Corrupt`] when the commit's required headers are missing or malformed.
     /// - Any other error [`Self::read`] reports.
     pub fn read_commit(&self, oid: &ObjectId) -> Result<CommitData> {
         let object = self.read(oid)?;
@@ -74,8 +75,8 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectNotFound`] when `oid` is missing.
-    /// - [`Error::UnexpectedObjectKind`] when `oid` names a tree, blob or tag.
+    /// - [`crate::error::ObjectError::NotFound`] when `oid` is missing.
+    /// - [`crate::error::ObjectError::UnexpectedKind`] when `oid` names a tree, blob or tag.
     /// - Any other error [`Self::read`] reports.
     pub fn read_commit_through_subject(&self, oid: &ObjectId) -> Result<Vec<u8>> {
         if self.custom_primary.is_none() {
@@ -173,11 +174,11 @@ fn expect_commit(oid: &ObjectId, actual: ObjectKind) -> Result<()> {
     if actual == ObjectKind::Commit {
         return Ok(());
     }
-    Err(Error::UnexpectedObjectKind {
+    Err(Error::Object(ObjectError::UnexpectedKind {
         oid: *oid,
         expected: ObjectKind::Commit,
         actual,
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -425,15 +426,15 @@ mod tests {
         let blob = odb.write(ObjectKind::Blob, b"data").unwrap();
         assert!(matches!(
             odb.read_commit_through_subject(&blob),
-            Err(Error::UnexpectedObjectKind {
+            Err(Error::Object(ObjectError::UnexpectedKind {
                 actual: ObjectKind::Blob,
                 ..
-            })
+            }))
         ));
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
         assert!(matches!(
             odb.read_commit_through_subject(&missing),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::NotFound { .. }))
         ));
     }
 
@@ -463,11 +464,11 @@ mod tests {
                 assert!(
                     matches!(
                         err,
-                        Error::UnexpectedObjectKind {
+                        Error::Object(ObjectError::UnexpectedKind {
                             oid: o,
                             expected: ObjectKind::Commit,
                             actual,
-                        } if o == oid && actual == kind
+                        }) if o == oid && actual == kind
                     ),
                     "{err:?}"
                 );
@@ -486,11 +487,11 @@ mod tests {
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
         assert!(matches!(
             odb.read_commit(&missing),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::NotFound { .. }))
         ));
         assert!(matches!(
             odb.commit_tree(&missing),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::NotFound { .. }))
         ));
 
         let no_tree = odb
@@ -501,11 +502,11 @@ mod tests {
             .unwrap();
         assert!(matches!(
             odb.read_commit(&no_tree),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ));
         assert!(matches!(
             odb.commit_tree(&no_tree),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ));
     }
 }

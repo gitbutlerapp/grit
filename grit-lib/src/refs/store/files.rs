@@ -6,6 +6,7 @@
 //! refs that were already written remain allowed so grit can remove broken entries. Reftable
 //! and other backends are unchanged.
 
+use crate::error::RefError;
 use crate::error::{Error, Result};
 use crate::git_dir::io_error::{
     io_with_ref_store_path, map_ref_store_path_io, GitDirPathOperation,
@@ -214,7 +215,9 @@ impl FilesRefStore {
         }
         if self
             .ascii_casefold_existing_name(name)
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+            .map_err(|e| RefStoreError::Corrupt {
+                detail: e.to_string(),
+            })?
             .is_some()
         {
             return Err(RefStoreError::CreateExists {
@@ -842,10 +845,12 @@ impl FilesRefStore {
         let mut logs = BTreeSet::new();
         collect_loose_file_names(&path, &storage, &mut logs);
         let Some(log) = logs.first() else {
-            return Err(RefStoreError::Corrupt(format!(
-                "cannot write reflog at '{}': unreadable directory in the way",
-                path.display()
-            )));
+            return Err(RefStoreError::Corrupt {
+                detail: format!(
+                    "cannot write reflog at '{}': unreadable directory in the way",
+                    path.display()
+                ),
+            });
         };
         Err(RefnameUnavailable::DescendantExists {
             blocking: self.logical_name(log),
@@ -1196,7 +1201,9 @@ impl FilesRefStore {
         }
         let existing = self
             .load_raw_map_prefix("", None)
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            .map_err(|e| RefStoreError::Corrupt {
+                detail: e.to_string(),
+            })?;
         if updates
             .iter()
             .any(|u| existing.contains_key(u.name.as_str()))
@@ -1255,7 +1262,9 @@ impl FilesRefStore {
             Err(LockError::Held { .. }) => Err(RefStoreError::LockHeld {
                 name: super::paths::PACKED_REFS.to_owned(),
             }),
-            Err(LockError::Io { source, .. }) => Err(RefStoreError::Corrupt(source.to_string())),
+            Err(LockError::Io { source, .. }) => Err(RefStoreError::Corrupt {
+                detail: source.to_string(),
+            }),
         }
     }
 
@@ -1321,12 +1330,17 @@ impl FilesRefStore {
     /// [`GitDirPathOperation::CreateDir`] failure; otherwise as [`Self::acquire_ref_lock_mapped`].
     fn lock_ref(&self, refname: &str, lock_path: &Path, wait: LockWait) -> Result<()> {
         if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
-            return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
+            return Err(Error::Ref(RefError::Store(
+                RefStoreError::NameUnavailable { reason },
+            )));
         }
         let Err(first_err) = self.acquire_ref_lock_mapped(lock_path, refname, wait) else {
             return Ok(());
         };
-        if matches!(first_err, Error::RefStore(RefStoreError::LockHeld { .. })) {
+        if matches!(
+            first_err,
+            Error::Ref(RefError::Store(RefStoreError::LockHeld { .. }))
+        ) {
             return Err(first_err);
         }
         if !Self::lock_acquire_suggests_missing_parent(&first_err) {
@@ -1334,30 +1348,38 @@ impl FilesRefStore {
         }
         if let Some(parent) = lock_path.parent() {
             if parent.is_file() {
-                return Err(Error::RefStore(RefStoreError::NameUnavailable {
-                    reason: RefnameUnavailable::AncestorExists {
-                        blocking: loose_storage_path_to_refname(&self.common_dir, parent),
-                        new_ref: refname.to_owned(),
+                return Err(Error::Ref(RefError::Store(
+                    RefStoreError::NameUnavailable {
+                        reason: RefnameUnavailable::AncestorExists {
+                            blocking: loose_storage_path_to_refname(&self.common_dir, parent),
+                            new_ref: refname.to_owned(),
+                        },
                     },
-                }));
+                )));
             }
             if let Err(source) = fs::create_dir_all(parent) {
                 if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
-                    return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
+                    return Err(Error::Ref(RefError::Store(
+                        RefStoreError::NameUnavailable { reason },
+                    )));
                 }
                 self.io_ref_store(parent, GitDirPathOperation::CreateDir, Err(source))?;
             }
             if parent.is_file() {
-                return Err(Error::RefStore(RefStoreError::NameUnavailable {
-                    reason: RefnameUnavailable::AncestorExists {
-                        blocking: loose_storage_path_to_refname(&self.common_dir, parent),
-                        new_ref: refname.to_owned(),
+                return Err(Error::Ref(RefError::Store(
+                    RefStoreError::NameUnavailable {
+                        reason: RefnameUnavailable::AncestorExists {
+                            blocking: loose_storage_path_to_refname(&self.common_dir, parent),
+                            new_ref: refname.to_owned(),
+                        },
                     },
-                }));
+                )));
             }
         }
         if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
-            return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
+            return Err(Error::Ref(RefError::Store(
+                RefStoreError::NameUnavailable { reason },
+            )));
         }
         match self.acquire_ref_lock_mapped(lock_path, refname, wait) {
             Ok(()) => Ok(()),
@@ -1379,7 +1401,9 @@ impl FilesRefStore {
             lock_path,
             &err,
         ) {
-            Err(Error::RefStore(RefStoreError::NameUnavailable { reason }))
+            Err(Error::Ref(RefError::Store(
+                RefStoreError::NameUnavailable { reason },
+            )))
         } else {
             Err(err)
         }
@@ -1427,9 +1451,9 @@ impl FilesRefStore {
         LockFile::acquire(lock_path, wait)
             .map(|guard| guard.detach())
             .map_err(|err| match err {
-                LockError::Held { .. } => Error::RefStore(RefStoreError::LockHeld {
+                LockError::Held { .. } => Error::Ref(RefError::Store(RefStoreError::LockHeld {
                     name: refname.to_owned(),
-                }),
+                })),
                 LockError::Io { source, path } => map_ref_store_path_io(
                     &self.common_dir,
                     &self.git_dir,
@@ -1453,14 +1477,16 @@ impl FilesRefStore {
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let crate::error::PathIoOperation::GitDir(operation) = operation else {
-                    return RefStoreError::Corrupt(
-                        "unexpected path I/O operation for ref store".into(),
-                    );
+                    return RefStoreError::Corrupt {
+                        detail: "unexpected path I/O operation for ref store".into(),
+                    };
                 };
                 RefStoreError::git_dir_path_io(path, operation, source)
             }
-            Error::RefStore(store_err) => store_err,
-            other => RefStoreError::Corrupt(other.to_string()),
+            Error::Ref(RefError::Store(store_err)) => store_err,
+            other => RefStoreError::Corrupt {
+                detail: other.to_string(),
+            },
         }
     }
 
@@ -1492,18 +1518,22 @@ impl FilesRefStore {
     ) -> Result<()> {
         if let Some(parent) = lock.parent() {
             if parent.is_file() {
-                return Err(Error::RefStore(RefStoreError::NameUnavailable {
-                    reason: RefnameUnavailable::AncestorExists {
-                        blocking: loose_storage_path_to_refname(common_dir, parent),
-                        new_ref: refname.to_owned(),
+                return Err(Error::Ref(RefError::Store(
+                    RefStoreError::NameUnavailable {
+                        reason: RefnameUnavailable::AncestorExists {
+                            blocking: loose_storage_path_to_refname(common_dir, parent),
+                            new_ref: refname.to_owned(),
+                        },
                     },
-                }));
+                )));
             }
         }
         if path.is_dir() && crate::refs::dir_tree_has_files(path) {
-            return Err(Error::RefStore(RefStoreError::NameUnavailable {
-                reason: name_unavailable_after_loose_rename_conflict(refname, path, common_dir),
-            }));
+            return Err(Error::Ref(RefError::Store(
+                RefStoreError::NameUnavailable {
+                    reason: name_unavailable_after_loose_rename_conflict(refname, path, common_dir),
+                },
+            )));
         }
         let content = match value {
             RawRef::Direct(oid) => format!("{oid}\n"),
@@ -1522,7 +1552,9 @@ impl FilesRefStore {
                     name_unavailable_if_lock_path_io_blocked(common_dir, refname, path, lock, &err)
                 {
                     let _ = fs::remove_file(lock);
-                    return Err(Error::RefStore(RefStoreError::NameUnavailable { reason }));
+                    return Err(Error::Ref(RefError::Store(
+                        RefStoreError::NameUnavailable { reason },
+                    )));
                 }
                 return Err(err);
             }
@@ -1544,9 +1576,13 @@ impl FilesRefStore {
                 ) =>
             {
                 let _ = fs::remove_file(lock);
-                Err(Error::RefStore(RefStoreError::NameUnavailable {
-                    reason: name_unavailable_after_loose_rename_conflict(refname, path, common_dir),
-                }))
+                Err(Error::Ref(RefError::Store(
+                    RefStoreError::NameUnavailable {
+                        reason: name_unavailable_after_loose_rename_conflict(
+                            refname, path, common_dir,
+                        ),
+                    },
+                )))
             }
             Err(err) => io_with_ref_store_path(
                 common_dir,
@@ -1565,10 +1601,10 @@ impl FilesRefStore {
         ctx: CommitContext<'_>,
     ) -> Result<()> {
         let Some(value) = after.refs.get(rename.to.as_str()) else {
-            return Err(Error::Verbatim(format!(
-                "case-only rename missing destination ref '{}'",
-                rename.to
-            )));
+            return Err(RefError::Invalid {
+                detail: format!("case-only rename missing destination ref '{}'", rename.to),
+            }
+            .into());
         };
         let (_, from_path, from_lock) = self.ref_lock_paths(rename.from.as_str());
         if let Some(parent) = from_lock.parent() {
@@ -1793,7 +1829,7 @@ impl FilesRefStore {
                 None => return Ok(None),
             }
         }
-        Err(Error::RefStore(RefStoreError::SymrefLoop))
+        Err(Error::Ref(RefError::Store(RefStoreError::SymrefLoop)))
     }
 
     /// Verify `update` against disk under its locks: its expectation, and for a create that
@@ -1826,7 +1862,9 @@ impl FilesRefStore {
             state_before.refs.get(update.name.as_str()).cloned()
         } else {
             self.read_raw(update.name.as_ref())
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+                .map_err(|e| RefStoreError::Corrupt {
+                    detail: e.to_string(),
+                })?
                 .or_else(|| ctx.removed.get(update.name.as_str()).cloned())
         };
         let actual_ref = actual.as_ref();
@@ -1838,7 +1876,9 @@ impl FilesRefStore {
                         && !update.flags.no_deref =>
                 {
                     self.peel_ref_to_oid(update.name.as_str())
-                        .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+                        .map_err(|e| RefStoreError::Corrupt {
+                            detail: e.to_string(),
+                        })?
                         .is_some_and(|got| got == *want)
                 }
                 _ => expected_matches(actual_ref, &update.expected),
@@ -2139,9 +2179,11 @@ impl FilesRefStore {
             let materialize_loose = update.new_value.is_some()
                 && a.is_some()
                 && b == a
-                && !self
-                    .loose_ref_file_exists(name.as_str())
-                    .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+                && !self.loose_ref_file_exists(name.as_str()).map_err(|e| {
+                    RefStoreError::Corrupt {
+                        detail: e.to_string(),
+                    }
+                })?;
             let writes_ref = b != a || materialize_loose;
 
             self.persist_update_locked(
@@ -2304,13 +2346,19 @@ impl RefStore for FilesRefStore {
 
         let mut preliminary = self
             .load_batch_state_for_prepare(&updates, &reflog_renames, &case_only_renames)
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            .map_err(|e| RefStoreError::Corrupt {
+                detail: e.to_string(),
+            })?;
         self.insert_create_conflict_neighbors(&mut preliminary.refs, &updates)
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            .map_err(|e| RefStoreError::Corrupt {
+                detail: e.to_string(),
+            })?;
         let ignore_case = self.refs_ignore_ascii_case();
         let casefold_lookup = |name: &str| -> std::result::Result<Option<String>, RefStoreError> {
             self.ascii_casefold_existing_name(name)
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))
+                .map_err(|e| RefStoreError::Corrupt {
+                    detail: e.to_string(),
+                })
         };
         let casefold_lookup: CasefoldLookup<'_> = if ignore_case {
             Some(&casefold_lookup)
@@ -2357,7 +2405,9 @@ impl RefStore for FilesRefStore {
 
         if let Err(err) = self
             .refresh_batch_ref_snapshot_under_lock(&mut preliminary, &updates, &case_only_renames)
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))
+            .map_err(|e| RefStoreError::Corrupt {
+                detail: e.to_string(),
+            })
         {
             for acquired in ref_locks.values() {
                 let _ = fs::remove_file(acquired);
@@ -2426,7 +2476,9 @@ impl RefStore for FilesRefStore {
             if before_commit.refs.contains_key(update.name.as_str())
                 && !self
                     .loose_ref_file_exists(update.name.as_str())
-                    .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+                    .map_err(|e| RefStoreError::Corrupt {
+                        detail: e.to_string(),
+                    })?
             {
                 changed.insert(update.name.as_str().to_owned());
             }
@@ -2517,7 +2569,7 @@ impl RefStore for FilesRefStore {
     }
 
     fn create_reflog(&self, name: &RefNameRef) -> Result<()> {
-        validate_storable_refname(name.as_str()).map_err(|e| Error::Verbatim(e.to_string()))?;
+        validate_storable_refname(name.as_str())?;
         let path = self.reflog_path(name.as_str());
         if let Some(parent) = path.parent() {
             self.io_ref_store(
@@ -2660,8 +2712,10 @@ impl PreparedRefTransaction for FilesPrepared<'_> {
                 let _ = fs::remove_file(p);
             }
             return Err(match err {
-                Error::RefStore(store_err) => store_err,
-                other => RefStoreError::Corrupt(other.to_string()),
+                Error::Ref(RefError::Store(store_err)) => store_err,
+                other => RefStoreError::Corrupt {
+                    detail: other.to_string(),
+                },
             });
         }
         if let Some(p) = &batch.packed_lock {

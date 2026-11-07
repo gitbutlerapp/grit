@@ -1,6 +1,7 @@
 //! Rev-list ordering, limiting, and range tests vs system `git` (history harness).
 
 use crate::support;
+use grit_lib::error::RevisionError;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -1048,7 +1049,9 @@ fn cherry_mark_and_left_right_require_one_symmetric_range() {
             assert!(
                 matches!(
                     err,
-                    grit_lib::error::Error::RevList(RevListError::SymmetricRangeRequired)
+                    grit_lib::error::Error::Revision(RevisionError::List(
+                        RevListError::SymmetricRangeRequired
+                    ))
                 ),
                 "{tokens:?}: {err:?}"
             );
@@ -1056,7 +1059,9 @@ fn cherry_mark_and_left_right_require_one_symmetric_range() {
             assert!(
                 matches!(
                     err,
-                    grit_lib::error::Error::RevList(RevListError::SymmetricRangeRequired)
+                    grit_lib::error::Error::Revision(RevisionError::List(
+                        RevListError::SymmetricRangeRequired
+                    ))
                 ),
                 "symmetric_range_tips {tokens:?}: {err:?}"
             );

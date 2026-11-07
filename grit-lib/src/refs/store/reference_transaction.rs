@@ -1,5 +1,6 @@
 //! `reference-transaction` hook around ref store prepare/commit.
 
+use crate::error::RefError;
 use std::sync::Arc;
 
 use crate::hooks::{RefHookContext, ReferenceTransactionPhase};
@@ -91,7 +92,9 @@ fn current_direct_oid(
 ) -> StoreResult<ObjectId> {
     let Some(raw) = store
         .read_raw(RefNameRef::from_trusted(name))
-        .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+        .map_err(|e| RefStoreError::Corrupt {
+            detail: e.to_string(),
+        })?
     else {
         return Ok(null_oid);
     };
@@ -109,7 +112,9 @@ fn current_log_only_old_oid(
 ) -> StoreResult<ObjectId> {
     let Some(raw) = store
         .read_raw(RefNameRef::from_trusted(name))
-        .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+        .map_err(|e| RefStoreError::Corrupt {
+            detail: e.to_string(),
+        })?
     else {
         return Ok(null_oid);
     };
@@ -117,10 +122,14 @@ fn current_log_only_old_oid(
         RawRef::Direct(oid) => Ok(oid),
         RawRef::Symbolic(_) => match store.resolve(RefNameRef::from_trusted(name)) {
             Ok(oid) => Ok(oid),
-            Err(crate::error::Error::RefStore(RefStoreError::NotFound { .. })) => Ok(null_oid),
+            Err(crate::error::Error::Ref(RefError::Store(RefStoreError::NotFound { .. }))) => {
+                Ok(null_oid)
+            }
             Err(e) => Err(match e {
-                crate::error::Error::RefStore(err) => err,
-                other => RefStoreError::Corrupt(other.to_string()),
+                crate::error::Error::Ref(RefError::Store(err)) => err,
+                other => RefStoreError::Corrupt {
+                    detail: other.to_string(),
+                },
             }),
         },
     }
@@ -143,7 +152,10 @@ pub(crate) fn run_reference_transaction_phase(
     }
     let stdin = stdin_from_lines(lines);
     ctx.run_reference_transaction(phase, &stdin)
-        .map_err(|e| RefStoreError::Hook(e.into()))
+        .map_err(|e| match e {
+            crate::error::Error::Hook(hook) => RefStoreError::Hook(hook.into()),
+            other => RefStoreError::Backend(super::BackendError::new(other)),
+        })
 }
 
 /// Prepared batch with optional hook phases after the backend locks.
@@ -194,10 +206,9 @@ impl PreparedRefTransaction for HookWrappedPrepared<'_> {
 
     fn commit(mut self: Box<Self>) -> StoreResult<()> {
         self.hook_armed = false;
-        let inner = self
-            .inner
-            .take()
-            .ok_or_else(|| RefStoreError::Corrupt("ref transaction already finished".into()))?;
+        let inner = self.inner.take().ok_or_else(|| RefStoreError::Corrupt {
+            detail: "ref transaction already finished".into(),
+        })?;
         inner.commit()?;
         let _ = run_reference_transaction_phase(
             self.hooks.as_ref(),

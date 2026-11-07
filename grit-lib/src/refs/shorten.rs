@@ -2,6 +2,7 @@
 
 use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::diagnostics::Warning;
+use crate::error::RefError;
 use crate::error::{Error, Result};
 use crate::refs::store::{RawRef, RefNameRef};
 use crate::refs::SYMREF_MAXDEPTH;
@@ -62,9 +63,9 @@ pub fn peel_symref_to_terminal_ref(repo: &Repository, start: &str) -> Result<Str
             }
         }
     }
-    Err(Error::RefStore(
+    Err(Error::Ref(RefError::Store(
         crate::refs::store::RefStoreError::SymrefLoop,
-    ))
+    )))
 }
 
 fn symref_target_resolves(repo: &Repository, start: &str) -> Result<bool> {

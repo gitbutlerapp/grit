@@ -402,17 +402,18 @@ pub fn write_untracked_extension(uc: &UntrackedCache) -> Vec<u8> {
 }
 
 /// Parse UNTR body (after 4-byte signature + 4-byte size).
-pub(crate) fn parse_untracked_extension(data: &[u8]) -> crate::index::IndexResult<UntrackedCache> {
+pub(crate) fn parse_untracked_extension(data: &[u8]) -> crate::error::Result<UntrackedCache> {
     if data.len() <= 1 || data[data.len() - 1] != 0 {
         return Err(IndexError::corrupt_at(
             None,
             data.len().checked_sub(1),
             IndexCorruptReason::UntrackedCacheMissingNul,
-        ));
+        )
+        .into());
     }
-    parse_untracked_extension_body(data).ok_or_else(|| {
+    Ok(parse_untracked_extension_body(data).ok_or_else(|| {
         IndexError::corrupt_at(None, None, IndexCorruptReason::UntrackedCacheDirCorrupt)
-    })
+    })?)
 }
 
 fn parse_untracked_extension_body(data: &[u8]) -> Option<UntrackedCache> {

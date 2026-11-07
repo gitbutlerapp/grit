@@ -1,6 +1,7 @@
 //! Rev-list history simplification, object walks, and filters (upstream t60xx / t4216).
 
 use crate::support;
+use grit_lib::error::RevisionError;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
@@ -369,7 +370,9 @@ fn t6102_unexpected_object_types_typed_error() {
         .revwalk()
         .rev_list(&[blob_hex, broken_tree_hex.clone()], &[], &opts);
     match result {
-        Err(Error::RevList(RevListError::UnexpectedObjectKind { .. })) => {}
+        Err(Error::Revision(RevisionError::List(RevListError::UnexpectedObjectKind {
+            ..
+        }))) => {}
         other => panic!("unexpected result: {other:?} (blob={blob} broken={broken_tree_hex})"),
     }
 
@@ -401,7 +404,9 @@ fn t6102_unexpected_object_types_typed_error() {
         .expect_err("non-blob seen");
     assert!(matches!(
         err,
-        Error::RevList(RevListError::UnexpectedObjectKind { .. })
+        Error::Revision(RevisionError::List(
+            RevListError::UnexpectedObjectKind { .. }
+        ))
     ));
 }
 

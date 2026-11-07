@@ -400,6 +400,7 @@ impl Pickaxe {
 
 /// Invalid pickaxe pattern.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PickaxeError {
     /// Pattern compilation failed.
     #[error("invalid pickaxe pattern `{pattern}`: {detail}")]
@@ -413,11 +414,7 @@ pub enum PickaxeError {
 
 impl From<PickaxeError> for Error {
     fn from(value: PickaxeError) -> Self {
-        match value {
-            PickaxeError::InvalidPattern { pattern, detail } => {
-                Error::Verbatim(format!("invalid pickaxe pattern `{pattern}`: {detail}"))
-            }
-        }
+        Error::Diff(crate::error::DiffError::Pickaxe(value))
     }
 }
 

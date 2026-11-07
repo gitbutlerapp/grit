@@ -14,6 +14,7 @@ use grit_lib::revwalk::history::{
     RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RefScope, RewriteOptions,
     StartRebaseOptions,
 };
+use grit_lib::worktree::WorktreeError;
 use grit_test_support::{git, git_fsck, unique_tmp, write_file};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -603,10 +604,10 @@ fn pull_rebase_conflict_with_local_changes_refuses_and_keeps_them() {
             &err,
             PullError::Nested(e) if matches!(
                 e.as_ref(),
-                grit_lib::error::Error::DirtyWorktree {
+                grit_lib::error::Error::Worktree(WorktreeError::DirtyWorktree {
                     operation: grit_lib::error::WorktreeOperation::Rebase,
                     paths,
-                } if paths == &vec!["f".to_owned()]
+                }) if paths == &vec!["f".to_owned()]
             )
         ),
         "unexpected {err:?}"

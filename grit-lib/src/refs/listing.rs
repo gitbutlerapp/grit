@@ -29,9 +29,6 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 
-use thiserror::Error;
-
-use crate::error::Error;
 use crate::ident::committer_unix_seconds_for_ordering_bytes;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -157,24 +154,7 @@ pub struct RefQueryOptions {
     pub ignore_case: bool,
 }
 
-/// Errors from ref query operations.
-#[derive(Debug, Error)]
-pub enum RefQueryError {
-    /// Ref store iteration or resolution failed.
-    #[error("ref store: {0}")]
-    Store(#[from] Error),
-    /// Creator-date sort was requested but no object database was supplied.
-    #[error("creator-date sort requires an object database")]
-    MissingObjectDatabase,
-    /// Filter object id is not present in the object database.
-    #[error("object {0} not found")]
-    MissingObject(ObjectId),
-    /// `--contains` / `--merged` target does not resolve to a commit.
-    #[error("object {0} is not a commit")]
-    NotCommit(ObjectId),
-}
-
-type QueryResult<T> = std::result::Result<T, RefQueryError>;
+type QueryResult<T> = crate::error::Result<T>;
 
 #[derive(Clone)]
 struct CollectedRef {
@@ -401,8 +381,9 @@ pub fn creator_date(odb: &Odb, oid: &ObjectId) -> crate::error::Result<i64> {
 ///
 /// # Errors
 ///
-/// Returns [`RefQueryError::MissingObjectDatabase`] when sort key is [`SortKey::Date`] and
-/// `odb` is `None`. Propagates object read errors as [`RefQueryError::Store`].
+/// Returns [`RefError::QueryNeedsObjectDatabase`](crate::error::RefError::QueryNeedsObjectDatabase)
+/// when sort key is [`SortKey::Date`] and `odb` is `None`, and propagates ref store and object
+/// read errors.
 pub fn query_listings_from_pairs<I>(
     entries: I,
     query: &RefQuery,
@@ -684,7 +665,7 @@ fn finish_query(
     if query_has_reachability(query) {
         // Filtering peels the tips it judges, so only the refs it keeps without having
         // peeled them are peeled afterwards; each tip's header is read once.
-        let repo = repo.ok_or(RefQueryError::MissingObjectDatabase)?;
+        let repo = repo.ok_or(crate::error::RefError::QueryNeedsObjectDatabase)?;
         let packed = packed_peels_for(repo, &collected);
         let mut rows: Vec<ReachRow> = collected
             .iter()
@@ -717,7 +698,7 @@ fn finish_query(
         }
     }
     if matches!(query.sort.key, SortKey::Date) {
-        let odb = odb.ok_or(RefQueryError::MissingObjectDatabase)?;
+        let odb = odb.ok_or(crate::error::RefError::QueryNeedsObjectDatabase)?;
         for entry in &mut collected {
             entry.creator_date = creator_date(odb, &entry.oid).unwrap_or(0);
         }

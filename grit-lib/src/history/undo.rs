@@ -36,7 +36,7 @@ pub fn undo_last_rewrite(
     repo: &Repository,
     opts: &ApplyOptions,
     dry_run: bool,
-) -> Result<UndoOutcome, HistoryError> {
+) -> crate::error::Result<UndoOutcome> {
     undo_last_rewrite_with_cancel(repo, opts, dry_run, &crate::progress::CancelToken::never())
 }
 
@@ -46,7 +46,7 @@ pub fn undo_last_rewrite_with_cancel(
     opts: &ApplyOptions,
     dry_run: bool,
     cancel: &crate::progress::CancelToken,
-) -> Result<UndoOutcome, HistoryError> {
+) -> crate::error::Result<UndoOutcome> {
     let record = read_history_last(repo)?.ok_or(HistoryError::NoUndoRecord)?;
     verify_record_still_valid(repo, &record)?;
     let work = if repo.is_bare() {
@@ -105,13 +105,14 @@ fn consumed_local_edits(repo: &Repository, record: &HistoryLastRecord) -> bool {
 fn verify_record_still_valid(
     repo: &Repository,
     record: &HistoryLastRecord,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     for update in &record.ref_updates {
         let live = repo.references().resolve_if_exists(update.name.as_str());
         if !matches!(live, Ok(Some(oid)) if oid == update.new) {
             return Err(HistoryError::UndoStale {
                 name: update.name.as_str().to_owned(),
-            });
+            }
+            .into());
         }
     }
     if let Some(expected) = record.head_new_commit {
@@ -120,7 +121,8 @@ fn verify_record_still_valid(
             Err(_) => {
                 return Err(HistoryError::UndoStale {
                     name: record.head_ref.clone().unwrap_or_else(|| "HEAD".into()),
-                })
+                }
+                .into())
             }
         };
         let live_commit = match head {
@@ -130,7 +132,7 @@ fn verify_record_still_valid(
         };
         if live_commit != Some(expected) {
             let label = record.head_ref.clone().unwrap_or_else(|| "HEAD".into());
-            return Err(HistoryError::UndoStale { name: label });
+            return Err(HistoryError::UndoStale { name: label }.into());
         }
     }
     Ok(())

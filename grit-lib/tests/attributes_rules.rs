@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::error::RefError;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
@@ -585,7 +586,7 @@ fn t0003_resolve_attr_treeish_and_tree_oid_errors() {
     let repo2 =
         Repository::open(&wt.join(".git"), &options.clone().with_work_tree(wt)).expect("open2");
     let err = load_gitattributes_for_diff(&repo2).unwrap_err();
-    assert!(matches!(err, Error::InvalidRef(_)));
+    assert!(matches!(err, Error::Ref(RefError::Invalid { .. })));
 }
 
 fn null_dev() -> &'static str {

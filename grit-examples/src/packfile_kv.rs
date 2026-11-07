@@ -3,6 +3,8 @@
 //! Each object is stored as a length-prefixed zlib blob of canonical Git store bytes.
 //! An in-memory index mapping [`ObjectId`] to file offsets is rebuilt when the file is opened.
 
+use grit_lib::error::ObjectError;
+use grit_lib::error::RefError;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -116,9 +118,11 @@ impl PackfileKvStore {
         file.read_exact(&mut zlib).map_err(Error::Io)?;
         let mut decoder = ZlibDecoder::new(zlib.as_slice());
         let mut raw = Vec::new();
-        decoder
-            .read_to_end(&mut raw)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
+        decoder.read_to_end(&mut raw).map_err(|e| {
+            Error::Object(ObjectError::Zlib {
+                detail: e.to_string(),
+            })
+        })?;
         Ok(raw)
     }
 
@@ -127,7 +131,11 @@ impl PackfileKvStore {
         {
             let mut enc = ZlibEncoder::new(&mut zlib, self.compression);
             enc.write_all(store_bytes).map_err(Error::Io)?;
-            enc.finish().map_err(|e| Error::Zlib(e.to_string()))?;
+            enc.finish().map_err(|e| {
+                Error::Object(ObjectError::Zlib {
+                    detail: e.to_string(),
+                })
+            })?;
         }
         let _guard = self
             .append
@@ -141,8 +149,11 @@ impl PackfileKvStore {
         let offset = file.stream_position().map_err(Error::Io)?;
         write_u32_be(
             &mut file,
-            u32::try_from(zlib.len())
-                .map_err(|_| Error::CorruptObject("zlib record length overflow".into()))?,
+            u32::try_from(zlib.len()).map_err(|_| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "zlib record length overflow".into(),
+                })
+            })?,
         )?;
         file.write_all(&zlib).map_err(Error::Io)?;
         file.sync_all().map_err(Error::Io)?;
@@ -170,10 +181,9 @@ impl ObjectStore for PackfileKvStore {
         let obj = parse_store_bytes(&raw)?;
         let computed = hash::hash_object(self.algo, obj.kind, &obj.data)?;
         if computed != *oid {
-            return Err(Error::CorruptObject(format!(
-                "packfile kv hash mismatch for {}",
-                oid.to_hex()
-            )));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("packfile kv hash mismatch for {}", oid.to_hex()),
+            }));
         }
         Ok(Some(obj))
     }
@@ -198,7 +208,9 @@ impl ObjectStore for PackfileKvStore {
             return Ok(None);
         };
         let size = u64::try_from(obj.data.len()).map_err(|_| {
-            Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("object size overflow for {}", oid.to_hex()),
+            })
         })?;
         Ok(Some(ObjectStream {
             kind: obj.kind,
@@ -227,10 +239,10 @@ impl ObjectStore for PackfileKvStore {
             .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
         let prefix = prefix.to_ascii_lowercase();
         if !prefix.is_empty() && !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(Error::InvalidObjectId(prefix));
+            return Err(Error::Object(ObjectError::InvalidId { input: prefix }));
         }
         if prefix.len() > self.algo.hex_len() {
-            return Err(Error::InvalidObjectId(prefix));
+            return Err(Error::Object(ObjectError::InvalidId { input: prefix }));
         }
         let mut count = 0usize;
         for oid in guard.keys() {
@@ -288,7 +300,9 @@ fn read_header(file: &mut File) -> Result<HashAlgo> {
     let mut magic = [0u8; 8];
     file.read_exact(&mut magic).map_err(Error::Io)?;
     if &magic != MAGIC {
-        return Err(Error::CorruptObject("invalid packfile kv magic".into()));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "invalid packfile kv magic".into(),
+        }));
     }
     let mut algo_byte = [0u8; 1];
     file.read_exact(&mut algo_byte).map_err(Error::Io)?;
@@ -308,9 +322,9 @@ fn parse_algo_byte(byte: u8) -> Result<HashAlgo> {
     match byte {
         1 => Ok(HashAlgo::Sha1),
         2 => Ok(HashAlgo::Sha256),
-        _ => Err(Error::CorruptObject(format!(
-            "unknown packfile kv algo byte {byte}"
-        ))),
+        _ => Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("unknown packfile kv algo byte {byte}"),
+        })),
     }
 }
 
@@ -327,12 +341,14 @@ fn rebuild_index(file: &mut File, algo: HashAlgo) -> Result<HashMap<ObjectId, u6
         let len = match read_u32_be_or_eof(file) {
             Ok(None) => break,
             Ok(Some(len)) => len as usize,
-            Err(Error::CorruptObject(_)) => break,
+            Err(Error::Object(ObjectError::Corrupt { .. })) => break,
             Err(err) => return Err(err),
         };
         let payload_start = file.stream_position().map_err(Error::Io)?;
         let remaining = usize::try_from(file_len.saturating_sub(payload_start)).map_err(|_| {
-            Error::CorruptObject("packfile kv record extends past address space".into())
+            Error::Object(ObjectError::Corrupt {
+                detail: "packfile kv record extends past address space".into(),
+            })
         })?;
         if len > remaining {
             break;
@@ -371,33 +387,49 @@ fn build_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
 }
 
 fn parse_store_bytes(raw: &[u8]) -> Result<Object> {
-    let nul = raw
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| Error::CorruptObject("missing object header terminator".into()))?;
-    let header = std::str::from_utf8(&raw[..nul])
-        .map_err(|_| Error::CorruptObject("invalid object header utf-8".into()))?;
+    let nul = raw.iter().position(|&b| b == 0).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "missing object header terminator".into(),
+        })
+    })?;
+    let header = std::str::from_utf8(&raw[..nul]).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "invalid object header utf-8".into(),
+        })
+    })?;
     let mut parts = header.splitn(2, ' ');
-    let kind_str = parts
-        .next()
-        .ok_or_else(|| Error::CorruptObject("empty object header".into()))?;
-    let size_str = parts
-        .next()
-        .ok_or_else(|| Error::CorruptObject("missing object size".into()))?;
-    let kind: ObjectKind = kind_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("unknown object kind {kind_str}")))?;
-    let size: usize = size_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("invalid object size {size_str}")))?;
-    let payload = raw
-        .get(nul + 1..)
-        .ok_or_else(|| Error::CorruptObject("object payload shorter than header".into()))?;
+    let kind_str = parts.next().ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "empty object header".into(),
+        })
+    })?;
+    let size_str = parts.next().ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "missing object size".into(),
+        })
+    })?;
+    let kind: ObjectKind = kind_str.parse().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("unknown object kind {kind_str}"),
+        })
+    })?;
+    let size: usize = size_str.parse().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("invalid object size {size_str}"),
+        })
+    })?;
+    let payload = raw.get(nul + 1..).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "object payload shorter than header".into(),
+        })
+    })?;
     if payload.len() != size {
-        return Err(Error::CorruptObject(format!(
-            "object size {size} does not match payload {}",
-            payload.len()
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!(
+                "object size {size} does not match payload {}",
+                payload.len()
+            ),
+        }));
     }
     Ok(Object {
         kind,
@@ -409,8 +441,11 @@ fn info_from_store_bytes(raw: &[u8]) -> Result<ObjectInfo> {
     let obj = parse_store_bytes(raw)?;
     Ok(ObjectInfo {
         kind: obj.kind,
-        size: u64::try_from(obj.data.len())
-            .map_err(|_| Error::CorruptObject("object size overflow".into()))?,
+        size: u64::try_from(obj.data.len()).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "object size overflow".into(),
+            })
+        })?,
     })
 }
 
@@ -425,7 +460,7 @@ fn read_u32_be(reader: &mut impl Read) -> Result<u32> {
 
 /// Read a big-endian record length, or `None` at a clean end-of-file (zero bytes read).
 ///
-/// A partial 1–3 byte prefix is corruption and returns [`Error::CorruptObject`].
+/// A partial 1–3 byte prefix is corruption and returns [`grit_lib::error::ObjectError::Corrupt`].
 fn read_u32_be_or_eof(reader: &mut impl Read) -> Result<Option<u32>> {
     let mut buf = [0u8; 4];
     let mut filled = 0usize;
@@ -435,9 +470,9 @@ fn read_u32_be_or_eof(reader: &mut impl Read) -> Result<Option<u32>> {
                 if filled == 0 {
                     return Ok(None);
                 }
-                return Err(Error::CorruptObject(
-                    "truncated packfile kv record length prefix".into(),
-                ));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "truncated packfile kv record length prefix".into(),
+                }));
             }
             Ok(n) => filled += n,
             Err(err) => return Err(Error::Io(err)),
@@ -497,7 +532,11 @@ pub fn run_custom_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
         .write(ObjectKind::Commit, commit_body.as_bytes())?;
     // The commit lives in the custom store, which only the repository's own ref store checks.
     repo.references().update(
-        &RefName::try_from("refs/heads/main").map_err(|e| Error::InvalidRef(e.to_string()))?,
+        &RefName::try_from("refs/heads/main").map_err(|e| {
+            Error::Ref(RefError::Invalid {
+                detail: e.to_string(),
+            })
+        })?,
         &commit,
     )?;
 

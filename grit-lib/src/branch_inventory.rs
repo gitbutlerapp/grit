@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use time::OffsetDateTime;
 
 use crate::config::ConfigSet;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::objects::{read_commit_subject_pretty, ObjectId, ObjectKind};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::refs::listing::{
-    query_refs_peeling, PeelTips, RefKind, RefNamespace, RefQuery, RefQueryError, RefQueryOptions,
+    query_refs_peeling, PeelTips, RefKind, RefNamespace, RefQuery, RefQueryOptions,
 };
 use crate::repo::Repository;
 use crate::rev_parse::abbreviate_ref_name;
@@ -129,8 +129,7 @@ pub fn list_branches(
         &ref_query_for_branch_list(query),
         &ref_query_options(&config),
         PeelTips::WhenFiltering,
-    )
-    .map_err(ref_query_error)?;
+    )?;
 
     let current = match resolve_head_for_repository(repo)? {
         HeadState::Branch { short_name, .. } => Some(short_name),
@@ -215,17 +214,6 @@ fn ref_query_options(config: &ConfigSet) -> RefQueryOptions {
             .map(|s| s.to_owned())
             .collect(),
         ignore_case: config.ignore_case(),
-    }
-}
-
-fn ref_query_error(err: RefQueryError) -> Error {
-    match err {
-        RefQueryError::Store(e) => e,
-        RefQueryError::MissingObjectDatabase => {
-            Error::Verbatim("creator-date sort requires commit objects".into())
-        }
-        RefQueryError::MissingObject(oid) => Error::ObjectNotFound(oid.to_string()),
-        RefQueryError::NotCommit(oid) => Error::Verbatim(format!("not a commit: {oid}")),
     }
 }
 

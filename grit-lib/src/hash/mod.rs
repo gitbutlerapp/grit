@@ -7,7 +7,7 @@
 //!
 //! **Object ids** name Git objects. SHA-1 ids are computed with [`sha1dc`] (collision
 //! detection, standard digest mode). [`ObjectHasher::finalize`], [`hash_object`], and
-//! [`HashAlgo::digest`] return [`Result`] and surface [`Error::HashCollision`] on
+//! [`HashAlgo::digest`] return [`Result`] and surface [`crate::error::ObjectError::HashCollision`] on
 //! chosen-prefix collisions. Canonical store bytes are `"<kind> <len>\\0<payload>"`;
 //! use [`HashAlgo::digest`] when hashing raw bytes that should become an [`ObjectId`]
 //! (for example verifying loose object headers).
@@ -19,6 +19,7 @@
 
 #![allow(dead_code)]
 
+use crate::error::ObjectError;
 use std::io::{self, Write};
 
 use sha1::{Digest as Sha1Digest, Sha1};
@@ -234,7 +235,7 @@ impl ObjectHasher {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::error::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn finalize(self) -> Result<ObjectId> {
         match self {
             Self::Sha1(h) => match h.finalize() {
@@ -250,7 +251,7 @@ impl ObjectHasher {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidObjectId`] when `out` is shorter than the digest
+    /// Returns [`crate::error::ObjectError::InvalidId`] when `out` is shorter than the digest
     /// length for this algorithm (a diagnostic string names the required size).
     pub fn finalize_into(self, out: &mut [u8]) -> Result<usize> {
         match self {
@@ -261,11 +262,13 @@ impl ObjectHasher {
                 };
                 let bytes = oid.as_bytes();
                 if out.len() < bytes.len() {
-                    return Err(Error::InvalidObjectId(format!(
-                        "digest buffer too short: need {} bytes, have {}",
-                        bytes.len(),
-                        out.len()
-                    )));
+                    return Err(Error::Object(ObjectError::InvalidId {
+                        input: format!(
+                            "digest buffer too short: need {} bytes, have {}",
+                            bytes.len(),
+                            out.len()
+                        ),
+                    }));
                 }
                 out[..bytes.len()].copy_from_slice(bytes);
                 Ok(bytes.len())
@@ -274,10 +277,12 @@ impl ObjectHasher {
                 let digest = h.finalize();
                 let len = digest.len();
                 if out.len() < len {
-                    return Err(Error::InvalidObjectId(format!(
-                        "digest buffer too short: need {len} bytes, have {}",
-                        out.len()
-                    )));
+                    return Err(Error::Object(ObjectError::InvalidId {
+                        input: format!(
+                            "digest buffer too short: need {len} bytes, have {}",
+                            out.len()
+                        ),
+                    }));
                 }
                 out[..len].copy_from_slice(&digest);
                 Ok(len)
@@ -328,7 +333,7 @@ impl HashAlgo {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::error::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn digest(self, data: &[u8]) -> Result<ObjectId> {
         let mut hasher = self.hasher();
         hasher.update(data);
@@ -339,7 +344,7 @@ impl HashAlgo {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::error::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn hash_object(self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         hash_object(self, kind, data)
     }
@@ -356,7 +361,7 @@ impl HashAlgo {
 ///
 /// # Errors
 ///
-/// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+/// Returns [`crate::error::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
 pub fn hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
     let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
     let mut hasher = ObjectHasher::for_object(algo, kind, len);
@@ -389,7 +394,7 @@ impl ObjectPayloadHasher {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::error::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn finish(self) -> Result<ObjectId> {
         self.inner.finalize()
     }
@@ -401,9 +406,9 @@ fn object_id_from_sha1_digest(digest: &sha1dc::Digest) -> ObjectId {
 }
 
 fn collision_to_error(collision: sha1dc::Collision) -> Error {
-    Error::HashCollision {
+    Error::Object(ObjectError::HashCollision {
         oid: object_id_from_sha1_digest(&collision.digest()),
-    }
+    })
 }
 
 /// A writer that forwards bytes to an inner sink while accumulating a checksum.
@@ -901,10 +906,13 @@ mod tests {
             let mut hasher = ObjectHasher::new(HashAlgo::Sha1);
             hasher.update(&bytes);
             let err = hasher.finalize().expect_err("SHAttered block must collide");
-            assert!(matches!(err, Error::HashCollision { .. }));
+            assert!(matches!(
+                err,
+                Error::Object(ObjectError::HashCollision { .. })
+            ));
             assert!(matches!(
                 HashAlgo::Sha1.digest(&bytes),
-                Err(Error::HashCollision { .. })
+                Err(Error::Object(ObjectError::HashCollision { .. }))
             ));
 
             // As a blob, the header shifts the colliding blocks: the object id is an

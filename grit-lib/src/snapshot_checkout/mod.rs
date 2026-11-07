@@ -114,6 +114,7 @@ pub(crate) use {
     transfer::push_for_checkin,
 };
 
+use crate::error::ObjectError;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -595,8 +596,12 @@ pub struct CheckoutErrorBody {
     pub error: String,
 }
 
-/// Why a snapshot checkout failed.
+/// Snapshot-checkout failures specific to talking to a grit server; fetch, pull, download,
+/// and repository failures are reported in their own areas.
+///
+/// Surfaced on the umbrella as [`RemoteError::Snapshot`](crate::remote::RemoteError::Snapshot).
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum CheckoutError {
     /// The server has no snapshot-checkout endpoint for this repository.
     #[error("{}", checkout_not_offered_message(.url, .endpoint))]
@@ -617,8 +622,11 @@ pub enum CheckoutError {
         message: String,
     },
     /// The URL cannot name a repository.
-    #[error("{}", checkout_invalid_url_message(.0))]
-    InvalidUrl(String),
+    #[error("{}", checkout_invalid_url_message(.url))]
+    InvalidUrl {
+        /// The URL as given.
+        url: String,
+    },
     /// A path is not a plain path inside the repository.
     #[error("{path}: {reason}")]
     InvalidPath {
@@ -647,8 +655,11 @@ pub enum CheckoutError {
     #[error("{0} already exists and is not empty")]
     DestinationNotEmpty(PathBuf),
     /// A name is not a valid branch name.
-    #[error("{0} is not a valid branch name")]
-    InvalidBranchName(String),
+    #[error("{name} is not a valid branch name")]
+    InvalidBranchName {
+        /// The branch name as given.
+        name: String,
+    },
     /// A checkout's stored record could not be read.
     #[error("the record of checkout {id} at {path} is damaged: {detail}")]
     DamagedRecord {
@@ -707,18 +718,12 @@ pub enum CheckoutError {
         /// The branch `HEAD` is on now.
         branch: String,
         /// Why the rebase failed.
-        failed: Box<CheckoutError>,
+        failed: crate::error::ErrorSummary,
     },
     /// The checkout is in the middle of an operation (a stopped rebase, a
     /// merge) that has to be finished or aborted first.
     #[error("a {} is in progress", .0.description())]
     OperationInProgress(crate::state::InProgressOperation),
-    /// A fetch from or push to the server failed.
-    #[error(transparent)]
-    Remote(Box<crate::remote::RemoteError>),
-    /// Bringing the current branch onto the new snapshot failed.
-    #[error(transparent)]
-    Pull(Box<crate::porcelain::pull::PullError>),
     /// The server's answer could not be parsed.
     #[error("{}", checkout_protocol_message(.url, .detail))]
     Protocol {
@@ -727,9 +732,6 @@ pub enum CheckoutError {
         /// What was wrong.
         detail: String,
     },
-    /// The download failed.
-    #[error(transparent)]
-    Download(Box<crate::resumable::ResumableError>),
     /// The snapshot needs blobs the repository keeps on a promisor remote (a
     /// large-object promisor), and lazy fetch is off, so they cannot be brought in.
     /// As for upload-pack, lazy fetch is turned on with `uploadpack.lazyFetch` or
@@ -751,48 +753,14 @@ pub enum CheckoutError {
         count: usize,
         /// Why the fetch failed.
         #[source]
-        source: Box<crate::error::Error>,
+        source: crate::error::ErrorSummary,
     },
-    /// A repository operation failed.
-    #[error(transparent)]
-    Library(Box<crate::error::Error>),
     /// A file operation failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
-impl From<crate::error::Error> for CheckoutError {
-    fn from(e: crate::error::Error) -> Self {
-        Self::Library(Box::new(e))
-    }
-}
-
-impl From<crate::index::IndexError> for CheckoutError {
-    fn from(err: crate::index::IndexError) -> Self {
-        crate::error::Error::from(err).into()
-    }
-}
-
-impl From<crate::resumable::ResumableError> for CheckoutError {
-    fn from(e: crate::resumable::ResumableError) -> Self {
-        Self::Download(Box::new(e))
-    }
-}
-
-impl From<crate::remote::RemoteError> for CheckoutError {
-    fn from(e: crate::remote::RemoteError) -> Self {
-        Self::Remote(Box::new(e))
-    }
-}
-
-impl From<crate::porcelain::pull::PullError> for CheckoutError {
-    fn from(e: crate::porcelain::pull::PullError) -> Self {
-        Self::Pull(Box::new(e))
-    }
-}
-
-/// Result alias for snapshot checkouts.
-pub type Result<T> = std::result::Result<T, CheckoutError>;
+use crate::error::Result;
 
 /// Clean up requested paths: relative, without `.`, `..` or empty components,
 /// without trailing slashes, sorted, deduplicated, and with paths inside
@@ -813,7 +781,8 @@ pub fn normalize_paths(paths: &[String]) -> Result<Vec<String>> {
             return Err(CheckoutError::InvalidPath {
                 path: p.clone(),
                 reason: "paths are relative to the repository root",
-            });
+            }
+            .into());
         }
         if trimmed
             .split('/')
@@ -822,7 +791,8 @@ pub fn normalize_paths(paths: &[String]) -> Result<Vec<String>> {
             return Err(CheckoutError::InvalidPath {
                 path: p.clone(),
                 reason: "not a plain path inside the repository",
-            });
+            }
+            .into());
         }
         out.push(trimmed.to_owned());
     }
@@ -981,12 +951,13 @@ fn cut_tree(odb: &Odb, tree: ObjectId, paths: &[String], strict: bool) -> Result
                 return Err(CheckoutError::MissingPath {
                     path: p.clone(),
                     base: tree.to_hex(),
-                })
+                }
+                .into())
             }
             None => {}
         }
     }
-    Ok(root.write(odb)?)
+    root.write(odb)
 }
 
 /// The bytes of the snapshot commit standing for `base` with tree `tree` on
@@ -1050,10 +1021,13 @@ pub(crate) fn make_snapshot(
     let odb = repo.odb();
     let commit = odb.read_commit(&base)?;
     let tree = filtered_tree(odb, commit.tree, paths).map_err(|e| match e {
-        CheckoutError::MissingPath { path, .. } => CheckoutError::MissingPath {
+        crate::error::Error::Remote(crate::remote::RemoteError::Snapshot(
+            CheckoutError::MissingPath { path, .. },
+        )) => CheckoutError::MissingPath {
             path,
             base: base.to_hex(),
-        },
+        }
+        .into(),
         other => other,
     })?;
     let time = crate::ident::parse_signature_times(&commit.committer)
@@ -1109,11 +1083,13 @@ fn fetch_promised_tree_blobs(repo: &Repository, tree: ObjectId) -> Result<usize>
     };
     let promised = crate::serve::promised_objects::PromisorObjects::new(repo)?;
     if !promised.is_promised(&first, Some(&referrer))? {
-        return Err(crate::error::Error::ObjectNotFound(first.to_hex()).into());
+        return Err(crate::error::Error::Object(ObjectError::NotFound {
+            name: first.to_hex(),
+        }));
     }
     let count = missing.len();
     if repo.caches().promisor_fetcher().is_none() {
-        return Err(CheckoutError::PromisedBlobs { oid: first, count });
+        return Err(CheckoutError::PromisedBlobs { oid: first, count }.into());
     }
     let wanted: Vec<ObjectId> = blobs
         .iter()
@@ -1124,17 +1100,17 @@ fn fetch_promised_tree_blobs(repo: &Repository, tree: ObjectId) -> Result<usize>
         |oid: ObjectId, source: crate::error::Error| CheckoutError::PromisedBlobsNotFetched {
             oid,
             count,
-            source: Box::new(source),
+            source: crate::error::ErrorSummary::from(source),
         };
     repo.prefetch_promised(&wanted)
         .map_err(|e| not_fetched(first, e))?;
     odb.reprepare_local_packs();
     odb.invalidate_packs();
     if let Some(&still) = odb.missing_stored_oids(wanted.iter().copied())?.first() {
-        return Err(not_fetched(
+        return Err(crate::error::Error::from(not_fetched(
             still,
-            crate::error::Error::PromisedObjectMissing(still),
-        ));
+            crate::error::Error::Object(ObjectError::PromisedMissing { oid: still }),
+        )));
     }
     Ok(count)
 }
@@ -1177,15 +1153,17 @@ impl CheckoutUrl {
     /// [`CheckoutError::InvalidUrl`] when `url` is not http(s) or names no
     /// repository.
     pub fn parse(url: &str) -> Result<Self> {
-        let invalid = || CheckoutError::InvalidUrl(url.to_owned());
+        let invalid = || CheckoutError::InvalidUrl {
+            url: url.to_owned(),
+        };
         let parsed = url::Url::parse(url).map_err(|_| invalid())?;
         if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-            return Err(invalid());
+            return Err(crate::error::Error::from(invalid()));
         }
         let path = parsed.path().trim_matches('/');
         let path = path.strip_suffix(".git").unwrap_or(path);
         if path.is_empty() {
-            return Err(invalid());
+            return Err(crate::error::Error::from(invalid()));
         }
         let name = path.rsplit('/').next().unwrap_or(path).to_owned();
         let mut server = parsed.clone();
@@ -1247,7 +1225,8 @@ impl<'a> CheckoutClient<'a> {
             return Err(CheckoutError::NotOffered {
                 url: self.given.clone(),
                 endpoint: self.url.api.clone(),
-            });
+            }
+            .into());
         }
         if !(200..300).contains(&status) {
             let message = serde_json::from_slice::<CheckoutErrorBody>(&bytes)
@@ -1257,12 +1236,15 @@ impl<'a> CheckoutClient<'a> {
                 url: url.to_owned(),
                 status,
                 message,
-            });
+            }
+            .into());
         }
-        serde_json::from_slice(&bytes).map_err(|e| CheckoutError::Protocol {
-            url: url.to_owned(),
-            detail: e.to_string(),
-        })
+        Ok(
+            serde_json::from_slice(&bytes).map_err(|e| CheckoutError::Protocol {
+                url: url.to_owned(),
+                detail: e.to_string(),
+            })?,
+        )
     }
 
     /// What the server would check out.
@@ -1601,7 +1583,7 @@ pub fn materialize(
         work,
     } = *request;
     if dest.is_dir() && std::fs::read_dir(dest)?.next().is_some() {
-        return Err(CheckoutError::DestinationNotEmpty(dest.to_path_buf()));
+        return Err(CheckoutError::DestinationNotEmpty(dest.to_path_buf()).into());
     }
     std::fs::create_dir_all(dest)?;
     let (repo, _) = Repository::init(
@@ -1611,13 +1593,8 @@ pub fn materialize(
             ..InitOptions::default()
         },
     )?;
-    let opened = repo
-        .bundles()
-        .open(bundle)
-        .map_err(|e| crate::error::Error::Verbatim(format!("bundle: {e}")))?;
-    let unbundled = opened
-        .unbundle(&repo, progress, cancel)
-        .map_err(|e| crate::error::Error::Verbatim(format!("bundle: {e}")))?;
+    let opened = repo.bundles().open(bundle)?;
+    let unbundled = opened.unbundle(&repo, progress, cancel)?;
     let mismatch = |got: String| CheckoutError::Mismatch {
         expected: info.root.clone(),
         got,
@@ -1629,14 +1606,14 @@ pub fn materialize(
         .map(|r| r.oid)
         .ok_or_else(|| mismatch("an empty bundle".to_owned()))?;
     if tip != root {
-        return Err(mismatch(tip.to_hex()));
+        return Err(crate::error::Error::from(mismatch(tip.to_hex())));
     }
     let object = repo.odb().read(&root)?;
     if object.data != info.root_object.as_bytes() {
-        return Err(mismatch(format!(
+        return Err(crate::error::Error::from(mismatch(format!(
             "{} with different contents",
             root.to_hex()
-        )));
+        ))));
     }
     let git_dir = repo.git_dir().to_path_buf();
     let upstream = upstream_ref(&info.branch);
@@ -1962,7 +1939,7 @@ mod tests {
         let repo = open_with(tmp.path(), None);
         let err = make_snapshot(&repo, commit, &["src".to_owned()], None).unwrap_err();
         assert!(
-            matches!(err, CheckoutError::PromisedBlobs { oid, count: 1 } if oid == big),
+            matches!(err, crate::error::Error::Remote(crate::remote::RemoteError::Snapshot(CheckoutError::PromisedBlobs { oid, count: 1 })) if oid == big),
             "{err:?}"
         );
         assert!(err.to_string().contains("uploadpack.lazyFetch"), "{err}");
@@ -1996,7 +1973,7 @@ mod tests {
         let repo = open_with(tmp.path(), Some(fetcher));
         let err = fetch_promised_blobs(&repo, commit).unwrap_err();
         assert!(
-            matches!(err, CheckoutError::PromisedBlobsNotFetched { oid, count: 1, .. } if oid == big),
+            matches!(err, crate::error::Error::Remote(crate::remote::RemoteError::Snapshot(CheckoutError::PromisedBlobsNotFetched { oid, count: 1, .. })) if oid == big),
             "{err:?}"
         );
     }
@@ -2023,7 +2000,7 @@ mod tests {
                 detail: "not json".to_owned(),
             }
             .to_string(),
-            CheckoutError::InvalidUrl(url.clone()).to_string(),
+            CheckoutError::InvalidUrl { url: url.clone() }.to_string(),
         ];
         assert!(
             samples[0].contains("/.grit/checkouts/demo"),
@@ -2051,7 +2028,12 @@ mod tests {
         // Not a partial repository: the check is skipped and the stats read fails.
         let err = make_snapshot(&repo, commit, &["src".to_owned()], None).unwrap_err();
         assert!(
-            !matches!(err, CheckoutError::PromisedBlobs { .. }),
+            !matches!(
+                err,
+                crate::error::Error::Remote(crate::remote::RemoteError::Snapshot(
+                    CheckoutError::PromisedBlobs { .. }
+                ))
+            ),
             "{err:?}"
         );
     }

@@ -1,5 +1,6 @@
 //! Init initial branch, separate git dir, and object format (task 3527 / t0001-init core cases).
 
+use grit_lib::error::RefError;
 use std::fs;
 use std::process::Command;
 
@@ -73,7 +74,7 @@ fn init_falls_back_to_main() {
 #[test]
 fn init_invalid_branch_name_is_typed_error() {
     let err = resolve_initial_branch(&Environment::empty(), Some("-bad")).unwrap_err();
-    assert!(matches!(err, Error::InvalidRef(_)));
+    assert!(matches!(err, Error::Ref(RefError::Invalid { .. })));
 }
 
 #[test]

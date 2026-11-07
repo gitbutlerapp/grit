@@ -1,6 +1,7 @@
 //! Hostile tree entry names must be rejected at checkout/index population, matching system `git`.
 
 use crate::support;
+use grit_lib::worktree::WorktreeError;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -230,7 +231,10 @@ fn snapshot_walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
 
 fn assert_invalid_path_component(err: Error) {
     assert!(
-        matches!(err, Error::InvalidPathComponent { .. }),
+        matches!(
+            err,
+            Error::Worktree(WorktreeError::InvalidPathComponent { .. })
+        ),
         "expected InvalidPathComponent, got {err:?}"
     );
 }

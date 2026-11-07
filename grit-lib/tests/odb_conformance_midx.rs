@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::midx_support;
+use grit_lib::error::ObjectError;
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -556,7 +557,10 @@ fn partial_permissive_chain_never_satisfies_strict_store_and_refresh_recovers() 
             try_read_object_via_midx_with_diagnostics(&objects, &new, &sink)
         });
         if failure == "structure" {
-            assert!(matches!(permissive, Err(grit_lib::error::Error::Midx(_))));
+            assert!(matches!(
+                permissive,
+                Err(grit_lib::error::Error::Object(ObjectError::Midx(_)))
+            ));
         } else {
             assert!(permissive.expect("partial chain").is_some());
         }

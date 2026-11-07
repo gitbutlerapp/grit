@@ -1,6 +1,10 @@
 //! Single chain walk that maps library and wrapped failures to CLI exit codes,
 //! human text, hints, and structured `--json` payloads.
 
+use grit_lib::error::ObjectError;
+use grit_lib::error::RefError;
+use grit_lib::error::RevisionError;
+use grit_lib::worktree::WorktreeError;
 use std::error::Error as StdError;
 
 use grit_lib::index::IndexError;
@@ -14,7 +18,6 @@ use grit_lib::error::{ConfigError, Error as LibError, LockHeldError, RepositoryE
 use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
-use grit_lib::porcelain::merge::ContinueMergeError;
 use grit_lib::porcelain::paths::BlockedRemoval;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::porcelain::{CommitError, MergeError};
@@ -22,7 +25,7 @@ use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::history::{HistoryEngineError, HistoryError};
+use grit_lib::revwalk::history::HistoryError;
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 use grit_lib::state::InProgressOperation;
 use time::OffsetDateTime;
@@ -123,33 +126,42 @@ fn format_ambiguous_change_id(spec: &str, candidates: &[AmbiguousChangeIdHint]) 
 #[must_use]
 pub fn human_message_for_lib(err: &LibError) -> String {
     match err {
-        LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
-            format_ambiguous_change_id(prefix, candidates)
-        }
-        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+        LibError::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
+            prefix,
+            candidates,
+        })) => format_ambiguous_change_id(prefix, candidates),
+        LibError::Revision(RevisionError::Parse(RevParseError::InvalidObjectName { name })) => {
             format!("revision '{name}' not found")
         }
-        LibError::RevParse(e @ RevParseError::AmbiguousArgument { .. }) => e.to_string(),
-        LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
+        LibError::Revision(RevisionError::Parse(e @ RevParseError::AmbiguousArgument { .. })) => {
+            e.to_string()
+        }
+        LibError::Revision(RevisionError::Parse(RevParseError::ReflogDateUnparseable { date })) => {
             format!("invalid reflog date '{date}'")
         }
-        LibError::ObjectNotFound(spec) => format!("revision '{spec}' not found"),
-        LibError::HashCollision { oid } => format!(
+        LibError::Object(ObjectError::NotFound { name: spec }) => {
+            format!("revision '{spec}' not found")
+        }
+        LibError::Object(ObjectError::HashCollision { oid }) => format!(
             "refusing to store content that triggers an SHA-1 hash collision (digest {})",
             oid.to_hex()
         ),
         LibError::LockHeld(lock) => lock_held(&lock.path, lock.holder).to_string(),
-        LibError::RefStore(RefStoreError::NotFound { name }) => {
+        LibError::Ref(RefError::Store(RefStoreError::NotFound { name })) => {
             match name.strip_prefix("refs/heads/") {
                 Some(short) => format!("no branch named '{short}'"),
                 None => format!("ref not found: {name}"),
             }
         }
-        LibError::InvalidPathComponent { path, reason } => {
+        LibError::Worktree(WorktreeError::InvalidPathComponent { path, reason }) => {
             format!("cannot use path '{path}': {reason}")
         }
-        LibError::PathspecIgnored { paths } => pathspec_ignored_human(paths),
-        LibError::UnmergedConflictMarkers { paths } => stage_conflict_markers_human(paths),
+        LibError::Worktree(WorktreeError::PathspecIgnored { paths }) => {
+            pathspec_ignored_human(paths)
+        }
+        LibError::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) => {
+            stage_conflict_markers_human(paths)
+        }
         LibError::Hook(hook) => {
             let mut message = hook.to_string();
             let mut cause = StdError::source(hook);
@@ -160,7 +172,9 @@ pub fn human_message_for_lib(err: &LibError) -> String {
             }
             message
         }
-        LibError::RemoveBlocked { paths } => remove_blocked_human(paths, false, None),
+        LibError::Worktree(WorktreeError::RemoveBlocked { paths }) => {
+            remove_blocked_human(paths, false, None)
+        }
         LibError::Merge(MergeError::OperationInProgress(kind)) => {
             operation_in_progress_human("proceed", *kind)
         }
@@ -208,7 +222,9 @@ pub fn resolve_rebase_upstream_revision(
 ) -> Result<ObjectId, Error> {
     match resolve {
         Ok(oid) => Ok(oid),
-        Err(LibError::RevParse(RevParseError::NoUpstream { branch })) if use_default_upstream => {
+        Err(LibError::Revision(RevisionError::Parse(RevParseError::NoUpstream { branch })))
+            if use_default_upstream =>
+        {
             Err(rebase_no_upstream_error(&branch))
         }
         Err(other) => {
@@ -221,8 +237,10 @@ pub fn resolve_rebase_upstream_revision(
 #[must_use]
 pub fn map_lib_error(err: LibError) -> Error {
     match err {
-        LibError::RevisionNotFound(spec) => crate::json_error::revision_not_found(&spec),
-        LibError::UnbornHead => crate::unborn_errors::unborn_head_from_cwd()
+        LibError::Revision(RevisionError::NotFound { spec }) => {
+            crate::json_error::revision_not_found(&spec)
+        }
+        LibError::Ref(RefError::UnbornHead) => crate::unborn_errors::unborn_head_from_cwd()
             .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         other => {
             let wrapped = Error::new(other);
@@ -262,7 +280,7 @@ pub fn identity_error(err: IdentityError) -> Error {
     })
 }
 
-/// Human text for [`LibError::PathspecIgnored`] (explicit `grit add` of ignored paths).
+/// Human text for [`grit_lib::worktree::WorktreeError::PathspecIgnored`] (explicit `grit add` of ignored paths).
 #[must_use]
 pub fn pathspec_ignored_human(paths: &[String]) -> String {
     let mut msg = String::from("the following paths are ignored by one of your ignore files:\n");
@@ -299,7 +317,9 @@ pub fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> Error {
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::ReflogDateUnparseable { .. }
     ) {
-        Error::msg(human_message_for_lib(&LibError::RevParse(err)))
+        Error::msg(human_message_for_lib(&LibError::Revision(
+            RevisionError::Parse(err),
+        )))
     } else {
         Error::msg(format!("could not resolve ref '{spec}': {err}"))
     }
@@ -309,22 +329,23 @@ pub fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> Error {
 #[must_use]
 pub fn map_commit_spec_error(err: LibError) -> Error {
     match err {
-        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+        LibError::Revision(RevisionError::Parse(RevParseError::InvalidObjectName { name })) => {
             crate::json_error::structured_revision_not_found(format!("revision '{name}' not found"))
         }
-        LibError::RevParse(e @ RevParseError::AmbiguousArgument { .. }) => {
+        LibError::Revision(RevisionError::Parse(e @ RevParseError::AmbiguousArgument { .. })) => {
             crate::json_error::structured_revision_not_found(e.to_string())
         }
-        LibError::ObjectNotFound(spec) => {
+        LibError::Object(ObjectError::NotFound { name: spec }) => {
             crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
         }
-        LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
-            Error::msg(format_ambiguous_change_id(&prefix, &candidates))
-        }
-        LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
+        LibError::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
+            prefix,
+            candidates,
+        })) => Error::msg(format_ambiguous_change_id(&prefix, &candidates)),
+        LibError::Revision(RevisionError::Parse(RevParseError::ReflogDateUnparseable { date })) => {
             Error::msg(format!("invalid reflog date '{date}'"))
         }
-        LibError::InvalidRef(msg) => Error::msg(msg),
+        LibError::Ref(RefError::Invalid { detail: msg }) => Error::msg(msg),
         other => map_lib_error(other),
     }
 }
@@ -340,39 +361,33 @@ pub fn map_switch_lib_error(repo: &grit_lib::repo::Repository, err: LibError) ->
 
 /// Map [`PullError`] after the remote reauth path during `grit pull`.
 #[must_use]
-pub fn map_pull_repository_error(repo: &grit_lib::repo::Repository, err: PullError) -> Error {
+pub fn map_pull_repository_error(repo: &grit_lib::repo::Repository, err: LibError) -> Error {
     match err {
-        PullError::Remote(remote) => map_remote_error(remote),
-        PullError::Nested(boxed) => match *boxed {
-            LibError::Merge(MergeError::OperationInProgress(kind)) => {
-                operation_in_progress_for_repo(repo, "pull", kind)
+        remote @ LibError::Remote(_) => map_remote_error(remote),
+        LibError::Merge(MergeError::OperationInProgress(kind)) => {
+            operation_in_progress_for_repo(repo, "pull", kind)
+        }
+        hook @ LibError::Hook(_) => {
+            if repo.git_dir().join("MERGE_HEAD").is_file() {
+                crate::json_error::hook_failed_with_hint(
+                    hook,
+                    "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel; autostashed edits come back either way",
+                )
+            } else {
+                Error::new(hook)
             }
-            hook @ LibError::Hook(_) => {
-                if repo.git_dir().join("MERGE_HEAD").is_file() {
-                    crate::json_error::hook_failed_with_hint(
-                        hook,
-                        "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel; autostashed edits come back either way",
-                    )
-                } else {
-                    Error::new(hook)
-                }
-            }
-            lib => map_lib_error(lib),
-        },
-        rest => Error::new(rest),
+        }
+        pull @ LibError::Merge(MergeError::Pull(_)) => Error::new(pull),
+        lib => map_lib_error(lib),
     }
 }
 
 /// Map errors while building [`PullOptions`](grit_lib::porcelain::pull::PullOptions) for `grit pull`.
 #[must_use]
-pub fn map_pull_options_error(repo: &grit_lib::repo::Repository, err: PullError) -> Error {
+pub fn map_pull_options_error(repo: &grit_lib::repo::Repository, err: LibError) -> Error {
     match err {
-        PullError::Nested(boxed) => {
-            if let LibError::Merge(MergeError::OperationInProgress(kind)) = *boxed {
-                operation_in_progress_for_repo(repo, "pull", kind)
-            } else {
-                Error::new(PullError::Nested(boxed))
-            }
+        LibError::Merge(MergeError::OperationInProgress(kind)) => {
+            operation_in_progress_for_repo(repo, "pull", kind)
         }
         other => Error::new(other),
     }
@@ -386,7 +401,7 @@ pub fn map_remove_paths_error(
     path_display: Option<&PathDisplayOptions>,
 ) -> Error {
     match err {
-        LibError::RemoveBlocked { paths } => {
+        LibError::Worktree(WorktreeError::RemoveBlocked { paths }) => {
             Error::msg(remove_blocked_human(&paths, cached, path_display))
         }
         other => map_lib_error(other),
@@ -427,18 +442,16 @@ fn remove_blocked_human(
 #[must_use]
 pub fn integrate_failure_text(err: &Error) -> String {
     let text = format!("{err:#}");
-    let paths = err.chain().find_map(|cause| {
-        let lib = match cause.downcast_ref::<PullError>() {
-            Some(PullError::Nested(e)) => Some(e.as_ref()),
-            _ => cause.downcast_ref::<LibError>(),
-        };
-        match lib {
-            Some(LibError::WouldOverwrite { paths, .. }) if !paths.is_empty() => {
+    let paths = err
+        .chain()
+        .find_map(|cause| match cause.downcast_ref::<LibError>() {
+            Some(LibError::Worktree(WorktreeError::WouldOverwrite { paths, .. }))
+                if !paths.is_empty() =>
+            {
                 Some(paths.join(", "))
             }
             _ => None,
-        }
-    });
+        });
     match paths {
         Some(paths) => format!("{text}: {paths}"),
         None => text,
@@ -447,9 +460,9 @@ pub fn integrate_failure_text(err: &Error) -> String {
 
 /// Map repository identity resolution failures to structured CLI errors.
 #[must_use]
-pub fn map_repo_identity_error(err: CommitError) -> Error {
+pub fn map_repo_identity_error(err: LibError) -> Error {
     match err {
-        CommitError::Identity(identity) => identity_error(identity),
+        LibError::Commit(CommitError::Identity(identity)) => identity_error(identity),
         other => Error::new(other),
     }
 }
@@ -464,10 +477,10 @@ pub fn committer_reflog_signature(
 
     match repo.identity(IdentRole::Committer, now) {
         Ok(sig) => Ok(sig),
-        Err(CommitError::Identity(_)) => {
+        Err(LibError::Commit(CommitError::Identity(_))) => {
             let line = resolve_loose_committer_identity_with(repo.environment(), config, now);
             line.parse()
-                .map_err(|err| Error::new(LibError::InvalidSignature(err)))
+                .map_err(|err| Error::new(LibError::Object(ObjectError::InvalidSignature(err))))
         }
         Err(other) => Err(Error::new(other)),
     }
@@ -477,7 +490,7 @@ pub fn committer_reflog_signature(
 #[must_use]
 pub fn map_stage_lib_error(err: LibError) -> Error {
     match err {
-        LibError::EmbeddedRepoWithoutCommit { path } => {
+        LibError::Worktree(WorktreeError::EmbeddedRepoWithoutCommit { path }) => {
             let human =
                 format!("cannot stage '{path}': embedded git repository has no commit checked out");
             Error::new(StructuredCliError {
@@ -589,90 +602,15 @@ fn classified_from_structured_error(err: &Error) -> ClassifiedError {
         })
 }
 
-/// [`std::error::Error::source`] chains may surface [`CommitError::Library`] /
-/// [`MergeError::Library`] without an outer [`LibError`] wrapper, or
-/// [`LibError::Commit`]/[`LibError::Merge`] carrying the same. Peel so the CLI classifies the
-/// inner umbrella error's stable `kind` (for example `lock_held`).
+/// The library error in a [`std::error::Error::source`] chain link, when it is one.
 fn peel_lib_error<'a>(cause: &'a (dyn StdError + 'static)) -> Option<&'a LibError> {
-    if let Some(LibError::Commit(CommitError::Library(boxed))) = cause.downcast_ref::<LibError>() {
-        return peel_lib_error(boxed.as_ref());
-    }
-    if let Some(LibError::Merge(MergeError::Library(boxed))) = cause.downcast_ref::<LibError>() {
-        return peel_lib_error(boxed.as_ref());
-    }
-    if let Some(CommitError::Library(boxed)) = cause.downcast_ref::<CommitError>() {
-        return peel_lib_error(boxed.as_ref());
-    }
-    if let Some(MergeError::Library(boxed)) = cause.downcast_ref::<MergeError>() {
-        return peel_lib_error(boxed.as_ref());
-    }
     cause.downcast_ref::<LibError>()
 }
 
-/// Walk the same wrappers as [`peel_lib_error`], then [`HistoryError`] / [`HistoryEngineError`],
-/// to find a [`LockHeldError`] for structured `lock_held` JSON (commit may fail only through history).
+/// The held lock behind a chain link, for structured `lock_held` JSON.
 fn peel_lock_held(cause: &(dyn StdError + 'static)) -> Option<LockHeldError> {
-    if let Some(LibError::Commit(CommitError::Library(boxed))) = cause.downcast_ref::<LibError>() {
-        return peel_lock_held(boxed.as_ref());
-    }
-    if let Some(LibError::Merge(MergeError::Library(boxed))) = cause.downcast_ref::<LibError>() {
-        return peel_lock_held(boxed.as_ref());
-    }
-    if let Some(CommitError::Library(boxed)) = cause.downcast_ref::<CommitError>() {
-        return peel_lock_held(boxed.as_ref());
-    }
-    if let Some(MergeError::Library(boxed)) = cause.downcast_ref::<MergeError>() {
-        return peel_lock_held(boxed.as_ref());
-    }
-    if let Some(LibError::LockHeld(lock)) = cause.downcast_ref::<LibError>() {
-        return Some(lock.clone());
-    }
-    if let Some(LibError::History(h)) = cause.downcast_ref::<LibError>() {
-        return lock_from_history_error(h);
-    }
-    cause
-        .downcast_ref::<HistoryError>()
-        .and_then(lock_from_history_error)
-}
-
-fn lock_from_history_error(history: &HistoryError) -> Option<LockHeldError> {
-    match history {
-        HistoryError::Nested(boxed) => peel_lock_held(boxed.as_ref()),
-        HistoryError::Engine(engine) => lock_from_history_engine(engine),
-        HistoryError::WorktreeApply { source } => lock_from_history_engine(source),
-        HistoryError::UndoRecordRead { source } | HistoryError::UndoRecordWrite { source } => {
-            lock_from_history_engine(source)
-        }
-        HistoryError::ApplyRollbackIncomplete {
-            checkout,
-            ref_rollback,
-            worktree_restore,
-        } => lock_from_history_engine(checkout)
-            .or_else(|| ref_rollback.as_deref().and_then(lock_from_history_engine))
-            .or_else(|| {
-                worktree_restore
-                    .as_deref()
-                    .and_then(lock_from_history_engine)
-            }),
-        _ => None,
-    }
-}
-
-fn lock_from_history_engine(engine: &HistoryEngineError) -> Option<LockHeldError> {
-    match engine {
-        HistoryEngineError::LockHeld(lock) => Some(lock.clone()),
-        HistoryEngineError::CorruptLooseObject { source, .. }
-        | HistoryEngineError::CorruptPackedObject { source, .. } => {
-            lock_from_history_engine(source)
-        }
-        HistoryEngineError::CheckoutRollbackIncomplete { source, .. } => {
-            lock_from_history_engine(source)
-        }
-        HistoryEngineError::PromisorFetchFailed { failures, .. } => failures
-            .iter()
-            .find_map(|(_, e)| lock_from_history_engine(e)),
-        HistoryEngineError::Commit(CommitError::Library(boxed)) => peel_lock_held(boxed.as_ref()),
-        HistoryEngineError::Merge(MergeError::Library(boxed)) => peel_lock_held(boxed.as_ref()),
+    match cause.downcast_ref::<LibError>() {
+        Some(LibError::LockHeld(lock)) => Some(lock.clone()),
         _ => None,
     }
 }
@@ -710,7 +648,7 @@ fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<Classi
 
 fn hash_oid_from_cause(cause: &(dyn StdError + 'static)) -> Option<ObjectId> {
     match peel_lib_error(cause)? {
-        LibError::HashCollision { oid } => Some(*oid),
+        LibError::Object(ObjectError::HashCollision { oid }) => Some(*oid),
         _ => None,
     }
 }
@@ -718,26 +656,12 @@ fn hash_oid_from_cause(cause: &(dyn StdError + 'static)) -> Option<ObjectId> {
 fn would_overwrite_classified_from_cause(
     cause: &(dyn StdError + 'static),
 ) -> Option<ClassifiedError> {
-    if let Some(PullError::Nested(e)) = cause.downcast_ref::<PullError>() {
-        if let LibError::WouldOverwrite {
-            reason,
-            paths,
-            message,
-        } = e.as_ref()
-        {
-            return Some(classified_from_structured_error(&would_overwrite_error(
-                *reason,
-                paths.clone(),
-                message.clone(),
-            )));
-        }
-    }
     match peel_lib_error(cause)? {
-        LibError::WouldOverwrite {
+        LibError::Worktree(WorktreeError::WouldOverwrite {
             reason,
             paths,
             message,
-        } => Some(classified_from_structured_error(&would_overwrite_error(
+        }) => Some(classified_from_structured_error(&would_overwrite_error(
             *reason,
             paths.clone(),
             message.clone(),
@@ -749,19 +673,22 @@ fn would_overwrite_classified_from_cause(
 fn revision_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
     let lib = peel_lib_error(cause)?;
     match lib {
-        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+        LibError::Revision(RevisionError::Parse(RevParseError::InvalidObjectName { name })) => {
             Some(StructuredJsonError::new(
                 format!("revision '{name}' not found"),
                 ErrorKind::RevisionNotFound,
             ))
         }
-        LibError::RevParse(e @ RevParseError::AmbiguousArgument { .. }) => Some(
-            StructuredJsonError::new(e.to_string(), ErrorKind::RevisionNotFound),
-        ),
-        LibError::RevParse(
+        LibError::Revision(RevisionError::Parse(e @ RevParseError::AmbiguousArgument { .. })) => {
+            Some(StructuredJsonError::new(
+                e.to_string(),
+                ErrorKind::RevisionNotFound,
+            ))
+        }
+        LibError::Revision(RevisionError::Parse(
             RevParseError::PathNotInRevision { .. }
             | RevParseError::PathMissingFromWorktreeAndIndex { .. },
-        ) => Some(StructuredJsonError::new(
+        )) => Some(StructuredJsonError::new(
             lib.to_string(),
             ErrorKind::PathNotFound,
         )),
@@ -774,29 +701,22 @@ fn cause_is_remote_unreadable(cause: &(dyn StdError + 'static)) -> bool {
         || cause
             .downcast_ref::<RemoteError>()
             .is_some_and(RemoteError::is_remote_unreadable)
-        || cause
-            .downcast_ref::<CloneError>()
-            .is_some_and(CloneError::is_remote_unreadable)
-        || cause
-            .downcast_ref::<PullError>()
-            .is_some_and(PullError::is_remote_unreadable)
 }
 
-/// Map a [`RemoteError`] for fetch, push, pull, and remote commands.
-pub fn map_remote_error(err: RemoteError) -> Error {
-    if let Some(guided) = guide_remote(&err) {
-        return guided;
+/// Map a library error from fetch, push, pull, clone, and remote commands.
+pub fn map_remote_error(err: LibError) -> Error {
+    if let LibError::Remote(remote) = &err {
+        if let Some(guided) = guide_remote(remote) {
+            return guided;
+        }
     }
     match err {
-        RemoteError::Nested(lib) if matches!(*lib, LibError::HashCollision { .. }) => {
-            crate::json_error::map_lib_error(*lib)
+        lib @ LibError::Object(ObjectError::HashCollision { .. }) => {
+            crate::json_error::map_lib_error(lib)
         }
-        RemoteError::Nested(boxed) if matches!(boxed.as_ref(), LibError::Hook(_)) => {
-            Error::new(*boxed)
-        }
-        RemoteError::Nested(lib) if lib.is_cancelled() || lib.is_remote_unreadable() => {
-            Error::new(*lib)
-        }
+        // A missing object during a transfer is the remote's or the pack's, not a revision the
+        // user named: keep the library's wording instead of the revision-not-found rendering.
+        lib @ LibError::Object(ObjectError::NotFound { .. }) => Error::msg(lib.to_string()),
         other => Error::new(other),
     }
 }
@@ -816,6 +736,19 @@ fn branch_error_message(err: &BranchError) -> String {
 /// Map a library [`LibError`] from branch commands to a structured CLI error.
 pub fn map_branch_error(err: LibError) -> Error {
     match err {
+        LibError::Branch(BranchError::CheckedOut {
+            worktree: worktree_path,
+            ..
+        }) => {
+            let worktree = grit_lib::config::git_path::path_for_error_message(
+                std::path::Path::new(&worktree_path),
+            );
+            let human = format!("branch is checked out in '{worktree}'");
+            Error::new(StructuredCliError {
+                payload: StructuredJsonError::new(human.clone(), ErrorKind::BranchCheckedOut),
+                human,
+            })
+        }
         LibError::Branch(branch_err) => {
             let human = branch_error_message(&branch_err);
             Error::new(StructuredCliError {
@@ -823,16 +756,6 @@ pub fn map_branch_error(err: LibError) -> Error {
                     human.clone(),
                     ErrorKind::from_branch_error(&branch_err),
                 ),
-                human,
-            })
-        }
-        LibError::BranchCheckedOutInWorktree { worktree_path, .. } => {
-            let worktree = grit_lib::config::git_path::path_for_error_message(
-                std::path::Path::new(&worktree_path),
-            );
-            let human = format!("branch is checked out in '{worktree}'");
-            Error::new(StructuredCliError {
-                payload: StructuredJsonError::new(human.clone(), ErrorKind::BranchCheckedOut),
                 human,
             })
         }
@@ -861,7 +784,9 @@ pub fn guided_error(err: &Error) -> Option<Error> {
 /// [`guided_error`] for a [`RemoteError`] that has not been wrapped in `anyhow` yet.
 pub fn guide_remote(err: &RemoteError) -> Option<Error> {
     match err {
-        RemoteError::UnknownRemote(name) => Some(remote_not_found(name)),
+        RemoteError::PushPlan(plan) => guide_push_plan(plan),
+        RemoteError::Clone(clone) => guide_clone(clone),
+        RemoteError::UnknownRemote { name } => Some(remote_not_found(name)),
         RemoteError::NoUrl { remote: Some(name) } => Some(guided(
             ErrorKind::RemoteNoUrl,
             err.to_string(),
@@ -881,12 +806,11 @@ pub fn guide_remote(err: &RemoteError) -> Option<Error> {
             Some("check the URL, and that you have access to the repository".to_owned()),
             None,
         )),
-        RemoteError::Nested(lib) => guide_lib(lib),
         _ => None,
     }
 }
 
-/// The hint for an [`LibError::WouldOverwrite`] refusal.
+/// The hint for an [`grit_lib::worktree::WorktreeError::WouldOverwrite`] refusal.
 pub fn would_overwrite_hint(reason: OverwriteReason) -> &'static str {
     match reason {
         OverwriteReason::LocalChanges => {
@@ -929,19 +853,17 @@ fn guide_cause(cause: &(dyn StdError + 'static)) -> Option<Error> {
     if let Some(err) = cause.downcast_ref::<PullError>() {
         return guide_pull(err);
     }
-    if let Some(err) = cause.downcast_ref::<ContinueMergeError>() {
-        return guide_continue_merge(err);
-    }
     if let Some(err) = cause.downcast_ref::<RebaseSessionError>() {
         return guide_rebase_session(err);
     }
     if let Some(err) = cause.downcast_ref::<CloneError>() {
-        return match err {
-            CloneError::Nested(lib) => guide_lib(lib),
-            CloneError::Remote(remote) => guide_remote(remote),
-            CloneError::CheckoutFailed { .. } => Some(clone_checkout_failed(err)),
-            _ => None,
-        };
+        return guide_clone(err);
+    }
+    if let Some(err) = cause.downcast_ref::<MergeError>() {
+        return guide_merge(err);
+    }
+    if let Some(err) = cause.downcast_ref::<CommitError>() {
+        return guide_commit(err);
     }
     peel_lib_error(cause).and_then(guide_lib)
 }
@@ -956,7 +878,7 @@ fn guide_push_plan(err: &PushPlanError) -> Option<Error> {
             )),
             None,
         )),
-        PushPlanError::UnknownRemote(name) => Some(remote_not_found(name)),
+        PushPlanError::UnknownRemote { name } => Some(remote_not_found(name)),
         _ => None,
     }
 }
@@ -971,14 +893,15 @@ fn guide_pull(err: &PullError) -> Option<Error> {
             )),
             None,
         )),
-        PullError::Remote(remote) => guide_remote(remote),
-        PullError::Nested(lib) => guide_lib(lib.as_ref()),
         _ => None,
     }
 }
 
-fn guide_continue_merge(err: &ContinueMergeError) -> Option<Error> {
-    guide_merge(err)
+fn guide_clone(err: &CloneError) -> Option<Error> {
+    match err {
+        CloneError::CheckoutFailed { .. } => Some(clone_checkout_failed(err)),
+        _ => None,
+    }
 }
 
 fn guide_rebase_session(err: &RebaseSessionError) -> Option<Error> {
@@ -1001,14 +924,18 @@ fn guide_rebase_session(err: &RebaseSessionError) -> Option<Error> {
 #[allow(deprecated)]
 fn guide_lib(err: &LibError) -> Option<Error> {
     match err {
+        LibError::Remote(RemoteError::Clone(clone)) => guide_clone(clone),
         LibError::Remote(remote) => guide_remote(remote),
+        LibError::Merge(MergeError::Pull(pull)) => guide_pull(pull),
+        LibError::History(HistoryError::RebaseSession(session)) => guide_rebase_session(session),
+        LibError::Stash(stash) => guide_stash(stash),
         LibError::Repository(RepositoryError::NotARepository(_)) => Some(guided(
             ErrorKind::NotARepository,
             err.to_string(),
             None,
             None,
         )),
-        LibError::PathspecNoMatch { .. } => Some(guided(
+        LibError::Worktree(WorktreeError::PathspecNoMatch { .. }) => Some(guided(
             ErrorKind::PathspecNoMatch,
             err.to_string(),
             None,
@@ -1027,13 +954,13 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             }
             _ => None,
         },
-        LibError::EmbeddedRepoWithoutCommit { .. } => Some(guided(
+        LibError::Worktree(WorktreeError::EmbeddedRepoWithoutCommit { .. }) => Some(guided(
             ErrorKind::EmbeddedRepoWithoutCommit,
             err.to_string(),
             None,
             None,
         )),
-        LibError::Index(IndexError::Unmerged { .. }) | LibError::IndexUnmerged => Some(guided(
+        LibError::Index(IndexError::Unmerged { .. }) => Some(guided(
             ErrorKind::UnmergedPaths,
             "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again".to_owned(),
             Some(
@@ -1041,24 +968,24 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             ),
             None,
         )),
-        LibError::RemoveBlocked { paths } => {
+        LibError::Worktree(WorktreeError::RemoveBlocked { paths }) => {
             Some(Error::msg(remove_blocked_human(paths, false, None)))
         }
-        LibError::RevParse(
+        LibError::Revision(RevisionError::Parse(
             RevParseError::PathNotInRevision { .. }
             | RevParseError::PathMissingFromWorktreeAndIndex { .. },
-        ) => Some(guided(
+        )) => Some(guided(
             ErrorKind::PathNotFound,
             err.to_string(),
             None,
             None,
         )),
-        LibError::WouldOverwrite {
+        LibError::Worktree(WorktreeError::WouldOverwrite {
             reason,
             paths,
             message,
-        } => Some(would_overwrite_error(*reason, paths.clone(), message.clone())),
-        LibError::DirtyWorktree { paths, .. } => Some(Error::new(StructuredCliError {
+        }) => Some(would_overwrite_error(*reason, paths.clone(), message.clone())),
+        LibError::Worktree(WorktreeError::DirtyWorktree { paths, .. }) => Some(Error::new(StructuredCliError {
             human: format!("{err}{}", indented_paths(paths)),
             payload: StructuredJsonError {
                 hint: Some(would_overwrite_hint(OverwriteReason::LocalChanges).to_owned()),
@@ -1066,7 +993,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 ..StructuredJsonError::new(err.to_string(), ErrorKind::DirtyWorktree)
             },
         })),
-        LibError::RestorePathUnmerged { paths } => {
+        LibError::Worktree(WorktreeError::RestorePathUnmerged { paths }) => {
             let words = shell_words(paths);
             Some(guided(
                 ErrorKind::UnmergedPaths,
@@ -1077,7 +1004,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 Some(paths.clone()),
             ))
         }
-        LibError::UnmergedConflictMarkers { paths } => Some(Error::new(StructuredCliError {
+        LibError::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) => Some(Error::new(StructuredCliError {
             human: stage_conflict_markers_human(paths),
             payload: StructuredJsonError {
                 hint: Some(format!(
@@ -1088,14 +1015,21 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 ..StructuredJsonError::new(err.to_string(), ErrorKind::UnmergedPaths)
             },
         })),
-        LibError::WorktreePathIo { path, .. } => Some(guided(
-            ErrorKind::WorktreePathIo,
-            err.to_string(),
-            err.is_worktree_file_in_use()
-                .then(|| "close programs that may have the file open, then try again".to_owned()),
-            Some(vec![path.clone()]),
-        )),
-        LibError::CheckoutRollbackIncomplete { unrestored, .. } => Some(Error::new(
+        LibError::Worktree(WorktreeError::PathIo(io))
+            if matches!(io.operation, grit_lib::error::PathIoOperation::Worktree(_)) =>
+        {
+            Some(guided(
+                ErrorKind::WorktreePathIo,
+                err.to_string(),
+                err.is_worktree_file_in_use().then(|| {
+                    "close programs that may have the file open, then try again".to_owned()
+                }),
+                io.path
+                    .as_ref()
+                    .map(|path| vec![path.to_string_lossy().into_owned()]),
+            ))
+        }
+        LibError::Worktree(WorktreeError::CheckoutRollbackIncomplete { unrestored, .. }) => Some(Error::new(
             StructuredCliError {
                 human: format!("{err}{}", indented_paths(unrestored)),
                 payload: StructuredJsonError {
@@ -1134,12 +1068,12 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 Some(vec![path]),
             ))
         }
-        LibError::UnbornHead => Some(
+        LibError::Ref(RefError::UnbornHead) => Some(
             crate::unborn_errors::unborn_head_from_cwd()
                 .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         ),
         LibError::Branch(branch_err) => guide_branch(branch_err),
-        LibError::MoveDestinationExists { destination, .. } => Some(guided(
+        LibError::Worktree(WorktreeError::MoveDestinationExists { destination, .. }) => Some(guided(
             ErrorKind::BranchError,
             err.to_string(),
             Some(format!(
@@ -1147,7 +1081,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             )),
             Some(vec![destination.clone()]),
         )),
-        LibError::MoveSourceNotTracked { src } => Some(guided(
+        LibError::Worktree(WorktreeError::MoveSourceNotTracked { src }) => Some(guided(
             ErrorKind::BranchError,
             err.to_string(),
             Some(format!("track '{src}' with `grit add` before moving it")),
@@ -1163,6 +1097,7 @@ fn clone_checkout_failed(err: &CloneError) -> Error {
         path,
         commit,
         source,
+        ..
     } = err
     else {
         return guided(ErrorKind::CloneCheckoutFailed, err.to_string(), None, None);
@@ -1187,9 +1122,9 @@ fn clone_checkout_failed(err: &CloneError) -> Error {
                 failed_remotes: err
                     .failed_promisor_remotes()
                     .iter()
-                    .map(|(remote, e)| crate::json_error::PromisorRemoteFailureJson {
-                        remote: remote.clone(),
-                        error: e.to_string(),
+                    .map(|failure| crate::json_error::PromisorRemoteFailureJson {
+                        remote: failure.remote.clone(),
+                        error: failure.error.to_string(),
                     })
                     .collect(),
             }),
@@ -1208,7 +1143,6 @@ fn guide_commit(err: &CommitError) -> Option<Error> {
             None,
         )),
         CommitError::Identity(identity_err) => Some(identity_error(identity_err.clone())),
-        CommitError::Library(lib) => guide_lib(lib),
         _ => None,
     }
 }
@@ -1241,7 +1175,6 @@ fn guide_merge(err: &MergeError) -> Option<Error> {
             *op,
             None,
         )),
-        MergeError::Library(lib) => guide_lib(lib),
         _ => None,
     }
 }
@@ -1515,7 +1448,7 @@ mod tests {
 
     #[test]
     fn unknown_and_url_less_remotes_name_the_remote() {
-        let p = payload(Error::new(RemoteError::UnknownRemote("up".into())));
+        let p = payload(Error::new(RemoteError::UnknownRemote { name: "up".into() }));
         assert_eq!(p.kind, ErrorKind::RemoteNotFound);
         assert!(p.hint.expect("hint").contains("grit remote add up <url>"));
         let p = payload(Error::new(RemoteError::NoUrl {
@@ -1531,18 +1464,22 @@ mod tests {
 
     #[test]
     fn worktree_path_io_suggests_closing_programs_only_when_in_use() {
-        let in_use = payload(Error::new(LibError::WorktreePathIo {
-            path: "a.txt".into(),
-            operation: grit_lib::error::WorktreePathOperation::Replace,
-            source: std::io::Error::from_raw_os_error(libc::EBUSY),
-        }));
+        let in_use = payload(Error::new(LibError::from(
+            grit_lib::error::PathIoError::worktree(
+                "a.txt",
+                grit_lib::error::WorktreePathOperation::Replace,
+                std::io::Error::from_raw_os_error(libc::EBUSY),
+            ),
+        )));
         assert_eq!(in_use.kind, ErrorKind::WorktreePathIo);
         assert!(in_use.hint.expect("hint").contains("close programs"));
-        let denied = payload(Error::new(LibError::WorktreePathIo {
-            path: "a.txt".into(),
-            operation: grit_lib::error::WorktreePathOperation::Metadata,
-            source: std::io::Error::from_raw_os_error(libc::EACCES),
-        }));
+        let denied = payload(Error::new(LibError::from(
+            grit_lib::error::PathIoError::worktree(
+                "a.txt",
+                grit_lib::error::WorktreePathOperation::Metadata,
+                std::io::Error::from_raw_os_error(libc::EACCES),
+            ),
+        )));
         assert_eq!(denied.paths, Some(vec!["a.txt".to_owned()]));
         assert!(denied.hint.is_none());
     }
@@ -1553,7 +1490,7 @@ mod tests {
             RepositoryError::git_dir_path_io(
                 ".git/index",
                 grit_lib::error::GitDirPathOperation::WriteIndex,
-                std::io::Error::from_raw_os_error(libc::EBUSY as i32),
+                std::io::Error::from_raw_os_error(libc::EBUSY),
             ),
         )));
         assert!(in_use.hint.expect("hint").contains("retry shortly"));
@@ -1565,7 +1502,7 @@ mod tests {
             RepositoryError::git_dir_path_io(
                 ".git/objects/pack/tmp",
                 grit_lib::error::GitDirPathOperation::GcPack,
-                std::io::Error::from_raw_os_error(libc::EACCES as i32),
+                std::io::Error::from_raw_os_error(libc::EACCES),
             ),
         )));
         assert!(worktree.hint.expect("hint").contains("ls -l .git"));
@@ -1573,7 +1510,7 @@ mod tests {
             RepositoryError::git_dir_path_io(
                 "objects/pack/tmp_repack_1",
                 grit_lib::error::GitDirPathOperation::GcPack,
-                std::io::Error::from_raw_os_error(libc::EACCES as i32),
+                std::io::Error::from_raw_os_error(libc::EACCES),
             ),
         )));
         let bare_hint = bare.hint.expect("hint");
@@ -1675,9 +1612,11 @@ mod tests {
 
     #[test]
     fn restore_of_unmerged_paths_names_each_side() {
-        let p = payload(Error::new(LibError::RestorePathUnmerged {
-            paths: strings(&["a b"]),
-        }));
+        let p = payload(Error::new(LibError::Worktree(
+            WorktreeError::RestorePathUnmerged {
+                paths: strings(&["a b"]),
+            },
+        )));
         assert_eq!(p.kind, ErrorKind::UnmergedPaths);
         assert_eq!(p.paths, Some(strings(&["a b"])));
         assert_eq!(p.error, "path 'a b' is unmerged");
@@ -1693,9 +1632,11 @@ mod tests {
 
     #[test]
     fn conflict_markers_refusal_names_paths() {
-        let p = payload(Error::new(LibError::UnmergedConflictMarkers {
-            paths: strings(&["f"]),
-        }));
+        let p = payload(Error::new(LibError::Worktree(
+            WorktreeError::UnmergedConflictMarkers {
+                paths: strings(&["f"]),
+            },
+        )));
         assert_eq!(p.kind, ErrorKind::UnmergedPaths);
         assert_eq!(p.paths, Some(strings(&["f"])));
         assert_eq!(p.error, "unmerged paths still have conflict markers");
@@ -1704,11 +1645,11 @@ mod tests {
 
     #[test]
     fn would_overwrite_from_pull_repository_is_guided() {
-        let err = Error::new(PullError::Nested(Box::new(LibError::WouldOverwrite {
+        let err = Error::new(LibError::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths: strings(&["f"]),
             message: "local changes would be overwritten by merge".into(),
-        })));
+        }));
         let p = payload(err);
         assert_eq!(p.kind, ErrorKind::WouldOverwrite);
         assert_eq!(
@@ -1745,9 +1686,11 @@ mod tests {
 
     #[test]
     fn pathspec_no_match_has_kind() {
-        let p = payload(Error::new(LibError::PathspecNoMatch {
-            spec: "nosuch".into(),
-        }));
+        let p = payload(Error::new(LibError::Worktree(
+            WorktreeError::PathspecNoMatch {
+                spec: "nosuch".into(),
+            },
+        )));
         assert_eq!(p.kind, ErrorKind::PathspecNoMatch);
     }
 
@@ -1759,7 +1702,7 @@ mod tests {
 
     #[test]
     fn errors_inside_wrappers_are_found() {
-        let wrapped = Error::new(CloneError::Remote(RemoteError::Unreadable {
+        let wrapped = Error::new(LibError::Remote(RemoteError::Unreadable {
             url: Some("https://example.com/x.git".to_owned()),
             reason: RemoteUnreadableReason::HttpStatus { status: 404 },
         }))
@@ -1788,11 +1731,9 @@ mod tests {
 
     #[test]
     fn library_object_not_found_keeps_remote_display() {
-        use grit_lib::remote::RemoteError;
-
-        let err = super::map_remote_error(RemoteError::Nested(Box::new(LibError::ObjectNotFound(
-            "deadbeef".into(),
-        ))));
+        let err = super::map_remote_error(LibError::Object(ObjectError::NotFound {
+            name: "deadbeef".into(),
+        }));
         assert!(err.downcast_ref::<LibError>().is_none());
         assert_eq!(
             crate::cli_messages::human_error_message(&err),
@@ -1804,12 +1745,8 @@ mod tests {
 
     #[test]
     fn library_hash_collision_stays_typed_for_json() {
-        use grit_lib::remote::RemoteError;
-
         let oid = ObjectId::from_hex("f92d74e3874587aaf443d1db961d4e26dde13e9c").expect("oid");
-        let err = super::map_remote_error(RemoteError::Nested(Box::new(LibError::HashCollision {
-            oid,
-        })));
+        let err = super::map_remote_error(LibError::Object(ObjectError::HashCollision { oid }));
         let payload = crate::json_error::structured_json_payload(&err).expect("structured payload");
         assert_eq!(payload.kind, ErrorKind::HashCollision);
         assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));

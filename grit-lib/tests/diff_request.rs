@@ -1,6 +1,7 @@
 //! `resolve_diff_request` / `resolve_commit_diff_pathspecs`: operand disambiguation, range and
 //! revision resolution, pathspec rules, and every typed error, on repositories built by `git`.
 
+use grit_lib::worktree::WorktreeError;
 use std::error::Error as _;
 use std::path::Path;
 
@@ -126,7 +127,7 @@ fn unknown_lone_operand_is_reported_as_a_path_matching_nothing() {
     let (_dir, repo) = two_commit_repo();
     let err = resolve_err(&repo, &positionals(&["no-such-thing"]));
     assert!(
-        matches!(&err, ResolveDiffArgumentsError::Library(lib) if matches!(lib.as_ref(), Error::PathspecNoMatch { spec } if spec == "no-such-thing")),
+        matches!(&err, ResolveDiffArgumentsError::Library(lib) if matches!(lib.as_ref(), Error::Worktree(WorktreeError::PathspecNoMatch { spec }) if spec == "no-such-thing")),
         "{err:?}"
     );
 }

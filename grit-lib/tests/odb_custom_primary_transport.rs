@@ -405,7 +405,7 @@ fn unbundle_into_custom_primary_reports_a_corrupt_pack() {
         )
         .expect_err("corrupt trailer must fail");
     assert!(
-        matches!(&err, BundleError::Io(msg) if msg.contains("checksum")),
+        matches!(&err, BundleError::Io { detail: msg } if msg.contains("checksum")),
         "unexpected error: {err:?}"
     );
 }

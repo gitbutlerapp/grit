@@ -1,5 +1,6 @@
 //! Object position order for pack and MIDX bitmaps (Git pack offset / MIDX pseudo-pack order).
 
+use crate::error::ObjectError;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -37,8 +38,11 @@ impl BitmapOrder {
     }
 
     pub(crate) fn oid_at(&self, position: u32) -> Result<ObjectId> {
-        let pos = usize::try_from(position)
-            .map_err(|_| Error::CorruptObject("bitmap position out of range".to_owned()))?;
+        let pos = usize::try_from(position).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "bitmap position out of range".to_owned(),
+            })
+        })?;
         match self {
             Self::Pack {
                 index,
@@ -46,7 +50,9 @@ impl BitmapOrder {
                 ..
             } => {
                 let row = *rank_to_index_row.get(pos).ok_or_else(|| {
-                    Error::CorruptObject("bitmap position out of range".to_owned())
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "bitmap position out of range".to_owned(),
+                    })
                 })? as usize;
                 ObjectId::from_bytes(index.oid_at(row))
             }
@@ -54,10 +60,14 @@ impl BitmapOrder {
                 oids, rid_order, ..
             } => {
                 let oid_idx = *rid_order.get(pos).ok_or_else(|| {
-                    Error::CorruptObject("bitmap position out of range".to_owned())
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "bitmap position out of range".to_owned(),
+                    })
                 })? as usize;
                 oids.get(oid_idx).copied().ok_or_else(|| {
-                    Error::CorruptObject("MIDX reverse index out of range".to_owned())
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "MIDX reverse index out of range".to_owned(),
+                    })
                 })
             }
         }
@@ -111,10 +121,11 @@ impl BitmapOrder {
     pub(crate) fn oid_at_storage_row(&self, row: u32) -> Result<ObjectId> {
         match self {
             Self::Pack { index, .. } => ObjectId::from_bytes(index.oid_at(row as usize)),
-            Self::Midx { oids, .. } => oids
-                .get(row as usize)
-                .copied()
-                .ok_or_else(|| Error::CorruptObject("MIDX object row out of range".to_owned())),
+            Self::Midx { oids, .. } => oids.get(row as usize).copied().ok_or_else(|| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "MIDX object row out of range".to_owned(),
+                })
+            }),
         }
     }
 

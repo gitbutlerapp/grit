@@ -5,6 +5,7 @@
 //! directory, and (in the mixed fixture) change symlinks, executables and gitlinks. The cancel is
 //! raised at many points of the apply, from the first file to the last.
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -527,7 +528,8 @@ fn rollback_that_cannot_remove_a_created_file_reports_it() {
     if locked.is_dir() {
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("unlock");
     }
-    let Error::CheckoutRollbackIncomplete { source, unrestored } = &err else {
+    let Error::Worktree(WorktreeError::CheckoutRollbackIncomplete { source, unrestored }) = &err
+    else {
         panic!("expected an incomplete rollback, got {err:?}");
     };
     assert!(matches!(**source, Error::Cancelled), "{source:?}");

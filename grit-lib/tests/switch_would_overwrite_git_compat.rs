@@ -1,6 +1,7 @@
 //! Switch overwrite errors match system `git switch` refusal sets.
 
 use crate::switch_overwrite_git_helpers;
+use grit_lib::worktree::WorktreeError;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, OverwriteReason};
@@ -69,11 +70,11 @@ fn switch_local_changes_refusal_paths_match_git() {
     )
     .expect_err("switch");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => {
+        }) => {
             assert_eq!(paths, git_paths);
             assert!(paths.contains(&"shared.txt".to_owned()));
         }
@@ -105,11 +106,11 @@ fn switch_untracked_refusal_paths_match_git() {
     )
     .expect_err("switch");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::Untracked,
             paths,
             ..
-        } => {
+        }) => {
             assert_eq!(paths, git_paths);
             assert!(paths.contains(&"only-other.txt".to_owned()));
         }

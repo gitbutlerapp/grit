@@ -3329,6 +3329,7 @@ pub fn parse_i64(s: &str) -> std::result::Result<i64, ConfigValueError> {
 
 /// Why [`parse_git_config_int_strict`] failed (mirrors Git `errno` after `git_parse_signed`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum GitConfigIntStrictError {
     /// `EINVAL` — trailing junk, unknown unit suffix, or not a number.
     InvalidUnit,

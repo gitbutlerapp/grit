@@ -405,11 +405,19 @@ fn bitmapped_pack_indexes(pack_dir: &Path) -> Result<Vec<(Arc<PackIndex>, PathBu
     let entries = match std::fs::read_dir(pack_dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(BitmapError::Io(err.to_string())),
+        Err(err) => {
+            return Err(BitmapError::Io {
+                detail: err.to_string(),
+            })
+        }
     };
     let mut out = Vec::new();
     for entry in entries {
-        let bitmap_path = entry.map_err(|e| BitmapError::Io(e.to_string()))?.path();
+        let bitmap_path = entry
+            .map_err(|e| BitmapError::Io {
+                detail: e.to_string(),
+            })?
+            .path();
         if bitmap_path.extension().and_then(|e| e.to_str()) != Some("bitmap") {
             continue;
         }
@@ -443,7 +451,9 @@ fn open_bitmap_file(
     source: BitmapSource,
     repo: &Repository,
 ) -> Result<BitmapIndex, BitmapError> {
-    let map = PackData::open(path).map_err(|e| BitmapError::Io(e.to_string()))?;
+    let map = PackData::open(path).map_err(|e| BitmapError::Io {
+        detail: e.to_string(),
+    })?;
     let data = map.as_ref();
     if data.is_empty() {
         return Err(BitmapError::TooSmall);

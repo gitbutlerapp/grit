@@ -1,5 +1,7 @@
 //! Local branches: create one without switching `HEAD`, list them, delete one, rename one, and configure upstream.
 
+use crate::error::ObjectError;
+use crate::error::RefError;
 use std::fs;
 use std::path::Path;
 
@@ -369,7 +371,7 @@ pub fn delete_branch(
 ///
 /// - [`BranchError::NotFound`] when `old` is missing and no worktree uses it.
 /// - [`BranchError::AlreadyExists`] when `new` exists and `force` is unset.
-/// - [`Error::BranchCheckedOutInWorktree`] when `force` would clobber a branch
+/// - [`crate::porcelain::branch_error::BranchError::CheckedOut`] when `force` would clobber a branch
 ///   checked out in another worktree.
 /// - Ref store, config, and I/O errors are propagated.
 pub fn rename_branch(repo: &Repository, opts: &RenameBranchOptions) -> Result<RenameBranchOutcome> {
@@ -761,11 +763,14 @@ fn resolve_create_start(
 
 fn validate_start_commit(repo: &Repository, oid: ObjectId, label: &str) -> Result<ObjectId> {
     peel_to_commit_for_merge_base(repo, oid).map_err(|err| match err {
-        Error::ObjectNotFound(_) => Error::Branch(BranchError::InvalidStartPoint {
-            label: label.to_owned(),
-            reason: "object not found".into(),
-        }),
-        Error::InvalidRef(msg) | Error::CorruptObject(msg) => {
+        Error::Object(ObjectError::NotFound { .. }) => {
+            Error::Branch(BranchError::InvalidStartPoint {
+                label: label.to_owned(),
+                reason: "object not found".into(),
+            })
+        }
+        Error::Ref(RefError::Invalid { detail: msg })
+        | Error::Object(ObjectError::Corrupt { detail: msg }) => {
             Error::Branch(BranchError::InvalidStartPoint {
                 label: label.to_owned(),
                 reason: msg,
@@ -812,12 +817,13 @@ fn checked_out_error(repo: &Repository, name: &str) -> Result<Error> {
 
 fn map_checked_out_err(err: Error, name: &str) -> Error {
     match err {
-        Error::BranchCheckedOutInWorktree { worktree_path, .. } => {
-            Error::Branch(BranchError::CheckedOut {
-                name: name.to_owned(),
-                worktree: path_for_error_message(Path::new(&worktree_path)),
-            })
-        }
+        Error::Branch(BranchError::CheckedOut {
+            worktree: worktree_path,
+            ..
+        }) => Error::Branch(BranchError::CheckedOut {
+            name: name.to_owned(),
+            worktree: path_for_error_message(Path::new(&worktree_path)),
+        }),
         other => other,
     }
 }
@@ -1005,10 +1011,10 @@ mod tests {
     #[test]
     fn checked_out_in_other_worktree_strips_verbatim_path() {
         let err = map_checked_out_err(
-            Error::BranchCheckedOutInWorktree {
-                branch: "side".into(),
-                worktree_path: r"\\?\C:\Users\tmp\repo".into(),
-            },
+            Error::Branch(BranchError::CheckedOut {
+                name: "side".into(),
+                worktree: r"\\?\C:\Users\tmp\repo".into(),
+            }),
             "side",
         );
         match err {

@@ -7,7 +7,8 @@
 //! [`crate::refs::store::RefTransaction`] with compare-and-swap expectations and reflog entries.
 
 use crate::config::ConfigSet;
-use crate::error::{Error, Result};
+use crate::error::RefError;
+use crate::error::Result;
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 
@@ -78,10 +79,10 @@ pub(crate) fn verify_new_tip(store: &dyn RefStore, refname: &str, new_oid: Objec
 ///
 /// # Errors
 ///
-/// - [`Error::Verbatim`] when `HEAD` is not a symbolic ref to `update.branch_ref`.
-/// - [`Error::RefStore`] with [`crate::refs::store::RefStoreError::ExpectedMismatch`] when the branch no
+/// - [`crate::error::RefError::HeadNotOnBranch`] when `HEAD` is not a symbolic ref to `update.branch_ref`.
+/// - [`crate::error::RefError::Store`] with [`crate::refs::store::RefStoreError::ExpectedMismatch`] when the branch no
 ///   longer has `update.expected_old`.
-/// - [`Error::RefStore`] with [`crate::refs::store::RefStoreError::MissingObject`] or
+/// - [`crate::error::RefError::Store`] with [`crate::refs::store::RefStoreError::MissingObject`] or
 ///   [`crate::refs::store::RefStoreError::NotACommit`] when `store` is the store of
 ///   [`crate::repo::Repository::ref_store`] and `update.new_oid` is not a commit the repository
 ///   stores (checked before any lock, on every backend).
@@ -94,10 +95,10 @@ pub fn update_branch_for_commit_on_store(
     match store.read_raw(RefNameRef::from_trusted("HEAD"))? {
         Some(RawRef::Symbolic(target)) if target.as_str() == update.branch_ref.as_str() => {}
         _ => {
-            return Err(Error::Verbatim(format!(
-                "HEAD does not point at branch '{}'",
-                update.branch_ref
-            )))
+            return Err(RefError::HeadNotOnBranch {
+                branch: update.branch_ref.to_string(),
+            }
+            .into())
         }
     }
     let null_oid = store.reference_transaction_null_oid();
@@ -164,7 +165,7 @@ pub fn update_branch_for_commit_on_store(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Verbatim`] when `HEAD` is symbolic,
+/// Returns [`crate::error::RefError::HeadNotDetached`] when `HEAD` is symbolic,
 /// [`crate::refs::store::RefStoreError::ExpectedMismatch`] when `HEAD` moved, or a ref/reflog/I/O failure.
 pub(crate) fn update_detached_head_for_commit_on_store(
     store: &dyn RefStore,
@@ -178,9 +179,7 @@ pub(crate) fn update_detached_head_for_commit_on_store(
         store.read_raw(RefNameRef::from_trusted("HEAD"))?,
         Some(RawRef::Symbolic(_))
     ) {
-        return Err(Error::Verbatim(
-            "HEAD points at a branch; use update_branch_for_commit".into(),
-        ));
+        return Err(RefError::HeadNotDetached.into());
     }
     if let Some(files) = store.as_files() {
         verify_new_tip(store, "HEAD", new_oid)?;
@@ -335,6 +334,7 @@ pub(crate) fn delete_ref_on_store(store: &dyn RefStore, refname: &str) -> Result
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
+    use crate::error::Error;
 
     use std::ops::ControlFlow;
     use std::path::Path;
@@ -440,7 +440,7 @@ mod tests {
                 .expect_err("stale tip");
         assert!(matches!(
             err,
-            Error::RefStore(RefStoreError::ExpectedMismatch { ref name, .. }) if name == "refs/heads/main"
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { ref name, .. })) if name == "refs/heads/main"
         ));
         assert_eq!(
             store
@@ -454,7 +454,7 @@ mod tests {
             .expect_err("branch exists");
         assert!(matches!(
             err,
-            Error::RefStore(RefStoreError::ExpectedMismatch { .. })
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
         ));
     }
 
@@ -467,7 +467,7 @@ mod tests {
         let err =
             update_branch_for_commit_on_store(&store, &update(Some(oid(1)), oid(2)), &config(None))
                 .expect_err("HEAD elsewhere");
-        assert!(matches!(err, Error::Verbatim(_)));
+        assert!(matches!(err, Error::Ref(RefError::HeadNotOnBranch { .. })));
         assert_eq!(
             store
                 .resolve(RefNameRef::from_trusted("refs/heads/main"))
@@ -544,14 +544,14 @@ mod tests {
             update_branch_for_commit_on_store(repo.ref_store(), &branch(oid(9)), &config(None))
                 .expect_err("missing tip");
         assert!(
-            matches!(&err, Error::RefStore(RefStoreError::MissingObject { name, oid: o })
+            matches!(&err, Error::Ref(RefError::Store(RefStoreError::MissingObject { name, oid: o }))
                 if name == "refs/heads/main" && *o == oid(9)),
             "{err:?}"
         );
         let err = update_branch_for_commit_on_store(repo.ref_store(), &branch(tree), &config(None))
             .expect_err("tree tip");
         assert!(
-            matches!(&err, Error::RefStore(RefStoreError::NotACommit { name, .. })
+            matches!(&err, Error::Ref(RefError::Store(RefStoreError::NotACommit { name, .. }))
                 if name == "refs/heads/main"),
             "{err:?}"
         );
@@ -573,9 +573,9 @@ mod tests {
             )
             .expect_err("bad detached tip");
             let expected = if missing {
-                matches!(&err, Error::RefStore(RefStoreError::MissingObject { name, .. }) if name == "HEAD")
+                matches!(&err, Error::Ref(RefError::Store(RefStoreError::MissingObject { name, .. })) if name == "HEAD")
             } else {
-                matches!(&err, Error::RefStore(RefStoreError::NotACommit { name, .. }) if name == "HEAD")
+                matches!(&err, Error::Ref(RefError::Store(RefStoreError::NotACommit { name, .. })) if name == "HEAD")
             };
             assert!(expected, "{err:?}");
         }
@@ -634,7 +634,7 @@ mod tests {
         .expect_err("stale");
         assert!(matches!(
             err,
-            Error::RefStore(RefStoreError::ExpectedMismatch { .. })
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
         ));
 
         let attached = store_on("refs/heads/main", Some(oid(1)));
@@ -647,7 +647,7 @@ mod tests {
                 "commit: d",
                 &config(None),
             ),
-            Err(Error::Verbatim(_))
+            Err(Error::Ref(RefError::HeadNotDetached))
         ));
     }
 

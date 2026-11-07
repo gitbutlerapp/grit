@@ -5,7 +5,6 @@ use crate::error::{Error, Result};
 use crate::ewah_bitmap::EwahBitmap;
 use crate::git_date::approx::approxidate_careful;
 use crate::git_path::CanonicalizeExt;
-use crate::index::IndexResult;
 use crate::index::{Index, IndexEntry};
 use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::{HashAlgo, ObjectId};
@@ -560,16 +559,14 @@ fn write_index_through_lock(
     commit_lock: bool,
     thread_policy: crate::parallel::ThreadPolicy,
 ) -> Result<()> {
-    index
-        .write_to_path_with_config_and_lock_mode_policy(
-            path,
-            skip_hash,
-            Some(cfg),
-            existing_lock,
-            commit_lock,
-            thread_policy,
-        )
-        .map_err(Error::from)
+    index.write_to_path_with_config_and_lock_mode_policy(
+        path,
+        skip_hash,
+        Some(cfg),
+        existing_lock,
+        commit_lock,
+        thread_policy,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -742,9 +739,12 @@ pub(crate) fn write_index_file_split(
         // The shared index always carries a real checksum, even under `index.skipHash`: readers
         // match the link's base oid against the shared file's trailer, and a zero base oid means
         // "not split", so a skipped trailer would leave the index unreadable.
-        shared_index
-            .write_to_path_with_config_and_policy(&tmp_path, false, Some(cfg), thread_policy)
-            .map_err(Error::from)?;
+        shared_index.write_to_path_with_config_and_policy(
+            &tmp_path,
+            false,
+            Some(cfg),
+            thread_policy,
+        )?;
         adjust_shared_perm_file(&tmp_path, shared_repo).map_err(Error::Io)?;
         let oid = read_index_trailer(&tmp_path, index.hash_algo)?;
         let dest = git_dir.join(format!("sharedindex.{}", oid.to_hex()));
@@ -917,7 +917,7 @@ pub fn resolve_split_index_if_needed(
     index: &mut Index,
     git_dir: &Path,
     index_path: &Path,
-) -> IndexResult<()> {
+) -> crate::error::Result<()> {
     let Some(link) = index.split_link.clone() else {
         return Ok(());
     };
@@ -937,10 +937,10 @@ pub fn resolve_split_index_if_needed(
     })?;
     let hash_len = index.hash_algo.len();
     if data.len() < hash_len {
-        return Err(split_index_error(
+        return Err(crate::error::Error::from(split_index_error(
             Some(index_path),
             IndexCorruptReason::SplitIndexTooShort,
-        ));
+        )));
     }
     let (body, trailer) = data.split_at(data.len() - hash_len);
     // The link names the shared file's trailer, which must also match its body.
@@ -951,10 +951,10 @@ pub fn resolve_split_index_if_needed(
         trailer
     };
     if got != base_oid {
-        return Err(split_index_error(
+        return Err(crate::error::Error::from(split_index_error(
             Some(index_path),
             IndexCorruptReason::SplitIndexCorrupt,
-        ));
+        )));
     }
     freshen_shared_index(&shared_path);
     let base_entries = Index::parse_with_algo(&data, index.hash_algo)?.entries;
@@ -970,13 +970,13 @@ pub fn resolve_split_index_if_needed(
 /// Format output for `test-tool dump-split-index` (Git reads the index with `do_read_index` only,
 /// without merging the shared base — stubs and EWAH bitmaps stay intact).
 #[allow(dead_code)] // integration / re-export use only
-pub fn format_dump_split_index_file(data: &[u8], index: &Index) -> IndexResult<String> {
+pub fn format_dump_split_index_file(data: &[u8], index: &Index) -> crate::error::Result<String> {
     use std::fmt::Write;
     let hash_len = index.hash_algo.len();
     if data.len() < hash_len {
-        return Err(IndexError::corrupt(IndexCorrupt::new(
-            IndexCorruptReason::SplitIndexTooShort,
-        )));
+        return Err(
+            IndexError::corrupt(IndexCorrupt::new(IndexCorruptReason::SplitIndexTooShort)).into(),
+        );
     }
     let body = &data[..data.len() - hash_len];
     let trail = &data[data.len() - hash_len..];
@@ -1297,7 +1297,8 @@ mod tests {
         fs::write(&index_path, b"x").expect("write");
         let err = resolve_split_index_if_needed(&mut idx, &git_dir, &index_path).expect_err("read");
         assert!(
-            matches!(err, IndexError::PathIo(_)),
+            err.path_io()
+                .is_some_and(|io| io.source.kind() == std::io::ErrorKind::NotFound),
             "expected missing shared index I/O error, got {err:?}"
         );
     }
@@ -1483,7 +1484,7 @@ mod tests {
         let err = resolve_split_index_if_needed(&mut idx, &git_dir, &index_path)
             .expect_err("zero trailer does not match the link");
         assert!(
-            matches!(err, IndexError::Corrupt { .. }),
+            matches!(err, crate::error::Error::Index(IndexError::Corrupt { .. })),
             "expected corrupt split index, got {err:?}"
         );
         assert!(err.to_string().contains("split index corrupt"), "{err}");

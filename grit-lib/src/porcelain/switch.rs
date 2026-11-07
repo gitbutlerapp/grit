@@ -1,5 +1,8 @@
 //! Switch branches or detach `HEAD` at a commit, updating the working tree when needed.
 
+use crate::error::ObjectError;
+use crate::error::RefError;
+use crate::error::RevisionError;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::branch_tracking::write_branch_upstream_config;
@@ -277,7 +280,8 @@ pub fn resolve_create_branch(
 /// # Errors
 ///
 /// Returns [`Error::Branch`] for invalid local branch names, missing branches, and `@{-1}` with no
-/// previous branch; tag names that would attach `HEAD` to a tag return [`Error::Verbatim`].
+/// previous branch; tag names that would attach `HEAD` to a tag return
+/// [`BranchError::IsTag`].
 pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode> {
     let spec = normalize_switch_spec(spec);
     if is_at_minus_branch_spec(spec) {
@@ -355,7 +359,7 @@ fn is_at_minus_branch_spec(spec: &str) -> bool {
 }
 
 fn map_at_minus_switch_error(spec: &str, err: Error) -> Error {
-    if is_at_minus_branch_spec(spec) && matches!(err, Error::InvalidRef(_)) {
+    if is_at_minus_branch_spec(spec) && matches!(err, Error::Ref(RefError::Invalid { .. })) {
         return Error::Branch(BranchError::NoPreviousBranch);
     }
     err
@@ -390,9 +394,10 @@ fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<Sw
         }));
     }
     if refname.starts_with("refs/tags/") {
-        return Err(Error::Verbatim(format!(
-            "cannot switch to tag '{spec}' on a branch — use `grit switch --detach {spec}`"
-        )));
+        return Err(BranchError::IsTag {
+            name: spec.to_owned(),
+        }
+        .into());
     }
     Ok(None)
 }
@@ -401,11 +406,13 @@ fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<Sw
 ///
 /// # Errors
 ///
-/// Returns [`Error::RevisionNotFound`] when `spec` does not resolve; [`Error::InvalidRef`] when the
+/// Returns [`crate::error::RevisionError::NotFound`] when `spec` does not resolve; [`crate::error::RefError::Invalid`] when the
 /// resolved object is not a commit; other object database errors propagate.
 pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> {
     if crate::rev_parse::is_top_level_range(spec) {
-        return Err(Error::RevisionNotFound(spec.to_owned()));
+        return Err(Error::Revision(RevisionError::NotFound {
+            spec: spec.to_owned(),
+        }));
     }
     let oid = resolve_revision(repo, spec).map_err(|err| map_revision_spec_error(spec, err))?;
     peel_to_commit_for_merge_base(repo, oid)
@@ -413,13 +420,15 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 
 fn map_revision_spec_error(spec: &str, err: Error) -> Error {
     match err {
-        Error::ObjectNotFound(_)
-        | Error::RevParse(
+        Error::Object(ObjectError::NotFound { .. })
+        | Error::Revision(RevisionError::Parse(
             RevParseError::InvalidObjectName { .. }
             | RevParseError::RevisionOutOfRange { .. }
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::NoSuchBranch { .. },
-        ) => Error::RevisionNotFound(spec.to_owned()),
+        )) => Error::Revision(RevisionError::NotFound {
+            spec: spec.to_owned(),
+        }),
         other => other,
     }
 }
@@ -448,7 +457,7 @@ fn map_revision_spec_error(spec: &str, err: Error) -> Error {
 /// [`Error::LockHeld`] when another process holds `index.lock`, with the work tree, index,
 /// `HEAD` and branch refs unchanged; overwrite refusals and ref/object failures otherwise;
 /// [`Error::Cancelled`] when `cancel` or `progress` asked to stop;
-/// [`Error::CheckoutRollbackIncomplete`] (wrapping the cause) when some work-tree paths could
+/// [`crate::worktree::WorktreeError::CheckoutRollbackIncomplete`] (wrapping the cause) when some work-tree paths could
 /// not be put back. On error the hook does not run.
 pub fn switch_repository(
     repo: &Repository,
@@ -649,13 +658,8 @@ fn switch_to_target(
                 (target.join(), head.join())
             });
             (
-                target_res
-                    .map_err(|_| Error::Verbatim("parallel commit tree read failed".into()))??,
-                Some(
-                    head_res.map_err(|_| {
-                        Error::Verbatim("parallel commit tree read failed".into())
-                    })??,
-                ),
+                target_res.unwrap_or_else(|panic| std::panic::resume_unwind(panic))?,
+                Some(head_res.unwrap_or_else(|panic| std::panic::resume_unwind(panic))?),
             )
         }
     };
@@ -1089,8 +1093,8 @@ pub(crate) fn keep_style_transition_would_block_paths_for_preview(
     )
     .map_err(|err| match err {
         TreeTransitionPrepareError::Failed(err) => err,
-        TreeTransitionPrepareError::OverwritePaths(_) => {
-            Error::Verbatim("keep preview planning should not fail on local paths".into())
+        TreeTransitionPrepareError::OverwritePaths(paths) => {
+            Error::would_overwrite(crate::error::OverwriteReason::LocalChanges, paths)
         }
     })?;
     Ok(merge_keep_style_block_paths(&core))
@@ -1222,7 +1226,7 @@ pub(crate) fn checkout_tree_transition_allow_local(
     )
 }
 
-/// Like [`checkout_tree_transition_allow_local`], but local-overwrite paths become [`Error::WouldOverwrite`].
+/// Like [`checkout_tree_transition_allow_local`], but local-overwrite paths become [`crate::worktree::WorktreeError::WouldOverwrite`].
 pub(crate) fn checkout_tree_transition_allow_local_reset(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
@@ -1439,6 +1443,7 @@ mod tests {
     use crate::repo::{init_repository, Repository};
     use crate::state::resolve_head_for_repository;
     use crate::state::HeadState;
+    use crate::worktree::WorktreeError;
     use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
     use crate::RefStorageFormat;
     use tempfile::TempDir;
@@ -1669,10 +1674,10 @@ mod tests {
         .expect_err("must refuse overwrite");
         assert!(matches!(
             err,
-            Error::WouldOverwrite {
+            Error::Worktree(WorktreeError::WouldOverwrite {
                 reason: OverwriteReason::LocalChanges,
                 ..
-            }
+            })
         ));
 
         let head_after = resolve_head_for_repository(&repo).expect("head");
@@ -1812,10 +1817,10 @@ mod tests {
         .expect_err("local changes should block switch");
         assert!(matches!(
             err,
-            Error::WouldOverwrite {
+            Error::Worktree(WorktreeError::WouldOverwrite {
                 reason: OverwriteReason::LocalChanges,
                 ..
-            }
+            })
         ));
     }
 
@@ -1901,10 +1906,10 @@ mod tests {
         .expect_err("conflict");
         assert!(matches!(
             err,
-            Error::WouldOverwrite {
+            Error::Worktree(WorktreeError::WouldOverwrite {
                 reason: OverwriteReason::LocalChanges,
                 ..
-            }
+            })
         ));
         assert!(refs::resolve_ref(repo.git_dir(), "refs/heads/leaked").is_err());
     }
@@ -2190,8 +2195,7 @@ mod tests {
         refs::write_ref(repo.git_dir(), "refs/tags/rel1", &tip).expect("tag");
 
         let err = resolve_switch_target(&repo, "rel1").expect_err("tag");
-        assert!(matches!(err, Error::Verbatim(_)));
-        assert!(err.to_string().contains("--detach"));
+        assert!(matches!(err, Error::Branch(BranchError::IsTag { ref name }) if name == "rel1"));
     }
 
     #[test]
@@ -2229,7 +2233,7 @@ mod tests {
                 .expect_err("missing start");
         assert!(matches!(
             missing,
-            Error::RevisionNotFound(spec) if spec == "nosuchrev"
+            Error::Revision(RevisionError::NotFound { spec }) if spec == "nosuchrev"
         ));
 
         let tree_oid = repo.odb().write(ObjectKind::Tree, b"").expect("empty tree");
@@ -2237,7 +2241,7 @@ mod tests {
         let not_commit =
             resolve_create_branch(&repo, "from-tree", Some(&tree_spec), TrackMode::Auto)
                 .expect_err("tree start");
-        assert!(matches!(not_commit, Error::InvalidRef(_)));
+        assert!(matches!(not_commit, Error::Ref(RefError::Invalid { .. })));
         let _ = tip;
     }
 
@@ -2248,7 +2252,7 @@ mod tests {
         let err = resolve_revision_spec(&repo, "nosuchrev").expect_err("missing");
         assert!(matches!(
             err,
-            Error::RevisionNotFound(spec) if spec == "nosuchrev"
+            Error::Revision(RevisionError::NotFound { spec }) if spec == "nosuchrev"
         ));
     }
 

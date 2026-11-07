@@ -1,14 +1,11 @@
 //! Worktree path I/O errors name the path and stay actionable (issue #1915).
 
-use grit_lib::error::{Error, WorktreePathOperation};
+use grit_lib::error::{Error, PathIoError, PathIoOperation, WorktreePathOperation};
+use grit_lib::worktree::WorktreeError;
 use std::io;
 
 fn worktree_path_io(path: &str, operation: WorktreePathOperation, source: io::Error) -> Error {
-    Error::WorktreePathIo {
-        path: path.to_owned(),
-        operation,
-        source,
-    }
+    PathIoError::worktree(path, operation, source).into()
 }
 
 #[test]
@@ -24,11 +21,11 @@ fn file_in_use_message_names_path_without_raw_os_error() {
     assert!(!msg.contains("os error"));
     assert!(matches!(
         err,
-        Error::WorktreePathIo {
-            path,
-            operation: WorktreePathOperation::Replace,
+        Error::Worktree(WorktreeError::PathIo(PathIoError {
+            path: Some(ref path),
+            operation: PathIoOperation::Worktree(WorktreePathOperation::Replace),
             ..
-        } if path == "b.txt"
+        })) if path.as_path() == std::path::Path::new("b.txt")
     ));
 }
 

@@ -2,6 +2,8 @@
 
 use grit_lib::config::ConfigSet;
 use grit_lib::config::{ConfigFile, ConfigScope};
+use grit_lib::error::DiffError;
+use grit_lib::error::RefError;
 use grit_lib::error::{
     ApplyError, BadNumericSource, ConfigError, Error, FilterError, FilterPhase, RefLockError,
 };
@@ -11,6 +13,7 @@ use grit_lib::refs::RefnameUnavailable;
 use grit_lib::worktree::crlf::{
     convert_to_git_with_opts, ConversionConfig, ConvertToGitOpts, FileAttrs,
 };
+use grit_lib::worktree::WorktreeError;
 use grit_test_support::{git, git_cmd};
 use std::fs;
 use tempfile::tempdir;
@@ -88,9 +91,9 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
     assert!(
         matches!(
             err,
-            Error::RefStore(RefStoreError::NameUnavailable {
+            Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
                 reason: RefnameUnavailable::DescendantExists { ref blocking, .. }
-            }) if blocking == "refs/heads/feature/extra"
+            })) if blocking == "refs/heads/feature/extra"
         ),
         "{err:?}"
     );
@@ -110,7 +113,10 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
     fs::write(git_dir.join("refs/heads/feature/extra.lock"), "").unwrap();
     let err = grit_lib::refs::write_ref(&git_dir, "refs/heads/feature", &oid).unwrap_err();
     assert!(
-        matches!(err, Error::RefLock(RefLockError::DirectoryInTheWay { .. })),
+        matches!(
+            err,
+            Error::Ref(RefError::Lock(RefLockError::DirectoryInTheWay { .. }))
+        ),
         "{err:?}"
     );
     let git_out = git_cmd(&["update-ref", "refs/heads/feature", &oid.to_hex()])
@@ -197,7 +203,7 @@ fn bom_filter_error_has_single_fatal_prefix_on_stderr() {
         filter_err,
         FilterError::NotFilteredProperly { .. }
     ));
-    let stderr = Error::Filter(filter_err).git_stderr_message();
+    let stderr = Error::Worktree(WorktreeError::Filter(filter_err)).git_stderr_message();
     assert_eq!(
         stderr.matches("fatal:").count(),
         1,
@@ -216,7 +222,7 @@ fn corrupt_patch_surfaces_apply_error() {
     let input = "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n one\n";
     let err = parse_patch(input, 1, "patch", false, None).unwrap_err();
     match &err {
-        Error::Apply(ApplyError::CorruptPatch { line, .. }) => assert!(*line >= 3),
+        Error::Diff(DiffError::Apply(ApplyError::CorruptPatch { line, .. })) => assert!(*line >= 3),
         other => panic!("expected corrupt patch, got {other:?}"),
     }
 }

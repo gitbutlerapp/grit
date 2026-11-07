@@ -16,6 +16,7 @@
 //!
 //! [TUS]: https://tus.io/protocols/resumable-upload
 
+use crate::worktree::WorktreeError;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
@@ -152,7 +153,11 @@ impl Session {
             url: upload.url.clone(),
             length: upload.length,
         };
-        let bytes = serde_json::to_vec(&saved).map_err(|e| Error::PathError(e.to_string()))?;
+        let bytes = serde_json::to_vec(&saved).map_err(|e| {
+            Error::Worktree(WorktreeError::Path {
+                detail: e.to_string(),
+            })
+        })?;
         std::fs::write(self.upload_path(), bytes)?;
         Ok(())
     }
@@ -212,14 +217,6 @@ impl Drop for SpooledPack {
     }
 }
 
-fn resumable(e: ResumableError) -> RemoteError {
-    RemoteError::Resumable(Box::new(e))
-}
-
-fn remote_from_err(e: Error) -> RemoteError {
-    RemoteError::from(e)
-}
-
 /// Upload the session's bundle to `endpoint` (resuming an earlier upload),
 /// then post `commands` to apply it.
 ///
@@ -234,29 +231,31 @@ pub(crate) fn push(
     sent_refs: &[&str],
     sideband: bool,
     progress: &mut dyn Progress,
-) -> crate::remote::RemoteResult<Vec<u8>> {
+) -> crate::error::Result<Vec<u8>> {
     let bundle = session.bundle_path();
-    let length = std::fs::metadata(&bundle)
-        .map_err(|e| remote_from_err(Error::Io(e)))?
-        .len();
+    let length = std::fs::metadata(&bundle).map_err(Error::Io)?.len();
     let mut upload = match session.saved_upload() {
-        Some(u) if u.length == length && u.offset(client).map_err(resumable)?.is_some() => u,
-        _ => TusUpload::create(client, endpoint, length).map_err(resumable)?,
+        Some(u) if u.length == length && u.offset(client)?.is_some() => u,
+        _ => TusUpload::create(client, endpoint, length)?,
     };
-    session.save_upload(&upload).map_err(remote_from_err)?;
+    session.save_upload(&upload)?;
     match upload.send_file(client, &bundle, progress) {
         Ok(()) => {}
         // The server forgot the upload (it expires): start a new one, once.
-        Err(ResumableError::Status {
-            status: 404 | 410, ..
-        }) => {
-            upload = TusUpload::create(client, endpoint, length).map_err(resumable)?;
-            session.save_upload(&upload).map_err(remote_from_err)?;
-            upload
-                .send_file(client, &bundle, progress)
-                .map_err(resumable)?;
+        Err(Error::Remote(RemoteError::Resumable(ref status)))
+            if matches!(
+                **status,
+                ResumableError::Status {
+                    status: 404 | 410,
+                    ..
+                }
+            ) =>
+        {
+            upload = TusUpload::create(client, endpoint, length)?;
+            session.save_upload(&upload)?;
+            upload.send_file(client, &bundle, progress)?;
         }
-        Err(e) => return Err(resumable(e)),
+        Err(e) => return Err(e),
     }
 
     let url = format!("{}/{RECEIVE_SUFFIX}", upload.url.trim_end_matches('/'));
@@ -272,10 +271,11 @@ pub(crate) fn push(
             .into_bytes()
             .map(|b| String::from_utf8_lossy(&b).trim().to_owned())
             .unwrap_or_default();
-        return Err(resumable(ResumableError::Protocol {
+        return Err(ResumableError::Protocol {
             url,
             detail: format!("HTTP {status} applying the pushed bundle: {detail}"),
-        }));
+        }
+        .into());
     }
     let mut body = response.body;
     let raw = crate::push::read_receive_pack_response(
@@ -291,6 +291,7 @@ pub(crate) fn push(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ObjectError;
 
     #[test]
     fn endpoints_resolve_under_the_repository() {
@@ -326,7 +327,7 @@ mod tests {
     }
 
     impl HttpClient for Server {
-        fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+        fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
             unreachable!()
         }
         fn post(
@@ -336,10 +337,10 @@ mod tests {
             _: &str,
             _: &[u8],
             _: Option<&str>,
-        ) -> crate::remote::RemoteResult<Vec<u8>> {
+        ) -> crate::error::Result<Vec<u8>> {
             unreachable!()
         }
-        fn send(&self, request: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
+        fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
             let header = |name: &str| {
                 request
                     .headers
@@ -369,10 +370,12 @@ mod tests {
                 (HttpMethod::Head, _) => reply(200, offset(stored.len()), vec![]),
                 (HttpMethod::Patch, _) => {
                     if self.failing.load(Ordering::SeqCst) && !stored.is_empty() {
-                        return Err(crate::remote::RemoteError::Transport {
-                            url: None,
-                            detail: "connection reset".to_owned(),
-                        });
+                        return Err(crate::error::Error::from(
+                            crate::remote::RemoteError::Transport {
+                                url: None,
+                                detail: "connection reset".to_owned(),
+                            },
+                        ));
                     }
                     if header("Upload-Offset") != Some(stored.len()) {
                         return Ok(reply(409, vec![], vec![]));
@@ -568,7 +571,9 @@ mod tests {
         let result =
             session.write_bundle(&odb, &[], &[(tip, "refs/heads/main".to_owned())], 0, |w| {
                 w.write_all(b"PACK")?;
-                Err(Error::ObjectNotFound("object went missing".to_owned()))
+                Err(Error::Object(ObjectError::NotFound {
+                    name: "object went missing".to_owned(),
+                }))
             });
         assert!(result.is_err());
         assert!(!session.has_bundle());

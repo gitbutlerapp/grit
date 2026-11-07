@@ -12,6 +12,8 @@
 //! These functions compute and apply worktree changes from index/object data
 //! and make no presentation decisions — no colour, pager, tty, or stdout.
 
+use crate::error::ObjectError;
+use crate::worktree::WorktreeError;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
@@ -519,9 +521,9 @@ fn remove_wholesale_dirs_parallel_cancellable(
             Ok(remove_wholesale_dir(&abs).then_some((dir.clone(), abs)))
         })
         .map_err(|e: ParallelHashError<()>| match e {
-            ParallelHashError::Task(()) => {
-                Error::PathError("parallel wholesale directory removal failed".into())
-            }
+            ParallelHashError::Task(()) => Error::Worktree(WorktreeError::Path {
+                detail: "parallel wholesale directory removal failed".into(),
+            }),
         })?;
         removed.extend(removed_chunk.into_iter().flatten());
     }
@@ -684,9 +686,11 @@ fn checkout_populated_tree(
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<CheckoutOutcome> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+    let work_tree = repo.work_tree().ok_or_else(|| {
+        Error::Worktree(WorktreeError::Path {
+            detail: "cannot update a bare repository's working tree".into(),
+        })
+    })?;
     let (mut lock, mut loaded_index) = repo.lock_and_load_index()?;
     let total = diff_tree_path_change_count(repo.odb(), None, Some(tree_oid), "")?;
     progress.start(
@@ -724,9 +728,11 @@ fn checkout_populated_tree_journaled(
     lock: &mut IndexLock,
     journal: &mut CheckoutJournal,
 ) -> Result<bool> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+    let work_tree = repo.work_tree().ok_or_else(|| {
+        Error::Worktree(WorktreeError::Path {
+            detail: "cannot update a bare repository's working tree".into(),
+        })
+    })?;
     let config = repo.config().snapshot()?;
     let protect = ProtectOptions::from_config(config.as_ref());
     let ignorecase = config.ignore_case();
@@ -897,7 +903,7 @@ pub fn checkout_between_trees(
 /// # Errors
 ///
 /// Same as [`checkout_between_trees`], plus [`Error::Cancelled`] when `cancel` or `progress`
-/// asked to stop, and [`Error::CheckoutRollbackIncomplete`] (wrapping the cause) when some
+/// asked to stop, and [`crate::worktree::WorktreeError::CheckoutRollbackIncomplete`] (wrapping the cause) when some
 /// paths could not be put back.
 pub fn checkout_between_trees_with_progress(
     repo: &Repository,
@@ -947,7 +953,7 @@ pub fn checkout_between_trees_with_progress(
 /// Returns [`Error::LockHeld`] without touching the work tree or index when another process
 /// holds `index.lock`, and an error when the repository has no work tree, required promised
 /// objects cannot be fetched, or checkout I/O fails; [`Error::Cancelled`] when `cancel`
-/// fires; and [`Error::CheckoutRollbackIncomplete`] when some paths could not be put back.
+/// fires; and [`crate::worktree::WorktreeError::CheckoutRollbackIncomplete`] when some paths could not be put back.
 pub fn checkout_hard_to_tree_from_head_tree(
     repo: &Repository,
     head_tree: &ObjectId,
@@ -955,9 +961,11 @@ pub fn checkout_hard_to_tree_from_head_tree(
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<()> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+    let work_tree = repo.work_tree().ok_or_else(|| {
+        Error::Worktree(WorktreeError::Path {
+            detail: "cannot update a bare repository's working tree".into(),
+        })
+    })?;
     let mut lock = repo.lock_index()?;
     let mut journal = CheckoutJournal::new(work_tree)?;
     let result = checkout_hard_to_tree_journaled(
@@ -1172,8 +1180,10 @@ fn checkout_hard_to_tree_journaled(
             cancel,
             &mut index,
             &changes,
-            tree_diff_unrecorded,
-            None,
+            match tree_diff_unrecorded.take() {
+                Some(paths) => UnrecordedPaths::Known(paths),
+                None => UnrecordedPaths::Compute(sparse.as_ref(), stat_check),
+            },
             hard_reset_checkout_apply.clone(),
             lock,
             journal,
@@ -1187,8 +1197,7 @@ fn checkout_hard_to_tree_journaled(
             cancel,
             &mut index,
             &staged_index_changes,
-            None,
-            Some((sparse.as_ref(), stat_check)),
+            UnrecordedPaths::Compute(sparse.as_ref(), stat_check),
             hard_reset_checkout_apply,
             lock,
             journal,
@@ -1709,6 +1718,14 @@ fn hard_reset_align_plan_diff_entries(
     changes
 }
 
+/// Untracked paths a hard-reset tree-diff checkout must not overwrite.
+enum UnrecordedPaths<'a> {
+    /// Already computed against the pre-reset index.
+    Known(Vec<String>),
+    /// Compute them from the current index with these sparse rules and stat policy.
+    Compute(Option<&'a SparseCheckout>, HardResetStatCheck),
+}
+
 #[allow(clippy::too_many_arguments)]
 fn hard_reset_apply_tree_diff_checkout(
     repo: &Repository,
@@ -1717,30 +1734,22 @@ fn hard_reset_apply_tree_diff_checkout(
     cancel: &CancelToken,
     index: &mut Index,
     changes: &[DiffEntry],
-    precomputed_unrecorded: Option<Vec<String>>,
-    compute_unrecorded: Option<(Option<&SparseCheckout>, HardResetStatCheck)>,
+    unrecorded: UnrecordedPaths<'_>,
     apply: CheckoutApplyOptions,
     lock: &mut IndexLock,
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
-    let unrecorded = match precomputed_unrecorded {
-        Some(paths) => paths,
-        None => {
-            let Some((sparse, stat_check)) = compute_unrecorded else {
-                return Err(Error::Verbatim(
-                    "hard reset tree-diff checkout needs unrecorded path plan".into(),
-                ));
-            };
-            hard_reset_unrecorded_tree_diff_paths(
-                repo,
-                work_tree,
-                index,
-                &repo.config().snapshot()?,
-                changes,
-                sparse,
-                stat_check,
-            )?
-        }
+    let unrecorded = match unrecorded {
+        UnrecordedPaths::Known(paths) => paths,
+        UnrecordedPaths::Compute(sparse, stat_check) => hard_reset_unrecorded_tree_diff_paths(
+            repo,
+            work_tree,
+            index,
+            &repo.config().snapshot()?,
+            changes,
+            sparse,
+            stat_check,
+        )?,
     };
     for rel in unrecorded {
         journal.spool_remove(&rel)?;
@@ -2607,9 +2616,11 @@ pub(crate) fn checkout_tree_changes_with_index_deferred(
     attribute_changes: Option<&[DiffEntry]>,
     lock: &IndexLock,
 ) -> Result<CheckoutJournal> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+    let work_tree = repo.work_tree().ok_or_else(|| {
+        Error::Worktree(WorktreeError::Path {
+            detail: "cannot update a bare repository's working tree".into(),
+        })
+    })?;
     let mut journal = CheckoutJournal::new(work_tree)?;
     let result = checkout_tree_changes_into_deferred_journal(
         repo,
@@ -4282,9 +4293,11 @@ fn checkout_tree_changes_with_progress(
     attribute_changes: Option<&[DiffEntry]>,
     index_write: CheckoutIndexWrite<'_>,
 ) -> Result<()> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+    let work_tree = repo.work_tree().ok_or_else(|| {
+        Error::Worktree(WorktreeError::Path {
+            detail: "cannot update a bare repository's working tree".into(),
+        })
+    })?;
     let mut loaded_index;
     let index_mut: &mut Index = if let Some(index) = reuse_index {
         index
@@ -4347,7 +4360,9 @@ fn apply_tree_changes_in_chunks(
         apply.precomputed_worktree_rules = Some(Rc::new(rules));
     }
     let rules = apply.precomputed_worktree_rules.as_ref().ok_or_else(|| {
-        Error::PathError("internal error: missing precomputed checkout rules".into())
+        Error::Worktree(WorktreeError::Path {
+            detail: "internal error: missing precomputed checkout rules".into(),
+        })
     })?;
 
     if !apply.skip_bulk_checkout_fast_path {
@@ -4468,9 +4483,11 @@ fn apply_tree_changes(
     journal: &mut CheckoutJournal,
 ) -> Result<()> {
     let mut progress = CancelProgress::new(progress, cancel);
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+    let work_tree = repo.work_tree().ok_or_else(|| {
+        Error::Worktree(WorktreeError::Path {
+            detail: "cannot update a bare repository's working tree".into(),
+        })
+    })?;
     let delete_rollback = journal.shared();
     let config = repo.config().snapshot()?;
     let protect = ProtectOptions::from_config(config.as_ref());
@@ -4757,7 +4774,9 @@ fn apply_tree_changes(
                 )?));
             }
             let rules = rules.as_deref().ok_or_else(|| {
-                Error::PathError("internal error: missing checkout rules for write".into())
+                Error::Worktree(WorktreeError::Path {
+                    detail: "internal error: missing checkout rules for write".into(),
+                })
             })?;
             if conv.is_none() {
                 conv = Some(rules.conversion().clone());
@@ -4870,10 +4889,14 @@ fn apply_tree_changes(
         Vec::new()
     } else {
         let rules = rules.as_ref().ok_or_else(|| {
-            Error::PathError("internal error: missing checkout rules for write jobs".into())
+            Error::Worktree(WorktreeError::Path {
+                detail: "internal error: missing checkout rules for write jobs".into(),
+            })
         })?;
         let conv = conv.as_ref().ok_or_else(|| {
-            Error::PathError("internal error: missing conversion config for write jobs".into())
+            Error::Worktree(WorktreeError::Path {
+                detail: "internal error: missing conversion config for write jobs".into(),
+            })
         })?;
         crate::trace::trace_span!("grit.checkout.write");
         execute_write_jobs(
@@ -4902,7 +4925,9 @@ fn apply_tree_changes(
             CheckoutPlanSlot::Ready(entry) => new_entries.push(entry),
             CheckoutPlanSlot::Write => {
                 match write_iter.next().ok_or_else(|| {
-                    Error::PathError("internal error: missing parallel checkout outcome".into())
+                    Error::Worktree(WorktreeError::Path {
+                        detail: "internal error: missing parallel checkout outcome".into(),
+                    })
                 })? {
                     WriteJobOutcome::Index(entry) => {
                         new_entries.push(entry);
@@ -4917,7 +4942,9 @@ fn apply_tree_changes(
 
     if !pending_delayed.is_empty() {
         let rules = rules.as_ref().ok_or_else(|| {
-            Error::PathError("internal error: missing checkout rules for delayed writes".into())
+            Error::Worktree(WorktreeError::Path {
+                detail: "internal error: missing checkout rules for delayed writes".into(),
+            })
         })?;
         finish_delayed_checkouts(
             repo,
@@ -5051,9 +5078,9 @@ pub(crate) fn smudge_bytes_for_worktree_path(
     }
     match worktree_bytes_from_index_blob(repo, rules, rel_path, mode, blob, oid, None, None)? {
         Some(bytes) => Ok(bytes),
-        None => Err(Error::PathError(format!(
-            "delayed filter checkout is not supported for '{rel_path}'"
-        ))),
+        None => Err(Error::Worktree(WorktreeError::Path {
+            detail: format!("delayed filter checkout is not supported for '{rel_path}'"),
+        })),
     }
 }
 
@@ -5070,9 +5097,9 @@ pub(crate) fn write_smudged_blob_to_worktree(
     let written =
         write_blob_to_worktree(repo, rules, work_tree, rel_path, oid, mode, &mut dir_cache)?;
     if written.is_none() {
-        return Err(Error::PathError(format!(
-            "delayed filter checkout is not supported for '{rel_path}'"
-        )));
+        return Err(Error::Worktree(WorktreeError::Path {
+            detail: format!("delayed filter checkout is not supported for '{rel_path}'"),
+        }));
     }
     Ok(())
 }
@@ -5171,9 +5198,11 @@ fn finish_delayed_checkouts(
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
-            Err(Error::PathError(msg))
+            Err(Error::Worktree(WorktreeError::Path { detail: msg }))
         }
-        Err(DelayedCheckoutError::Transport(msg)) => Err(Error::PathError(msg)),
+        Err(DelayedCheckoutError::Transport(msg)) => {
+            Err(Error::Worktree(WorktreeError::Path { detail: msg }))
+        }
     }
 }
 
@@ -5331,8 +5360,11 @@ pub(crate) fn materialize_gitlink_worktree(
             }
         }
     }
-    fs::create_dir_all(&file_path)
-        .map_err(|e| Error::PathError(format!("creating gitlink directory '{rel_path}': {e}")))?;
+    fs::create_dir_all(&file_path).map_err(|e| {
+        Error::Worktree(WorktreeError::Path {
+            detail: format!("creating gitlink directory '{rel_path}': {e}"),
+        })
+    })?;
     Ok(())
 }
 
@@ -5438,7 +5470,7 @@ pub(crate) fn read_blob_unless_streamed(
 ///
 /// # Errors
 ///
-/// [`Error::ObjectNotFound`] when the object is missing, [`Error::Io`] when its stream is
+/// [`crate::error::ObjectError::NotFound`] when the object is missing, [`Error::Io`] when its stream is
 /// corrupt, and the usual work-tree write errors.
 pub(crate) fn stream_checkout_entry(
     repo: &Repository,
@@ -5462,7 +5494,7 @@ pub(crate) fn stream_checkout_entry(
                 oid,
             )
         })?
-        .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
+        .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))
 }
 
 /// Write blob `oid` to `rel_path` with checkout conversion, replacing whatever is there.
@@ -5496,7 +5528,7 @@ pub(crate) fn write_blob_to_worktree(
                     has_symlinks,
                 )
             })?
-            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
+            .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))
             .map(Some);
     };
     let Some(bytes) =
@@ -5535,7 +5567,9 @@ fn write_checkout_entry(
             .open(&abs_path)
         {
             file.write_all(data).map_err(|e| {
-                Error::PathError(format!("writing '{rel_path}' during checkout: {e}"))
+                Error::Worktree(WorktreeError::Path {
+                    detail: format!("writing '{rel_path}' during checkout: {e}"),
+                })
             })?;
             drop(file);
             let old_mode = change.old_mode.bits();
@@ -5738,8 +5772,10 @@ impl LeadingDirCache {
         #[cfg(not(unix))]
         {
             use std::path::Component;
-            let parent_str = std::str::from_utf8(&parent)
-                .map_err(|_| Error::Verbatim("non-UTF-8 parent path during checkout".into()))?;
+            let parent_str =
+                std::str::from_utf8(&parent).map_err(|_| WorktreeError::NonUtf8Path {
+                    path: String::from_utf8_lossy(&parent).into_owned(),
+                })?;
             let path = Path::new(parent_str);
             let mut cur = work_tree.to_path_buf();
             for comp in path.components() {
@@ -5905,9 +5941,9 @@ fn write_worktree_content(
     let ready = match content {
         WorktreeFileContent::Bytes(data) => Ready::Bytes(data),
         WorktreeFileContent::Stream(_) if mode == MODE_SYMLINK => {
-            return Err(Error::PathError(format!(
-                "symlink target for '{rel_path}' must be in memory"
-            )));
+            return Err(Error::Worktree(WorktreeError::Path {
+                detail: format!("symlink target for '{rel_path}' must be in memory"),
+            }));
         }
         WorktreeFileContent::Stream(reader) => {
             let dir = abs_path.parent().unwrap_or(work_tree);
@@ -5950,7 +5986,9 @@ fn write_worktree_content(
     };
     if mode == MODE_SYMLINK {
         let target = std::str::from_utf8(data).map_err(|_| {
-            Error::PathError(format!("symlink target for '{rel_path}' is not UTF-8"))
+            Error::Worktree(WorktreeError::Path {
+                detail: format!("symlink target for '{rel_path}' is not UTF-8"),
+            })
         })?;
         io_with_path(
             rel_path,

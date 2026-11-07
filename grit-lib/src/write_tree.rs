@@ -1,5 +1,6 @@
 //! Build tree objects from index entries (`git write-tree` core logic).
 
+use crate::error::ObjectError;
 use std::collections::BTreeMap;
 
 use crate::error::{Error, Result};
@@ -7,7 +8,7 @@ use crate::index::{
     CacheTreeNode, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK,
     MODE_TREE,
 };
-use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError, IndexResult};
+use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::{
     oid_hash_set_with_capacity, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind,
     OidHashSet, TreeEntry,
@@ -190,7 +191,7 @@ pub fn write_tree_update_index(
     index: &mut Index,
     prefix: &str,
     flags: WriteTreeFlags,
-) -> IndexResult<ObjectId> {
+) -> crate::error::Result<ObjectId> {
     ensure_empty_blob_for_intent_to_add(odb, index)?;
 
     let was_valid =
@@ -518,11 +519,13 @@ fn rebuild_directory_node(
 }
 
 fn missing_member_error(mode: u32, oid: &ObjectId, path: &[u8]) -> Error {
-    Error::ObjectNotFound(format!(
-        "{mode:o} {} at {}",
-        oid.to_hex(),
-        String::from_utf8_lossy(path)
-    ))
+    Error::Object(ObjectError::NotFound {
+        name: format!(
+            "{mode:o} {} at {}",
+            oid.to_hex(),
+            String::from_utf8_lossy(path)
+        ),
+    })
 }
 
 /// Whether `node` and every descendant are valid and their trees are in `reusable`.
@@ -585,13 +588,13 @@ pub(crate) fn is_empty_tree_oid(odb: &Odb, oid: &ObjectId) -> bool {
     odb.is_empty_tree(oid)
 }
 
-fn ensure_empty_blob_for_intent_to_add(odb: &Odb, index: &Index) -> IndexResult<()> {
+fn ensure_empty_blob_for_intent_to_add(odb: &Odb, index: &Index) -> Result<()> {
     if index
         .entries
         .iter()
         .any(|e| e.stage() == 0 && e.intent_to_add())
     {
-        let _ = odb.write(ObjectKind::Blob, b"").map_err(IndexError::from)?;
+        let _ = odb.write(ObjectKind::Blob, b"")?;
     }
     Ok(())
 }
@@ -610,7 +613,7 @@ fn ensure_empty_blob_for_partial_index_write(
             && !odb.exists(&e.oid)
     });
     if needs_empty {
-        let _ = odb.write(ObjectKind::Blob, b"").map_err(IndexError::from)?;
+        let _ = odb.write(ObjectKind::Blob, b"")?;
     }
     Ok(())
 }
@@ -624,7 +627,7 @@ fn index_path_in_dir(path: &[u8], prefix: &str) -> bool {
     path.len() > pb.len() && path.starts_with(pb) && path[pb.len()] == b'/'
 }
 
-fn entry_relative_to_dir_prefix<'a>(path: &'a [u8], dir_prefix: &[u8]) -> IndexResult<&'a [u8]> {
+fn entry_relative_to_dir_prefix<'a>(path: &'a [u8], dir_prefix: &[u8]) -> Result<&'a [u8]> {
     if dir_prefix.is_empty() {
         return Ok(path);
     }
@@ -636,6 +639,7 @@ fn entry_relative_to_dir_prefix<'a>(path: &'a [u8], dir_prefix: &[u8]) -> IndexR
                     prefix: String::from_utf8_lossy(dir_prefix).into_owned(),
                 },
             ))
+            .into()
         })
 }
 
@@ -712,7 +716,7 @@ pub(crate) fn write_tree_from_index_subset(
     odb: &Odb,
     index: &Index,
     paths: &std::collections::HashSet<Vec<u8>>,
-) -> IndexResult<ObjectId> {
+) -> Result<ObjectId> {
     ensure_empty_blob_for_intent_to_add(odb, index)?;
 
     let mut entries: Vec<&IndexEntry> = index
@@ -737,7 +741,11 @@ pub(crate) fn write_tree_from_index_subset(
 /// Unlike [`write_tree_update_index`], this does not read or update the index cache-tree
 /// extension. Callers that need incremental reuse must use [`write_tree_update_index`] on a
 /// mutable index instead.
-pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> IndexResult<ObjectId> {
+pub fn write_tree_from_index(
+    odb: &Odb,
+    index: &Index,
+    prefix: &str,
+) -> crate::error::Result<ObjectId> {
     if prefix.is_empty() {
         if let Some(root) = index.cache_tree_root {
             if cache_tree_fully_valid(odb, index.cache_tree.as_ref()) {
@@ -865,7 +873,7 @@ fn verify_cache_tree_one(
     Ok(())
 }
 
-fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> IndexResult<ObjectId> {
+fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<ObjectId> {
     let mut children: BTreeMap<Vec<u8>, ChildKind> = BTreeMap::new();
 
     for entry in entries {
@@ -918,7 +926,7 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> IndexRes
     });
 
     let data = serialize_tree(&tree_entries);
-    odb.write(ObjectKind::Tree, &data).map_err(IndexError::from)
+    odb.write(ObjectKind::Tree, &data)
 }
 
 fn build_cache_tree_node(
@@ -1337,7 +1345,7 @@ mod tests {
         let mut index = Index::new();
         index.add_or_replace(entry("gone", MODE_REGULAR, missing));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
-        assert!(matches!(err, Error::ObjectNotFound(_)));
+        assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
     }
 
     #[test]
@@ -1358,7 +1366,7 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(matches!(err, Error::ObjectNotFound(_)));
+        assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
     }
 
     #[test]
@@ -1748,7 +1756,7 @@ mod tests {
         index.add_or_replace(entry("beta/three", MODE_REGULAR, missing));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
         assert!(
-            matches!(&err, Error::ObjectNotFound(msg) if msg.contains("beta/three")),
+            matches!(&err, Error::Object(ObjectError::NotFound { name: msg }) if msg.contains("beta/three")),
             "{err:?}"
         );
     }

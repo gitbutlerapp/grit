@@ -22,7 +22,7 @@ use crate::repo::Repository;
 use crate::revwalk::rev_list::topo_order_commit_subset;
 use crate::state::{resolve_head_for_repository, HeadState};
 
-use super::error::{engine_err, HistoryError};
+use super::error::HistoryError;
 use super::plan::{
     collect_scoped_refs, commit_parents, head_effect, plan_ref_updates, plan_rewrite_with_order,
     plan_rewrite_with_order_resumable, ResumablePlanOutcome,
@@ -87,7 +87,7 @@ pub fn rebase_request_after_fetch(
     upstream_reflog_ref: &str,
     landed: Option<ObjectId>,
     use_fork_point: bool,
-) -> Result<RebaseRequest, HistoryError> {
+) -> crate::error::Result<RebaseRequest> {
     let merge_base = rebase_fork(repo, upstream_tip, head)?;
     if !use_fork_point {
         if let Some(base) = landed {
@@ -108,10 +108,8 @@ pub fn rebase_request_after_fetch(
             branch_tip: head,
         });
     }
-    let fork =
-        try_reflog_fork_point(repo, upstream_reflog_ref, upstream_tip, head).map_err(engine_err)?;
-    let mut boundary =
-        rebase_boundary_from_fork_point(repo, head, upstream_tip, fork).map_err(engine_err)?;
+    let fork = try_reflog_fork_point(repo, upstream_reflog_ref, upstream_tip, head)?;
+    let mut boundary = rebase_boundary_from_fork_point(repo, head, upstream_tip, fork)?;
     if let Some(base) = landed {
         if base != boundary
             && is_ancestor(repo, base, head).map_err(history_repo_err)?
@@ -132,7 +130,7 @@ fn pick_newer_boundary(
     repo: &Repository,
     a: ObjectId,
     b: ObjectId,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     if is_ancestor(repo, a, b).map_err(history_repo_err)? && a != b {
         Ok(b)
     } else {
@@ -140,8 +138,8 @@ fn pick_newer_boundary(
     }
 }
 
-fn history_repo_err(err: crate::error::Error) -> HistoryError {
-    engine_err(err)
+fn history_repo_err(err: crate::error::Error) -> crate::error::Error {
+    err
 }
 
 /// Builds a [`RebaseRequest`] for `grit rebase` / `grit history rebase`.
@@ -161,7 +159,7 @@ pub fn rebase_run_request(
     upstream_spec: Option<&str>,
     explicit_onto: bool,
     use_fork_point: Option<bool>,
-) -> Result<RebaseRequest, HistoryError> {
+) -> crate::error::Result<RebaseRequest> {
     if explicit_onto {
         return Ok(RebaseRequest {
             upstream: upstream_oid,
@@ -206,7 +204,7 @@ pub fn resolve_rebase_use_fork_point(
 fn rebase_upstream_reflog_ref(
     repo: &Repository,
     upstream_spec: Option<&str>,
-) -> Result<String, HistoryError> {
+) -> crate::error::Result<String> {
     if let Some(spec) = upstream_spec {
         return Ok(resolve_fork_point_reflog_ref(repo, spec));
     }
@@ -218,13 +216,13 @@ fn rebase_upstream_reflog_ref(
                 HistoryError::Planning(PlanningError::RebaseUpstreamRequiresBranchHead)
             })?,
         _ => {
-            return Err(HistoryError::Planning(
-                PlanningError::RebaseDetachedHeadNeedsUpstream,
-            ));
+            return Err(
+                HistoryError::Planning(PlanningError::RebaseDetachedHeadNeedsUpstream).into(),
+            );
         }
     };
     upstream_tracking_full_ref(repo, &branch)
-        .ok_or_else(|| HistoryError::Planning(PlanningError::NoUpstreamForBranch { branch }))
+        .ok_or_else(|| HistoryError::Planning(PlanningError::NoUpstreamForBranch { branch }).into())
 }
 
 /// Result of [`plan_rebase`]: already current, a rewrite plan, or a conflict report (not an error).
@@ -333,7 +331,7 @@ pub fn plan_rebase_check(
     repo: &Repository,
     request: &RebaseRequest,
     opts: &RebaseOntoOptions,
-) -> Result<RebaseCheckPlan, HistoryError> {
+) -> crate::error::Result<RebaseCheckPlan> {
     match plan_rebase(repo, request, opts)? {
         RebasePlan::UpToDate => Ok(RebaseCheckPlan::UpToDate),
         RebasePlan::Conflict {
@@ -374,11 +372,9 @@ pub enum PreRebase {
 }
 
 impl PreRebase {
-    pub(crate) fn run(&self, repo: &Repository) -> Result<(), HistoryError> {
+    pub(crate) fn run(&self, repo: &Repository) -> crate::error::Result<()> {
         match self {
-            Self::Run { upstream } => run_pre_rebase(repo, upstream.as_deref())
-                .map(drop)
-                .map_err(|err| HistoryError::from(crate::error::Error::Hook(err))),
+            Self::Run { upstream } => run_pre_rebase(repo, upstream.as_deref()).map(drop),
             Self::Skip => Ok(()),
         }
     }
@@ -397,7 +393,7 @@ pub fn plan_rebase(
     repo: &Repository,
     request: &RebaseRequest,
     opts: &RebaseOntoOptions,
-) -> Result<RebasePlan, HistoryError> {
+) -> crate::error::Result<RebasePlan> {
     plan_rebase_with_hook(repo, request, opts, &PreRebase::Skip)
 }
 
@@ -407,15 +403,15 @@ pub fn plan_rebase(
 ///
 /// # Errors
 ///
-/// Same as [`plan_rebase`], plus [`HistoryError::Engine`] with
-/// [`HistoryEngineError::Hook`](super::HistoryEngineError::Hook) when the hook refuses the rebase
+/// Same as [`plan_rebase`], plus
+/// [`Error::Hook`](crate::error::Error::Hook) when the hook refuses the rebase
 /// or cannot start.
 pub fn plan_rebase_with_hook(
     repo: &Repository,
     request: &RebaseRequest,
     opts: &RebaseOntoOptions,
     pre_rebase: &PreRebase,
-) -> Result<RebasePlan, HistoryError> {
+) -> crate::error::Result<RebasePlan> {
     let fork = rebase_fork(repo, request.upstream, request.branch_tip)?;
     let effective_onto = request.onto.unwrap_or(request.upstream);
     if rebase_keeps_branch(request, fork) {
@@ -452,12 +448,12 @@ pub fn plan_rebase_with_hook(
         Some(&range),
     ) {
         Ok(plan) => Ok(RebasePlan::Plan(plan)),
-        Err(HistoryError::Conflict {
+        Err(crate::error::Error::History(HistoryError::Conflict {
             commit,
             subject,
             conflicts,
             refs,
-        }) => Ok(RebasePlan::Conflict {
+        })) => Ok(RebasePlan::Conflict {
             commit,
             subject,
             conflicts: conflicts.as_ref().clone(),
@@ -488,7 +484,7 @@ pub fn rebase_onto(
     onto: ObjectId,
     tips: &[ObjectId],
     opts: &RebaseOntoOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     rebase_onto_impl(repo, upstream, onto, tips, opts, None)
 }
 
@@ -496,13 +492,14 @@ pub(crate) fn rebase_fork(
     repo: &Repository,
     upstream: ObjectId,
     branch_tip: ObjectId,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let bases = merge_bases_first_vs_rest(repo, branch_tip, &[upstream])?;
     bases.into_iter().next().ok_or_else(|| {
         HistoryError::Planning(PlanningError::NoMergeBaseBetweenUpstreamAndTip {
             upstream,
             tip: branch_tip,
         })
+        .into()
     })
 }
 
@@ -511,7 +508,7 @@ fn plan_rebase_fast_forward(
     branch_tip: ObjectId,
     onto: ObjectId,
     opts: &RebaseOntoOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     let scoped = collect_scoped_refs(repo, &opts.rewrite, branch_tip)?;
     let mapping = HashMap::from([(branch_tip, onto)]);
     let ref_updates = plan_ref_updates(&scoped, &mapping);
@@ -546,7 +543,7 @@ fn is_rebase_up_to_date(
     onto: Option<ObjectId>,
     branch_tip: ObjectId,
     range: &[ObjectId],
-) -> Result<bool, HistoryError> {
+) -> crate::error::Result<bool> {
     if branch_tip == effective_onto {
         return Ok(true);
     }
@@ -570,16 +567,16 @@ pub(crate) fn build_rebase_rewrite_inputs(
     tips: &[ObjectId],
     opts: &RebaseOntoOptions,
     range: Option<&[ObjectId]>,
-) -> Result<(HistoryEdits, Vec<ObjectId>, Vec<ObjectId>), HistoryError> {
+) -> crate::error::Result<(HistoryEdits, Vec<ObjectId>, Vec<ObjectId>)> {
     if tips.is_empty() {
-        return Err(HistoryError::Planning(PlanningError::RebaseTipsRequired));
+        return Err(HistoryError::Planning(PlanningError::RebaseTipsRequired).into());
     }
 
     for &tip in tips {
         if !is_ancestor(repo, fork, tip)? {
-            return Err(HistoryError::Planning(
-                PlanningError::ForkNotAncestorOfTip { fork, tip },
-            ));
+            return Err(
+                HistoryError::Planning(PlanningError::ForkNotAncestorOfTip { fork, tip }).into(),
+            );
         }
     }
 
@@ -626,7 +623,7 @@ fn linear_rebase_edits(
     range: &[ObjectId],
     skip_map: &HashMap<ObjectId, ObjectId>,
     drop: &[ObjectId],
-) -> Result<HistoryEdits, HistoryError> {
+) -> crate::error::Result<HistoryEdits> {
     let mut edits = HistoryEdits::new();
     let mut previous = onto;
     for &commit in range {
@@ -665,7 +662,7 @@ fn merge_preserving_rebase_edits(
     tips: &[ObjectId],
     range: &[ObjectId],
     skip_map: &HashMap<ObjectId, ObjectId>,
-) -> Result<HistoryEdits, HistoryError> {
+) -> crate::error::Result<HistoryEdits> {
     let range_set: HashSet<ObjectId> = range.iter().copied().collect();
     let mainline = mainline_commits_in_range(repo, fork, tips, &range_set)?;
     let mut edits = HistoryEdits::new();
@@ -699,7 +696,7 @@ fn priority_topo_replay_order(
     repo: &Repository,
     mainline: &HashSet<ObjectId>,
     replay_order: &[ObjectId],
-) -> Result<Vec<ObjectId>, HistoryError> {
+) -> crate::error::Result<Vec<ObjectId>> {
     if replay_order.is_empty() {
         return Ok(Vec::new());
     }
@@ -748,9 +745,7 @@ fn priority_topo_replay_order(
             .min_by(|a, b| prefer_side_branch(a, b))
             .copied()
         else {
-            return Err(HistoryError::Planning(
-                PlanningError::RebaseReplayOrderCycle,
-            ));
+            return Err(HistoryError::Planning(PlanningError::RebaseReplayOrderCycle).into());
         };
         ready.retain(|commit| commit != &next);
         ordered.push(next);
@@ -774,7 +769,7 @@ fn mainline_commits_in_range(
     fork: ObjectId,
     tips: &[ObjectId],
     range_set: &HashSet<ObjectId>,
-) -> Result<HashSet<ObjectId>, HistoryError> {
+) -> crate::error::Result<HashSet<ObjectId>> {
     let mut mainline = HashSet::new();
     for &tip in tips {
         let mut current = tip;
@@ -794,7 +789,7 @@ fn rebase_onto_impl(
     tips: &[ObjectId],
     opts: &RebaseOntoOptions,
     range: Option<&[ObjectId]>,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     let (edits, replay_order, range) =
         build_rebase_rewrite_inputs(repo, fork, onto, tips, opts, range)?;
     if range.is_empty() {
@@ -825,7 +820,7 @@ pub(crate) fn plan_rebase_identity_exec(
     onto: ObjectId,
     range: &[ObjectId],
     opts: &RebaseOntoOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     let skip_map = HashMap::new();
     let replay_order = extend_rebase_replay_order(repo, fork, range, &opts.rewrite, &skip_map)?;
     let mut edits = HistoryEdits::new();
@@ -878,7 +873,7 @@ pub(crate) fn plan_rebase_resumable(
     request: &RebaseRequest,
     opts: &RebaseOntoOptions,
     pre_rebase: &PreRebase,
-) -> Result<Result<ResumablePlanOutcome, RebasePlan>, HistoryError> {
+) -> crate::error::Result<Result<ResumablePlanOutcome, RebasePlan>> {
     let fork = rebase_fork(repo, request.upstream, request.branch_tip)?;
     let effective_onto = request.onto.unwrap_or(request.upstream);
     if rebase_keeps_branch(request, fork) {
@@ -932,7 +927,7 @@ fn extend_rebase_replay_order(
     range: &[ObjectId],
     opts: &RewriteOptions,
     skip_map: &HashMap<ObjectId, ObjectId>,
-) -> Result<Vec<ObjectId>, HistoryError> {
+) -> crate::error::Result<Vec<ObjectId>> {
     if range.is_empty() {
         return Ok(Vec::new());
     }
@@ -981,7 +976,7 @@ fn stacked_commits_above_range(
     range_set: &HashSet<ObjectId>,
     fork: ObjectId,
     skip_map: &HashMap<ObjectId, ObjectId>,
-) -> Result<Vec<ObjectId>, HistoryError> {
+) -> crate::error::Result<Vec<ObjectId>> {
     let mut reachable = commits_reachable_excluding_ancestors_of(repo, &[tip], &[fork], None)?;
     reachable.retain(|oid| *oid != fork && !range_set.contains(oid) && !skip_map.contains_key(oid));
     reachable.retain(|oid| descends_from_rewritten_range(repo, *oid, range_set));
@@ -1002,7 +997,7 @@ pub(crate) fn commits_in_rebase_range(
     repo: &Repository,
     fork: ObjectId,
     tips: &[ObjectId],
-) -> Result<Vec<ObjectId>, HistoryError> {
+) -> crate::error::Result<Vec<ObjectId>> {
     let mut commits = commits_reachable_excluding_ancestors_of(repo, tips, &[fork], None)?;
     commits.retain(|oid| *oid != fork);
     let set: HashSet<ObjectId> = commits.iter().copied().collect();
@@ -1020,14 +1015,14 @@ pub(crate) fn commits_in_rebase_range(
 fn paths_changed_by_commit(
     repo: &Repository,
     commit: ObjectId,
-) -> Result<HashSet<String>, HistoryError> {
+) -> crate::error::Result<HashSet<String>> {
     let obj = repo.odb().read(&commit)?;
     let parsed = parse_commit(&obj.data)?;
     let mut parent_trees = parsed
         .parents
         .iter()
         .map(|parent| Ok(Some(repo.odb().commit_tree(parent)?)))
-        .collect::<Result<Vec<_>, HistoryError>>()?;
+        .collect::<crate::error::Result<Vec<_>>>()?;
     if parent_trees.is_empty() {
         // A root commit adds its whole tree; `None` diffs against the empty tree.
         parent_trees.push(None);
@@ -1043,7 +1038,7 @@ fn paths_changed_by_commit(
 fn collect_range_touched_paths(
     repo: &Repository,
     range: &[ObjectId],
-) -> Result<HashSet<String>, HistoryError> {
+) -> crate::error::Result<HashSet<String>> {
     let mut paths = HashSet::new();
     for &commit in range {
         paths.extend(paths_changed_by_commit(repo, commit)?);
@@ -1074,7 +1069,7 @@ fn commit_touches_replay_paths(
     commit: ObjectId,
     filters: &ReplayPathFilters,
     bloom_chain: Option<&CommitGraphChain>,
-) -> Result<bool, HistoryError> {
+) -> crate::error::Result<bool> {
     if filters.pathspecs.is_empty() {
         return Ok(true);
     }
@@ -1122,7 +1117,7 @@ fn trees_differ_on_pathspecs(
     bloom_chain: Option<&CommitGraphChain>,
     commit_oid: ObjectId,
     bloom_first_parent: bool,
-) -> Result<bool, HistoryError> {
+) -> crate::error::Result<bool> {
     if old_tree == new_tree && old_tree.is_some() {
         return Ok(false);
     }
@@ -1180,7 +1175,7 @@ fn patch_ids_in_fork_to_onto(
     onto: ObjectId,
     range_paths: &HashSet<String>,
     needed_pids: &HashSet<ObjectId>,
-) -> Result<HashMap<ObjectId, ObjectId>, HistoryError> {
+) -> crate::error::Result<HashMap<ObjectId, ObjectId>> {
     if fork == onto || needed_pids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -1232,7 +1227,7 @@ fn applied_by_patch(
     fork: ObjectId,
     onto: ObjectId,
     range: &[ObjectId],
-) -> Result<HashMap<ObjectId, ObjectId>, HistoryError> {
+) -> crate::error::Result<HashMap<ObjectId, ObjectId>> {
     let range_paths = collect_range_touched_paths(repo, range)?;
     let algo = repo.odb().hash_algo();
     let mut needed_pids = HashSet::new();
@@ -1455,7 +1450,7 @@ mod tests {
         content: &[u8],
         msg: &str,
         id: &str,
-    ) -> Result<ObjectId, HistoryError> {
+    ) -> crate::error::Result<ObjectId> {
         use crate::porcelain::index_from_tree::index_from_tree;
         let parent_tree = repo.odb().commit_tree(&parent).map_err(history_repo_err)?;
         let mut index = index_from_tree(repo, &parent_tree).map_err(history_repo_err)?;

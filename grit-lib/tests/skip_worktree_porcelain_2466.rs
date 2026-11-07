@@ -8,6 +8,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::resolve_head_for_repository;
+use grit_lib::worktree::WorktreeError;
 use grit_test_support::git;
 
 use crate::support::{git_ls_files_verbose_map, git_status_porcelain_v2_lines};
@@ -272,7 +273,7 @@ fn reset_hard_aborts_when_skip_worktree_path_removed_in_target() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::WouldOverwrite { .. }),
+        matches!(err, Error::Worktree(WorktreeError::WouldOverwrite { .. })),
         "expected WouldOverwrite, got {err:?}"
     );
     assert!(
@@ -308,7 +309,7 @@ fn reset_hard_aborts_when_skip_worktree_blob_changes_and_worktree_dirty() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::WouldOverwrite { .. }),
+        matches!(err, Error::Worktree(WorktreeError::WouldOverwrite { .. })),
         "expected WouldOverwrite, got {err:?}"
     );
 }

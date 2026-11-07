@@ -1,5 +1,6 @@
 //! [`TreeRefIter`] must match [`parse_tree`] on real trees and preserve parse errors.
 
+use grit_lib::error::ObjectError;
 use std::collections::VecDeque;
 
 use grit_lib::diff::tree_oid_of_commit;
@@ -113,5 +114,8 @@ fn tree_ref_iter_malformed_matches_parse_tree_errors() {
         .collect::<Result<Vec<_>, _>>()
         .expect_err("iter trunc");
     assert_eq!(format!("{parse_err}"), format!("{iter_err}"));
-    assert!(matches!(parse_err, Error::CorruptObject(_)));
+    assert!(matches!(
+        parse_err,
+        Error::Object(ObjectError::Corrupt { .. })
+    ));
 }

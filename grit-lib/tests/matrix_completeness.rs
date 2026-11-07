@@ -497,11 +497,7 @@ struct FakeHttpClient {
 }
 
 impl HttpClient for FakeHttpClient {
-    fn get(
-        &self,
-        _url: &str,
-        _git_protocol: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> grit_lib::error::Result<Vec<u8>> {
         if let Some(e) = &self.get_err {
             return Err(Error::Verbatim(e.clone()));
         }
@@ -514,7 +510,7 @@ impl HttpClient for FakeHttpClient {
         _accept: &str,
         _body: &[u8],
         _git_protocol: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    ) -> grit_lib::error::Result<Vec<u8>> {
         if let Some(e) = &self.post_err {
             return Err(Error::Verbatim(e.clone()));
         }
@@ -529,7 +525,7 @@ impl HttpClient for FakeHttpClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Box<dyn std::io::Read + Send>> {
+    ) -> grit_lib::error::Result<Box<dyn std::io::Read + Send>> {
         Ok(Box::new(std::io::Cursor::new(self.post(
             url,
             content_type,

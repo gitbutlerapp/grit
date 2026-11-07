@@ -1,5 +1,6 @@
 //! Repository-scoped object database access via [`Objects`].
 use crate::change_id::{set_change_id, ChangeIdPolicy};
+use crate::error::ObjectError;
 use crate::error::{Error, Result};
 use crate::fsck_standalone::{fsck_object, FsckObjectOptions};
 use crate::objects::write::{
@@ -62,7 +63,7 @@ impl<'repo> Objects<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::error::Error::ObjectNotFound`] when the object is missing.
+    /// Returns [`crate::error::ObjectError::NotFound`] when the object is missing.
     ///
     /// # Examples
     ///
@@ -98,7 +99,7 @@ impl<'repo> Objects<'repo> {
     /// # Errors
     ///
     /// See [`crate::objects::odb::Odb::read_commit`]: a missing object, an object that is not
-    /// a commit ([`crate::error::Error::UnexpectedObjectKind`]), or a malformed commit.
+    /// a commit ([`crate::error::ObjectError::UnexpectedKind`]), or a malformed commit.
     ///
     /// # Examples
     ///
@@ -138,7 +139,7 @@ impl<'repo> Objects<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::error::Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::error::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     #[inline]
     pub fn hash(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         self.repo.odb().hash(kind, data)
@@ -154,9 +155,9 @@ impl<'repo> Objects<'repo> {
     ///
     /// # Errors
     ///
-    /// - [`crate::error::Error::InvalidObject`] when the payload would fail `git fsck`;
+    /// - [`crate::error::ObjectError::Invalid`] when the payload would fail `git fsck`;
     ///   nothing is written.
-    /// - [`crate::error::Error::HashCollision`] and zlib or filesystem errors from the ODB.
+    /// - [`crate::error::ObjectError::HashCollision`] and zlib or filesystem errors from the ODB.
     ///
     /// # Examples
     ///
@@ -167,7 +168,7 @@ impl<'repo> Objects<'repo> {
             data,
             FsckObjectOptions::new(self.repo.odb().hash_algo()),
         )
-        .map_err(|check| Error::InvalidObject { kind, check })?;
+        .map_err(|check| Error::Object(ObjectError::Invalid { kind, check }))?;
         self.repo.odb().write(kind, data)
     }
 
@@ -178,7 +179,7 @@ impl<'repo> Objects<'repo> {
     ///
     /// # Errors
     ///
-    /// [`crate::error::Error::HashCollision`] and zlib or filesystem errors from the ODB.
+    /// [`crate::error::ObjectError::HashCollision`] and zlib or filesystem errors from the ODB.
     #[inline]
     pub fn write_literally(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         self.repo.odb().write(kind, data)
@@ -195,14 +196,14 @@ impl<'repo> Objects<'repo> {
     ///
     /// # Errors
     ///
-    /// - [`crate::error::Error::InvalidTreeEntry`] when an entry has an empty, `.`, `..`,
+    /// - [`crate::error::ObjectError::InvalidTreeEntry`] when an entry has an empty, `.`, `..`,
     ///   `.git`-alias or slash/NUL-containing name, a mode other than `100644`, `100755`,
     ///   `120000`, `40000` or `160000`, the null object id, an object id of the wrong hash
     ///   algorithm, a name over 4096 bytes, a name used by another entry, or a symlink to a
     ///   reserved metadata file name (`.gitmodules`, `.gitattributes`, and related spellings).
-    /// - [`crate::error::Error::ObjectNotFound`] when a required entry object is missing.
-    /// - [`crate::error::Error::UnexpectedObjectKind`] when a stored object has the wrong kind.
-    /// - [`crate::error::Error::HashCollision`] and zlib or filesystem errors from the ODB.
+    /// - [`crate::error::ObjectError::NotFound`] when a required entry object is missing.
+    /// - [`crate::error::ObjectError::UnexpectedKind`] when a stored object has the wrong kind.
+    /// - [`crate::error::ObjectError::HashCollision`] and zlib or filesystem errors from the ODB.
     ///
     /// # Examples
     ///
@@ -262,11 +263,11 @@ impl<'repo> Objects<'repo> {
     ///
     /// # Errors
     ///
-    /// - [`crate::error::Error::InvalidSignature`] when the author or committer has a
+    /// - [`crate::error::ObjectError::InvalidSignature`] when the author or committer has a
     ///   `<`, `>` or control character in its name or email, a time before the Unix
     ///   epoch, or a UTC offset with a seconds component.
-    /// - [`crate::error::Error::ObjectNotFound`] when the tree or a parent is missing, and
-    ///   [`crate::error::Error::UnexpectedObjectKind`] when one has the wrong kind.
+    /// - [`crate::error::ObjectError::NotFound`] when the tree or a parent is missing, and
+    ///   [`crate::error::ObjectError::UnexpectedKind`] when one has the wrong kind.
     /// - Config loading errors from [`Repository::config`] (read for `grit.changeIds`).
     /// - The errors of [`Self::write`].
     ///
@@ -296,11 +297,11 @@ impl<'repo> Objects<'repo> {
     fn expect_kind(&self, oid: &ObjectId, expected: ObjectKind) -> Result<()> {
         let actual = self.read_info(oid)?.kind;
         if actual != expected {
-            return Err(Error::UnexpectedObjectKind {
+            return Err(Error::Object(ObjectError::UnexpectedKind {
                 oid: *oid,
                 expected,
                 actual,
-            });
+            }));
         }
         Ok(())
     }

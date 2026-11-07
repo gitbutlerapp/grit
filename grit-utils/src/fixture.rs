@@ -19,14 +19,14 @@ pub fn scratch_dir() -> PathBuf {
         std::thread_local! {
             static TEST_SCRATCH: OnceCell<PathBuf> = const { OnceCell::new() };
         }
-        return TEST_SCRATCH.with(|cell| {
+        TEST_SCRATCH.with(|cell| {
             cell.get_or_init(|| {
                 tempfile::tempdir()
                     .expect("benchmark scratch tempdir")
                     .keep()
             })
             .clone()
-        });
+        })
     }
     #[cfg(not(test))]
     {

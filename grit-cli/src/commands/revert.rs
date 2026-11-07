@@ -13,6 +13,7 @@ use crate::ui::path_display_for_discovered_repo;
 use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
+use grit_lib::error::RefError;
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::Conflict;
 use grit_lib::porcelain::replay::ReplayDirection;
@@ -408,8 +409,9 @@ fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Er
         Error::Commit(grit_lib::porcelain::CommitError::NothingToCommit) => {
             anyhow::anyhow!("nothing to commit — the revert would not change the tree")
         }
-        Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to revert onto"),
-        Error::Verbatim(msg) => anyhow::anyhow!(msg),
+        Error::Ref(RefError::UnbornHead) => {
+            anyhow::anyhow!("no commits yet on this branch to revert onto")
+        }
         other => anyhow::Error::new(other),
     }
 }

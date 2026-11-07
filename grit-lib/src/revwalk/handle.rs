@@ -1,6 +1,6 @@
 //! Repository-scoped revision parsing and walking via [`RevWalk`].
 use crate::error::Result;
-use crate::object_inspect::{ResolveError, ResolvedObject};
+use crate::object_inspect::ResolvedObject;
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::rev_list::{
@@ -38,7 +38,7 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// See [`Repository::resolve`].
     #[inline]
-    pub fn resolve_object(&self, spec: &str) -> std::result::Result<ResolvedObject, ResolveError> {
+    pub fn resolve_object(&self, spec: &str) -> Result<ResolvedObject> {
         self.repo.resolve(spec)
     }
 

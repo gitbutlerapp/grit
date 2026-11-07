@@ -3,6 +3,7 @@
 //! [`CommitRef::parse`] is the single commit parser; [`super::parse_commit`] is
 //! `CommitRef::parse(data)?.to_owned()`.
 
+use crate::error::ObjectError;
 use std::borrow::Cow;
 
 use crate::commit_encoding;
@@ -31,7 +32,7 @@ impl<'a> CommitRef<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when required headers are missing or malformed.
+    /// Returns [`crate::error::ObjectError::Corrupt`] when required headers are missing or malformed.
     ///
     /// A header block that ends at EOF (no blank line before the message) is accepted with
     /// an empty message, matching Git's commit parser.
@@ -302,7 +303,9 @@ fn scan_commit(data: &[u8], lenient: bool) -> Result<CommitScan<'_>> {
                 if std::str::from_utf8(rest).is_ok() {
                     encoding = Some(rest);
                 } else if !lenient {
-                    return Err(Error::CorruptObject("encoding is not UTF-8".to_owned()));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: "encoding is not UTF-8".to_owned(),
+                    }));
                 }
                 cont = Continuation::Ignore;
             }
@@ -311,9 +314,9 @@ fn scan_commit(data: &[u8], lenient: bool) -> Result<CommitScan<'_>> {
             }
             HeaderKind::Malformed => {
                 if !lenient {
-                    return Err(Error::CorruptObject(
-                        "malformed commit header line".to_owned(),
-                    ));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: "malformed commit header line".to_owned(),
+                    }));
                 }
                 cont = Continuation::Ignore;
             }
@@ -337,19 +340,25 @@ fn scan_commit(data: &[u8], lenient: bool) -> Result<CommitScan<'_>> {
 
 fn parse_one_pass<'a>(data: &'a [u8]) -> Result<CommitRef<'a>> {
     let scan = scan_commit(data, false)?;
-    let author_bytes = scan
-        .author_raw
-        .ok_or_else(|| Error::CorruptObject("commit missing author header".to_owned()))?;
-    let committer_bytes = scan
-        .committer_raw
-        .ok_or_else(|| Error::CorruptObject("commit missing committer header".to_owned()))?;
+    let author_bytes = scan.author_raw.ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "commit missing author header".to_owned(),
+        })
+    })?;
+    let committer_bytes = scan.committer_raw.ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "commit missing committer header".to_owned(),
+        })
+    })?;
 
     Ok(CommitRef {
         headers_block: scan.headers_block,
         message: scan.message,
-        tree: scan
-            .tree
-            .ok_or_else(|| Error::CorruptObject("commit missing tree header".to_owned()))?,
+        tree: scan.tree.ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "commit missing tree header".to_owned(),
+            })
+        })?,
         parents: scan.parents,
         author_raw: author_bytes,
         committer_raw: committer_bytes,
@@ -484,9 +493,11 @@ impl ExtraScan {
 }
 
 fn merge_identity_continuation(slot: &mut Option<Cow<'_, [u8]>>, rest: &[u8]) -> Result<()> {
-    let merged = slot
-        .as_mut()
-        .ok_or_else(|| Error::CorruptObject("orphan header continuation".to_owned()))?;
+    let merged = slot.as_mut().ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "orphan header continuation".to_owned(),
+        })
+    })?;
     match merged {
         Cow::Borrowed(first) => {
             let mut buf = first.to_vec();

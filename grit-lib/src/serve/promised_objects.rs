@@ -189,7 +189,10 @@ pub(crate) fn plan_pack(
             let promised = PromisorObjects::new(repo)?;
             for blob in &missing {
                 if !promised.is_promised(&blob.oid, blob.referrer.as_ref())? {
-                    return Err(missing_error(blob.oid, MissingObjectReason::NotPromised));
+                    return Err(crate::error::Error::from(missing_error(
+                        blob.oid,
+                        MissingObjectReason::NotPromised,
+                    )));
                 }
             }
         }
@@ -201,7 +204,7 @@ pub(crate) fn plan_pack(
             } else {
                 MissingObjectReason::NotPromised
             };
-            return Err(missing_error(first.oid, reason));
+            return Err(crate::error::Error::from(missing_error(first.oid, reason)));
         }
         MissingObjects::LazyFetch => {
             let oids: Vec<ObjectId> = missing.iter().map(|b| b.oid).collect();
@@ -219,10 +222,10 @@ pub(crate) fn plan_pack(
                 pack_opts,
             )?;
             if let Some(blob) = still_missing.first() {
-                return Err(missing_error(
+                return Err(crate::error::Error::from(missing_error(
                     blob.oid,
                     MissingObjectReason::LazyFetchFailed,
-                ));
+                )));
             }
             selection = replanned;
         }
@@ -260,7 +263,10 @@ pub(crate) fn resolve_missing_wants(
             continue;
         }
         if mode == MissingObjects::Error {
-            return Err(missing_error(oid, MissingObjectReason::Promised));
+            return Err(crate::error::Error::from(missing_error(
+                oid,
+                MissingObjectReason::Promised,
+            )));
         }
         omit.insert(oid);
     }
@@ -271,14 +277,20 @@ pub(crate) fn resolve_missing_wants(
 /// Fetch `oids` through the repository's promisor fetcher and check they arrived.
 fn fetch_from_promisor_remotes(repo: &Repository, oids: &[ObjectId]) -> Result<()> {
     let Some(fetcher) = repo.caches().promisor_fetcher() else {
-        return Err(missing_error(oids[0], MissingObjectReason::NoFetcher));
+        return Err(crate::error::Error::from(missing_error(
+            oids[0],
+            MissingObjectReason::NoFetcher,
+        )));
     };
     fetcher.fetch_missing(repo, oids)?;
     let odb = repo.odb();
     odb.reprepare_local_packs();
     odb.invalidate_packs();
     if let Some(oid) = odb.missing_oids(oids.iter().copied())?.first() {
-        return Err(missing_error(*oid, MissingObjectReason::LazyFetchFailed));
+        return Err(crate::error::Error::from(missing_error(
+            *oid,
+            MissingObjectReason::LazyFetchFailed,
+        )));
     }
     Ok(())
 }

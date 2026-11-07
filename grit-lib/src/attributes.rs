@@ -6,6 +6,7 @@
 
 use crate::config::parse_path;
 use crate::config::ConfigSet;
+use crate::error::RefError;
 use crate::git_path::CanonicalizeExt;
 #[cfg(unix)]
 use crate::index::normalize_mode;
@@ -793,13 +794,24 @@ fn lexical_normalize_path(path: PathBuf) -> PathBuf {
 ///
 /// Uses [`std::fs::canonicalize`] when the target exists; otherwise resolves `..` lexically from the
 /// current directory so paths like `../f` work for missing files (Git `prefix_path`, t0003).
+///
+/// # Errors
+///
+/// [`RepositoryError::RequiresWorkTree`](crate::repo::RepositoryError::RequiresWorkTree) in a
+/// bare repository, and [`PathOutsideRepoError`](crate::error::PathOutsideRepoError) when the
+/// path is outside the work tree.
 pub fn path_relative_to_worktree(
     repo: &Repository,
     path_str: &str,
-) -> std::result::Result<String, String> {
+) -> crate::error::Result<String> {
     let wt = repo
         .work_tree()
-        .ok_or_else(|| "bare repository — no work tree".to_string())?;
+        .ok_or(crate::repo::RepositoryError::RequiresWorkTree)?;
+    let outside = || crate::error::PathOutsideRepoError::OutsideRepository {
+        path: path_str.to_owned(),
+        subpath: path_str.to_owned(),
+        repo_root: wt.display().to_string(),
+    };
     let cwd = repo.environment().cwd.clone();
     let p = Path::new(path_str);
     let combined = if p.is_absolute() {
@@ -809,14 +821,12 @@ pub fn path_relative_to_worktree(
     };
 
     if let Ok(abs) = combined.canonicalize_simplified() {
-        let rel = crate::git_path::strip_worktree_prefix(&abs, wt)
-            .ok_or_else(|| format!("path outside repository: {}", path_str))?;
+        let rel = crate::git_path::strip_worktree_prefix(&abs, wt).ok_or_else(outside)?;
         return Ok(normalize_rel_path(&rel));
     }
 
     let abs_lex = lexical_normalize_path(combined);
-    let rel = crate::git_path::strip_worktree_prefix(&abs_lex, wt)
-        .ok_or_else(|| format!("path outside repository: {}", path_str))?;
+    let rel = crate::git_path::strip_worktree_prefix(&abs_lex, wt).ok_or_else(outside)?;
     Ok(normalize_rel_path(&rel))
 }
 
@@ -1253,9 +1263,9 @@ pub(crate) fn load_gitattributes_for_diff(
             Ok(oid) => return load_gitattributes_from_tree(repo, &oid),
             Err(_) if ignore_bad_tree => {}
             Err(_) => {
-                return Err(crate::error::Error::InvalidRef(format!(
-                    "bad --attr-source or GIT_ATTR_SOURCE: {spec}"
-                )));
+                return Err(crate::error::Error::Ref(RefError::Invalid {
+                    detail: format!("bad --attr-source or GIT_ATTR_SOURCE: {spec}"),
+                }));
             }
         }
     }
@@ -1298,16 +1308,24 @@ pub(crate) fn resolve_attr_treeish(
 }
 
 /// Parse a revision to a tree OID for attribute loading.
-pub fn resolve_tree_oid(repo: &Repository, spec: &str) -> std::result::Result<ObjectId, String> {
-    let oid = resolve_revision(repo, spec).map_err(|e| e.to_string())?;
-    let obj = repo.read_replaced(&oid).map_err(|e| e.to_string())?;
+///
+/// # Errors
+///
+/// Revision resolution and object read failures, and
+/// [`ObjectError::UnexpectedKind`](crate::error::ObjectError::UnexpectedKind) when the revision
+/// names neither a commit nor a tree.
+pub fn resolve_tree_oid(repo: &Repository, spec: &str) -> crate::error::Result<ObjectId> {
+    let oid = resolve_revision(repo, spec)?;
+    let obj = repo.read_replaced(&oid)?;
     match obj.kind {
-        ObjectKind::Commit => {
-            let c = crate::objects::parse_commit(&obj.data).map_err(|e| e.to_string())?;
-            Ok(c.tree)
-        }
+        ObjectKind::Commit => Ok(crate::objects::parse_commit(&obj.data)?.tree),
         ObjectKind::Tree => Ok(oid),
-        _ => Err("revision is not a commit or tree".to_string()),
+        actual => Err(crate::error::ObjectError::UnexpectedKind {
+            oid,
+            expected: ObjectKind::Tree,
+            actual,
+        }
+        .into()),
     }
 }
 

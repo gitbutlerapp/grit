@@ -39,15 +39,19 @@ pub struct RefspecItem {
 
 /// Error returned when a refspec cannot be parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RefspecError {
     /// The refspec string is invalid.
-    Invalid(String),
+    Invalid {
+        /// The refspec as given.
+        spec: String,
+    },
 }
 
 impl std::fmt::Display for RefspecError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RefspecError::Invalid(s) => write!(f, "invalid refspec '{s}'"),
+            RefspecError::Invalid { spec: s } => write!(f, "invalid refspec '{s}'"),
         }
     }
 }
@@ -82,7 +86,9 @@ fn refname_ok(name: &str, is_glob: bool) -> bool {
 /// This is a direct port of `parse_refspec()` in `git/refspec.c`.
 fn parse_refspec(refspec: &str, fetch: bool) -> Result<RefspecItem, RefspecError> {
     let bytes = refspec.as_bytes();
-    let invalid = || RefspecError::Invalid(refspec.to_owned());
+    let invalid = || RefspecError::Invalid {
+        spec: refspec.to_owned(),
+    };
 
     let mut item = RefspecItem::default();
     let mut is_glob = false;

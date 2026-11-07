@@ -8,6 +8,7 @@ mod t0008;
 use grit_lib::index::Index;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::ignore::{IgnoreCheck, IgnoreSource};
+use grit_lib::worktree::WorktreeError;
 use t0008::{assert_match_eq, git_check_ignore_verbose_batch, t0008_corpus, T0008Repo};
 
 fn grit_ignore_check(repo: &Repository, index: &Index, paths: &[String]) -> Vec<IgnoreCheck> {
@@ -45,7 +46,7 @@ fn normalize_ignore_paths_preserves_boundaries_and_directory_hints() {
     for input in ["../../outside", "../a/../../outside"] {
         assert!(matches!(
             normalize_repo_relative(&repo, &cwd, input),
-            Err(grit_lib::error::Error::PathError(_))
+            Err(grit_lib::error::Error::Worktree(WorktreeError::Path { .. }))
         ));
     }
     let sibling = root.with_file_name(format!(
@@ -54,7 +55,7 @@ fn normalize_ignore_paths_preserves_boundaries_and_directory_hints() {
     ));
     assert!(matches!(
         normalize_repo_relative(&repo, &cwd, sibling.join("file").to_str().expect("path")),
-        Err(grit_lib::error::Error::PathError(_))
+        Err(grit_lib::error::Error::Worktree(WorktreeError::Path { .. }))
     ));
 }
 

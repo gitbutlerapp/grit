@@ -13,6 +13,7 @@ use crate::ui::path_display_for_discovered_repo;
 use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
+use grit_lib::error::RefError;
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::next_step_grit_commands;
 use grit_lib::operation::Conflict;
@@ -428,8 +429,9 @@ fn map_prediction_outcome(prediction: SequencePrediction) -> PickOutcome {
 fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Error {
     match err {
         Error::Merge(merge_err) => map_merge_replay_error(repo, "pick", merge_err),
-        Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to pick onto"),
-        Error::Verbatim(msg) => anyhow::anyhow!(msg),
+        Error::Ref(RefError::UnbornHead) => {
+            anyhow::anyhow!("no commits yet on this branch to pick onto")
+        }
         other => anyhow::Error::new(other),
     }
 }

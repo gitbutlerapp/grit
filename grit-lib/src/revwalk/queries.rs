@@ -1,4 +1,5 @@
 //! Typed revision-range parsing and high-level rev-walk queries on [`super::RevWalk`].
+use crate::error::RevisionError;
 use crate::error::{Error, Result};
 use crate::git_date::parse::DateParseError;
 use crate::git_date::parse_date_cutoff;
@@ -360,7 +361,7 @@ pub(crate) fn rev_list_options_from_walk(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Verbatim`] when the string cannot be parsed.
+/// Returns [`DateParseError`] when the string cannot be parsed.
 pub fn committer_cutoff_from_date(
     date: &str,
     now_sec: i64,
@@ -444,7 +445,9 @@ fn single_symmetric_range(
 ) -> Result<(ObjectId, ObjectId)> {
     match (tokens, parsed.symmetric_left, parsed.symmetric_right) {
         ([_], Some(left), Some(right)) => Ok((left, right)),
-        _ => Err(Error::RevList(RevListError::SymmetricRangeRequired)),
+        _ => Err(Error::Revision(RevisionError::List(
+            RevListError::SymmetricRangeRequired,
+        ))),
     }
 }
 
@@ -739,7 +742,9 @@ impl<'repo> RevWalk<'repo> {
     /// range, or rev-parse / merge-base errors from resolving the tips.
     pub fn symmetric_range_tips(&self, tokens: &[&str]) -> Result<(ObjectId, ObjectId)> {
         if tokens.len() != 1 {
-            return Err(Error::RevList(RevListError::SymmetricRangeRequired));
+            return Err(Error::Revision(RevisionError::List(
+                RevListError::SymmetricRangeRequired,
+            )));
         }
         let parsed = parse_rev_walk_tokens(self.repository(), tokens)?;
         single_symmetric_range(tokens, &parsed)
@@ -832,6 +837,7 @@ impl<'repo> RevWalk<'repo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::RefError;
 
     #[test]
     fn split_double_dot_token_without_repo() {
@@ -858,7 +864,7 @@ mod tests {
         let walk = RevWalkListOptions::default();
         let err = repo.revwalk().count(&[], &walk).expect_err("no revisions");
         assert!(
-            matches!(err, Error::InvalidRef(ref m) if m == "no revisions specified"),
+            matches!(err, Error::Ref(RefError::Invalid { detail: ref m }) if m == "no revisions specified"),
             "{err:?}"
         );
     }

@@ -1,5 +1,6 @@
 //! Commit-graph parse/load corruption handling (t5318/t5324 scenarios).
 
+use grit_lib::error::ObjectError;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -93,7 +94,7 @@ fn write_verify_fixture_graph(root: &Path) -> PathBuf {
 fn expect_corrupt_parse(path: PathBuf, bytes: Vec<u8>) -> Error {
     let err = CommitGraphLayer::try_parse(path.clone(), bytes.clone()).unwrap_err();
     assert!(
-        matches!(err, Error::CorruptObject(_)),
+        matches!(err, Error::Object(ObjectError::Corrupt { .. })),
         "expected CorruptObject, got {err:?}"
     );
     err
@@ -114,7 +115,7 @@ fn expect_corrupt_load(objects: &Path, graph_path: &Path, bytes: Vec<u8>) {
     write_graph_bytes(graph_path, &bytes);
     let err = CommitGraphChain::verify_on_disk(objects).unwrap_err();
     assert!(
-        matches!(err, Error::CorruptObject(_)),
+        matches!(err, Error::Object(ObjectError::Corrupt { .. })),
         "verify_on_disk: expected CorruptObject, got {err:?}"
     );
 }
@@ -357,11 +358,14 @@ fn corrupt_chain_missing_and_mismatched_layer() {
     let layer_path = graphdir.join(format!("graph-{hash}.graph"));
     std::fs::remove_file(&layer_path).expect("remove layer");
     let err = CommitGraphChain::try_load(&objects).unwrap_err();
-    assert!(matches!(err, Error::CorruptObject(_) | Error::Io(_)));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::Corrupt { .. }) | Error::Io(_)
+    ));
 
     std::fs::write(&layer_path, b"not a graph").expect("bad layer");
     let err = CommitGraphChain::try_load(&objects).unwrap_err();
-    assert!(matches!(err, Error::CorruptObject(_)));
+    assert!(matches!(err, Error::Object(ObjectError::Corrupt { .. })));
 }
 
 #[test]

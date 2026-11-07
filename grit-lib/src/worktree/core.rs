@@ -230,7 +230,7 @@ pub fn find_worktree_with_branch_checked_out(
 ///
 /// # Errors
 ///
-/// Returns [`Error::BranchCheckedOutInWorktree`] when a different worktree holds the branch.
+/// Returns [`crate::porcelain::branch_error::BranchError::CheckedOut`] when a different worktree holds the branch.
 pub fn ensure_branch_not_checked_out_elsewhere(
     repo: &Repository,
     branch_short_name: &str,
@@ -251,7 +251,7 @@ pub fn ensure_branch_not_checked_out_elsewhere(
 ///
 /// # Errors
 ///
-/// Returns [`Error::BranchCheckedOutInWorktree`] when any registered worktree holds the branch.
+/// Returns [`crate::porcelain::branch_error::BranchError::CheckedOut`] when any registered worktree holds the branch.
 pub fn ensure_branch_not_checked_out_in_any_worktree(
     repo: &Repository,
     branch_short_name: &str,
@@ -266,10 +266,10 @@ pub fn ensure_branch_not_checked_out_in_any_worktree(
 }
 
 fn branch_checked_out_error(branch: &str, worktree_path: &Path) -> Error {
-    Error::BranchCheckedOutInWorktree {
-        branch: branch.to_owned(),
-        worktree_path: crate::git_path::path_for_error_message(worktree_path),
-    }
+    Error::Branch(BranchError::CheckedOut {
+        name: branch.to_owned(),
+        worktree: crate::git_path::path_for_error_message(worktree_path),
+    })
 }
 
 /// Whether the main worktree row in [`list_worktrees`] is marked bare (matches `git worktree list`).
@@ -1591,7 +1591,7 @@ mod tests {
         assert_eq!(found.worktree_path, path_for_disk_compare(&linked));
         assert!(matches!(
             ensure_branch_not_checked_out_in_any_worktree(&repo, "feature"),
-            Err(Error::BranchCheckedOutInWorktree { .. })
+            Err(Error::Branch(BranchError::CheckedOut { .. }))
         ));
         git(&linked, &["rebase", "--abort"]);
 

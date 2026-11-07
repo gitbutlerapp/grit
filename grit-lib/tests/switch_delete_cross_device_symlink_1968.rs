@@ -76,14 +76,17 @@ mod unix {
             msg.contains("z/blocked"),
             "error must name the blocking path, got: {msg}"
         );
-        match &err {
-            Error::WorktreePathIo {
-                path,
-                operation: WorktreePathOperation::Remove,
-                ..
-            } => assert_eq!(path, "z/blocked"),
-            other => panic!("unexpected error: {other:?}"),
-        }
+        let path_io = err
+            .path_io()
+            .unwrap_or_else(|| panic!("unexpected error: {err:?}"));
+        assert_eq!(
+            path_io.operation,
+            grit_lib::error::PathIoOperation::Worktree(WorktreePathOperation::Remove)
+        );
+        assert_eq!(
+            path_io.path.as_deref(),
+            Some(std::path::Path::new("z/blocked"))
+        );
 
         assert_eq!(
             git(tmp.path(), &["rev-parse", "HEAD"]),

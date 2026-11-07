@@ -16,7 +16,10 @@
 //! [`crate::push_report::PushRefStatus`] rather than redefining it.
 
 use crate::environment::RepositoryOptions;
+use crate::error::ObjectError;
+use crate::error::RefError;
 use crate::partial_clone::ObjectFilterSpec;
+use crate::worktree::WorktreeError;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
@@ -34,10 +37,12 @@ use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::remote::RemoteError;
 use std::num::NonZeroU32;
 
-fn serve_err(e: crate::serve::ServeError) -> Error {
+fn serve_err(e: Error) -> Error {
     match e {
-        crate::serve::ServeError::Repository(err) => err,
-        other => Error::Remote(RemoteError::LocalUploadPack(Box::new(other))),
+        Error::Remote(RemoteError::Serve(serve)) => {
+            Error::Remote(RemoteError::LocalUploadPack(Box::new(serve)))
+        }
+        other => other,
     }
 }
 
@@ -2130,8 +2135,7 @@ pub(crate) fn fetch_local_into(
         remote_git_dir,
         Some(&remote_odb),
         &opts.refspecs,
-    )
-    .map_err(crate::error::Error::from)?;
+    )?;
 
     let mut default_branch = None;
     let mut remote_head_oid = None;
@@ -2917,7 +2921,7 @@ pub(crate) fn push_local_from(
                     if let Err(err) = outcome.result {
                         apply_ref_store_error_to_push_decision(
                             &mut decisions[idx],
-                            &Error::RefStore(err),
+                            &Error::Ref(RefError::Store(err)),
                             false,
                         );
                     }
@@ -2983,11 +2987,11 @@ fn fail_atomic_push(decisions: &mut [PushDecision]) {
 /// `messages`, one entry per non-empty line, as a wire push handles the remote's side-band
 /// hook output.
 fn receive_hook_or_panic(
-    result: std::result::Result<crate::hooks::HookResult, crate::remote::serve::ServeError>,
+    result: crate::error::Result<crate::hooks::HookResult>,
 ) -> crate::hooks::HookResult {
     match result {
         Ok(r) => r,
-        Err(crate::remote::serve::ServeError::Cancelled) => {
+        Err(crate::error::Error::Cancelled) => {
             unreachable!("receive hooks are not cancelled during push")
         }
         Err(e) => panic!("unexpected serve error during receive hook: {e}"),
@@ -3134,14 +3138,14 @@ fn push_store_ref_update(
 
 fn push_status_for_ref_store_error(err: &Error) -> PushRefStatus {
     match err {
-        Error::RefStore(crate::refs::store::RefStoreError::CreateExists { .. })
-        | Error::RefStore(crate::refs::store::RefStoreError::ExpectedMismatch {
+        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::CreateExists { .. }))
+        | Error::Ref(RefError::Store(crate::refs::store::RefStoreError::ExpectedMismatch {
             expected: crate::refs::store::Expected::Missing,
             ..
-        }) => PushRefStatus::RejectAlreadyExists,
-        Error::RefStore(crate::refs::store::RefStoreError::ExpectedMismatch { .. }) => {
-            PushRefStatus::RejectStale
-        }
+        })) => PushRefStatus::RejectAlreadyExists,
+        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::ExpectedMismatch {
+            ..
+        })) => PushRefStatus::RejectStale,
         _ => PushRefStatus::RemoteRejected,
     }
 }
@@ -3155,7 +3159,7 @@ fn push_message_for_ref_store_error(err: &Error) -> String {
 }
 
 fn ref_store_error_refname(err: &Error) -> Option<String> {
-    let Error::RefStore(store_err) = err else {
+    let Error::Ref(RefError::Store(store_err)) = err else {
         return None;
     };
     Some(match store_err {
@@ -3182,7 +3186,7 @@ fn ref_store_error_refname(err: &Error) -> Option<String> {
             } => refname.clone(),
         },
         crate::refs::store::RefStoreError::SymrefLoop
-        | crate::refs::store::RefStoreError::Corrupt(_)
+        | crate::refs::store::RefStoreError::Corrupt { .. }
         | crate::refs::store::RefStoreError::GitDirPathIo { .. }
         | crate::refs::store::RefStoreError::InvalidReflog(_)
         | crate::refs::store::RefStoreError::Backend(_)
@@ -3382,16 +3386,20 @@ fn decide_push(
 
     // Non-delete updates require a source object that exists locally.
     let Some(src) = spec.src else {
-        return Err(Error::InvalidRef(format!(
-            "push to '{}' has no source object and is not a deletion",
-            spec.dst
-        )));
+        return Err(Error::Ref(RefError::Invalid {
+            detail: format!(
+                "push to '{}' has no source object and is not a deletion",
+                spec.dst
+            ),
+        }));
     };
     if !local_odb.contains(&src)? {
-        return Err(Error::ObjectNotFound(format!(
-            "source object {src} for '{}' is missing from the local object store",
-            spec.dst
-        )));
+        return Err(Error::Object(ObjectError::NotFound {
+            name: format!(
+                "source object {src} for '{}' is missing from the local object store",
+                spec.dst
+            ),
+        }));
     }
 
     // Unchanged: the remote is already at the source.
@@ -3604,11 +3612,11 @@ pub(crate) fn sync_empty_destination_object_format(
         return Ok(false);
     }
     if local_odb.approximate_object_count()? > 0 || local_odb.count_loose_objects()? > 0 {
-        return Err(Error::PathError(format!(
+        return Err(Error::Worktree(WorktreeError::Path { detail: format!(
             "unsupported object format: destination uses {} but remote uses {}; re-clone into an empty directory with a matching format",
             local_odb.hash_algo().name(),
             remote_algo.name()
-        )));
+        ) }));
     }
     write_empty_destination_object_format(local_git_dir, remote_algo)?;
     Ok(true)
@@ -4191,10 +4199,15 @@ pub(crate) struct FetchRefRejectHint<'a> {
 fn fetch_ref_store_error_rejectable(err: &Error) -> bool {
     matches!(
         err,
-        Error::RefStore(crate::refs::store::RefStoreError::NameUnavailable { .. })
-            | Error::RefStore(crate::refs::store::RefStoreError::LockHeld { .. })
-            | Error::RefStore(crate::refs::store::RefStoreError::CreateExists { .. })
-            | Error::RefStore(crate::refs::store::RefStoreError::CaseConflict { .. })
+        Error::Ref(RefError::Store(
+            crate::refs::store::RefStoreError::NameUnavailable { .. }
+        )) | Error::Ref(RefError::Store(
+            crate::refs::store::RefStoreError::LockHeld { .. }
+        )) | Error::Ref(RefError::Store(
+            crate::refs::store::RefStoreError::CreateExists { .. }
+        )) | Error::Ref(RefError::Store(
+            crate::refs::store::RefStoreError::CaseConflict { .. }
+        ))
     )
 }
 
@@ -4235,23 +4248,23 @@ fn mark_fetch_ref_update_rejected(
     };
     update.mode = UpdateMode::RefLockRejected;
     let mut note = match err {
-        Error::RefStore(crate::refs::store::RefStoreError::NameUnavailable { reason }) => {
+        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::NameUnavailable { reason })) => {
             let mut text = reason.lock_message_suffix();
             if let Some(blocking) = blocking_ref_from_unavailable(reason) {
                 append_fetch_prune_hint(&mut text, stale_tracking, blocking, hint.remote_name);
             }
             text
         }
-        Error::RefStore(crate::refs::store::RefStoreError::LockHeld { name }) => {
+        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::LockHeld { name })) => {
             format!("ref '{name}' is locked")
         }
-        Error::RefStore(crate::refs::store::RefStoreError::CaseConflict { name, other }) => {
+        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::CaseConflict { name, other })) => {
             format!(
                 "cannot store '{name}' and '{other}' as loose refs when core.ignorecase is enabled \
                  — use `grit init --ref-format=reftable` and fetch again to keep both spellings"
             )
         }
-        Error::RefStore(crate::refs::store::RefStoreError::CreateExists { name }) => format!(
+        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::CreateExists { name })) => format!(
             "reference '{name}' already exists when core.ignorecase treats names as case-insensitive \
              — use `grit init --ref-format=reftable` and fetch again to keep both spellings"
         ),

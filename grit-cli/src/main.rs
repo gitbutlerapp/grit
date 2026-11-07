@@ -3460,7 +3460,11 @@ fn dispatch(
                 bail!("`--patch-text` cannot be used with --json or --markdown");
             }
             let diff_merges =
-                grit_lib::diff::DiffMerges::parse(&diff_merges).map_err(|e| anyhow::anyhow!(e))?;
+                grit_lib::diff::DiffMerges::parse(&diff_merges).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unknown --diff-merges mode '{diff_merges}' (expected first-parent or combined)"
+                    )
+                })?;
             emit_success(
                 commands::show::run(commands::show::ShowRunOptions {
                     objects,
@@ -5038,7 +5042,7 @@ mod tests {
         let mut heading_idx = 0usize;
         while heading_idx < headings.len() {
             let heading = &headings[heading_idx];
-            if template_idx < TEMPLATE_HEADINGS.len() && heading == &TEMPLATE_HEADINGS[template_idx]
+            if template_idx < TEMPLATE_HEADINGS.len() && heading == TEMPLATE_HEADINGS[template_idx]
             {
                 template_idx += 1;
                 heading_idx += 1;

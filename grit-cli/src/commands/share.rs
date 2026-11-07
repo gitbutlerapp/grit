@@ -672,7 +672,7 @@ fn server_error(server: &ServerUrl, e: ServerAuthError) -> anyhow::Error {
             server.host(),
             server.root_url()
         ),
-        ServerAuthError::NotGritServer(_) => anyhow::anyhow!(
+        ServerAuthError::NotGritServer { .. } => anyhow::anyhow!(
             "{} doesn't share branches: sharing needs a grit hosting server such as grithub",
             server.host()
         ),

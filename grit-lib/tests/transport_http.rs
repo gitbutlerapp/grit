@@ -462,11 +462,7 @@ impl RecordingClient {
 }
 
 impl HttpClient for RecordingClient {
-    fn get(
-        &self,
-        url: &str,
-        git_protocol: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> grit_lib::error::Result<Vec<u8>> {
         let gp = git_protocol.or_else(|| self.inner.git_protocol_header());
         self.git_protocols
             .lock()
@@ -482,7 +478,7 @@ impl HttpClient for RecordingClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    ) -> grit_lib::error::Result<Vec<u8>> {
         let gp = git_protocol.or_else(|| self.inner.git_protocol_header());
         self.git_protocols
             .lock()
@@ -519,11 +515,7 @@ struct IoFailUploadPackClient<C> {
 }
 
 impl<C: HttpClient> HttpClient for IoFailUploadPackClient<C> {
-    fn get(
-        &self,
-        url: &str,
-        git_protocol: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> grit_lib::error::Result<Vec<u8>> {
         self.inner.get(url, git_protocol)
     }
 
@@ -534,7 +526,7 @@ impl<C: HttpClient> HttpClient for IoFailUploadPackClient<C> {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    ) -> grit_lib::error::Result<Vec<u8>> {
         if url.contains("git-upload-pack") {
             return Err(grit_lib::remote::RemoteError::from_io(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,

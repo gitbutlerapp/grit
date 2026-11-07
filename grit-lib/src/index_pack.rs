@@ -4,6 +4,7 @@
 //! exploding every object into loose storage. Small receive-pack pushes may still
 //! use [`crate::unpack_objects`] via [`crate::receive_pack::should_use_unpack_objects`].
 
+use crate::error::ObjectError;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -256,7 +257,7 @@ impl IngestPackOptions {
 ///
 /// # Errors
 ///
-/// [`Error::CorruptObject`] when the bytes are not a complete pack, plus any
+/// [`crate::error::ObjectError::Corrupt`] when the bytes are not a complete pack, plus any
 /// indexing, delta-resolution, or object-store failure.
 pub fn ingest_received_pack(
     pack: Vec<u8>,
@@ -278,14 +279,14 @@ pub fn ingest_received_pack_with_progress(
         return Ok(IngestedPack::default());
     }
     if pack.len() < 12 || &pack[0..4] != b"PACK" {
-        return Err(Error::CorruptObject(
-            "received data is not a pack stream".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "received data is not a pack stream".to_owned(),
+        }));
     }
     verify_trailer(odb.hash_algo(), &pack).map_err(|e| {
-        Error::CorruptObject(format!(
-            "received pack checksum mismatch (download may be incomplete): {e}"
-        ))
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("received pack checksum mismatch (download may be incomplete): {e}"),
+        })
     })?;
     if !odb.uses_files_primary() {
         return ingest_into_custom_primary(&mut pack.as_slice(), odb, progress, cancel);
@@ -442,7 +443,9 @@ pub fn install_pack_path_with_progress(
     let meta = std::fs::metadata(&owned).map_err(Error::Io)?;
     let len = meta.len();
     if len < 12 + hb as u64 {
-        return Err(Error::CorruptObject("pack too small".to_owned()));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "pack too small".to_owned(),
+        }));
     }
     let mut header = [0u8; 12];
     {
@@ -451,9 +454,9 @@ pub fn install_pack_path_with_progress(
         f.read_exact(&mut header).map_err(Error::Io)?;
     }
     if &header[0..4] != b"PACK" {
-        return Err(Error::CorruptObject(
-            "received data is not a pack stream".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "received data is not a pack stream".to_owned(),
+        }));
     }
     let mut trailer = vec![0u8; hb];
     {
@@ -494,9 +497,9 @@ pub fn install_pack_path_with_progress(
             if rows.len()
                 != u32::from_be_bytes([header[8], header[9], header[10], header[11]]) as usize
             {
-                return Err(Error::CorruptObject(
-                    "trusted index row count does not match pack header".to_owned(),
-                ));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "trusted index row count does not match pack header".to_owned(),
+                }));
             }
             (rows.to_vec(), ObjectKindCounts::default())
         } else {
@@ -506,9 +509,10 @@ pub fn install_pack_path_with_progress(
             let body_len = pack_bytes.len() - hb;
             if resident.checksum(odb.hash_algo(), &pack_bytes[..body_len]) != pack_bytes[body_len..]
             {
-                return Err(Error::CorruptObject(
-                    "received pack checksum mismatch (download may be incomplete)".to_owned(),
-                ));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "received pack checksum mismatch (download may be incomplete)"
+                        .to_owned(),
+                }));
             }
             poll_ingest_cancel(&mut progress, cancel)?;
             trailer = pack_bytes[body_len..].to_vec();
@@ -521,9 +525,9 @@ pub fn install_pack_path_with_progress(
                         pack_bytes[11],
                     ]) as usize
                 {
-                    return Err(Error::CorruptObject(
-                        "trusted index row count does not match pack header".to_owned(),
-                    ));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: "trusted index row count does not match pack header".to_owned(),
+                    }));
                 }
                 drop(indexed);
                 (rows.clone(), ObjectKindCounts::default())
@@ -694,7 +698,7 @@ fn write_keep_marker(final_pack: &Path, opts: &IngestPackOptions) -> Result<Opti
 /// # Errors
 ///
 /// Returns [`Error::Io`] on file errors, an object-database error when a base cannot be
-/// read, and [`Error::CorruptObject`] when the object count would overflow.
+/// read, and [`crate::error::ObjectError::Corrupt`] when the object count would overflow.
 fn append_thin_bases(
     pack_path: &Path,
     odb: &Odb,
@@ -716,7 +720,11 @@ fn append_thin_bases(
         .and_then(|added| {
             u32::from_be_bytes([header[8], header[9], header[10], header[11]]).checked_add(added)
         })
-        .ok_or_else(|| Error::CorruptObject("thin pack fix: object count overflow".to_owned()))?;
+        .ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "thin pack fix: object count overflow".to_owned(),
+            })
+        })?;
     header[8..12].copy_from_slice(&count.to_be_bytes());
 
     let len = file.metadata().map_err(Error::Io)?.len();
@@ -1287,7 +1295,7 @@ mod tests {
             )
             .expect_err("index-pack hashing");
             assert!(
-                matches!(err, Error::CorruptObject(_)),
+                matches!(err, Error::Object(ObjectError::Corrupt { .. })),
                 "threads={threads}: {err:?}"
             );
         }
@@ -1304,7 +1312,7 @@ mod tests {
             )
             .expect_err("install pack");
             assert!(
-                matches!(err, Error::CorruptObject(_)),
+                matches!(err, Error::Object(ObjectError::Corrupt { .. })),
                 "install threads={threads}: {err:?}"
             );
         }
@@ -1666,7 +1674,7 @@ mod tests {
         )
         .expect_err("truncated pack must fail");
         assert!(
-            matches!(err, Error::CorruptObject(_)),
+            matches!(err, Error::Object(ObjectError::Corrupt { .. })),
             "expected corrupt object, got {err:?}"
         );
         let pack_dir = tmp.path().join("pack");

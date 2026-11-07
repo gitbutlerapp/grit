@@ -37,11 +37,11 @@ fn reflog_list_cli() {
         .filter_map(|v| v.get("ref").and_then(Value::as_str))
         .collect::<Vec<_>>();
     assert!(
-        refs.iter().any(|r| *r == "refs/heads/main"),
+        refs.contains(&"refs/heads/main"),
         "expected main reflog: {refs:?}"
     );
     assert!(
-        refs.iter().any(|r| *r == "refs/heads/list"),
+        refs.contains(&"refs/heads/list"),
         "branch named list must appear as refs/heads/list: {refs:?}"
     );
 

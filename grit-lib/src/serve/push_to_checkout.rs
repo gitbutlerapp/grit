@@ -66,11 +66,9 @@ fn deploy_push_to_checkout(
     let hex = new_commit.to_hex();
     let here = worktree_admin_dir(repo);
     let wt_repo = if admin_dirs_match(&entry.admin_dir, &here) {
-        Repository::discover(Some(entry.path.as_path()), &RepositoryOptions::empty())
-            .map_err(super::ServeError::Repository)?
+        Repository::discover(Some(entry.path.as_path()), &RepositoryOptions::empty())?
     } else {
-        repo.open_linked_worktree(&entry.admin_dir, &entry.path)
-            .map_err(super::ServeError::Repository)?
+        repo.open_linked_worktree(&entry.admin_dir, &entry.path)?
     };
     run_deploy_on_repo(&wt_repo, entry, hex.as_str(), new_commit, sideband_out)
 }
@@ -97,10 +95,7 @@ fn run_push_to_checkout_hook(
     entry: &WorktreeEntry,
     new_hex: &str,
 ) -> Result<HookResult> {
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(super::ServeError::Repository)?;
+    let config = repo.config().snapshot()?;
     let git_dir = std::path::absolute(repo.git_dir()).map_err(super::ServeError::Io)?;
     let work_tree = std::path::absolute(&entry.path).map_err(super::ServeError::Io)?;
     let env = [
@@ -108,7 +103,7 @@ fn run_push_to_checkout_hook(
         ("GIT_WORK_TREE", work_tree.to_string_lossy().into_owned()),
     ];
     let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    run_hook_opts(
+    Ok(run_hook_opts(
         Some(repo),
         "push-to-checkout",
         &[new_hex],
@@ -120,36 +115,30 @@ fn run_push_to_checkout_hook(
             ..RunHookOptions::default()
         },
     )
-    .map_err(|e| super::ServeError::Protocol(e.to_string()))
+    .map_err(|e| super::ServeError::Protocol {
+        detail: e.to_string(),
+    })?)
 }
 
 fn push_to_deploy_builtin(
     repo: &Repository,
     new_commit: ObjectId,
 ) -> Result<Option<RefUpdateRefusal>> {
-    let mut index = load_worktree_index(repo).map_err(super::ServeError::Repository)?;
+    let mut index = load_worktree_index(repo)?;
     if index.has_unmerged_entries() {
         return Ok(Some(RefUpdateRefusal::PushCheckoutUpToDateFailed));
     }
-    let head_tree = resolve_head_for_repository(repo)
-        .map_err(super::ServeError::Repository)?
-        .tree(repo.odb())
-        .map_err(super::ServeError::Repository)?;
-    let new_tree = repo
-        .odb()
-        .peel_to_tree(new_commit)
-        .map_err(super::ServeError::Repository)?
-        .ok_or_else(|| {
-            super::ServeError::Protocol(format!("push deploy: {new_commit} is not a commit"))
-        })?;
+    let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
+    let new_tree =
+        repo.odb()
+            .peel_to_tree(new_commit)?
+            .ok_or_else(|| super::ServeError::Protocol {
+                detail: format!("push deploy: {new_commit} is not a commit"),
+            })?;
     let odb = repo.odb();
-    let index_path = repo
-        .index_path_for_env()
-        .map_err(super::ServeError::Repository)?;
+    let index_path = repo.index_path_for_env()?;
     let index_mtime = crate::diff::index_mtime_for_diff(&index, index_file_mtime(&index_path));
-    let work_tree = repo.work_tree().ok_or(super::ServeError::Repository(
-        RepositoryError::RequiresWorkTree.into(),
-    ))?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let unstaged = diff_index_to_worktree_with_options(
         odb,
         &mut index,
@@ -164,18 +153,15 @@ fn push_to_deploy_builtin(
             command_runner: Some(repo.command_runner()),
             ..DiffIndexToWorktreeOptions::default()
         },
-    )
-    .map_err(super::ServeError::Repository)?;
+    )?;
     if !unstaged.0.is_empty() {
         return Ok(Some(RefUpdateRefusal::PushCheckoutUnstagedChanges));
     }
-    let staged = diff_index_to_tree(odb, &index, head_tree.as_ref(), true)
-        .map_err(super::ServeError::Repository)?;
+    let staged = diff_index_to_tree(odb, &index, head_tree.as_ref(), true)?;
     if !staged.is_empty() {
         return Ok(Some(RefUpdateRefusal::PushCheckoutStagedChanges));
     }
-    let tree_changes = diff_trees(odb, head_tree.as_ref(), Some(&new_tree), "")
-        .map_err(super::ServeError::Repository)?;
+    let tree_changes = diff_trees(odb, head_tree.as_ref(), Some(&new_tree), "")?;
     if prepare_tree_checkout_with_changes(repo, &tree_changes).is_err() {
         return Ok(Some(RefUpdateRefusal::PushCheckoutFailed));
     }

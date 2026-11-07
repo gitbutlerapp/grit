@@ -16,7 +16,7 @@ use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transport::http::HttpClient;
-use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
+use grit_lib::remote::{HttpClientFactory, RemoteError};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::test_support::objects_pack::clear_pack_cache;
 
@@ -24,12 +24,12 @@ use grit_lib::test_support::objects_pack::clear_pack_cache;
 struct NoHttp;
 
 impl HttpClientFactory for NoHttp {
-    fn create(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
-        Err(RemoteError::UnsupportedScheme)
+    fn create(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
+        Err(grit_lib::error::Error::from(RemoteError::UnsupportedScheme))
     }
 
-    fn create_for_preflight(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
-        Err(RemoteError::UnsupportedScheme)
+    fn create_for_preflight(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
+        Err(grit_lib::error::Error::from(RemoteError::UnsupportedScheme))
     }
 }
 
@@ -320,18 +320,32 @@ fn a_checkout_whose_blobs_cannot_be_fetched_keeps_the_clone() {
         Ok(_) => panic!("checkout of an unavailable blob succeeded"),
         Err(err) => err,
     };
-    assert!(matches!(err, CloneError::CheckoutFailed { .. }), "{err:?}");
-    assert!(!err.should_cleanup_failed_clone());
+    assert!(
+        matches!(
+            &err,
+            grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Clone(clone))
+                if matches!(**clone, CloneError::CheckoutFailed { .. })
+        ),
+        "{err:?}"
+    );
+    assert!(!grit_lib::remote::clone::should_cleanup_failed_clone(&err));
     assert!(!err.is_cancelled());
-    assert_eq!(err.kept_repository(), Some(dest.as_path()));
-    assert_eq!(err.missing_promised_object(), Some(big));
-    let remotes: Vec<&str> = err
+    let grit_lib::error::Error::Remote(RemoteError::Clone(clone_err)) = &err else {
+        unreachable!()
+    };
+    assert_eq!(clone_err.kept_repository(), Some(dest.as_path()));
+    assert_eq!(clone_err.missing_promised_object(), Some(big));
+    let remotes: Vec<&str> = clone_err
         .failed_promisor_remotes()
         .iter()
-        .map(|(name, _)| name.as_str())
+        .map(|failure| failure.remote.as_str())
         .collect();
     assert_eq!(remotes, ["lop", "origin"]);
-    let CloneError::CheckoutFailed { commit, .. } = err else {
+    let grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Clone(clone_err)) = err
+    else {
+        unreachable!()
+    };
+    let CloneError::CheckoutFailed { commit, .. } = *clone_err else {
         unreachable!()
     };
     clear_pack_cache();

@@ -3,7 +3,7 @@
 use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions, DiffStatus,
 };
-use crate::error::{Error, PathOutsideRepoError, Result};
+use crate::error::{Error, ErrorSummary, PathOutsideRepoError, Result};
 use crate::git_path::CanonicalizeExt;
 use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
@@ -19,6 +19,7 @@ use crate::porcelain::pathspec_match::{
 };
 use crate::progress::{poll_cancel, CancelToken, NullProgress};
 use crate::repo::{Repository, RepositoryError};
+use crate::worktree::WorktreeError;
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -119,7 +120,7 @@ impl std::fmt::Display for RemoveBlockReason {
     }
 }
 
-/// A path [`remove_paths`] refused to remove, carried by [`Error::RemoveBlocked`].
+/// A path [`remove_paths`] refused to remove, carried by [`crate::worktree::WorktreeError::RemoveBlocked`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockedRemoval {
     /// Repository-relative path that was not removed.
@@ -183,8 +184,8 @@ pub struct MoveOutcome {
 ///
 /// # Errors
 ///
-/// Returns [`Error::PathspecNoMatch`], [`Error::RemoveBlocked`],
-/// [`Error::NotRemovingRecursively`], or I/O / object-store failures.
+/// Returns [`crate::worktree::WorktreeError::PathspecNoMatch`], [`crate::worktree::WorktreeError::RemoveBlocked`],
+/// [`crate::worktree::WorktreeError::NotRemovingRecursively`], or I/O / object-store failures.
 pub fn remove_paths(
     repo: &Repository,
     opts: &RemoveOptions,
@@ -193,7 +194,7 @@ pub fn remove_paths(
     let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     if opts.pathspecs.is_empty() {
-        return Err(Error::RemovePathsRequired);
+        return Err(Error::Worktree(WorktreeError::RemovePathsRequired));
     }
 
     let mut opts = opts.clone();
@@ -214,7 +215,9 @@ pub fn remove_paths(
             opts.cached,
         )?;
         if !blocked.is_empty() {
-            return Err(Error::RemoveBlocked { paths: blocked });
+            return Err(Error::Worktree(WorktreeError::RemoveBlocked {
+                paths: blocked,
+            }));
         }
     }
 
@@ -265,7 +268,7 @@ pub fn remove_paths(
         return Err(abort_failed_remove_worktree(
             work_tree,
             &worktree_backups,
-            Error::from(err),
+            err,
         ));
     }
 
@@ -309,7 +312,7 @@ pub fn move_path(
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidPath`], [`Error::MoveSourceNotTracked`], [`Error::MoveDestinationExists`],
+/// Returns [`crate::worktree::WorktreeError::InvalidPath`], [`crate::worktree::WorktreeError::MoveSourceNotTracked`], [`crate::worktree::WorktreeError::MoveDestinationExists`],
 /// and related move errors, or I/O failures.
 pub fn move_paths(
     repo: &Repository,
@@ -318,9 +321,9 @@ pub fn move_paths(
 ) -> Result<MoveOutcome> {
     let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     if opts.sources.is_empty() {
-        return Err(Error::MoveNothingToMove {
+        return Err(Error::Worktree(WorktreeError::MoveNothingToMove {
             src: opts.destination.clone(),
-        });
+        }));
     }
 
     let ignorecase = repo
@@ -458,8 +461,7 @@ pub fn move_paths(
             err,
         ));
     }
-    repo.finish_index_update(&mut lock, true)
-        .map_err(Error::from)?;
+    repo.finish_index_update(&mut lock, true)?;
 
     Ok(MoveOutcome { moves })
 }
@@ -488,10 +490,10 @@ fn abort_failed_remove_worktree(
     if unrestored.is_empty() {
         original
     } else {
-        Error::CheckoutRollbackIncomplete {
-            source: Box::new(original),
+        Error::Worktree(WorktreeError::CheckoutRollbackIncomplete {
+            source: ErrorSummary::from(original),
             unrestored,
-        }
+        })
     }
 }
 
@@ -514,9 +516,9 @@ fn validate_unique_move_destinations(moves: &[PathMove]) -> Result<()> {
     let mut seen = HashSet::new();
     for mv in moves {
         if !seen.insert(mv.to.clone()) {
-            return Err(Error::MoveDuplicateDestination {
+            return Err(Error::Worktree(WorktreeError::MoveDuplicateDestination {
                 destination: mv.to.clone(),
-            });
+            }));
         }
     }
     Ok(())
@@ -554,16 +556,22 @@ fn reverse_worktree_rename(work_tree: &Path, from: &str, to: &str, ignorecase: b
     let from_abs = work_tree.join(from);
     let to_abs = work_tree.join(to);
     if !to_abs.exists() {
-        return Err(Error::PathError(format!(
-            "rollback skipped missing destination '{to}'"
-        )));
+        return Err(Error::Worktree(WorktreeError::Path {
+            detail: format!("rollback skipped missing destination '{to}'"),
+        }));
     }
     if let Some(parent) = from_abs.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| Error::PathError(format!("creating parent for rollback '{from}': {e}")))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            Error::Worktree(WorktreeError::Path {
+                detail: format!("creating parent for rollback '{from}': {e}"),
+            })
+        })?;
     }
-    rename_worktree_entry(&to_abs, &from_abs, ignorecase)
-        .map_err(|e| Error::PathError(format!("rolling back rename '{to}' -> '{from}': {e}")))?;
+    rename_worktree_entry(&to_abs, &from_abs, ignorecase).map_err(|e| {
+        Error::Worktree(WorktreeError::Path {
+            detail: format!("rolling back rename '{to}' -> '{from}': {e}"),
+        })
+    })?;
     Ok(())
 }
 
@@ -604,19 +612,12 @@ fn abort_failed_move_worktree(
         return original;
     }
 
-    let mut parts = vec![original.to_string()];
-    if !rollback.failures.is_empty() {
-        parts.push(format!(
-            "incomplete worktree rollback ({} rename(s) could not be reversed)",
-            rollback.failures.len()
-        ));
+    WorktreeError::MoveRollbackIncomplete {
+        source: ErrorSummary::from(original),
+        unreversed: rollback.failures.len(),
+        backup_restore: restore_err.map(ErrorSummary::from),
     }
-    if let Some(err) = restore_err {
-        parts.push(format!(
-            "restoring forced-destination backups failed: {err}"
-        ));
-    }
-    Error::Verbatim(parts.join("; "))
+    .into()
 }
 
 struct SingleMovePlan {
@@ -651,9 +652,9 @@ fn plan_single_move(params: PlanSingleMoveParams<'_>) -> Result<SingleMovePlan> 
     } = params;
     let src_entries = index_paths_under(index, src, true);
     if src_entries.is_empty() {
-        return Err(Error::MoveSourceNotTracked {
+        return Err(Error::Worktree(WorktreeError::MoveSourceNotTracked {
             src: src.to_owned(),
-        });
+        }));
     }
 
     let (final_dst, dst_is_dir_target) = resolve_move_destination(
@@ -671,35 +672,36 @@ fn plan_single_move(params: PlanSingleMoveParams<'_>) -> Result<SingleMovePlan> 
         let dest_exists =
             work_tree.join(&final_dst).exists() || index.get(final_dst.as_bytes(), 0).is_some();
         if dest_exists {
-            return Err(Error::MoveDestinationExists {
+            return Err(Error::Worktree(WorktreeError::MoveDestinationExists {
                 src: src.to_owned(),
                 destination: final_dst,
-            });
+            }));
         }
-        return Err(Error::Verbatim(format!(
-            "destination '{final_dst}' is not a directory"
-        )));
+        return Err(WorktreeError::MoveDestinationNotDirectory {
+            destination: final_dst,
+        }
+        .into());
     }
 
     if is_subdirectory(&final_dst, src, ignorecase) {
-        return Err(Error::MoveIntoSubdirectory {
+        return Err(Error::Worktree(WorktreeError::MoveIntoSubdirectory {
             src: src.to_owned(),
             destination: final_dst,
-        });
+        }));
     }
 
     if final_dst == *src {
-        return Err(Error::MoveIntoSelf {
+        return Err(Error::Worktree(WorktreeError::MoveIntoSelf {
             src: src.to_owned(),
             destination: final_dst,
-        });
+        }));
     }
 
     let renames = plan_index_renames(index, src, &final_dst)?;
     if renames.is_empty() {
-        return Err(Error::MoveNothingToMove {
+        return Err(Error::Worktree(WorktreeError::MoveNothingToMove {
             src: src.to_owned(),
-        });
+        }));
     }
 
     ensure_worktree_move_sources_exist(work_tree, &renames)?;
@@ -714,10 +716,10 @@ fn plan_single_move(params: PlanSingleMoveParams<'_>) -> Result<SingleMovePlan> 
             &renames,
         )
     {
-        return Err(Error::MoveDestinationExists {
+        return Err(Error::Worktree(WorktreeError::MoveDestinationExists {
             src: src.to_owned(),
             destination: final_dst,
-        });
+        }));
     }
 
     Ok(SingleMovePlan {
@@ -737,9 +739,9 @@ fn apply_renames_to_index(index: &mut Index, renames: &[(String, String)]) -> Re
         .collect();
     let mut new_entries = Vec::with_capacity(renames.len());
     for (from, to) in renames {
-        let old = index
-            .get(from.as_bytes(), 0)
-            .ok_or_else(|| Error::MoveMissingIndexEntry { path: from.clone() })?;
+        let old = index.get(from.as_bytes(), 0).ok_or_else(|| {
+            Error::Worktree(WorktreeError::MoveMissingIndexEntry { path: from.clone() })
+        })?;
         new_entries.push(entry_with_relpath(old.clone(), to));
     }
     let old_refs: Vec<&[u8]> = old_paths.iter().map(|p| p.as_slice()).collect();
@@ -798,9 +800,9 @@ fn collect_removal_paths(
             if opts.ignore_unmatch {
                 continue;
             }
-            return Err(Error::PathspecNoMatch {
+            return Err(Error::Worktree(WorktreeError::PathspecNoMatch {
                 spec: label.clone(),
-            });
+            }));
         }
     }
 
@@ -840,7 +842,9 @@ fn collect_plain_literal_removal(
 
     if matches.is_empty() {
         if !opts.recursive {
-            return Err(Error::NotRemovingRecursively(resolved.to_string()));
+            return Err(Error::Worktree(WorktreeError::NotRemovingRecursively {
+                path: resolved.to_string(),
+            }));
         }
         for entry in under {
             selected.insert(String::from_utf8_lossy(&entry.path).into_owned());
@@ -851,7 +855,9 @@ fn collect_plain_literal_removal(
     if !opts.recursive && index.has_stage0_descendant_under(spec_lookup.as_ref()) {
         let prefix = format!("{}/", spec_lookup.as_ref());
         if matches.iter().any(|path| path.starts_with(&prefix)) {
-            return Err(Error::NotRemovingRecursively(resolved.to_string()));
+            return Err(Error::Worktree(WorktreeError::NotRemovingRecursively {
+                path: resolved.to_string(),
+            }));
         }
     }
 
@@ -934,7 +940,9 @@ fn collect_pathspec_matched_removal(
                     return Ok(false);
                 }
                 if !opts.recursive {
-                    return Err(Error::NotRemovingRecursively(resolved.to_string()));
+                    return Err(Error::Worktree(WorktreeError::NotRemovingRecursively {
+                        path: resolved.to_string(),
+                    }));
                 }
                 for entry in under {
                     selected.insert(String::from_utf8_lossy(&entry.path).into_owned());
@@ -948,7 +956,9 @@ fn collect_pathspec_matched_removal(
             if path.starts_with(&prefix) {
                 under_prefix = true;
                 if !opts.recursive {
-                    return Err(Error::NotRemovingRecursively(resolved.to_string()));
+                    return Err(Error::Worktree(WorktreeError::NotRemovingRecursively {
+                        path: resolved.to_string(),
+                    }));
                 }
                 selected.insert(path.into_owned());
             }
@@ -959,7 +969,9 @@ fn collect_pathspec_matched_removal(
     if !opts.recursive && index.has_stage0_descendant_under(spec) {
         let prefix = format!("{spec}/");
         if matches.iter().any(|path| path.starts_with(&prefix)) {
-            return Err(Error::NotRemovingRecursively(resolved.to_string()));
+            return Err(Error::Worktree(WorktreeError::NotRemovingRecursively {
+                path: resolved.to_string(),
+            }));
         }
     }
 
@@ -976,7 +988,9 @@ fn insert_match_and_descendants(
     selected: &mut BTreeSet<String>,
 ) -> Result<()> {
     if !opts.recursive && index.has_stage0_descendant_under(path) {
-        return Err(Error::NotRemovingRecursively(path.to_string()));
+        return Err(Error::Worktree(WorktreeError::NotRemovingRecursively {
+            path: path.to_string(),
+        }));
     }
     selected.insert(path.to_string());
     if !opts.recursive {
@@ -1108,21 +1122,31 @@ impl WorktreePathBackup {
 fn snapshot_worktree_path(work_tree: &Path, path: &str) -> Result<Option<WorktreePathBackup>> {
     let abs = work_tree.join(path);
     if abs.is_symlink() {
-        let target = fs::read_link(&abs)
-            .map_err(|e| Error::PathError(format!("reading symlink '{path}': {e}")))?;
+        let target = fs::read_link(&abs).map_err(|e| {
+            Error::Worktree(WorktreeError::Path {
+                detail: format!("reading symlink '{path}': {e}"),
+            })
+        })?;
         return Ok(Some(WorktreePathBackup::Symlink {
             rel: path.to_string(),
             target,
         }));
     }
     if abs.is_file() {
-        let bytes =
-            fs::read(&abs).map_err(|e| Error::PathError(format!("reading '{path}': {e}")))?;
+        let bytes = fs::read(&abs).map_err(|e| {
+            Error::Worktree(WorktreeError::Path {
+                detail: format!("reading '{path}': {e}"),
+            })
+        })?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = fs::metadata(&abs)
-                .map_err(|e| Error::PathError(format!("reading metadata for '{path}': {e}")))?
+                .map_err(|e| {
+                    Error::Worktree(WorktreeError::Path {
+                        detail: format!("reading metadata for '{path}': {e}"),
+                    })
+                })?
                 .permissions()
                 .mode()
                 & 0o7777;
@@ -1146,7 +1170,11 @@ fn snapshot_worktree_path(work_tree: &Path, path: &str) -> Result<Option<Worktre
 fn remove_backed_up_worktree_path(work_tree: &Path, backup: &WorktreePathBackup) -> Result<()> {
     let path = backup.rel();
     let abs = work_tree.join(path);
-    fs::remove_file(&abs).map_err(|e| Error::PathError(format!("removing '{path}': {e}")))?;
+    fs::remove_file(&abs).map_err(|e| {
+        Error::Worktree(WorktreeError::Path {
+            detail: format!("removing '{path}': {e}"),
+        })
+    })?;
     Ok(())
 }
 
@@ -1186,22 +1214,31 @@ fn restore_worktree_backups(work_tree: &Path, backups: &[WorktreePathBackup]) ->
                 let abs = work_tree.join(rel);
                 if let Some(parent) = abs.parent() {
                     fs::create_dir_all(parent).map_err(|e| {
-                        Error::PathError(format!("creating parent for '{rel}': {e}"))
+                        Error::Worktree(WorktreeError::Path {
+                            detail: format!("creating parent for '{rel}': {e}"),
+                        })
                     })?;
                 }
-                fs::write(&abs, bytes)
-                    .map_err(|e| Error::PathError(format!("restoring '{rel}': {e}")))?;
+                fs::write(&abs, bytes).map_err(|e| {
+                    Error::Worktree(WorktreeError::Path {
+                        detail: format!("restoring '{rel}': {e}"),
+                    })
+                })?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
                     let mut perms = fs::metadata(&abs)
                         .map_err(|e| {
-                            Error::PathError(format!("reading metadata for '{rel}': {e}"))
+                            Error::Worktree(WorktreeError::Path {
+                                detail: format!("reading metadata for '{rel}': {e}"),
+                            })
                         })?
                         .permissions();
                     perms.set_mode(*mode);
                     fs::set_permissions(&abs, perms).map_err(|e| {
-                        Error::PathError(format!("restoring mode for '{rel}': {e}"))
+                        Error::Worktree(WorktreeError::Path {
+                            detail: format!("restoring mode for '{rel}': {e}"),
+                        })
                     })?;
                 }
             }
@@ -1209,11 +1246,16 @@ fn restore_worktree_backups(work_tree: &Path, backups: &[WorktreePathBackup]) ->
                 let abs = work_tree.join(rel);
                 if let Some(parent) = abs.parent() {
                     fs::create_dir_all(parent).map_err(|e| {
-                        Error::PathError(format!("creating parent for '{rel}': {e}"))
+                        Error::Worktree(WorktreeError::Path {
+                            detail: format!("creating parent for '{rel}': {e}"),
+                        })
                     })?;
                 }
-                crate::worktree::create_worktree_symlink(&abs, target.as_ref())
-                    .map_err(|e| Error::PathError(format!("restoring symlink '{rel}': {e}")))?;
+                crate::worktree::create_worktree_symlink(&abs, target.as_ref()).map_err(|e| {
+                    Error::Worktree(WorktreeError::Path {
+                        detail: format!("restoring symlink '{rel}': {e}"),
+                    })
+                })?;
             }
         }
     }
@@ -1227,7 +1269,7 @@ fn restore_worktree_backups(work_tree: &Path, backups: &[WorktreePathBackup]) ->
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidPath`] when `path` is empty, absolute, or contains `..`.
+/// Returns [`crate::worktree::WorktreeError::InvalidPath`] when `path` is empty, absolute, or contains `..`.
 fn destination_had_trailing_separator(path: &str) -> bool {
     let trimmed = path.trim_end_matches([' ', '\t']);
     trimmed.ends_with('/') || trimmed.ends_with('\\')
@@ -1248,11 +1290,13 @@ fn path_outside_work_tree(path: &str, work_tree: &Path) -> Error {
         .canonicalize_simplified()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| work_tree.display().to_string());
-    Error::PathOutsideRepo(PathOutsideRepoError::OutsideRepository {
-        path: path.to_owned(),
-        subpath: path.to_owned(),
-        repo_root,
-    })
+    Error::Worktree(WorktreeError::OutsideRepo(
+        PathOutsideRepoError::OutsideRepository {
+            path: path.to_owned(),
+            subpath: path.to_owned(),
+            repo_root,
+        },
+    ))
 }
 
 fn normalize_and_validate_repo_relative(
@@ -1261,12 +1305,14 @@ fn normalize_and_validate_repo_relative(
     path: &str,
 ) -> Result<String> {
     if path.is_empty() {
-        return Err(Error::InvalidPath("empty path".into()));
+        return Err(Error::Worktree(WorktreeError::InvalidPath {
+            path: "empty path".into(),
+        }));
     }
     if Path::new(path).is_absolute() {
-        return Err(Error::InvalidPath(format!(
-            "'{path}' is outside repository"
-        )));
+        return Err(Error::Worktree(WorktreeError::InvalidPath {
+            path: format!("'{path}' is outside repository"),
+        }));
     }
     let with_slashes = path.replace('\\', "/");
     if with_slashes.starts_with('/') {
@@ -1279,7 +1325,9 @@ fn normalize_and_validate_repo_relative(
     }
     let rel = normalize_repo_relative_slashes(path);
     if rel.is_empty() {
-        return Err(Error::InvalidPath("empty path".into()));
+        return Err(Error::Worktree(WorktreeError::InvalidPath {
+            path: "empty path".into(),
+        }));
     }
     let opts = ProtectOptions::from_config(&*repo.config().snapshot()?);
     validate_path(
@@ -1347,9 +1395,11 @@ fn resolve_move_destination(
         if single_source && src_is_dir {
             return Ok((dst.to_string(), false));
         }
-        return Err(Error::MoveDestinationNotDirectory {
-            destination: dst.to_owned(),
-        });
+        return Err(Error::Worktree(
+            WorktreeError::MoveDestinationNotDirectory {
+                destination: dst.to_owned(),
+            },
+        ));
     }
 
     Ok(resolve_move_destination_path(
@@ -1576,10 +1626,10 @@ fn ensure_worktree_move_sources_exist(
         if abs.is_dir() {
             continue;
         }
-        return Err(Error::MoveBadSource {
+        return Err(Error::Worktree(WorktreeError::MoveBadSource {
             src: from.clone(),
             destination: to.clone(),
-        });
+        }));
     }
     Ok(())
 }
@@ -1669,14 +1719,15 @@ fn rename_worktree_paths(
         let to = work_tree.join(&renames[0].1);
         if let Some(parent) = to.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                Error::PathError(format!("creating parent for '{}': {e}", renames[0].1))
+                Error::Worktree(WorktreeError::Path {
+                    detail: format!("creating parent for '{}': {e}", renames[0].1),
+                })
             })?;
         }
         rename_worktree_entry(&from, &to, ignorecase).map_err(|e| {
-            Error::PathError(format!(
-                "renaming '{}' -> '{}': {e}",
-                renames[0].0, renames[0].1
-            ))
+            Error::Worktree(WorktreeError::Path {
+                detail: format!("renaming '{}' -> '{}': {e}", renames[0].0, renames[0].1),
+            })
         })?;
         return Ok(());
     }
@@ -1685,11 +1736,16 @@ fn rename_worktree_paths(
     let dst_abs = work_tree.join(final_dst);
     if src_abs.is_dir() {
         if let Some(parent) = dst_abs.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| Error::PathError(format!("creating parent for '{final_dst}': {e}")))?;
+            fs::create_dir_all(parent).map_err(|e| {
+                Error::Worktree(WorktreeError::Path {
+                    detail: format!("creating parent for '{final_dst}': {e}"),
+                })
+            })?;
         }
         rename_worktree_entry(&src_abs, &dst_abs, ignorecase).map_err(|e| {
-            Error::PathError(format!("renaming directory '{src}' -> '{final_dst}': {e}"))
+            Error::Worktree(WorktreeError::Path {
+                detail: format!("renaming directory '{src}' -> '{final_dst}': {e}"),
+            })
         })?;
         return Ok(());
     }
@@ -1698,12 +1754,18 @@ fn rename_worktree_paths(
         let from_abs = work_tree.join(from);
         let to_abs = work_tree.join(to);
         if let Some(parent) = to_abs.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| Error::PathError(format!("creating parent for '{to}': {e}")))?;
+            fs::create_dir_all(parent).map_err(|e| {
+                Error::Worktree(WorktreeError::Path {
+                    detail: format!("creating parent for '{to}': {e}"),
+                })
+            })?;
         }
         if from_abs.exists() {
-            rename_worktree_entry(&from_abs, &to_abs, ignorecase)
-                .map_err(|e| Error::PathError(format!("renaming '{from}' -> '{to}': {e}")))?;
+            rename_worktree_entry(&from_abs, &to_abs, ignorecase).map_err(|e| {
+                Error::Worktree(WorktreeError::Path {
+                    detail: format!("renaming '{from}' -> '{to}': {e}"),
+                })
+            })?;
         }
     }
     Ok(())
@@ -2066,6 +2128,7 @@ mod path_validation_tests {
     use super::normalize_and_validate_repo_relative;
     use crate::error::Error;
     use crate::repo::{InitOptions, Repository};
+    use crate::worktree::WorktreeError;
 
     fn test_repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2079,7 +2142,10 @@ mod path_validation_tests {
         let wt = repo.work_tree().expect("worktree");
         let err = normalize_and_validate_repo_relative(&repo, wt, "/tmp/repo/destination")
             .expect_err("abs");
-        assert!(matches!(err, Error::InvalidPath(_)));
+        assert!(matches!(
+            err,
+            Error::Worktree(WorktreeError::InvalidPath { .. })
+        ));
     }
 
     #[test]
@@ -2087,7 +2153,10 @@ mod path_validation_tests {
         let (_dir, repo) = test_repo();
         let wt = repo.work_tree().expect("worktree");
         let err = normalize_and_validate_repo_relative(&repo, wt, "dir/../source").expect_err("..");
-        assert!(matches!(err, Error::PathOutsideRepo(_)));
+        assert!(matches!(
+            err,
+            Error::Worktree(WorktreeError::OutsideRepo(_))
+        ));
     }
 
     #[test]
@@ -2303,6 +2372,7 @@ mod destination_exists_tests {
 
 #[cfg(test)]
 mod move_rollback_tests {
+    use crate::worktree::WorktreeError;
     use std::fs;
 
     use crate::error::Error;
@@ -2324,7 +2394,9 @@ mod move_rollback_tests {
             .expect("backup bytes");
         fs::write(wt.join("dest/a.txt"), b"from-source\n").expect("simulated completed rename");
         let completed = vec![("src/a.txt".to_string(), "dest/a.txt".to_string())];
-        let original = crate::error::Error::PathError("simulated rename failure".into());
+        let original = crate::error::Error::Worktree(WorktreeError::Path {
+            detail: "simulated rename failure".into(),
+        });
 
         let _ = abort_failed_move_worktree(
             wt,
@@ -2381,7 +2453,9 @@ mod move_rollback_tests {
             &completed,
             &backups,
             false,
-            crate::error::Error::PathError("simulated later rename failure".into()),
+            crate::error::Error::Worktree(WorktreeError::Path {
+                detail: "simulated later rename failure".into(),
+            }),
         );
         assert_eq!(fs::read(wt.join("src/f0.txt")).unwrap(), b"source0\n");
         assert_eq!(fs::read(wt.join("src/f1.txt")).unwrap(), b"source1\n");
@@ -2422,13 +2496,16 @@ mod move_rollback_tests {
             &applied,
             &cleared,
             false,
-            Error::MoveBadSource {
+            Error::Worktree(WorktreeError::MoveBadSource {
                 src: "src/f0001".to_owned(),
                 destination: "dest/f0001".to_owned(),
-            },
+            }),
         );
         assert!(
-            matches!(err, Error::Verbatim(_)),
+            matches!(
+                err,
+                Error::Worktree(WorktreeError::MoveRollbackIncomplete { unreversed: 1, .. })
+            ),
             "expected aggregated incomplete rollback error, got {err:?}"
         );
         assert_eq!(
@@ -2467,13 +2544,16 @@ mod move_rollback_tests {
             &applied,
             &cleared,
             false,
-            Error::MoveBadSource {
+            Error::Worktree(WorktreeError::MoveBadSource {
                 src: "srcdir/missing".to_owned(),
                 destination: "dest/srcdir/missing".to_owned(),
-            },
+            }),
         );
         assert!(
-            matches!(err, Error::Verbatim(_)),
+            matches!(
+                err,
+                Error::Worktree(WorktreeError::MoveRollbackIncomplete { .. })
+            ),
             "unexpected error: {err:?}"
         );
         assert_eq!(
@@ -2714,6 +2794,7 @@ mod index_lock_transaction_tests {
 
 #[cfg(test)]
 mod trailing_slash_move_tests {
+    use crate::worktree::WorktreeError;
     use std::fs;
 
     use crate::error::Error;
@@ -2772,7 +2853,10 @@ mod trailing_slash_move_tests {
             &crate::progress::CancelToken::never(),
         )
         .expect_err("mv");
-        assert!(matches!(err, Error::MoveDestinationNotDirectory { .. }));
+        assert!(matches!(
+            err,
+            Error::Worktree(WorktreeError::MoveDestinationNotDirectory { .. })
+        ));
         assert!(root.join("c").is_file());
     }
 

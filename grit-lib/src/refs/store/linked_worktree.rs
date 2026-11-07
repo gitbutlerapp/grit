@@ -1,5 +1,6 @@
 //! Ref view of a linked worktree whose repository keeps its refs in an injected store.
 
+use crate::error::RefError;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -151,8 +152,10 @@ impl LinkedWorktreeRefStore {
 
 fn store_error(err: crate::error::Error) -> RefStoreError {
     match err {
-        crate::error::Error::RefStore(err) => err,
-        other => RefStoreError::Corrupt(other.to_string()),
+        crate::error::Error::Ref(RefError::Store(err)) => err,
+        other => RefStoreError::Corrupt {
+            detail: other.to_string(),
+        },
     }
 }
 

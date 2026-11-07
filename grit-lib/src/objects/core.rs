@@ -18,6 +18,7 @@
 //! live in this module and are produced by fallible `TryFrom<&Object>`
 //! conversions.
 
+use crate::error::ObjectError;
 use std::fmt;
 use std::str::FromStr;
 
@@ -128,7 +129,9 @@ const MAX_OID_LEN: usize = 32;
 
 #[cold]
 fn invalid_oid_bytes(bytes: &[u8]) -> Error {
-    Error::InvalidObjectId(hex::encode(bytes))
+    Error::Object(ObjectError::InvalidId {
+        input: hex::encode(bytes),
+    })
 }
 
 /// Number of hex digits in the fixed-width short form of an object id.
@@ -229,7 +232,7 @@ impl ObjectId {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidObjectId`] when `bytes` is not a recognised
+    /// Returns [`crate::error::ObjectError::InvalidId`] when `bytes` is not a recognised
     /// digest length.
     #[inline]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
@@ -399,24 +402,31 @@ impl ObjectId {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidObjectId`] if the string is not a valid hex OID.
+    /// Returns [`crate::error::ObjectError::InvalidId`] if the string is not a valid hex OID.
     pub fn from_hex(s: &str) -> Result<Self> {
-        Self::decode_hex(s.as_bytes()).ok_or_else(|| Error::InvalidObjectId(s.to_owned()))
+        Self::decode_hex(s.as_bytes()).ok_or_else(|| {
+            Error::Object(ObjectError::InvalidId {
+                input: s.to_owned(),
+            })
+        })
     }
 
     /// Parse a fixed-width lowercase/uppercase ASCII hex OID (40 chars for SHA-1).
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidObjectId`] when `bytes` is not exactly 40 hex digits.
+    /// Returns [`crate::error::ObjectError::InvalidId`] when `bytes` is not exactly 40 hex digits.
     pub fn from_hex_ascii(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != HashAlgo::Sha1.hex_len() {
-            return Err(Error::InvalidObjectId(
-                String::from_utf8_lossy(bytes).into_owned(),
-            ));
+            return Err(Error::Object(ObjectError::InvalidId {
+                input: String::from_utf8_lossy(bytes).into_owned(),
+            }));
         }
-        Self::decode_hex(bytes)
-            .ok_or_else(|| Error::InvalidObjectId(String::from_utf8_lossy(bytes).into_owned()))
+        Self::decode_hex(bytes).ok_or_else(|| {
+            Error::Object(ObjectError::InvalidId {
+                input: String::from_utf8_lossy(bytes).into_owned(),
+            })
+        })
     }
 
     /// Decode 40 or 64 ASCII hex digits (either case); `None` for any other input.
@@ -693,12 +703,14 @@ impl ObjectIdPrefix {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidObjectId`] when `hex` contains a non-hex character or is
+    /// Returns [`crate::error::ObjectError::InvalidId`] when `hex` contains a non-hex character or is
     /// longer than a full `algo` id ([`HashAlgo::hex_len`]).
     pub fn from_hex(hex: &str, algo: HashAlgo) -> Result<Self> {
         let digits = hex.as_bytes();
         if digits.len() > algo.hex_len() {
-            return Err(Error::InvalidObjectId(hex.to_owned()));
+            return Err(Error::Object(ObjectError::InvalidId {
+                input: hex.to_owned(),
+            }));
         }
         let mut bytes = [0u8; MAX_OID_LEN];
         let mut invalid = 0u8;
@@ -709,7 +721,9 @@ impl ObjectIdPrefix {
             bytes[i / 2] |= (nibble & 0x0f) << shift;
         }
         if invalid & HEX_INVALID != 0 {
-            return Err(Error::InvalidObjectId(hex.to_owned()));
+            return Err(Error::Object(ObjectError::InvalidId {
+                input: hex.to_owned(),
+            }));
         }
         Ok(Self {
             bytes,
@@ -822,16 +836,16 @@ impl ObjectKind {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UnknownObjectType`] for unrecognised strings.
+    /// Returns [`crate::error::ObjectError::UnknownType`] for unrecognised strings.
     pub fn from_bytes(b: &[u8]) -> Result<Self> {
         match b {
             b"blob" => Ok(Self::Blob),
             b"tree" => Ok(Self::Tree),
             b"commit" => Ok(Self::Commit),
             b"tag" => Ok(Self::Tag),
-            other => Err(Error::UnknownObjectType(
-                String::from_utf8_lossy(other).into_owned(),
-            )),
+            other => Err(Error::Object(ObjectError::UnknownType {
+                name: String::from_utf8_lossy(other).into_owned(),
+            })),
         }
     }
 
@@ -1028,7 +1042,7 @@ impl<'a> TreeRefIter<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the blob does not parse as a tree.
+    /// Returns [`crate::error::ObjectError::Corrupt`] when the blob does not parse as a tree.
     pub fn infer_oid_len(data: &'a [u8]) -> Result<Self> {
         match try_parse_tree_oid_len(data, HashAlgo::Sha1.len()) {
             Ok(()) => Ok(Self::with_oid_len(data, HashAlgo::Sha1.len())),
@@ -1121,24 +1135,31 @@ fn parse_tree_entry_at<'a>(
     if *pos >= data.len() {
         return Ok(None);
     }
-    let sp = memchr::memchr(b' ', &data[*pos..])
-        .ok_or_else(|| Error::CorruptObject("tree entry missing space".to_owned()))?;
+    let sp = memchr::memchr(b' ', &data[*pos..]).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "tree entry missing space".to_owned(),
+        })
+    })?;
     let mode_bytes = &data[*pos..*pos + sp];
     let mode = parse_tree_mode(mode_bytes).ok_or_else(|| {
-        Error::CorruptObject(format!(
-            "invalid tree mode: {}",
-            String::from_utf8_lossy(mode_bytes)
-        ))
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("invalid tree mode: {}", String::from_utf8_lossy(mode_bytes)),
+        })
     })?;
     *pos += sp + 1;
 
-    let nul = memchr::memchr(0, &data[*pos..])
-        .ok_or_else(|| Error::CorruptObject("tree entry missing NUL".to_owned()))?;
+    let nul = memchr::memchr(0, &data[*pos..]).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "tree entry missing NUL".to_owned(),
+        })
+    })?;
     let name = &data[*pos..*pos + nul];
     *pos += nul + 1;
 
     if *pos + oid_len > data.len() {
-        return Err(Error::CorruptObject("tree entry truncated SHA".to_owned()));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "tree entry truncated SHA".to_owned(),
+        }));
     }
     let oid = ObjectId::from_bytes(&data[*pos..*pos + oid_len])?;
     *pos += oid_len;
@@ -1194,7 +1215,7 @@ fn collect_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEntr
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] if the data is malformed.
+/// Returns [`crate::error::ObjectError::Corrupt`] if the data is malformed.
 pub fn parse_tree(data: &[u8]) -> Result<Vec<TreeEntry>> {
     match collect_tree_with_oid_len(data, HashAlgo::Sha1.len()) {
         Ok(entries) => Ok(entries),
@@ -1305,7 +1326,7 @@ fn parse_tree_mode_octal(bytes: &[u8]) -> Option<u32> {
 ///
 /// # Errors
 ///
-/// [`Error::CorruptObject`] when an entry scanned before the stop point is malformed.
+/// [`crate::error::ObjectError::Corrupt`] when an entry scanned before the stop point is malformed.
 pub(crate) fn find_tree_entry_by_name_in_data(
     data: &[u8],
     oid_len: usize,
@@ -1315,18 +1336,29 @@ pub(crate) fn find_tree_entry_by_name_in_data(
     let mut pos = 0usize;
     while pos < data.len() {
         let rest = &data[pos..];
-        let sp = memchr::memchr(b' ', rest)
-            .ok_or_else(|| Error::CorruptObject("tree entry missing space".to_owned()))?;
-        let mode = parse_tree_mode_octal(&rest[..sp])
-            .ok_or_else(|| Error::CorruptObject("invalid tree mode".to_owned()))?;
+        let sp = memchr::memchr(b' ', rest).ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "tree entry missing space".to_owned(),
+            })
+        })?;
+        let mode = parse_tree_mode_octal(&rest[..sp]).ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "invalid tree mode".to_owned(),
+            })
+        })?;
         let name_start = sp + 1;
-        let nul = memchr::memchr(0, &rest[name_start..])
-            .ok_or_else(|| Error::CorruptObject("tree entry missing NUL".to_owned()))?;
+        let nul = memchr::memchr(0, &rest[name_start..]).ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "tree entry missing NUL".to_owned(),
+            })
+        })?;
         let entry_name = &rest[name_start..name_start + nul];
         let oid_start = name_start + nul + 1;
         let oid_end = oid_start + oid_len;
         if oid_end > rest.len() {
-            return Err(Error::CorruptObject("tree entry truncated SHA".to_owned()));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: "tree entry truncated SHA".to_owned(),
+            }));
         }
         if entry_name == name {
             return Ok(Some(TreeEntry {
@@ -1418,7 +1450,7 @@ pub fn commit_subject_pretty(message: &str) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when the commit headers are malformed.
+/// Returns [`crate::error::ObjectError::Corrupt`] when the commit headers are malformed.
 pub fn read_commit_subject_pretty(data: &[u8]) -> Result<String> {
     let message_start = data.windows(2).position(|w| w == b"\n\n").map(|p| p + 2);
     let Some(message_start) = message_start else {
@@ -1434,7 +1466,7 @@ pub fn read_commit_subject_pretty(data: &[u8]) -> Result<String> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when commit headers are malformed.
+/// Returns [`crate::error::ObjectError::Corrupt`] when commit headers are malformed.
 pub fn read_commit_subject_line(data: &[u8]) -> Result<String> {
     let mut pos = 0usize;
     let mut encoding: Option<String> = None;
@@ -1463,7 +1495,11 @@ pub fn read_commit_subject_line(data: &[u8]) -> Result<String> {
         if let Some(rest) = line.strip_prefix(b"encoding ") {
             encoding = Some(
                 std::str::from_utf8(rest)
-                    .map_err(|_| Error::CorruptObject("encoding is not UTF-8".to_owned()))?
+                    .map_err(|_| {
+                        Error::Object(ObjectError::Corrupt {
+                            detail: "encoding is not UTF-8".to_owned(),
+                        })
+                    })?
                     .trim()
                     .to_owned(),
             );
@@ -1505,11 +1541,16 @@ pub(crate) fn commit_through_subject_len(data: &[u8]) -> Option<usize> {
 }
 
 pub(crate) fn parse_oid_field(value: &[u8]) -> Result<ObjectId> {
-    let s = std::str::from_utf8(value)
-        .map_err(|_| Error::CorruptObject("commit header object id is not UTF-8".to_owned()))?;
-    s.trim()
-        .parse::<ObjectId>()
-        .map_err(|_| Error::CorruptObject("invalid object id in commit header".to_owned()))
+    let s = std::str::from_utf8(value).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "commit header object id is not UTF-8".to_owned(),
+        })
+    })?;
+    s.trim().parse::<ObjectId>().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "invalid object id in commit header".to_owned(),
+        })
+    })
 }
 
 /// Parse `tree` and `parent` headers from a possibly truncated leading slice of a commit.
@@ -1574,7 +1615,7 @@ fn canonical_commit_tree_and_parents(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] if required headers are missing.
+/// Returns [`crate::error::ObjectError::Corrupt`] if required headers are missing.
 pub fn parse_commit(data: &[u8]) -> Result<CommitData> {
     Ok(super::CommitRef::parse(data)?.to_owned())
 }
@@ -1634,7 +1675,7 @@ pub struct TagData {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] if required headers are missing or malformed.
+/// Returns [`crate::error::ObjectError::Corrupt`] if required headers are missing or malformed.
 ///
 /// When the header block ends at EOF without a blank line, the message is empty (Git accepts this).
 pub fn parse_tag(data: &[u8]) -> Result<TagData> {
@@ -1673,12 +1714,21 @@ pub fn parse_tag(data: &[u8]) -> Result<TagData> {
                 ),
             };
             return Ok(TagData {
-                object: object
-                    .ok_or_else(|| Error::CorruptObject("tag missing object header".to_owned()))?,
-                object_type: object_type
-                    .ok_or_else(|| Error::CorruptObject("tag missing type header".to_owned()))?,
-                tag: tag_name
-                    .ok_or_else(|| Error::CorruptObject("tag missing tag header".to_owned()))?,
+                object: object.ok_or_else(|| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "tag missing object header".to_owned(),
+                    })
+                })?,
+                object_type: object_type.ok_or_else(|| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "tag missing type header".to_owned(),
+                    })
+                })?,
+                tag: tag_name.ok_or_else(|| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "tag missing tag header".to_owned(),
+                    })
+                })?,
                 tagger,
                 extra_headers,
                 message,
@@ -1704,37 +1754,44 @@ pub fn parse_tag(data: &[u8]) -> Result<TagData> {
             continue;
         }
 
-        let key_end = line
-            .iter()
-            .position(|&b| b == b' ')
-            .ok_or_else(|| Error::CorruptObject("malformed tag header line".to_owned()))?;
+        let key_end = line.iter().position(|&b| b == b' ').ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "malformed tag header line".to_owned(),
+            })
+        })?;
         let key = &line[..key_end];
         let rest = line.get(key_end + 1..).unwrap_or_default();
 
         match key {
             b"object" => {
                 let line_str = std::str::from_utf8(rest).map_err(|_| {
-                    Error::CorruptObject("tag object line is not valid UTF-8".to_owned())
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "tag object line is not valid UTF-8".to_owned(),
+                    })
                 })?;
                 object = Some(line_str.trim().parse::<ObjectId>()?);
                 cont = Continuation::None;
             }
             b"type" => {
                 let typ = std::str::from_utf8(rest).map_err(|_| {
-                    Error::CorruptObject("tag type line is not valid UTF-8".to_owned())
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "tag type line is not valid UTF-8".to_owned(),
+                    })
                 })?;
                 let typ = typ.trim();
                 if ObjectKind::from_tag_type_field(typ.as_bytes()).is_none() {
-                    return Err(Error::CorruptObject(format!(
-                        "invalid 'type' value in tag: {typ}"
-                    )));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: format!("invalid 'type' value in tag: {typ}"),
+                    }));
                 }
                 object_type = Some(typ.to_owned());
                 cont = Continuation::None;
             }
             b"tag" => {
                 let line_str = std::str::from_utf8(rest).map_err(|_| {
-                    Error::CorruptObject("tag name line is not valid UTF-8".to_owned())
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "tag name line is not valid UTF-8".to_owned(),
+                    })
                 })?;
                 tag_name = Some(line_str.trim().to_owned());
                 cont = Continuation::None;
@@ -1743,7 +1800,9 @@ pub fn parse_tag(data: &[u8]) -> Result<TagData> {
                 tagger = Some(
                     std::str::from_utf8(rest)
                         .map_err(|_| {
-                            Error::CorruptObject("tag tagger line is not valid UTF-8".to_owned())
+                            Error::Object(ObjectError::Corrupt {
+                                detail: "tag tagger line is not valid UTF-8".to_owned(),
+                            })
                         })?
                         .to_owned(),
                 );
@@ -1759,11 +1818,21 @@ pub fn parse_tag(data: &[u8]) -> Result<TagData> {
     }
 
     Ok(TagData {
-        object: object
-            .ok_or_else(|| Error::CorruptObject("tag missing object header".to_owned()))?,
-        object_type: object_type
-            .ok_or_else(|| Error::CorruptObject("tag missing type header".to_owned()))?,
-        tag: tag_name.ok_or_else(|| Error::CorruptObject("tag missing tag header".to_owned()))?,
+        object: object.ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "tag missing object header".to_owned(),
+            })
+        })?,
+        object_type: object_type.ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "tag missing type header".to_owned(),
+            })
+        })?,
+        tag: tag_name.ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "tag missing tag header".to_owned(),
+            })
+        })?,
         tagger,
         extra_headers,
         message: String::new(),
@@ -1917,11 +1986,11 @@ mod object_id_prefix_tests {
         assert_eq!(prefix("4B825DC"), prefix("4b825dc"));
         assert!(matches!(
             ObjectIdPrefix::from_hex("4b8g", HashAlgo::Sha1),
-            Err(Error::InvalidObjectId(_))
+            Err(Error::Object(ObjectError::InvalidId { .. }))
         ));
         assert!(matches!(
             ObjectIdPrefix::from_hex(&format!("{ID}0"), HashAlgo::Sha1),
-            Err(Error::InvalidObjectId(_))
+            Err(Error::Object(ObjectError::InvalidId { .. }))
         ));
         let sha256 = "a".repeat(64);
         assert_eq!(
@@ -2139,7 +2208,7 @@ mod commit_parse_tests {
             "0123456789abcdef0123456789abcdef012345G7",
         ] {
             assert!(
-                matches!(ObjectId::from_hex(bad), Err(Error::InvalidObjectId(s)) if s == bad),
+                matches!(ObjectId::from_hex(bad), Err(Error::Object(ObjectError::InvalidId { input: s })) if s == bad),
                 "{bad:?}"
             );
             assert!(bad.parse::<ObjectId>().is_err(), "{bad:?}");
@@ -2226,7 +2295,7 @@ mod commit_parse_tests {
     fn parse_commit_non_commit_bytes_does_not_panic() {
         let tree_bytes = b"100644 blob 0123456789012345678901234567890123456789\tf";
         let err = parse_commit(tree_bytes).expect_err("tree bytes are not a commit");
-        assert!(matches!(err, Error::CorruptObject(_)));
+        assert!(matches!(err, Error::Object(ObjectError::Corrupt { .. })));
     }
 
     #[test]
@@ -2495,7 +2564,7 @@ mod commit_parse_tests {
         );
         assert!(matches!(
             find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"d", false),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ));
         Ok(())
     }
@@ -2505,12 +2574,12 @@ mod commit_parse_tests {
         let bad_mode = b"10x644 a\0aaaaaaaaaaaaaaaaaaaa";
         assert!(matches!(
             find_tree_entry_by_name_in_data(bad_mode, HashAlgo::Sha1.len(), b"a", false),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ));
         let truncated = b"100644 a\0short";
         assert!(matches!(
             find_tree_entry_by_name_in_data(truncated, HashAlgo::Sha1.len(), b"a", false),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ));
     }
 
@@ -2584,7 +2653,7 @@ mod commit_parse_tests {
         assert_eq!(sha256.algo(), HashAlgo::Sha256);
         assert!(matches!(
             ObjectId::from_bytes(&[1; 19]),
-            Err(Error::InvalidObjectId(hex)) if hex == "01".repeat(19)
+            Err(Error::Object(ObjectError::InvalidId { input: hex })) if hex == "01".repeat(19)
         ));
     }
 

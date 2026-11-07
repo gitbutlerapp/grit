@@ -1,21 +1,45 @@
 //! Shared error types for grit-lib.
 //!
-//! Library code uses [`enum@Error`] (a `thiserror` enum) so callers can match on
-//! specific failure modes. The binary wraps these with `anyhow` for human-
-//! readable top-level reporting.
+//! Every fallible operation returns [`enum@Error`]. It has one variant per functional area
+//! (repository, objects, index, refs, revisions, config, work tree, diff, commit, merge,
+//! history, stash, branches, tags, notes, remotes, hooks) plus the cross-cutting
+//! [`Error::Io`], [`Error::LockHeld`] and [`Error::Cancelled`]. Each area enum lists that
+//! area's failures with structured fields, so callers match on the area and then on the
+//! specific failure. The binary wraps these with `anyhow` for human-readable top-level
+//! reporting.
 //!
 //! Library guide: [typed errors](https://grit-scm.com/docs/library/errors) and [embedding](https://grit-scm.com/docs/library/embedding)
 //!
 //! ```rust
-//! use grit_lib::error::Error;
-//! # fn main() {
-//! let _ = Error::Verbatim("example".into());
-//! # }
+//! use grit_lib::error::{Error, RefError};
+//!
+//! fn describe(err: &Error) -> &'static str {
+//!     match err {
+//!         Error::Ref(RefError::UnbornHead) => "no commits yet",
+//!         Error::Cancelled => "cancelled",
+//!         other => other.area(),
+//!     }
+//! }
+//! assert_eq!(describe(&Error::Ref(RefError::UnbornHead)), "no commits yet");
 //! ```
 
 use std::path::PathBuf;
 
 use thiserror::Error;
+
+mod diff;
+mod notes;
+mod object;
+mod refs;
+mod revision;
+mod summary;
+
+pub use diff::DiffError;
+pub use notes::NotesError;
+pub use object::{ObjectError, PromisorFetchFailure};
+pub use refs::RefError;
+pub use revision::RevisionError;
+pub use summary::ErrorSummary;
 
 pub use crate::git_dir::GitDirPathOperation;
 pub use crate::midx_error::MidxError;
@@ -116,7 +140,7 @@ impl PathIoError {
         }
     }
 
-    /// Human-readable summary (same text as [`Error::WorktreePathIo`] / [`RepositoryError::git_dir_path_io`]).
+    /// Human-readable summary (the display text of the worktree or git-dir path I/O failure).
     #[must_use]
     pub fn message(&self) -> String {
         let path = self
@@ -351,7 +375,7 @@ impl AuthFailure {
     }
 }
 
-/// The command a dirty worktree blocked ([`Error::DirtyWorktree`]).
+/// The command a dirty worktree blocked ([`WorktreeError::DirtyWorktree`](crate::worktree::WorktreeError::DirtyWorktree)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum WorktreeOperation {
@@ -860,6 +884,13 @@ pub enum SubmoduleError {
         path: String,
     },
 
+    /// The submodule has no checkout (no embedded git directory) to update.
+    #[error("submodule at '{path}' is not checked out")]
+    NotCheckedOut {
+        /// Submodule work tree path.
+        path: String,
+    },
+
     /// The submodule's `HEAD` names an object that is missing or is not a commit.
     #[error("HEAD of submodule '{path}' does not point to a readable commit")]
     HeadCommitMissing {
@@ -950,6 +981,13 @@ pub enum FilterError {
     LineEndingWouldChange {
         /// Additional human-readable detail for the failure.
         detail: String,
+    },
+
+    /// A long-running filter process delayed a checkout, which this operation cannot wait for.
+    #[error("{path}: filter delayed the checkout, which this operation does not support")]
+    DelayedCheckoutUnsupported {
+        /// Repository-relative path being checked out.
+        path: String,
     },
 
     /// Shell filter subprocess exited non-zero.
@@ -1063,9 +1101,42 @@ pub enum ApplyError {
         hunk_index: usize,
     },
 
-    /// Other apply parse failures.
-    #[error("{0}")]
-    Other(String),
+    /// A path named by the patch is not valid UTF-8.
+    #[error("diff path is not valid UTF-8")]
+    PathNotUtf8,
+
+    /// A traditional (non-git) patch header names no file that the strip level leaves.
+    #[error("unable to find filename in traditional patch")]
+    MissingFilename,
+
+    /// A `diff --git` header path has fewer leading components than the strip level removes.
+    #[error("malformed {side} path in diff --git header: {path}")]
+    MalformedHeaderPath {
+        /// Which side of the header the path is on.
+        side: PatchSide,
+        /// The path as written in the header.
+        path: String,
+    },
+
+    /// A mode header line (`old mode`, `new file mode`, …) carries no mode.
+    #[error("invalid mode on line {line}: {text}")]
+    InvalidMode {
+        /// One-based line number in the patch input.
+        line: usize,
+        /// The header line as written.
+        text: String,
+    },
+
+    /// A `@@ -a,b +c,d @@` hunk header could not be parsed.
+    #[error("invalid hunk header: {header}")]
+    InvalidHunkHeader {
+        /// The header line as written.
+        header: String,
+    },
+
+    /// A `GIT binary patch` section is malformed or cannot be applied.
+    #[error(transparent)]
+    BinaryPatch(#[from] BinaryPatchError),
 
     /// A text hunk could not be matched or applied.
     #[error("patch failed: {path}:{line}")]
@@ -1099,10 +1170,79 @@ pub enum ApplyError {
         path: String,
     },
 
-    /// The caller's [`crate::progress::CancelToken`] or
-    /// Cancellation stopped the apply between files.
+    /// The caller's [`crate::progress::CancelToken`] stopped the apply between files.
     #[error("operation cancelled")]
     Cancelled,
+}
+
+/// Side of a patch a header path belongs to ([`ApplyError::MalformedHeaderPath`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PatchSide {
+    /// The preimage (`a/…`, `---`).
+    Old,
+    /// The postimage (`b/…`, `+++`).
+    New,
+}
+
+impl std::fmt::Display for PatchSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Old => "old",
+            Self::New => "new",
+        })
+    }
+}
+
+/// Why a `GIT binary patch` section could not be read or applied ([`ApplyError::BinaryPatch`]).
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BinaryPatchError {
+    /// A section header is neither `literal <size>` nor `delta <size>`.
+    #[error("unsupported binary patch section: '{header}'")]
+    UnsupportedSection {
+        /// The section header as written.
+        header: String,
+    },
+    /// The size after `literal` / `delta` is not a decimal number.
+    #[error("invalid binary patch section size: '{size}'")]
+    InvalidSectionSize {
+        /// The size text as written.
+        size: String,
+    },
+    /// A payload line is empty where a length marker was expected.
+    #[error("empty binary patch payload line")]
+    EmptyLine,
+    /// A payload line starts with a character that is not a length marker (`A`–`Z`, `a`–`z`).
+    #[error("invalid binary patch line length marker: '{marker}'")]
+    InvalidLineLength {
+        /// The marker character as written.
+        marker: char,
+    },
+    /// A payload line's base85 body is truncated, has bytes outside the alphabet, or does not
+    /// decode to its declared length.
+    #[error("invalid binary patch base85")]
+    InvalidBase85,
+    /// The zlib payload of a section could not be inflated.
+    #[error("failed to inflate binary patch payload: {detail}")]
+    Inflate {
+        /// The zlib library's description of the failure.
+        detail: String,
+    },
+    /// A literal section inflated to a different size than its header declared.
+    #[error("binary patch literal size {actual} != declared {declared}")]
+    SizeMismatch {
+        /// Bytes after inflating.
+        actual: usize,
+        /// Size from the section header.
+        declared: usize,
+    },
+    /// A delta section was applied without the preimage blob it is relative to.
+    #[error("binary patch delta requires a base blob")]
+    DeltaWithoutBase,
+    /// The patch has a forward section but no reverse section.
+    #[error("binary patch has no reverse section")]
+    NoReverseSection,
 }
 
 /// `--pathspec-from-file` / `--pathspec-file-nul` parse failure.
@@ -1171,8 +1311,8 @@ pub enum PathspecResolveError {
     #[error("this operation needs a working tree")]
     NeedsWorkTree,
     /// Incompatible `GIT_*_PATHSPECS` global flags.
-    #[error("{0}")]
-    InvalidGlobals(String),
+    #[error(transparent)]
+    InvalidGlobals(#[from] crate::pathspec::PathspecGlobalsError),
 }
 
 /// Why a `:(attr:...)` pathspec clause was rejected.
@@ -1186,8 +1326,11 @@ pub enum AttrPathspecError {
     #[error("a pathspec may contain at most one attr clause")]
     MultipleAttrClauses,
     /// A requirement names an attribute that is not valid (`-a=b`, `bad name`, `bad/name`).
-    #[error("'{0}' is not a usable attribute name")]
-    InvalidName(String),
+    #[error("'{name}' is not a usable attribute name")]
+    InvalidName {
+        /// The attribute name as written.
+        name: String,
+    },
     /// A `\` escape ends the value or precedes whitespace.
     #[error("attr value ends with a dangling escape")]
     DanglingEscape,
@@ -1271,11 +1414,10 @@ pub(crate) fn restore_unmerged_message(paths: &[String]) -> String {
     }
 }
 
-/// Failure decoding object bytes from loose storage or a pack entry, without nesting the umbrella [`enum@Error`].
+/// Failure decoding object bytes from loose storage or a pack entry.
 ///
-/// Used as the `source` of [`Error::CorruptLooseObject`] and [`Error::CorruptPackedObject`] so
-/// object-read layers do not store a recursive `Box<Error>` (which counted against API quality
-/// ratchet metrics).
+/// Used as the `source` of [`ObjectError::CorruptLoose`] and [`ObjectError::CorruptPacked`]
+/// so object-read layers do not store a recursive [`enum@Error`].
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ObjectReadFailure {
@@ -1283,11 +1425,17 @@ pub enum ObjectReadFailure {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     /// zlib inflate/deflate failure on object payload bytes.
-    #[error("zlib error: {0}")]
-    Zlib(String),
-    /// Object header or payload failed structural checks (see [`Error::CorruptObject`]).
-    #[error("corrupt object: {0}")]
-    CorruptObject(String),
+    #[error("zlib error: {detail}")]
+    Zlib {
+        /// The zlib library's description of the failure.
+        detail: String,
+    },
+    /// Object header or payload failed structural checks (see [`ObjectError::Corrupt`]).
+    #[error("corrupt object: {detail}")]
+    CorruptObject {
+        /// What is wrong with the object bytes.
+        detail: String,
+    },
     /// Declared size did not match bytes read from a stream.
     #[error("object stream ended after {actual} of {expected} bytes")]
     ObjectStreamTruncated {
@@ -1297,8 +1445,11 @@ pub enum ObjectReadFailure {
         actual: u64,
     },
     /// Object type token in a header was not recognized.
-    #[error("unknown object type '{0}'")]
-    UnknownObjectType(String),
+    #[error("unknown object type '{name}'")]
+    UnknownObjectType {
+        /// The type token as read.
+        name: String,
+    },
     /// Loose object header type field exceeds Git's limit.
     #[error("header for {oid} too long, exceeds 32 bytes")]
     ObjectHeaderTooLong {
@@ -1322,23 +1473,32 @@ pub enum ObjectReadFailure {
 }
 
 impl ObjectReadFailure {
-    /// Maps the umbrella [`enum@Error`] variants that may appear while decoding stored object bytes.
+    /// Maps the [`ObjectError`] decode failures that may appear while reading stored object
+    /// bytes.
     ///
-    /// Returns `Err(err)` when `err` is not one of those variants (callers must not wrap unrelated
-    /// failures as object corruption). Used only by [`Error::wrap_loose_read_failure`] and
-    /// [`Error::wrap_packed_read_failure`].
+    /// Returns `Err(err)` when `err` is not one of those failures (callers must not wrap
+    /// unrelated failures as object corruption). Used only by
+    /// [`Error::wrap_loose_read_failure`] and [`Error::wrap_packed_read_failure`].
     pub(crate) fn try_from_object_read_error(err: Error) -> std::result::Result<Self, Error> {
         match err {
             Error::Io(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(Self::Io(e)),
-            Error::Zlib(s) => Ok(Self::Zlib(s)),
-            Error::CorruptObject(s) => Ok(Self::CorruptObject(s)),
-            Error::ObjectStreamTruncated { expected, actual } => {
+            Error::Object(ObjectError::Zlib { detail }) => Ok(Self::Zlib { detail }),
+            Error::Object(ObjectError::Corrupt { detail }) => Ok(Self::CorruptObject { detail }),
+            Error::Object(ObjectError::StreamTruncated { expected, actual }) => {
                 Ok(Self::ObjectStreamTruncated { expected, actual })
             }
-            Error::UnknownObjectType(s) => Ok(Self::UnknownObjectType(s)),
-            Error::ObjectHeaderTooLong { oid } => Ok(Self::ObjectHeaderTooLong { oid }),
-            Error::DeltaChainTooDeep { limit } => Ok(Self::DeltaChainTooDeep { limit }),
-            Error::InvalidObject { kind, check } => Ok(Self::InvalidObject { kind, check }),
+            Error::Object(ObjectError::UnknownType { name }) => {
+                Ok(Self::UnknownObjectType { name })
+            }
+            Error::Object(ObjectError::HeaderTooLong { oid }) => {
+                Ok(Self::ObjectHeaderTooLong { oid })
+            }
+            Error::Object(ObjectError::DeltaChainTooDeep { limit }) => {
+                Ok(Self::DeltaChainTooDeep { limit })
+            }
+            Error::Object(ObjectError::Invalid { kind, check }) => {
+                Ok(Self::InvalidObject { kind, check })
+            }
             other => Err(other),
         }
     }
@@ -1346,151 +1506,90 @@ impl ObjectReadFailure {
 
 /// The top-level error type for all grit-lib operations.
 ///
+/// Every variant is one functional area (plus the cross-cutting [`Self::Io`],
+/// [`Self::LockHeld`] and [`Self::Cancelled`]). Each area enum carries that area's specific
+/// failures with structured fields; match on the area first, then on its enum.
+///
 /// # Examples
 ///
 /// ```
-/// use grit_lib::error::Error;
+/// use grit_lib::error::{Error, ObjectError};
 ///
-/// let err = Error::Verbatim("repository not found".into());
-/// assert!(err.to_string().contains("repository not found"));
+/// let err = Error::Object(ObjectError::NotFound { name: "1234abcd".into() });
+/// assert_eq!(err.area(), "object");
+/// assert_eq!(err.kind_name(), "object_not_found");
+/// assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
 /// ```
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// Repository layout, discovery, init, and embedding failures.
+    /// Repository discovery, layout, format, and maintenance-lock failures.
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 
-    /// A supplied object ID string was not valid hex or the wrong length.
-    #[error("invalid object id '{0}'")]
-    InvalidObjectId(String),
-
-    /// SHA-1 object hashing detected a chosen-prefix collision (sha1dc).
-    #[error("SHA-1 hash collision detected for object {oid}")]
-    HashCollision {
-        /// Plain SHA-1 digest for the colliding input (not safe to use as an object id).
-        oid: crate::objects::ObjectId,
-    },
-
-    /// The requested object does not exist in the object store.
-    #[error("object not found: {0}")]
-    ObjectNotFound(String),
-
-    /// A revision expression (branch, tag, object id, `x~n`, `ORIG_HEAD`, …) names nothing in
-    /// the repository. Holds the expression as the caller wrote it.
-    #[error("unknown revision '{0}'")]
-    RevisionNotFound(String),
-
-    /// A partial-clone promisor object is not present locally and no fetcher ran.
-    #[error("promised object not available locally: {0}")]
-    PromisedObjectMissing(crate::objects::ObjectId),
-
-    /// Promised objects could not be fetched: every promisor remote was asked, and some
-    /// failed. [`Self::PromisedObjectMissing`] is used instead when every remote answered
-    /// but none had the object.
-    #[error("{}", promisor_fetch_failed_message(missing, failures))]
-    PromisorFetchFailed {
-        /// The first object still missing after every remote was tried.
-        missing: crate::objects::ObjectId,
-        /// One entry per remote that failed, in the order they were tried: the remote's
-        /// name and its first error.
-        failures: Vec<(String, Box<Error>)>,
-    },
-
-    /// An object's stored data is corrupt or malformed.
-    #[error("corrupt object: {0}")]
-    CorruptObject(String),
-
-    /// A pack index (`.idx`) file's trailing checksum does not match its contents.
-    ///
-    /// Only reported by reads that verify the index trailer, such as
-    /// [`crate::pack::read_pack_index`]; the checksum of the `.pack` the index
-    /// describes is checked separately.
-    #[error("corrupt object: index checksum mismatch for {}: {mismatch}", crate::git_path::user_display_path(.path))]
-    PackIndexChecksumMismatch {
-        /// The `.idx` file that failed verification.
-        path: std::path::PathBuf,
-        /// Expected and stored trailer digests.
-        mismatch: crate::hash::TrailerMismatch,
-    },
-
-    /// Indexing or unpacking a pack left deltas whose bases are neither in the pack nor
-    /// in the object database: a thin pack without its bases, or a ref-delta cycle.
-    #[error("corrupt object: {count} delta(s) could not be resolved")]
-    UnresolvedDeltas {
-        /// Number of deltas left unresolved.
-        count: u64,
-    },
-
-    /// A pack being written that is not thin reached a delta before its base: the base
-    /// is missing from the pack, or the planned deltas form a cycle. The receiver could
-    /// not resolve that delta, so the pack was abandoned.
-    #[error("pack delta for {target} comes before its base {base}")]
-    PackDeltaBaseNotWritten {
-        /// The object that would have been stored as a delta.
-        target: crate::objects::ObjectId,
-        /// Its delta base, not written ahead of it.
-        base: crate::objects::ObjectId,
-    },
-
-    /// [`crate::objects::Objects::write`] refused a payload that `git fsck` would reject;
-    /// nothing was written.
-    #[error("refusing to write invalid {kind} object: {}", .check.report_line())]
-    InvalidObject {
-        /// Kind the payload was meant to be stored as.
-        kind: crate::objects::ObjectKind,
-        /// The first fsck rule the payload breaks (`check.id` is Git's fsck message id).
-        check: crate::fsck_standalone::FsckError,
-    },
-
-    /// [`crate::objects::Objects::write_tree`] refused an entry.
+    /// Object database, pack, commit-graph, multi-pack-index, and promisor failures.
     #[error(transparent)]
-    InvalidTreeEntry(#[from] crate::objects::TreeEntryError),
+    Object(#[from] ObjectError),
 
-    /// A [`crate::ident::Signature`] cannot be written as an author, committer or tagger line.
+    /// Index read, write, extension, or write-tree failure.
     #[error(transparent)]
-    InvalidSignature(#[from] crate::ident::SignatureError),
+    Index(crate::index::IndexError),
 
-    /// An object exists but has a different kind than the operation requires, such as a
-    /// tree or blob where a commit was expected.
-    #[error("object {oid} is a {actual}, not a {expected}")]
-    UnexpectedObjectKind {
-        /// The object that was read.
-        oid: crate::objects::ObjectId,
-        /// The kind the operation required.
-        expected: crate::objects::ObjectKind,
-        /// The kind the object actually has.
-        actual: crate::objects::ObjectKind,
-    },
+    /// Reference, reflog, ref store, and `HEAD` state failures.
+    #[error(transparent)]
+    Ref(#[from] RefError),
 
-    /// A commit-graph write was given a commit whose parent is neither among the commits
-    /// being written nor in the base graph layers, so its parent edge cannot be encoded.
-    #[error("commit-graph cannot encode parent {parent} of commit {commit}: parent not in graph")]
-    CommitGraphParentMissing {
-        /// Commit whose parent list was being encoded.
-        commit: crate::objects::ObjectId,
-        /// Parent that is missing from the graph.
-        parent: crate::objects::ObjectId,
-    },
+    /// Revision lookup, parsing, and walk failures.
+    #[error(transparent)]
+    Revision(#[from] RevisionError),
 
-    /// In-pack delta resolution exceeded the read-side chain depth limit (guards
-    /// against cyclic ref-delta chains and unbounded recursion; Git has no read limit).
-    #[error("delta chain too deep (limit {limit})")]
-    DeltaChainTooDeep {
-        /// Maximum delta chain depth allowed while reading packed objects.
-        limit: usize,
-    },
+    /// Configuration parse, validation, and write failures.
+    #[error(transparent)]
+    Config(#[from] ConfigError),
 
-    /// An unsupported or unknown object type was encountered.
-    #[error("unknown object type '{0}'")]
-    UnknownObjectType(String),
+    /// Work tree, path, pathspec, checkout, filter, submodule, and linked worktree failures.
+    #[error(transparent)]
+    Worktree(#[from] crate::worktree::WorktreeError),
 
-    /// Loose object header type field exceeds Git's 32-byte limit.
-    #[error("header for {oid} too long, exceeds 32 bytes")]
-    ObjectHeaderTooLong {
-        /// Object id (hex) of the loose object with an oversized header.
-        oid: String,
-    },
+    /// Patch application, hunk selection, and blame failures.
+    #[error(transparent)]
+    Diff(#[from] DiffError),
+
+    /// Commit, identity, signing, and patch-scoped commit failures.
+    #[error(transparent)]
+    Commit(crate::porcelain::commit_error::CommitError),
+
+    /// Merge, cherry-pick, revert, and in-progress operation failures.
+    #[error(transparent)]
+    Merge(crate::porcelain::merge_error::MergeError),
+
+    /// History rewrite (`grit history`, rebase) failures.
+    #[error(transparent)]
+    History(crate::history::HistoryError),
+
+    /// Stash push, apply, and stack failures.
+    #[error(transparent)]
+    Stash(crate::porcelain::stash_error::StashError),
+
+    /// Branch create, delete, lookup, and upstream configuration failures.
+    #[error(transparent)]
+    Branch(#[from] crate::porcelain::branch_error::BranchError),
+
+    /// Tag create, delete, and verification failures.
+    #[error(transparent)]
+    Tag(#[from] crate::porcelain::tag::TagError),
+
+    /// Notes ref, notes tree, and notes merge failures.
+    #[error(transparent)]
+    Notes(#[from] NotesError),
+
+    /// Remote transport, fetch, push, and clone failures.
+    #[error(transparent)]
+    Remote(crate::remote::RemoteError),
+
+    /// A Git hook subprocess failed or could not be started.
+    #[error(transparent)]
+    Hook(crate::hooks::HookError),
 
     /// An I/O error from the underlying filesystem.
     #[error("I/O error: {0}")]
@@ -1506,729 +1605,28 @@ pub enum Error {
     #[error(transparent)]
     LockHeld(#[from] LockHeldError),
 
-    /// A zlib compression or decompression failure.
-    #[error("zlib error: {0}")]
-    Zlib(String),
-
-    /// A loose object file is present but its stored bytes could not be decoded.
-    #[error("loose object {oid} at {} is unreadable: {source}", crate::git_path::user_display_path(.path))]
-    #[non_exhaustive]
-    CorruptLooseObject {
-        /// Object id implied by the loose object path.
-        oid: crate::objects::ObjectId,
-        /// Path to the loose object file (often under `.git/objects/`).
-        path: std::path::PathBuf,
-        /// Underlying zlib, header, or I/O failure.
-        #[source]
-        source: Box<ObjectReadFailure>,
-    },
-
-    /// A pack entry names the object but its stored bytes could not be decoded.
-    #[error(
-        "packed object {oid} in {} (offset {offset}) is unreadable: {source}",
-        pack.display()
-    )]
-    #[non_exhaustive]
-    CorruptPackedObject {
-        /// Object id from the pack index.
-        oid: crate::objects::ObjectId,
-        /// Path to the `.pack` file.
-        pack: std::path::PathBuf,
-        /// Byte offset of the object record in the pack.
-        offset: u64,
-        /// Underlying zlib, header, or I/O failure.
-        #[source]
-        source: Box<ObjectReadFailure>,
-    },
-
-    /// Loose object bytes hash to a different OID than the file path implies (`git fsck` / `read_loose_object`).
-    #[error("{real_oid}: hash-path mismatch, found at: {path}")]
-    LooseHashMismatch {
-        /// Repository-relative or filesystem path to the loose object file.
-        path: String,
-        /// Hex object id of the unpacked contents.
-        real_oid: String,
-    },
-
-    /// A prepared loose object could not be written during parallel index staging.
-    #[error("could not store {path}: {source}")]
-    LooseObjectWrite {
-        /// Index-relative path of the blob being stored.
-        path: String,
-        /// Underlying filesystem error from the object store.
-        source: std::io::Error,
-    },
-
-    /// Filesystem I/O failed on a repository-relative worktree path (checkout, staging, diff).
-    #[error("{}", crate::worktree::io_error::format_worktree_path_io_message(.path, *operation, .source))]
-    WorktreePathIo {
-        /// Index- or worktree-relative path grit was operating on.
-        path: String,
-        /// What the operation was trying to do when I/O failed.
-        operation: WorktreePathOperation,
-        /// Underlying OS error.
-        source: std::io::Error,
-    },
-
-    /// A streamed object write or hash ended before the declared size was read.
-    #[error("object stream ended after {actual} of {expected} bytes")]
-    ObjectStreamTruncated {
-        /// Payload size the caller declared.
-        expected: u64,
-        /// Bytes the stream delivered before end of file.
-        actual: u64,
-    },
-
-    /// A worktree file hashed earlier in an operation had different content when stored.
-    #[error("{path} changed while it was being added")]
-    WorktreeFileChanged {
-        /// Index-relative path of the file.
-        path: String,
-    },
-
-    /// Legacy index failure (unstructured message). Prefer [`Self::Index`].
-    #[deprecated(
-        note = "use Error::Index(IndexError::corrupt(...)) or another IndexError variant"
-    )]
-    #[error("index error: {0}")]
-    IndexError(String),
-
-    /// Legacy unmerged-index error. Prefer [`Self::Index`](Error::Index).
-    #[deprecated(note = "use Error::Index(IndexError::unmerged())")]
-    #[error("index contains unmerged entries")]
-    IndexUnmerged,
-
-    /// Legacy path-prefix conflict. Prefer [`Self::Index`](Error::Index).
-    #[deprecated(note = "use Error::Index(IndexError::PathPrefixConflict { ... })")]
-    #[error(
-        "index path prefix conflict between '{}' and '{}'",
-        directory.display(),
-        file.display()
-    )]
-    IndexPathPrefixConflict {
-        /// Shorter path (treated as the ambiguous directory prefix).
-        directory: std::path::PathBuf,
-        /// Longer path that extends the prefix with an additional component.
-        file: std::path::PathBuf,
-    },
-
-    /// Legacy fsmonitor extension error. Prefer [`Self::Index`](Error::Index).
-    #[deprecated(note = "use Error::Index(IndexError::FsmonitorExtensionTruncated)")]
-    #[error("index fsmonitor extension payload is truncated")]
-    IndexFsmonitorExtensionTruncated,
-
-    /// Legacy fsmonitor extension error. Prefer [`Self::Index`](Error::Index).
-    #[deprecated(note = "use Error::Index(IndexError::FsmonitorExtensionBadVersion(...))")]
-    #[error("index fsmonitor extension has unsupported header version {0}")]
-    IndexFsmonitorExtensionBadVersion(u32),
-
-    /// Legacy fsmonitor extension error. Prefer [`Self::Index`](Error::Index).
-    #[deprecated(note = "use Error::Index(IndexError::FsmonitorExtensionEwahInvalid)")]
-    #[error("index fsmonitor extension EWAH bitmap is invalid")]
-    IndexFsmonitorExtensionEwahInvalid,
-
-    /// Legacy cache-tree error. Prefer [`Self::Index`](Error::Index).
-    #[deprecated(note = "use Error::Index(IndexError::CacheTreeCorrupt)")]
-    #[error("corrupted cache-tree has entries not present in index")]
-    CacheTreeCorrupt,
-
-    /// Index read, write, extension, or write-tree failure.
-    #[error(transparent)]
-    Index(crate::index::IndexError),
-
-    /// Another maintenance run holds the repository's `gc.pid` lock
-    /// ([`crate::maintenance::GcLock`]); nothing was changed.
-    #[error("{}", maintenance_running_message(holder))]
-    MaintenanceRunning {
-        /// Process recorded in `gc.pid`.
-        holder: crate::maintenance::GcLockHolder,
-    },
-
-    /// Staging ([`crate::porcelain::add::stage`] with explicit paths, or the auto-stage pass of
-    /// [`crate::porcelain::commit::commit_worktree`]) refused paths that still contain conflict
-    /// markers: either they are unmerged, or their conflict stages were dropped (the index keeps
-    /// a resolve-undo record) and at least one marker block is not in the `HEAD` version. A dropped-stage
-    /// path stops the whole staging pass before the index is written.
-    #[error("unmerged paths still have conflict markers")]
-    UnmergedConflictMarkers {
-        /// Repository-relative paths that were not staged because markers remain.
-        paths: Vec<String>,
-    },
-
-    /// A reference name or value is invalid.
-    #[error("invalid ref: {0}")]
-    InvalidRef(String),
-
-    /// A `packed-refs` line Git would reject when reading the ref database.
-    #[error("unexpected line in {path}: {line}")]
-    PackedRefsUnexpectedLine {
-        /// Path to the `packed-refs` file being read.
-        path: String,
-        /// Offending line contents.
-        line: String,
-    },
-
-    /// A general path-related error (invalid UTF-8, out-of-bounds, etc.).
-    #[error("path error: {0}")]
-    PathError(String),
-
-    /// `--pathspec-from-file` parse failure.
-    #[error(transparent)]
-    PathspecFromFile(#[from] PathspecFromFileParseError),
-
-    /// A tree/index path component is forbidden (`.git`, HFS/NTFS aliases, etc.).
-    #[error("invalid path '{0}'")]
-    InvalidPath(String),
-
-    /// A repository-relative path failed [`crate::path_validate`] rules while populating the index or checkout.
-    #[error("invalid path '{path}': {reason}")]
-    InvalidPathComponent {
-        /// Full repository-relative path that was rejected.
-        path: String,
-        /// Which component rule failed.
-        reason: crate::path_validate::PathComponentError,
-    },
-
-    /// A configuration file parsing or access error.
-    #[error(transparent)]
-    Config(#[from] ConfigError),
-
-    /// Submodule git dir layout or submodule state failure.
-    #[error(transparent)]
-    Submodule(#[from] SubmoduleError),
-
-    /// Branch create, delete, or upstream configuration failure.
-    #[error(transparent)]
-    Branch(#[from] crate::porcelain::branch_error::BranchError),
-
-    /// Commit, identity, signing, and patch-scoped commit failures.
-    #[error(transparent)]
-    Commit(crate::porcelain::commit_error::CommitError),
-
-    /// Merge, cherry-pick, revert, and in-progress operation failures.
-    #[error(transparent)]
-    Merge(crate::porcelain::merge_error::MergeError),
-
-    /// Reference lock failure while updating refs.
-    #[error(transparent)]
-    RefLock(#[from] RefLockError),
-
-    /// Reference store transaction or iteration failure.
-    #[error(transparent)]
-    RefStore(crate::refs::store::RefStoreError),
-
-    /// Reftable file, stack, or transaction failure.
-    #[error(transparent)]
-    Reftable(#[from] crate::reftable::ReftableError),
-
-    /// Filter or EOL conversion failure.
-    #[error(transparent)]
-    Filter(#[from] FilterError),
-
-    /// Patch application failure.
-    #[error(transparent)]
-    Apply(#[from] ApplyError),
-
-    /// Path resolves outside the repository.
-    #[error(transparent)]
-    PathOutsideRepo(#[from] PathOutsideRepoError),
-
-    /// A commit/tag signing or signature-verification error.
-    #[error("{0}")]
-    Signing(String),
-
-    /// A pathspec's `:(attr:...)` magic is malformed.
-    #[error("invalid attr magic in pathspec '{spec}': {reason}")]
-    InvalidAttrPathspec {
-        /// The offending pathspec as given.
-        spec: String,
-        /// What is wrong with its attr clause.
-        #[source]
-        reason: AttrPathspecError,
-    },
-
-    /// A pathspec did not match any file known to Git (index or HEAD tree).
-    #[error("pathspec '{spec}' did not match any file(s) known to git")]
-    PathspecNoMatch {
-        /// User-supplied pathspec that matched nothing.
-        spec: String,
-    },
-
-    /// [`crate::porcelain::restore::restore_paths`] conflict options were combined with `--staged`.
-    #[error("conflict restore options cannot be used with --staged")]
-    RestoreConflictWithStaged,
-
-    /// [`crate::porcelain::restore::restore_paths`] conflict options were combined with `--source`.
-    #[error("conflict restore options cannot be used with --source")]
-    RestoreConflictWithSource,
-
-    /// A conflict side was missing from the index for the requested path.
-    #[error("path '{path}' does not have their version")]
-    RestoreConflictMissingTheirs {
-        /// Repository-relative path.
-        path: String,
-    },
-
-    /// A conflict side was missing from the index for the requested path.
-    #[error("path '{path}' does not have our version")]
-    RestoreConflictMissingOurs {
-        /// Repository-relative path.
-        path: String,
-    },
-
-    /// Three-way remerge needs stages 1, 2, and 3 in the index.
-    #[error("path '{path}' is not unmerged")]
-    RestoreConflictNotUnmerged {
-        /// Repository-relative path.
-        path: String,
-    },
-
-    /// [`crate::porcelain::restore::restore_paths`] was asked to restore the worktree from the
-    /// index for paths that still have conflict stages; pick a side or rebuild the markers instead.
-    ///
-    /// Nothing is written when this is returned.
-    #[error("{}", restore_unmerged_message(paths))]
-    RestorePathUnmerged {
-        /// Matched repository-relative paths with conflict stages (sorted, deduplicated).
-        paths: Vec<String>,
-    },
-
-    /// A literal pathspec names a file under a symlink directory component.
-    #[error("pathspec '{spec}' is beyond a symbolic link")]
-    PathspecBeyondSymlink {
-        /// User-supplied pathspec that crosses a symlink directory.
-        spec: String,
-    },
-
-    /// An embedded git repository (nested `.git` checkout) has no commit checked out on its
-    /// current branch, so it cannot be recorded as a gitlink or as regular files.
-    #[error("embedded git repository '{path}' has no commit checked out")]
-    EmbeddedRepoWithoutCommit {
-        /// Repository-relative path to the nested checkout directory.
-        path: String,
-    },
-
-    /// Explicit [`crate::porcelain::add::stage`] pathspecs name paths excluded by ignore rules.
-    #[error("the following paths are ignored:\n{}", paths.join("\n"))]
-    PathspecIgnored {
-        /// Repository-relative paths (or user labels) that cannot be staged while ignored.
-        paths: Vec<String>,
-    },
-
-    /// [`crate::porcelain::paths::remove_paths`] refused paths whose removal would lose
-    /// content, because [`crate::porcelain::paths::RemoveOptions::force`] was not set.
-    #[error(
-        "refusing to remove paths with unsaved content:\n{}",
-        paths.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")
-    )]
-    RemoveBlocked {
-        /// Each refused path with the reason it was refused.
-        paths: Vec<crate::porcelain::paths::BlockedRemoval>,
-    },
-
-    /// A directory pathspec was used without `recursive` ([`crate::porcelain::paths::remove_paths`]).
-    #[error("not removing '{0}' recursively without -r")]
-    NotRemovingRecursively(String),
-
-    /// A commit was requested with an empty message body after normalization.
-    #[error("empty commit message")]
-    EmptyCommitMessage,
-
-    /// [`crate::porcelain::paths::remove_paths`] was called with no pathspecs.
-    #[error("you must specify path(s) to remove")]
-    RemovePathsRequired,
-
-    /// [`crate::porcelain::paths::move_path`] / [`crate::porcelain::paths::move_paths`] source is not tracked.
-    #[error("'{src}' is not under version control")]
-    MoveSourceNotTracked {
-        /// Untracked or missing source path.
-        src: String,
-    },
-
-    /// Move refused because the destination already exists without `--force`.
-    #[error("destination '{destination}' already exists")]
-    MoveDestinationExists {
-        /// Source path in the move request.
-        src: String,
-        /// Existing destination path.
-        destination: String,
-    },
-
-    /// Move refused because a trailing slash named a destination that is not a directory.
-    #[error("destination '{destination}' is not a directory")]
-    MoveDestinationNotDirectory {
-        /// Destination path (trailing slash already removed).
-        destination: String,
-    },
-
-    /// Move refused because the destination lies under the source directory.
-    #[error("cannot move '{src}' to a subdirectory of itself, '{destination}'")]
-    MoveIntoSubdirectory {
-        /// Source directory path.
-        src: String,
-        /// Invalid destination under the source.
-        destination: String,
-    },
-
-    /// Move refused because source and destination are the same path.
-    #[error("cannot move '{src}' into itself")]
-    MoveIntoSelf {
-        /// Source path.
-        src: String,
-        /// Destination equal to the source.
-        destination: String,
-    },
-
-    /// Move refused because the source has no index entries.
-    #[error("nothing to move from '{src}'")]
-    MoveNothingToMove {
-        /// Source path with no index entries.
-        src: String,
-    },
-
-    /// Multi-source move would write more than one source to the same destination path.
-    #[error("multiple sources would move to '{destination}'")]
-    MoveDuplicateDestination {
-        /// Destination path that would receive more than one source.
-        destination: String,
-    },
-
-    /// A worktree source path is missing or not a file, directory, or symlink.
-    #[error("cannot move '{src}' to '{destination}': bad source path")]
-    MoveBadSource {
-        /// Source path.
-        src: String,
-        /// Planned destination path.
-        destination: String,
-    },
-
-    /// Internal invariant: a planned rename references a missing index entry.
-    #[error("internal error: missing index entry for '{path}'")]
-    MoveMissingIndexEntry {
-        /// Index path that should exist during a move.
-        path: String,
-    },
-
-    /// Checkout or switch would overwrite local or untracked worktree content.
-    #[error("{message}")]
-    WouldOverwrite {
-        /// Whether tracked local edits or untracked paths block the operation.
-        reason: OverwriteReason,
-        /// Repository-relative paths that would be overwritten (sorted, deduplicated).
-        paths: Vec<String>,
-        /// Human-readable summary (depends on [`OverwriteReason`]).
-        message: String,
-    },
-
-    /// Staged or unstaged changes block an operation that needs a clean worktree.
-    #[error("you have uncommitted changes — commit them before {operation}")]
-    DirtyWorktree {
-        /// The operation that was refused.
-        operation: WorktreeOperation,
-        /// Repository-relative paths with staged or unstaged changes (sorted, deduplicated;
-        /// empty when the caller only knew that something changed).
-        paths: Vec<String>,
-    },
-
     /// A long-running library operation stopped at a cancellation checkpoint.
     ///
-    /// Use [`Error::is_cancelled`] to test for it through wrapper errors
-    /// ([`crate::remote::RemoteError::is_cancelled`], [`crate::remote::clone::CloneError::is_cancelled`], …).
+    /// Use [`Error::is_cancelled`] to test for it, including cancellations recorded inside
+    /// area errors.
     #[error("operation cancelled")]
     Cancelled,
-
-    /// A checkout failed or was cancelled before it finished, and putting the work tree back
-    /// failed for some paths.
-    ///
-    /// Refs and the index are unchanged, as after any failed checkout; only `unrestored`
-    /// differ from the index. Use [`Error::is_cancelled`] to see whether `source` was a
-    /// cancellation.
-    #[error("{source}; {} work-tree path(s) could not be restored", unrestored.len())]
-    CheckoutRollbackIncomplete {
-        /// Why the checkout stopped.
-        source: Box<Error>,
-        /// Repository-relative paths left different from the index (sorted, deduplicated).
-        unrestored: Vec<String>,
-    },
-
-    /// No usable author or committer identity is configured
-    /// ([`crate::repo::Repository::identity`]).
-    #[error(transparent)]
-    Identity(#[from] crate::config::ident_resolve::IdentityError),
-
-    /// Remote transport, fetch, push, or clone failure.
-    #[error(transparent)]
-    Remote(#[from] crate::remote::RemoteError),
-
-    /// User-facing message that should be printed verbatim (no extra prefix).
-    ///
-    /// Used for revision errors that must match Git's `fatal:` lines exactly.
-    #[error("{0}")]
-    Verbatim(String),
-
-    /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
-    #[error("HEAD is detached")]
-    DetachedHead,
-
-    /// `HEAD` is on a branch with no commits yet, but the operation needs a commit
-    /// ([`Repository::head_commit`](crate::repo::Repository::head_commit),
-    /// [`replay_commit`](crate::porcelain::replay::replay_commit)).
-    #[error("no commits yet on this branch")]
-    UnbornHead,
-
-    /// `HEAD` could not be resolved to a branch, detached commit, or unborn branch.
-    #[error("HEAD is in an unknown state")]
-    InvalidHead,
-
-    /// A local branch is checked out as `HEAD` in a linked or main worktree.
-    #[error("branch '{branch}' is already checked out in '{worktree_path}'")]
-    BranchCheckedOutInWorktree {
-        /// Short branch name (e.g. `main`).
-        branch: String,
-        /// Path to the worktree that has the branch checked out.
-        worktree_path: String,
-    },
-
-    /// `refs/heads/<branch>` does not exist.
-    #[error("no branch named '{branch}'")]
-    BranchNotFound {
-        /// Short branch name (e.g. `topic`).
-        branch: String,
-    },
-
-    /// [`list_branches`](crate::branch_tracking::list_branches) with [`BranchDetail::Names`](crate::branch_tracking::BranchDetail::Names) cannot use date sort.
-    #[error("branch list with Names detail cannot use date sort (date sort reads commit objects)")]
-    BranchListNamesDateSort,
-
-    /// Tag create/delete validation failure ([`crate::porcelain::tag::TagError`]).
-    #[error(transparent)]
-    Tag(#[from] crate::porcelain::tag::TagError),
-
-    /// Linked worktree add/remove/move/lock/repair failure ([`crate::worktree::WorktreeError`]).
-    #[error(transparent)]
-    Worktree(#[from] crate::worktree::WorktreeError),
-
-    /// Ref does not exist and has no reflog entries.
-    #[error("unknown ref '{refname}'")]
-    ReflogUnknownRef {
-        /// User-supplied or DWIM ref name.
-        refname: String,
-    },
-
-    /// A reflog selector is missing its reference or `@{n}` delimiters.
-    #[error("expected ref@{{n}} form, got '{spec}'")]
-    ReflogInvalidSelector {
-        /// Selector after trimming surrounding whitespace.
-        spec: String,
-    },
-
-    /// A reflog selector index is not a nonnegative integer that fits in `usize`.
-    #[error("invalid reflog index in '{spec}'")]
-    ReflogInvalidIndex {
-        /// Selector after trimming surrounding whitespace.
-        spec: String,
-        /// Integer parsing failure, including overflow.
-        #[source]
-        source: std::num::ParseIntError,
-    },
-
-    /// `ref@{{n}}` is out of range for the current reflog.
-    #[error("reflog entry {refname}@{{{index}}} not found")]
-    ReflogIndexOutOfRange {
-        /// Ref whose reflog was read.
-        refname: String,
-        /// Requested newest-first index.
-        index: usize,
-    },
-
-    /// [`crate::blame::BlameFinalSource::Worktree`] was requested in a bare repository.
-    #[error("cannot blame the working tree of a bare repository")]
-    BlameWorktreeBareRepository,
-
-    /// Partial hunk selection failed outside the stash stack.
-    #[error(transparent)]
-    HunkSelection(#[from] crate::porcelain::hunk_select::HunkSelectError),
-
-    /// [`CommitRequest::amend`](crate::porcelain::commit::CommitRequest::amend) was set on an unborn branch.
-    #[error("cannot amend: no commits on this branch yet")]
-    AmendUnborn,
-
-    /// [`RepositoryNotes::add`](crate::repo_handles::RepositoryNotes::add) was called without
-    /// `force` when a note already exists on the object.
-    #[error("note for object {object} already exists")]
-    NoteAlreadyExists {
-        /// Annotated object that already has a note.
-        object: crate::objects::ObjectId,
-    },
-
-    /// A configured or environment notes ref is not under `refs/notes/`.
-    #[error("notes ref '{0}' must start with 'refs/notes/'")]
-    InvalidNotesRef(String),
-
-    /// Unknown `notes.rewriteMode` or `GIT_NOTES_REWRITE_MODE` value.
-    #[error("unknown notes rewrite mode '{0}'")]
-    NotesRewriteMode(String),
-
-    /// A notes ref resolves to an object that cannot hold notes (notes reads accept a commit or
-    /// a tree; notes merges require a commit).
-    #[error("notes ref '{notes_ref}' points to a {found}, not a notes commit")]
-    NotesRefNotCommit {
-        /// Notes ref (or revision) that was read.
-        notes_ref: String,
-        /// Kind of object the ref resolved to.
-        found: crate::objects::ObjectKind,
-    },
-
-    /// An object reached while reading a notes tree has the wrong kind (for example a note
-    /// entry that is not a blob).
-    #[error("notes object {oid} is a {found}, expected a {expected}")]
-    NotesObjectKind {
-        /// Object that was read.
-        oid: crate::objects::ObjectId,
-        /// Kind the notes layout requires at this position.
-        expected: crate::objects::ObjectKind,
-        /// Kind actually stored.
-        found: crate::objects::ObjectKind,
-    },
-
-    /// [`notes_merge_inner`](crate::notes::notes_merge_inner) was asked to merge two notes refs
-    /// that both have no notes commit.
-    #[error("cannot merge notes: neither '{local}' nor '{remote}' has any notes")]
-    NotesMergeBothEmpty {
-        /// Local notes ref (merge destination).
-        local: String,
-        /// Remote notes ref (merge source).
-        remote: String,
-    },
-
-    /// A manual notes merge was started while an earlier one still has conflict files in the
-    /// notes merge worktree.
-    #[error("unfinished notes merge: conflict files remain in {}", crate::git_path::user_display_path(.path))]
-    NotesMergeInProgress {
-        /// The notes merge worktree directory.
-        path: std::path::PathBuf,
-    },
-
-    /// Multi-pack-index load or write failure.
-    #[error(transparent)]
-    Midx(#[from] MidxError),
-
-    /// Offloading blobs to a large-object promisor was refused
-    /// ([`crate::maintenance::offload_blobs`]).
-    #[error(transparent)]
-    Offload(#[from] crate::offload::OffloadError),
-
-    /// Revision parsing failed ([`crate::rev_parse_error::RevParseError`]).
-    #[error(transparent)]
-    RevParse(#[from] crate::rev_parse_error::RevParseError),
-
-    /// Revision walking / `rev-list` option parsing failed ([`crate::rev_list_error::RevListError`]).
-    #[error(transparent)]
-    RevList(#[from] crate::rev_list_error::RevListError),
-
-    /// A Git hook subprocess failed or could not be started.
-    #[error(transparent)]
-    Hook(crate::hooks::HookError),
-
-    /// History rewrite planning failed ([`crate::history::HistoryError`]).
-    #[error(transparent)]
-    History(#[from] crate::history::HistoryError),
-
-    /// The operation fetches objects back from a promisor remote, and the repository
-    /// has none: no `remote.<name>.promisor = true` and no `extensions.partialClone`.
-    /// Nothing was changed.
-    #[error("{operation} needs a promisor remote to fetch objects back from")]
-    NoPromisorRemote {
-        /// Operation that was refused (for example `"drop-large-blobs"`).
-        operation: &'static str,
-    },
-
-    /// Parsing a [`crate::tree_sha256::TreeSha256`] from hex failed (expected 64 hex digits).
-    #[error("invalid tree-sha256 hex")]
-    TreeSha256InvalidHex,
-
-    /// A revision passed to [`crate::tree_sha256::tree_sha256`] did not peel to a commit or tree.
-    #[error("tree-sha256: revision resolves to {found:?}, not a commit or tree")]
-    TreeSha256InvalidRevision {
-        /// Object kind after peeling annotated tags.
-        found: crate::objects::ObjectKind,
-    },
-
-    /// One or more submodules required for [`crate::tree_sha256::tree_sha256`] are missing.
-    #[error("tree-sha256: missing submodules")]
-    TreeSha256MissingSubmodules(Vec<crate::tree_sha256::MissingSubmodule>),
-
-    /// `--tree-sha256` was requested with signing explicitly disabled.
-    #[error("tree-sha256 requires a signed tag")]
-    TreeSha256RequiresSigning,
-
-    /// [`crate::tree_sha256::verify_tag`] was given an object that is not an annotated tag.
-    #[error("verify-tag: object {oid} is a {found:?}, not an annotated tag")]
-    TagVerifyNotTag {
-        /// Object id passed to verification.
-        oid: crate::objects::ObjectId,
-        /// Kind stored in the ODB.
-        found: crate::objects::ObjectKind,
-    },
-
-    /// Annotated tag header block has no `object` line.
-    #[error("verify-tag: tag has no object header")]
-    TagVerifyMissingObjectHeader,
-
-    /// Annotated tag carries more than one `tree-sha256` header line.
-    #[error("verify-tag: tag has more than one tree-sha256 header")]
-    TagVerifyDuplicateTreeSha256Header,
-
-    /// Annotated tag tree-sha256 header parsing failed.
-    #[error(transparent)]
-    TreeSha256Claim(#[from] crate::tree_sha256::TreeSha256ClaimError),
-
-    /// `grit blame --ignore-rev` did not resolve to a commit.
-    #[error("cannot find revision {rev} to ignore")]
-    BlameIgnoreRevUnknown {
-        /// Revision expression from `--ignore-rev`.
-        rev: String,
-    },
-
-    /// `--ignore-revs-file` could not be read.
-    #[error("could not open object name list: {path}")]
-    BlameIgnoreRevsFileOpen {
-        /// Path argument (before expansion).
-        path: String,
-        /// Underlying open error.
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// A line in an ignore-revs file is not a full-length object id.
-    #[error("invalid object name: {rev}")]
-    BlameIgnoreRevsFileInvalidRev {
-        /// Path argument for the file.
-        path: String,
-        /// Offending line text after comment/trim handling.
-        rev: String,
-    },
-}
-
-impl From<crate::ident::CommitIdentityError> for Error {
-    fn from(err: crate::ident::CommitIdentityError) -> Self {
-        crate::porcelain::commit_error::CommitError::from(err).into()
-    }
 }
 
 impl Error {
-    /// Stable snake_case name of this error's variant (for example `"not_a_repository"`),
-    /// for scripts and serialized output that must branch on the failure kind.
+    /// Stable snake_case name of this error's specific failure (for example
+    /// `"not_a_repository"`), for scripts and serialized output that must branch on the
+    /// failure kind.
     ///
-    /// The name is the variant name in snake_case; it changes only when the variant is
-    /// renamed. Match on the error value itself in Rust code.
+    /// The names are the leaf failure names and change only when a failure is renamed.
+    /// Match on the error value itself in Rust code.
     ///
     /// # Examples
     ///
     /// ```
     /// use grit_lib::error::Error;
-    ///
     /// use grit_lib::porcelain::CommitError;
+    ///
     /// assert_eq!(
     ///     Error::Commit(CommitError::NothingToCommit).kind_name(),
     ///     "nothing_to_commit"
@@ -2236,286 +1634,81 @@ impl Error {
     /// assert_eq!(Error::Cancelled.kind_name(), "cancelled");
     /// ```
     #[must_use]
-    #[allow(deprecated)]
     pub fn kind_name(&self) -> &'static str {
         match self {
-            Self::Repository(repo) => repo.kind_name(),
-            Self::InvalidObjectId(..) => "invalid_object_id",
-            Self::HashCollision { .. } => "hash_collision",
-            Self::ObjectNotFound(..) => "object_not_found",
-            Self::RevisionNotFound(..) => "revision_not_found",
-            Self::PromisedObjectMissing(..) => "promised_object_missing",
-            Self::PromisorFetchFailed { .. } => "promisor_fetch_failed",
-            Self::CorruptObject(..) => "corrupt_object",
-            Self::PackIndexChecksumMismatch { .. } => "pack_index_checksum_mismatch",
-            Self::UnresolvedDeltas { .. } => "unresolved_deltas",
-            Self::PackDeltaBaseNotWritten { .. } => "pack_delta_base_not_written",
-            Self::InvalidObject { .. } => "invalid_object",
-            Self::InvalidTreeEntry(..) => "invalid_tree_entry",
-            Self::InvalidSignature(..) => "invalid_signature",
-            Self::UnexpectedObjectKind { .. } => "unexpected_object_kind",
-            Self::CommitGraphParentMissing { .. } => "commit_graph_parent_missing",
-            Self::DeltaChainTooDeep { .. } => "delta_chain_too_deep",
-            Self::UnknownObjectType(..) => "unknown_object_type",
-            Self::ObjectHeaderTooLong { .. } => "object_header_too_long",
-            Self::Io(..) => "io",
-            Self::LockHeld(..) => "lock_held",
-            Self::Zlib(..) => "zlib",
-            Self::CorruptLooseObject { .. } => "corrupt_loose_object",
-            Self::CorruptPackedObject { .. } => "corrupt_packed_object",
-            Self::LooseHashMismatch { .. } => "loose_hash_mismatch",
-            Self::LooseObjectWrite { .. } => "loose_object_write",
-            Self::WorktreePathIo { .. } => "worktree_path_io",
-            Self::ObjectStreamTruncated { .. } => "object_stream_truncated",
-            Self::WorktreeFileChanged { .. } => "worktree_file_changed",
-            Self::IndexError(..) => "index_error",
-            Self::IndexUnmerged => "index_unmerged",
-            Self::IndexPathPrefixConflict { .. } => "index_path_prefix_conflict",
-            Self::IndexFsmonitorExtensionTruncated => "index_fsmonitor_extension_truncated",
-            Self::IndexFsmonitorExtensionBadVersion(_) => "index_fsmonitor_extension_bad_version",
-            Self::IndexFsmonitorExtensionEwahInvalid => "index_fsmonitor_extension_ewah_invalid",
-            Self::CacheTreeCorrupt => "cache_tree_corrupt",
-            Self::Index(index) => index.kind_name(),
-            Self::MaintenanceRunning { .. } => "maintenance_running",
-            Self::UnmergedConflictMarkers { .. } => "unmerged_conflict_markers",
-            Self::InvalidRef(..) => "invalid_ref",
-            Self::PackedRefsUnexpectedLine { .. } => "packed_refs_unexpected_line",
-            Self::PathError(..) => "path_error",
-            Self::PathspecFromFile(..) => "pathspec_from_file",
-            Self::InvalidPath(..) => "invalid_path",
-            Self::InvalidPathComponent { .. } => "invalid_path_component",
+            Self::Repository(e) => e.kind_name(),
+            Self::Object(e) => e.kind_name(),
+            Self::Index(e) => e.kind_name(),
+            Self::Ref(e) => e.kind_name(),
+            Self::Revision(e) => e.kind_name(),
             Self::Config(..) => "config",
-            Self::Submodule(..) => "submodule",
-            Self::Branch(..) => "branch",
+            Self::Worktree(e) => e.kind_name(),
+            Self::Diff(e) => e.kind_name(),
             Self::Commit(e) => e.kind_name(),
             Self::Merge(e) => e.kind_name(),
-            Self::RefLock(..) => "ref_lock",
-            Self::RefStore(..) => "ref_store",
-            Self::Reftable(..) => "reftable",
-            Self::Filter(..) => "filter",
-            Self::Apply(..) => "apply",
-            Self::PathOutsideRepo(..) => "path_outside_repo",
-            Self::Signing(..) => "signing",
-            Self::Remote(remote) => remote.kind_name(),
-            Self::InvalidAttrPathspec { .. } => "invalid_attr_pathspec",
-            Self::PathspecNoMatch { .. } => "pathspec_no_match",
-            Self::RestoreConflictWithStaged => "restore_conflict_with_staged",
-            Self::RestoreConflictWithSource => "restore_conflict_with_source",
-            Self::RestoreConflictMissingTheirs { .. } => "restore_conflict_missing_theirs",
-            Self::RestoreConflictMissingOurs { .. } => "restore_conflict_missing_ours",
-            Self::RestoreConflictNotUnmerged { .. } => "restore_conflict_not_unmerged",
-            Self::RestorePathUnmerged { .. } => "restore_path_unmerged",
-            Self::PathspecBeyondSymlink { .. } => "pathspec_beyond_symlink",
-            Self::EmbeddedRepoWithoutCommit { .. } => "embedded_repo_without_commit",
-            Self::PathspecIgnored { .. } => "pathspec_ignored",
-            Self::RemoveBlocked { .. } => "remove_blocked",
-            Self::NotRemovingRecursively(..) => "not_removing_recursively",
-            Self::EmptyCommitMessage => "empty_commit_message",
-            Self::RemovePathsRequired => "remove_paths_required",
-            Self::MoveSourceNotTracked { .. } => "move_source_not_tracked",
-            Self::MoveDestinationExists { .. } => "move_destination_exists",
-            Self::MoveDestinationNotDirectory { .. } => "move_destination_not_directory",
-            Self::MoveIntoSubdirectory { .. } => "move_into_subdirectory",
-            Self::MoveIntoSelf { .. } => "move_into_self",
-            Self::MoveNothingToMove { .. } => "move_nothing_to_move",
-            Self::MoveDuplicateDestination { .. } => "move_duplicate_destination",
-            Self::MoveBadSource { .. } => "move_bad_source",
-            Self::MoveMissingIndexEntry { .. } => "move_missing_index_entry",
-            Self::WouldOverwrite { .. } => "would_overwrite",
-            Self::DirtyWorktree { .. } => "dirty_worktree",
-            Self::Cancelled => "cancelled",
-            Self::Identity(..) => "identity",
-            Self::Verbatim(..) => "message",
-            Self::CheckoutRollbackIncomplete { .. } => "checkout_rollback_incomplete",
-            Self::DetachedHead => "detached_head",
-            Self::UnbornHead => "unborn_head",
-            Self::InvalidHead => "invalid_head",
-            Self::BranchCheckedOutInWorktree { .. } => "branch_checked_out_in_worktree",
-            Self::BranchNotFound { .. } => "branch_not_found",
-            Self::BranchListNamesDateSort => "branch_list_names_date_sort",
-            Self::Tag(..) => "tag",
-            Self::Worktree(..) => "worktree",
-            Self::ReflogUnknownRef { .. } => "reflog_unknown_ref",
-            Self::ReflogInvalidSelector { .. } => "reflog_invalid_selector",
-            Self::ReflogInvalidIndex { .. } => "reflog_invalid_index",
-            Self::ReflogIndexOutOfRange { .. } => "reflog_index_out_of_range",
-            Self::BlameWorktreeBareRepository => "blame_worktree_bare_repository",
-            Self::HunkSelection(..) => "hunk_selection",
-            Self::AmendUnborn => "amend_unborn",
-            Self::NoteAlreadyExists { .. } => "note_already_exists",
-            Self::InvalidNotesRef(..) => "invalid_notes_ref",
-            Self::NotesRewriteMode(..) => "notes_rewrite_mode",
-            Self::NotesRefNotCommit { .. } => "notes_ref_not_commit",
-            Self::NotesObjectKind { .. } => "notes_object_kind",
-            Self::NotesMergeBothEmpty { .. } => "notes_merge_both_empty",
-            Self::NotesMergeInProgress { .. } => "notes_merge_in_progress",
-            Self::Midx(..) => "midx",
-            Self::Offload(..) => "offload",
-            Self::RevParse(..) => "rev_parse",
-            Self::RevList(..) => "rev_list",
-            Self::Hook(..) => "hook",
             Self::History(..) => "history",
-            Self::NoPromisorRemote { .. } => "no_promisor_remote",
-            Self::TreeSha256InvalidHex => "tree_sha256_invalid_hex",
-            Self::TreeSha256InvalidRevision { .. } => "tree_sha256_invalid_revision",
-            Self::TreeSha256MissingSubmodules(..) => "tree_sha256_missing_submodules",
-            Self::TreeSha256RequiresSigning => "tree_sha256_requires_signing",
-            Self::TagVerifyNotTag { .. } => "tag_verify_not_tag",
-            Self::TagVerifyMissingObjectHeader => "tag_verify_missing_object_header",
-            Self::TagVerifyDuplicateTreeSha256Header => "tag_verify_duplicate_tree_sha256_header",
-            Self::TreeSha256Claim(..) => "tree_sha256_claim",
-            Self::BlameIgnoreRevUnknown { .. } => "blame_ignore_rev_unknown",
-            Self::BlameIgnoreRevsFileOpen { .. } => "blame_ignore_revs_file_open",
-            Self::BlameIgnoreRevsFileInvalidRev { .. } => "blame_ignore_revs_file_invalid_rev",
+            Self::Stash(e) => e.kind_name(),
+            Self::Branch(e) => e.kind_name(),
+            Self::Tag(e) => e.kind_name(),
+            Self::Notes(e) => e.kind_name(),
+            Self::Remote(e) => e.kind_name(),
+            Self::Hook(..) => "hook",
+            Self::Io(..) => "io",
+            Self::LockHeld(..) => "lock_held",
+            Self::Cancelled => "cancelled",
         }
     }
 
-    /// Functional area for this error, for analytics and additive JSON (`area` in `serde-models`).
+    /// Functional area of this error: the snake_case name of its umbrella variant
+    /// (`"repository"`, `"object"`, `"index"`, `"ref"`, …).
     ///
-    /// This string is **not** a stability contract for scripts: match on [`enum@Error`] variants or
-    /// [`Self::kind_name`] for stable branching. Areas group related variants for dashboards.
+    /// # Examples
+    ///
+    /// ```
+    /// use grit_lib::error::Error;
+    ///
+    /// assert_eq!(Error::Cancelled.area(), "cancelled");
+    /// ```
     #[must_use]
-    #[allow(deprecated)]
     pub fn area(&self) -> &'static str {
         match self {
-            Self::Repository(repo) => repo.area(),
-            Self::Remote(remote) => remote.area(),
-            Self::Index(index) => index.area(),
-            Self::IndexError(..)
-            | Self::IndexUnmerged
-            | Self::IndexPathPrefixConflict { .. }
-            | Self::IndexFsmonitorExtensionTruncated
-            | Self::IndexFsmonitorExtensionBadVersion(_)
-            | Self::IndexFsmonitorExtensionEwahInvalid
-            | Self::CacheTreeCorrupt
-            | Self::UnmergedConflictMarkers { .. } => "index",
-            Self::InvalidObjectId(..)
-            | Self::HashCollision { .. }
-            | Self::ObjectNotFound(..)
-            | Self::PromisedObjectMissing(..)
-            | Self::PromisorFetchFailed { .. }
-            | Self::CorruptObject(..)
-            | Self::PackIndexChecksumMismatch { .. }
-            | Self::UnresolvedDeltas { .. }
-            | Self::PackDeltaBaseNotWritten { .. }
-            | Self::InvalidObject { .. }
-            | Self::InvalidTreeEntry(..)
-            | Self::UnexpectedObjectKind { .. }
-            | Self::CommitGraphParentMissing { .. }
-            | Self::DeltaChainTooDeep { .. }
-            | Self::UnknownObjectType(..)
-            | Self::ObjectHeaderTooLong { .. }
-            | Self::Zlib(..)
-            | Self::CorruptLooseObject { .. }
-            | Self::CorruptPackedObject { .. }
-            | Self::LooseHashMismatch { .. }
-            | Self::LooseObjectWrite { .. }
-            | Self::ObjectStreamTruncated { .. }
-            | Self::NoPromisorRemote { .. }
-            | Self::Midx(..) => "object",
-            Self::RevisionNotFound(..) | Self::RevParse(..) | Self::RevList(..) => "revision",
-            Self::InvalidRef(..)
-            | Self::PackedRefsUnexpectedLine { .. }
-            | Self::RefLock(..)
-            | Self::RefStore(..)
-            | Self::Reftable(..)
-            | Self::ReflogUnknownRef { .. }
-            | Self::ReflogInvalidSelector { .. }
-            | Self::ReflogInvalidIndex { .. }
-            | Self::ReflogIndexOutOfRange { .. } => "ref",
+            Self::Repository(..) => "repository",
+            Self::Object(..) => "object",
+            Self::Index(..) => "index",
+            Self::Ref(..) => "ref",
+            Self::Revision(..) => "revision",
             Self::Config(..) => "config",
-            Self::Submodule(..) => "submodule",
-            Self::Branch(..)
-            | Self::BranchCheckedOutInWorktree { .. }
-            | Self::BranchNotFound { .. }
-            | Self::BranchListNamesDateSort => "branch",
-            Self::Tag(..)
-            | Self::TagVerifyNotTag { .. }
-            | Self::TagVerifyMissingObjectHeader
-            | Self::TagVerifyDuplicateTreeSha256Header => "tag",
-            Self::NoteAlreadyExists { .. }
-            | Self::InvalidNotesRef(..)
-            | Self::NotesRewriteMode(..)
-            | Self::NotesRefNotCommit { .. }
-            | Self::NotesObjectKind { .. }
-            | Self::NotesMergeBothEmpty { .. }
-            | Self::NotesMergeInProgress { .. } => "notes",
             Self::Worktree(..) => "worktree",
-            Self::WorktreePathIo { .. }
-            | Self::WorktreeFileChanged { .. }
-            | Self::PathOutsideRepo(..)
-            | Self::WouldOverwrite { .. }
-            | Self::DirtyWorktree { .. }
-            | Self::PathspecIgnored { .. }
-            | Self::RemoveBlocked { .. }
-            | Self::NotRemovingRecursively(..)
-            | Self::RemovePathsRequired
-            | Self::MoveSourceNotTracked { .. }
-            | Self::MoveDestinationExists { .. }
-            | Self::MoveDestinationNotDirectory { .. }
-            | Self::MoveIntoSubdirectory { .. }
-            | Self::MoveIntoSelf { .. }
-            | Self::MoveNothingToMove { .. }
-            | Self::MoveDuplicateDestination { .. }
-            | Self::MoveBadSource { .. }
-            | Self::MoveMissingIndexEntry { .. }
-            | Self::EmbeddedRepoWithoutCommit { .. }
-            | Self::RestoreConflictWithStaged
-            | Self::RestoreConflictWithSource
-            | Self::RestoreConflictMissingTheirs { .. }
-            | Self::RestoreConflictMissingOurs { .. }
-            | Self::RestoreConflictNotUnmerged { .. }
-            | Self::RestorePathUnmerged { .. }
-            | Self::PathspecBeyondSymlink { .. }
-            | Self::PathspecNoMatch { .. }
-            | Self::InvalidAttrPathspec { .. }
-            | Self::CheckoutRollbackIncomplete { .. } => "worktree",
-            Self::MaintenanceRunning { .. } => "repository",
-            Self::PathError(..)
-            | Self::PathspecFromFile(..)
-            | Self::InvalidPath(..)
-            | Self::InvalidPathComponent { .. } => "path",
-            Self::Filter(..) | Self::Apply(..) | Self::HunkSelection(..) => "diff",
-            Self::Hook(..) => "hook",
+            Self::Diff(..) => "diff",
+            Self::Commit(..) => "commit",
+            Self::Merge(..) => "merge",
             Self::History(..) => "history",
+            Self::Stash(..) => "stash",
+            Self::Branch(..) => "branch",
+            Self::Tag(..) => "tag",
+            Self::Notes(..) => "notes",
+            Self::Remote(..) => "remote",
+            Self::Hook(..) => "hook",
             Self::Io(..) => "io",
-            Self::LockHeld(..) => "lock",
-            Self::Signing(..) => "signing",
-            Self::InvalidSignature(..) | Self::Identity(..) => "identity",
-            Self::Commit(_)
-            | Self::Merge(_)
-            | Self::DetachedHead
-            | Self::UnbornHead
-            | Self::InvalidHead
-            | Self::EmptyCommitMessage
-            | Self::AmendUnborn => "merge",
+            Self::LockHeld(..) => "lock_held",
             Self::Cancelled => "cancelled",
-            Self::Verbatim(..) => "verbatim",
-            Self::Offload(..) => "maintenance",
-            Self::BlameWorktreeBareRepository
-            | Self::BlameIgnoreRevUnknown { .. }
-            | Self::BlameIgnoreRevsFileOpen { .. }
-            | Self::BlameIgnoreRevsFileInvalidRev { .. } => "blame",
-            Self::TreeSha256InvalidHex
-            | Self::TreeSha256InvalidRevision { .. }
-            | Self::TreeSha256MissingSubmodules(..)
-            | Self::TreeSha256RequiresSigning
-            | Self::TreeSha256Claim(..) => "tree_sha256",
         }
     }
 
-    /// Build [`Error::DirtyWorktree`], sorting and deduplicating `paths`.
+    /// Build [`WorktreeError::DirtyWorktree`](crate::worktree::WorktreeError::DirtyWorktree),
+    /// sorting and deduplicating `paths`.
     #[must_use]
     pub fn dirty_worktree(operation: WorktreeOperation, mut affected_paths: Vec<String>) -> Self {
         affected_paths.sort();
         affected_paths.dedup();
-        Self::DirtyWorktree {
+        Self::Worktree(crate::worktree::WorktreeError::DirtyWorktree {
             operation,
             paths: affected_paths,
-        }
+        })
     }
 
-    /// Build [`Error::WouldOverwrite`] for switch and similar tree transitions.
+    /// Build [`WorktreeError::WouldOverwrite`](crate::worktree::WorktreeError::WouldOverwrite)
+    /// for switch and similar tree transitions.
     #[must_use]
     pub fn would_overwrite(reason: OverwriteReason, mut affected_paths: Vec<String>) -> Self {
         affected_paths.sort();
@@ -2532,11 +1725,11 @@ impl Error {
                 format!("untracked file '{first}' would be overwritten — move or remove it first")
             }
         };
-        Self::WouldOverwrite {
+        Self::Worktree(crate::worktree::WorktreeError::WouldOverwrite {
             reason,
             paths: affected_paths,
             message,
-        }
+        })
     }
 
     /// Build [`crate::remote::RemoteError::Unreadable`] for `url`.
@@ -2566,31 +1759,29 @@ impl Error {
     /// When this is a worktree or git-dir path I/O failure, returns the shared leaf shape.
     #[must_use]
     pub fn path_io(&self) -> Option<PathIoError> {
-        match self {
-            Self::WorktreePathIo {
-                path,
-                operation,
-                source,
-            } => Some(PathIoError::worktree(
-                path.clone(),
-                *operation,
-                preserve_io_error(source),
-            )),
-            Self::Repository(RepositoryError::GitDirPathIo(io)) => Some(PathIoError {
-                operation: io.operation,
-                path: io.path.clone(),
-                source: preserve_io_error(&io.source),
-            }),
-            _ => None,
-        }
+        let io = match self {
+            Self::Worktree(crate::worktree::WorktreeError::PathIo(io)) => io,
+            Self::Repository(RepositoryError::GitDirPathIo(io)) => io,
+            _ => return None,
+        };
+        Some(PathIoError {
+            operation: io.operation,
+            path: io.path.clone(),
+            source: preserve_io_error(&io.source),
+        })
     }
 
-    /// Whether this is [`Error::WorktreePathIo`] caused by another process holding the file
-    /// open (a Windows sharing or lock violation, `EBUSY`, or would-block), so retrying after
-    /// closing that program can succeed.
+    /// Whether this is a work-tree path I/O failure caused by another process holding the
+    /// file open (a Windows sharing or lock violation, `EBUSY`, or would-block), so retrying
+    /// after closing that program can succeed.
     #[must_use]
     pub fn is_worktree_file_in_use(&self) -> bool {
-        matches!(self, Self::WorktreePathIo { source, .. } if crate::worktree::io_error::is_file_in_use(source))
+        matches!(
+            self,
+            Self::Worktree(crate::worktree::WorktreeError::PathIo(io))
+                if matches!(io.operation, PathIoOperation::Worktree(_))
+                    && crate::worktree::io_error::is_file_in_use(&io.source)
+        )
     }
 
     /// Whether this is [`RepositoryError::git_dir_path_io`] caused by another process holding a git-dir file
@@ -2608,16 +1799,13 @@ impl Error {
         }
     }
 
-    /// Whether this is [`Error::Cancelled`] or a nested history failure that was cancelled.
+    /// Whether this is [`Error::Cancelled`] or an area failure recording a cancellation.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         match self {
             Self::Cancelled => true,
-            Self::Remote(e) => e.is_cancelled(),
             Self::History(e) => e.is_cancelled(),
-            Self::Commit(e) => e.is_cancelled(),
-            Self::Merge(e) => e.is_cancelled(),
-            Self::CheckoutRollbackIncomplete { source, .. } => source.is_cancelled(),
+            Self::Worktree(e) => e.is_cancelled(),
             Self::Io(err)
                 if err.to_string() == crate::transport::stateless_http::TRANSPORT_IO_CANCELLED =>
             {
@@ -2632,8 +1820,12 @@ impl Error {
     #[must_use]
     pub fn is_damaged_object(&self) -> bool {
         match self {
-            Self::Zlib(_) | Self::CorruptObject(_) => true,
-            Self::CorruptLooseObject { .. } | Self::CorruptPackedObject { .. } => true,
+            Self::Object(
+                ObjectError::Zlib { .. }
+                | ObjectError::Corrupt { .. }
+                | ObjectError::CorruptLoose { .. }
+                | ObjectError::CorruptPacked { .. },
+            ) => true,
             Self::Io(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => true,
             _ => false,
         }
@@ -2641,13 +1833,16 @@ impl Error {
 
     pub(crate) fn is_object_read_wrap_source(&self) -> bool {
         match self {
-            Self::Zlib(_) | Self::CorruptObject(_) => true,
             Self::Io(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => true,
-            Self::ObjectStreamTruncated { .. }
-            | Self::UnknownObjectType(_)
-            | Self::ObjectHeaderTooLong { .. }
-            | Self::DeltaChainTooDeep { .. }
-            | Self::InvalidObject { .. } => true,
+            Self::Object(
+                ObjectError::Zlib { .. }
+                | ObjectError::Corrupt { .. }
+                | ObjectError::StreamTruncated { .. }
+                | ObjectError::UnknownType { .. }
+                | ObjectError::HeaderTooLong { .. }
+                | ObjectError::DeltaChainTooDeep { .. }
+                | ObjectError::Invalid { .. },
+            ) => true,
             _ => false,
         }
     }
@@ -2659,20 +1854,19 @@ impl Error {
         path: std::path::PathBuf,
         err: Error,
     ) -> Error {
-        if matches!(err, Self::CorruptLooseObject { .. }) {
+        if matches!(err, Self::Object(ObjectError::CorruptLoose { .. })) {
             return err;
         }
-        if err.is_object_read_wrap_source() {
-            match ObjectReadFailure::try_from_object_read_error(err) {
-                Ok(source) => Self::CorruptLooseObject {
-                    oid,
-                    path,
-                    source: Box::new(source),
-                },
-                Err(err) => err,
-            }
-        } else {
-            err
+        if !err.is_object_read_wrap_source() {
+            return err;
+        }
+        match ObjectReadFailure::try_from_object_read_error(err) {
+            Ok(source) => Self::Object(ObjectError::CorruptLoose {
+                oid,
+                path,
+                source: Box::new(source),
+            }),
+            Err(err) => err,
         }
     }
 
@@ -2684,46 +1878,48 @@ impl Error {
         offset: u64,
         err: Error,
     ) -> Error {
-        if matches!(err, Self::CorruptPackedObject { .. }) {
+        if matches!(err, Self::Object(ObjectError::CorruptPacked { .. })) {
             return err;
         }
-        if err.is_object_read_wrap_source() {
-            match ObjectReadFailure::try_from_object_read_error(err) {
-                Ok(source) => Self::CorruptPackedObject {
-                    oid,
-                    pack,
-                    offset,
-                    source: Box::new(source),
-                },
-                Err(err) => err,
-            }
-        } else {
-            err
+        if !err.is_object_read_wrap_source() {
+            return err;
+        }
+        match ObjectReadFailure::try_from_object_read_error(err) {
+            Ok(source) => Self::Object(ObjectError::CorruptPacked {
+                oid,
+                pack,
+                offset,
+                source: Box::new(source),
+            }),
+            Err(err) => err,
         }
     }
 
-    /// Build [`Error::InvalidPathComponent`].
+    /// Build [`WorktreeError::InvalidPathComponent`](crate::worktree::WorktreeError::InvalidPathComponent).
     #[must_use]
     pub fn invalid_path_component(
         path: impl Into<String>,
         reason: crate::path_validate::PathComponentError,
     ) -> Self {
-        Self::InvalidPathComponent {
+        Self::Worktree(crate::worktree::WorktreeError::InvalidPathComponent {
             path: path.into(),
             reason,
-        }
+        })
     }
 
     /// When set, the CLI should prefix stderr with `fatal: ` for Git-compatible commands.
     #[must_use]
     pub fn wants_fatal_prefix(&self) -> bool {
+        use crate::worktree::WorktreeError;
         matches!(
             self,
             Error::Config(_)
-                | Error::Submodule(_)
-                | Error::RefLock(_)
-                | Error::Filter(_)
-                | Error::PathOutsideRepo(_)
+                | Error::Worktree(
+                    WorktreeError::Submodule(_)
+                        | WorktreeError::Filter(_)
+                        | WorktreeError::OutsideRepo(_)
+                )
+                | Error::Ref(RefError::Lock(_))
         )
     }
 
@@ -2731,11 +1927,12 @@ impl Error {
     #[must_use]
     pub fn git_stderr_message(&self) -> String {
         match self {
-            Error::Apply(ApplyError::CorruptPatch { .. }) => {
+            Error::Diff(DiffError::Apply(ApplyError::CorruptPatch { .. })) => {
                 crate::diagnostics::error_line(&self.to_string())
             }
-            Error::Verbatim(s) => s.clone(),
-            Error::WouldOverwrite { message, .. } => message.clone(),
+            Error::Worktree(crate::worktree::WorktreeError::WouldOverwrite { message, .. }) => {
+                message.clone()
+            }
             e if e.wants_fatal_prefix() => crate::diagnostics::fatal_line(&e.to_string()),
             other => other.to_string(),
         }
@@ -2744,40 +1941,43 @@ impl Error {
 
 impl From<crate::hooks::HookError> for Error {
     fn from(err: crate::hooks::HookError) -> Self {
-        match err {
-            crate::hooks::HookError::Cancelled => Self::Cancelled,
-            other => Self::Hook(other),
-        }
+        Self::Hook(err)
     }
 }
 
 impl From<crate::porcelain::commit_error::CommitError> for Error {
     fn from(err: crate::porcelain::commit_error::CommitError) -> Self {
-        use crate::porcelain::commit_error::CommitError;
-        match err {
-            CommitError::Library(boxed) => match *boxed {
-                inner @ Self::Cancelled
-                | inner @ Self::Index(crate::index::IndexError::Unmerged { .. })
-                | inner @ Self::Repository(RepositoryError::GitDirPathIo(_)) => inner,
-                other => Self::Commit(CommitError::Library(Box::new(other))),
-            },
-            other => Self::Commit(other),
-        }
+        Self::Commit(err)
     }
 }
 
 impl From<crate::porcelain::merge_error::MergeError> for Error {
     fn from(err: crate::porcelain::merge_error::MergeError) -> Self {
-        use crate::porcelain::merge_error::MergeError;
-        match err {
-            MergeError::Library(boxed) => match *boxed {
-                inner @ Self::Cancelled
-                | inner @ Self::Index(crate::index::IndexError::Unmerged { .. })
-                | inner @ Self::Repository(RepositoryError::GitDirPathIo(_)) => inner,
-                other => Self::Merge(MergeError::Library(Box::new(other))),
-            },
-            other => Self::Merge(other),
-        }
+        Self::Merge(err)
+    }
+}
+
+impl From<crate::history::HistoryError> for Error {
+    fn from(err: crate::history::HistoryError) -> Self {
+        Self::History(err)
+    }
+}
+
+impl From<crate::porcelain::stash_error::StashError> for Error {
+    fn from(err: crate::porcelain::stash_error::StashError) -> Self {
+        Self::Stash(err)
+    }
+}
+
+impl From<crate::remote::RemoteError> for Error {
+    fn from(err: crate::remote::RemoteError) -> Self {
+        Self::Remote(err)
+    }
+}
+
+impl From<crate::ident::CommitIdentityError> for Error {
+    fn from(err: crate::ident::CommitIdentityError) -> Self {
+        crate::porcelain::commit_error::CommitError::from(err).into()
     }
 }
 
@@ -2795,8 +1995,149 @@ impl From<crate::refs::store::RefStoreError> for Error {
             )
             .into(),
             crate::refs::store::RefStoreError::Hook(hook) => Error::Hook(hook.into_hook_error()),
-            other => Error::RefStore(other),
+            other => Error::Ref(RefError::Store(other)),
         }
+    }
+}
+
+impl From<RefLockError> for Error {
+    fn from(err: RefLockError) -> Self {
+        Self::Ref(RefError::Lock(err))
+    }
+}
+
+impl From<crate::reftable::ReftableError> for Error {
+    fn from(err: crate::reftable::ReftableError) -> Self {
+        Self::Ref(RefError::Reftable(err))
+    }
+}
+
+impl From<crate::rev_parse_error::RevParseError> for Error {
+    fn from(err: crate::rev_parse_error::RevParseError) -> Self {
+        Self::Revision(RevisionError::Parse(err))
+    }
+}
+
+impl From<crate::rev_list_error::RevListError> for Error {
+    fn from(err: crate::rev_list_error::RevListError) -> Self {
+        Self::Revision(RevisionError::List(err))
+    }
+}
+
+impl From<ApplyError> for Error {
+    fn from(err: ApplyError) -> Self {
+        match err {
+            ApplyError::Cancelled => Self::Cancelled,
+            other => Self::Diff(DiffError::Apply(other)),
+        }
+    }
+}
+
+impl From<crate::userdiff::FuncnamePatternError> for Error {
+    fn from(err: crate::userdiff::FuncnamePatternError) -> Self {
+        Self::Diff(DiffError::FuncnamePattern(err))
+    }
+}
+
+impl From<crate::porcelain::hunk_select::HunkSelectError> for Error {
+    fn from(err: crate::porcelain::hunk_select::HunkSelectError) -> Self {
+        Self::Diff(DiffError::HunkSelection(err))
+    }
+}
+
+impl From<FilterError> for Error {
+    fn from(err: FilterError) -> Self {
+        Self::Worktree(crate::worktree::WorktreeError::Filter(err))
+    }
+}
+
+impl From<SubmoduleError> for Error {
+    fn from(err: SubmoduleError) -> Self {
+        Self::Worktree(crate::worktree::WorktreeError::Submodule(err))
+    }
+}
+
+impl From<PathOutsideRepoError> for Error {
+    fn from(err: PathOutsideRepoError) -> Self {
+        Self::Worktree(crate::worktree::WorktreeError::OutsideRepo(err))
+    }
+}
+
+impl From<PathspecFromFileParseError> for Error {
+    fn from(err: PathspecFromFileParseError) -> Self {
+        Self::Worktree(crate::worktree::WorktreeError::PathspecFromFile(err))
+    }
+}
+
+impl From<crate::bitmap_walk::BitmapWalkError> for Error {
+    fn from(err: crate::bitmap_walk::BitmapWalkError) -> Self {
+        Self::Object(ObjectError::BitmapWalk(err))
+    }
+}
+
+impl From<crate::bitmap_walk::BitmapWalkUnsupported> for Error {
+    fn from(err: crate::bitmap_walk::BitmapWalkUnsupported) -> Self {
+        Self::Object(ObjectError::BitmapWalk(err.into()))
+    }
+}
+
+impl From<crate::pack_bitmap::BitmapError> for Error {
+    fn from(err: crate::pack_bitmap::BitmapError) -> Self {
+        Self::Object(ObjectError::BitmapWalk(err.into()))
+    }
+}
+
+impl From<crate::object_inspect::ResolveError> for Error {
+    fn from(err: crate::object_inspect::ResolveError) -> Self {
+        Self::Revision(RevisionError::Resolve(err))
+    }
+}
+
+impl From<MidxError> for Error {
+    fn from(err: MidxError) -> Self {
+        Self::Object(ObjectError::Midx(err))
+    }
+}
+
+impl From<crate::offload::OffloadError> for Error {
+    fn from(err: crate::offload::OffloadError) -> Self {
+        Self::Object(ObjectError::Offload(err))
+    }
+}
+
+impl From<crate::objects::TreeEntryError> for Error {
+    fn from(err: crate::objects::TreeEntryError) -> Self {
+        Self::Object(ObjectError::InvalidTreeEntry(err))
+    }
+}
+
+impl From<crate::ident::SignatureError> for Error {
+    fn from(err: crate::ident::SignatureError) -> Self {
+        Self::Object(ObjectError::InvalidSignature(err))
+    }
+}
+
+impl From<crate::config::ident_resolve::IdentityError> for Error {
+    fn from(err: crate::config::ident_resolve::IdentityError) -> Self {
+        Self::Commit(crate::porcelain::commit_error::CommitError::Identity(err))
+    }
+}
+
+impl From<crate::ident::AuthorArgError> for Error {
+    fn from(err: crate::ident::AuthorArgError) -> Self {
+        Self::History(crate::history::HistoryError::InvalidAuthor(err))
+    }
+}
+
+impl From<crate::change_id::ChangeIdError> for Error {
+    fn from(err: crate::change_id::ChangeIdError) -> Self {
+        Self::Commit(crate::porcelain::commit_error::CommitError::ChangeId(err))
+    }
+}
+
+impl From<crate::tree_sha256::TreeSha256ClaimError> for Error {
+    fn from(err: crate::tree_sha256::TreeSha256ClaimError) -> Self {
+        Self::Tag(crate::porcelain::tag::TagError::TreeSha256Claim(err))
     }
 }
 
@@ -2814,20 +2155,11 @@ impl From<crate::worktree::LinkedWorktreeError> for Error {
 
 impl From<PathIoError> for Error {
     fn from(value: PathIoError) -> Self {
-        let path = value
-            .path
-            .as_ref()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
         match value.operation {
-            PathIoOperation::Worktree(operation) => Self::WorktreePathIo {
-                path,
-                operation,
-                source: value.source,
-            },
-            PathIoOperation::GitDir(operation) => {
-                RepositoryError::git_dir_path_io(path, operation, value.source).into()
+            PathIoOperation::Worktree(_) => {
+                Self::Worktree(crate::worktree::WorktreeError::PathIo(value))
             }
+            PathIoOperation::GitDir(_) => Self::Repository(RepositoryError::GitDirPathIo(value)),
         }
     }
 }
@@ -2848,36 +2180,92 @@ impl From<crate::lockfile::LockError> for Error {
     }
 }
 
+impl From<crate::serve::ServeError> for Error {
+    fn from(err: crate::serve::ServeError) -> Self {
+        Self::Remote(crate::remote::RemoteError::Serve(err))
+    }
+}
+
+impl From<crate::snapshot_checkout::CheckoutError> for Error {
+    fn from(err: crate::snapshot_checkout::CheckoutError) -> Self {
+        Self::Remote(crate::remote::RemoteError::Snapshot(err))
+    }
+}
+
+impl From<crate::clone::CloneError> for Error {
+    fn from(err: crate::clone::CloneError) -> Self {
+        Self::Remote(crate::remote::RemoteError::Clone(Box::new(err)))
+    }
+}
+
+impl From<crate::porcelain::pull::PullError> for Error {
+    fn from(err: crate::porcelain::pull::PullError) -> Self {
+        Self::Merge(crate::porcelain::merge_error::MergeError::Pull(err))
+    }
+}
+
+impl From<crate::remote::push_plan::PushPlanError> for Error {
+    fn from(err: crate::remote::push_plan::PushPlanError) -> Self {
+        Self::Remote(crate::remote::RemoteError::PushPlan(err))
+    }
+}
+
+impl From<crate::history::RebaseSessionError> for Error {
+    fn from(err: crate::history::RebaseSessionError) -> Self {
+        match err {
+            crate::history::RebaseSessionError::NothingToCommit => {
+                Self::Commit(crate::porcelain::commit_error::CommitError::NothingToCommit)
+            }
+            other => Self::History(crate::history::HistoryError::RebaseSession(Box::new(other))),
+        }
+    }
+}
+
+impl From<crate::porcelain::stash_error::StashPushValidationError> for Error {
+    fn from(err: crate::porcelain::stash_error::StashPushValidationError) -> Self {
+        Self::Stash(crate::porcelain::stash_error::StashError::PushValidation(
+            err,
+        ))
+    }
+}
+
+impl From<crate::bundle::BundleError> for Error {
+    fn from(err: crate::bundle::BundleError) -> Self {
+        use crate::bundle::BundleError;
+        match err {
+            BundleError::Cancelled => Self::Cancelled,
+            BundleError::ObjectNotFound { name } => Self::Object(ObjectError::NotFound { name }),
+            other => Self::Remote(crate::remote::RemoteError::Bundle(other)),
+        }
+    }
+}
+
+impl From<crate::fetch_request::FetchRefspecError> for Error {
+    fn from(e: crate::fetch_request::FetchRefspecError) -> Self {
+        Self::Remote(crate::remote::RemoteError::FetchRefspec(e))
+    }
+}
+
 /// Convenience alias for `Result<T, Error>`.
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub(crate) fn promisor_fetch_failed_message(
-    missing: &crate::objects::ObjectId,
-    failures: &[(String, Box<Error>)],
-) -> String {
-    let causes = failures
-        .iter()
-        .map(|(remote, err)| format!("{remote}: {err}"))
-        .collect::<Vec<_>>()
-        .join("; ");
-    format!("could not fetch promised object {missing} ({causes})")
-}
-
-/// Serializes as `{"kind": <Error::kind_name>, "message": <Display text>, "area": <Error::area>}`.
+/// Serializes as `{"kind": <Error::kind_name>, "area": <Error::area>, "message": <Display text>}`,
+/// plus structured fields for lock, overwrite, dirty-worktree, and conflict-marker failures.
 #[cfg(feature = "serde-models")]
 impl serde::Serialize for Error {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
+        use crate::worktree::WorktreeError;
         use serde::ser::SerializeStruct;
 
         match self {
             Self::LockHeld(lock) => {
-                let mut out = serializer.serialize_struct("Error", 4)?;
+                let mut out = serializer.serialize_struct("Error", 5)?;
                 out.serialize_field("kind", self.kind_name())?;
-                out.serialize_field("message", &self.to_string())?;
                 out.serialize_field("area", self.area())?;
+                out.serialize_field("message", &self.to_string())?;
                 out.serialize_field(
                     "path",
                     &crate::git_path::user_display_path(lock.path.as_path()),
@@ -2893,55 +2281,47 @@ impl serde::Serialize for Error {
                 }
                 out.end()
             }
-            Self::WouldOverwrite { reason, paths, .. } => {
-                let mut out = serializer.serialize_struct("Error", 4)?;
+            Self::Worktree(WorktreeError::WouldOverwrite { reason, paths, .. }) => {
+                let mut out = serializer.serialize_struct("Error", 5)?;
                 out.serialize_field("kind", self.kind_name())?;
+                out.serialize_field("area", self.area())?;
                 out.serialize_field("message", &self.to_string())?;
                 out.serialize_field("reason", &reason.to_string())?;
                 out.serialize_field("paths", paths)?;
                 out.end()
             }
-            Self::DirtyWorktree { operation, paths } => {
-                let mut out = serializer.serialize_struct("Error", 4)?;
+            Self::Worktree(WorktreeError::DirtyWorktree { operation, paths }) => {
+                let mut out = serializer.serialize_struct("Error", 5)?;
                 out.serialize_field("kind", self.kind_name())?;
+                out.serialize_field("area", self.area())?;
                 out.serialize_field("message", &self.to_string())?;
                 out.serialize_field("operation", &operation.to_string())?;
                 out.serialize_field("paths", paths)?;
                 out.end()
             }
-            Self::UnmergedConflictMarkers { paths } => {
-                let mut out = serializer.serialize_struct("Error", 3)?;
+            Self::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) => {
+                let mut out = serializer.serialize_struct("Error", 4)?;
                 out.serialize_field("kind", self.kind_name())?;
+                out.serialize_field("area", self.area())?;
                 out.serialize_field("message", &self.to_string())?;
                 out.serialize_field("paths", paths)?;
                 out.end()
             }
+            Self::Stash(stash) => stash.serialize(serializer),
             _ => {
                 let mut out = serializer.serialize_struct("Error", 3)?;
                 out.serialize_field("kind", self.kind_name())?;
-                out.serialize_field("message", &self.to_string())?;
                 out.serialize_field("area", self.area())?;
+                out.serialize_field("message", &self.to_string())?;
                 out.end()
             }
         }
     }
 }
 
-impl From<crate::fetch_request::FetchRefspecError> for Error {
-    fn from(e: crate::fetch_request::FetchRefspecError) -> Self {
-        Self::Remote(crate::remote::RemoteError::FetchRefspec(e))
-    }
-}
-
-impl From<Box<crate::resumable::ResumableError>> for Error {
-    fn from(e: Box<crate::resumable::ResumableError>) -> Self {
-        Self::Remote(crate::remote::RemoteError::Resumable(e))
-    }
-}
-
 #[cfg(test)]
 mod object_read_failure_tests {
-    use super::{Error, ObjectReadFailure};
+    use super::{Error, ObjectError, ObjectReadFailure};
 
     #[test]
     fn try_from_object_read_error_rejects_unrelated_umbrella_variants() {
@@ -2954,9 +2334,177 @@ mod object_read_failure_tests {
     #[test]
     fn try_from_object_read_error_maps_decode_variants() {
         assert!(matches!(
-            ObjectReadFailure::try_from_object_read_error(Error::Zlib("bad".into())),
-            Ok(ObjectReadFailure::Zlib(_))
+            ObjectReadFailure::try_from_object_read_error(Error::Object(ObjectError::Zlib {
+                detail: "bad".into()
+            })),
+            Ok(ObjectReadFailure::Zlib { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod umbrella_area_tests {
+    use super::{
+        ConfigError, DiffError, Error, ErrorSummary, LockHeldError, NotesError, ObjectError,
+        RefError, RepositoryError, RevisionError,
+    };
+    use crate::history::HistoryError;
+    use crate::hooks::{HookError, HookOutput};
+    use crate::index::IndexError;
+    use crate::porcelain::branch_error::BranchError;
+    use crate::porcelain::commit_error::CommitError;
+    use crate::porcelain::merge_error::MergeError;
+    use crate::porcelain::stash_error::StashError;
+    use crate::porcelain::tag::TagError;
+    use crate::remote::RemoteError;
+    use crate::worktree::WorktreeError;
+
+    /// Area name for each umbrella variant, written without a wildcard arm so a new variant
+    /// fails to compile here until it is listed in [`AREAS`].
+    fn area_by_variant(err: &Error) -> &'static str {
+        match err {
+            Error::Repository(_) => "repository",
+            Error::Object(_) => "object",
+            Error::Index(_) => "index",
+            Error::Ref(_) => "ref",
+            Error::Revision(_) => "revision",
+            Error::Config(_) => "config",
+            Error::Worktree(_) => "worktree",
+            Error::Diff(_) => "diff",
+            Error::Commit(_) => "commit",
+            Error::Merge(_) => "merge",
+            Error::History(_) => "history",
+            Error::Stash(_) => "stash",
+            Error::Branch(_) => "branch",
+            Error::Tag(_) => "tag",
+            Error::Notes(_) => "notes",
+            Error::Remote(_) => "remote",
+            Error::Hook(_) => "hook",
+            Error::Io(_) => "io",
+            Error::LockHeld(_) => "lock_held",
+            Error::Cancelled => "cancelled",
+        }
+    }
+
+    const AREAS: &[&str] = &[
+        "repository",
+        "object",
+        "index",
+        "ref",
+        "revision",
+        "config",
+        "worktree",
+        "diff",
+        "commit",
+        "merge",
+        "history",
+        "stash",
+        "branch",
+        "tag",
+        "notes",
+        "remote",
+        "hook",
+        "io",
+        "lock_held",
+        "cancelled",
+    ];
+
+    fn one_error_per_area() -> Vec<Error> {
+        vec![
+            Error::Repository(RepositoryError::RequiresWorkTree),
+            Error::Object(ObjectError::InvalidId {
+                input: "xyz".into(),
+            }),
+            Error::Index(IndexError::CacheTreeCorrupt),
+            Error::Ref(RefError::UnbornHead),
+            Error::Revision(RevisionError::NotFound {
+                spec: "nope".into(),
+            }),
+            Error::Config(ConfigError::ConfigCacheLockPoisoned),
+            Error::Worktree(WorktreeError::RemovePathsRequired),
+            Error::Diff(DiffError::BlameWorktreeBareRepository),
+            Error::Commit(CommitError::EmptyCommitMessage),
+            Error::Merge(MergeError::NotFastForward),
+            Error::History(HistoryError::EmptyMessage),
+            Error::Stash(StashError::NoInitialCommit),
+            Error::Branch(BranchError::NoPreviousBranch),
+            Error::Tag(TagError::EmptyMessage),
+            Error::Notes(NotesError::AlreadyExists {
+                object: crate::objects::ObjectId::zero(),
+            }),
+            Error::Remote(RemoteError::HttpUnavailable),
+            Error::Hook(HookError::Failed {
+                hook_name: "pre-commit".into(),
+                status: 1,
+                output: HookOutput::default(),
+            }),
+            Error::Io(std::io::Error::other("disk")),
+            Error::LockHeld(LockHeldError {
+                path: ".git/index.lock".into(),
+                holder: None,
+            }),
+            Error::Cancelled,
+        ]
+    }
+
+    #[test]
+    fn umbrella_error_has_one_variant_per_area() {
+        let samples = one_error_per_area();
+        assert_eq!(samples.len(), AREAS.len());
+        let mut seen = std::collections::HashSet::new();
+        for (err, expected) in samples.iter().zip(AREAS) {
+            assert_eq!(area_by_variant(err), *expected);
+            assert_eq!(err.area(), *expected, "{err:?}");
+            assert!(seen.insert(err.area()), "area {expected} listed twice");
+            assert!(!err.kind_name().is_empty());
+        }
+    }
+
+    #[test]
+    fn area_errors_convert_into_their_umbrella_variant() {
+        let cases: Vec<(Error, &str)> = vec![
+            (RepositoryError::RequiresWorkTree.into(), "repository"),
+            (RefError::UnbornHead.into(), "ref"),
+            (
+                RevisionError::NotFound { spec: "x".into() }.into(),
+                "revision",
+            ),
+            (CommitError::EmptyCommitMessage.into(), "commit"),
+            (MergeError::NotFastForward.into(), "merge"),
+            (HistoryError::EmptyMessage.into(), "history"),
+            (StashError::NoInitialCommit.into(), "stash"),
+            (BranchError::NoPreviousBranch.into(), "branch"),
+            (TagError::EmptyMessage.into(), "tag"),
+            (RemoteError::HttpUnavailable.into(), "remote"),
+            (IndexError::CacheTreeCorrupt.into(), "index"),
+            (WorktreeError::RemovePathsRequired.into(), "worktree"),
+        ];
+        for (err, area) in cases {
+            assert_eq!(err.area(), area, "{err:?}");
+        }
+    }
+
+    #[test]
+    fn error_summary_keeps_kind_area_message_and_cancellation() {
+        let summary = ErrorSummary::from(&Error::Ref(RefError::UnbornHead));
+        assert_eq!(summary.kind(), Error::Ref(RefError::UnbornHead).kind_name());
+        assert_eq!(summary.area(), "ref");
+        assert_eq!(
+            summary.message(),
+            Error::Ref(RefError::UnbornHead).to_string()
+        );
+        assert_eq!(summary.to_string(), summary.message());
+        assert!(!summary.is_cancelled());
+
+        let cancelled = ErrorSummary::from(Error::Cancelled);
+        assert!(cancelled.is_cancelled());
+        assert_eq!(cancelled.kind(), "cancelled");
+        assert_eq!(cancelled.area(), "cancelled");
+        assert_eq!(cancelled.clone(), cancelled);
+        assert_eq!(
+            std::mem::size_of::<ErrorSummary>(),
+            std::mem::size_of::<usize>()
+        );
     }
 }
 

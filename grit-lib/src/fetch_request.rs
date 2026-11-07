@@ -84,6 +84,7 @@ pub enum FetchRefspecPlan {
 
 /// Errors while resolving fetch refspecs before transfer.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FetchRefspecError {
     /// A refspec string failed `parse_fetch_refspec`.
     #[error("invalid refspec '{spec}': {message}")]
@@ -114,7 +115,7 @@ pub enum FetchRefspecError {
 impl From<RefspecError> for FetchRefspecError {
     fn from(e: RefspecError) -> Self {
         match e {
-            RefspecError::Invalid(s) => Self::InvalidRefspec {
+            RefspecError::Invalid { spec: s } => Self::InvalidRefspec {
                 spec: s.clone(),
                 message: s,
             },
@@ -154,14 +155,17 @@ pub struct FetchInvocation {
 pub fn resolve_remote_argument(
     config: &ConfigSet,
     remote_or_url: &str,
-) -> Result<Remote, RemoteError> {
+) -> crate::error::Result<Remote> {
     if has_remote_section(config, remote_or_url) {
         return Remote::from_config(config, remote_or_url);
     }
     if looks_like_path_or_url(remote_or_url) || remote_or_url.contains(':') {
         return Remote::from_url(remote_or_url);
     }
-    Err(RemoteError::UnknownRemote(remote_or_url.to_owned()))
+    Err(RemoteError::UnknownRemote {
+        name: remote_or_url.to_owned(),
+    }
+    .into())
 }
 
 /// `branch.<branch>.remote`, trimmed; `None` when unset, blank, or `branch` is `None`.
@@ -1195,10 +1199,12 @@ mod tests {
 
         assert!(matches!(
             resolve_remote_argument(&config, "nourl"),
-            Err(RemoteError::NoUrl { remote: Some(name) }) if name == "nourl"
+            Err(crate::error::Error::Remote(RemoteError::NoUrl { remote: Some(name) })) if name == "nourl"
         ));
         let err = resolve_remote_argument(&config, "nosuch").expect_err("unknown");
-        assert!(matches!(&err, RemoteError::UnknownRemote(name) if name == "nosuch"));
+        assert!(
+            matches!(&err, crate::error::Error::Remote(RemoteError::UnknownRemote { name }) if name == "nosuch")
+        );
         assert_eq!(err.to_string(), "unknown remote 'nosuch'");
     }
 
@@ -1227,7 +1233,7 @@ mod tests {
         );
         assert!(matches!(
             resolve_remote_argument(&config, &invocation.remote),
-            Err(RemoteError::NoUrl { remote: Some(name) }) if name == "half"
+            Err(crate::error::Error::Remote(RemoteError::NoUrl { remote: Some(name) })) if name == "half"
         ));
     }
 

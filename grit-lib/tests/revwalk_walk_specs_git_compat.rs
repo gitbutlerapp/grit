@@ -6,6 +6,7 @@
 //! Symmetric ranges list commits in Git's exact order and only read history down to the
 //! merge-base frontier (issue #2109).
 
+use grit_lib::error::RevisionError;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -192,7 +193,9 @@ fn walk_rejects_specs_that_need_the_token_api() {
             .walk(spec, &RevListOptions::default())
             .expect_err(spec);
         match err {
-            Error::RevList(RevListError::UnsupportedWalkSpec { spec: got }) => {
+            Error::Revision(RevisionError::List(RevListError::UnsupportedWalkSpec {
+                spec: got,
+            })) => {
                 assert_eq!(got, spec, "error keeps the full spec");
             }
             other => panic!("walk({spec:?}): expected UnsupportedWalkSpec, got {other:?}"),
@@ -290,7 +293,7 @@ fn rev_list_rejects_unexpanded_symmetric_range() {
     assert!(
         matches!(
             &err,
-            Error::RevList(RevListError::UnexpandedSymmetricRange { spec }) if spec == "main...topic"
+            Error::Revision(RevisionError::List(RevListError::UnexpandedSymmetricRange { spec })) if spec == "main...topic"
         ),
         "{err:?}"
     );

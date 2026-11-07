@@ -1,5 +1,6 @@
 //! Initial switch materialization, including upstream t2018's no-checkout branch scenario.
 
+use grit_lib::worktree::WorktreeError;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -259,11 +260,11 @@ fn initial_switch_refuses_untracked_collisions_without_mutating_any_bytes() {
             for dry_run in [true, false] {
                 let err = switch(&repo, mode.clone(), dry_run).expect_err("untracked collision");
                 match err {
-                    Error::WouldOverwrite {
+                    Error::Worktree(WorktreeError::WouldOverwrite {
                         reason: OverwriteReason::Untracked,
                         paths,
                         ..
-                    } => assert_eq!(paths, vec![path.to_owned()]),
+                    }) => assert_eq!(paths, vec![path.to_owned()]),
                     other => panic!("expected untracked refusal: {other:?}"),
                 }
                 assert_eq!(bytes(dest.path()), before);
@@ -294,10 +295,10 @@ fn existing_empty_index_preserves_staged_deletions() {
     for dry_run in [true, false] {
         assert!(matches!(
             switch(&repo, mode.clone(), dry_run),
-            Err(Error::WouldOverwrite {
+            Err(Error::Worktree(WorktreeError::WouldOverwrite {
                 reason: OverwriteReason::LocalChanges,
                 ..
-            })
+            }))
         ));
         assert_eq!(bytes(dest.path()), before);
     }

@@ -1,6 +1,7 @@
 //! Typed config and submodule errors: each failure is a specific variant, and the system `git`
 //! rejects the same input where it has an equivalent check.
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::path::Path;
 
@@ -25,7 +26,7 @@ fn config_error(err: Error) -> ConfigError {
 
 fn submodule_error(err: Error) -> SubmoduleError {
     match err {
-        Error::Submodule(e) => e,
+        Error::Worktree(WorktreeError::Submodule(e)) => e,
         other => panic!("expected a submodule error, got {other:?}"),
     }
 }
@@ -121,7 +122,7 @@ fn rename_section_rejects_invalid_section_names() {
     }
     assert!(Error::Config(ConfigError::RepositoryRequired).wants_fatal_prefix());
     assert!(
-        Error::Submodule(SubmoduleError::EmptyPath).wants_fatal_prefix(),
+        Error::Worktree(WorktreeError::Submodule(SubmoduleError::EmptyPath)).wants_fatal_prefix(),
         "submodule errors keep the fatal: prefix they had as config errors"
     );
 }
@@ -370,5 +371,8 @@ fn missing_configured_submodule_git_dir_is_typed() {
             name: "lib".to_owned()
         }
     );
-    assert_eq!(Error::Submodule(err).kind_name(), "submodule");
+    assert_eq!(
+        Error::Worktree(WorktreeError::Submodule(err)).kind_name(),
+        "submodule"
+    );
 }

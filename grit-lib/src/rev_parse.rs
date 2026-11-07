@@ -5,6 +5,9 @@
 //! object-name resolution, and lightweight peeling (`^{}`, `^{object}`,
 //! `^{commit}`).
 
+use crate::error::ObjectError;
+use crate::error::RefError;
+use crate::error::RevisionError;
 use crate::git_path::CanonicalizeExt;
 
 use std::borrow::Cow;
@@ -172,9 +175,11 @@ pub(crate) fn expand_at_minus_to_branch_name(
         return Ok(None);
     }
     let inner = &spec[3..spec.len() - 1];
-    let n: usize = inner
-        .parse()
-        .map_err(|_| Error::InvalidRef(format!("invalid N in @{{-N}} for '{spec}'")))?;
+    let n: usize = inner.parse().map_err(|_| {
+        Error::Ref(RefError::Invalid {
+            detail: format!("invalid N in @{{-N}} for '{spec}'"),
+        })
+    })?;
     if n < 1 {
         return Ok(None);
     }
@@ -220,7 +225,9 @@ pub fn upstream_suffix_info(spec: &str) -> Option<(&str, bool)> {
 /// Resolve `@{upstream}` / `@{u}` / `@{push}` to the symbolic full ref name (for `rev-parse --symbolic-full-name`).
 pub(crate) fn resolve_upstream_symbolic_name(repo: &Repository, spec: &str) -> Result<String> {
     let Some((base, is_push)) = upstream_suffix_info(spec) else {
-        return Err(Error::InvalidRef(format!("not an upstream spec: {spec}")));
+        return Err(Error::Ref(RefError::Invalid {
+            detail: format!("not an upstream spec: {spec}"),
+        }));
     };
     resolve_upstream_full_ref_name(repo, base, is_push)
 }
@@ -246,9 +253,11 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
         }
         return Ok(format!("refs/heads/{m}"));
     }
-    let merge_branch = merge
-        .strip_prefix("refs/heads/")
-        .ok_or_else(|| Error::InvalidRef(format!("invalid merge ref: {merge}")))?;
+    let merge_branch = merge.strip_prefix("refs/heads/").ok_or_else(|| {
+        Error::Ref(RefError::Invalid {
+            detail: format!("invalid merge ref: {merge}"),
+        })
+    })?;
     let tracking = format!("refs/remotes/{remote}/{merge_branch}");
     if repo.resolve_ref_oid(&tracking).is_err() {
         return Err(RevParseError::UpstreamNotTracked {
@@ -622,7 +631,7 @@ fn parse_branch_tracking(config: &str, branch: &str) -> Option<(String, String)>
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] or [`Error::InvalidRef`] when resolution
+/// Returns [`crate::error::ObjectError::NotFound`] or [`crate::error::RefError::Invalid`] when resolution
 /// fails.
 /// Split `spec` at a `..` range operator, avoiding the three-dot symmetric-diff form.
 ///
@@ -741,10 +750,10 @@ impl<'repo> NavParentCache<'repo> {
             }
         }
         let bytes = match self.repo.read_commit_bytes_with_replace(&commit_oid) {
-            Err(Error::UnexpectedObjectKind { .. }) => {
-                return Err(Error::InvalidRef(format!(
-                    "invalid ref: {commit_oid} is not a commit"
-                )));
+            Err(Error::Object(ObjectError::UnexpectedKind { .. })) => {
+                return Err(Error::Ref(RefError::Invalid {
+                    detail: format!("invalid ref: {commit_oid} is not a commit"),
+                }));
             }
             Err(other) => return Err(other),
             Ok(bytes) => bytes,
@@ -1053,10 +1062,11 @@ fn resolve_commit_ish(
         let left_c = endpoint(left)?;
         let right_c = endpoint(right)?;
         let bases = crate::merge_base::merge_bases_first_vs_rest(repo, left_c, &[right_c])?;
-        return bases
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::ObjectNotFound(format!("no merge base for '{spec}'")));
+        return bases.into_iter().next().ok_or_else(|| {
+            Error::Object(ObjectError::NotFound {
+                name: format!("no merge base for '{spec}'"),
+            })
+        });
     }
     if let Some((left, right)) = split_double_dot_range(spec) {
         endpoint(left)?;
@@ -1229,12 +1239,16 @@ fn resolve_revision_with_navigation(
     if let Some(pattern) = spec.strip_prefix(":/") {
         if pattern.is_empty() {
             // `:/` with an empty pattern resolves to the youngest reachable commit (HEAD tip).
-            let head = crate::state::resolve_head_for_repository(repo)
-                .map_err(|_| Error::ObjectNotFound(":/".to_owned()))?;
-            return head
-                .oid()
-                .copied()
-                .ok_or_else(|| Error::ObjectNotFound(":/".to_owned()));
+            let head = crate::state::resolve_head_for_repository(repo).map_err(|_| {
+                Error::Object(ObjectError::NotFound {
+                    name: ":/".to_owned(),
+                })
+            })?;
+            return head.oid().copied().ok_or_else(|| {
+                Error::Object(ObjectError::NotFound {
+                    name: ":/".to_owned(),
+                })
+            });
         }
         return resolve_commit_message_search(repo, pattern);
     }
@@ -1263,9 +1277,11 @@ fn resolve_revision_with_navigation(
             })
         })?;
         let line = raw.lines().next().unwrap_or("").trim();
-        return line
-            .parse::<ObjectId>()
-            .map_err(|_| Error::InvalidRef("AUTO_MERGE: invalid object id".to_owned()));
+        return line.parse::<ObjectId>().map_err(|_| {
+            Error::Ref(RefError::Invalid {
+                detail: "AUTO_MERGE: invalid object id".to_owned(),
+            })
+        });
     }
 
     // `refs/...` spelled in full (e.g. `refs/tags/other`): resolve as a ref before any
@@ -1338,10 +1354,11 @@ fn resolve_revision_with_navigation(
                 },
             )?;
             let bases = crate::merge_base::merge_bases_first_vs_rest(repo, left_oid, &[right_oid])?;
-            return bases
-                .into_iter()
-                .next()
-                .ok_or_else(|| Error::ObjectNotFound(format!("no merge base for '{spec}'")));
+            return bases.into_iter().next().ok_or_else(|| {
+                Error::Object(ObjectError::NotFound {
+                    name: format!("no merge base for '{spec}'"),
+                })
+            });
         }
     }
 
@@ -1363,13 +1380,15 @@ fn resolve_revision_with_navigation(
                 remote_branch_name_guess,
             ) {
                 Ok(o) => o,
-                Err(Error::ObjectNotFound(s)) if s == before => {
+                Err(Error::Object(ObjectError::NotFound { name: s })) if s == before => {
                     return Err(RevParseError::InvalidObjectName {
                         name: before.to_owned(),
                     }
                     .into());
                 }
-                Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
+                Err(Error::Revision(RevisionError::Parse(RevParseError::AmbiguousArgument {
+                    ..
+                }))) => {
                     return Err(RevParseError::InvalidObjectName {
                         name: before.to_owned(),
                     }
@@ -1384,7 +1403,9 @@ fn resolve_revision_with_navigation(
             }
             let clean_path = match normalize_colon_path_for_tree(repo, after) {
                 Ok(p) => p,
-                Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
+                Err(Error::Ref(RefError::Invalid { detail: msg }))
+                    if msg == "outside repository" =>
+                {
                     let wt = repo
                         .work_tree()
                         .and_then(|p| p.canonicalize_simplified().ok())
@@ -1422,7 +1443,7 @@ fn resolve_revision_with_navigation(
     let nav_cache = NavParentCache::new(repo, metadata);
     for step in nav_steps {
         oid = apply_nav_step(repo, &nav_cache, oid, step).map_err(|e| {
-            if matches!(e, Error::ObjectNotFound(_)) {
+            if matches!(e, Error::Object(ObjectError::NotFound { .. })) {
                 RevParseError::RevisionOutOfRange {
                     spec: spec.to_owned(),
                 }
@@ -1459,9 +1480,9 @@ fn normalize_path_components(path: PathBuf) -> PathBuf {
 fn normalize_colon_path_for_bare_tree(raw_path: &str) -> Result<String> {
     let cwd_relative = raw_path.starts_with("./") || raw_path.starts_with("../") || raw_path == ".";
     if cwd_relative {
-        return Err(Error::InvalidRef(
-            "relative path syntax can't be used outside working tree".to_owned(),
-        ));
+        return Err(Error::Ref(RefError::Invalid {
+            detail: "relative path syntax can't be used outside working tree".to_owned(),
+        }));
     }
     let s = raw_path.trim_start_matches('/');
     let mut stack: Vec<&str> = Vec::new();
@@ -1488,9 +1509,9 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
 
     let cwd_relative = raw_path.starts_with("./") || raw_path.starts_with("../") || raw_path == ".";
     if cwd_relative && !path_is_within(&cwd, work_tree) {
-        return Err(Error::InvalidRef(
-            "relative path syntax can't be used outside working tree".to_owned(),
-        ));
+        return Err(Error::Ref(RefError::Invalid {
+            detail: "relative path syntax can't be used outside working tree".to_owned(),
+        }));
     }
 
     // `./` / `../` / `.` are relative to cwd; other relative paths are relative to work tree.
@@ -1504,11 +1525,15 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
     let full = normalize_path_components(full);
 
     if !path_is_within(&full, &wt_canon) {
-        return Err(Error::InvalidRef("outside repository".to_owned()));
+        return Err(Error::Ref(RefError::Invalid {
+            detail: "outside repository".to_owned(),
+        }));
     }
-    let rel = full
-        .strip_prefix(&wt_canon)
-        .map_err(|_| Error::InvalidRef("outside repository".to_owned()))?;
+    let rel = full.strip_prefix(&wt_canon).map_err(|_| {
+        Error::Ref(RefError::Invalid {
+            detail: "outside repository".to_owned(),
+        })
+    })?;
     let s = rel.to_string_lossy().replace('\\', "/");
     Ok(s.trim_end_matches('/').to_owned())
 }
@@ -1534,8 +1559,11 @@ fn is_unreplaced_commit(repo: &Repository, oid: ObjectId) -> bool {
 
 /// Peel tags to a commit OID for merge-base computation (`A...B` and `rev-parse` output).
 pub(crate) fn peel_to_commit_for_merge_base(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
-    peel_tags_to_commit(repo, oid)?
-        .map_err(|other| Error::InvalidRef(format!("object {other} does not name a commit")))
+    peel_tags_to_commit(repo, oid)?.map_err(|other| {
+        Error::Ref(RefError::Invalid {
+            detail: format!("object {other} does not name a commit"),
+        })
+    })
 }
 
 /// Peel tags starting at `oid` until a non-tag object.
@@ -1570,7 +1598,9 @@ pub(crate) fn try_peel_to_commit_for_merge_base(
     match obj.kind {
         ObjectKind::Commit => Ok(Some(oid)),
         ObjectKind::Tree | ObjectKind::Blob => Ok(None),
-        ObjectKind::Tag => Err(Error::InvalidRef("unexpected tag after peel".to_owned())),
+        ObjectKind::Tag => Err(Error::Ref(RefError::Invalid {
+            detail: "unexpected tag after peel".to_owned(),
+        })),
     }
 }
 
@@ -1578,7 +1608,7 @@ pub(crate) fn try_peel_to_commit_for_merge_base(
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] when the object cannot be peeled to a tree (e.g. a blob).
+/// Returns [`crate::error::ObjectError::NotFound`] when the object cannot be peeled to a tree (e.g. a blob).
 pub(crate) fn peel_to_tree(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
     let obj = repo.read_replaced(&oid)?;
     match obj.kind {
@@ -1591,10 +1621,9 @@ pub(crate) fn peel_to_tree(repo: &Repository, oid: ObjectId) -> Result<ObjectId>
             let tag = crate::objects::parse_tag(&obj.data)?;
             peel_to_tree(repo, tag.object)
         }
-        _ => Err(Error::ObjectNotFound(format!(
-            "cannot peel {} to tree",
-            oid
-        ))),
+        _ => Err(Error::Object(ObjectError::NotFound {
+            name: format!("cannot peel {} to tree", oid),
+        })),
     }
 }
 
@@ -1602,9 +1631,13 @@ pub(crate) fn peel_to_tree(repo: &Repository, oid: ObjectId) -> Result<ObjectId>
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] when the tags lead to a commit or tree.
+/// Returns [`ObjectError::NotFound`] when the tags lead to a commit or tree.
 pub(crate) fn peel_to_blob(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
-    let not_blob = |other: ObjectId| Error::ObjectNotFound(format!("cannot peel {other} to blob"));
+    let not_blob = |other: ObjectId| {
+        Error::Object(ObjectError::NotFound {
+            name: format!("cannot peel {other} to blob"),
+        })
+    };
     match peel_tags_to_commit(repo, oid)? {
         Ok(commit) => Err(not_blob(commit)),
         Err(other) if repo.read_info_replaced(&other)?.kind == ObjectKind::Blob => Ok(other),
@@ -1646,9 +1679,9 @@ fn resolve_tree_path_rev_parse(
     let entries = crate::objects::parse_tree(&obj.data)?;
     let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
     if components.is_empty() {
-        return Err(Error::InvalidRef(format!(
-            "path '{path}' does not name an object in tree {tree_oid}"
-        ))
+        return Err(Error::Ref(RefError::Invalid {
+            detail: format!("path '{path}' does not name an object in tree {tree_oid}"),
+        })
         .into());
     }
 
@@ -1666,7 +1699,10 @@ fn resolve_tree_path_rev_parse(
                 return Ok(entry.oid);
             }
             if entry.mode != crate::index::MODE_TREE {
-                return Err(Error::ObjectNotFound(path.to_owned()).into());
+                return Err(Error::Object(ObjectError::NotFound {
+                    name: path.to_owned(),
+                })
+                .into());
             }
             return resolve_tree_path_rev_parse(repo, &entry.oid, &rest.join("/"));
         }
@@ -1695,19 +1731,24 @@ pub(crate) fn resolve_treeish_blob_at_path(
     repo: &Repository,
     spec: &str,
 ) -> Result<TreeishBlobAtPath> {
-    let (before, after) = split_treeish_colon(spec)
-        .ok_or_else(|| Error::InvalidRef(format!("'{spec}' is not a treeish:path revision")))?;
+    let (before, after) = split_treeish_colon(spec).ok_or_else(|| {
+        Error::Ref(RefError::Invalid {
+            detail: format!("'{spec}' is not a treeish:path revision"),
+        })
+    })?;
 
     let rev_oid =
         match resolve_revision_impl(repo, before, true, false, true, true, false, false, true) {
             Ok(o) => o,
-            Err(Error::ObjectNotFound(s)) if s == before => {
+            Err(Error::Object(ObjectError::NotFound { name: s })) if s == before => {
                 return Err(RevParseError::InvalidObjectName {
                     name: before.to_owned(),
                 }
                 .into());
             }
-            Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
+            Err(Error::Revision(RevisionError::Parse(RevParseError::AmbiguousArgument {
+                ..
+            }))) => {
                 return Err(RevParseError::InvalidObjectName {
                     name: before.to_owned(),
                 }
@@ -1729,7 +1770,7 @@ pub(crate) fn resolve_treeish_blob_at_path(
 
     let clean_path = match normalize_colon_path_for_tree(repo, after) {
         Ok(p) => p,
-        Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
+        Err(Error::Ref(RefError::Invalid { detail: msg })) if msg == "outside repository" => {
             let wt = repo
                 .work_tree()
                 .and_then(|p| p.canonicalize_simplified().ok())
@@ -1765,9 +1806,9 @@ fn walk_tree_to_blob_entry(
     let entries = crate::objects::parse_tree(&obj.data)?;
     let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
     if components.is_empty() {
-        return Err(Error::InvalidRef(format!(
-            "path '{path}' does not name a blob in tree {tree_oid}"
-        ))
+        return Err(Error::Ref(RefError::Invalid {
+            detail: format!("path '{path}' does not name a blob in tree {tree_oid}"),
+        })
         .into());
     }
 
@@ -1778,12 +1819,18 @@ fn walk_tree_to_blob_entry(
         if name == first {
             if rest.is_empty() {
                 if entry.mode == crate::index::MODE_TREE {
-                    return Err(Error::InvalidRef(format!("'{path}' is a tree, not a blob")).into());
+                    return Err(Error::Ref(RefError::Invalid {
+                        detail: format!("'{path}' is a tree, not a blob"),
+                    })
+                    .into());
                 }
                 return Ok((entry.oid, entry.mode_str()));
             }
             if entry.mode != crate::index::MODE_TREE {
-                return Err(Error::ObjectNotFound(path.to_owned()).into());
+                return Err(Error::Object(ObjectError::NotFound {
+                    name: path.to_owned(),
+                })
+                .into());
             }
             return walk_tree_to_blob_entry(repo, &entry.oid, &rest.join("/"));
         }
@@ -1873,19 +1920,21 @@ fn apply_nav_step(
         NavStep::ParentN(n) => {
             let oid = peel_annotated_tag_chain(repo, oid)?;
             let parents = nav.parents_of(oid)?;
-            parents
-                .get(n - 1)
-                .copied()
-                .ok_or_else(|| Error::ObjectNotFound(format!("{oid}^{n}")))
+            parents.get(n - 1).copied().ok_or_else(|| {
+                Error::Object(ObjectError::NotFound {
+                    name: format!("{oid}^{n}"),
+                })
+            })
         }
         NavStep::AncestorN(n) => {
             let mut current = peel_annotated_tag_chain(repo, oid)?;
             for _ in 0..n {
                 let parents = nav.parents_of(current)?;
-                current = parents
-                    .first()
-                    .copied()
-                    .ok_or_else(|| Error::ObjectNotFound(format!("{current}~1")))?;
+                current = parents.first().copied().ok_or_else(|| {
+                    Error::Object(ObjectError::NotFound {
+                        name: format!("{current}~1"),
+                    })
+                })?;
             }
             Ok(current)
         }
@@ -2237,7 +2286,9 @@ fn try_resolve_describe_name(repo: &Repository, spec: &str) -> Result<Option<Obj
     }
 
     match commit_candidates.len() {
-        0 => Err(Error::ObjectNotFound(spec.to_owned())),
+        0 => Err(Error::Object(ObjectError::NotFound {
+            name: spec.to_owned(),
+        })),
         1 => Ok(Some(commit_candidates[0])),
         _ => Err(RevParseError::AmbiguousShortObject {
             spec: hex_abbrev.to_owned(),
@@ -2275,11 +2326,15 @@ fn resolve_base(
 
     if spec == "HEAD" {
         return match crate::state::resolve_head_for_repository(repo) {
-            Ok(crate::state::HeadState::Branch { oid: None, .. }) => Err(Error::UnbornHead),
+            Ok(crate::state::HeadState::Branch { oid: None, .. }) => {
+                Err(Error::Ref(RefError::UnbornHead))
+            }
             Ok(crate::state::HeadState::Branch { oid: Some(oid), .. }) => Ok(oid),
             Ok(crate::state::HeadState::Detached { oid }) => Ok(oid),
             Ok(crate::state::HeadState::Invalid) | Err(_) => {
-                Err(Error::ObjectNotFound(spec.to_owned()))
+                Err(Error::Object(ObjectError::NotFound {
+                    name: spec.to_owned(),
+                }))
             }
         };
     }
@@ -2288,8 +2343,11 @@ fn resolve_base(
     // the first fetched OID even when every line is marked `not-for-merge`.
     if spec == "FETCH_HEAD" {
         let path = repo.git_dir().join("FETCH_HEAD");
-        let content = std::fs::read_to_string(&path)
-            .map_err(|_| Error::ObjectNotFound("FETCH_HEAD".to_owned()))?;
+        let content = std::fs::read_to_string(&path).map_err(|_| {
+            Error::Object(ObjectError::NotFound {
+                name: "FETCH_HEAD".to_owned(),
+            })
+        })?;
         let mut first_oid = None;
         for line in content.lines() {
             let line = line.trim();
@@ -2301,9 +2359,11 @@ fn resolve_base(
                 continue;
             };
             if ObjectId::is_full_hex(oid_hex) {
-                let oid = oid_hex
-                    .parse::<ObjectId>()
-                    .map_err(|_| Error::InvalidRef("invalid FETCH_HEAD object id".to_owned()))?;
+                let oid = oid_hex.parse::<ObjectId>().map_err(|_| {
+                    Error::Ref(RefError::Invalid {
+                        detail: "invalid FETCH_HEAD object id".to_owned(),
+                    })
+                })?;
                 first_oid.get_or_insert(oid);
                 let not_for_merge = parts.next().is_some_and(|v| v == "not-for-merge");
                 if !not_for_merge {
@@ -2311,7 +2371,11 @@ fn resolve_base(
                 }
             }
         }
-        return first_oid.ok_or_else(|| Error::ObjectNotFound("FETCH_HEAD".to_owned()));
+        return first_oid.ok_or_else(|| {
+            Error::Object(ObjectError::NotFound {
+                name: "FETCH_HEAD".to_owned(),
+            })
+        });
     }
 
     // `@{-N}` must run before reflog parsing so `@{-1}@{1}` is not misread as `@{-1}` + `@{1}`.
@@ -2348,9 +2412,11 @@ fn resolve_base(
     // Handle @{upstream} / @{u} / @{push} suffixes (including compounds like branch@{u}@{1})
     if upstream_suffix_info(spec).is_some() {
         let full_ref = resolve_upstream_symbolic_name(repo, spec)?;
-        return repo
-            .resolve_ref_oid(&full_ref)
-            .map_err(|_| Error::ObjectNotFound(spec.to_owned()));
+        return repo.resolve_ref_oid(&full_ref).map_err(|_| {
+            Error::Object(ObjectError::NotFound {
+                name: spec.to_owned(),
+            })
+        });
     }
 
     // Reflog selectors: `main@{1}`, `@{3}` (current branch), `other@{u}@{1}`, etc.
@@ -2377,7 +2443,9 @@ fn resolve_base(
                             let raw_path = &rest[2..];
                             let path = match normalize_colon_path_for_tree(repo, raw_path) {
                                 Ok(p) => p,
-                                Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
+                                Err(Error::Ref(RefError::Invalid { detail: msg }))
+                                    if msg == "outside repository" =>
+                                {
                                     let wt = repo
                                         .work_tree()
                                         .and_then(|p| p.canonicalize_simplified().ok())
@@ -2400,7 +2468,9 @@ fn resolve_base(
             }
             let clean_rest = match normalize_colon_path_for_tree(repo, rest) {
                 Ok(p) => p,
-                Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
+                Err(Error::Ref(RefError::Invalid { detail: msg }))
+                    if msg == "outside repository" =>
+                {
                     let wt = repo
                         .work_tree()
                         .and_then(|p| p.canonicalize_simplified().ok())
@@ -2474,7 +2544,9 @@ fn resolve_base(
             // matches, fail as unknown revision — do not fall through to index DWIM (which would
             // incorrectly report "ambiguous argument" for paths like `000000000`).
             if (4..repo.odb().hash_algo().hex_len()).contains(&spec.len()) {
-                return Err(Error::ObjectNotFound(spec.to_owned()));
+                return Err(Error::Object(ObjectError::NotFound {
+                    name: spec.to_owned(),
+                }));
             }
         } else if matches.len() == 1 {
             let oid = matches[0];
@@ -2624,9 +2696,11 @@ fn resolve_base(
                 return Ok(matches[0]);
             }
             if matches.len() > 1 {
-                return Err(Error::InvalidRef(format!(
-                    "ambiguous refname '{spec}': matches multiple remote-tracking branches"
-                )));
+                return Err(Error::Ref(RefError::Invalid {
+                    detail: format!(
+                        "ambiguous refname '{spec}': matches multiple remote-tracking branches"
+                    ),
+                }));
             }
         }
     }
@@ -2657,7 +2731,9 @@ fn resolve_base(
         }
         .into());
     }
-    Err(Error::ObjectNotFound(spec.to_owned()))
+    Err(Error::Object(ObjectError::NotFound {
+        name: spec.to_owned(),
+    }))
 }
 
 fn read_reflog_for_repo(repo: &Repository, refname: &str) -> Result<Vec<ReflogEntry>> {
@@ -2688,9 +2764,9 @@ fn resolve_at_minus_to_branch(repo: &Repository, n: usize) -> Result<String> {
             }
         }
     }
-    Err(Error::InvalidRef(format!(
-        "@{{-{n}}}: only {count} checkout(s) in reflog"
-    )))
+    Err(Error::Ref(RefError::Invalid {
+        detail: format!("@{{-{n}}}: only {count} checkout(s) in reflog"),
+    }))
 }
 
 /// Try to resolve `@{-N}` syntax — the Nth previously checked out branch.
@@ -2732,17 +2808,19 @@ fn try_resolve_at_minus(repo: &Repository, spec: &str) -> Result<Option<ObjectId
                             return Ok(Some(oid));
                         }
                     }
-                    return Err(Error::InvalidRef(format!(
-                        "cannot resolve @{{-{n}}}: branch '{}' not found",
-                        from_branch
-                    )));
+                    return Err(Error::Ref(RefError::Invalid {
+                        detail: format!(
+                            "cannot resolve @{{-{n}}}: branch '{}' not found",
+                            from_branch
+                        ),
+                    }));
                 }
             }
         }
     }
-    Err(Error::InvalidRef(format!(
-        "@{{-{n}}}: only {count} checkout(s) in reflog"
-    )))
+    Err(Error::Ref(RefError::Invalid {
+        detail: format!("@{{-{n}}}: only {count} checkout(s) in reflog"),
+    }))
 }
 
 #[derive(Debug, Clone)]
@@ -2964,9 +3042,11 @@ fn resolve_at_minus_token_to_branch(repo: &Repository, token: &str) -> Result<Op
         return Ok(None);
     }
     let inner = &token[3..token.len() - 1];
-    let n: usize = inner
-        .parse()
-        .map_err(|_| Error::InvalidRef(format!("invalid N in @{{-N}} for '{token}'")))?;
+    let n: usize = inner.parse().map_err(|_| {
+        Error::Ref(RefError::Invalid {
+            detail: format!("invalid N in @{{-N}} for '{token}'"),
+        })
+    })?;
     if n < 1 {
         return Ok(None);
     }
@@ -3055,9 +3135,11 @@ fn try_resolve_reflog_index(repo: &Repository, spec: &str) -> Result<Option<Obje
 
     let refname_raw = current_spec.as_str();
     let refname = dwim_refname(repo, refname_raw);
-    repo.resolve_ref_oid(&refname)
-        .map(Some)
-        .map_err(|_| Error::ObjectNotFound(spec.to_owned()))
+    repo.resolve_ref_oid(&refname).map(Some).map_err(|_| {
+        Error::Object(ObjectError::NotFound {
+            name: spec.to_owned(),
+        })
+    })
 }
 
 enum ReflogSelector {
@@ -3188,7 +3270,7 @@ fn diagnose_tree_path_error(
 }
 
 fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Error) -> Error {
-    let Error::ObjectNotFound(_) = err else {
+    let Error::Object(ObjectError::NotFound { .. }) = err else {
         return err;
     };
     let work_path = repo
@@ -3353,8 +3435,12 @@ fn resolve_index_path_at_stage(repo: &Repository, path: &str, stage: u8) -> Resu
         repo.index_path()
     };
     let config = repo.config().snapshot()?;
-    let index = Index::load_expand_sparse_with_config(&index_path, repo.odb(), &config)
-        .map_err(|_| Error::ObjectNotFound(format!(":{stage}:{path}")))?;
+    let index =
+        Index::load_expand_sparse_with_config(&index_path, repo.odb(), &config).map_err(|_| {
+            Error::Object(ObjectError::NotFound {
+                name: format!(":{stage}:{path}"),
+            })
+        })?;
     let lookup_path = if repo.pathspec_precompose_enabled() {
         crate::unicode_normalization::precompose_utf8_path(path).into_owned()
     } else {
@@ -3362,7 +3448,9 @@ fn resolve_index_path_at_stage(repo: &Repository, path: &str, stage: u8) -> Resu
     };
     match index.get(lookup_path.as_bytes(), stage) {
         Some(entry) => Ok(entry.oid),
-        None => Err(Error::ObjectNotFound(format!(":{stage}:{path}"))),
+        None => Err(Error::Object(ObjectError::NotFound {
+            name: format!(":{stage}:{path}"),
+        })),
     }
 }
 
@@ -3419,9 +3507,9 @@ pub(crate) fn resolve_treeish_path_to_object(
         ObjectKind::Commit => parse_commit(&object.data)?.tree,
         ObjectKind::Tree => treeish,
         _ => {
-            return Err(Error::InvalidRef(format!(
-                "object {treeish} does not name a tree"
-            )))
+            return Err(Error::Ref(RefError::Invalid {
+                detail: format!("object {treeish} does not name a tree"),
+            }))
         }
     };
 
@@ -3432,24 +3520,30 @@ pub(crate) fn resolve_treeish_path_to_object(
     for (idx, part) in parts_vec.iter().enumerate() {
         let tree_object = repo.read_replaced(&current_tree)?;
         if tree_object.kind != ObjectKind::Tree {
-            return Err(Error::CorruptObject(format!(
-                "object {current_tree} is not a tree"
-            )));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("object {current_tree} is not a tree"),
+            }));
         }
         let entries = parse_tree(&tree_object.data)?;
         let Some(entry) = entries.iter().find(|entry| entry.name == part.as_bytes()) else {
-            return Err(Error::ObjectNotFound(path.to_owned()));
+            return Err(Error::Object(ObjectError::NotFound {
+                name: path.to_owned(),
+            }));
         };
         if idx + 1 == parts_vec.len() {
             return Ok(entry.oid);
         }
         if entry.mode != crate::index::MODE_TREE {
-            return Err(Error::ObjectNotFound(path.to_owned()));
+            return Err(Error::Object(ObjectError::NotFound {
+                name: path.to_owned(),
+            }));
         }
         current_tree = entry.oid;
     }
 
-    Err(Error::ObjectNotFound(path.to_owned()))
+    Err(Error::Object(ObjectError::NotFound {
+        name: path.to_owned(),
+    }))
 }
 
 pub(crate) fn resolve_treeish_path(
@@ -3466,9 +3560,9 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
         Some(search) if search.starts_with('/') => {
             let pattern = &search[1..];
             if pattern.is_empty() {
-                return Err(Error::InvalidRef(
-                    "empty commit message search pattern".to_owned(),
-                ));
+                return Err(Error::Ref(RefError::Invalid {
+                    detail: "empty commit message search pattern".to_owned(),
+                }));
             }
             resolve_commit_message_search_from(repo, oid, pattern)
         }
@@ -3487,7 +3581,9 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
             if obj.kind == ObjectKind::Commit {
                 Ok(oid)
             } else {
-                Err(Error::InvalidRef("expected commit".to_owned()))
+                Err(Error::Ref(RefError::Invalid {
+                    detail: "expected commit".to_owned(),
+                }))
             }
         }
         Some("tree") => {
@@ -3497,7 +3593,9 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
             match obj.kind {
                 ObjectKind::Tree => Ok(oid),
                 ObjectKind::Commit => Ok(parse_commit(&obj.data)?.tree),
-                _ => Err(Error::InvalidRef("expected tree or commit".to_owned())),
+                _ => Err(Error::Ref(RefError::Invalid {
+                    detail: "expected tree or commit".to_owned(),
+                })),
             }
         }
         Some("blob") => {
@@ -3510,7 +3608,11 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
                     ObjectKind::Tag => {
                         cur = parse_tag_target(&obj.data)?;
                     }
-                    _ => return Err(Error::InvalidRef("expected blob".to_owned())),
+                    _ => {
+                        return Err(Error::Ref(RefError::Invalid {
+                            detail: "expected blob".to_owned(),
+                        }))
+                    }
                 }
             }
         }
@@ -3521,12 +3623,14 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
             if obj.kind == ObjectKind::Tag {
                 Ok(oid)
             } else {
-                Err(Error::InvalidRef("expected tag".to_owned()))
+                Err(Error::Ref(RefError::Invalid {
+                    detail: "expected tag".to_owned(),
+                }))
             }
         }
-        Some(other) => Err(Error::InvalidRef(format!(
-            "unsupported peel operator '{{{other}}}'"
-        ))),
+        Some(other) => Err(Error::Ref(RefError::Invalid {
+            detail: format!("unsupported peel operator '{{{other}}}'"),
+        })),
     }
 }
 
@@ -3555,10 +3659,15 @@ pub fn parse_peel_suffix(spec: &str) -> (&str, Option<&str>) {
 }
 
 fn parse_tag_target(data: &[u8]) -> Result<ObjectId> {
-    let text = std::str::from_utf8(data)
-        .map_err(|_| Error::CorruptObject("invalid tag object".to_owned()))?;
+    let text = std::str::from_utf8(data).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "invalid tag object".to_owned(),
+        })
+    })?;
     let Some(line) = text.lines().find(|line| line.starts_with("object ")) else {
-        return Err(Error::CorruptObject("tag missing object header".to_owned()));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "tag missing object header".to_owned(),
+        }));
     };
     let oid_text = line.trim_start_matches("object ").trim();
     oid_text.parse::<ObjectId>()
@@ -3741,7 +3850,9 @@ impl<'repo> MessageSearchWalker<'repo> {
             }
         }
 
-        Err(Error::ObjectNotFound(format!(":/{pattern}")))
+        Err(Error::Object(ObjectError::NotFound {
+            name: format!(":/{pattern}"),
+        }))
     }
 }
 
@@ -3751,7 +3862,9 @@ fn resolve_commit_message_search_seeds(
     pattern: &str,
 ) -> Result<ObjectId> {
     let Some((negate, effective_pattern)) = parse_oneline_pattern(pattern) else {
-        return Err(Error::ObjectNotFound(format!(":/{pattern}")));
+        return Err(Error::Object(ObjectError::NotFound {
+            name: format!(":/{pattern}"),
+        }));
     };
     let regex = Regex::new(effective_pattern).ok();
     MessageSearchWalker::new(repo).run(seeds, pattern, negate, effective_pattern, regex.as_ref())
@@ -4118,13 +4231,13 @@ mod line_coverage_tests {
         for not_commit in [tree, blob, blob_tag] {
             assert!(matches!(
                 peel_to_commit_for_merge_base(&repo, not_commit),
-                Err(crate::error::Error::InvalidRef(_))
+                Err(crate::error::Error::Ref(RefError::Invalid { .. }))
             ));
         }
         let absent = ObjectId::from_hex("1111111111111111111111111111111111111111")?;
         assert!(matches!(
             peel_to_commit_for_merge_base(&repo, absent),
-            Err(crate::error::Error::ObjectNotFound(_))
+            Err(crate::error::Error::Object(ObjectError::NotFound { .. }))
         ));
         Ok(())
     }
@@ -4657,7 +4770,7 @@ mod line_coverage_tests {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
         let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         let err = resolve_revision_for_range_end(&repo, "HEAD").expect_err("HEAD");
-        assert!(matches!(err, Error::UnbornHead), "{err:?}");
+        assert!(matches!(err, Error::Ref(RefError::UnbornHead)), "{err:?}");
         Ok(())
     }
 
@@ -4827,7 +4940,9 @@ mod line_coverage_tests {
             assert!(
                 matches!(
                     err,
-                    Error::RevParse(RevParseError::OutsideRepository { .. })
+                    Error::Revision(RevisionError::Parse(
+                        RevParseError::OutsideRepository { .. }
+                    ))
                 ),
                 "{spec}: {err:?}"
             );
@@ -4986,11 +5101,14 @@ mod line_coverage_tests {
         assert_eq!(resolve_walk_range_end(&repo, &spec)?, root);
         let nav = NavParentCache::new(&repo, NavigationMetadata::RetainForWalk);
         assert_eq!(nav.parents_of(child)?, vec![root]);
-        assert!(matches!(nav.parents_of(blob), Err(Error::InvalidRef(_))));
+        assert!(matches!(
+            nav.parents_of(blob),
+            Err(Error::Ref(RefError::Invalid { .. }))
+        ));
         assert_eq!(nav.parents_of(root)?, Vec::<ObjectId>::new());
         assert!(matches!(
             nav.parents_of(malformed),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ));
         assert_eq!(nav.parents_of(child)?, vec![root]);
         assert_eq!(
@@ -5204,10 +5322,19 @@ mod line_coverage_tests {
             "HEAD",
             "missing",
             "missing",
-            Error::ObjectNotFound("missing".into()).into(),
+            Error::Object(ObjectError::NotFound {
+                name: "missing".into(),
+            })
+            .into(),
         );
-        let _ =
-            diagnose_index_path_error(&repo, "missing", 0, Error::ObjectNotFound("missing".into()));
+        let _ = diagnose_index_path_error(
+            &repo,
+            "missing",
+            0,
+            Error::Object(ObjectError::NotFound {
+                name: "missing".into(),
+            }),
+        );
         for spec in [
             "main",
             "ann",
@@ -5472,16 +5599,26 @@ mod line_coverage_tests {
             &repo,
             "conflict.txt",
             1,
-            Error::ObjectNotFound("conflict.txt".into()),
+            Error::Object(ObjectError::NotFound {
+                name: "conflict.txt".into(),
+            }),
         );
-        let _ =
-            diagnose_index_path_error(&repo, "no-such", 2, Error::ObjectNotFound("no-such".into()));
+        let _ = diagnose_index_path_error(
+            &repo,
+            "no-such",
+            2,
+            Error::Object(ObjectError::NotFound {
+                name: "no-such".into(),
+            }),
+        );
         fs::write(dir.path().join("disk-only.txt"), b"x\n").map_err(crate::error::Error::Io)?;
         let _ = diagnose_index_path_error(
             &repo,
             "disk-only.txt",
             0,
-            Error::ObjectNotFound("disk-only.txt".into()),
+            Error::Object(ObjectError::NotFound {
+                name: "disk-only.txt".into(),
+            }),
         );
 
         let _ = resolve_revision_for_verify(&repo, ":0:sub/leaf.txt");

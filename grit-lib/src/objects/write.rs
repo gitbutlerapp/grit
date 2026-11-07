@@ -4,6 +4,7 @@
 //! [`Objects::write_commit`](super::Objects::write_commit) take these types and
 //! produce objects that pass `git fsck --strict`, including checks on referenced oids.
 
+use crate::error::ObjectError;
 use std::collections::HashSet;
 
 use crate::change_id::ChangeId;
@@ -132,8 +133,8 @@ pub(crate) fn canonical_tree_entries(
 ///
 /// # Errors
 ///
-/// - [`Error::ObjectNotFound`] when an entry requires a stored object that is missing.
-/// - [`Error::UnexpectedObjectKind`] when a stored object has the wrong kind.
+/// - [`crate::error::ObjectError::NotFound`] when an entry requires a stored object that is missing.
+/// - [`crate::error::ObjectError::UnexpectedKind`] when a stored object has the wrong kind.
 pub(crate) fn validate_tree_entry_stored_kinds(
     odb: &Odb,
     entries: &[TreeEntry],
@@ -163,11 +164,11 @@ fn validate_one_tree_entry_stored_kind(
     if entry.mode == MODE_GITLINK {
         if let Some(actual) = stored {
             if actual != ObjectKind::Commit {
-                return Err(Error::UnexpectedObjectKind {
+                return Err(Error::Object(ObjectError::UnexpectedKind {
                     oid: entry.oid,
                     expected: ObjectKind::Commit,
                     actual,
-                });
+                }));
             }
         }
         return Ok(());
@@ -176,14 +177,16 @@ fn validate_one_tree_entry_stored_kind(
         if allow_missing {
             return Ok(());
         }
-        return Err(Error::ObjectNotFound(entry.oid.to_hex()));
+        return Err(Error::Object(ObjectError::NotFound {
+            name: entry.oid.to_hex(),
+        }));
     };
     if actual != expected {
-        return Err(Error::UnexpectedObjectKind {
+        return Err(Error::Object(ObjectError::UnexpectedKind {
             oid: entry.oid,
             expected,
             actual,
-        });
+        }));
     }
     Ok(())
 }
@@ -250,9 +253,8 @@ fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntr
 ///     name: b"README".to_vec(),
 ///     oid: blob,
 /// }])?;
-/// let when = OffsetDateTime::from_unix_timestamp(1_700_000_000).map_err(|e| {
-///     grit_lib::error::Error::Verbatim(e.to_string())
-/// })?;
+/// let when = OffsetDateTime::from_unix_timestamp(1_700_000_000)
+///     .map_err(|e| std::io::Error::other(e.to_string()))?;
 /// let ada = Signature::new("Ada Lovelace", "ada@example.com", when)?;
 /// let commit = repo
 ///     .objects()

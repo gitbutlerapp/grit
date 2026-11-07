@@ -119,7 +119,7 @@ fn add_refuses_what_git_refuses() {
     ));
     assert!(matches!(
         repo.remotes().add("origin", "/srv/other.git"),
-        Err(RemoteError::RemoteExists(_))
+        Err(RemoteError::RemoteExists { .. })
     ));
 
     for bad in ["bad name", "a..b", "x:y"] {
@@ -130,7 +130,7 @@ fn add_refuses_what_git_refuses() {
         assert!(
             matches!(
                 repo.remotes().add(bad, "/srv/x.git"),
-                Err(RemoteError::InvalidRemoteName(_))
+                Err(RemoteError::InvalidRemoteName { .. })
             ),
             "grit accepted {bad}"
         );

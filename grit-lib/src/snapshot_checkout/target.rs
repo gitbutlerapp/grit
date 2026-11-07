@@ -16,6 +16,7 @@
 //! The target is the branch the served repository's `HEAD` names
 //! ([`target_branch`]).
 
+use crate::worktree::WorktreeError;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -307,8 +308,10 @@ fn keep_worktree(repo: &Repository, from: ObjectId, to: ObjectId) -> Result<Opti
         &crate::progress::CancelToken::never(),
     ) {
         Ok(()) => Ok(None),
-        Err(crate::error::Error::WouldOverwrite { paths, .. }) => Ok(Some(paths)),
-        Err(e) => Err(e.into()),
+        Err(crate::error::Error::Worktree(WorktreeError::WouldOverwrite { paths, .. })) => {
+            Ok(Some(paths))
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -703,11 +706,11 @@ fn edit_tree(
     tree: ObjectId,
     entry: Option<(u32, ObjectId)>,
 ) -> Result<ObjectId> {
-    Ok(edit(
+    edit(
         repo.odb(),
         Some(tree),
         &[(SLICES_PATH.as_bytes().to_vec(), entry)],
-    )?)
+    )
 }
 
 #[cfg(test)]

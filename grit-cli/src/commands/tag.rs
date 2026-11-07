@@ -958,7 +958,7 @@ fn render_verify_markdown(w: &mut dyn Write, entry: &TagVerifyEntry) -> Result<(
 
 fn map_tag_error(err: Error) -> anyhow::Error {
     match err {
-        Error::TagVerifyNotTag { .. } => {
+        Error::Tag(TagError::VerifyNotTag { .. }) => {
             anyhow::anyhow!("tag is not an annotated tag object (use an annotated tag)")
         }
         Error::Tag(tag_err) => match tag_err {
@@ -987,6 +987,7 @@ fn map_tag_error(err: Error) -> anyhow::Error {
             TagError::Lightweight { name } => {
                 anyhow::anyhow!("tag '{name}' is lightweight (not an annotated tag object)")
             }
+            other => anyhow::Error::new(Error::Tag(other)),
         },
         other => anyhow::Error::msg(other.to_string()),
     }

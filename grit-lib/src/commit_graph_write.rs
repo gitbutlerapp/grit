@@ -4,6 +4,7 @@
 
 use crate::bloom::{BloomBuildOutcome, BloomFilterSettings};
 use crate::commit_graph_file::CommitGraphChain;
+use crate::error::ObjectError;
 #[cfg(windows)]
 use crate::fs_readonly::clear_readonly_attribute;
 use crate::fs_readonly::clear_readonly_tree;
@@ -78,15 +79,17 @@ fn commit_info_from_ref(commit: &CommitRef<'_>) -> CommitGraphCommitInfo {
 ///
 /// # Errors
 ///
-/// [`crate::error::Error::CorruptObject`] when `oid` is not a commit, plus any read or
+/// [`crate::error::ObjectError::Corrupt`] when `oid` is not a commit, plus any read or
 /// parse error from [`Odb::read_commit`].
 pub(crate) fn load_commit_graph_commit_info(
     odb: &Odb,
     oid: ObjectId,
 ) -> crate::error::Result<CommitGraphCommitInfo> {
     let c = odb.read_commit(&oid).map_err(|err| match err {
-        crate::error::Error::UnexpectedObjectKind { .. } => {
-            crate::error::Error::CorruptObject(format!("object {oid} is not a commit"))
+        crate::error::Error::Object(ObjectError::UnexpectedKind { .. }) => {
+            crate::error::Error::Object(ObjectError::Corrupt {
+                detail: format!("object {oid} is not a commit"),
+            })
         }
         other => other,
     })?;
@@ -317,7 +320,9 @@ fn resolve_parent_edge(
     }
     chain
         .and_then(|c| c.global_position(&parent))
-        .ok_or(crate::error::Error::CommitGraphParentMissing { commit, parent })
+        .ok_or(crate::error::Error::Object(
+            ObjectError::CommitGraphParentMissing { commit, parent },
+        ))
 }
 
 /// Counters emitted as `GIT_TRACE2_EVENT` for Bloom generation (`commit-graph.c`).
@@ -818,9 +823,9 @@ pub fn atomic_replace_commit_graph(
         drop(file);
         #[cfg(test)]
         if test_inject::should_fail_rename() {
-            return Err(crate::error::Error::Verbatim(
-                "injected commit-graph rename failure".into(),
-            ));
+            return Err(crate::error::Error::Io(std::io::Error::other(
+                "injected commit-graph rename failure",
+            )));
         }
         #[cfg(windows)]
         if fs::symlink_metadata(&graph_path)
@@ -975,6 +980,7 @@ mod test_inject {
 
 #[cfg(test)]
 mod tests {
+    use crate::error::ObjectError;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -1026,7 +1032,10 @@ mod tests {
         .expect("init");
         let blob = repo.odb().write(ObjectKind::Blob, b"x").expect("blob");
         let err = super::load_commit_graph_commit_info(&repo.odb(), blob).unwrap_err();
-        assert!(matches!(err, crate::error::Error::CorruptObject(_)));
+        assert!(matches!(
+            err,
+            crate::error::Error::Object(ObjectError::Corrupt { .. })
+        ));
     }
 
     #[test]
@@ -1113,7 +1122,7 @@ mod tests {
         .expect_err("first parent is not in the graph");
         assert!(matches!(
             err,
-            crate::error::Error::CommitGraphParentMissing { commit, parent }
+            crate::error::Error::Object(ObjectError::CommitGraphParentMissing { commit, parent })
                 if commit == merge && parent == root
         ));
     }

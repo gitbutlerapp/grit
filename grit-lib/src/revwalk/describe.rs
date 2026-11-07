@@ -6,13 +6,13 @@
 //! propagation over the reachable subgraph yields exact distances in one history pass.
 
 use crate::commit_pretty::resolve_core_abbrev_len;
+use crate::error::RefError;
 use crate::error::Result;
 use crate::merge_base::{push_describe_heap_key, CommitGraphCache, PaintKey};
 use crate::objects::ObjectId;
 use crate::objects::{oid_hash_map, oid_hash_set, OidHashMap, OidHashSet};
 use crate::refs::listing::{
-    creator_date, query_refs, RefKind, RefListing, RefNamespace, RefQuery, RefQueryError,
-    RefQueryOptions,
+    creator_date, query_refs, RefKind, RefListing, RefNamespace, RefQuery, RefQueryOptions,
 };
 use crate::refs::store::RefName;
 use crate::repo::Repository;
@@ -161,8 +161,11 @@ fn build_described(
     };
     let mut abbrev_batch = OidAbbrevBatch::new(abbrev_len);
     let abbrev = abbrev_batch.abbrev_known(repo, commit)?;
-    let tag = RefName::try_from(winner.listing.full_name.as_str())
-        .map_err(|e| crate::error::Error::InvalidRef(e.to_string()))?;
+    let tag = RefName::try_from(winner.listing.full_name.as_str()).map_err(|e| {
+        crate::error::Error::Ref(RefError::Invalid {
+            detail: e.to_string(),
+        })
+    })?;
     Ok(DescribedCommit {
         tag,
         tag_oid: winner.listing.oid,
@@ -549,13 +552,6 @@ fn best_match_within(matches: &[ActiveMatch], candidate_count: usize) -> (usize,
     (best_depth, bits)
 }
 
-fn map_ref_query(err: RefQueryError) -> crate::error::Error {
-    match err {
-        RefQueryError::Store(e) => e,
-        other => crate::error::Error::InvalidRef(other.to_string()),
-    }
-}
-
 fn collect_tag_candidates(repo: &Repository, opts: &DescribeOptions) -> Result<Vec<TagCandidate>> {
     let mut query = RefQuery {
         namespaces: vec![RefNamespace::Tags],
@@ -564,7 +560,7 @@ fn collect_tag_candidates(repo: &Repository, opts: &DescribeOptions) -> Result<V
     if let Some(glob) = &opts.match_glob {
         query.patterns = vec![glob.clone()];
     }
-    let listings = query_refs(repo, &query, &RefQueryOptions::default()).map_err(map_ref_query)?;
+    let listings = query_refs(repo, &query, &RefQueryOptions::default())?;
     let odb = repo.odb();
     let mut out = Vec::new();
     for listing in listings {

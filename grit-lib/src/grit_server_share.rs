@@ -24,7 +24,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::Error;
+use crate::error::{Error, ErrorSummary};
 use crate::grit_server_auth::{not_grit_server_or_http, ServerAuthError, ServerUrl};
 use crate::remote::RemoteError;
 use crate::transport::http::HttpClient;
@@ -424,9 +424,11 @@ pub fn share(
 ) -> std::result::Result<ShareReply, ServerAuthError> {
     let url = format!("{}{SHARED_PATH}/{project}", server.root_url());
     let request = serde_json::to_vec(request)
-        .map_err(|e| ServerAuthError::Http(Error::Verbatim(e.to_string())))?;
+        .map_err(|e| ServerAuthError::Http(ErrorSummary::from(Error::Io(e.into()))))?;
     let body = post_json(http, server, &url, &request)?;
-    serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer(server.root_url()))
+    serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer {
+        url: server.root_url(),
+    })
 }
 
 /// Accept the share link `request.link` on `server` as the signed-in user.
@@ -442,9 +444,11 @@ pub fn accept(
 ) -> std::result::Result<ShareAcceptReply, ServerAuthError> {
     let url = format!("{}{ACCEPT_PATH}", server.root_url());
     let request = serde_json::to_vec(request)
-        .map_err(|e| ServerAuthError::Http(Error::Verbatim(e.to_string())))?;
+        .map_err(|e| ServerAuthError::Http(ErrorSummary::from(Error::Io(e.into()))))?;
     let body = post_json(http, server, &url, &request)?;
-    serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer(server.root_url()))
+    serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer {
+        url: server.root_url(),
+    })
 }
 
 fn post_json(
@@ -455,7 +459,7 @@ fn post_json(
 ) -> std::result::Result<Vec<u8>, ServerAuthError> {
     http.post(url, JSON_CONTENT_TYPE, JSON_CONTENT_TYPE, body, None)
         .map_err(|e| match e {
-            RemoteError::Auth { .. } => ServerAuthError::TokenRejected,
+            crate::error::Error::Remote(RemoteError::Auth { .. }) => ServerAuthError::TokenRejected,
             other => not_grit_server_or_http(server, other),
         })
 }

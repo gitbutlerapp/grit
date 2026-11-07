@@ -57,6 +57,7 @@ pub struct HunkId([u8; HUNK_ID_HEX_LEN / 2]);
 
 /// Parse or format failure for [`HunkId`].
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HunkIdError {
     /// Wrong length or non-hex character.
     #[error("hunk id must be {HUNK_ID_HEX_LEN} lowercase hex characters")]

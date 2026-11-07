@@ -1,5 +1,6 @@
 //! Deterministic synthetic repository generator (grit-lib backed).
 
+use crate::error::ObjectError;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -353,9 +354,11 @@ fn generate_into_repo(repo: &Repository, spec: TierSpec) -> Result<ObjectId> {
         commits.push(commit_oid);
         parent = Some(commit_oid);
     }
-    let head = *commits
-        .last()
-        .ok_or_else(|| Error::CorruptObject("no commits generated".into()))?;
+    let head = *commits.last().ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "no commits generated".into(),
+        })
+    })?;
     write_refs(repo, &commits, spec, &mut rng)?;
     crate::refs::update_direct_ref_on_store(
         repo.ref_store(),

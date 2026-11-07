@@ -32,6 +32,7 @@ use std::num::NonZeroUsize;
 /// If a worker panics, partial results are dropped and the panic is resumed on the
 /// caller thread after workers join.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ParallelHashError<E> {
     /// The first error returned by a worker (additional concurrent errors are discarded).
     Task(E),

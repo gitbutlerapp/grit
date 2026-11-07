@@ -225,16 +225,38 @@ impl FuncnameMatcher {
     }
 }
 
+/// Why a `diff.<driver>.funcname` / `diff.<driver>.xfuncname` pattern was rejected.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum FuncnamePatternError {
+    /// The last line of a multi-line pattern is negated (`!…`), so it could never select a line.
+    #[error("last expression must not be negated: {line}")]
+    NegatedLastLine {
+        /// The pattern line as configured.
+        line: String,
+    },
+    /// A pattern line is not a regular expression grit can compile.
+    #[error("invalid regexp to look for hunk header: {line}")]
+    InvalidRegex {
+        /// The pattern line as configured.
+        line: String,
+    },
+}
+
 /// Resolve a function-name matcher for `rel_path` from parsed `.gitattributes` rules + config.
 ///
 /// Returns `Ok(None)` when no diff driver is configured for the path.
+///
+/// # Errors
+///
+/// [`FuncnamePatternError`] when the driver's configured pattern does not compile.
 pub fn matcher_for_path_parsed(
     config: &ConfigSet,
     rules: &[crate::attributes::AttrRule],
     macros: &MacroTable,
     rel_path: &str,
     ignore_case: bool,
-) -> Result<Option<FuncnameMatcher>, String> {
+) -> Result<Option<FuncnameMatcher>, FuncnamePatternError> {
     let map = collect_attrs_for_path(rules, macros, rel_path, ignore_case);
     let Some(AttrValue::Value(driver)) = map.get("diff") else {
         return Ok(None);
@@ -246,10 +268,14 @@ pub fn matcher_for_path_parsed(
 ///
 /// Returns `Ok(None)` when the driver has no built-in or configured funcname
 /// pattern.
+///
+/// # Errors
+///
+/// [`FuncnamePatternError`] when the driver's configured pattern does not compile.
 pub fn matcher_for_driver(
     config: &ConfigSet,
     driver: &str,
-) -> Result<Option<FuncnameMatcher>, String> {
+) -> Result<Option<FuncnameMatcher>, FuncnamePatternError> {
     if let Some(pattern) = config.value(&format!("diff.{driver}.xfuncname")) {
         return compile_matcher(&pattern, true, false).map(Some);
     }
@@ -281,7 +307,7 @@ fn compile_matcher(
     pattern: &str,
     extended: bool,
     ignore_case: bool,
-) -> Result<FuncnameMatcher, String> {
+) -> Result<FuncnameMatcher, FuncnamePatternError> {
     let lines: Vec<&str> = pattern.split('\n').collect();
     if lines.is_empty() {
         return Ok(FuncnameMatcher { rules: Vec::new() });
@@ -293,7 +319,9 @@ fn compile_matcher(
         let negate = line.starts_with('!');
         if negate {
             if idx == lines.len() - 1 {
-                return Err(format!("Last expression must not be negated: {line}"));
+                return Err(FuncnamePatternError::NegatedLastLine {
+                    line: line.to_owned(),
+                });
             }
             line = &line[1..];
         }
@@ -500,15 +528,16 @@ fn compile_posix_ere_rule(
     pattern: &str,
     ignore_case: bool,
     line: &str,
-) -> Result<RuleMatcher, String> {
-    validate_posix_ere(pattern, ignore_case)
-        .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))?;
-    let rust_pattern = posix_ere_to_rust_regex(pattern)
-        .ok_or_else(|| format!("Invalid regexp to look for hunk header: {line}"))?;
+) -> Result<RuleMatcher, FuncnamePatternError> {
+    let invalid = || FuncnamePatternError::InvalidRegex {
+        line: line.to_owned(),
+    };
+    validate_posix_ere(pattern, ignore_case).map_err(|_| invalid())?;
+    let rust_pattern = posix_ere_to_rust_regex(pattern).ok_or_else(invalid)?;
     RegexBuilder::new(&rust_pattern)
         .case_insensitive(ignore_case)
         .build()
-        .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))
+        .map_err(|_| invalid())
         .map(RuleMatcher::Rust)
 }
 
@@ -531,10 +560,10 @@ mod tests {
     #[test]
     fn unterminated_posix_bracket_class_is_rejected() {
         let err = compile_matcher("[a", true, false).unwrap_err();
-        assert!(err.contains("Invalid regexp"), "unexpected error: {err}");
+        assert!(matches!(err, FuncnamePatternError::InvalidRegex { ref line } if line == "[a"));
         let cfg = config_with_xfuncname("probe", "[a");
         let err = matcher_for_driver(&cfg, "probe").unwrap_err();
-        assert!(err.contains("Invalid regexp"), "unexpected error: {err}");
+        assert!(matches!(err, FuncnamePatternError::InvalidRegex { ref line } if line == "[a"));
     }
 
     #[test]

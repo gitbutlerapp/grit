@@ -55,6 +55,7 @@ use super::{in_view, view_tree, Result, SnapshotRoot};
 
 /// Why a branch could not be grafted.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum GraftError {
     /// A commit's parent is neither a snapshot of the checkout, nor a commit
     /// the graft log knows, nor another of the branch's commits.
@@ -490,7 +491,7 @@ mod tests {
             graft(&repo, &roots, &src, None, &[], stray).expect("graft"),
             Err(GraftError::NotOnSnapshot { .. })
         ));
-        let _ = CheckoutError::InvalidUrl(String::new());
+        let _ = CheckoutError::InvalidUrl { url: String::new() };
     }
 
     #[cfg_attr(

@@ -154,7 +154,7 @@ mod tests {
         const STACK: usize = 16 * 1024 * 1024;
         std::thread::Builder::new()
             .stack_size(STACK)
-            .spawn(move || build())
+            .spawn(build)
             .expect("spawn cli root builder")
             .join()
             .expect("join cli root builder")

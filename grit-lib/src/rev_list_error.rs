@@ -90,6 +90,7 @@ pub enum RevListError {
 mod tests {
     use super::*;
     use crate::error::Error;
+    use crate::error::RevisionError;
 
     #[test]
     fn variant_sparse_filter_unparsable() {
@@ -98,7 +99,9 @@ mod tests {
         });
         assert!(matches!(
             err,
-            Error::RevList(RevListError::SparseFilterUnparsable { .. })
+            Error::Revision(RevisionError::List(
+                RevListError::SparseFilterUnparsable { .. }
+            ))
         ));
     }
 
@@ -109,7 +112,7 @@ mod tests {
         });
         assert!(matches!(
             err,
-            Error::RevList(RevListError::MissingOptionValue { .. })
+            Error::Revision(RevisionError::List(RevListError::MissingOptionValue { .. }))
         ));
     }
 
@@ -132,7 +135,9 @@ mod tests {
         assert!(symmetric.to_string().contains("'a...b'"));
         assert!(matches!(
             Error::from(symmetric),
-            Error::RevList(RevListError::UnexpandedSymmetricRange { .. })
+            Error::Revision(RevisionError::List(
+                RevListError::UnexpandedSymmetricRange { .. }
+            ))
         ));
     }
 

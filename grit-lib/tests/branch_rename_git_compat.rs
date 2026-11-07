@@ -2,6 +2,7 @@
 //! the system `git` on files (packed), reftable, and injected memory ref stores.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::error::RefError;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -265,7 +266,7 @@ fn rename_force_refuses_when_target_checked_out_in_worktree() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::BranchCheckedOutInWorktree { .. }),
+        matches!(err, Error::Branch(BranchError::CheckedOut { .. })),
         "{err:?}"
     );
 }
@@ -513,9 +514,9 @@ fn rename_aborts_when_destination_reflog_path_is_directory() {
     assert!(
         matches!(
             err,
-            Error::RefStore(grit_lib::refs::store::RefStoreError::NameUnavailable {
+            Error::Ref(RefError::Store(grit_lib::refs::store::RefStoreError::NameUnavailable {
                 reason: grit_lib::refs::RefnameUnavailable::DescendantExists { ref blocking, .. }
-            }) if blocking == "refs/heads/new/x/y"
+            })) if blocking == "refs/heads/new/x/y"
         ),
         "{err:?}"
     );

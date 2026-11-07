@@ -215,7 +215,7 @@ fn rename_to_existing_typed_error() {
     git(&repo, &["remote", "add", "other", "/b.git"]);
     assert!(matches!(
         open(&repo).remotes().rename("origin", "other", false),
-        Err(RemoteError::RemoteExists(name)) if name == "other"
+        Err(grit_lib::error::Error::Remote(RemoteError::RemoteExists { name })) if name == "other"
     ));
 }
 
@@ -228,7 +228,7 @@ fn rename_invalid_name_typed_error() {
     git(&repo, &["remote", "add", "origin", "/a.git"]);
     assert!(matches!(
         open(&repo).remotes().rename("origin", "bad name", false),
-        Err(RemoteError::InvalidRemoteName(name)) if name == "bad name"
+        Err(grit_lib::error::Error::Remote(RemoteError::InvalidRemoteName { name })) if name == "bad name"
     ));
 }
 
@@ -258,7 +258,7 @@ fn rename_rejects_remote_only_in_global_config_leaves_state() {
     env.git_config_nosystem = Some("1".into());
     assert!(matches!(
         open_with_environment(&repo, env).remotes().rename("origin", "upstream", false),
-        Err(RemoteError::UnknownRemote(name)) if name == "origin"
+        Err(grit_lib::error::Error::Remote(RemoteError::UnknownRemote { name })) if name == "origin"
     ));
     assert_eq!(for_each_ref(&repo), refs_before);
     assert_eq!(config_list_local(&repo), cfg_before);

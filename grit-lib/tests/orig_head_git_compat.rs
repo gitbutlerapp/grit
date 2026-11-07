@@ -2,6 +2,7 @@
 //! way Git does, so `reset --hard ORIG_HEAD` undoes them. Checked with the system `git`.
 
 use crate::support;
+use grit_lib::worktree::WorktreeError;
 
 use std::path::Path;
 
@@ -196,7 +197,10 @@ fn dry_run_and_refused_resets_leave_orig_head_alone() {
     let stale = set_stale_orig_head(dir);
     std::fs::write(dir.join("f3"), "local edit\n").expect("edit");
     let err = reset(&repo, target, ResetMode::Keep).expect_err("keep refuses");
-    assert!(matches!(err, Error::WouldOverwrite { .. }), "{err:?}");
+    assert!(
+        matches!(err, Error::Worktree(WorktreeError::WouldOverwrite { .. })),
+        "{err:?}"
+    );
     assert_eq!(git_orig_head(dir), Some(stale));
 }
 
@@ -484,7 +488,7 @@ fn rebase_with_exec(
     upstream: ObjectId,
     tip: ObjectId,
     command: &str,
-) -> Result<RebaseOutcome, RebaseSessionError> {
+) -> grit_lib::error::Result<RebaseOutcome> {
     start_rebase_with_exec(
         &open(dir),
         &rebase_opts(upstream, tip),

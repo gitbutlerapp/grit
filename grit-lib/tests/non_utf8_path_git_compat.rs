@@ -2,6 +2,7 @@
 
 #![cfg(unix)]
 
+use grit_lib::worktree::WorktreeError;
 use std::ffi::OsStr;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
@@ -704,7 +705,10 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
     )
     .expect_err("switch must refuse real local edit");
     assert!(
-        matches!(dirty_err, grit_lib::error::Error::WouldOverwrite { .. }),
+        matches!(
+            dirty_err,
+            grit_lib::error::Error::Worktree(WorktreeError::WouldOverwrite { .. })
+        ),
         "expected WouldOverwrite, got {dirty_err:?}"
     );
     write_non_utf8_path(&root, ISSUE_2513_FILE, b"a");
@@ -727,7 +731,10 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
     )
     .expect_err("merge must refuse unstaged edit");
     assert!(
-        matches!(merge_dirty, grit_lib::error::Error::WouldOverwrite { .. }),
+        matches!(
+            merge_dirty,
+            grit_lib::error::Error::Worktree(WorktreeError::WouldOverwrite { .. })
+        ),
         "expected WouldOverwrite on merge, got {merge_dirty:?}"
     );
     write_non_utf8_path(&root, ISSUE_2513_FILE, b"a");

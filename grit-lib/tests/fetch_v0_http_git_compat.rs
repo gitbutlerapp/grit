@@ -129,11 +129,7 @@ struct Recording {
 }
 
 impl HttpClient for Recording {
-    fn get(
-        &self,
-        url: &str,
-        git_protocol: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> grit_lib::error::Result<Vec<u8>> {
         self.inner.get(url, git_protocol)
     }
 
@@ -144,7 +140,7 @@ impl HttpClient for Recording {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    ) -> grit_lib::error::Result<Vec<u8>> {
         self.bodies
             .lock()
             .unwrap_or_else(|e| e.into_inner())

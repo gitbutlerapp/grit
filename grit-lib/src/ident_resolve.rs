@@ -96,6 +96,7 @@ impl IdentRole {
 
 /// Errors returned by strict identity resolution.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum IdentityError {
     /// `user.useConfigOnly` disables email auto-detection and no config email was provided.
     ///

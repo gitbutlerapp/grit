@@ -1,6 +1,7 @@
 //! A repository whose object store and ref store are both injected needs no git directory
 //! layout on disk: no `HEAD`, `objects/` or `refs/`.
 
+use grit_lib::error::RefError;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -162,7 +163,10 @@ fn initial_branch_rejects_invalid_names() {
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("bad..name")),
     );
-    assert!(matches!(result, Err(Error::InvalidRef(_))), "{result:?}");
+    assert!(
+        matches!(result, Err(Error::Ref(RefError::Invalid { .. }))),
+        "{result:?}"
+    );
 }
 
 #[test]

@@ -1,6 +1,8 @@
 //! `resolve_merge_source`: merge arguments name branches, tags, commit ids or any revision.
 
 use grit_lib::error::Error;
+use grit_lib::error::ObjectError;
+use grit_lib::error::RevisionError;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::merge::{resolve_merge_source, MergeSource, MergeSourceKind};
 use grit_lib::repo::Repository;
@@ -176,7 +178,7 @@ fn missing_revision_is_typed_not_found() {
         "0123456789abcdef0123456789abcdef01234567",
     ] {
         match resolve_merge_source(&repo, spec) {
-            Err(Error::RevisionNotFound(s)) => assert_eq!(s, spec),
+            Err(Error::Revision(RevisionError::NotFound { spec: s })) => assert_eq!(s, spec),
             other => panic!("{spec}: expected RevisionNotFound, got {other:?}"),
         }
     }
@@ -195,11 +197,11 @@ fn tree_or_blob_is_rejected_with_object_kind() {
         ("blobtag".to_owned(), blob, ObjectKind::Blob),
     ] {
         match resolve_merge_source(&repo, &spec) {
-            Err(Error::UnexpectedObjectKind {
+            Err(Error::Object(ObjectError::UnexpectedKind {
                 oid: got,
                 expected: ObjectKind::Commit,
                 actual,
-            }) => {
+            })) => {
                 assert_eq!(got, oid, "{spec}");
                 assert_eq!(actual, kind, "{spec}");
             }
@@ -247,7 +249,7 @@ fn ranges_over_brace_containing_branch_are_not_found() {
         "foo{bar@{0}...main",
     ] {
         match resolve_merge_source(&repo, spec) {
-            Err(Error::RevisionNotFound(s)) => assert_eq!(s, spec),
+            Err(Error::Revision(RevisionError::NotFound { spec: s })) => assert_eq!(s, spec),
             other => panic!("{spec}: expected RevisionNotFound, got {other:?}"),
         }
         // The general resolver supports merge-base shorthand, but merge sources must

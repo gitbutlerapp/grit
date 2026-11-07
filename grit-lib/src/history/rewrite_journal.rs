@@ -25,7 +25,6 @@ use crate::history::error::{
     HistoryError,
 };
 use crate::history::types::{ApplyOptions, HeadEffect, PlannedRefUpdate, RewritePlan};
-use crate::history::HistoryEngineError;
 
 const FORMAT_VERSION: u32 = 2;
 const META: &str = "meta";
@@ -53,7 +52,7 @@ impl RewriteApplyKind {
         }
     }
 
-    fn parse(raw: &str) -> Result<Self, HistoryError> {
+    fn parse(raw: &str) -> crate::error::Result<Self> {
         match raw {
             "rewrite" => Ok(Self::Standard),
             "fixup" => Ok(Self::Fixup),
@@ -92,7 +91,7 @@ pub(crate) fn write_rewrite_apply_journal(
     apply_kind: RewriteApplyKind,
     index_before: &IndexSnapshot,
     worktree_before: &HashMap<String, WorktreePathSnapshot>,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     let dir = journal_dir(repo.git_dir());
     fs::create_dir_all(&dir).map_err(journal_write_err)?;
     let worktree_dir = dir.join(WORKTREE_DIR);
@@ -131,7 +130,7 @@ pub(crate) fn write_rewrite_apply_journal(
 /// # Errors
 ///
 /// Returns [`HistoryError::UndoRecordWrite`] when the directory cannot be removed.
-pub(crate) fn clear_rewrite_apply_journal(repo: &Repository) -> Result<(), HistoryError> {
+pub(crate) fn clear_rewrite_apply_journal(repo: &Repository) -> crate::error::Result<()> {
     let dir = journal_dir(repo.git_dir());
     if dir.is_dir() {
         fs::remove_dir_all(&dir).map_err(journal_write_err)?;
@@ -146,14 +145,14 @@ pub(crate) fn clear_rewrite_apply_journal(repo: &Repository) -> Result<(), Histo
 /// # Errors
 ///
 /// Returns [`HistoryError::RewriteApplyIncomplete`] when no journal is pending,
-/// [`HistoryError::Engine`] with [`HistoryEngineError::LockHeld`](crate::history::HistoryEngineError::LockHeld) when
+/// [`Error::LockHeld`](crate::error::Error::LockHeld) when
 /// another process holds `index.lock`, [`HistoryError::UndoRecordRead`] when the journal is
 /// invalid, and apply failures when rollback cannot complete.
 pub fn abort_interrupted_rewrite_apply(
     repo: &Repository,
-) -> Result<RewriteApplyRecovery, HistoryError> {
+) -> crate::error::Result<RewriteApplyRecovery> {
     if !rewrite_apply_journal_active(repo.git_dir()) {
-        return Err(HistoryError::RewriteApplyIncomplete);
+        return Err(HistoryError::RewriteApplyIncomplete.into());
     }
     let _index_lock = lock_index_for_recovery(repo)?;
     let record = read_rewrite_apply_journal(repo)?;
@@ -166,13 +165,13 @@ pub fn abort_interrupted_rewrite_apply(
 ///
 /// Returns [`HistoryError::RewriteApplyIncomplete`] when recovery could not clear the journal,
 /// and the errors of [`recover_interrupted_rewrite_apply`].
-pub fn ensure_rewrite_apply_ready(repo: &Repository) -> Result<(), HistoryError> {
+pub fn ensure_rewrite_apply_ready(repo: &Repository) -> crate::error::Result<()> {
     if !rewrite_apply_journal_active(repo.git_dir()) {
         return Ok(());
     }
     recover_interrupted_rewrite_apply(repo)?;
     if rewrite_apply_journal_active(repo.git_dir()) {
-        return Err(HistoryError::RewriteApplyIncomplete);
+        return Err(HistoryError::RewriteApplyIncomplete.into());
     }
     Ok(())
 }
@@ -199,12 +198,12 @@ pub fn ensure_rewrite_apply_ready(repo: &Repository) -> Result<(), HistoryError>
 ///
 /// # Errors
 ///
-/// Returns [`HistoryError::Engine`] with [`HistoryEngineError::LockHeld`](crate::history::HistoryEngineError::LockHeld)
+/// Returns [`Error::LockHeld`](crate::error::Error::LockHeld)
 /// when another process holds `index.lock`, [`HistoryError::UndoRecordRead`] when the journal is
 /// present but invalid, and apply failures when rollback cannot complete.
 pub fn recover_interrupted_rewrite_apply(
     repo: &Repository,
-) -> Result<Option<RewriteApplyRecovery>, HistoryError> {
+) -> crate::error::Result<Option<RewriteApplyRecovery>> {
     if !rewrite_apply_journal_active(repo.git_dir()) {
         remove_journal_without_meta(repo)?;
         return Ok(None);
@@ -246,7 +245,7 @@ fn finish_checkout_from_journal(
     old_tree: &ObjectId,
     new_tree: &ObjectId,
     index_lock: &mut IndexLock,
-) -> Result<RewriteApplyRecovery, HistoryError> {
+) -> crate::error::Result<RewriteApplyRecovery> {
     let checkout = restore_worktree_after_failed_apply(
         repo,
         Some(old_tree),
@@ -273,29 +272,29 @@ fn finish_checkout_from_journal(
 }
 
 /// Take `index.lock` for recovery, removing it first when its recorded holder has exited.
-fn lock_index_for_recovery(repo: &Repository) -> Result<IndexLock, HistoryError> {
+fn lock_index_for_recovery(repo: &Repository) -> crate::error::Result<IndexLock> {
     match repo.begin_index_update() {
-        Err(crate::index::IndexError::LockHeld(crate::error::LockHeldError { path, holder })) => {
+        Err(crate::error::Error::LockHeld(crate::error::LockHeldError { path, holder })) => {
             if LockHolder::remove_if_stale(&path).map_err(crate::error::Error::Io)? {
-                repo.begin_index_update().map_err(Into::into)
+                repo.begin_index_update()
             } else {
-                Err(
-                    crate::error::Error::LockHeld(crate::error::LockHeldError { path, holder })
-                        .into(),
-                )
+                Err(crate::error::Error::LockHeld(crate::error::LockHeldError {
+                    path,
+                    holder,
+                }))
             }
         }
-        other => other.map_err(Into::into),
+        other => other,
     }
 }
 
-fn remove_journal_without_meta(repo: &Repository) -> Result<(), HistoryError> {
+fn remove_journal_without_meta(repo: &Repository) -> crate::error::Result<()> {
     if !journal_dir(repo.git_dir()).is_dir() {
         return Ok(());
     }
     let _index_lock = match lock_index_for_recovery(repo) {
         Ok(lock) => lock,
-        Err(HistoryError::Engine(e)) if matches!(*e, HistoryEngineError::LockHeld(_)) => {
+        Err(crate::error::Error::LockHeld(_)) => {
             return Ok(());
         }
         Err(err) => return Err(err),
@@ -309,7 +308,7 @@ fn remove_journal_without_meta(repo: &Repository) -> Result<(), HistoryError> {
 fn rollback_from_journal(
     repo: &Repository,
     record: &RewriteApplyJournal,
-) -> Result<RewriteApplyRecovery, HistoryError> {
+) -> crate::error::Result<RewriteApplyRecovery> {
     rollback_ref_updates(repo, &record.ref_updates, &record.apply_options)?;
     restore_worktree_after_failed_apply(
         repo,
@@ -325,11 +324,9 @@ fn refs_match_plan(
     repo: &Repository,
     updates: &[PlannedRefUpdate],
     expect_new: bool,
-) -> Result<bool, HistoryError> {
+) -> crate::error::Result<bool> {
     for planned in updates {
-        let current = repo
-            .resolve_ref_oid(planned.name.as_str())
-            .map_err(HistoryError::from)?;
+        let current = repo.resolve_ref_oid(planned.name.as_str())?;
         let expected = if expect_new { planned.new } else { planned.old };
         if current != expected {
             return Ok(false);
@@ -348,7 +345,7 @@ struct RewriteApplyJournal {
     worktree_before: Option<HashMap<String, WorktreePathSnapshot>>,
 }
 
-fn read_rewrite_apply_journal(repo: &Repository) -> Result<RewriteApplyJournal, HistoryError> {
+fn read_rewrite_apply_journal(repo: &Repository) -> crate::error::Result<RewriteApplyJournal> {
     let dir = journal_dir(repo.git_dir());
     let meta = fs::read_to_string(dir.join(META)).map_err(journal_read_err)?;
     let mut parsed = parse_meta(&meta)?;
@@ -365,11 +362,11 @@ fn journal_dir(git_dir: &Path) -> PathBuf {
     git_dir.join("grit/rewrite-apply")
 }
 
-fn journal_write_err<E: Into<crate::error::Error>>(e: E) -> HistoryError {
+fn journal_write_err<E: Into<crate::error::Error>>(e: E) -> crate::error::Error {
     undo_record_write_engine(e.into())
 }
 
-fn journal_read_err(e: std::io::Error) -> HistoryError {
+fn journal_read_err(e: std::io::Error) -> crate::error::Error {
     undo_record_read_io(e)
 }
 
@@ -403,7 +400,7 @@ fn write_head_effect(out: &mut String, head: &HeadEffect) {
     }
 }
 
-fn parse_meta(text: &str) -> Result<RewriteApplyJournal, HistoryError> {
+fn parse_meta(text: &str) -> crate::error::Result<RewriteApplyJournal> {
     let mut version: Option<u32> = None;
     let mut identity: Option<String> = None;
     let mut reflog: Option<String> = None;
@@ -495,19 +492,19 @@ fn parse_meta(text: &str) -> Result<RewriteApplyJournal, HistoryError> {
     })
 }
 
-fn parse_oid(token: Option<&str>, line_no: usize, label: &str) -> Result<ObjectId, HistoryError> {
+fn parse_oid(token: Option<&str>, line_no: usize, label: &str) -> crate::error::Result<ObjectId> {
     let hex = token.ok_or_else(|| parse_err(line_no, &format!("missing {label}")))?;
     ObjectId::from_hex(hex).map_err(|e| parse_err(line_no, &format!("{label}: {e}")))
 }
 
-fn parse_err(line_no: usize, detail: &str) -> HistoryError {
+fn parse_err(line_no: usize, detail: &str) -> crate::error::Error {
     undo_record_read_str(format!(
         "rewrite-apply journal line {}: {detail}",
         line_no + 1
     ))
 }
 
-fn validate_repo_relative_path(path: &str) -> Result<(), HistoryError> {
+fn validate_repo_relative_path(path: &str) -> crate::error::Result<()> {
     if path.is_empty() {
         return Err(undo_record_write_str("empty worktree snapshot path"));
     }
@@ -530,19 +527,19 @@ fn validate_repo_relative_path(path: &str) -> Result<(), HistoryError> {
     Ok(())
 }
 
-fn snapshot_blob_name(repo_path: &str) -> Result<String, HistoryError> {
+fn snapshot_blob_name(repo_path: &str) -> crate::error::Result<String> {
     validate_repo_relative_path(repo_path)?;
     Ok(hex::encode(
         crate::objects::HashAlgo::Sha1.checksum_digest(repo_path.as_bytes()),
     ))
 }
 
-fn encode_snapshot_path(path: &str) -> Result<String, HistoryError> {
+fn encode_snapshot_path(path: &str) -> crate::error::Result<String> {
     validate_repo_relative_path(path)?;
     Ok(hex::encode(path.as_bytes()))
 }
 
-fn decode_snapshot_path_hex(hex_str: &str) -> Result<String, HistoryError> {
+fn decode_snapshot_path_hex(hex_str: &str) -> crate::error::Result<String> {
     let bytes = hex::decode(hex_str.trim())
         .map_err(|e| undo_record_read_str(format!("worktree snapshot path-hex decode: {e}")))?;
     let path = String::from_utf8(bytes)
@@ -551,7 +548,7 @@ fn decode_snapshot_path_hex(hex_str: &str) -> Result<String, HistoryError> {
     Ok(path)
 }
 
-fn decode_snapshot_path_legacy(raw: &str) -> Result<String, HistoryError> {
+fn decode_snapshot_path_legacy(raw: &str) -> crate::error::Result<String> {
     if raw.contains('\n') || raw.contains('\r') {
         return Err(undo_record_read_str(
             "legacy worktree snapshot path header must not contain newlines",
@@ -587,7 +584,7 @@ fn worktree_kind_label(kind: WorktreePathKind) -> &'static str {
 fn write_worktree_from_tree_manifest(
     dir: &Path,
     paths: &[(&str, &WorktreePathSnapshot)],
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     let mut body = String::from("from-tree-manifest 2\n");
     for (path, snap) in paths {
         let (oid, mode) = snap
@@ -607,7 +604,7 @@ fn write_worktree_from_tree_manifest(
 
 fn read_worktree_from_tree_manifest(
     dir: &Path,
-) -> Result<HashMap<String, WorktreePathSnapshot>, HistoryError> {
+) -> crate::error::Result<HashMap<String, WorktreePathSnapshot>> {
     let path = dir.join(WORKTREE_FROM_TREE);
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
@@ -674,7 +671,7 @@ fn write_worktree_snapshot_file(
     dir: &Path,
     path: &str,
     snap: &WorktreePathSnapshot,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     let file_path = dir.join(snapshot_blob_name(path)?);
     let kind = match snap.kind {
         WorktreePathKind::Absent => "absent",
@@ -702,7 +699,7 @@ fn write_worktree_snapshot_file(
 
 fn read_worktree_snapshot_dir(
     dir: &Path,
-) -> Result<HashMap<String, WorktreePathSnapshot>, HistoryError> {
+) -> crate::error::Result<HashMap<String, WorktreePathSnapshot>> {
     let mut out = HashMap::new();
     if !dir.is_dir() {
         return Ok(out);
@@ -729,7 +726,7 @@ fn read_worktree_snapshot_dir(
 
 fn parse_worktree_snapshot_file(
     bytes: &[u8],
-) -> Result<(String, WorktreePathSnapshot), HistoryError> {
+) -> crate::error::Result<(String, WorktreePathSnapshot)> {
     let sep = b"\n---\n";
     let split_at = bytes
         .windows(sep.len())

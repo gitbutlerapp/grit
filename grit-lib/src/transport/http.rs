@@ -28,6 +28,7 @@
 //! resends the capability echo, all `want`s, and the accumulated `have`s —
 //! reusing the shared v2 request framing and side-band demuxer from the fetch module.
 
+use crate::error::ObjectError;
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
@@ -36,7 +37,7 @@ use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::pkt_line;
 use crate::progress::CancelToken;
-use crate::remote::{RemoteError, RemoteResult};
+use crate::remote::RemoteError;
 use crate::transfer::{FetchOptions, FetchOutcome};
 use crate::transport::pending_http::PendingHttp;
 use crate::transport::stateless_http::StatelessHttpConnection;
@@ -62,7 +63,7 @@ pub trait HttpClient: Send + Sync {
     /// # Errors
     ///
     /// Returns an error on a transport failure or a non-success HTTP status.
-    fn get(&self, url: &str, git_protocol: Option<&str>) -> RemoteResult<Vec<u8>>;
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>>;
 
     /// Issue a `POST` to `url` with the given `content_type`, `accept` header,
     /// and request `body`, returning the response body bytes.
@@ -77,7 +78,7 @@ pub trait HttpClient: Send + Sync {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> RemoteResult<Vec<u8>>;
+    ) -> crate::error::Result<Vec<u8>>;
 
     /// Issue a `POST` and return the response body as a readable stream.
     ///
@@ -94,7 +95,7 @@ pub trait HttpClient: Send + Sync {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> RemoteResult<Box<dyn Read + Send>> {
+    ) -> crate::error::Result<Box<dyn Read + Send>> {
         Ok(Box::new(Cursor::new(self.post(
             url,
             content_type,
@@ -129,7 +130,7 @@ pub trait HttpClient: Send + Sync {
         accept: &str,
         body: &mut dyn Read,
         git_protocol: Option<&str>,
-    ) -> RemoteResult<Box<dyn Read + Send>> {
+    ) -> crate::error::Result<Box<dyn Read + Send>> {
         let mut buffered = Vec::new();
         body.read_to_end(&mut buffered)
             .map_err(RemoteError::from_io)?;
@@ -155,7 +156,7 @@ pub trait HttpClient: Send + Sync {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
+    ) -> crate::error::Result<(Vec<u8>, Option<String>)> {
         Ok((self.get(url, git_protocol)?, None))
     }
 
@@ -192,11 +193,14 @@ pub trait HttpClient: Send + Sync {
     /// # Errors
     ///
     /// A transport or authentication failure.
-    fn send(&self, request: &HttpRequest<'_>) -> RemoteResult<HttpResponse> {
-        Err(RemoteError::Http(format!(
-            "this HTTP client cannot send {} requests",
-            request.method.as_str()
-        )))
+    fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
+        Err(RemoteError::Http {
+            detail: format!(
+                "this HTTP client cannot send {} requests",
+                request.method.as_str()
+            ),
+        }
+        .into())
     }
 
     /// Wire an operation [`CancelToken`] checked during blocking HTTP reads (when supported).
@@ -342,7 +346,7 @@ impl std::fmt::Debug for HttpResponse {
 /// Forward [`HttpClient`] through a shared [`std::sync::Arc`], so one client can
 /// back several transports (and be observed by the caller) without moving it.
 impl HttpClient for std::sync::Arc<dyn HttpClient> {
-    fn get(&self, url: &str, git_protocol: Option<&str>) -> RemoteResult<Vec<u8>> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
         (**self).get(url, git_protocol)
     }
 
@@ -353,7 +357,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> RemoteResult<Vec<u8>> {
+    ) -> crate::error::Result<Vec<u8>> {
         (**self).post(url, content_type, accept, body, git_protocol)
     }
 
@@ -364,7 +368,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> RemoteResult<Box<dyn Read + Send>> {
+    ) -> crate::error::Result<Box<dyn Read + Send>> {
         (**self).post_into_reader(url, content_type, accept, body, git_protocol)
     }
 
@@ -375,7 +379,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         accept: &str,
         body: &mut dyn Read,
         git_protocol: Option<&str>,
-    ) -> RemoteResult<Box<dyn Read + Send>> {
+    ) -> crate::error::Result<Box<dyn Read + Send>> {
         (**self).post_streaming(url, content_type, accept, body, git_protocol)
     }
 
@@ -383,7 +387,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
+    ) -> crate::error::Result<(Vec<u8>, Option<String>)> {
         (**self).get_following_redirects(url, git_protocol)
     }
 
@@ -399,7 +403,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         (**self).reset_auth_after_redirect_rebase();
     }
 
-    fn send(&self, request: &HttpRequest<'_>) -> RemoteResult<HttpResponse> {
+    fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
         (**self).send(request)
     }
 
@@ -409,7 +413,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
 }
 
 impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
-    fn get(&self, url: &str, git_protocol: Option<&str>) -> RemoteResult<Vec<u8>> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
         (**self).get(url, git_protocol)
     }
 
@@ -420,7 +424,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> RemoteResult<Vec<u8>> {
+    ) -> crate::error::Result<Vec<u8>> {
         (**self).post(url, content_type, accept, body, git_protocol)
     }
 
@@ -431,7 +435,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> RemoteResult<Box<dyn Read + Send>> {
+    ) -> crate::error::Result<Box<dyn Read + Send>> {
         (**self).post_into_reader(url, content_type, accept, body, git_protocol)
     }
 
@@ -442,7 +446,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         accept: &str,
         body: &mut dyn Read,
         git_protocol: Option<&str>,
-    ) -> RemoteResult<Box<dyn Read + Send>> {
+    ) -> crate::error::Result<Box<dyn Read + Send>> {
         (**self).post_streaming(url, content_type, accept, body, git_protocol)
     }
 
@@ -450,7 +454,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
+    ) -> crate::error::Result<(Vec<u8>, Option<String>)> {
         (**self).get_following_redirects(url, git_protocol)
     }
 
@@ -466,7 +470,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         (**self).reset_auth_after_redirect_rebase();
     }
 
-    fn send(&self, request: &HttpRequest<'_>) -> RemoteResult<HttpResponse> {
+    fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
         (**self).send(request)
     }
 
@@ -650,9 +654,9 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
         }
         Some(pkt_line::Packet::Data(s)) => s,
         Some(other) => {
-            return Err(Error::CorruptObject(format!(
-                "unexpected first advertisement packet: {other:?}"
-            )))
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("unexpected first advertisement packet: {other:?}"),
+            }))
         }
     };
     pkt_line::reject_err_line(&first)?;
@@ -734,7 +738,9 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
                     continue;
                 }
                 let oid = ObjectId::from_hex(oid_hex).map_err(|e| {
-                    Error::InvalidObjectId(format!("bad oid in advertisement: {oid_hex}: {e}"))
+                    Error::Object(ObjectError::InvalidId {
+                        input: format!("bad oid in advertisement: {oid_hex}: {e}"),
+                    })
                 })?;
                 let valid_ref = refname == "HEAD"
                     || crate::refs::is_valid_fetch_advertised_ref(refname)
@@ -749,9 +755,9 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
                 }
             }
             Some(other) => {
-                return Err(Error::CorruptObject(format!(
-                    "unexpected packet in advertisement: {other:?}"
-                )))
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: format!("unexpected packet in advertisement: {other:?}"),
+                }))
             }
         }
     }
@@ -1027,10 +1033,9 @@ fn get_interruptible<C: HttpClient + Clone + 'static>(
     cancel: &CancelToken,
     owner: &CancelToken,
     stack_watch: &std::sync::atomic::AtomicBool,
-) -> crate::remote::RemoteResult<Vec<u8>> {
+) -> crate::error::Result<Vec<u8>> {
     get_following_redirects_interruptible(client, url, git_protocol, cancel, owner, stack_watch)
         .map(|(body, _)| body)
-        .map_err(RemoteError::from)
 }
 
 fn get_following_redirects_interruptible<C: HttpClient + Clone + 'static>(
@@ -1045,9 +1050,7 @@ fn get_following_redirects_interruptible<C: HttpClient + Clone + 'static>(
     let url = url.to_owned();
     let git_protocol = git_protocol.map(str::to_owned);
     PendingHttp::spawn("grit-http-get", move || {
-        client
-            .get_following_redirects(&url, git_protocol.as_deref())
-            .map_err(Error::Remote)
+        client.get_following_redirects(&url, git_protocol.as_deref())
     })
     .map_err(Error::Io)?
     .wait_with_watch(cancel, Some(owner), Some(stack_watch), None)

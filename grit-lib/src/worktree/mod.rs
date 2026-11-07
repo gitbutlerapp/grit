@@ -67,9 +67,9 @@ pub mod pathspec {
         is_long_magic_pathspec_token, parse_pathspecs_from_source, path_allowed_by_pathspec_list,
         pathdiff, pathspec_contributes_match, pathspec_has_top, pathspec_is_exclude,
         pathspec_wants_descent_into_tree, pathspecs_allow_bloom, precompose_argv_pathspec,
-        resolve_pathspec_with_argv_precompose, simple_length, validate_attr_pathspecs,
-        validate_global_pathspec_flags, Pathspec, PathspecFile, PathspecGlobalFlags,
-        PathspecMatchContext, PathspecOptions, PathspecParseError,
+        resolve_pathspec_with_argv_precompose, simple_length, validate_attr_pathspecs, Pathspec,
+        PathspecFile, PathspecGlobalFlags, PathspecGlobalsError, PathspecMatchContext,
+        PathspecOptions, PathspecParseError,
     };
 }
 pub mod wildmatch {

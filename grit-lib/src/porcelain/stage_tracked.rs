@@ -4,6 +4,7 @@
 //! and mode match the index (and are not racy relative to the index file mtime) are trusted without
 //! re-reading file contents — Git's `ie_match_stat` fast path.
 
+use crate::worktree::WorktreeError;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1097,8 +1098,9 @@ fn restage_deferred_chunk(
     let mut batch_inputs = Vec::with_capacity(jobs.len());
     for job in jobs {
         let raw_path = job.raw_path.as_slice();
-        let rel_path = std::str::from_utf8(raw_path)
-            .map_err(|_| Error::Verbatim("deferred restage requires utf-8 index paths".into()))?;
+        let rel_path = std::str::from_utf8(raw_path).map_err(|_| WorktreeError::NonUtf8Path {
+            path: String::from_utf8_lossy(raw_path).into_owned(),
+        })?;
         let Some(idx_e) = index.get(raw_path, 0).cloned() else {
             continue;
         };
@@ -1472,7 +1474,7 @@ mod tests {
         impl crate::promisor_fetch::PromisorFetcher for FetchCounter {
             fn fetch_missing(&self, _: &Repository, _: &[ObjectId]) -> Result<()> {
                 self.0.fetch_add(1, Ordering::SeqCst);
-                Err(Error::Verbatim("unexpected fetch".into()))
+                Err(Error::Io(std::io::Error::other("unexpected fetch")))
             }
         }
         let (_dir, repo) = init_repo();
@@ -2361,7 +2363,7 @@ mod tests {
         let err = stage_tracked_modifications(&repo, wt).unwrap_err();
         assert!(matches!(
             err,
-            Error::EmbeddedRepoWithoutCommit { path } if path == "sub"
+            Error::Worktree(WorktreeError::EmbeddedRepoWithoutCommit { path }) if path == "sub"
         ));
         assert_eq!(fs::read(&index_path).unwrap(), index_before);
         assert!(repo.load_index().unwrap().has_unmerged_entries());

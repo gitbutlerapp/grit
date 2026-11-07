@@ -37,10 +37,10 @@ fn remote_error_variants() {
         .expect_err("missing file:// repo");
     assert!(matches!(
         err,
-        RemoteError::Unreadable {
+        grit_lib::error::Error::Remote(RemoteError::Unreadable {
             reason: RemoteUnreadableReason::RepositoryNotFound,
             ..
-        }
+        })
     ));
 
     let work = init_repo(&tmp.path().join("work"));
@@ -56,10 +56,10 @@ fn remote_error_variants() {
         .expect_err("fetch missing");
     assert!(matches!(
         fetch_err,
-        RemoteError::Unreadable {
+        grit_lib::error::Error::Remote(RemoteError::Unreadable {
             reason: RemoteUnreadableReason::RepositoryNotFound,
             ..
-        }
+        })
     ));
 
     if system_git_available() {
@@ -101,7 +101,7 @@ fn remote_error_variants() {
                     .expect_err("unshallow on complete repo");
                 assert!(matches!(
                     unshallow_err,
-                    RemoteError::FetchUnshallowNotShallow
+                    grit_lib::error::Error::Remote(RemoteError::FetchUnshallowNotShallow)
                 ));
             }
         }
@@ -291,20 +291,19 @@ fn bundle_missing_prerequisites() {
 }
 
 #[test]
-fn clone_error_has_no_library_wrapper() {
-    fn classify(e: CloneError) {
-        match e {
-            CloneError::DestNotEmpty(_)
-            | CloneError::RemoteRefNotFound(_)
-            | CloneError::InvalidCloneDepth
-            | CloneError::Nested(_)
-            | CloneError::Remote(_)
-            | CloneError::CheckoutFailed { .. } => {}
-        }
-    }
-    classify(CloneError::Remote(RemoteError::FetchUnshallowNotShallow));
+fn clone_errors_report_remote_failures_in_the_remote_area() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let opts = CloneOptions::new("file:///nope.git", tmp.path().join("x"));
     let err = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect_err("clone missing");
-    classify(err);
+    assert_eq!(err.area(), "remote");
+    assert!(
+        matches!(err, grit_lib::error::Error::Remote(ref remote) if remote.is_remote_unreadable()),
+        "{err:?}"
+    );
+    let leaf = grit_lib::error::Error::from(CloneError::InvalidCloneDepth);
+    assert!(matches!(
+        leaf,
+        grit_lib::error::Error::Remote(RemoteError::Clone(ref clone))
+            if matches!(**clone, CloneError::InvalidCloneDepth)
+    ));
 }

@@ -24,7 +24,7 @@ use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::serve::{ReceivePack, ReceivePolicy, ServeOptions};
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::remote::transport::http::HttpClient;
-use grit_lib::remote::{Remote, RemoteError, RemoteResult};
+use grit_lib::remote::{Remote, RemoteError};
 use grit_lib::repo::{InitOptions, Repository};
 
 /// Deterministic incompressible bytes, so blobs keep the pack large.
@@ -126,7 +126,7 @@ fn push_file(
     remote_dir: &Path,
     tip: ObjectId,
     cancel: &CancelToken,
-) -> std::result::Result<Vec<PushRefStatus>, grit_lib::remote::RemoteError> {
+) -> grit_lib::error::Result<Vec<PushRefStatus>> {
     let remote = Remote::from_url(&format!("file://{}", remote_dir.display())).expect("url");
     remote
         .push(
@@ -317,7 +317,7 @@ impl InProcessServer {
         Repository::open(&self.repo_dir, &RepositoryOptions::empty())
     }
 
-    fn serve(&self, body: &[u8]) -> RemoteResult<Vec<u8>> {
+    fn serve(&self, body: &[u8]) -> grit_lib::error::Result<Vec<u8>> {
         let probe = body == b"0000";
         let hold = (!probe)
             .then(|| self.hold.lock().unwrap_or_else(|e| e.into_inner()).take())
@@ -336,17 +336,15 @@ impl InProcessServer {
             &opts,
             &ReceivePolicy::from_config(&ConfigSet::new()),
         )
-        .run(&mut Cursor::new(body), &mut out)
-        .map_err(|e| Error::Verbatim(e.to_string()))?;
+        .run(&mut Cursor::new(body), &mut out)?;
         Ok(out)
     }
 }
 
 impl HttpClient for InProcessServer {
-    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> RemoteResult<Vec<u8>> {
+    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> grit_lib::error::Result<Vec<u8>> {
         let mut out = Vec::new();
-        pkt_line::write_line_to_vec(&mut out, "# service=git-receive-pack")
-            .map_err(|e| RemoteError::Nested(Box::new(Error::from(e))))?;
+        pkt_line::write_line_to_vec(&mut out, "# service=git-receive-pack").map_err(Error::from)?;
         out.extend_from_slice(b"0000");
         let opts = ServeOptions {
             stateless_rpc: true,
@@ -358,8 +356,7 @@ impl HttpClient for InProcessServer {
             &opts,
             &ReceivePolicy::from_config(&ConfigSet::new()),
         )
-        .run(&mut std::io::empty(), &mut out)
-        .map_err(|e| Error::Verbatim(e.to_string()))?;
+        .run(&mut std::io::empty(), &mut out)?;
         Ok(out)
     }
 
@@ -370,7 +367,7 @@ impl HttpClient for InProcessServer {
         _accept: &str,
         body: &[u8],
         _git_protocol: Option<&str>,
-    ) -> RemoteResult<Vec<u8>> {
+    ) -> grit_lib::error::Result<Vec<u8>> {
         self.serve(body)
     }
 
@@ -381,7 +378,7 @@ impl HttpClient for InProcessServer {
         _accept: &str,
         body: &mut dyn Read,
         _git_protocol: Option<&str>,
-    ) -> RemoteResult<Box<dyn Read + Send>> {
+    ) -> grit_lib::error::Result<Box<dyn Read + Send>> {
         let mut got = Vec::new();
         let mut buf = vec![0u8; 64 * 1024];
         let end = loop {
@@ -405,9 +402,9 @@ impl HttpClient for InProcessServer {
             let _ = tx.send(end);
         }
         if failed {
-            return Err(RemoteError::Nested(Box::new(Error::Verbatim(
-                "request body did not finish".to_owned(),
-            ))));
+            return Err(Error::Io(std::io::Error::other(
+                "request body did not finish",
+            )));
         }
         Ok(Box::new(Cursor::new(self.serve(&got)?)))
     }

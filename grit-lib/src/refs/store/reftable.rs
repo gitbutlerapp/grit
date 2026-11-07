@@ -1,5 +1,6 @@
 //! Reftable-backed [`super::RefStore`] over [`crate::reftable::ReftableStack`].
 
+use crate::error::RefError;
 use std::borrow::ToOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -139,24 +140,18 @@ impl ReftableRefStore {
             prepared: Mutex::new(None),
         };
         // Match [`MemoryRefStore`]: conformance seeds start from an empty namespace.
-        let txn = RefTransaction::new()
-            .update(RefUpdate {
-                name: RefName::from_trusted("HEAD"),
-                new_value: None,
-                expected: Expected::Any,
-                reflog: None,
-                flags: super::RefUpdateFlags {
-                    no_deref: true,
-                    log_only: false,
-                    ..Default::default()
-                },
-            })
-            .map_err(|e| Error::Verbatim(e.to_string()))?;
-        store
-            .prepare(txn)
-            .map_err(|e| Error::Verbatim(e.to_string()))?
-            .commit()
-            .map_err(|e| Error::Verbatim(e.to_string()))?;
+        let txn = RefTransaction::new().update(RefUpdate {
+            name: RefName::from_trusted("HEAD"),
+            new_value: None,
+            expected: Expected::Any,
+            reflog: None,
+            flags: super::RefUpdateFlags {
+                no_deref: true,
+                log_only: false,
+                ..Default::default()
+            },
+        })?;
+        store.prepare(txn)?.commit()?;
         Ok(store)
     }
 
@@ -183,8 +178,10 @@ impl ReftableRefStore {
             grouped.entry(store_git_dir).or_default().push(update);
         }
         for (store_git_dir, group) in grouped {
-            let mut stack = ReftableStack::open(&store_git_dir)
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            let mut stack =
+                ReftableStack::open(&store_git_dir).map_err(|e| RefStoreError::Corrupt {
+                    detail: e.to_string(),
+                })?;
             let opts = self.write_options_for(&store_git_dir);
             stack
                 .write_transaction(group, &opts)
@@ -232,7 +229,11 @@ impl ReftableRefStore {
             let old_oid = match self.read_raw_at(&target) {
                 Ok(Some(RawRef::Direct(oid))) => oid,
                 Ok(_) => ObjectId::zero(),
-                Err(e) => return Err(RefStoreError::Corrupt(e.to_string())),
+                Err(e) => {
+                    return Err(RefStoreError::Corrupt {
+                        detail: e.to_string(),
+                    })
+                }
             };
             let new_oid = match &update.new_value {
                 Some(RawRef::Direct(oid)) => *oid,
@@ -282,8 +283,9 @@ impl ReftableRefStore {
             return Ok(None);
         }
         let read = |name: &str| {
-            self.read_raw_at(name)
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))
+            self.read_raw_at(name).map_err(|e| RefStoreError::Corrupt {
+                detail: e.to_string(),
+            })
         };
         let Some(RawRef::Symbolic(mut target)) = read(update.name.as_str())? else {
             return Ok(None);
@@ -407,19 +409,21 @@ fn record_to_raw(rec: &crate::reftable::RefRecord) -> Option<RawRef> {
 
 fn map_reftable_err(err: Error) -> RefStoreError {
     match err {
-        Error::Reftable(ReftableError::Locked { .. }) => RefStoreError::LockHeld {
+        Error::Ref(RefError::Reftable(ReftableError::Locked { .. })) => RefStoreError::LockHeld {
             name: "refs".to_owned(),
         },
-        Error::Reftable(ReftableError::ExpectedMismatch {
+        Error::Ref(RefError::Reftable(ReftableError::ExpectedMismatch {
             refname,
             expected,
             actual,
-        }) => RefStoreError::ExpectedMismatch {
+        })) => RefStoreError::ExpectedMismatch {
             name: refname,
             expected: Expected::Oid(expected),
             actual: actual.map(RawRef::Direct),
         },
-        other => RefStoreError::Corrupt(other.to_string()),
+        other => RefStoreError::Corrupt {
+            detail: other.to_string(),
+        },
     }
 }
 
@@ -478,7 +482,9 @@ fn build_reftable_updates_for_stack(
                 }
                 for refname in log_refnames {
                     let record = log_record_from_update(git_dir, &refname, old_oid, new_oid, log)
-                        .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+                        .map_err(|e| RefStoreError::Corrupt {
+                        detail: e.to_string(),
+                    })?;
                     log_updates.push(ReftableTransactionUpdate {
                         refname,
                         value: None,
@@ -616,14 +622,18 @@ impl RefStore for ReftableRefStore {
         let mut stacks = Vec::new();
         let mut rejections = Vec::new();
         for (store_git_dir, group) in grouped {
-            let mut stack = ReftableStack::open(&store_git_dir)
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            let mut stack =
+                ReftableStack::open(&store_git_dir).map_err(|e| RefStoreError::Corrupt {
+                    detail: e.to_string(),
+                })?;
             let lock = stack
                 .acquire_tables_list_lock_for_store()
                 .map_err(map_reftable_err)?;
             stack.reload_table_names();
             let refs = Self::merged_refs_from_locked_stack(&self.git_dir, &store_git_dir, &stack)
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+                .map_err(|e| RefStoreError::Corrupt {
+                detail: e.to_string(),
+            })?;
             let snapshot = RefBatchState {
                 refs,
                 reflogs: BTreeMap::new(),
@@ -763,8 +773,11 @@ fn commit_reflog_rename_on_stack(
     stack: &mut ReftableStack,
     rename: &RefReflogRename,
 ) -> StoreResult<()> {
-    let entries = read_reflog_entries_from_stack(git_dir, rename.from.as_str())
-        .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+    let entries = read_reflog_entries_from_stack(git_dir, rename.from.as_str()).map_err(|e| {
+        RefStoreError::Corrupt {
+            detail: e.to_string(),
+        }
+    })?;
     let mut batch = RefBatchState {
         refs: BTreeMap::new(),
         reflogs: BTreeMap::from([(rename.from.as_str().to_owned(), entries)]),
@@ -779,10 +792,14 @@ fn commit_reflog_rename_on_stack(
     let (_, to_storage) = reftable_storage_location(git_dir, rename.to.as_str());
     stack
         .replace_logs_for_ref(&to_storage, &new_entries)
-        .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+        .map_err(|e| RefStoreError::Corrupt {
+            detail: e.to_string(),
+        })?;
     stack
         .replace_logs_for_ref(&from_storage, &[])
-        .map_err(|e| RefStoreError::Corrupt(e.to_string()))
+        .map_err(|e| RefStoreError::Corrupt {
+            detail: e.to_string(),
+        })
 }
 
 struct ReftablePrepared<'a> {
@@ -827,7 +844,9 @@ impl PreparedRefTransaction for ReftablePrepared<'_> {
                     continue;
                 }
                 commit_reflog_rename_on_stack(&self.store.git_dir, &mut stack_batch.stack, rename)
-                    .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+                    .map_err(|e| RefStoreError::Corrupt {
+                        detail: e.to_string(),
+                    })?;
             }
         }
         self.committed = true;
@@ -896,7 +915,9 @@ mod tests {
         }
 
         let corrupt = map_reftable_err(ReftableError::BadMagic.into());
-        assert!(matches!(corrupt, RefStoreError::Corrupt(msg) if msg.contains("bad magic")));
+        assert!(
+            matches!(corrupt, RefStoreError::Corrupt { detail: msg } if msg.contains("bad magic"))
+        );
     }
     fn cas_update_oid(n: u32) -> ObjectId {
         let mut b = [0u8; 20];

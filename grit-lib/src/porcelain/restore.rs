@@ -1,6 +1,7 @@
 //! Restore working tree and/or index paths from the index, `HEAD`, or another tree
 //! (`git restore` semantics).
 
+use crate::worktree::WorktreeError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use crate::diff::{
     submodule_embedded_git_dir,
 };
 use crate::environment::RepositoryOptions;
-use crate::error::{Error, Result};
+use crate::error::{Error, FilterError, Result, SubmoduleError};
 use crate::index::{Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, MODE_SYMLINK};
 use crate::index_name_hash_lazy::memihash;
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
@@ -93,17 +94,17 @@ pub struct RestoreOutcome {
 ///
 /// # Errors
 ///
-/// Returns [`Error::PathspecNoMatch`] when a positive pathspec matches nothing, and
-/// [`Error::RestorePathUnmerged`] (before writing anything) when a matched path has conflict
+/// Returns [`crate::worktree::WorktreeError::PathspecNoMatch`] when a positive pathspec matches nothing, and
+/// [`crate::worktree::WorktreeError::RestorePathUnmerged`] (before writing anything) when a matched path has conflict
 /// stages and the restore would either write the worktree from the index or, with `--staged`
 /// alone, replace the stages while the worktree keeps its conflict markers. Use
 /// [`RestoreOptions::stage`] or [`RestoreOptions::remerge`] for those paths, or stage the
 /// edited file. `--staged --worktree` replaces the stages and the worktree file together, and
 /// `--source` without `--staged` writes only the worktree, leaving the stages in place.
 /// Conflict options ([`RestoreOptions::stage`], [`RestoreOptions::remerge`]) also
-/// return [`Error::RestoreConflictWithStaged`], [`Error::RestoreConflictWithSource`],
-/// [`Error::RestoreConflictMissingOurs`], [`Error::RestoreConflictMissingTheirs`],
-/// or [`Error::RestoreConflictNotUnmerged`] when the index shape does not allow
+/// return [`crate::worktree::WorktreeError::RestoreConflictWithStaged`], [`crate::worktree::WorktreeError::RestoreConflictWithSource`],
+/// [`crate::worktree::WorktreeError::RestoreConflictMissingOurs`], [`crate::worktree::WorktreeError::RestoreConflictMissingTheirs`],
+/// or [`crate::worktree::WorktreeError::RestoreConflictNotUnmerged`] when the index shape does not allow
 /// the requested checkout. [`Error::LockHeld`] means another process holds `index.lock`;
 /// the lock is taken before the index is read, so nothing was changed. [`Error::Cancelled`]
 /// means `cancel` fired while restoring the work tree:
@@ -120,9 +121,7 @@ pub fn restore_paths(
     let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     if opts.pathspecs.is_empty() {
-        return Err(Error::Verbatim(
-            "you must specify path(s) to restore".into(),
-        ));
+        return Err(WorktreeError::RestorePathsRequired.into());
     }
 
     if opts.stage.is_some() || opts.remerge.is_some() {
@@ -155,9 +154,9 @@ pub(crate) fn restore_paths_with_lock(
     if index_only || worktree_from_index {
         let unmerged = collect_conflict_matched_paths(&index, &pathspec_filter, false);
         if !unmerged.is_empty() {
-            return Err(Error::RestorePathUnmerged {
+            return Err(Error::Worktree(WorktreeError::RestorePathUnmerged {
                 paths: unmerged.into_iter().collect(),
-            });
+            }));
         }
     }
 
@@ -274,15 +273,13 @@ pub(crate) fn restore_paths_with_lock(
 
 fn validate_conflict_restore_options(opts: &RestoreOptions) -> Result<()> {
     if opts.staged {
-        return Err(Error::RestoreConflictWithStaged);
+        return Err(Error::Worktree(WorktreeError::RestoreConflictWithStaged));
     }
     if !matches!(opts.source, RestoreSource::Index) {
-        return Err(Error::RestoreConflictWithSource);
+        return Err(Error::Worktree(WorktreeError::RestoreConflictWithSource));
     }
     if opts.stage.is_some() && opts.remerge.is_some() {
-        return Err(Error::Verbatim(
-            "cannot combine --ours/--theirs with --merge".into(),
-        ));
+        return Err(WorktreeError::RestoreStageWithRemerge.into());
     }
     Ok(())
 }
@@ -404,9 +401,9 @@ fn validate_unmerged_pathspecs(
         }
         if !positive_spec_matches_any_entries(repo, resolved, &matched_entries, pathspec_ctx, None)?
         {
-            return Err(Error::PathspecNoMatch {
+            return Err(Error::Worktree(WorktreeError::PathspecNoMatch {
                 spec: label.clone(),
-            });
+            }));
         }
     }
     Ok(())
@@ -428,12 +425,12 @@ fn restore_conflict_side(
     let path_bytes = crate::repo_relpath::storage_bytes(path);
     let Some(entry) = index.get(path_bytes.as_ref(), stage) else {
         return Err(match side {
-            ConflictSide::Ours => Error::RestoreConflictMissingOurs {
+            ConflictSide::Ours => Error::Worktree(WorktreeError::RestoreConflictMissingOurs {
                 path: path.to_string(),
-            },
-            ConflictSide::Theirs => Error::RestoreConflictMissingTheirs {
+            }),
+            ConflictSide::Theirs => Error::Worktree(WorktreeError::RestoreConflictMissingTheirs {
                 path: path.to_string(),
-            },
+            }),
         });
     };
     if entry.mode == MODE_GITLINK {
@@ -451,10 +448,10 @@ fn restore_conflict_side(
 
 fn checkout_submodule_worktree_to_commit(sub_worktree: &Path, oid: ObjectId) -> Result<()> {
     let Some(git_dir) = submodule_embedded_git_dir(sub_worktree) else {
-        return Err(Error::Verbatim(format!(
-            "submodule at '{}' is not checked out",
-            sub_worktree.display()
-        )));
+        return Err(SubmoduleError::NotCheckedOut {
+            path: sub_worktree.display().to_string(),
+        }
+        .into());
     };
     let sub_repo = Repository::open(
         &git_dir,
@@ -506,9 +503,9 @@ fn restore_conflict_remerge(
         index.get(path_bytes.as_ref(), 2),
         index.get(path_bytes.as_ref(), 3),
     ) else {
-        return Err(Error::RestoreConflictNotUnmerged {
+        return Err(Error::Worktree(WorktreeError::RestoreConflictNotUnmerged {
             path: path.to_string(),
-        });
+        }));
     };
     if ours.mode == MODE_GITLINK || theirs.mode == MODE_GITLINK {
         return Ok(());
@@ -663,9 +660,9 @@ fn validate_pathspecs(
             )?
         };
         if !hits {
-            return Err(Error::PathspecNoMatch {
+            return Err(Error::Worktree(WorktreeError::PathspecNoMatch {
                 spec: label.clone(),
-            });
+            }));
         }
     }
     Ok(())
@@ -1199,9 +1196,9 @@ fn restore_blob_to_worktree(
     dir_cache: &mut LeadingDirCache,
 ) -> Result<fs::Metadata> {
     write_blob_to_worktree(repo, rules, work_tree, path, oid, mode, dir_cache)?.ok_or_else(|| {
-        Error::Verbatim(format!(
-            "filter delayed checkout for '{path}' is not supported by grit restore"
-        ))
+        Error::from(FilterError::DelayedCheckoutUnsupported {
+            path: path.to_string(),
+        })
     })
 }
 
@@ -1495,7 +1492,7 @@ mod tests {
         let err =
             restore_paths(&repo, &opts("f"), &mut NullProgress, &CancelToken::never()).unwrap_err();
         assert!(
-            matches!(&err, Error::RestorePathUnmerged { paths } if paths == &["f"]),
+            matches!(&err, Error::Worktree(WorktreeError::RestorePathUnmerged { paths }) if paths == &["f"]),
             "{err:?}"
         );
         assert!(err.to_string().contains("path 'f' is unmerged"), "{err}");
@@ -1510,7 +1507,13 @@ mod tests {
         let (dir, repo) = conflicted_repo();
         let err =
             restore_paths(&repo, &opts("."), &mut NullProgress, &CancelToken::never()).unwrap_err();
-        assert!(matches!(err, Error::RestorePathUnmerged { .. }), "{err:?}");
+        assert!(
+            matches!(
+                err,
+                Error::Worktree(WorktreeError::RestorePathUnmerged { .. })
+            ),
+            "{err:?}"
+        );
         assert_eq!(std::fs::read(dir.path().join("g")).expect("g"), b"edited\n");
     }
 
@@ -1530,7 +1533,7 @@ mod tests {
             )
             .unwrap_err();
             assert!(
-                matches!(&err, Error::RestorePathUnmerged { paths } if paths == &["f"]),
+                matches!(&err, Error::Worktree(WorktreeError::RestorePathUnmerged { paths }) if paths == &["f"]),
                 "{err:?}"
             );
         }
@@ -1588,9 +1591,9 @@ mod tests {
 
     #[test]
     fn restore_unmerged_message_lists_every_path() {
-        let err = Error::RestorePathUnmerged {
+        let err = Error::Worktree(WorktreeError::RestorePathUnmerged {
             paths: vec!["a".into(), "b".into()],
-        };
+        });
         assert_eq!(err.to_string(), "paths are unmerged: 'a', 'b'");
     }
 

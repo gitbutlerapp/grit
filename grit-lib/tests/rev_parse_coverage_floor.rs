@@ -1,6 +1,7 @@
 //! Targeted hits for `rev_parse.rs` lines needed to satisfy the 85% file floor.
 
 use crate::support;
+use grit_lib::error::ObjectError;
 
 use std::fs;
 use std::io::Write;
@@ -37,6 +38,7 @@ fn unknown_abbreviated_object_id_errors() {
     let wt = hist.worktree();
     commit_file(wt, "f.txt", "x\n", "c");
     let repo = open_grit(wt);
+
     let err = repo
         .revwalk()
         .resolve(
@@ -46,7 +48,7 @@ fn unknown_abbreviated_object_id_errors() {
                 .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
         )
         .expect_err("missing abbrev");
-    assert!(matches!(err, Error::ObjectNotFound(_)));
+    assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
     let err = repo
         .revwalk()
         .resolve(
@@ -56,7 +58,7 @@ fn unknown_abbreviated_object_id_errors() {
                 .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
         )
         .expect_err("missing abbrev8");
-    assert!(matches!(err, Error::ObjectNotFound(_)));
+    assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
     let _ = repo.revwalk().symbolic_full_name("@{-0}");
     let _ = repo.revwalk().symbolic_full_name("@{-99}");
     let _ = repo
@@ -74,7 +76,7 @@ fn unknown_abbreviated_object_id_errors() {
                 .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
         )
         .expect_err("7hex");
-    assert!(matches!(err, Error::ObjectNotFound(_)));
+    assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
 }
 
 #[test]

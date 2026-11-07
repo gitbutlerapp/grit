@@ -13,6 +13,7 @@ use thiserror::Error;
 
 /// Failure to interpret a Git-style date cutoff string (for example `--since` / `--until`).
 #[derive(Clone, Debug, Eq, PartialEq, Error)]
+#[non_exhaustive]
 pub enum DateSpecError {
     /// The specification could not be parsed as a date.
     #[error("unparseable date spec: {spec:?}")]

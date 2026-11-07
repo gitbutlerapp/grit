@@ -4,6 +4,7 @@
 //! rebase and stash pop, and the auto-staging commit refuses a file whose stages were already
 //! dropped (by system `git restore --staged`) while its worktree copy still has markers.
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::path::Path;
 
@@ -160,7 +161,7 @@ fn assert_conflict_survives(root: &Path, repo: &Repository) {
         )
         .unwrap_err();
         assert!(
-            matches!(&err, Error::RestorePathUnmerged { paths } if paths == &["f"]),
+            matches!(&err, Error::Worktree(WorktreeError::RestorePathUnmerged { paths }) if paths == &["f"]),
             "{err:?}"
         );
     }
@@ -244,7 +245,7 @@ fn assert_collapsed_markers_refused(root: &Path, repo: &Repository) {
         &CancelToken::never(),
     )
     .unwrap_err();
-    let Error::UnmergedConflictMarkers { paths } = err else {
+    let Error::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) = err else {
         panic!("expected conflict markers refusal, got {err:?}");
     };
     assert_eq!(paths, ["f"]);
@@ -263,7 +264,10 @@ fn assert_collapsed_markers_refused(root: &Path, repo: &Repository) {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::UnmergedConflictMarkers { .. }),
+        matches!(
+            err,
+            Error::Worktree(WorktreeError::UnmergedConflictMarkers { .. })
+        ),
         "{err:?}"
     );
     assert_eq!(git(root, &["ls-files", "-s"]), index);
@@ -391,7 +395,10 @@ fn stale_resolve_undo_with_new_markers_is_refused() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::UnmergedConflictMarkers { .. }),
+        matches!(
+            err,
+            Error::Worktree(WorktreeError::UnmergedConflictMarkers { .. })
+        ),
         "{err:?}"
     );
     assert_eq!(git(root, &["rev-parse", "HEAD"]), head);

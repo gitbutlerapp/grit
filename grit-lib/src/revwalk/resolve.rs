@@ -148,8 +148,8 @@ impl<'repo> RevWalk<'repo> {
     ///   [`RevParseError::AmbiguousShortObject`](super::rev_parse_error::RevParseError::AmbiguousShortObject)
     ///   when abbreviated hex matches several objects the options can't choose between, and
     ///   other rev-parse errors.
-    /// - [`Error::InvalidRef`](crate::error::Error::InvalidRef) when [`Peel::Commit`] meets a
-    ///   tree or blob, and [`Error::ObjectNotFound`](crate::error::Error::ObjectNotFound) when
+    /// - [`RefError::Invalid`](crate::error::RefError::Invalid) when [`Peel::Commit`] meets a
+    ///   tree or blob, and [`ObjectError::NotFound`](crate::error::ObjectError::NotFound) when
     ///   [`Peel::Tree`] or [`Peel::Blob`] cannot peel the object.
     ///
     /// # Examples
@@ -183,7 +183,7 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidRef`](crate::error::Error::InvalidRef) when the object peels
+    /// Returns [`RefError::Invalid`](crate::error::RefError::Invalid) when the object peels
     /// to a tree or blob, and object read errors.
     pub fn peel_to_commit(&self, oid: ObjectId) -> Result<ObjectId> {
         rev_parse::peel_to_commit_for_merge_base(self.repository(), oid)
@@ -194,7 +194,7 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ObjectNotFound`](crate::error::Error::ObjectNotFound) when the
+    /// Returns [`ObjectError::NotFound`](crate::error::ObjectError::NotFound) when the
     /// object peels to a blob, and object read errors.
     pub fn peel_to_tree(&self, oid: ObjectId) -> Result<ObjectId> {
         rev_parse::peel_to_tree(self.repository(), oid)
@@ -257,7 +257,7 @@ impl<'repo> RevWalk<'repo> {
     /// [`RevParseError::UpstreamNotTracked`](super::rev_parse_error::RevParseError::UpstreamNotTracked)
     /// and the `@{push}` variants of
     /// [`RevParseError`](super::rev_parse_error::RevParseError), or
-    /// [`Error::InvalidRef`](crate::error::Error::InvalidRef) when `spec` has no upstream
+    /// [`RefError::Invalid`](crate::error::RefError::Invalid) when `spec` has no upstream
     /// suffix.
     pub fn upstream_symbolic_name(&self, spec: &str) -> Result<String> {
         rev_parse::resolve_upstream_symbolic_name(self.repository(), spec)

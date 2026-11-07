@@ -363,11 +363,11 @@ fn recording_runner_pre_commit_hook_argv_and_failure() {
     let err = run_commit_hook_checked(&repo, "pre-commit", &[], None, &CommitHookEnv::default())
         .expect_err("hook should fail");
     match err {
-        HookError::Failed {
+        grit_lib::error::Error::Hook(HookError::Failed {
             hook_name,
             status,
             output,
-        } => {
+        }) => {
             assert_eq!(hook_name, "pre-commit");
             assert_eq!(status, 42);
             assert!(output.is_empty(), "the recording produced no output");

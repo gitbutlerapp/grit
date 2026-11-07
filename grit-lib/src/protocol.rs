@@ -9,6 +9,7 @@ use thiserror::Error;
 
 /// Errors returned when a transport protocol is not allowed.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProtocolError {
     /// Protocol is not included in `GIT_ALLOW_PROTOCOL`.
     #[error("protocol '{protocol}' is not allowed by GIT_ALLOW_PROTOCOL")]

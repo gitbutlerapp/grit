@@ -213,15 +213,10 @@ fn errors_serialize_with_kind_and_message() {
     let json = serde_json::to_value(&err).expect("Error");
     assert_eq!(json["kind"], "nothing_to_commit");
     assert_eq!(json["message"], err.to_string());
-    assert_eq!(json["area"], "merge");
+    assert_eq!(json["area"], "commit");
 
     let err = grit_lib::error::Error::Cancelled;
     assert_eq!(err.kind_name(), "cancelled");
-
-    let err = grit_lib::error::Error::Verbatim("fatal: exact line".into());
-    let json = serde_json::to_value(&err).expect("Verbatim");
-    assert_eq!(json["kind"], "message");
-    assert_eq!(json["area"], "verbatim");
 
     let err = grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError {
         path: std::path::PathBuf::from(".git/index.lock"),
@@ -232,7 +227,7 @@ fn errors_serialize_with_kind_and_message() {
     });
     let json = serde_json::to_value(&err).expect("LockHeld");
     assert_eq!(json["kind"], "lock_held");
-    assert_eq!(json["area"], "lock");
+    assert_eq!(json["area"], "lock_held");
     assert_eq!(json["path"], ".git/index.lock");
     assert_eq!(json["holder"]["pid"], 42);
     assert_eq!(json["holder"]["running"], true);

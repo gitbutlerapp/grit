@@ -5,6 +5,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::error::RefError;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -48,9 +49,9 @@ fn assert_names_blocking_ref(err: &Error, blocking_ref: &str, new: &str) {
     assert!(
         matches!(
             err,
-            Error::RefStore(RefStoreError::NameUnavailable {
+            Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
                 reason: RefnameUnavailable::DescendantExists { blocking, new_ref }
-            }) if blocking == blocking_ref && new_ref == new
+            })) if blocking == blocking_ref && new_ref == new
         ),
         "expected '{blocking_ref}' to block '{new}': {err:?}"
     );

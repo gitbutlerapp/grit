@@ -19,6 +19,7 @@ use crate::command_runner::{
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::index::Index;
+use crate::index::IndexError;
 
 /// Nanoseconds since the Unix epoch, sampled immediately before a fsmonitor hook query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,15 +245,12 @@ fn query_hook(
     let child = runner.spawn(&spec).map_err(Error::Io)?;
     let output = child.wait_with_output().map_err(Error::Io)?;
     if !output.status.success {
-        return Err(Error::Verbatim(format!(
-            "fsmonitor hook exited with {}",
-            output.status.code.unwrap_or(-1)
-        )));
+        return Err(IndexError::FsmonitorHookFailed {
+            status: output.status.code,
+        }
+        .into());
     }
-    if version == 1 {
-        let token = v1_query_token.ok_or_else(|| {
-            Error::Verbatim("internal error: missing v1 fsmonitor query token".into())
-        })?;
+    if let (1, Some(token)) = (version, v1_query_token) {
         return Ok(parse_v1_hook_response(&output.stdout, token));
     }
     parse_v2_hook_response(&output.stdout)
@@ -283,7 +281,7 @@ fn parse_v2_hook_response(buf: &[u8]) -> Result<QueryOutcome> {
         .next()
         .map(|p| String::from_utf8_lossy(p).into_owned())
         .filter(|t| !t.is_empty())
-        .ok_or_else(|| Error::Verbatim("fsmonitor hook returned empty token".into()))?;
+        .ok_or(IndexError::FsmonitorHookEmptyToken)?;
     let mut changed_paths = Vec::new();
     let mut trivial = false;
     for p in parts {
@@ -348,9 +346,9 @@ fn ipc_send_query(ipc_path: &Path, message: &[u8]) -> Result<Vec<u8>> {
     #[cfg(not(any(unix, windows)))]
     {
         let _ = (ipc_path, message);
-        Err(Error::Verbatim(
-            "fsmonitor IPC is not supported on this platform".into(),
-        ))
+        Err(Error::Io(std::io::Error::from(
+            std::io::ErrorKind::Unsupported,
+        )))
     }
 }
 
@@ -395,9 +393,7 @@ fn ipc_send_query_windows(ipc_path: &Path, message: &[u8]) -> Result<Vec<u8>> {
     pipe.push(0);
     unsafe {
         if WaitNamedPipeW(pipe.as_ptr(), 3000) == 0 {
-            return Err(Error::Verbatim(
-                "fsmonitor daemon pipe not available".into(),
-            ));
+            return Err(Error::Io(std::io::Error::last_os_error()));
         }
         let handle = CreateFileW(
             pipe.as_ptr(),
@@ -409,7 +405,7 @@ fn ipc_send_query_windows(ipc_path: &Path, message: &[u8]) -> Result<Vec<u8>> {
             std::ptr::null_mut(),
         );
         if handle == INVALID_HANDLE_VALUE {
-            return Err(Error::Verbatim("fsmonitor IPC connect failed".into()));
+            return Err(Error::Io(std::io::Error::last_os_error()));
         }
         let mut file = std::fs::File::from_raw_handle(handle as _);
         crate::pkt_line::write_packet_raw(&mut file, message).map_err(Error::Io)?;

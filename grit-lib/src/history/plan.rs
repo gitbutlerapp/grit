@@ -19,7 +19,7 @@ use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::state::resolve_head_for_repository;
 use crate::worktree::{find_worktree_with_branch_checked_out, worktree_admin_dir};
 
-use super::error::{engine_err, error_to_engine, HistoryError};
+use super::error::HistoryError;
 use super::subject::{
     commit_message_subject_line, replay_conflict_labels, subject_for_rewrite_row,
 };
@@ -117,7 +117,7 @@ struct ChangeIdWriteContext {
 }
 
 impl ChangeIdWriteContext {
-    fn from_repo(repo: &Repository) -> Result<Self, HistoryError> {
+    fn from_repo(repo: &Repository) -> crate::error::Result<Self> {
         let config = repo.config().snapshot().map_err(library_err)?;
         Ok(Self {
             policy: ChangeIdPolicy::from_config(config.as_ref()),
@@ -143,13 +143,13 @@ impl ChangeIdWriteContext {
 /// # Errors
 ///
 /// Returns [`HistoryError`] for conflicts, unsupported merges, scope violations, empty-policy
-/// aborts, [`HistoryError::Planning`] for invalid planning inputs, and [`HistoryError::Engine`]
-/// for object/revwalk/ref failures.
+/// aborts, [`HistoryError::Planning`] for invalid planning inputs, and the object, revision or ref
+/// area errors for read failures.
 pub fn plan_rewrite(
     repo: &Repository,
     edits: &HistoryEdits,
     opts: &RewriteOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     plan_rewrite_with_order(repo, edits, opts, None, None, MergeFavor::default())
 }
 
@@ -157,7 +157,7 @@ pub fn plan_rewrite(
 #[allow(clippy::too_many_arguments)]
 fn finish_plan_rewrite_on_replay_error(
     repo: &Repository,
-    err: HistoryError,
+    err: crate::error::Error,
     mapping: HashMap<ObjectId, ObjectId>,
     rewritten: Vec<RewrittenCommit>,
     commits_to_replay: Vec<ObjectId>,
@@ -165,8 +165,11 @@ fn finish_plan_rewrite_on_replay_error(
     edits: &HistoryEdits,
     opts: &RewriteOptions,
     linearize_onto: Option<ObjectId>,
-) -> Result<ResumablePlanOutcome, HistoryError> {
-    if matches!(err, HistoryError::Conflict { .. }) {
+) -> crate::error::Result<ResumablePlanOutcome> {
+    if matches!(
+        err,
+        crate::error::Error::History(HistoryError::Conflict { .. })
+    ) {
         if let Some(conflict) = take_resumable_conflict() {
             return Ok(ResumablePlanOutcome::Partial(Box::new(
                 PartialRewritePlan {
@@ -193,7 +196,7 @@ pub(crate) fn plan_rewrite_with_order_resumable(
     replay_order: Option<&[ObjectId]>,
     linearize_onto: Option<ObjectId>,
     merge_favor: MergeFavor,
-) -> Result<ResumablePlanOutcome, HistoryError> {
+) -> crate::error::Result<ResumablePlanOutcome> {
     plan_rewrite_with_order_resumable_seeded(
         repo,
         edits,
@@ -217,7 +220,7 @@ pub(crate) fn plan_rewrite_with_order_resumable_seeded(
     merge_favor: MergeFavor,
     seed: Option<(HashMap<ObjectId, ObjectId>, Vec<RewrittenCommit>)>,
     scoped_refs: Option<Vec<(String, ObjectId)>>,
-) -> Result<ResumablePlanOutcome, HistoryError> {
+) -> crate::error::Result<ResumablePlanOutcome> {
     with_resumable_replay(|| {
         plan_rewrite_with_order_impl(
             repo,
@@ -247,7 +250,7 @@ pub(crate) fn plan_rewrite_with_order(
     replay_order: Option<&[ObjectId]>,
     linearize_onto: Option<ObjectId>,
     merge_favor: MergeFavor,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     match plan_rewrite_with_order_impl(
         repo,
         edits,
@@ -273,7 +276,7 @@ fn plan_rewrite_with_order_impl(
     merge_favor: MergeFavor,
     seed: Option<(HashMap<ObjectId, ObjectId>, Vec<RewrittenCommit>)>,
     scoped_refs_override: Option<Vec<(String, ObjectId)>>,
-) -> Result<ResumablePlanOutcome, HistoryError> {
+) -> crate::error::Result<ResumablePlanOutcome> {
     let committer_line = opts.committer_line()?;
     let replay_pending = replay_order.is_some_and(|order| !order.is_empty());
     let has_seed = seed.is_some();
@@ -302,7 +305,8 @@ fn plan_rewrite_with_order_impl(
             } else {
                 return Err(HistoryError::NotInHistory {
                     commit: ObjectId::null(repo.odb().hash_algo()),
-                });
+                }
+                .into());
             }
         } else if let Some(refs) = scoped_refs_override.as_ref().and_then(|r| r.first()) {
             refs.1
@@ -315,7 +319,8 @@ fn plan_rewrite_with_order_impl(
         } else {
             return Err(HistoryError::NotInHistory {
                 commit: ObjectId::null(repo.odb().hash_algo()),
-            });
+            }
+            .into());
         }
     } else {
         oldest_edited_commit(repo, edits)?
@@ -331,7 +336,7 @@ fn plan_rewrite_with_order_impl(
         let order = order.to_vec();
         for &edited in edits.keys() {
             if !order.contains(&edited) {
-                return Err(HistoryError::NotInHistory { commit: edited });
+                return Err(HistoryError::NotInHistory { commit: edited }.into());
             }
         }
         order
@@ -364,7 +369,7 @@ fn plan_rewrite_with_order_impl(
 
         for &edited in edits.keys() {
             if !commits_to_replay.contains(&edited) {
-                return Err(HistoryError::NotInHistory { commit: edited });
+                return Err(HistoryError::NotInHistory { commit: edited }.into());
             }
         }
         commits_to_replay
@@ -374,7 +379,7 @@ fn plan_rewrite_with_order_impl(
         let head_oid = repo.head_commit()?;
         for &edited in edits.keys() {
             if !is_ancestor(repo, edited, head_oid).map_err(library_err)? {
-                return Err(HistoryError::NotInHistory { commit: edited });
+                return Err(HistoryError::NotInHistory { commit: edited }.into());
             }
         }
     }
@@ -384,7 +389,7 @@ fn plan_rewrite_with_order_impl(
             if is_ancestor(repo, oldest, *tip).map_err(library_err)?
                 && !commits_to_replay.contains(tip)
             {
-                return Err(HistoryError::DivergentBranch { name: name.clone() });
+                return Err(HistoryError::DivergentBranch { name: name.clone() }.into());
             }
         }
     }
@@ -415,7 +420,7 @@ fn plan_rewrite_with_order_impl(
             Some(CommitEdit::InsertBefore(_)) | Some(CommitEdit::SplitBefore { .. })
         ) && old.parents.len() > 1
         {
-            return Err(HistoryError::InsertBeforeOnMerge { commit: old_oid });
+            return Err(HistoryError::InsertBeforeOnMerge { commit: old_oid }.into());
         }
 
         if let Some(CommitEdit::Reuse { existing, parent }) = edit {
@@ -444,7 +449,7 @@ fn plan_rewrite_with_order_impl(
 
         if matches!(edit, Some(CommitEdit::Drop)) {
             if old.parents.is_empty() {
-                return Err(HistoryError::RootCommit { commit: old_oid });
+                return Err(HistoryError::RootCommit { commit: old_oid }.into());
             }
             let parent = match linear_tip {
                 Some(tip) => tip,
@@ -493,7 +498,7 @@ fn plan_rewrite_with_order_impl(
             }
         }
 
-        let mut replay_step = || -> Result<(ObjectId, Option<ObjectId>), HistoryError> {
+        let mut replay_step = || -> crate::error::Result<(ObjectId, Option<ObjectId>)> {
             match edit {
                 None => {
                     let oid = replay_commit_descendant(
@@ -705,7 +710,7 @@ pub(crate) fn plan_replay_linear_segment(
     oldest: ObjectId,
     replay_order: &[ObjectId],
     opts: &RewriteOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     let committer_line = opts.committer_line()?;
     if replay_order.is_empty() {
         return Ok(RewritePlan {
@@ -728,7 +733,7 @@ pub(crate) fn plan_replay_linear_segment(
     if matches!(opts.scope, RefScope::Head) {
         let head_oid = repo.head_commit()?;
         if !is_ancestor(repo, oldest, head_oid).map_err(library_err)? {
-            return Err(HistoryError::NotInHistory { commit: oldest });
+            return Err(HistoryError::NotInHistory { commit: oldest }.into());
         }
     }
 
@@ -739,7 +744,7 @@ pub(crate) fn plan_replay_linear_segment(
                 continue;
             }
             if main_line.contains(tip) {
-                return Err(HistoryError::DivergentBranch { name: name.clone() });
+                return Err(HistoryError::DivergentBranch { name: name.clone() }.into());
             }
         }
     }
@@ -747,7 +752,7 @@ pub(crate) fn plan_replay_linear_segment(
     for &oid in &commits_to_replay {
         let old = load_commit(repo, oid)?;
         if old.parents.len() > 1 {
-            return Err(HistoryError::MergeCommitInReplay { commit: oid });
+            return Err(HistoryError::MergeCommitInReplay { commit: oid }.into());
         }
     }
 
@@ -788,7 +793,7 @@ pub(crate) fn plan_replay_linear_segment(
                 reused: false,
             })
         })
-        .collect::<Result<Vec<_>, HistoryError>>()?;
+        .collect::<crate::error::Result<Vec<_>>>()?;
 
     let replay_tip = *replay_order
         .last()
@@ -820,31 +825,23 @@ fn validate_replay_order_segment(
     repo: &Repository,
     oldest: ObjectId,
     replay_order: &[ObjectId],
-) -> Result<(Vec<ObjectId>, ObjectId), HistoryError> {
+) -> crate::error::Result<(Vec<ObjectId>, ObjectId)> {
     if replay_order.is_empty() {
-        return Err(HistoryError::Planning(PlanningError::ReplayOrderEmpty));
+        return Err(HistoryError::Planning(PlanningError::ReplayOrderEmpty).into());
     }
     let set: HashSet<ObjectId> = replay_order.iter().copied().collect();
     if set.len() != replay_order.len() {
-        return Err(HistoryError::Planning(
-            PlanningError::ReplayOrderDuplicateCommit,
-        ));
+        return Err(HistoryError::Planning(PlanningError::ReplayOrderDuplicateCommit).into());
     }
     let segment_tip = segment_tip_in_replay_order(repo, replay_order)?;
     let Some(canonical) = first_parent_segment_between(repo, oldest, segment_tip)? else {
-        return Err(HistoryError::Planning(
-            PlanningError::ReplayOrderNotFirstParentSegment,
-        ));
+        return Err(HistoryError::Planning(PlanningError::ReplayOrderNotFirstParentSegment).into());
     };
     if canonical.first() != Some(&oldest) {
-        return Err(HistoryError::Planning(
-            PlanningError::OldestDoesNotStartReplaySegment,
-        ));
+        return Err(HistoryError::Planning(PlanningError::OldestDoesNotStartReplaySegment).into());
     }
     if canonical.iter().copied().collect::<HashSet<_>>() != set {
-        return Err(HistoryError::Planning(
-            PlanningError::ReplayOrderWrongSegmentCoverage,
-        ));
+        return Err(HistoryError::Planning(PlanningError::ReplayOrderWrongSegmentCoverage).into());
     }
     Ok((canonical, segment_tip))
 }
@@ -852,7 +849,7 @@ fn validate_replay_order_segment(
 fn segment_tip_in_replay_order(
     repo: &Repository,
     replay_order: &[ObjectId],
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let set: HashSet<ObjectId> = replay_order.iter().copied().collect();
     let mut tips = Vec::new();
     for &oid in replay_order {
@@ -868,15 +865,11 @@ fn segment_tip_in_replay_order(
         }
     }
     if tips.len() != 1 {
-        return Err(HistoryError::Planning(
-            PlanningError::ReplayOrderMultipleTips,
-        ));
+        return Err(HistoryError::Planning(PlanningError::ReplayOrderMultipleTips).into());
     }
     let tip = tips[0];
     if !set.contains(&tip) {
-        return Err(HistoryError::Planning(
-            PlanningError::ReplaySegmentTipMissingFromOrder,
-        ));
+        return Err(HistoryError::Planning(PlanningError::ReplaySegmentTipMissingFromOrder).into());
     }
     Ok(tip)
 }
@@ -886,7 +879,7 @@ fn first_parent_segment_between(
     repo: &Repository,
     oldest: ObjectId,
     tip: ObjectId,
-) -> Result<Option<Vec<ObjectId>>, HistoryError> {
+) -> crate::error::Result<Option<Vec<ObjectId>>> {
     let mut newest_first = Vec::new();
     let mut current = Some(tip);
     while let Some(oid) = current {
@@ -926,11 +919,11 @@ fn plan_ref_updates_reordered(
     updates
 }
 
-fn library_err(err: Error) -> HistoryError {
+fn library_err(err: Error) -> crate::error::Error {
     if let Error::History(inner) = err {
-        return inner;
+        return crate::error::Error::from(inner);
     }
-    engine_err(err)
+    err
 }
 
 fn oldest_from_resume_seed(
@@ -943,7 +936,7 @@ fn oldest_from_resume_seed(
         .or_else(|| mapping.keys().next().copied())
 }
 
-fn oldest_edited_commit(repo: &Repository, edits: &HistoryEdits) -> Result<ObjectId, HistoryError> {
+fn oldest_edited_commit(repo: &Repository, edits: &HistoryEdits) -> crate::error::Result<ObjectId> {
     let keys: Vec<ObjectId> = edits.keys().copied().collect();
     for &candidate in &keys {
         let mut is_oldest = true;
@@ -965,14 +958,14 @@ fn oldest_edited_commit(repo: &Repository, edits: &HistoryEdits) -> Result<Objec
         .next()
         .copied()
         .unwrap_or_else(|| ObjectId::null(repo.odb().hash_algo()));
-    Err(HistoryError::NotInHistory { commit: fallback })
+    Err(HistoryError::NotInHistory { commit: fallback }.into())
 }
 
 pub(crate) fn collect_scoped_refs(
     repo: &Repository,
     opts: &RewriteOptions,
     oldest: ObjectId,
-) -> Result<Vec<(String, ObjectId)>, HistoryError> {
+) -> crate::error::Result<Vec<(String, ObjectId)>> {
     let head = resolve_head_for_repository(repo).map_err(library_err)?;
     let mut out = Vec::new();
 
@@ -980,21 +973,21 @@ pub(crate) fn collect_scoped_refs(
         RefScope::Head => match head {
             crate::state::HeadState::Branch { refname, oid, .. } => {
                 let Some(oid) = oid else {
-                    return Err(HistoryError::NotInHistory { commit: oldest });
+                    return Err(HistoryError::NotInHistory { commit: oldest }.into());
                 };
                 if !is_ancestor(repo, oldest, oid).map_err(library_err)? {
-                    return Err(HistoryError::NotInHistory { commit: oldest });
+                    return Err(HistoryError::NotInHistory { commit: oldest }.into());
                 }
                 out.push((refname, oid));
             }
             crate::state::HeadState::Detached { oid } => {
                 if !is_ancestor(repo, oldest, oid).map_err(library_err)? {
-                    return Err(HistoryError::NotInHistory { commit: oldest });
+                    return Err(HistoryError::NotInHistory { commit: oldest }.into());
                 }
                 out.push(("HEAD".to_owned(), oid));
             }
             crate::state::HeadState::Invalid => {
-                return Err(HistoryError::NotInHistory { commit: oldest });
+                return Err(HistoryError::NotInHistory { commit: oldest }.into());
             }
         },
         RefScope::Branches => {
@@ -1025,7 +1018,7 @@ pub(crate) fn collect_scoped_refs(
     }
 
     if out.is_empty() {
-        return Err(HistoryError::NotInHistory { commit: oldest });
+        return Err(HistoryError::NotInHistory { commit: oldest }.into());
     }
     Ok(out)
 }
@@ -1033,7 +1026,7 @@ pub(crate) fn collect_scoped_refs(
 fn ensure_branches_not_checked_out_elsewhere(
     repo: &Repository,
     scoped_refs: &[(String, ObjectId)],
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     let here = worktree_admin_dir(repo);
     for (name, _) in scoped_refs {
         let short = name.strip_prefix("refs/heads/").unwrap_or(name.as_str());
@@ -1046,7 +1039,8 @@ fn ensure_branches_not_checked_out_elsewhere(
             return Err(HistoryError::BranchCheckedOutElsewhere {
                 name: name.clone(),
                 worktree: crate::git_path::path_for_error_message(&found.worktree_path),
-            });
+            }
+            .into());
         }
     }
     Ok(())
@@ -1055,11 +1049,11 @@ fn ensure_branches_not_checked_out_elsewhere(
 pub(crate) fn commit_parents(
     repo: &Repository,
     oid: ObjectId,
-) -> Result<Vec<ObjectId>, HistoryError> {
+) -> crate::error::Result<Vec<ObjectId>> {
     Ok(load_commit(repo, oid)?.parents)
 }
 
-fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
+fn load_commit(repo: &Repository, oid: ObjectId) -> crate::error::Result<CommitData> {
     repo.odb().read_commit(&oid).map_err(library_err)
 }
 
@@ -1067,7 +1061,7 @@ fn mapped_first_parent(
     mapping: &HashMap<ObjectId, ObjectId>,
     old: &CommitData,
     commit: ObjectId,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let parent = *old
         .parents
         .first()
@@ -1086,7 +1080,7 @@ fn replay_commit_descendant(
     merge_favor: MergeFavor,
     opts: &RewriteOptions,
     replay_session: &mut ReplayMergeSession,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     if old.parents.len() > 1 {
         return replay_merge_descendant(
             repo,
@@ -1129,7 +1123,7 @@ pub(crate) fn replay_commit_onto_mapping(
     mapping: &HashMap<ObjectId, ObjectId>,
     commit: ObjectId,
     opts: &RewriteOptions,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let change_ids = ChangeIdWriteContext::from_repo(repo)?;
     let old = load_commit(repo, commit)?;
     let mut replay_session = ReplayMergeSession::default();
@@ -1158,7 +1152,7 @@ pub(crate) fn write_resolved_replay(
     tree: ObjectId,
     parent: ObjectId,
     opts: &RewriteOptions,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let change_ids = ChangeIdWriteContext::from_repo(repo)?;
     let old = load_commit(repo, template)?;
     let committer = if opts.preserve_committer {
@@ -1191,7 +1185,7 @@ fn replay_descendant(
     merge_favor: MergeFavor,
     opts: &RewriteOptions,
     replay_session: &mut ReplayMergeSession,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let committer_line = opts.committer_line()?;
     let (_, new_parent) = replay_parent_pair(repo, old, mapping, extra_parent)?;
     replay_edited_commit(
@@ -1221,7 +1215,7 @@ fn replay_merge_descendant(
     opts: &RewriteOptions,
     parent_list_override: Option<&[ObjectId]>,
     replay_session: &mut ReplayMergeSession,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let committer_line = opts.committer_line()?;
     let parent_list = parent_list_override
         .map(<[_]>::to_vec)
@@ -1257,7 +1251,7 @@ fn replay_merge_descendant(
 
     if old.tree != old_parent_tree && result_tree == new_parent_tree {
         return match opts.empty {
-            EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }),
+            EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }.into()),
             EmptyPolicy::Drop => Ok(new_first_parent),
             EmptyPolicy::Keep => write_rewritten_commit(
                 repo,
@@ -1313,7 +1307,7 @@ fn replay_stop_parent(
     old_oid: ObjectId,
     insert_parent: Option<ObjectId>,
     mapping: &HashMap<ObjectId, ObjectId>,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let parent_list = match edit {
         Some(CommitEdit::Reparent { parent }) => reparent_parent_list(old, *parent, mapping),
         Some(CommitEdit::Rewrite {
@@ -1353,7 +1347,9 @@ fn replay_stop_parent(
     parent_list
         .first()
         .copied()
-        .ok_or(HistoryError::RootCommit { commit: old_oid })
+        .ok_or(crate::error::Error::from(HistoryError::RootCommit {
+            commit: old_oid,
+        }))
 }
 
 fn reparent_parent_list(
@@ -1389,11 +1385,9 @@ fn replay_merge_tree(
     new_parents: &[ObjectId],
     merge_favor: MergeFavor,
     replay_session: &mut ReplayMergeSession,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     if old.parents.len() != new_parents.len() {
-        return Err(HistoryError::Planning(
-            PlanningError::MergeReplayParentCountMismatch,
-        ));
+        return Err(HistoryError::Planning(PlanningError::MergeReplayParentCountMismatch).into());
     }
 
     let labels = replay_conflict_labels(old_oid, old);
@@ -1425,7 +1419,7 @@ pub(crate) fn write_rebase_staged_resolution(
     stopped_commit: ObjectId,
     tree: ObjectId,
     parents: &[ObjectId],
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let old = load_commit(repo, stopped_commit)?;
     let change_ids = ChangeIdWriteContext::from_repo(repo)?;
     let committer = opts.committer_line()?;
@@ -1461,7 +1455,7 @@ fn write_replacement_commit(
     committer: &str,
     message: &str,
     split_rest_commit: bool,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let empty = empty_tree_oid(repo)?;
     let old_parent = old.parents.first().copied().unwrap_or(empty);
     let new_parent = parent_list.first().copied().unwrap_or(empty);
@@ -1478,7 +1472,7 @@ fn write_replacement_commit(
 
     if !split_rest_commit && old.tree != old_parent_tree && result_tree == new_parent_tree {
         return match opts.empty {
-            EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }),
+            EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }.into()),
             EmptyPolicy::Drop => Ok(new_parent),
             EmptyPolicy::Keep => write_rewritten_commit(
                 repo,
@@ -1523,7 +1517,7 @@ fn replay_edited_commit(
     merge_favor: MergeFavor,
     opts: &RewriteOptions,
     replay_session: &mut ReplayMergeSession,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let committer = if opts.preserve_committer {
         old.committer.as_str()
     } else {
@@ -1572,7 +1566,7 @@ fn replay_parent_pair(
     old: &CommitData,
     mapping: &HashMap<ObjectId, ObjectId>,
     extra_parent: Option<ObjectId>,
-) -> Result<(ObjectId, ObjectId), HistoryError> {
+) -> crate::error::Result<(ObjectId, ObjectId)> {
     let empty = empty_tree_oid(repo)?;
     if old.parents.is_empty() {
         let new_parent = extra_parent.unwrap_or(empty);
@@ -1584,7 +1578,7 @@ fn replay_parent_pair(
     Ok((old_parent, new_parent))
 }
 
-fn empty_tree_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
+fn empty_tree_oid(repo: &Repository) -> crate::error::Result<ObjectId> {
     repo.odb().empty_tree_oid().map_err(library_err)
 }
 
@@ -1596,7 +1590,7 @@ fn compute_replayed_tree(
     new_parent_tree: ObjectId,
     merge_favor: MergeFavor,
     replay_session: &mut ReplayMergeSession,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     transplant_tree_across_parent_move(
         repo,
         old_oid,
@@ -1621,27 +1615,25 @@ fn transplant_tree_across_parent_move(
     new_parent_tree: ObjectId,
     merge_favor: MergeFavor,
     replay_session: &mut ReplayMergeSession,
-) -> Result<ObjectId, HistoryError> {
-    replay_session
-        .transplant_tree(
-            repo,
-            commit,
-            labels,
-            subject_tree,
-            old_parent_tree,
-            new_parent_tree,
-            merge_favor,
-            |commit, merge| {
-                let err = conflict_error(repo, commit, &merge);
-                if REPLAY_STOP_COMMIT.with(|c| c.get()) == Some(commit) {
-                    if let Some(replayed_parent) = REPLAY_STOP_PARENT.with(|p| p.get()) {
-                        note_resumable_conflict(commit, replayed_parent, merge);
-                    }
+) -> crate::error::Result<ObjectId> {
+    replay_session.transplant_tree(
+        repo,
+        commit,
+        labels,
+        subject_tree,
+        old_parent_tree,
+        new_parent_tree,
+        merge_favor,
+        |commit, merge| {
+            let err = conflict_error(repo, commit, &merge);
+            if REPLAY_STOP_COMMIT.with(|c| c.get()) == Some(commit) {
+                if let Some(replayed_parent) = REPLAY_STOP_PARENT.with(|p| p.get()) {
+                    note_resumable_conflict(commit, replayed_parent, merge);
                 }
-                Err(Error::from(err))
-            },
-        )
-        .map_err(HistoryError::from)
+            }
+            Err(err)
+        },
+    )
 }
 
 /// [`HistoryError::Conflict`] for `commit` from a conflicted tree merge, with no refs attributed.
@@ -1649,32 +1641,32 @@ pub(crate) fn conflict_error(
     repo: &Repository,
     commit: ObjectId,
     merge: &TreeMergeOutput,
-) -> HistoryError {
+) -> crate::error::Error {
     // The conflict is the error worth reporting; an unreadable subject only leaves it blank.
     let subject = load_commit(repo, commit)
         .map(|c| commit_message_subject_line(&c.message))
         .unwrap_or_default();
-    HistoryError::Conflict {
+    crate::error::Error::from(HistoryError::Conflict {
         commit,
         subject,
         conflicts: Box::new(crate::operation::conflicts_from_tree_merge(merge)),
         refs: Vec::new(),
-    }
+    })
 }
 
 /// Names the scoped branches containing a conflicting commit that is not on `HEAD`'s history,
 /// so the failure points at the branch that could not be moved. Other errors pass through.
 fn attribute_conflict_to_refs(
     repo: &Repository,
-    err: HistoryError,
+    err: crate::error::Error,
     scoped_refs: &[(String, ObjectId)],
-) -> HistoryError {
-    let HistoryError::Conflict {
+) -> crate::error::Error {
+    let crate::error::Error::History(HistoryError::Conflict {
         commit,
         subject,
         conflicts,
         refs: _,
-    } = err
+    }) = err
     else {
         return err;
     };
@@ -1693,15 +1685,15 @@ fn attribute_conflict_to_refs(
     };
     refs.sort();
     refs.dedup();
-    HistoryError::Conflict {
+    crate::error::Error::from(HistoryError::Conflict {
         commit,
         subject,
         conflicts,
         refs,
-    }
+    })
 }
 
-fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryError> {
+fn commit_tree(repo: &Repository, commit: ObjectId) -> crate::error::Result<ObjectId> {
     repo.odb().commit_tree(&commit).map_err(library_err)
 }
 
@@ -1716,7 +1708,7 @@ fn write_new_commit(
     committer: &str,
     message: &str,
     extra_headers: &[u8],
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let mut data = CommitData {
         tree,
         parents: parents.to_vec(),
@@ -1729,11 +1721,11 @@ fn write_new_commit(
         raw_message: None,
         extra_headers: extra_headers.to_vec(),
     };
-    if let Some(id) = change_ids.policy.id_for_new_commit(
-        &data,
-        change_ids.hash_algo,
-        change_ids.generator.as_ref(),
-    )? {
+    if let Some(id) = change_ids
+        .policy
+        .id_for_new_commit(&data, change_ids.hash_algo, change_ids.generator.as_ref())
+        .map_err(HistoryError::ChangeId)?
+    {
         set_change_id(&mut data, &id);
     }
     write_commit_data(repo, opts, &data)
@@ -1753,7 +1745,7 @@ fn write_rewritten_commit(
     author: &str,
     committer: &str,
     message: &str,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let author_unchanged = author == template.author;
     let committer_unchanged = committer == template.committer;
     let message_unchanged = message == template.message;
@@ -1800,7 +1792,7 @@ fn preserve_logical_change_id(
     template: &CommitData,
     template_oid: ObjectId,
     data: &mut CommitData,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     let config = repo.config().snapshot().map_err(library_err)?;
     if !ChangeIdPolicy::from_config(config.as_ref()).enabled() {
         return Ok(());
@@ -1814,7 +1806,7 @@ fn write_commit_data(
     repo: &Repository,
     opts: &RewriteOptions,
     data: &CommitData,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let bytes = if opts.sign {
         prepare_commit_bytes(repo, data, None).map_err(signing_err)?
     } else {
@@ -1825,25 +1817,25 @@ fn write_commit_data(
         .map_err(library_err)
 }
 
-fn signing_err(err: Error) -> HistoryError {
+fn signing_err(err: Error) -> crate::error::Error {
     match err {
         Error::Commit(CommitError::Signing {
             program,
             status,
             stderr,
-        }) => HistoryError::Signing {
+        }) => crate::error::Error::from(HistoryError::Signing {
             program,
             status,
             stderr,
-        },
-        other => HistoryError::Engine(Box::new(error_to_engine(other))),
+        }),
+        other => other,
     }
 }
 
 fn logical_change_id_for_commit(
     repo: &Repository,
     oid: ObjectId,
-) -> Result<Option<ChangeId>, HistoryError> {
+) -> crate::error::Result<Option<ChangeId>> {
     crate::change_id::logical_change_id_for_commit(repo, oid).map_err(library_err)
 }
 
@@ -1873,7 +1865,7 @@ fn resolve_mapped_tip(tip: ObjectId, mapping: &HashMap<ObjectId, ObjectId>) -> O
 pub(crate) fn head_effect(
     repo: &Repository,
     mapping: &HashMap<ObjectId, ObjectId>,
-) -> Result<HeadEffect, HistoryError> {
+) -> crate::error::Result<HeadEffect> {
     let head = resolve_head_for_repository(repo).map_err(library_err)?;
     let old_oid = match head {
         crate::state::HeadState::Branch { oid, .. } => oid,
@@ -1912,18 +1904,18 @@ pub(crate) fn plan_fold_range_at_head(
     tip_tree: ObjectId,
     message: &str,
     opts: &RewriteOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     if !matches!(opts.scope, RefScope::Head) {
-        return Err(HistoryError::Planning(PlanningError::FoldRequiresHeadScope));
+        return Err(HistoryError::Planning(PlanningError::FoldRequiresHeadScope).into());
     }
     let change_ids = ChangeIdWriteContext::from_repo(repo)?;
     let head = repo.head_commit()?;
     if tip != head {
-        return Err(HistoryError::Planning(PlanningError::FoldRequiresTipIsHead));
+        return Err(HistoryError::Planning(PlanningError::FoldRequiresTipIsHead).into());
     }
     let oldest_commit = load_commit(repo, oldest)?;
     if oldest_commit.parents.is_empty() {
-        return Err(HistoryError::RootCommit { commit: oldest });
+        return Err(HistoryError::RootCommit { commit: oldest }.into());
     }
     let committer_line = opts.committer_line()?;
     let committer = if opts.preserve_committer {
@@ -2045,6 +2037,54 @@ mod merge_call_tests {
         test_merge_tree_call_count, test_reset_merge_tree_call_count,
         test_reset_upstream_delta_scan_count, test_upstream_delta_scan_count,
     };
+
+    #[test]
+    fn new_commit_change_id_failure_is_a_history_error() {
+        use crate::change_id::{ChangeIdError, ChangeIdGenerator};
+
+        struct FailingGenerator;
+        impl ChangeIdGenerator for FailingGenerator {
+            fn random_bytes(&self) -> std::result::Result<[u8; 16], ChangeIdError> {
+                Err(ChangeIdError::HashCollision)
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let repo = Repository::open(
+            &dir.path().join(".git"),
+            &crate::config::environment::RepositoryOptions::empty()
+                .with_work_tree(dir.path())
+                .with_change_id_generator(Arc::new(FailingGenerator)),
+        )
+        .expect("open");
+        let id = ident(1);
+        let tree = blob_tree(&repo, "f.txt", b"a\n").expect("tree");
+        let change_ids = ChangeIdWriteContext::from_repo(&repo).expect("change ids");
+        let opts = RewriteOptions {
+            scope: RefScope::Branches,
+            empty: EmptyPolicy::Drop,
+            committer: ident(0).parse().expect("signature"),
+            preserve_committer: false,
+            sign: false,
+        };
+        let err = write_new_commit(&repo, &opts, &change_ids, tree, &[], &id, &id, "a\n", &[])
+            .expect_err("a failing generator must stop the commit");
+        assert!(
+            matches!(
+                err,
+                Error::History(HistoryError::ChangeId(ChangeIdError::HashCollision))
+            ),
+            "{err:?}"
+        );
+        assert_eq!(err.area(), "history");
+    }
 
     #[test]
     fn reword_parent_only_replay_skips_merge_tree() {

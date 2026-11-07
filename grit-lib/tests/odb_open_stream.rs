@@ -1,6 +1,7 @@
 //! `Odb::open_stream` error propagation (corrupt local loose, alternates fallback).
 
 use grit_lib::error::Error;
+use grit_lib::error::ObjectError;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectKind;
 use std::fs;
@@ -27,5 +28,8 @@ fn open_stream_corrupt_local_loose_returns_error_not_none() {
     }
 
     let result = odb.open_stream(&oid);
-    assert!(matches!(result, Err(Error::CorruptLooseObject { .. })));
+    assert!(matches!(
+        result,
+        Err(Error::Object(ObjectError::CorruptLoose { .. }))
+    ));
 }

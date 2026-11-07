@@ -52,7 +52,7 @@ fn apply(
     repo: &Repository,
     plan: &RewritePlan,
     opts: &ApplyOptions,
-) -> Result<AppliedRewrite, HistoryError> {
+) -> grit_lib::error::Result<AppliedRewrite> {
     apply_rewrite(repo, plan, opts, &mut NullProgress, &CancelToken::never())
 }
 

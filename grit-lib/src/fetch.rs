@@ -6,6 +6,7 @@
 //! over streaming transports runs `ls-refs` before `fetch` when the connection
 //! advertises no refs on connect.
 
+use crate::error::ObjectError;
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -229,11 +230,15 @@ fn read_final_ack(reader: &mut dyn Read) -> Result<()> {
     let mut reader = reader;
     loop {
         match pkt_line::read_packet(&mut reader)? {
-            None => return Err(Error::CorruptObject("unexpected EOF after done".to_owned())),
+            None => {
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "unexpected EOF after done".to_owned(),
+                }))
+            }
             Some(pkt_line::Packet::Flush) => {
-                return Err(Error::CorruptObject(
-                    "unexpected flush after done".to_owned(),
-                ))
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "unexpected flush after done".to_owned(),
+                }))
             }
             Some(pkt_line::Packet::Data(ln)) => {
                 let ln = ln.trim_end();
@@ -1369,9 +1374,9 @@ pub(crate) fn read_v2_acknowledgments(
         // would be lost; for the streaming fetch we only reach here after a
         // first round of haves, where servers always emit `acknowledgments`
         // first. Reaching a different header is therefore unexpected.
-        return Err(Error::CorruptObject(format!(
-            "unexpected v2 fetch section before acknowledgments: {hdr}"
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("unexpected v2 fetch section before acknowledgments: {hdr}"),
+        }));
     }
     let mut ready = false;
     let mut common = Vec::new();
@@ -1389,7 +1394,9 @@ pub(crate) fn read_v2_acknowledgments(
                 }
                 if let Some(hex) = ln.strip_prefix("ACK ") {
                     let oid = ObjectId::from_hex(hex.trim()).map_err(|_| {
-                        Error::CorruptObject(format!("unexpected acknowledgment line: '{ln}'"))
+                        Error::Object(ObjectError::Corrupt {
+                            detail: format!("unexpected acknowledgment line: '{ln}'"),
+                        })
                     })?;
                     common.push(oid);
                     continue;
@@ -1398,9 +1405,9 @@ pub(crate) fn read_v2_acknowledgments(
                     ready = true;
                     continue;
                 }
-                return Err(Error::CorruptObject(format!(
-                    "unexpected acknowledgment line: '{ln}'"
-                )));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: format!("unexpected acknowledgment line: '{ln}'"),
+                }));
             }
         }
     }
@@ -1459,9 +1466,9 @@ pub(crate) fn read_v2_fetch_pack_response(
                 }
                 Some(pkt_line::Packet::Delim) => continue,
                 Some(other) => {
-                    return Err(Error::CorruptObject(format!(
-                        "unexpected v2 fetch response: {other:?}"
-                    )))
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: format!("unexpected v2 fetch response: {other:?}"),
+                    }))
                 }
             }
         };
@@ -1498,9 +1505,9 @@ pub(crate) fn read_v2_fetch_pack_response(
                 // `wanted-refs` payload line (some servers omit the section header).
             }
             other => {
-                return Err(Error::CorruptObject(format!(
-                    "unexpected v2 fetch section: {other}"
-                )))
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: format!("unexpected v2 fetch section: {other}"),
+                }))
             }
         }
     }
@@ -2369,7 +2376,8 @@ pub(crate) fn fetch_operation_identity(
         .filter(|e| !e.trim().is_empty())
         .unwrap_or_else(|| "unknown".to_owned());
     let now = time::OffsetDateTime::now_utc();
-    crate::ident::Signature::new(name, email, now).map_err(crate::error::Error::InvalidSignature)
+    crate::ident::Signature::new(name, email, now)
+        .map_err(|e| crate::error::Error::Object(ObjectError::InvalidSignature(e)))
 }
 
 /// Ensure `refs/remotes/<remote>/HEAD` exists in `local`'s ref store when the remote default
@@ -2430,7 +2438,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
     let null = ObjectId::null(local.odb().hash_algo());
     log.identity
         .validate()
-        .map_err(crate::error::Error::InvalidSignature)?;
+        .map_err(|e| crate::error::Error::Object(ObjectError::InvalidSignature(e)))?;
     let identity = crate::refs::store::format_reflog_identity(
         &log.identity.reflog_name_email(),
         log.identity.time,

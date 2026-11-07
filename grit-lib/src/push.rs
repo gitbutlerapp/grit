@@ -24,6 +24,8 @@
 //! zero/null OID, the empty-pack trailer, and the advertisement parsing are all
 //! hash-width aware.
 
+use crate::error::ObjectError;
+use crate::error::RefError;
 use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, ErrorKind, Read, Write};
 
@@ -926,16 +928,20 @@ fn decide_push_wire(
     }
 
     let Some(src) = spec.src else {
-        return Err(Error::InvalidRef(format!(
-            "push to '{}' has no source object and is not a deletion",
-            spec.dst
-        )));
+        return Err(Error::Ref(RefError::Invalid {
+            detail: format!(
+                "push to '{}' has no source object and is not a deletion",
+                spec.dst
+            ),
+        }));
     };
     if !local_odb.contains(&src)? {
-        return Err(Error::ObjectNotFound(format!(
-            "source object {src} for '{}' is missing from the local object store",
-            spec.dst
-        )));
+        return Err(Error::Object(ObjectError::NotFound {
+            name: format!(
+                "source object {src} for '{}' is missing from the local object store",
+                spec.dst
+            ),
+        }));
     }
 
     // New ref: nothing on the remote yet — always allowed.
@@ -1108,9 +1114,9 @@ pub(crate) fn read_receive_pack_response(
         }
     }
     if !receive_pack_response_complete(&raw, sent_refs, server_sideband)? {
-        return Err(Error::CorruptObject(
-            "receive-pack response ended before a complete report-status".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "receive-pack response ended before a complete report-status".to_owned(),
+        }));
     }
     Ok(raw)
 }

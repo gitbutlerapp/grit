@@ -1,6 +1,8 @@
 //! Move `HEAD` and optionally the index and working tree to a target commit.
 
 use crate::diff::DiffEntry;
+use crate::error::ObjectError;
+use crate::error::RefError;
 use crate::error::{Error, Result};
 use crate::ident::Signature;
 use crate::index::IndexError;
@@ -18,6 +20,7 @@ use crate::repo::Repository;
 use crate::state::{
     clear_merge_state, clear_replay_state, resolve_head_for_repository, write_orig_head, HeadState,
 };
+use crate::worktree::WorktreeError;
 
 pub use crate::porcelain::orphans::{OrphanedCommitSummary, DEFAULT_ORPHAN_LIMIT};
 
@@ -153,7 +156,7 @@ pub struct ResetOutcome {
 ///
 /// # Errors
 ///
-/// Same validation failures as [`reset_to_commit`], including [`Error::InvalidSignature`]
+/// Same validation failures as [`reset_to_commit`], including [`crate::error::ObjectError::InvalidSignature`]
 /// for an invalid [`ResetOptions::identity`], even when the target is already `HEAD`
 /// or reflog updates are disabled. No repository state is changed.
 pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPreview> {
@@ -176,7 +179,7 @@ pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPrev
 /// refs, index and worktree unchanged. Returns an error when there is no current commit,
 /// the work tree is required but missing (hard/keep reset), local edits block keep reset,
 /// or ref/index/checkout I/O fails.
-/// An invalid [`ResetOptions::identity`] returns [`Error::InvalidSignature`] before
+/// An invalid [`ResetOptions::identity`] returns [`crate::error::ObjectError::InvalidSignature`] before
 /// changing HEAD, branch refs, index, worktree, reflogs, or operation state (including
 /// merge autostashes). This also applies to dry runs, resets to the current HEAD,
 /// and resets with reflog updates disabled. Later I/O failures may leave partial updates.
@@ -239,9 +242,14 @@ fn plan_reset(
     opts: &ResetOptions,
     with_worktree_preview: bool,
 ) -> Result<(ObjectId, HeadState, ResetPreview)> {
-    opts.identity.validate().map_err(Error::InvalidSignature)?;
+    opts.identity
+        .validate()
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     let head = resolve_head_for_repository(repo)?;
-    let previous = head.oid().copied().ok_or(Error::UnbornHead)?;
+    let previous = head
+        .oid()
+        .copied()
+        .ok_or(Error::Ref(RefError::UnbornHead))?;
 
     ensure_reset_worktree_mode(repo, opts.mode)?;
     ensure_keep_index_merged(repo, opts.mode)?;
@@ -328,12 +336,12 @@ fn ensure_reset_worktree_mode(repo: &Repository, mode: ResetMode) -> Result<()> 
         return Ok(());
     }
     match mode {
-        ResetMode::Hard => Err(Error::PathError(
-            "cannot hard reset a bare repository's working tree".into(),
-        )),
-        ResetMode::Keep => Err(Error::PathError(
-            "cannot keep-reset a bare repository's working tree".into(),
-        )),
+        ResetMode::Hard => Err(Error::Worktree(WorktreeError::Path {
+            detail: "cannot hard reset a bare repository's working tree".into(),
+        })),
+        ResetMode::Keep => Err(Error::Worktree(WorktreeError::Path {
+            detail: "cannot keep-reset a bare repository's working tree".into(),
+        })),
         _ => Ok(()),
     }
 }
@@ -392,10 +400,12 @@ fn commit_tree_oid(repo: &Repository, commit: &ObjectId) -> Result<ObjectId> {
     let obj = repo.odb().read(commit)?;
     match obj.kind {
         ObjectKind::Commit => Ok(parse_commit(&obj.data)?.tree),
-        ObjectKind::Tree | ObjectKind::Blob => Err(Error::InvalidRef(format!(
-            "object {commit} does not name a commit"
-        ))),
-        ObjectKind::Tag => Err(Error::InvalidRef("unexpected tag after peel".into())),
+        ObjectKind::Tree | ObjectKind::Blob => Err(Error::Ref(RefError::Invalid {
+            detail: format!("object {commit} does not name a commit"),
+        })),
+        ObjectKind::Tag => Err(Error::Ref(RefError::Invalid {
+            detail: "unexpected tag after peel".into(),
+        })),
     }
 }
 
@@ -422,7 +432,7 @@ fn move_head_tip(
             (refname, names)
         }
         HeadState::Detached { .. } => ("HEAD", vec!["HEAD"]),
-        HeadState::Invalid => return Err(Error::InvalidHead),
+        HeadState::Invalid => return Err(Error::Ref(RefError::InvalidHead)),
     };
     refs::store_write_value_on_store(
         repo.ref_store(),
@@ -547,10 +557,12 @@ mod tests {
             let error = plan_reset(&repo, &opts, with_worktree_preview).unwrap_err();
             assert!(matches!(
                 error,
-                Error::InvalidSignature(crate::ident::SignatureError::ForbiddenCharacter {
-                    field: crate::ident::SignatureField::Email,
-                    ch: '\n',
-                })
+                Error::Object(ObjectError::InvalidSignature(
+                    crate::ident::SignatureError::ForbiddenCharacter {
+                        field: crate::ident::SignatureField::Email,
+                        ch: '\n',
+                    }
+                ))
             ));
         }
     }
@@ -618,7 +630,7 @@ mod tests {
         )
         .expect_err("tree");
         assert!(
-            matches!(err, Error::InvalidRef(ref msg) if msg.contains("does not name a commit")),
+            matches!(err, Error::Ref(RefError::Invalid { detail: ref msg }) if msg.contains("does not name a commit")),
             "unexpected: {err:?}"
         );
     }
@@ -1245,7 +1257,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .expect_err("bare");
-        assert!(matches!(err, Error::PathError(_)));
+        assert!(matches!(err, Error::Worktree(WorktreeError::Path { .. })));
         assert_eq!(
             refs::resolve_ref(&repo.git_dir(), "refs/heads/main").expect("ref"),
             c1
@@ -1525,7 +1537,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .expect_err("bare dry-run hard");
-        assert!(matches!(err, Error::PathError(_)));
+        assert!(matches!(err, Error::Worktree(WorktreeError::Path { .. })));
     }
 
     #[cfg_attr(

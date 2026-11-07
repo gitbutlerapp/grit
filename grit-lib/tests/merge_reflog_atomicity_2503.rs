@@ -1,5 +1,6 @@
 //! Merge branch moves must commit branch tip and reflogs atomically (issue #2503).
 
+use grit_lib::error::RefError;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -292,7 +293,7 @@ fn merge_ref_update_rolls_back_when_reflog_commit_fails() {
         &CancelToken::never(),
     )
     .expect_err("merge fails when reflog transaction cannot commit");
-    assert!(matches!(err, Error::RefStore(_)), "{err:?}");
+    assert!(matches!(err, Error::Ref(RefError::Store(_))), "{err:?}");
 
     assert_eq!(
         ref_store

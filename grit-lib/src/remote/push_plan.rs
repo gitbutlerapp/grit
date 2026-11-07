@@ -21,9 +21,7 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::push_report::PushRefResult;
 use crate::refs;
 use crate::refspec::{parse_push_refspec, RefspecItem};
-use crate::remote::{
-    HttpClientFactory, PreflightHttpClientFactory, Remote, RemoteError, RemoteRef,
-};
+use crate::remote::{HttpClientFactory, PreflightHttpClientFactory, Remote, RemoteRef};
 use crate::repo::Repository;
 use crate::repo_handles::has_remote_section;
 use crate::repo_handles::RepositoryRemotes;
@@ -134,6 +132,7 @@ pub struct PushPlanContext {
 
 /// Errors while planning a push (typed; no stringly matching in callers).
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PushPlanError {
     /// Detached `HEAD` with no refspec on the command line.
     #[error("HEAD is detached; specify a refspec (for example HEAD:refs/heads/<name>)")]
@@ -152,8 +151,11 @@ pub enum PushPlanError {
     #[error("no remote to push to")]
     NoRemote,
     /// Named remote is missing from config.
-    #[error("unknown remote '{0}'")]
-    UnknownRemote(String),
+    #[error("unknown remote '{name}'")]
+    UnknownRemote {
+        /// The remote name or URL as given.
+        name: String,
+    },
     /// Malformed refspec string.
     #[error("invalid refspec '{spec}': {reason}")]
     InvalidRefspec {
@@ -207,18 +209,9 @@ pub enum PushPlanError {
         /// Local branch short name.
         branch: String,
     },
-    /// Repository failure while planning the push.
-    #[error(transparent)]
-    Nested(#[from] Box<crate::error::Error>),
 }
 
-type PlanResult<T> = std::result::Result<T, PushPlanError>;
-
-impl From<crate::error::Error> for PushPlanError {
-    fn from(e: crate::error::Error) -> Self {
-        Self::Nested(Box::new(e))
-    }
-}
+type PlanResult<T> = crate::error::Result<T>;
 
 /// Parse `--force` / `--force-with-lease[=<rev>]` into [`ForceMode`].
 pub(crate) fn parse_force_mode(
@@ -260,7 +253,7 @@ pub(crate) fn resolve_push(
     request: &PushRequest,
     ctx: &PushPlanContext,
 ) -> PlanResult<ResolvedPush> {
-    let config = repo.config().snapshot().map_err(PushPlanError::from)?;
+    let config = repo.config().snapshot()?;
     if request.delete_refs || !request.delete.is_empty() {
         return resolve_delete_push(repo, config.as_ref(), request, ctx);
     }
@@ -324,7 +317,8 @@ fn resolve_all_branches_push(
     if specs.is_empty() {
         return Err(PushPlanError::SrcRefspecNoMatch {
             spec: "refs/heads/*".into(),
-        });
+        }
+        .into());
     }
     let branch_label = branch_label_from_specs(repo, &specs);
     let kind = if specs.len() == 1 {
@@ -354,7 +348,8 @@ fn resolve_mirror_push(
     if specs.is_empty() {
         return Err(PushPlanError::SrcRefspecNoMatch {
             spec: "refs/*".into(),
-        });
+        }
+        .into());
     }
     let local_dst: HashSet<String> = specs.iter().map(|s| s.dst.clone()).collect();
     append_mirror_prune_deletes(&mut specs, ctx, &local_dst);
@@ -707,7 +702,7 @@ fn tag_reachable_from_push_tips(
         if peeled == tip {
             return Ok(true);
         }
-        if is_ancestor(repo, peeled, tip).map_err(|e| PushPlanError::Nested(Box::new(e)))? {
+        if is_ancestor(repo, peeled, tip)? {
             return Ok(true);
         }
     }
@@ -724,10 +719,11 @@ fn resolve_delete_push(
     if let Some(spec) = names.iter().find(|name| name.contains(':')) {
         return Err(PushPlanError::DeleteNotPlainName {
             spec: (*spec).clone(),
-        });
+        }
+        .into());
     }
     if names.is_empty() {
-        return Err(PushPlanError::DeleteWithoutRefs);
+        return Err(PushPlanError::DeleteWithoutRefs.into());
     }
     let remote = configured_remote_for_push(repo, config, request.remote.as_deref())?;
     validate_remote(config, &remote)?;
@@ -756,10 +752,9 @@ fn resolve_tags_push(
 ) -> PlanResult<ResolvedPush> {
     let remote = configured_remote_for_push(repo, config, request.remote.as_deref())?;
     validate_remote(config, &remote)?;
-    let entries = refs::list_refs(repo.git_dir(), "refs/tags/")
-        .map_err(|e| PushPlanError::Nested(Box::new(e)))?;
+    let entries = refs::list_refs(repo.git_dir(), "refs/tags/")?;
     if entries.is_empty() {
-        return Err(PushPlanError::NoTags);
+        return Err(PushPlanError::NoTags.into());
     }
     let specs = entries
         .into_iter()
@@ -871,15 +866,15 @@ fn resolve_matching_default_push(
 }
 
 fn current_branch_oid(repo: &Repository) -> PlanResult<(String, ObjectId)> {
-    match resolve_head(repo.git_dir()).map_err(|e| PushPlanError::Nested(Box::new(e)))? {
+    match resolve_head(repo.git_dir())? {
         HeadState::Branch {
             short_name,
             oid: Some(oid),
             ..
         } => Ok((short_name, oid)),
-        HeadState::Branch { .. } => Err(PushPlanError::NoCommits),
-        HeadState::Detached { .. } => Err(PushPlanError::DetachedHeadNoRefspec),
-        HeadState::Invalid => Err(PushPlanError::InvalidHead),
+        HeadState::Branch { .. } => Err(PushPlanError::NoCommits.into()),
+        HeadState::Detached { .. } => Err(PushPlanError::DetachedHeadNoRefspec.into()),
+        HeadState::Invalid => Err(PushPlanError::InvalidHead.into()),
     }
 }
 
@@ -922,7 +917,7 @@ pub(crate) fn configured_remote_for_push(
         }
     }
     if !has_remote_section(config, DEFAULT_REMOTE) {
-        return Err(PushPlanError::NoRemote);
+        return Err(PushPlanError::NoRemote.into());
     }
     Ok(DEFAULT_REMOTE.to_owned())
 }
@@ -969,7 +964,10 @@ pub fn resolve_push_invocation(
         });
     }
     if !rest.is_empty() {
-        return Err(PushPlanError::UnknownRemote(first.clone()));
+        return Err(PushPlanError::UnknownRemote {
+            name: first.clone(),
+        }
+        .into());
     }
     Ok(PushInvocation {
         remote: None,
@@ -1014,8 +1012,8 @@ pub fn expand_repository_shorthand(
 ///
 /// # Errors
 ///
-/// [`RemoteError::NoUrl`] when `name` has no configured URL, or a URL parse error.
-pub fn open_push_destination(config: &ConfigSet, name: &str) -> Result<Remote, RemoteError> {
+/// [`RemoteError::NoUrl`](crate::remote::RemoteError::NoUrl) when `name` has no configured URL, or a URL parse error.
+pub fn open_push_destination(config: &ConfigSet, name: &str) -> crate::error::Result<Remote> {
     if looks_like_literal_remote(name) {
         Remote::from_url(name)
     } else {
@@ -1063,7 +1061,7 @@ pub(crate) fn load_push_plan_context(
     remote_override: Option<&str>,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> PlanResult<PushPlanContext> {
-    let config = repo.config().snapshot().map_err(PushPlanError::from)?;
+    let config = repo.config().snapshot()?;
     let remote = configured_remote_for_push(repo, config.as_ref(), remote_override)?;
     let Ok(handle) = open_push_destination(config.as_ref(), &remote) else {
         return Ok(PushPlanContext::default());
@@ -1098,7 +1096,10 @@ fn validate_remote(config: &ConfigSet, name: &str) -> PlanResult<()> {
         // Literal URL / path remotes are resolved by the transport layer.
         Ok(())
     } else {
-        Err(PushPlanError::UnknownRemote(name.to_owned()))
+        Err(PushPlanError::UnknownRemote {
+            name: name.to_owned(),
+        }
+        .into())
     }
 }
 
@@ -1122,16 +1123,18 @@ fn default_push_destination(
         .unwrap_or_else(|| "simple".to_owned());
 
     if push_default == "nothing" {
-        return Err(PushPlanError::PushDefaultNothing);
+        return Err(PushPlanError::PushDefaultNothing.into());
     }
 
     if push_default.as_str() == "upstream" {
         let merge = config
             .value(&format!("branch.{branch_short}.merge"))
             .filter(|m| m.starts_with("refs/"));
-        return merge.ok_or(PushPlanError::NoUpstreamForPushDefault {
-            branch: branch_short.to_owned(),
-        });
+        return merge.ok_or(crate::error::Error::from(
+            PushPlanError::NoUpstreamForPushDefault {
+                branch: branch_short.to_owned(),
+            },
+        ));
     }
 
     // `simple`, `current`, and unspecified: grit keeps the historical default of
@@ -1189,7 +1192,8 @@ fn resolve_shorthand_refspec(
         let Some(matched) = local.refname_match(spec) else {
             return Err(PushPlanError::SrcRefspecNoMatch {
                 spec: spec.to_owned(),
-            });
+            }
+            .into());
         };
         if let Some(mapped) = map_through_remote_push_refspec(config, remote, &matched.0) {
             let item = parse_push_refspec(&mapped).map_err(|e| PushPlanError::InvalidRefspec {
@@ -1216,7 +1220,8 @@ fn resolve_shorthand_refspec(
     }
     Err(PushPlanError::SrcRefspecAmbiguous {
         spec: spec.to_owned(),
-    })
+    }
+    .into())
 }
 
 fn map_through_remote_push_refspec(
@@ -1324,7 +1329,8 @@ fn resolve_parsed_refspec(
         if specs.is_empty() {
             return Err(PushPlanError::SrcRefspecNoMatch {
                 spec: item.src.clone().unwrap_or_default(),
-            });
+            }
+            .into());
         }
         return Ok(specs);
     }
@@ -1369,13 +1375,15 @@ fn resolve_parsed_refspec(
                 0 => {
                     return Err(PushPlanError::SrcRefspecNoMatch {
                         spec: src_name.to_owned(),
-                    });
+                    }
+                    .into());
                 }
                 1 => {
                     let Some((name, oid)) = local.refname_match(src_name) else {
                         return Err(PushPlanError::SrcRefspecNoMatch {
                             spec: src_name.to_owned(),
-                        });
+                        }
+                        .into());
                     };
                     let dst = resolve_dst_for_src(repo, item, &name, ctx)?;
                     return Ok(vec![push_spec(
@@ -1389,7 +1397,8 @@ fn resolve_parsed_refspec(
                 _ => {
                     return Err(PushPlanError::SrcRefspecAmbiguous {
                         spec: src_name.to_owned(),
-                    });
+                    }
+                    .into());
                 }
             },
         }
@@ -1454,7 +1463,8 @@ fn resolve_dst_for_src(
             return Err(PushPlanError::InvalidRefspec {
                 spec: String::new(),
                 reason: "empty destination".into(),
-            });
+            }
+            .into());
         }
         return resolve_dst_name(repo, dst, Some(src_full), ctx);
     }
@@ -1485,14 +1495,16 @@ fn resolve_dst_name(
                 return Err(PushPlanError::InvalidRefspec {
                     spec: dst.to_owned(),
                     reason: "remote ref match failed".into(),
-                });
+                }
+                .into());
             };
             return Ok(name);
         }
         _ => {
             return Err(PushPlanError::DstRefspecAmbiguous {
                 spec: dst.to_owned(),
-            });
+            }
+            .into());
         }
     }
     if let Some(src) = src_full {
@@ -1548,7 +1560,7 @@ fn apply_force_mode(
         }
         ForceMode::Lease(LeaseExpectation::Value(expected)) => {
             if specs.len() != 1 {
-                return Err(PushPlanError::LeaseValueRequiresSingleRef);
+                return Err(PushPlanError::LeaseValueRequiresSingleRef.into());
             }
             for spec in specs.iter_mut() {
                 spec.force = true;
@@ -1598,9 +1610,11 @@ fn push_spec(
 }
 
 fn resolve_src_ref(repo: &Repository, spec: &str) -> PlanResult<ObjectId> {
-    resolve_revision_for_verify(repo, spec).map_err(|_| PushPlanError::UnknownRevision {
-        spec: spec.to_owned(),
-    })
+    Ok(
+        resolve_revision_for_verify(repo, spec).map_err(|_| PushPlanError::UnknownRevision {
+            spec: spec.to_owned(),
+        })?,
+    )
 }
 
 fn full_src_ref_name(repo: &Repository, spec: &str, local: &LocalPushRefs) -> PlanResult<String> {
@@ -1691,7 +1705,7 @@ impl LocalPushRefs {
 }
 
 fn list_local_refs(git_dir: &Path, prefix: &str) -> PlanResult<Vec<(String, ObjectId)>> {
-    refs::list_refs(git_dir, prefix).map_err(|e| PushPlanError::Nested(Box::new(e)))
+    refs::list_refs(git_dir, prefix)
 }
 
 /// Port of Git `count_refspec_match` / `refname_match` for local refs.
@@ -1829,6 +1843,7 @@ fn branch_label_from_specs(_repo: &Repository, specs: &[PushRefSpec]) -> Option<
 mod tests {
     use super::*;
     use crate::config::environment::Environment;
+    use crate::remote::RemoteError;
     use crate::repo::{InitOptions, Repository};
 
     fn init_repo() -> (tempfile::TempDir, Repository) {
@@ -2047,12 +2062,16 @@ mod tests {
         let (_tmp, repo) = init_repo();
         assert!(matches!(
             configured_remote_for_push(&repo, &ConfigSet::new(), None),
-            Err(PushPlanError::NoRemote)
+            Err(crate::error::Error::Remote(
+                crate::remote::RemoteError::PushPlan(PushPlanError::NoRemote)
+            ))
         ));
         assert_eq!(PushPlanError::NoRemote.to_string(), "no remote to push to");
         assert!(matches!(
             load_push_plan_context(&repo, None, None).map(|_| ()),
-            Err(PushPlanError::NoRemote)
+            Err(crate::error::Error::Remote(
+                crate::remote::RemoteError::PushPlan(PushPlanError::NoRemote)
+            ))
         ));
         let named = configured_remote_for_push(&repo, &ConfigSet::new(), Some("upstream"));
         assert_eq!(named.as_deref().unwrap(), "upstream");
@@ -2069,7 +2088,9 @@ mod tests {
     fn push_invocation_unknown_remote_before_refspecs_is_rejected() {
         let err = resolve_push_invocation(&ConfigSet::new(), None, &strings(&["nosuch", "main"]))
             .expect_err("unknown remote");
-        assert!(matches!(err, PushPlanError::UnknownRemote(name) if name == "nosuch"));
+        assert!(
+            matches!(err, crate::error::Error::Remote(crate::remote::RemoteError::PushPlan(PushPlanError::UnknownRemote { name })) if name == "nosuch")
+        );
     }
 
     #[test]
@@ -2111,7 +2132,7 @@ mod tests {
         }
         assert!(matches!(
             open_push_destination(&config, "nourl"),
-            Err(RemoteError::NoUrl { remote: Some(name) }) if name == "nourl"
+            Err(crate::error::Error::Remote(RemoteError::NoUrl { remote: Some(name) })) if name == "nourl"
         ));
     }
 
@@ -2300,7 +2321,7 @@ mod tests {
             assert!(
                 matches!(
                     &err,
-                    PushPlanError::DeleteNotPlainName { spec: s } if s == spec
+                    crate::error::Error::Remote(crate::remote::RemoteError::PushPlan(PushPlanError::DeleteNotPlainName { spec: s })) if s == spec
                 ),
                 "{err}"
             );
@@ -2313,7 +2334,12 @@ mod tests {
         let (_tmp, repo) = init_repo();
         let err = resolve_push(&repo, &delete_request(&[]), &PushPlanContext::default())
             .expect_err("empty delete");
-        assert!(matches!(err, PushPlanError::DeleteWithoutRefs));
+        assert!(matches!(
+            err,
+            crate::error::Error::Remote(crate::remote::RemoteError::PushPlan(
+                PushPlanError::DeleteWithoutRefs
+            ))
+        ));
     }
 
     #[test]
@@ -2413,7 +2439,7 @@ mod tests {
         .expect_err("ambiguous");
         assert!(matches!(
             err,
-            PushPlanError::SrcRefspecAmbiguous { spec } if spec == "release"
+            crate::error::Error::Remote(crate::remote::RemoteError::PushPlan(PushPlanError::SrcRefspecAmbiguous { spec })) if spec == "release"
         ));
     }
 

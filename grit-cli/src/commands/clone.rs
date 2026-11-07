@@ -704,6 +704,9 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let skip_cleanup = matches!(
+                err.downcast_ref::<grit_lib::error::Error>(),
+                Some(e) if !grit_lib::remote::clone::should_cleanup_failed_clone(e)
+            ) || matches!(
                 err.downcast_ref::<CloneError>(),
                 Some(e) if !e.should_cleanup_failed_clone()
             );

@@ -1575,7 +1575,7 @@ fn ensure_worktree_clean_for(
     Ok(())
 }
 
-/// [`Error::DirtyWorktree`] naming every path in `staged` and `unstaged`.
+/// [`crate::worktree::WorktreeError::DirtyWorktree`] naming every path in `staged` and `unstaged`.
 fn dirty_worktree_error(
     operation: WorktreeOperation,
     staged: &[DiffEntry],
@@ -1627,7 +1627,7 @@ pub(crate) fn prepare_worktree_for_pick(repo: &Repository) -> Result<Option<Work
 ///
 /// # Errors
 ///
-/// Returns [`Error::DirtyWorktree`] naming the changed paths.
+/// Returns [`crate::worktree::WorktreeError::DirtyWorktree`] naming the changed paths.
 pub fn ensure_worktree_clean_for_pick(repo: &Repository) -> Result<()> {
     ensure_worktree_clean_for(repo, WorktreeOperation::Pick, false)
 }
@@ -1636,7 +1636,7 @@ pub fn ensure_worktree_clean_for_pick(repo: &Repository) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::DirtyWorktree`] naming the changed paths.
+/// Returns [`crate::worktree::WorktreeError::DirtyWorktree`] naming the changed paths.
 pub fn ensure_worktree_clean_for_merge(repo: &Repository) -> Result<()> {
     ensure_worktree_clean_for(repo, WorktreeOperation::Merge, true)
 }
@@ -1645,7 +1645,7 @@ pub fn ensure_worktree_clean_for_merge(repo: &Repository) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::DirtyWorktree`] naming the changed paths.
+/// Returns [`crate::worktree::WorktreeError::DirtyWorktree`] naming the changed paths.
 pub fn ensure_worktree_clean_for_rebase_exec(repo: &Repository) -> Result<()> {
     ensure_worktree_clean_for(repo, WorktreeOperation::RebaseExec, false)
 }
@@ -1662,7 +1662,7 @@ pub struct TreeSwitchPlan {
 ///
 /// # Errors
 ///
-/// Returns [`Error::DirtyWorktree`] when staged or unstaged changes exist, or I/O/ODB failures.
+/// Returns [`crate::worktree::WorktreeError::DirtyWorktree`] when staged or unstaged changes exist, or I/O/ODB failures.
 pub fn prepare_tree_switch(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
@@ -1678,7 +1678,7 @@ pub fn prepare_tree_switch(
 ///
 /// # Errors
 ///
-/// Returns [`Error::DirtyWorktree`] for local changes and [`Error::Verbatim`] when an untracked
+/// Returns [`crate::worktree::WorktreeError::DirtyWorktree`] for local changes and [`crate::worktree::WorktreeError::WouldOverwrite`] when an untracked
 /// file would be overwritten.
 pub(crate) fn ensure_safe_for_rebase_stop(
     repo: &Repository,
@@ -1776,7 +1776,7 @@ pub fn untracked_would_be_overwritten_by_tree_changes(
 ///
 /// # Errors
 ///
-/// Returns [`Error::WouldOverwrite`] with [`OverwriteReason::Untracked`] and every
+/// Returns [`crate::worktree::WorktreeError::WouldOverwrite`] with [`OverwriteReason::Untracked`] and every
 /// colliding path (same display wording as `grit switch`).
 pub fn ensure_no_untracked_overwrite(
     untracked_paths: &[String],
@@ -1800,7 +1800,7 @@ pub fn ensure_no_untracked_overwrite(
 ///
 /// # Errors
 ///
-/// Returns [`Error::WouldOverwrite`] when an untracked path would be overwritten, or on
+/// Returns [`crate::worktree::WorktreeError::WouldOverwrite`] when an untracked path would be overwritten, or on
 /// I/O/ODB failures.
 pub fn prepare_tree_checkout(
     repo: &Repository,
@@ -1815,7 +1815,7 @@ pub fn prepare_tree_checkout(
 ///
 /// # Errors
 ///
-/// Returns [`Error::WouldOverwrite`] when an untracked path would be overwritten.
+/// Returns [`crate::worktree::WorktreeError::WouldOverwrite`] when an untracked path would be overwritten.
 pub(crate) fn prepare_tree_checkout_with_changes(
     repo: &Repository,
     tree_changes: &[DiffEntry],
@@ -1832,6 +1832,7 @@ mod tests {
     use super::*;
     use crate::diff::diff_trees;
     use crate::repo::{init_repository, Repository};
+    use crate::worktree::WorktreeError;
     use tempfile::TempDir;
 
     fn init_repo() -> (TempDir, Repository) {
@@ -2238,11 +2239,11 @@ mod tests {
         let err = ensure_no_untracked_overwrite(&["x.txt".into()], &[added_entry("x.txt")])
             .expect_err("collision");
         match err {
-            Error::WouldOverwrite {
+            Error::Worktree(WorktreeError::WouldOverwrite {
                 reason: OverwriteReason::Untracked,
                 paths,
                 message,
-            } => {
+            }) => {
                 assert_eq!(paths, vec!["x.txt".to_owned()]);
                 assert!(message.contains("untracked file 'x.txt' would be overwritten"));
             }
@@ -3299,7 +3300,7 @@ mod tests {
             assert!(
                 matches!(
                     &err,
-                    Error::DirtyWorktree { operation: op, paths }
+                    Error::Worktree(WorktreeError::DirtyWorktree { operation: op, paths })
                         if *op == operation && paths == &["tracked.txt"]
                 ),
                 "{err:?}"
@@ -3314,10 +3315,10 @@ mod tests {
             .expect("dirty switch");
         assert!(matches!(
             err,
-            Error::DirtyWorktree {
+            Error::Worktree(WorktreeError::DirtyWorktree {
                 operation: WorktreeOperation::Switch,
                 ..
-            }
+            })
         ));
     }
 

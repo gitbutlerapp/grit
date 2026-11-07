@@ -836,7 +836,10 @@ fn malformed_shallow_line_is_a_protocol_error() {
     body.extend(push_body(&[(None, Some(tip), "refs/heads/main")], &[]));
     let result = ReceivePack::new(&repo, &serve_opts(), &ReceivePolicy::default())
         .run(&mut std::io::Cursor::new(body), &mut Vec::new());
-    assert!(matches!(result, Err(ServeError::Protocol(_))), "{result:?}");
+    assert!(
+        matches!(result, Err(ServeError::Protocol { .. })),
+        "{result:?}"
+    );
     assert!(resolve_ref(&bare, "refs/heads/main").is_err());
 }
 

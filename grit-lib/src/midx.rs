@@ -11,6 +11,7 @@
 
 #![allow(dead_code)]
 
+use crate::error::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -169,37 +170,41 @@ fn normalize_pack_idx_basename(raw: &str) -> Result<String> {
 
 /// Read a big-endian `u32` from `data` at byte offset `off`.
 ///
-/// Returns [`Error::CorruptObject`] if `data` does not contain 4 bytes at `off`,
+/// Returns [`crate::error::ObjectError::Corrupt`] if `data` does not contain 4 bytes at `off`,
 /// replacing the previous fixed-width-slice `.try_into().unwrap()` with real
 /// bounds handling (the success-path value is unchanged).
 fn read_be_u32(data: &[u8], off: usize) -> Result<u32> {
     let end = off.checked_add(4).filter(|&e| e <= data.len());
     let Some(end) = end else {
-        return Err(Error::CorruptObject(
-            "truncated MIDX data reading u32".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "truncated MIDX data reading u32".to_owned(),
+        }));
     };
-    let bytes: [u8; 4] = data[off..end]
-        .try_into()
-        .map_err(|_| Error::CorruptObject("truncated MIDX data reading u32".to_owned()))?;
+    let bytes: [u8; 4] = data[off..end].try_into().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "truncated MIDX data reading u32".to_owned(),
+        })
+    })?;
     Ok(u32::from_be_bytes(bytes))
 }
 
 /// Read a big-endian `u64` from `data` at byte offset `off`.
 ///
-/// Returns [`Error::CorruptObject`] if `data` does not contain 8 bytes at `off`,
+/// Returns [`crate::error::ObjectError::Corrupt`] if `data` does not contain 8 bytes at `off`,
 /// replacing the previous fixed-width-slice `.try_into().unwrap()` with real
 /// bounds handling (the success-path value is unchanged).
 fn read_be_u64(data: &[u8], off: usize) -> Result<u64> {
     let end = off.checked_add(8).filter(|&e| e <= data.len());
     let Some(end) = end else {
-        return Err(Error::CorruptObject(
-            "truncated MIDX data reading u64".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "truncated MIDX data reading u64".to_owned(),
+        }));
     };
-    let bytes: [u8; 8] = data[off..end]
-        .try_into()
-        .map_err(|_| Error::CorruptObject("truncated MIDX data reading u64".to_owned()))?;
+    let bytes: [u8; 8] = data[off..end].try_into().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "truncated MIDX data reading u64".to_owned(),
+        })
+    })?;
     Ok(u64::from_be_bytes(bytes))
 }
 
@@ -209,17 +214,21 @@ struct MidxFileHeader {
 
 fn parse_midx_header(data: &[u8]) -> Result<(MidxFileHeader, usize, u8)> {
     if data.len() < MIDX_HEADER_SIZE + 20 {
-        return Err(Error::CorruptObject("midx file too small".to_owned()));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "midx file too small".to_owned(),
+        }));
     }
     let sig = read_be_u32(data, 0)?;
     if sig != MIDX_SIGNATURE {
-        return Err(Error::CorruptObject("bad MIDX signature".to_owned()));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "bad MIDX signature".to_owned(),
+        }));
     }
     let version = data[4];
     if version != MIDX_VERSION_V1 && version != MIDX_VERSION_V2 {
-        return Err(Error::CorruptObject(format!(
-            "multi-pack-index version {version} not recognized"
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("multi-pack-index version {version} not recognized"),
+        }));
     }
     let object_hash_bytes = data[5];
     let num_chunks = data[6];
@@ -237,8 +246,11 @@ fn parse_pack_names_blob(pn: &[u8]) -> Result<Vec<String>> {
     for (i, &b) in pn.iter().enumerate() {
         if b == 0 && i >= start {
             if i > start {
-                let s = std::str::from_utf8(&pn[start..i])
-                    .map_err(|_| Error::CorruptObject("non-utf8 pack name in MIDX".to_owned()))?;
+                let s = std::str::from_utf8(&pn[start..i]).map_err(|_| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "non-utf8 pack name in MIDX".to_owned(),
+                    })
+                })?;
                 names.push(s.to_string());
             }
             start = i + 1;
@@ -313,9 +325,9 @@ fn read_chain_layer_hashes(pack_dir: &Path) -> Result<Vec<String>> {
             continue;
         }
         if !is_valid_midx_chain_hash_line(t, hex_len) {
-            return Err(Error::CorruptObject(format!(
-                "invalid multi-pack-index chain line: {t}"
-            )));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("invalid multi-pack-index chain line: {t}"),
+            }));
         }
         out.push(t.to_ascii_lowercase());
     }
@@ -341,7 +353,7 @@ fn repo_midx_hash_version(pack_dir: &Path) -> u8 {
 fn open_midx_layer_bytes(path: &Path) -> Result<Arc<PackData>> {
     match PackData::open_with_min_len(path, MIDX_MIN_FILE_LEN) {
         Ok(b) => Ok(b),
-        Err(Error::CorruptObject(_)) => Ok(PackData::from_owned(
+        Err(Error::Object(ObjectError::Corrupt { .. })) => Ok(PackData::from_owned(
             std::fs::read(path).map_err(Error::Io)?,
         )),
         Err(err) => Err(err),
@@ -357,7 +369,7 @@ pub(crate) mod midx_cache {
         MIDX_LARGE_OFFSET_NEEDED, MIDX_MIN_FILE_LEN,
     };
     use crate::diagnostics::{CollectingDiagnostics, DiagnosticSink, Warning};
-    use crate::error::{Error, Result};
+    use crate::error::{Error, ObjectError, Result};
     use crate::objects::{ObjectId, ObjectIdPrefix, ObjectInfo};
     use crate::pack::{read_object_at, read_pack_index_cached, PackIndex};
     use crate::pack_map::PackData;
@@ -565,8 +577,11 @@ pub(crate) mod midx_cache {
             f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
         ) -> Result<()> {
             for i in 0..self.num_objects {
-                let oid = ObjectId::from_bytes(self.oid_at(i))
-                    .map_err(|e| Error::CorruptObject(e.to_string()))?;
+                let oid = ObjectId::from_bytes(self.oid_at(i)).map_err(|e| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: e.to_string(),
+                    })
+                })?;
                 if f(&oid).is_break() {
                     break;
                 }
@@ -589,8 +604,11 @@ pub(crate) mod midx_cache {
                 if !prefix.matches_digest(digest) {
                     continue;
                 }
-                let oid = ObjectId::from_bytes(digest)
-                    .map_err(|e| Error::CorruptObject(e.to_string()))?;
+                let oid = ObjectId::from_bytes(digest).map_err(|e| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: e.to_string(),
+                    })
+                })?;
                 if !seen.insert(oid) {
                     continue;
                 }
@@ -915,7 +933,9 @@ pub(crate) mod midx_cache {
 
     fn read_be_u32(data: &[u8], off: usize) -> Result<u32> {
         if off + 4 > data.len() {
-            return Err(Error::CorruptObject("truncated MIDX u32".to_owned()));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: "truncated MIDX u32".to_owned(),
+            }));
         }
         Ok(u32::from_be_bytes([
             data[off],
@@ -927,7 +947,9 @@ pub(crate) mod midx_cache {
 
     fn read_be_u64(data: &[u8], off: usize) -> Result<u64> {
         if off + 8 > data.len() {
-            return Err(Error::CorruptObject("truncated MIDX u64".to_owned()));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: "truncated MIDX u64".to_owned(),
+            }));
         }
         Ok(u64::from_be_bytes([
             data[off],
@@ -1039,7 +1061,7 @@ pub(crate) mod midx_cache {
                     }
                     continue;
                 }
-                Err(Error::CorruptObject(_)) => {
+                Err(Error::Object(ObjectError::Corrupt { .. })) => {
                     if require_every_layer {
                         return Ok(None);
                     }
@@ -1063,7 +1085,7 @@ pub(crate) mod midx_cache {
                     }
                     continue;
                 }
-                Err(Error::Midx(_)) if require_every_layer => return Ok(None),
+                Err(Error::Object(ObjectError::Midx(_))) if require_every_layer => return Ok(None),
                 Err(err) => return Err(err),
             };
             let prepared = Arc::new(PreparedMidxLayer::prepare(bytes, view, &pack_dir));
@@ -1308,15 +1330,19 @@ pub fn midx_sidecar_path_for_midx_file(midx_path: &Path, ext: &str) -> Result<Pa
             .and_then(|r| r.strip_suffix(".midx"))
         {
             let parent = midx_path.parent().ok_or_else(|| {
-                Error::CorruptObject("MIDX path has no parent directory".to_owned())
+                Error::Object(ObjectError::Corrupt {
+                    detail: "MIDX path has no parent directory".to_owned(),
+                })
             })?;
             return Ok(parent.join(format!("multi-pack-index-{hash_part}.{ext}")));
         }
     }
     let hash_hex = midx_checksum_hex_from_path(midx_path)?;
-    let parent = midx_path
-        .parent()
-        .ok_or_else(|| Error::CorruptObject("MIDX path has no parent directory".to_owned()))?;
+    let parent = midx_path.parent().ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "MIDX path has no parent directory".to_owned(),
+        })
+    })?;
     Ok(parent.join(format!("multi-pack-index-{hash_hex}.{ext}")))
 }
 
@@ -1400,9 +1426,9 @@ fn oids_and_packs_from_midx_data(data: &[u8]) -> Result<(HashSet<ObjectId>, Vec<
     let (oidl_off, oidl_len) = find_chunk(data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let num_objects = ooff_len / 8;
     if oidl_len != num_objects * hash_len {
-        return Err(Error::CorruptObject(
-            "MIDX oid-lookup size mismatch".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "MIDX oid-lookup size mismatch".to_owned(),
+        }));
     }
     let mut oids = HashSet::with_capacity(num_objects);
     for i in 0..num_objects {
@@ -1443,15 +1469,14 @@ fn collect_incremental_base(pack_dir: &Path) -> Result<(HashSet<ObjectId>, HashS
 
 fn midx_trailing_hash_len(data: &[u8]) -> Result<usize> {
     if data.len() < MIDX_HEADER_SIZE {
-        return Err(Error::CorruptObject(
-            "midx file too small for header".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "midx file too small for header".to_owned(),
+        }));
     }
     HashAlgo::try_from(data[5]).map(|a| a.len()).map_err(|e| {
-        Error::CorruptObject(format!(
-            "multi-pack-index hash version {} not recognized",
-            e.0
-        ))
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("multi-pack-index hash version {} not recognized", e.0),
+        })
     })
 }
 
@@ -1459,9 +1484,9 @@ fn midx_checksum_hex_from_path(path: &Path) -> Result<String> {
     let data = fs::read(path).map_err(Error::Io)?;
     let hash_len = midx_trailing_hash_len(&data)?;
     if data.len() < hash_len {
-        return Err(Error::CorruptObject(
-            "midx too small for checksum".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "midx too small for checksum".to_owned(),
+        }));
     }
     let hash = &data[data.len() - hash_len..];
     Ok(hex::encode(hash))
@@ -1590,7 +1615,9 @@ fn build_midx_bytes_filtered(
     let mut best: HashMap<ObjectId, MidxEntry> = HashMap::new();
     for (pack_id, idx) in indexes.iter().enumerate() {
         let pack_id = u32::try_from(pack_id).map_err(|_| {
-            Error::CorruptObject("too many pack files for multi-pack-index".to_owned())
+            Error::Object(ObjectError::Corrupt {
+                detail: "too many pack files for multi-pack-index".to_owned(),
+            })
         })?;
         let mtime = pack_mtimes[pack_id as usize];
         for e in idx.iter() {
@@ -1669,7 +1696,9 @@ fn build_midx_bytes_filtered(
         chunk_ooff.extend_from_slice(&e.pack_id.to_be_bytes());
         let encoded = if large_offsets_needed && e.offset >> 31 != 0 {
             let slot = u32::try_from(large_offsets.len()).map_err(|_| {
-                Error::CorruptObject("too many large offsets in multi-pack-index".to_owned())
+                Error::Object(ObjectError::Corrupt {
+                    detail: "too many large offsets in multi-pack-index".to_owned(),
+                })
             })?;
             large_offsets.push(e.offset);
             MIDX_LARGE_OFFSET_NEEDED | slot
@@ -1770,10 +1799,11 @@ fn build_midx_bytes_filtered(
         chunks.push((MIDX_CHUNKID_BITMAPPED_PACKS, chunk_btmp));
     }
 
-    let num_chunks: u8 = chunks
-        .len()
-        .try_into()
-        .map_err(|_| Error::CorruptObject("too many MIDX chunks".to_owned()))?;
+    let num_chunks: u8 = chunks.len().try_into().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "too many MIDX chunks".to_owned(),
+        })
+    })?;
 
     let mut body = Vec::new();
     let mut cur_offset =
@@ -1838,20 +1868,24 @@ fn write_midx_rev_sidecar(
     if midx_file_hash.len() >= hash_len {
         out.extend_from_slice(&midx_file_hash[..hash_len]);
     } else {
-        return Err(Error::CorruptObject(format!(
-            "MIDX checksum length {} does not match hash algorithm width {hash_len}",
-            midx_file_hash.len()
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!(
+                "MIDX checksum length {} does not match hash algorithm width {hash_len}",
+                midx_file_hash.len()
+            ),
+        }));
     }
     append_hashfile_checksum(&mut out, hash_len);
     let mut file = fs::File::create(path).map_err(Error::Io)?;
     file.write_all(&out).map_err(Error::Io)?;
     file.sync_all().map_err(Error::Io)?;
     if !path.is_file() {
-        return Err(Error::CorruptObject(format!(
-            "MIDX rev sidecar not present after write ({})",
-            path.display()
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!(
+                "MIDX rev sidecar not present after write ({})",
+                path.display()
+            ),
+        }));
     }
     Ok(())
 }
@@ -1871,9 +1905,9 @@ fn find_chunk(data: &[u8], header_end: usize, chunk_id: u32) -> Result<(usize, u
     let pos = header_end;
     let toc_end = pos + (n + 1) * CHUNK_TOC_ENTRY_SIZE;
     if data.len() < toc_end + 20 {
-        return Err(Error::CorruptObject(
-            "truncated MIDX chunk table".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "truncated MIDX chunk table".to_owned(),
+        }));
     }
     for i in 0..n {
         let base = pos + i * CHUNK_TOC_ENTRY_SIZE;
@@ -1890,9 +1924,9 @@ fn find_chunk(data: &[u8], header_end: usize, chunk_id: u32) -> Result<(usize, u
             return Ok((off, next_off.saturating_sub(off)));
         }
     }
-    Err(Error::CorruptObject(format!(
-        "MIDX chunk {chunk_id:08x} not found"
-    )))
+    Err(Error::Object(ObjectError::Corrupt {
+        detail: format!("MIDX chunk {chunk_id:08x} not found"),
+    }))
 }
 
 /// Fatal chunk-table failures from [`parse_midx_toc`] (Git `die()` in `load_multi_pack_index`).
@@ -2328,11 +2362,14 @@ fn midx_checksum_is_valid(data: &[u8]) -> bool {
 ///
 /// # Errors
 ///
-/// Returns I/O errors or [`Error::CorruptObject`] for missing or malformed metadata.
+/// Returns I/O errors or [`crate::error::ObjectError::Corrupt`] for missing or malformed metadata.
 pub fn read_midx_pack_idx_names(objects_dir: &Path) -> Result<Vec<String>> {
     let pack_dir = objects_dir.join("pack");
-    let path = resolve_tip_midx_path(&pack_dir)
-        .ok_or_else(|| Error::CorruptObject("no multi-pack-index found".to_owned()))?;
+    let path = resolve_tip_midx_path(&pack_dir).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "no multi-pack-index found".to_owned(),
+        })
+    })?;
     let metadata = fs::metadata(&path).map_err(Error::Io)?;
     read_midx_pack_idx_names_from_path(&path, &metadata)
 }
@@ -2354,7 +2391,11 @@ pub(crate) fn read_midx_pack_idx_names_from_path(
     let blob = pn_off
         .checked_add(pn_len)
         .and_then(|end| data.get(pn_off..end))
-        .ok_or_else(|| Error::CorruptObject("MIDX pack names are outside the file".to_owned()))?;
+        .ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "MIDX pack names are outside the file".to_owned(),
+            })
+        })?;
     parse_pack_names_blob(blob)
 }
 
@@ -2371,8 +2412,11 @@ pub struct MidxObjectRef {
 /// `nth_midxed_pack_int_id` iteration in Git used by expire/repack.
 pub fn read_midx_objects(objects_dir: &Path) -> Result<(Vec<String>, Vec<MidxObjectRef>)> {
     let pack_dir = objects_dir.join("pack");
-    let path = resolve_tip_midx_path(&pack_dir)
-        .ok_or_else(|| Error::CorruptObject("no multi-pack-index found".to_owned()))?;
+    let path = resolve_tip_midx_path(&pack_dir).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "no multi-pack-index found".to_owned(),
+        })
+    })?;
     let data = fs::read(&path).map_err(Error::Io)?;
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (pn_off, pn_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_PACKNAMES)?;
@@ -2381,21 +2425,25 @@ pub fn read_midx_objects(objects_dir: &Path) -> Result<(Vec<String>, Vec<MidxObj
     let (oidl_off, oidl_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
     if oidl_len % hash_len != 0 || ooff_len % 8 != 0 {
-        return Err(Error::CorruptObject(
-            "bad MIDX oid-lookup / object-offsets size".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "bad MIDX oid-lookup / object-offsets size".to_owned(),
+        }));
     }
     let num = oidl_len / hash_len;
     if num * 8 != ooff_len {
-        return Err(Error::CorruptObject(
-            "MIDX oid count does not match object-offsets".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "MIDX oid count does not match object-offsets".to_owned(),
+        }));
     }
     let mut objects = Vec::with_capacity(num);
     for i in 0..num {
         let oid =
             ObjectId::from_bytes(&data[oidl_off + i * hash_len..oidl_off + (i + 1) * hash_len])
-                .map_err(|e| Error::CorruptObject(e.to_string()))?;
+                .map_err(|e| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: e.to_string(),
+                    })
+                })?;
         let base = ooff_off + i * 8;
         let pack_id = read_be_u32(&data, base)? as usize;
         objects.push(MidxObjectRef {
@@ -2409,8 +2457,11 @@ pub fn read_midx_objects(objects_dir: &Path) -> Result<(Vec<String>, Vec<MidxObj
 /// Trailing 40-character SHA-1 hex of the active MIDX (root or chain tip).
 pub fn midx_checksum_hex(objects_dir: &Path) -> Result<String> {
     let pack_dir = objects_dir.join("pack");
-    let path = resolve_tip_midx_path(&pack_dir)
-        .ok_or_else(|| Error::CorruptObject("no multi-pack-index found".to_owned()))?;
+    let path = resolve_tip_midx_path(&pack_dir).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "no multi-pack-index found".to_owned(),
+        })
+    })?;
     midx_checksum_hex_from_path(&path)
 }
 
@@ -2450,9 +2501,9 @@ pub fn load_midx_reuse_tables_from_path(midx_path: &Path) -> Result<Option<MidxR
     let (oidl_off, oid_l_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
     if oid_l_len % hash_len != 0 || ooff_len != oid_l_len / hash_len * 8 {
-        return Err(Error::CorruptObject(
-            "MIDX OID / offset chunk size mismatch".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "MIDX OID / offset chunk size mismatch".to_owned(),
+        }));
     }
     let num_objects = oid_l_len / hash_len;
     if num_objects == 0 {
@@ -2462,9 +2513,9 @@ pub fn load_midx_reuse_tables_from_path(midx_path: &Path) -> Result<Option<MidxR
     let rid_order =
         if let Ok((ridx_off, ridx_len)) = find_chunk(&data, hdr_end, MIDX_CHUNKID_REVINDEX) {
             if ridx_len != num_objects.saturating_mul(4) {
-                return Err(Error::CorruptObject(
-                    "MIDX reverse index length does not match object count".to_owned(),
-                ));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "MIDX reverse index length does not match object count".to_owned(),
+                }));
             }
             let mut order = Vec::with_capacity(num_objects);
             for i in 0..num_objects {
@@ -2484,9 +2535,9 @@ pub fn load_midx_reuse_tables_from_path(midx_path: &Path) -> Result<Option<MidxR
             };
             crate::pack_rev::try_rev_positions_in_pack_order(&rev_data, num_objects).ok_or_else(
                 || {
-                    Error::CorruptObject(
-                        "MIDX standalone .rev sidecar is invalid or missing".to_owned(),
-                    )
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "MIDX standalone .rev sidecar is invalid or missing".to_owned(),
+                    })
                 },
             )?
         };
@@ -2507,15 +2558,21 @@ pub fn load_midx_reuse_tables_from_path(midx_path: &Path) -> Result<Option<MidxR
 
     let mut oid_idx_to_rank = vec![0u32; num_objects];
     for (rank, &oid_idx) in rid_order.iter().enumerate() {
-        let idx = usize::try_from(oid_idx)
-            .map_err(|_| Error::CorruptObject("bad MIDX reverse index entry".to_owned()))?;
+        let idx = usize::try_from(oid_idx).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "bad MIDX reverse index entry".to_owned(),
+            })
+        })?;
         if idx >= num_objects {
-            return Err(Error::CorruptObject(
-                "MIDX reverse index out of range".to_owned(),
-            ));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: "MIDX reverse index out of range".to_owned(),
+            }));
         }
-        oid_idx_to_rank[idx] = u32::try_from(rank)
-            .map_err(|_| Error::CorruptObject("too many MIDX objects".to_owned()))?;
+        oid_idx_to_rank[idx] = u32::try_from(rank).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "too many MIDX objects".to_owned(),
+            })
+        })?;
     }
 
     Ok(Some(MidxReuseTables {
@@ -2536,15 +2593,15 @@ pub(crate) fn midx_reuse_tables_from_bytes(
     let (oidl_off, oid_l_len) = find_chunk(data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
     if oid_l_len % hash_len != 0 || ooff_len != oid_l_len / hash_len * 8 {
-        return Err(Error::CorruptObject(
-            "MIDX OID / offset chunk size mismatch".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "MIDX OID / offset chunk size mismatch".to_owned(),
+        }));
     }
     let num_objects = oid_l_len / hash_len;
     if rid_order.len() != num_objects {
-        return Err(Error::CorruptObject(
-            "MIDX reverse index length does not match object count".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "MIDX reverse index length does not match object count".to_owned(),
+        }));
     }
 
     let mut oids = Vec::with_capacity(num_objects);
@@ -2563,15 +2620,21 @@ pub(crate) fn midx_reuse_tables_from_bytes(
 
     let mut oid_idx_to_rank = vec![0u32; num_objects];
     for (rank, &oid_idx) in rid_order.iter().enumerate() {
-        let idx = usize::try_from(oid_idx)
-            .map_err(|_| Error::CorruptObject("bad MIDX reverse index entry".to_owned()))?;
+        let idx = usize::try_from(oid_idx).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "bad MIDX reverse index entry".to_owned(),
+            })
+        })?;
         if idx >= num_objects {
-            return Err(Error::CorruptObject(
-                "MIDX reverse index out of range".to_owned(),
-            ));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: "MIDX reverse index out of range".to_owned(),
+            }));
         }
-        oid_idx_to_rank[idx] = u32::try_from(rank)
-            .map_err(|_| Error::CorruptObject("too many MIDX objects".to_owned()))?;
+        oid_idx_to_rank[idx] = u32::try_from(rank).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "too many MIDX objects".to_owned(),
+            })
+        })?;
     }
 
     Ok(MidxReuseTables {
@@ -2626,16 +2689,16 @@ pub fn read_midx_btmp_ranges(objects_dir: &Path) -> Result<Vec<MidxBtmpPackRange
         return Ok(Vec::new());
     };
     if btmp_len == 0 || btmp_len % 8 != 0 {
-        return Err(Error::CorruptObject(
-            "invalid MIDX BTMP chunk length".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "invalid MIDX BTMP chunk length".to_owned(),
+        }));
     }
     let num_packs = read_be_u32(&data, 8)?;
     let n_entries = btmp_len / 8;
     if u32::try_from(n_entries).ok() != Some(num_packs) {
-        return Err(Error::CorruptObject(
-            "MIDX BTMP entry count does not match num_packs".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "MIDX BTMP entry count does not match num_packs".to_owned(),
+        }));
     }
     let mut out = Vec::with_capacity(n_entries);
     for i in 0..n_entries {
@@ -2643,8 +2706,11 @@ pub fn read_midx_btmp_ranges(objects_dir: &Path) -> Result<Vec<MidxBtmpPackRange
         let bitmap_pos = read_be_u32(&data, base)?;
         let bitmap_nr = read_be_u32(&data, base + 4)?;
         out.push(MidxBtmpPackRange {
-            pack_id: u32::try_from(i)
-                .map_err(|_| Error::CorruptObject("too many packs in MIDX BTMP".to_owned()))?,
+            pack_id: u32::try_from(i).map_err(|_| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "too many packs in MIDX BTMP".to_owned(),
+                })
+            })?,
             bitmap_pos,
             bitmap_nr,
         });
@@ -2668,10 +2734,14 @@ pub fn midx_lookup_pack_and_offset_opt(
 /// Look up which pack and in-pack offset holds `oid` according to the active MIDX.
 pub fn midx_lookup_pack_and_offset(objects_dir: &Path, oid: &ObjectId) -> Result<(u32, u64)> {
     let Some(chain) = prepared_midx_chain(objects_dir)? else {
-        return Err(Error::CorruptObject("no multi-pack-index found".to_owned()));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "no multi-pack-index found".to_owned(),
+        }));
     };
     chain.lookup_pack_and_offset(oid).ok_or_else(|| {
-        Error::CorruptObject(format!("object {} not in multi-pack-index", oid.to_hex()))
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("object {} not in multi-pack-index", oid.to_hex()),
+        })
     })
 }
 
@@ -2702,7 +2772,7 @@ enum MidxLoadResult {
 }
 
 /// Validate and load a MIDX image for object reads, mirroring `load_multi_pack_index`
-/// in git/midx.c. Fatal corruptions return [`Error::Midx`]; recoverable corruptions emit
+/// in git/midx.c. Fatal corruptions return [`crate::error::ObjectError::Midx`]; recoverable corruptions emit
 /// [`Warning`] values through `diagnostics` and return [`MidxLoadResult::Skip`].
 fn midx_load_for_read(
     data: &PackData,
@@ -2900,8 +2970,11 @@ pub fn try_read_info_via_midx_with_diagnostics(
 /// `read_midx_preferred_idx_name` function.
 pub fn read_midx_preferred_idx_name(objects_dir: &Path) -> Result<String> {
     let pack_dir = objects_dir.join("pack");
-    let path = resolve_tip_midx_path(&pack_dir)
-        .ok_or_else(|| Error::CorruptObject("no multi-pack-index found".to_owned()))?;
+    let path = resolve_tip_midx_path(&pack_dir).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "no multi-pack-index found".to_owned(),
+        })
+    })?;
     let data = fs::read(&path).map_err(Error::Io)?;
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (pn_off, pn_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_PACKNAMES)?;
@@ -2915,29 +2988,35 @@ pub fn read_midx_preferred_idx_name(objects_dir: &Path) -> Result<String> {
     let (ridx_off, ridx_len) = match find_chunk(&data, hdr_end, MIDX_CHUNKID_REVINDEX) {
         Ok(r) => r,
         Err(_) => {
-            return Err(Error::CorruptObject(
-                "could not determine MIDX preferred pack".to_owned(),
-            ));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: "could not determine MIDX preferred pack".to_owned(),
+            }));
         }
     };
 
     if ridx_len < 4 || ooff_len < 8 {
-        return Err(Error::CorruptObject("truncated MIDX RIDX/OOFF".to_owned()));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "truncated MIDX RIDX/OOFF".to_owned(),
+        }));
     }
     let first_oid_idx = read_be_u32(&data, ridx_off)? as usize;
     let entry_base = ooff_off + first_oid_idx * 8;
     if entry_base + 8 > data.len() || entry_base + 8 > ooff_off + ooff_len {
-        return Err(Error::CorruptObject(
-            "bad MIDX object-offsets index".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "bad MIDX object-offsets index".to_owned(),
+        }));
     }
     let pack_id = read_be_u32(&data, entry_base)?;
-    let idx = usize::try_from(pack_id)
-        .map_err(|_| Error::CorruptObject("pack id overflow in multi-pack-index".to_owned()))?;
-    names
-        .get(idx)
-        .cloned()
-        .ok_or_else(|| Error::CorruptObject("preferred pack id out of range".to_owned()))
+    let idx = usize::try_from(pack_id).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "pack id overflow in multi-pack-index".to_owned(),
+        })
+    })?;
+    names.get(idx).cloned().ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "preferred pack id out of range".to_owned(),
+        })
+    })
 }
 
 /// Build `objects/pack/multi-pack-index` for all pack indexes in `pack_dir`.
@@ -3174,9 +3253,9 @@ pub fn write_multi_pack_index_with_options(
     }
     if let Some(p) = preferred_idx {
         if p >= work_names.len() {
-            return Err(Error::CorruptObject(
-                "preferred pack index out of range".to_owned(),
-            ));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: "preferred pack index out of range".to_owned(),
+            }));
         }
     }
 
@@ -3212,7 +3291,9 @@ pub fn write_multi_pack_index_with_options(
     let mut best: HashMap<ObjectId, MidxEntry> = HashMap::new();
     for (pack_id, idx) in indexes.iter().enumerate() {
         let pack_id = u32::try_from(pack_id).map_err(|_| {
-            Error::CorruptObject("too many pack files for multi-pack-index".to_owned())
+            Error::Object(ObjectError::Corrupt {
+                detail: "too many pack files for multi-pack-index".to_owned(),
+            })
         })?;
         let mtime = pack_mtimes_layer[pack_id as usize];
         for e in idx.iter() {
@@ -3365,16 +3446,18 @@ pub fn write_multi_pack_index_with_options(
 
         if opts.write_bitmap {
             let rid = bitmap_rid_order.as_ref().ok_or_else(|| {
-                Error::CorruptObject("MIDX bitmap write missing reverse index order".to_owned())
+                Error::Object(ObjectError::Corrupt {
+                    detail: "MIDX bitmap write missing reverse index order".to_owned(),
+                })
             })?;
             write_midx_reachability_bitmap(pack_dir, &out, rid, hash, &bitmap_path)?;
         }
         if opts.write_rev_sidecar {
             let rev_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.rev"));
             let order = bitmap_rid_order.as_ref().ok_or_else(|| {
-                Error::CorruptObject(
-                    "MIDX rev sidecar write missing reverse index order".to_owned(),
-                )
+                Error::Object(ObjectError::Corrupt {
+                    detail: "MIDX rev sidecar write missing reverse index order".to_owned(),
+                })
             })?;
             write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
         }
@@ -3385,9 +3468,9 @@ pub fn write_multi_pack_index_with_options(
         let rev_root = pack_dir.join(format!("multi-pack-index-{hash_hex}.rev"));
         let rev_layer = midx_d_dir(pack_dir).join(format!("multi-pack-index-{hash_hex}.rev"));
         if !rev_root.is_file() && !rev_layer.is_file() {
-            return Err(Error::CorruptObject(format!(
-                "MIDX rev sidecar missing after write ({hash_hex})"
-            )));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("MIDX rev sidecar missing after write ({hash_hex})"),
+            }));
         }
     }
 
@@ -3675,6 +3758,7 @@ mod tests {
         clear_pack_midx_state, resolve_tip_midx_path, try_read_object_via_midx,
         write_multi_pack_index,
     };
+    use crate::error::ObjectError;
 
     use crate::error::{Error, MidxError};
     use crate::hot_path_test_metrics::HotPathMetricsScope;
@@ -4042,10 +4126,10 @@ mod tests {
         assert!(
             matches!(
                 err,
-                Error::Midx(MidxError::HashVersionMismatch {
+                Error::Object(ObjectError::Midx(MidxError::HashVersionMismatch {
                     found: 2,
                     expected: 1
-                })
+                }))
             ),
             "unexpected error: {err:?}"
         );
@@ -4061,7 +4145,10 @@ mod tests {
     #[test]
     fn compact_error_from_library_error() {
         use crate::error::Error;
-        let err: super::CompactError = Error::CorruptObject("test".into()).into();
+        let err: super::CompactError = Error::Object(ObjectError::Corrupt {
+            detail: "test".into(),
+        })
+        .into();
         assert!(err.to_string().contains("test"));
     }
 
@@ -4229,7 +4316,7 @@ mod tests {
         for bad in [0u8, 3, 255] {
             assert!(matches!(
                 super::resolve_write_version(Some(bad), 1),
-                Err(Error::Midx(MidxError::UnknownWriteVersion { version })) if version == i64::from(bad)
+                Err(Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion { version }))) if version == i64::from(bad)
             ));
         }
     }
@@ -4254,7 +4341,7 @@ mod tests {
             assert!(
                 matches!(
                     read(text),
-                    Err(Error::Midx(MidxError::UnknownWriteVersion { version: v })) if v == version
+                    Err(Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion { version: v }))) if v == version
                 ),
                 "{text:?}"
             );
@@ -4291,7 +4378,9 @@ mod tests {
         .expect_err("version 3");
         assert!(matches!(
             err,
-            Error::Midx(MidxError::UnknownWriteVersion { version: 3 })
+            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion {
+                version: 3
+            }))
         ));
         assert!(!midx_path.exists(), "rejected write must not leave a MIDX");
     }

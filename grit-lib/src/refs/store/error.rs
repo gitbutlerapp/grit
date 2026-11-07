@@ -91,8 +91,11 @@ pub enum RefStoreError {
     },
 
     /// Stored data for a ref or reflog is malformed.
-    #[error("corrupt ref store: {0}")]
-    Corrupt(String),
+    #[error("corrupt ref store: {detail}")]
+    Corrupt {
+        /// What is wrong with the stored refs.
+        detail: String,
+    },
 
     /// Filesystem I/O on a git-directory path during ref store work.
     #[error("{}", crate::git_dir::io_error::format_git_dir_io_message(.path, *operation, &Self::git_dir_io_source(*.os_error)))]
@@ -237,10 +240,6 @@ impl ReferenceTransactionHookErr {
                     hook_name: hook_name.clone(),
                 }
             }
-            crate::hooks::HookError::Repository(err) => {
-                crate::hooks::HookError::Repository(Arc::clone(err))
-            }
-            crate::hooks::HookError::Cancelled => crate::hooks::HookError::Cancelled,
         })
     }
 }

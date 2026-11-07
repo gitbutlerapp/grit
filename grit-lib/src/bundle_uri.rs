@@ -34,7 +34,7 @@ use crate::protocol_v2::{cap_lines_for_command_request, server_advertises_bundle
 use crate::repo::Repository;
 use crate::resumable::{
     claim_resumable_download, discard_download, download_resumable, resolve_url,
-    ResumableDownloadDest, ResumableError,
+    ResumableDownloadDest,
 };
 use crate::transfer::TransferStats;
 use crate::transport::http::{discover_upload_pack_exact, HttpClient};
@@ -101,9 +101,9 @@ impl BundleList {
             };
             match key.to_ascii_lowercase().as_str() {
                 "version" if value != "1" => {
-                    return Err(bundle_error(crate::bundle::BundleError::MalformedLine(
-                        format!("unsupported bundle list version {value}"),
-                    )))
+                    return Err(bundle_error(crate::bundle::BundleError::MalformedLine {
+                        line: format!("unsupported bundle list version {value}"),
+                    }))
                 }
                 "mode" => {
                     list.mode = if value == "any" {
@@ -218,15 +218,13 @@ pub(crate) fn fetch_bundle_list(
     let url = format!("{}/git-upload-pack", repo_url.trim_end_matches('/'));
     let client_post = Arc::clone(&client);
     let body = run_interruptible("grit-http-post", cancel, stall, move || {
-        client_post
-            .post(
-                &url,
-                "application/x-git-upload-pack-request",
-                "application/x-git-upload-pack-result",
-                &request,
-                Some("version=2"),
-            )
-            .map_err(Into::into)
+        client_post.post(
+            &url,
+            "application/x-git-upload-pack-request",
+            "application/x-git-upload-pack-result",
+            &request,
+            Some("version=2"),
+        )
     })?;
     let mut lines = Vec::new();
     let mut cursor = Cursor::new(body);
@@ -368,11 +366,7 @@ fn seed_from(
         ResumableDownloadDest::Shared { dest, lock } => (dest, Some(lock)),
         ResumableDownloadDest::Private(dest) => (dest, None),
     };
-    let downloaded =
-        download_resumable(client, uri, &dest, progress, cancel).map_err(|e| match e {
-            ResumableError::Cancelled => Error::Cancelled,
-            e => Error::from(Box::new(e)),
-        })?;
+    let downloaded = download_resumable(client, uri, &dest, progress, cancel)?;
     let bundle = repo.bundles().open(&dest).map_err(bundle_error)?;
     if !bundle.header().prerequisites.is_empty() {
         // An incremental bundle cannot seed an empty repository.
@@ -567,7 +561,7 @@ mod tests {
         }
 
         impl HttpClient for LocalBundle {
-            fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+            fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
                 unreachable!()
             }
 
@@ -578,11 +572,11 @@ mod tests {
                 _: &str,
                 _: &[u8],
                 _: Option<&str>,
-            ) -> crate::remote::RemoteResult<Vec<u8>> {
+            ) -> crate::error::Result<Vec<u8>> {
                 unreachable!()
             }
 
-            fn send(&self, request: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
+            fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
                 assert_eq!(request.url, self.url);
                 Ok(HttpResponse {
                     status: 200,

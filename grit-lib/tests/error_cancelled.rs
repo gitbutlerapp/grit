@@ -24,15 +24,15 @@ fn wrapper_helpers_classify_only_cancelled() {
     assert!(cancelled().is_cancelled());
     assert!(!CommitError::NothingToCommit.is_cancelled());
 
-    assert!(RemoteError::Cancelled.is_cancelled());
+    assert!(grit_lib::error::Error::Cancelled.is_cancelled());
     assert!(!RemoteError::NoUrl { remote: None }.is_cancelled());
 
     assert!(CloneError::Nested(Box::new(cancelled())).is_cancelled());
-    assert!(CloneError::Remote(RemoteError::Cancelled).is_cancelled());
+    assert!(CloneError::Remote(grit_lib::error::Error::Cancelled).is_cancelled());
     assert!(!CloneError::InvalidCloneDepth.is_cancelled());
-    assert!(!CloneError::RemoteRefNotFound("x".into()).is_cancelled());
+    assert!(!CloneError::RemoteRefNotFound { name: "x".into() }.is_cancelled());
 
-    assert!(PullError::Remote(RemoteError::Cancelled).is_cancelled());
+    assert!(PullError::Remote(grit_lib::error::Error::Cancelled).is_cancelled());
     assert!(PullError::Nested(Box::new(cancelled())).is_cancelled());
     assert!(!PullError::DetachedHead.is_cancelled());
 
@@ -110,7 +110,10 @@ fn clone_cancelled_at_start_is_classified_and_needs_cleanup() {
 
     let opts = CloneOptions::new(upstream.to_string_lossy(), dest.clone());
     let err = clone(opts, &mut NoProgress, &flag, None).expect_err("cancelled before clone");
-    assert!(matches!(err, CloneError::Remote(RemoteError::Cancelled)));
+    assert!(matches!(
+        err,
+        CloneError::Remote(grit_lib::error::Error::Cancelled)
+    ));
     assert!(err.is_cancelled(), "{err:?}");
     assert!(err.should_cleanup_failed_clone(), "{err:?}");
     assert!(dest.join(".git").is_dir(), "partial clone leaves .git");

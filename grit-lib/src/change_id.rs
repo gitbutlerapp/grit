@@ -17,6 +17,8 @@
 //! # }
 //! ```
 
+use crate::error::ObjectError;
+use crate::error::RefError;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::fmt;
@@ -55,6 +57,7 @@ pub struct ChangeId(String);
 
 /// Failure modes for change-id parsing and generation.
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ChangeIdError {
     /// Reverse-hex form must be exactly 32 characters.
     #[error("change id reverse-hex must be 32 characters")]
@@ -268,7 +271,9 @@ impl ChangeIdPolicy {
                 strip_change_id_headers(&mut stripped.extra_headers);
                 let bytes = serialize_commit(&stripped);
                 let digest = algo.digest(&bytes).map_err(|e| match e {
-                    crate::error::Error::HashCollision { .. } => ChangeIdError::HashCollision,
+                    crate::error::Error::Object(ObjectError::HashCollision { .. }) => {
+                        ChangeIdError::HashCollision
+                    }
                     other => {
                         panic!("unexpected error deriving content-hash change id: {other}")
                     }
@@ -373,9 +378,9 @@ pub fn find_commits_by_change_id_prefix(
     prefix: &str,
 ) -> Result<Vec<ChangeIdMatch>> {
     if !is_change_id_spec_token(prefix) {
-        return Err(Error::InvalidRef(format!(
-            "invalid change id revision token '{prefix}'"
-        )));
+        return Err(Error::Ref(RefError::Invalid {
+            detail: format!("invalid change id revision token '{prefix}'"),
+        }));
     }
     let tips = all_ref_commit_tips_for_walk(repo)?;
     let mut graph = CommitGraph::with_commit_graph(repo, false, true);
@@ -869,12 +874,14 @@ fn change_id_from_commit_object_header(data: &[u8]) -> Option<ChangeId> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] when nothing matches,
-/// [`Error::RevParse`] with [`RevParseError::AmbiguousChangeId`] when several commits match.
+/// Returns [`crate::error::ObjectError::NotFound`] when nothing matches,
+/// [`crate::error::RevisionError::Parse`] with [`RevParseError::AmbiguousChangeId`] when several commits match.
 pub fn resolve_commit_by_change_id_prefix(repo: &Repository, prefix: &str) -> Result<ObjectId> {
     let matches = find_commits_by_change_id_prefix(repo, prefix)?;
     match matches.len() {
-        0 => Err(Error::ObjectNotFound(prefix.to_owned())),
+        0 => Err(Error::Object(ObjectError::NotFound {
+            name: prefix.to_owned(),
+        })),
         1 => Ok(matches[0].oid),
         _ => Err(RevParseError::AmbiguousChangeId {
             prefix: prefix.to_owned(),

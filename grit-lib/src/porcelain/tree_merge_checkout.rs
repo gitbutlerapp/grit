@@ -3,6 +3,7 @@
 //! Pick and revert already computed [`TreeMergeOutput`]; this module reuses that result for
 //! untracked guards, worktree checkout, and sparse index updates instead of separate full-tree diffs.
 
+use crate::worktree::WorktreeError;
 use std::collections::{BTreeSet, HashSet};
 
 use crate::diff::{diff_trees, diff_trees_with_index, DiffEntry, DiffStatus};
@@ -178,11 +179,13 @@ pub(crate) fn apply_conflict_tree_merge_to_worktree(
     let prepared =
         prepare_tree_transition_allow_local(repo, Some(head_tree), materialized, &HashSet::new())
             .map_err(|err| match err {
-            TreeTransitionPrepareError::OverwritePaths(paths) => Error::WouldOverwrite {
-                reason: crate::error::OverwriteReason::LocalChanges,
-                paths,
-                message: "local changes would be overwritten by merge".into(),
-            },
+            TreeTransitionPrepareError::OverwritePaths(paths) => {
+                Error::Worktree(WorktreeError::WouldOverwrite {
+                    reason: crate::error::OverwriteReason::LocalChanges,
+                    paths,
+                    message: "local changes would be overwritten by merge".into(),
+                })
+            }
             TreeTransitionPrepareError::Failed(err) => err,
         })?;
 

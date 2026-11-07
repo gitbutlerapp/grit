@@ -3,6 +3,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::error::ObjectError;
 use grit_lib::porcelain::branch::BranchError;
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::LockWorktreeOptions;
@@ -271,7 +272,7 @@ fn add_branch_refusals_use_branch_errors() {
                 Some(WorktreeBranch::Existing("main".into()))
             )
         ),
-        Err(Error::BranchCheckedOutInWorktree { branch, .. }) if branch == "main"
+        Err(Error::Branch(BranchError::CheckedOut { name: branch, .. })) if branch == "main"
     ));
 
     let tree = git(&main, &["rev-parse", "HEAD^{tree}"]);
@@ -279,7 +280,7 @@ fn add_branch_refusals_use_branch_errors() {
     not_commit.start_point = Some(tree.trim().to_owned());
     assert!(matches!(
         add_linked_worktree(&repo, &not_commit),
-        Err(Error::UnexpectedObjectKind { .. })
+        Err(Error::Object(ObjectError::UnexpectedKind { .. }))
     ));
 
     let occupied = tmp.path().join("occupied");

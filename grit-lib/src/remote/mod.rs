@@ -1,7 +1,9 @@
 //! Remotes, fetch/push, transport, and credential helpers.
 //!
-//! Remote operations return [`RemoteResult`] / [`RemoteError`]; use [`RemoteError::is_cancelled`]
-//! and [`RemoteError::is_remote_unreadable`] instead of matching nested library errors.
+//! Remote operations return [`crate::error::Result`]; remote-specific failures are
+//! [`Error::Remote`](crate::error::Error::Remote) with a [`RemoteError`]. Use
+//! [`Error::is_cancelled`](crate::error::Error::is_cancelled) and
+//! [`RemoteError::is_remote_unreadable`] instead of matching variants one by one.
 //!
 //! Library guide: [mod](https://grit-scm.com/docs/library/network)
 //!
@@ -20,7 +22,7 @@ mod error;
 mod inspect;
 pub mod push_plan;
 
-pub use error::{RemoteError, RemoteResult};
+pub use error::RemoteError;
 
 pub(crate) use core::is_valid_remote_name;
 pub use core::*;

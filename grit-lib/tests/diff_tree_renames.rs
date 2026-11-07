@@ -1,6 +1,7 @@
 //! Tree, index, and worktree diffs with rename/copy/break vs system `git` raw output.
 
 use crate::support;
+use grit_lib::error::ObjectError;
 
 use std::fs;
 
@@ -459,7 +460,7 @@ fn t4054_bogus_tree_typed_error() {
     let good = rev_parse_tree(&dr.worktree, "HEAD^{tree}");
     let err = diff_trees(&dr.repo.odb(), Some(&good), Some(&bogus), "").unwrap_err();
     assert!(
-        matches!(err, Error::CorruptObject(_)),
+        matches!(err, Error::Object(ObjectError::Corrupt { .. })),
         "expected CorruptObject, got {err:?}"
     );
 }

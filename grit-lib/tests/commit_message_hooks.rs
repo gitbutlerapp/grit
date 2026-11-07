@@ -647,10 +647,7 @@ fn rebase_opts(upstream: ObjectId, tip: ObjectId, pre_rebase: PreRebase) -> Star
     }
 }
 
-fn rebase(
-    repo: &Repository,
-    opts: &StartRebaseOptions,
-) -> Result<RebaseOutcome, RebaseSessionError> {
+fn rebase(repo: &Repository, opts: &StartRebaseOptions) -> grit_lib::error::Result<RebaseOutcome> {
     start_rebase(repo, opts, &mut NullProgress, &CancelToken::never())
 }
 

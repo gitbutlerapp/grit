@@ -9,7 +9,7 @@ use grit_lib::remote::{
     redact_url_for_display,
     snapshot_checkout::{
         same_branch_name, suggest_work_branch, valid_branch_name, CheckinBranch, CheckinRequest,
-        CheckinRule, CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus, Landing,
+        CheckinRule, CheckinStatus, IntegrateRequest, IntegrateStatus, Landing,
     },
 };
 use grit_lib::revwalk::ReachableWalkOptions;
@@ -224,7 +224,9 @@ fn check_in(
             Some(&crate::context::http_client_factory()),
         )
         .map_err(|e| match e {
-            CheckoutError::Remote(remote) => crate::commands::fetch::map_remote_error(*remote),
+            remote @ grit_lib::error::Error::Remote(_) => {
+                crate::commands::fetch::map_remote_error(remote)
+            }
             other => other.into(),
         })?;
     drop(progress);

@@ -4,6 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::error::ObjectError;
 use grit_lib::maintenance::{repack_all, RepackOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
@@ -137,7 +138,7 @@ fn lazy_v2_out_of_range_large_offset_slot_returns_corruption_not_panic() {
     body.extend_from_slice(&[0u8; 20]);
     let idx = parse_pack_index_bytes(Path::new("bad-large-slot.idx"), body, false).expect("lazy");
     let err = idx.find_offset(&oid).expect_err("corrupt slot");
-    assert!(matches!(err, Error::CorruptObject(_)));
+    assert!(matches!(err, Error::Object(ObjectError::Corrupt { .. })));
 }
 
 #[test]
@@ -161,7 +162,7 @@ fn lazy_v2_out_of_range_large_offset_slot_returns_corruption_on_lookup() {
     let err = idx
         .find_offset(&oid)
         .expect_err("slot 1 with one large entry");
-    assert!(matches!(err, Error::CorruptObject(_)));
+    assert!(matches!(err, Error::Object(ObjectError::Corrupt { .. })));
 }
 
 #[test]
@@ -182,7 +183,7 @@ fn corrupt_large_offset_read_object_from_pack_propagates_error() {
     let mut idx = idx;
     idx.pack_path = pack_path;
     let err = read_object_from_pack(&idx, &oid).expect_err("typed corruption");
-    assert!(matches!(err, Error::CorruptObject(_)));
+    assert!(matches!(err, Error::Object(ObjectError::Corrupt { .. })));
 }
 
 #[test]
@@ -217,11 +218,11 @@ fn misordered_oid_lazy_open_verify_and_fsck_reject() {
     read_pack_index_no_verify(&corrupt_path).expect("lazy open accepts swapped oids");
     assert!(matches!(
         read_pack_index(&corrupt_path),
-        Err(Error::CorruptObject(msg)) if msg.contains("out of order")
+        Err(Error::Object(ObjectError::Corrupt { detail: msg })) if msg.contains("out of order")
     ));
     assert!(matches!(
         verify_pack_and_collect(&corrupt_path),
-        Err(Error::CorruptObject(_))
+        Err(Error::Object(ObjectError::Corrupt { .. }))
     ));
 
     let lazy = read_pack_index_no_verify(&corrupt_path).expect("lazy idx");

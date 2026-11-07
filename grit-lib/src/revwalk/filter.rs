@@ -24,6 +24,7 @@
 //! # }
 //! ```
 
+use crate::error::ObjectError;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -69,6 +70,7 @@ impl From<&str> for Pattern {
 
 /// Invalid commit-filter pattern or compilation failure.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum CommitFilterError {
     /// A pattern could not be compiled.
     #[error("invalid commit filter pattern `{pattern}`: {detail}")]
@@ -121,10 +123,9 @@ impl CommitFilter {
     pub(crate) fn matches(&self, repo: &Repository, oid: ObjectId) -> Result<bool> {
         let object = repo.odb().read(&oid)?;
         if object.kind != ObjectKind::Commit {
-            return Err(Error::CorruptObject(format!(
-                "expected commit object for {oid}, found {:?}",
-                object.kind
-            )));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("expected commit object for {oid}, found {:?}", object.kind),
+            }));
         }
         Ok(self.matches_bytes(&object.data))
     }

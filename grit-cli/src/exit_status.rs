@@ -108,17 +108,8 @@ impl ExitStatus {
         }
         if err.chain().any(|cause| {
             cause
-                .downcast_ref::<grit_lib::remote::clone::CloneError>()
-                .is_some_and(grit_lib::remote::clone::CloneError::is_cancelled)
-                || cause
-                    .downcast_ref::<grit_lib::remote::RemoteError>()
-                    .is_some_and(grit_lib::remote::RemoteError::is_cancelled)
-                || cause
-                    .downcast_ref::<grit_lib::error::Error>()
-                    .is_some_and(grit_lib::error::Error::is_cancelled)
-                || cause
-                    .downcast_ref::<grit_lib::porcelain::pull::PullError>()
-                    .is_some_and(grit_lib::porcelain::pull::PullError::is_cancelled)
+                .downcast_ref::<grit_lib::error::Error>()
+                .is_some_and(grit_lib::error::Error::is_cancelled)
         }) {
             return Self::Interrupted;
         }
@@ -405,9 +396,9 @@ mod tests {
         ];
         for (kind, err, expected) in structured {
             let payload =
-                crate::json_error::structured_json_payload(&err).expect("structured payload");
+                crate::json_error::structured_json_payload(err).expect("structured payload");
             assert_eq!(payload.kind, *kind);
-            assert_eq!(ExitStatus::for_error(&err), *expected);
+            assert_eq!(ExitStatus::for_error(err), *expected);
         }
 
         let filter_err = grit_lib::revwalk::filter::CommitFilterError::InvalidPattern {
@@ -425,42 +416,32 @@ mod tests {
         };
         for err in [
             anyhow::Error::new(unreadable()),
-            commands::fetch::map_remote_error(grit_lib::remote::RemoteError::unreadable(
-                "/nope.git",
-                grit_lib::error::RemoteUnreadableReason::RepositoryNotFound,
-            )),
-            anyhow::Error::new(grit_lib::remote::clone::CloneError::Nested(Box::new(
-                unreadable(),
-            ))),
-            anyhow::Error::new(grit_lib::porcelain::pull::PullError::Remote(
-                grit_lib::remote::RemoteError::unreadable(
-                    "/nope.git",
-                    grit_lib::error::RemoteUnreadableReason::RepositoryNotFound,
-                ),
-            )),
+            commands::fetch::map_remote_error(unreadable()),
+            anyhow::Error::new(unreadable()).context("clone failed"),
+            anyhow::Error::new(unreadable()).context("pull failed"),
         ] {
             let payload = crate::json_error::structured_json_payload(&err).expect("payload");
             assert_eq!(payload.kind, ErrorKind::RemoteUnreadable);
             assert_eq!(payload.error, "could not find repository at '/nope.git'");
             assert_eq!(ExitStatus::for_error(&err), ExitStatus::RemoteUnreadable);
         }
-        let auth = commands::fetch::map_remote_error(grit_lib::remote::RemoteError::Auth {
-            url: "https://example.com/r.git".into(),
-            reason: grit_lib::error::AuthFailure::Rejected,
-        });
+        let auth = commands::fetch::map_remote_error(
+            grit_lib::remote::RemoteError::Auth {
+                url: "https://example.com/r.git".into(),
+                reason: grit_lib::error::AuthFailure::Rejected,
+            }
+            .into(),
+        );
         assert_eq!(ExitStatus::for_error(&auth), ExitStatus::Failure);
 
-        let cancelled = anyhow::Error::new(grit_lib::remote::clone::CloneError::Nested(Box::new(
-            grit_lib::error::Error::Cancelled,
-        )));
+        let cancelled =
+            anyhow::Error::new(grit_lib::error::Error::Cancelled).context("clone failed");
         assert_eq!(ExitStatus::for_error(&cancelled), ExitStatus::Interrupted);
         assert_eq!(ExitStatus::Interrupted.code(), 130);
         for err in [
             anyhow::Error::new(grit_lib::error::Error::Cancelled),
-            commands::fetch::map_remote_error(grit_lib::remote::RemoteError::Cancelled),
-            anyhow::Error::new(grit_lib::porcelain::pull::PullError::Remote(
-                grit_lib::remote::RemoteError::Cancelled,
-            )),
+            commands::fetch::map_remote_error(grit_lib::error::Error::Cancelled),
+            anyhow::Error::new(grit_lib::error::Error::Cancelled).context("pull failed"),
         ] {
             assert_eq!(
                 ExitStatus::for_error(&err),

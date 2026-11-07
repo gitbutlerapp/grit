@@ -7,9 +7,6 @@ use crate::objects::ObjectId;
 use crate::porcelain::branch_error::BranchError;
 use crate::porcelain::hunk_select::HunkSelectError;
 
-/// Result alias for stash stack operations.
-pub type StashResult<T> = std::result::Result<T, StashError>;
-
 /// Why a stash commit object cannot be interpreted for apply, show, or branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -55,10 +52,6 @@ pub enum StashPushValidationError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum StashError {
-    /// Underlying object, ref, index, checkout, or revision failure.
-    #[error(transparent)]
-    Library(#[from] Box<crate::error::Error>),
-
     /// Stash W commit has an invalid parent layout.
     #[error("corrupt stash commit {oid}: {reason}")]
     CorruptStash {
@@ -142,10 +135,6 @@ pub enum StashError {
     #[error(transparent)]
     InvalidSignature(#[from] crate::ident::SignatureError),
 
-    /// Operation stopped via [`CancelToken`](crate::progress::CancelToken).
-    #[error("operation cancelled")]
-    Cancelled,
-
     /// Incompatible [`crate::stash::StashPushOptions`] flags (see [`StashPushValidationError`]).
     #[error(transparent)]
     PushValidation(#[from] StashPushValidationError),
@@ -165,58 +154,21 @@ impl StashError {
         Self::CorruptStash { oid, reason }
     }
 
-    pub(crate) fn library(err: crate::error::Error) -> Self {
+    pub(crate) fn from_apply_worktree(err: crate::error::ApplyError) -> crate::error::Error {
         match err {
-            crate::error::Error::Cancelled => Self::Cancelled,
-            other => Self::Library(Box::new(other)),
-        }
-    }
-
-    pub(crate) fn from_apply_worktree(err: crate::error::ApplyError) -> Self {
-        match err {
-            crate::error::ApplyError::Cancelled => Self::Cancelled,
+            crate::error::ApplyError::Cancelled => crate::error::Error::Cancelled,
             crate::error::ApplyError::Failed { path, message } if !path.is_empty() => {
-                Self::WorktreeUpdateFailed { path, message }
+                Self::WorktreeUpdateFailed { path, message }.into()
             }
-            other => Self::Apply(other),
-        }
-    }
-
-    /// Map into the library umbrella for non-stash APIs (merge autostash, pull, and similar).
-    pub(crate) fn into_error(self) -> crate::error::Error {
-        match self {
-            Self::Cancelled => crate::error::Error::Cancelled,
-            Self::Library(boxed) => *boxed,
-            other => crate::error::Error::Verbatim(other.to_string()),
+            other => Self::Apply(other).into(),
         }
     }
 }
 
-impl From<crate::error::Error> for StashError {
-    fn from(err: crate::error::Error) -> Self {
-        match err {
-            crate::error::Error::Cancelled => Self::Cancelled,
-            other => Self::Library(Box::new(other)),
-        }
-    }
-}
-
-impl From<crate::index::IndexError> for StashError {
-    fn from(err: crate::index::IndexError) -> Self {
-        Self::library(crate::error::Error::from(err))
-    }
-}
-
-impl From<StashError> for crate::error::Error {
-    fn from(err: StashError) -> Self {
-        err.into_error()
-    }
-}
-
-#[cfg(feature = "serde-models")]
 impl StashError {
-    /// Stable `kind` slug when this error is serialized in the legacy `Error` JSON shape.
-    pub(crate) fn legacy_kind(&self) -> &'static str {
+    /// Stable snake_case slug for this failure (the `kind` of its serialized form).
+    #[must_use]
+    pub fn kind_name(&self) -> &'static str {
         match self {
             Self::CorruptStash { .. } => "corrupt_stash",
             Self::NotFound { .. } => "stash_not_found",
@@ -230,13 +182,11 @@ impl StashError {
             Self::SymlinkNotUtf8 => "stash_symlink_not_utf8",
             Self::CouldNotRestoreUntracked { .. } => "stash_could_not_restore_untracked",
             Self::PushValidation(_) => "stash_option_conflict",
-            Self::Cancelled => "cancelled",
             Self::HunkSelection(_) => "hunk_selection",
             Self::Branch(_) => "branch",
             Self::Apply(_) => "apply",
             Self::InvalidSignature(_) => "invalid_signature",
             Self::WorktreeUpdateFailed { .. } => "stash_worktree_update_failed",
-            Self::Library(boxed) => boxed.kind_name(),
         }
     }
 }
@@ -252,14 +202,14 @@ impl serde::Serialize for StashError {
         match self {
             Self::CouldNotRestoreUntracked { path } => {
                 let mut out = serializer.serialize_struct("Error", 3)?;
-                out.serialize_field("kind", self.legacy_kind())?;
+                out.serialize_field("kind", self.kind_name())?;
                 out.serialize_field("message", &self.to_string())?;
                 out.serialize_field("path", path)?;
                 out.end()
             }
             _ => {
                 let mut out = serializer.serialize_struct("Error", 2)?;
-                out.serialize_field("kind", self.legacy_kind())?;
+                out.serialize_field("kind", self.kind_name())?;
                 out.serialize_field("message", &self.to_string())?;
                 out.end()
             }

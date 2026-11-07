@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use crate::error::ObjectError;
 use std::io::Read;
 
 use flate2::{Decompress, FlushDecompress, Status};
@@ -218,25 +219,32 @@ impl ZlibInflateScratch {
         loop {
             if let Some(dest) = delta_uncompressed_result_size_if_complete(&self.delta_prefix)? {
                 *pos += in_off;
-                return u64::try_from(dest)
-                    .map_err(|_| Error::CorruptObject("delta result size overflow".to_owned()));
+                return u64::try_from(dest).map_err(|_| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "delta result size overflow".to_owned(),
+                    })
+                });
             }
             if self.delta_prefix.len() >= MAX_PREFIX {
-                return Err(Error::CorruptObject(
-                    "delta size prefix exceeds header limit".to_owned(),
-                ));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "delta size prefix exceeds header limit".to_owned(),
+                }));
             }
             if in_off >= input.len() {
-                return Err(Error::CorruptObject(
-                    "truncated delta zlib stream".to_owned(),
-                ));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "truncated delta zlib stream".to_owned(),
+                }));
             }
             let before_in = self.dec.total_in();
             let before_out = self.dec.total_out();
             let status = self
                 .dec
                 .decompress(&input[in_off..], &mut chunk, FlushDecompress::None)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
+                .map_err(|e| {
+                    Error::Object(ObjectError::Zlib {
+                        detail: e.to_string(),
+                    })
+                })?;
             let consumed = (self.dec.total_in() - before_in) as usize;
             let produced = (self.dec.total_out() - before_out) as usize;
             in_off += consumed;
@@ -251,18 +259,20 @@ impl ZlibInflateScratch {
                     {
                         *pos += in_off;
                         return u64::try_from(dest).map_err(|_| {
-                            Error::CorruptObject("delta result size overflow".to_owned())
+                            Error::Object(ObjectError::Corrupt {
+                                detail: "delta result size overflow".to_owned(),
+                            })
                         });
                     }
-                    return Err(Error::CorruptObject(
-                        "delta size prefix exceeds header limit".to_owned(),
-                    ));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: "delta size prefix exceeds header limit".to_owned(),
+                    }));
                 }
                 Status::Ok | Status::BufError => {
                     if consumed == 0 && produced == 0 {
-                        return Err(Error::CorruptObject(
-                            "zlib stream stalled before delta size".to_owned(),
-                        ));
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: "zlib stream stalled before delta size".to_owned(),
+                        }));
                     }
                 }
             }
@@ -275,8 +285,8 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when declared size does not match inflated output.
-    /// Returns [`Error::Zlib`] for invalid or truncated zlib data.
+    /// Returns [`crate::error::ObjectError::Corrupt`] when declared size does not match inflated output.
+    /// Returns [`crate::error::ObjectError::Zlib`] for invalid or truncated zlib data.
     /// Inflate exactly `expected_size` bytes and pass each produced slice to `update`.
     ///
     /// Uses a fixed stack buffer so large pack objects are not allocated whole in memory.
@@ -288,7 +298,9 @@ impl ZlibInflateScratch {
         mut update: impl FnMut(&[u8]) -> Result<()>,
     ) -> Result<()> {
         let expected = usize::try_from(expected_size).map_err(|_| {
-            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("pack object size overflow: {expected_size}"),
+            })
         })?;
         self.reset();
         let input = &bytes[*pos..];
@@ -306,7 +318,11 @@ impl ZlibInflateScratch {
             let status = self
                 .dec
                 .decompress(&input[in_off..], &mut chunk, flush)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
+                .map_err(|e| {
+                    Error::Object(ObjectError::Zlib {
+                        detail: e.to_string(),
+                    })
+                })?;
             let consumed = (self.dec.total_in() - before_in) as usize;
             let produced = (self.dec.total_out() - before_out) as usize;
             in_off += consumed;
@@ -317,21 +333,25 @@ impl ZlibInflateScratch {
             match status {
                 Status::StreamEnd => {
                     if out_pos != expected {
-                        return Err(Error::CorruptObject(format!(
-                            "pack object size mismatch: expected {expected}, got {out_pos}"
-                        )));
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: format!(
+                                "pack object size mismatch: expected {expected}, got {out_pos}"
+                            ),
+                        }));
                     }
                     *pos += in_off;
                     return Ok(());
                 }
                 Status::Ok | Status::BufError => {
                     if in_off >= input.len() && flush == FlushDecompress::Finish {
-                        return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                        return Err(Error::Object(ObjectError::Zlib {
+                            detail: "unexpected end of zlib stream".to_owned(),
+                        }));
                     }
                     if consumed == 0 && produced == 0 {
-                        return Err(Error::CorruptObject(
-                            "zlib stream stalled before declared object size".to_owned(),
-                        ));
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: "zlib stream stalled before declared object size".to_owned(),
+                        }));
                     }
                 }
             }
@@ -353,7 +373,7 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Zlib`] for invalid or truncated zlib data.
+    /// Returns [`crate::error::ObjectError::Zlib`] for invalid or truncated zlib data.
     pub fn decompress_prefix_into(
         &mut self,
         bytes: &[u8],
@@ -367,12 +387,11 @@ impl ZlibInflateScratch {
         }
         out.resize(max_out, 0);
         let consumed = self.decompress_into(bytes, out, false)?;
-        out.truncate(
-            self.dec
-                .total_out()
-                .try_into()
-                .map_err(|_| Error::CorruptObject("inflate output overflow".to_owned()))?,
-        );
+        out.truncate(self.dec.total_out().try_into().map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "inflate output overflow".to_owned(),
+            })
+        })?);
         Ok(consumed)
     }
 
@@ -382,12 +401,18 @@ impl ZlibInflateScratch {
         let status = self
             .dec
             .decompress(bytes, &mut sink, FlushDecompress::Finish)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
+            .map_err(|e| {
+                Error::Object(ObjectError::Zlib {
+                    detail: e.to_string(),
+                })
+            })?;
         let consumed = self.dec.total_in() as usize;
         match status {
             Status::StreamEnd => Ok((Vec::new(), consumed)),
             Status::Ok | Status::BufError if consumed == 0 && bytes.is_empty() => {
-                Err(Error::Zlib("unexpected end of zlib stream".to_owned()))
+                Err(Error::Object(ObjectError::Zlib {
+                    detail: "unexpected end of zlib stream".to_owned(),
+                }))
             }
             Status::Ok | Status::BufError => Ok((Vec::new(), consumed)),
         }
@@ -403,7 +428,7 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Zlib`] for invalid zlib, preset-dictionary streams, or truncated input.
+    /// Returns [`crate::error::ObjectError::Zlib`] for invalid zlib, preset-dictionary streams, or truncated input.
     /// Returns [`Error::Io`] for read failures, including a file too short to hold a zlib header.
     pub fn inflate_loose_file(
         &mut self,
@@ -518,9 +543,15 @@ impl ZlibInflateScratch {
             let status = match self.dec.decompress(&input[in_off..filled], dest, flush) {
                 Ok(s) => s,
                 Err(_) if preset_dictionary => {
-                    break Err(Error::Zlib("needs dictionary".to_owned()));
+                    break Err(Error::Object(ObjectError::Zlib {
+                        detail: "needs dictionary".to_owned(),
+                    }));
                 }
-                Err(e) => break Err(Error::Zlib(e.to_string())),
+                Err(e) => {
+                    break Err(Error::Object(ObjectError::Zlib {
+                        detail: e.to_string(),
+                    }))
+                }
             };
             // Both are bounded by the slices just passed to the inflater.
             let consumed = (self.dec.total_in() - before_in) as usize;
@@ -545,12 +576,14 @@ impl ZlibInflateScratch {
                 Status::Ok | Status::BufError => {
                     let out_has_room = produced < room;
                     if eof && in_off == filled && out_has_room {
-                        break Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                        break Err(Error::Object(ObjectError::Zlib {
+                            detail: "unexpected end of zlib stream".to_owned(),
+                        }));
                     }
                     if consumed == 0 && produced == 0 && out_has_room && in_off < filled {
-                        break Err(Error::CorruptObject(
-                            "zlib stream stalled in loose object".to_owned(),
-                        ));
+                        break Err(Error::Object(ObjectError::Corrupt {
+                            detail: "zlib stream stalled in loose object".to_owned(),
+                        }));
                     }
                 }
             }
@@ -566,7 +599,7 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Zlib`] for invalid zlib data and [`Error::Io`] for read failures.
+    /// Returns [`crate::error::ObjectError::Zlib`] for invalid zlib data and [`Error::Io`] for read failures.
     pub fn inflate_loose_header(&mut self, file: &mut std::fs::File) -> Result<Vec<u8>> {
         const HEADER_INPUT_CHUNK: usize = 512;
         self.reset();
@@ -576,7 +609,9 @@ impl ZlibInflateScratch {
         loop {
             let n = read_budget.read(file, &mut input)?;
             if n == 0 {
-                return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                return Err(Error::Object(ObjectError::Zlib {
+                    detail: "unexpected end of zlib stream".to_owned(),
+                }));
             }
             let mut in_off = 0usize;
             while in_off < n {
@@ -585,9 +620,16 @@ impl ZlibInflateScratch {
                 let status = self
                     .dec
                     .decompress_vec(&input[in_off..n], &mut prefix, FlushDecompress::None)
-                    .map_err(|e| Error::Zlib(e.to_string()))?;
-                let consumed = usize::try_from(self.dec.total_in() - before_in)
-                    .map_err(|_| Error::CorruptObject("inflate input overflow".to_owned()))?;
+                    .map_err(|e| {
+                        Error::Object(ObjectError::Zlib {
+                            detail: e.to_string(),
+                        })
+                    })?;
+                let consumed = usize::try_from(self.dec.total_in() - before_in).map_err(|_| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "inflate input overflow".to_owned(),
+                    })
+                })?;
                 in_off += consumed;
                 let done = status == Status::StreamEnd
                     || prefix.len() == prefix.capacity()
@@ -596,9 +638,9 @@ impl ZlibInflateScratch {
                     return Ok(prefix);
                 }
                 if consumed == 0 && prefix.len() == before_out {
-                    return Err(Error::CorruptObject(
-                        "zlib stream stalled in loose object header".to_owned(),
-                    ));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: "zlib stream stalled in loose object header".to_owned(),
+                    }));
                 }
             }
         }
@@ -613,7 +655,9 @@ impl ZlibInflateScratch {
         out: &mut Vec<u8>,
     ) -> Result<()> {
         let expected = usize::try_from(expected_size).map_err(|_| {
-            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("pack object size overflow: {expected_size}"),
+            })
         })?;
         out.clear();
         if expected <= MAX_HEADER_SIZE_RESERVE {
@@ -630,9 +674,11 @@ impl ZlibInflateScratch {
             if out_pos == out.len() {
                 let step = pack_fixed_output_growth(out_pos, expected);
                 if step == 0 {
-                    return Err(Error::CorruptObject(format!(
-                        "pack object size mismatch: expected {expected}, got {out_pos}"
-                    )));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: format!(
+                            "pack object size mismatch: expected {expected}, got {out_pos}"
+                        ),
+                    }));
                 }
                 out.reserve_exact(step);
                 out.resize(out_pos + step, 0);
@@ -648,7 +694,11 @@ impl ZlibInflateScratch {
             let status = self
                 .dec
                 .decompress(&input[in_off..], &mut out[out_pos..out_pos + room], flush)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
+                .map_err(|e| {
+                    Error::Object(ObjectError::Zlib {
+                        detail: e.to_string(),
+                    })
+                })?;
             let consumed = (self.dec.total_in() - before_in) as usize;
             let produced = (self.dec.total_out() - before_out) as usize;
             in_off += consumed;
@@ -657,9 +707,11 @@ impl ZlibInflateScratch {
                 Status::StreamEnd => {
                     out.truncate(out_pos);
                     if out_pos != expected {
-                        return Err(Error::CorruptObject(format!(
-                            "pack object size mismatch: expected {expected}, got {out_pos}"
-                        )));
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: format!(
+                                "pack object size mismatch: expected {expected}, got {out_pos}"
+                            ),
+                        }));
                     }
                     *pos += in_off;
                     return Ok(());
@@ -667,13 +719,15 @@ impl ZlibInflateScratch {
                 Status::Ok | Status::BufError => {
                     if in_off >= input.len() && flush == FlushDecompress::Finish {
                         out.truncate(out_pos);
-                        return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                        return Err(Error::Object(ObjectError::Zlib {
+                            detail: "unexpected end of zlib stream".to_owned(),
+                        }));
                     }
                     if consumed == 0 && produced == 0 {
                         out.truncate(out_pos);
-                        return Err(Error::CorruptObject(
-                            "zlib stream stalled before declared object size".to_owned(),
-                        ));
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: "zlib stream stalled before declared object size".to_owned(),
+                        }));
                     }
                 }
             }
@@ -699,8 +753,8 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the stream does not inflate to exactly
-    /// `expected_size` bytes, and [`Error::Zlib`] for invalid or truncated zlib data.
+    /// Returns [`crate::error::ObjectError::Corrupt`] when the stream does not inflate to exactly
+    /// `expected_size` bytes, and [`crate::error::ObjectError::Zlib`] for invalid or truncated zlib data.
     pub(crate) fn decompress_prefix_until(
         &mut self,
         input: &[u8],
@@ -710,7 +764,9 @@ impl ZlibInflateScratch {
         prefix_len: impl Fn(&[u8]) -> Option<usize>,
     ) -> Result<bool> {
         let expected = usize::try_from(expected_size).map_err(|_| {
-            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("pack object size overflow: {expected_size}"),
+            })
         })?;
         self.reset();
         out.clear();
@@ -734,16 +790,22 @@ impl ZlibInflateScratch {
             let status = self
                 .dec
                 .decompress(&input[in_off..in_end], &mut out[out_pos..], flush)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
+                .map_err(|e| {
+                    Error::Object(ObjectError::Zlib {
+                        detail: e.to_string(),
+                    })
+                })?;
             let consumed = (self.dec.total_in() - before_in) as usize;
             let produced = (self.dec.total_out() - before_out) as usize;
             in_off += consumed;
             out_pos += produced;
             if status == Status::StreamEnd {
                 if out_pos != expected {
-                    return Err(Error::CorruptObject(format!(
-                        "pack object size mismatch: expected {expected}, got {out_pos}"
-                    )));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: format!(
+                            "pack object size mismatch: expected {expected}, got {out_pos}"
+                        ),
+                    }));
                 }
                 return Ok(true);
             }
@@ -762,12 +824,14 @@ impl ZlibInflateScratch {
                 continue;
             }
             if in_off >= input.len() {
-                return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                return Err(Error::Object(ObjectError::Zlib {
+                    detail: "unexpected end of zlib stream".to_owned(),
+                }));
             }
             if consumed == 0 && produced == 0 {
-                return Err(Error::CorruptObject(
-                    "zlib stream stalled before declared object size".to_owned(),
-                ));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "zlib stream stalled before declared object size".to_owned(),
+                }));
             }
         }
     }
@@ -776,8 +840,8 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when inflated output exceeds `expected_size`, or when
-    /// the stream ends before producing `expected_size` bytes. Returns [`Error::Zlib`] for
+    /// Returns [`crate::error::ObjectError::Corrupt`] when inflated output exceeds `expected_size`, or when
+    /// the stream ends before producing `expected_size` bytes. Returns [`crate::error::ObjectError::Zlib`] for
     /// invalid or truncated zlib data.
     pub fn skip_zlib_stream(
         &mut self,
@@ -786,7 +850,9 @@ impl ZlibInflateScratch {
         expected_size: u64,
     ) -> Result<()> {
         let expected = usize::try_from(expected_size).map_err(|_| {
-            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("pack object size overflow: {expected_size}"),
+            })
         })?;
         let input = &bytes[*pos..];
         self.reset();
@@ -806,7 +872,11 @@ impl ZlibInflateScratch {
             let status = self
                 .dec
                 .decompress(&input[in_off..], &mut discard[..out_cap], flush)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
+                .map_err(|e| {
+                    Error::Object(ObjectError::Zlib {
+                        detail: e.to_string(),
+                    })
+                })?;
             let consumed = (self.dec.total_in() - before_in) as usize;
             let produced = (self.dec.total_out() - before_out) as usize;
             in_off += consumed;
@@ -814,30 +884,36 @@ impl ZlibInflateScratch {
             match status {
                 Status::StreamEnd => {
                     if out_written != expected {
-                        return Err(Error::CorruptObject(format!(
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: format!(
                             "pack object size mismatch: expected {expected_size}, got {out_written}"
-                        )));
+                        ),
+                        }));
                     }
                     *pos += in_off;
                     return Ok(());
                 }
                 Status::Ok | Status::BufError => {
                     if in_off >= input.len() && out_written < expected {
-                        return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                        return Err(Error::Object(ObjectError::Zlib {
+                            detail: "unexpected end of zlib stream".to_owned(),
+                        }));
                     }
                     if consumed == 0 && produced == 0 {
-                        return Err(Error::CorruptObject(
-                            "zlib stream stalled before declared object size".to_owned(),
-                        ));
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: "zlib stream stalled before declared object size".to_owned(),
+                        }));
                     }
                 }
             }
         }
         self.finish_zlib_without_extra_output(&input[in_off..], &mut in_off)?;
         if out_written != expected {
-            return Err(Error::CorruptObject(format!(
-                "pack object size mismatch: expected {expected_size}, got {out_written}"
-            )));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!(
+                    "pack object size mismatch: expected {expected_size}, got {out_written}"
+                ),
+            }));
         }
         *pos += in_off;
         Ok(())
@@ -857,25 +933,31 @@ impl ZlibInflateScratch {
             let status = self
                 .dec
                 .decompress(&input[*in_off..], &mut sink, flush)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
+                .map_err(|e| {
+                    Error::Object(ObjectError::Zlib {
+                        detail: e.to_string(),
+                    })
+                })?;
             let consumed = (self.dec.total_in() - before_in) as usize;
             let produced = (self.dec.total_out() - before_out) as usize;
             *in_off += consumed;
             if produced > 0 {
-                return Err(Error::CorruptObject(
-                    "zlib stream larger than declared object size".to_owned(),
-                ));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "zlib stream larger than declared object size".to_owned(),
+                }));
             }
             match status {
                 Status::StreamEnd => return Ok(()),
                 Status::Ok | Status::BufError => {
                     if *in_off >= input.len() && status != Status::StreamEnd {
-                        return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                        return Err(Error::Object(ObjectError::Zlib {
+                            detail: "unexpected end of zlib stream".to_owned(),
+                        }));
                     }
                     if consumed == 0 && produced == 0 {
-                        return Err(Error::CorruptObject(
-                            "zlib stream stalled after declared object size".to_owned(),
-                        ));
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: "zlib stream stalled after declared object size".to_owned(),
+                        }));
                     }
                 }
             }
@@ -908,7 +990,11 @@ impl ZlibInflateScratch {
             let status = self
                 .dec
                 .decompress(&input[in_off..], &mut out[out_pos..], flush)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
+                .map_err(|e| {
+                    Error::Object(ObjectError::Zlib {
+                        detail: e.to_string(),
+                    })
+                })?;
             let consumed = (self.dec.total_in() - before_in) as usize;
             let produced = (self.dec.total_out() - before_out) as usize;
             in_off += consumed;
@@ -916,10 +1002,12 @@ impl ZlibInflateScratch {
             match status {
                 Status::StreamEnd => {
                     if require_full_output && out_pos != out.len() {
-                        return Err(Error::CorruptObject(format!(
-                            "pack object size mismatch: expected {}, got {out_pos}",
-                            out.len()
-                        )));
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: format!(
+                                "pack object size mismatch: expected {}, got {out_pos}",
+                                out.len()
+                            ),
+                        }));
                     }
                     return Ok(in_off);
                 }
@@ -933,12 +1021,14 @@ impl ZlibInflateScratch {
                         return Ok(in_off + tail_off);
                     }
                     if in_off >= input.len() && flush == FlushDecompress::Finish {
-                        return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                        return Err(Error::Object(ObjectError::Zlib {
+                            detail: "unexpected end of zlib stream".to_owned(),
+                        }));
                     }
                     if consumed == 0 && produced == 0 {
-                        return Err(Error::CorruptObject(
-                            "zlib stream stalled before declared object size".to_owned(),
-                        ));
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: "zlib stream stalled before declared object size".to_owned(),
+                        }));
                     }
                 }
             }
@@ -1007,7 +1097,7 @@ mod tests {
             let longer = plain.len() as u64 + 1;
             assert!(matches!(
                 scratch.decompress_prefix_until(&input, longer, 128, &mut out, through_marker),
-                Err(Error::CorruptObject(_))
+                Err(Error::Object(ObjectError::Corrupt { .. }))
             ));
             if !plain.is_empty() {
                 let shorter = plain.len() as u64 - 1;
@@ -1061,7 +1151,10 @@ mod tests {
                 let err = scratch
                     .decompress_fixed(&compressed, &mut pos, size as u64)
                     .unwrap_err();
-                assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+                assert!(
+                    matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+                    "{err:?}"
+                );
                 assert_eq!(pos, 0);
             }
             for missing in 1..=4 {
@@ -1073,7 +1166,10 @@ mod tests {
                         plain.len() as u64,
                     )
                     .unwrap_err();
-                assert!(matches!(err, Error::Zlib(_)), "{err:?}");
+                assert!(
+                    matches!(err, Error::Object(ObjectError::Zlib { .. })),
+                    "{err:?}"
+                );
                 assert_eq!(pos, 0);
             }
             let mut bad = compressed.clone();
@@ -1081,7 +1177,10 @@ mod tests {
             let err = scratch
                 .decompress_fixed(&bad, &mut 0, plain.len() as u64)
                 .unwrap_err();
-            assert!(matches!(err, Error::Zlib(_)), "{err:?}");
+            assert!(
+                matches!(err, Error::Object(ObjectError::Zlib { .. })),
+                "{err:?}"
+            );
             assert_eq!(
                 scratch
                     .decompress_fixed(&compressed, &mut 0, plain.len() as u64)
@@ -1118,7 +1217,10 @@ mod tests {
         let err = scratch
             .decompress_fixed(&[0x78, 0x20, 0, 0, 0, 0, 3, 0], &mut 0, 0)
             .unwrap_err();
-        assert!(matches!(err, Error::Zlib(_)), "{err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Zlib { .. })),
+            "{err:?}"
+        );
         assert_eq!(scratch.decompress_fixed(&small, &mut 0, 2).unwrap(), b"ab");
     }
 
@@ -1154,7 +1256,7 @@ mod tests {
         let err = scratch
             .decompress_fixed(truncated, &mut pos, plain.len() as u64)
             .unwrap_err();
-        assert!(matches!(err, Error::Zlib(_)));
+        assert!(matches!(err, Error::Object(ObjectError::Zlib { .. })));
     }
 
     #[test]
@@ -1167,7 +1269,11 @@ mod tests {
         let mut scratch = ZlibInflateScratch::default();
         let err = scratch.decompress_fixed(&bad, &mut pos, 2).unwrap_err();
         assert!(
-            matches!(err, Error::Zlib(_) | Error::CorruptObject(_)),
+            matches!(
+                err,
+                Error::Object(ObjectError::Zlib { .. })
+                    | Error::Object(ObjectError::Corrupt { .. })
+            ),
             "got {err:?}"
         );
     }
@@ -1178,7 +1284,10 @@ mod tests {
         let mut pos = 0usize;
         let mut scratch = ZlibInflateScratch::default();
         let err = scratch.decompress_fixed(&zlib, &mut pos, 0).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -1188,7 +1297,10 @@ mod tests {
         let mut pos = 0usize;
         let mut scratch = ZlibInflateScratch::default();
         let err = scratch.decompress_fixed(&zlib, &mut pos, 2).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -1197,7 +1309,10 @@ mod tests {
         let mut pos = 0usize;
         let mut scratch = ZlibInflateScratch::default();
         let err = scratch.skip_zlib_stream(&zlib, &mut pos, 0).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -1206,7 +1321,10 @@ mod tests {
         let mut pos = 0usize;
         let mut scratch = ZlibInflateScratch::default();
         let err = scratch.skip_zlib_stream(&zlib, &mut pos, 1).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -1239,7 +1357,7 @@ mod tests {
     #[test]
     fn inflate_prefix_zero_on_empty_bytes_errors() {
         let err = inflate_prefix(b"", 0).unwrap_err();
-        assert!(matches!(err, Error::Zlib(_)));
+        assert!(matches!(err, Error::Object(ObjectError::Zlib { .. })));
     }
 
     #[test]
@@ -1275,7 +1393,7 @@ mod tests {
             .inflate_loose_file(&mut file.reopen().expect("reopen"), &mut Vec::new())
             .unwrap_err();
         match err {
-            Error::Zlib(msg) if msg == "needs dictionary" => {}
+            Error::Object(ObjectError::Zlib { detail: msg }) if msg == "needs dictionary" => {}
             other => panic!("expected needs dictionary, got {other:?}"),
         }
     }
@@ -1412,7 +1530,10 @@ mod tests {
         let err = scratch
             .decompress_fixed_into(&compressed, &mut 0, 549_755_813_887, &mut out)
             .unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+            "{err:?}"
+        );
         assert!(out.capacity() <= MAX_HEADER_SIZE_RESERVE);
     }
 
@@ -1424,7 +1545,10 @@ mod tests {
         let err = scratch
             .decompress_fixed(&compressed, &mut 0, 549_755_813_887)
             .unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -1463,7 +1587,10 @@ mod tests {
         let err = ZlibInflateScratch::default()
             .inflate_loose_file(&mut file.reopen().expect("reopen"), &mut Vec::new())
             .unwrap_err();
-        assert!(matches!(err, Error::Zlib(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Zlib { .. })),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -1534,7 +1661,10 @@ mod tests {
         let err = ZlibInflateScratch::default()
             .inflate_loose_header(&mut file.reopen().expect("reopen"))
             .unwrap_err();
-        assert!(matches!(err, Error::Zlib(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Zlib { .. })),
+            "got {err:?}"
+        );
     }
 
     #[test]

@@ -67,7 +67,7 @@ pub fn resolve_bundle_spec(repo: &Repository, options: &BundleCreateOptions) -> 
     let (positive_specs, negative_specs) = split_revision_specs_for_bundle(&rev_tokens);
 
     if positive_specs.is_empty() && !all_refs {
-        return Err(Error::Verbatim("at least one revision is required".into()));
+        return Err(BundleError::NoRevisions.into());
     }
 
     // With nothing excluded there is no boundary, so every ref is a tip and the pack
@@ -552,14 +552,7 @@ fn preflight_bundle_fetch_refspecs(bundle: &Bundle, opts: &FetchOptions) -> Resu
 }
 
 fn map_bundle_err(e: BundleError) -> Error {
-    match e {
-        BundleError::Cancelled => Error::Cancelled,
-        BundleError::ObjectNotFound(id) => Error::ObjectNotFound(id),
-        e @ (BundleError::MissingPrerequisites { .. } | BundleError::PrerequisitesNotConnected) => {
-            Error::Verbatim(e.to_string())
-        }
-        other => Error::Verbatim(other.to_string()),
-    }
+    Error::from(e)
 }
 
 #[cfg(test)]

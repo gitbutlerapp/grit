@@ -79,13 +79,14 @@ impl UploadPackPolicy {
 
     pub fn parse_filter(&self, config: &ConfigSet, spec: &str) -> Result<ObjectFilter> {
         if !self.allow_filter {
-            return Err(ServeError::Protocol(
-                "filter not supported (uploadpack.allowFilter is false)".into(),
-            ));
+            return Err(ServeError::Protocol {
+                detail: "filter not supported (uploadpack.allowFilter is false)".into(),
+            }
+            .into());
         }
         validate_upload_filter_request(config, spec).map_err(ServeError::UploadFilter)?;
-        ObjectFilter::parse(spec)
-            .map_err(|e| ServeError::UploadFilter(UploadFilterError::InvalidFilterSpec(e)))
+        Ok(ObjectFilter::parse(spec)
+            .map_err(|e| ServeError::UploadFilter(UploadFilterError::InvalidFilterSpec(e)))?)
     }
 }
 
@@ -97,9 +98,9 @@ pub(crate) fn resolve_want_ref(
 ) -> Result<ObjectId> {
     if matches!(name, "HEAD" | "refs/HEAD") {
         let head = super::head_info(repo);
-        return head
-            .oid
-            .ok_or_else(|| ServeError::Protocol("unknown ref HEAD".into()));
+        return Ok(head.oid.ok_or_else(|| ServeError::Protocol {
+            detail: "unknown ref HEAD".into(),
+        })?);
     }
     let full = if name.starts_with("refs/") {
         name.to_owned()
@@ -107,18 +108,23 @@ pub(crate) fn resolve_want_ref(
         format!("refs/{name}")
     };
     if crate::hide_refs::ref_is_hidden(name, &full, hidden) {
-        return Err(ServeError::Protocol(format!("unknown ref {name}")));
+        return Err(ServeError::Protocol {
+            detail: format!("unknown ref {name}"),
+        }
+        .into());
     }
-    crate::refs::resolve_ref_in(repo, &full)
+    Ok(crate::refs::resolve_ref_in(repo, &full)
         .or_else(|_| crate::refs::resolve_ref_in(repo, name))
-        .map_err(|_| ServeError::Protocol(format!("unknown ref {name}")))
+        .map_err(|_| ServeError::Protocol {
+            detail: format!("unknown ref {name}"),
+        })?)
 }
 
 /// Validate `want` OIDs for a filtered fetch (object must exist in the ODB).
 pub(crate) fn validate_wants_filtered(repo: &Repository, wants: &[ObjectId]) -> Result<()> {
     for w in wants {
         if !repo.odb().contains(w)? {
-            return Err(ServeError::NotOurRef(*w));
+            return Err(ServeError::NotOurRef(*w).into());
         }
     }
     Ok(())
@@ -145,7 +151,7 @@ pub(crate) fn validate_wants(
         let reachable = reachable_from_repository_tips(repo)?;
         for w in wants {
             if !reachable.contains(w) {
-                return Err(ServeError::NotOurRef(*w));
+                return Err(ServeError::NotOurRef(*w).into());
             }
         }
         return Ok(());
@@ -170,13 +176,13 @@ pub(crate) fn validate_wants(
         let tips = repository_tip_commits(repo)?;
         for w in &extra {
             if !tips.contains(w) {
-                return Err(ServeError::NotOurRef(*w));
+                return Err(ServeError::NotOurRef(*w).into());
             }
         }
         return Ok(());
     }
 
-    Err(ServeError::NotOurRef(extra[0]))
+    Err(ServeError::NotOurRef(extra[0]).into())
 }
 
 fn advertised_object_ids(tips: &HashSet<ObjectId>, head: Option<ObjectId>) -> HashSet<ObjectId> {
@@ -196,7 +202,7 @@ fn validate_stateless_extra_wants(repo: &Repository, wants: &[ObjectId]) -> Resu
             continue;
         }
         if !object_reachable_from_tip_commits(repo, *w, &tips)? {
-            return Err(ServeError::NotOurRef(*w));
+            return Err(ServeError::NotOurRef(*w).into());
         }
     }
     Ok(())

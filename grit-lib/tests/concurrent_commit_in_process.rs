@@ -1,5 +1,6 @@
 //! In-process concurrent `create_commit` must not surface spurious permission errors.
 
+use grit_lib::error::RefError;
 use std::sync::Arc;
 use std::thread;
 
@@ -75,7 +76,7 @@ fn concurrent_allow_empty_commits_avoid_permission_errors() {
             "unexpected permission error: {text}"
         );
         match err {
-            Error::RefStore(store) => {
+            Error::Ref(RefError::Store(store)) => {
                 assert!(
                     matches!(
                         store,
@@ -161,7 +162,7 @@ fn concurrent_commit_while_index_and_ref_handles_open() {
             "unexpected permission error: {text}"
         );
         match err {
-            Error::RefStore(store) => assert!(
+            Error::Ref(RefError::Store(store)) => assert!(
                 matches!(
                     store,
                     grit_lib::refs::store::RefStoreError::ExpectedMismatch { .. }

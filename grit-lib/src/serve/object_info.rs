@@ -2,6 +2,7 @@
 
 use super::{parse_oid, write_flush, write_line, Result, ServeError};
 use crate::error::Error;
+use crate::error::ObjectError;
 use crate::repo::Repository;
 
 /// Write the v2 `object-info` response for `args` to `output`.
@@ -22,9 +23,10 @@ pub(crate) fn write_object_info_response(
                 oids.push(parse_oid(repo, hex.trim())?);
             }
             other => {
-                return Err(ServeError::Protocol(format!(
-                    "object-info: unexpected line: '{other}'"
-                )));
+                return Err(ServeError::Protocol {
+                    detail: format!("object-info: unexpected line: '{other}'"),
+                }
+                .into());
             }
         }
     }
@@ -52,8 +54,8 @@ fn format_object_info_line(
     let hex = oid.to_hex();
     let info = match repo.odb().read_info_without_fetch(oid) {
         Ok(info) => info,
-        Err(Error::ObjectNotFound(_)) => return Ok(format!("{hex} ")),
-        Err(err) => return Err(ServeError::Repository(err)),
+        Err(Error::Object(ObjectError::NotFound { .. })) => return Ok(format!("{hex} ")),
+        Err(err) => return Err(err),
     };
     let mut line = hex;
     if want_size {

@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::error::RefError;
 
 use std::fs;
 
@@ -66,7 +67,9 @@ fn write_ref_fails_when_lock_file_exists() {
         {
             true
         }
-        Error::RefStore(RefStoreError::LockHeld { name }) => name == "refs/heads/locked",
+        Error::Ref(RefError::Store(RefStoreError::LockHeld { name })) => {
+            name == "refs/heads/locked"
+        }
         _ => false,
     };
     let err = write_ref(&git_dir, "refs/heads/locked", &oid(2)).expect_err("lock held");

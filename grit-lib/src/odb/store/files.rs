@@ -1,5 +1,6 @@
 //! On-disk object source for one `objects/` directory (MIDX, packs, loose).
 
+use crate::error::ObjectError;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
@@ -157,10 +158,10 @@ impl FilesSource {
         }
         matches!(
             err,
-            Error::CorruptObject(_)
-                | Error::CorruptLooseObject { .. }
-                | Error::LooseHashMismatch { .. }
-                | Error::Zlib(_)
+            Error::Object(ObjectError::Corrupt { .. })
+                | Error::Object(ObjectError::CorruptLoose { .. })
+                | Error::Object(ObjectError::LooseHashMismatch { .. })
+                | Error::Object(ObjectError::Zlib { .. })
         )
     }
 
@@ -198,7 +199,7 @@ impl FilesSource {
             match self.midx.read_into(oid, buf) {
                 Ok(Some(kind)) => return Ok(Some(kind)),
                 Ok(None) => {}
-                Err(Error::Midx(_)) => {}
+                Err(Error::Object(ObjectError::Midx(_))) => {}
                 Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                 Err(err) => return Err(err),
             }
@@ -212,7 +213,7 @@ impl FilesSource {
             buf,
         ) {
             Ok(kind) => return Ok(Some(kind)),
-            Err(Error::ObjectNotFound(_)) => {}
+            Err(Error::Object(ObjectError::NotFound { .. })) => {}
             Err(err) => return Err(err),
         }
 
@@ -225,7 +226,7 @@ impl FilesSource {
                 buf,
             ) {
                 Ok(kind) => return Ok(Some(kind)),
-                Err(Error::ObjectNotFound(_)) => {}
+                Err(Error::Object(ObjectError::NotFound { .. })) => {}
                 Err(err) => return Err(err),
             }
         }
@@ -256,7 +257,7 @@ impl FilesSource {
             match self.midx.read(oid) {
                 Ok(Some(obj)) => return Ok(Some(obj)),
                 Ok(None) => {}
-                Err(Error::Midx(_)) => {}
+                Err(Error::Object(ObjectError::Midx(_))) => {}
                 Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                 Err(err) => return Err(err),
             }
@@ -264,7 +265,7 @@ impl FilesSource {
 
         match pack::try_read_object_from_packs_with_options(&self.objects_dir, oid, pack_opts) {
             Ok(obj) => return Ok(Some(obj)),
-            Err(Error::ObjectNotFound(_)) => {}
+            Err(Error::Object(ObjectError::NotFound { .. })) => {}
             Err(err) => return Err(err),
         }
 
@@ -275,7 +276,7 @@ impl FilesSource {
                 PackLookupOptions::MIDX_COVERED_PACKS,
             ) {
                 Ok(obj) => return Ok(Some(obj)),
-                Err(Error::ObjectNotFound(_)) => {}
+                Err(Error::Object(ObjectError::NotFound { .. })) => {}
                 Err(err) => return Err(err),
             }
         }
@@ -306,7 +307,7 @@ impl FilesSource {
             match self.midx.read_info(oid) {
                 Ok(Some(info)) => return Ok(Some(info)),
                 Ok(None) => {}
-                Err(Error::Midx(_)) => {}
+                Err(Error::Object(ObjectError::Midx(_))) => {}
                 Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                 Err(err) => return Err(err),
             }
@@ -315,7 +316,7 @@ impl FilesSource {
         match pack::try_read_object_info_from_packs_with_options(&self.objects_dir, oid, pack_opts)
         {
             Ok(info) => return Ok(Some(info)),
-            Err(Error::ObjectNotFound(_)) => {}
+            Err(Error::Object(ObjectError::NotFound { .. })) => {}
             Err(err) => return Err(err),
         }
 
@@ -326,7 +327,7 @@ impl FilesSource {
                 PackLookupOptions::MIDX_COVERED_PACKS,
             ) {
                 Ok(info) => return Ok(Some(info)),
-                Err(Error::ObjectNotFound(_)) => {}
+                Err(Error::Object(ObjectError::NotFound { .. })) => {}
                 Err(err) => return Err(err),
             }
         }
@@ -543,14 +544,14 @@ impl ObjectStore for FilesSource {
                 match self.midx.open_stream(oid) {
                     Ok(Some(stream)) => return Ok(Some(stream)),
                     Ok(None) => {}
-                    Err(Error::Midx(_)) => {}
+                    Err(Error::Object(ObjectError::Midx(_))) => {}
                     Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                     Err(err) => return Err(err),
                 }
             }
             match self.packs.open_stream(oid) {
                 Ok(Some(stream)) => return Ok(Some(stream)),
-                Ok(None) | Err(Error::ObjectNotFound(_)) => {}
+                Ok(None) | Err(Error::Object(ObjectError::NotFound { .. })) => {}
                 Err(err) => return Err(err),
             }
             self.loose.open_stream(oid)

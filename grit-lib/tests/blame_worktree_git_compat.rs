@@ -1,6 +1,8 @@
 //! `blame_file` on uncommitted content (worktree file or caller buffer) against system
 //! `git blame`, which blames such content as a fake commit on top of `HEAD`.
 
+use grit_lib::error::DiffError;
+use grit_lib::error::RevisionError;
 use std::path::Path;
 
 use grit_lib::blame::{
@@ -320,7 +322,7 @@ fn untracked_file_is_not_in_head() {
     let repo = open_repo(root);
     let err = blame_file(&repo, "untracked.txt", &worktree_options()).unwrap_err();
     assert!(
-        matches!(&err, Error::RevParse(_)),
+        matches!(&err, Error::Revision(RevisionError::Parse(_))),
         "unexpected error: {err:?}"
     );
     assert!(err.to_string().contains("untracked.txt"), "{err}");
@@ -697,7 +699,7 @@ fn bare_repository_rejects_worktree_but_accepts_contents() {
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open bare");
     let err = blame_file(&repo, "f.txt", &worktree_options()).unwrap_err();
     assert!(
-        matches!(err, Error::BlameWorktreeBareRepository),
+        matches!(err, Error::Diff(DiffError::BlameWorktreeBareRepository)),
         "unexpected error: {err:?}"
     );
     let result = blame(

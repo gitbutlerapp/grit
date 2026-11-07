@@ -406,6 +406,7 @@ pub(crate) fn linked_object_set(local_odb: &Odb, needed: &[ObjectId]) -> HashSet
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worktree::WorktreeError;
     use std::process::Command;
 
     fn git(dir: &Path, args: &[&str]) {
@@ -568,7 +569,7 @@ mod tests {
         let dst = dst_pack.join("evil.keep");
         let err = hard_link_or_copy(&evil, &dst).unwrap_err();
         assert!(
-            matches!(err, Error::PathError(_)),
+            matches!(err, Error::Worktree(WorktreeError::Path { .. })),
             "expected PathError, got {err:?}"
         );
     }

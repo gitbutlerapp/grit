@@ -1,5 +1,6 @@
 //! Change ids as revision specs (prefix resolution via rev-parse).
 
+use grit_lib::error::RevisionError;
 use std::collections::HashSet;
 
 use grit_lib::change_id::{find_commits_by_change_id_prefix, set_change_id, ChangeId};
@@ -296,7 +297,10 @@ fn ambiguous_change_id_lists_all_candidates() {
         )
         .expect_err("ambiguous full");
     match err {
-        Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
+        Error::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
+            candidates,
+            ..
+        })) => {
             assert_eq!(candidates.len(), 2);
             let oids: Vec<_> = candidates.iter().map(|c| c.oid_hex.as_str()).collect();
             assert!(oids.contains(&a.to_hex().as_str()));
@@ -341,7 +345,10 @@ fn ambiguous_change_id_prefix_lists_candidates() {
         )
         .expect_err("prefix ambiguous");
     match err {
-        Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
+        Error::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
+            candidates,
+            ..
+        })) => {
             assert_eq!(candidates.len(), 2);
         }
         other => panic!("expected AmbiguousChangeId, got {other:?}"),
@@ -410,7 +417,10 @@ fn ambiguous_when_derived_prefix_collides_with_stored_prefix() {
         .resolve(&prefix, &grit_lib::revwalk::ResolveOptions::default())
         .expect_err("ambiguous");
     match err {
-        Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
+        Error::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
+            candidates,
+            ..
+        })) => {
             assert_eq!(candidates.len(), 2);
         }
         other => panic!("expected AmbiguousChangeId, got {other:?}"),

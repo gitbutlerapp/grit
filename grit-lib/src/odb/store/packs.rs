@@ -3,6 +3,7 @@
 //! All pack cache and index reads run under the owning [`PackStore`](crate::pack_store::PackStore)
 //! context via [`PackStore::with_context`](crate::pack_store::PackStore::with_context).
 
+use crate::error::ObjectError;
 use std::collections::HashSet;
 use std::io::{self, Cursor, Read};
 use std::ops::ControlFlow;
@@ -200,7 +201,7 @@ impl PackedObjects {
         self.with_pack(
             |objects_dir| match pack::read_object_from_packs(objects_dir, oid) {
                 Ok(obj) => Ok(Some(obj)),
-                Err(Error::ObjectNotFound(_)) => Ok(None),
+                Err(Error::Object(ObjectError::NotFound { .. })) => Ok(None),
                 Err(err) => Err(err),
             },
         )
@@ -214,7 +215,7 @@ impl PackedObjects {
         self.with_pack(|objects_dir| {
             match pack::read_object_from_packs_into(objects_dir, oid, buf) {
                 Ok(kind) => Ok(Some(kind)),
-                Err(Error::ObjectNotFound(_)) => Ok(None),
+                Err(Error::Object(ObjectError::NotFound { .. })) => Ok(None),
                 Err(err) => Err(err),
             }
         })
@@ -224,7 +225,7 @@ impl PackedObjects {
         self.with_pack(
             |objects_dir| match pack::read_object_info_from_packs(objects_dir, oid) {
                 Ok(info) => Ok(Some(info)),
-                Err(Error::ObjectNotFound(_)) => Ok(None),
+                Err(Error::Object(ObjectError::NotFound { .. })) => Ok(None),
                 Err(err) => Err(err),
             },
         )
@@ -597,8 +598,11 @@ fn stream_from_buffered_read(
     let Some(obj) = store.read(oid)? else {
         return Ok(None);
     };
-    let size = u64::try_from(obj.data.len())
-        .map_err(|_| Error::CorruptObject(format!("object size overflow for {}", oid.to_hex())))?;
+    let size = u64::try_from(obj.data.len()).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("object size overflow for {}", oid.to_hex()),
+        })
+    })?;
     Ok(Some(ObjectStream {
         kind: obj.kind,
         size,

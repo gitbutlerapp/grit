@@ -1,6 +1,8 @@
 //! Round-trip `grit reset` with system `git fsck` / `git status`.
 
 use crate::support;
+use grit_lib::error::ObjectError;
+use grit_lib::worktree::WorktreeError;
 
 use std::path::Path;
 
@@ -201,7 +203,7 @@ fn reset_keep_refuses_when_changed_file_has_local_edits() {
     )
     .expect_err("grit should refuse");
     assert!(
-        matches!(err, Error::WouldOverwrite { .. }),
+        matches!(err, Error::Worktree(WorktreeError::WouldOverwrite { .. })),
         "expected WouldOverwrite, got {err:?}"
     );
     assert_eq!(
@@ -550,7 +552,7 @@ fn append_reflog_rejects_malformed_identity() {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::InvalidSignature(_)),
+            matches!(err, Error::Object(ObjectError::InvalidSignature(_))),
             "expected InvalidSignature for {bad:?}, got {err:?}"
         );
     }

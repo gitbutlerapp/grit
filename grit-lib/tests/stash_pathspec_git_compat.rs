@@ -4,6 +4,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
+use grit_lib::worktree::WorktreeError;
 use grit_test_support::git;
 
 const IDENTITY: &str = "Test <t@example.com> 1000000000 +0000";
@@ -196,7 +197,7 @@ fn stash_push_untracked_pathspec_no_match_is_typed_error() {
     assert!(matches!(
         err,
         grit_lib::stash::StashError::Library(boxed)
-            if matches!(boxed.as_ref(), Error::PathspecNoMatch { .. })
+            if matches!(boxed.as_ref(), Error::Worktree(WorktreeError::PathspecNoMatch { .. }))
     ));
 }
 
@@ -220,7 +221,7 @@ fn stash_push_paths_no_match_is_typed_error() {
     assert!(matches!(
         err,
         grit_lib::stash::StashError::Library(boxed)
-            if matches!(boxed.as_ref(), Error::PathspecNoMatch { .. })
+            if matches!(boxed.as_ref(), Error::Worktree(WorktreeError::PathspecNoMatch { .. }))
     ));
 }
 

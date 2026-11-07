@@ -2,6 +2,8 @@
 //!
 //! [tree-sha256]: https://github.com/schacon/tree-sha256
 
+use crate::error::ObjectError;
+use crate::porcelain::tag::TagError;
 use std::thread;
 
 use crate::commit::signing::{self, GpgConfig, SignatureCheck, TrustLevel};
@@ -112,7 +114,7 @@ pub struct TreeSha256TagHeaders {
 ///
 /// # Errors
 ///
-/// Returns [`Error::TagVerifyDuplicateTreeSha256Header`] or parse failures for malformed headers.
+/// Returns [`crate::porcelain::tag::TagError::VerifyDuplicateTreeSha256Header`] or parse failures for malformed headers.
 pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders> {
     let mut object = None;
     let mut claimed = None;
@@ -121,8 +123,11 @@ pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders
         if line.is_empty() {
             break;
         }
-        let line_str = std::str::from_utf8(line)
-            .map_err(|_| Error::CorruptObject("tag header is not valid UTF-8".to_owned()))?;
+        let line_str = std::str::from_utf8(line).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "tag header is not valid UTF-8".to_owned(),
+            })
+        })?;
         let Some((key, value)) = line_str.split_once(' ') else {
             continue;
         };
@@ -132,7 +137,7 @@ pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders
             }
             TREE_SHA256_HEADER => {
                 if claimed.is_some() {
-                    return Err(Error::TagVerifyDuplicateTreeSha256Header);
+                    return Err(Error::Tag(TagError::VerifyDuplicateTreeSha256Header));
                 }
                 claimed = Some(value.parse()?);
             }
@@ -140,7 +145,7 @@ pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders
             _ => {}
         }
     }
-    let target = object.ok_or(Error::TagVerifyMissingObjectHeader)?;
+    let target = object.ok_or(Error::Tag(TagError::VerifyMissingObjectHeader))?;
     Ok(TreeSha256TagHeaders {
         target,
         claimed,
@@ -155,7 +160,7 @@ pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders
 ///
 /// # Errors
 ///
-/// Returns [`Error::TagVerifyNotTag`] when `oid` is not a tag object, header parse
+/// Returns [`crate::porcelain::tag::TagError::VerifyNotTag`] when `oid` is not a tag object, header parse
 /// failures, or signing subprocess errors. When digest recomputation requires missing
 /// submodules, returns [`Ok`] with [`TagVerification::tree_sha256`] set to `None` and
 /// [`TagVerification::missing_submodules`] populated.
@@ -166,10 +171,10 @@ pub fn verify_tag(
 ) -> Result<TagVerification> {
     let obj = repo.odb().read(&oid)?;
     if obj.kind != ObjectKind::Tag {
-        return Err(Error::TagVerifyNotTag {
+        return Err(Error::Tag(TagError::VerifyNotTag {
             oid,
             found: obj.kind,
-        });
+        }));
     }
     let headers = parse_tree_sha256_tag_headers(&obj.data)?;
     verify_tag_data(repo, &obj.data, &headers, options)
@@ -192,7 +197,7 @@ pub(crate) fn verify_tag_data(
             if !check_signature {
                 return Ok(SignatureVerdict::NotChecked);
             }
-            let check = signing::verify_tag(gpg, raw).map_err(Error::from)?;
+            let check = signing::verify_tag(gpg, raw)?;
             Ok(signature_verdict_from_check(&check, min_trust))
         });
 
@@ -214,17 +219,19 @@ pub(crate) fn verify_tag_data(
 
         let signature = sig_handle
             .join()
-            .map_err(|_| Error::Verbatim("signature verification thread panicked".into()))??;
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))?;
         let hash_result = hash_handle
             .join()
-            .map_err(|_| Error::Verbatim("tree-sha256 verification thread panicked".into()))?;
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         match hash_result {
             Ok(tree_sha256) => Ok(TagVerification {
                 signature,
                 tree_sha256,
                 missing_submodules: Vec::new(),
             }),
-            Err(Error::TreeSha256MissingSubmodules(missing)) => Ok(TagVerification {
+            Err(Error::Tag(TagError::TreeSha256MissingSubmodules {
+                submodules: missing,
+            })) => Ok(TagVerification {
                 signature,
                 tree_sha256: None,
                 missing_submodules: missing,

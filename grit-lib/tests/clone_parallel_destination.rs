@@ -75,7 +75,7 @@ fn parallel_clone_library_exactly_one_winner() {
     for handle in handles {
         match handle.join().expect("join") {
             Ok(_) => successes += 1,
-            Err(CloneError::DestNotEmpty(_)) => dest_not_empty += 1,
+            Err(CloneError::DestNotEmpty { .. }) => dest_not_empty += 1,
             Err(other) => panic!("unexpected clone error: {other:?}"),
         }
     }

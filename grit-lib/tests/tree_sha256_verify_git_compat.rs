@@ -513,7 +513,7 @@ fn non_tag_object_rejected() {
             },
         )
         .unwrap_err();
-    assert!(matches!(err, Error::TagVerifyNotTag { .. }));
+    assert!(matches!(err, Error::Tag(TagError::VerifyNotTag { .. })));
 }
 
 #[test]

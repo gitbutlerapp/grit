@@ -2,7 +2,7 @@
 //!
 //! Backends implement read, metadata, streaming, iteration, and (optionally) write
 //! operations without allocating error strings on cache misses: a missing object
-//! is `Ok(None)`, not [`Error::ObjectNotFound`].
+//! is `Ok(None)`, not [`crate::error::ObjectError::NotFound`].
 //!
 //! Thread safety: [`ObjectStore`] requires `Send + Sync` so repositories can share
 //! a store across threads; individual methods may take internal locks.
@@ -23,6 +23,7 @@ pub use midx::{MidxObjects, MidxObjectsStatus};
 pub(crate) use packs::touch_pack_mtime;
 pub use packs::{PackFilter, PackedObjects};
 
+use crate::error::ObjectError;
 use std::io::{self, Cursor, Read};
 use std::ops::ControlFlow;
 use std::sync::{Arc, RwLock};
@@ -91,7 +92,7 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     ///
     /// # Errors
     ///
-    /// Returns I/O or corruption errors from the backend; never [`Error::ObjectNotFound`].
+    /// Returns I/O or corruption errors from the backend; never [`crate::error::ObjectError::NotFound`].
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>>;
 
     /// Load object payload into `buf`, reusing its capacity when possible.
@@ -158,7 +159,9 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
             return Ok(None);
         };
         let size = u64::try_from(obj.data.len()).map_err(|_| {
-            Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("object size overflow for {}", oid.to_hex()),
+            })
         })?;
         Ok(Some(ObjectStream {
             kind: obj.kind,
@@ -189,7 +192,7 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidObjectId`] when `prefix` is not valid hex or is longer
+    /// Returns [`crate::error::ObjectError::InvalidId`] when `prefix` is not valid hex or is longer
     /// than a full object id for this store's hash algorithm.
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
         let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
@@ -245,7 +248,9 @@ pub trait WritableObjectStore: ObjectStore {
         options: WriteOptions,
     ) -> Result<ObjectId> {
         let size_usize = usize::try_from(size).map_err(|_| {
-            Error::CorruptObject(format!("object size {size} exceeds address space"))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("object size {size} exceeds address space"),
+            })
         })?;
         let mut buf = vec![0u8; size_usize];
         reader.read_exact(&mut buf).map_err(Error::Io)?;
@@ -640,7 +645,9 @@ impl ObjectStore for MemoryStore {
             return Ok(None);
         };
         let size = u64::try_from(data.len()).map_err(|_| {
-            Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("object size overflow for {}", oid.to_hex()),
+            })
         })?;
         Ok(Some(ObjectStream {
             kind: *kind,
@@ -920,7 +927,7 @@ mod tests {
         let mut out = Vec::new();
         assert!(matches!(
             store.lookup_prefix("xyz", 0, &mut out),
-            Err(Error::InvalidObjectId(_))
+            Err(Error::Object(ObjectError::InvalidId { .. }))
         ));
     }
 

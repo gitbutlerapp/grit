@@ -2,6 +2,8 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::error::NotesError;
+use grit_lib::error::ObjectError;
 use grit_lib::notes::{read_notes_tree, resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -210,7 +212,7 @@ fn add_existing_without_force_is_typed_error() {
         )
         .expect_err("must reject duplicate note");
     assert!(
-        matches!(err, Error::NoteAlreadyExists { .. }),
+        matches!(err, Error::Notes(NotesError::AlreadyExists { .. })),
         "expected typed NoteAlreadyExists, got {err:?}"
     );
 }
@@ -218,7 +220,7 @@ fn add_existing_without_force_is_typed_error() {
 #[test]
 fn padded_git_notes_ref_is_invalid() {
     let err = NotesRef::from_full(" refs/notes/spaced ").expect_err("padded ref");
-    assert!(matches!(err, Error::InvalidNotesRef(_)));
+    assert!(matches!(err, Error::Notes(NotesError::InvalidRef { .. })));
 
     let dir = tempfile::tempdir().expect("tempdir");
     init_repo(dir.path());
@@ -238,7 +240,7 @@ fn padded_git_notes_ref_is_invalid() {
 #[test]
 fn trailing_space_notes_ref_is_invalid() {
     let err = NotesRef::from_full("refs/notes/spaced ").expect_err("trailing space");
-    assert!(matches!(err, Error::InvalidNotesRef(_)));
+    assert!(matches!(err, Error::Notes(NotesError::InvalidRef { .. })));
 }
 
 #[test]
@@ -256,7 +258,7 @@ fn padded_core_notes_ref_is_invalid() {
     )
     .expect_err("padded core.notesRef");
     assert!(
-        matches!(err, Error::InvalidNotesRef(_)),
+        matches!(err, Error::Notes(NotesError::InvalidRef { .. })),
         "expected InvalidNotesRef, got {err:?}"
     );
 }
@@ -273,7 +275,7 @@ fn empty_core_notes_ref_is_invalid() {
     )
     .expect_err("empty config ref");
     assert!(
-        matches!(err, Error::InvalidNotesRef(_)),
+        matches!(err, Error::Notes(NotesError::InvalidRef { .. })),
         "expected InvalidNotesRef, got {err:?}"
     );
 }
@@ -397,7 +399,7 @@ fn list_with_bodies_reports_missing_note_blob() {
         .list_with_bodies(&NotesRef::commits(), None)
         .expect_err("a missing note blob must not read as an empty note");
     assert!(
-        matches!(err, Error::ObjectNotFound(_)),
+        matches!(err, Error::Object(ObjectError::NotFound { .. })),
         "expected ObjectNotFound for the note blob, got {err:?}"
     );
 }

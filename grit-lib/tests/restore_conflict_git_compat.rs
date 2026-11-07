@@ -1,5 +1,6 @@
 //! `restore_paths` conflict options compared with system `git restore`.
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::process::Command;
 
@@ -298,7 +299,7 @@ fn restore_ours_missing_stage_errors() {
     .unwrap_err();
     assert!(matches!(
         err,
-        grit_lib::error::Error::RestoreConflictMissingOurs { .. }
+        grit_lib::error::Error::Worktree(WorktreeError::RestoreConflictMissingOurs { .. })
     ));
 }
 
@@ -323,7 +324,7 @@ fn restore_ours_with_staged_rejected() {
     .unwrap_err();
     assert!(matches!(
         err,
-        grit_lib::error::Error::RestoreConflictWithStaged
+        grit_lib::error::Error::Worktree(WorktreeError::RestoreConflictWithStaged)
     ));
 }
 
@@ -388,7 +389,7 @@ fn restore_unmerged_path_from_index_refused_like_git() {
     assert!(
         matches!(
             &err,
-            grit_lib::error::Error::RestorePathUnmerged { paths } if paths == &["f.txt"]
+            grit_lib::error::Error::Worktree(WorktreeError::RestorePathUnmerged { paths }) if paths == &["f.txt"]
         ),
         "{err:?}"
     );
@@ -422,7 +423,7 @@ fn restore_dot_with_unmerged_path_restores_nothing_like_git() {
     assert!(
         matches!(
             &err,
-            grit_lib::error::Error::RestorePathUnmerged { paths } if paths == &["f.txt"]
+            grit_lib::error::Error::Worktree(WorktreeError::RestorePathUnmerged { paths }) if paths == &["f.txt"]
         ),
         "{err:?}"
     );
@@ -475,7 +476,7 @@ fn restore_staged_unmerged_path_is_refused() {
     assert!(
         matches!(
             &err,
-            grit_lib::error::Error::RestorePathUnmerged { paths } if paths == &["f.txt"]
+            grit_lib::error::Error::Worktree(WorktreeError::RestorePathUnmerged { paths }) if paths == &["f.txt"]
         ),
         "{err:?}"
     );

@@ -4,6 +4,7 @@
 
 #![allow(dead_code)]
 
+use crate::error::ObjectError;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -159,7 +160,9 @@ fn read_pack_trailer(pack_path: &Path, hash_len: usize) -> Result<Vec<u8>> {
     let len = file.metadata().map_err(Error::Io)?.len();
     let hash_len_u64 = u64::try_from(hash_len).unwrap_or(u64::MAX);
     if len < hash_len_u64 {
-        return Err(Error::CorruptObject("pack file too short for rev".into()));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "pack file too short for rev".into(),
+        }));
     }
     file.seek(SeekFrom::End(-(hash_len as i64)))
         .map_err(Error::Io)?;
@@ -494,7 +497,7 @@ mod coverage_tests {
         std::fs::write(&pack_path, [0u8; 10]).expect("truncate pack");
         assert!(matches!(
             write_pack_rev_sidecar_for_index_path_with_shared(&idx_path, PERM_UMASK),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ));
     }
 

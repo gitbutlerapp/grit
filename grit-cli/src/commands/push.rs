@@ -6,7 +6,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::push_plan::{
     expand_repository_shorthand, open_push_destination, push_follow_tags_config,
-    resolve_push_invocation, PushPlanError, PushPlanKind, PushRequest,
+    resolve_push_invocation, PushPlanKind, PushRequest,
 };
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::redact_url_for_display;
@@ -730,7 +730,7 @@ fn integrated_again(
         .flatten()
 }
 
-fn plan_error(err: PushPlanError) -> anyhow::Error {
+fn plan_error(err: grit_lib::error::Error) -> anyhow::Error {
     anyhow::Error::new(err)
 }
 

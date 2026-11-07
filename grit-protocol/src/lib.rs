@@ -69,7 +69,13 @@ impl Error {
 
 impl From<grit_lib::error::Error> for Error {
     fn from(value: grit_lib::error::Error) -> Self {
-        Self::Repository(Box::new(value))
+        match value {
+            grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Serve(serve)) => {
+                Self::Serve(serve)
+            }
+            grit_lib::error::Error::Io(io) => Self::Serve(serve::ServeError::Io(io)),
+            other => Self::Repository(Box::new(other)),
+        }
     }
 }
 

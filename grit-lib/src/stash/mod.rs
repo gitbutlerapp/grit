@@ -13,6 +13,4 @@
 //! # }
 //! ```
 pub use crate::porcelain::stash::*;
-pub use crate::porcelain::stash_error::{
-    CorruptStashReason, StashError, StashPushValidationError, StashResult,
-};
+pub use crate::porcelain::stash_error::{CorruptStashReason, StashError, StashPushValidationError};

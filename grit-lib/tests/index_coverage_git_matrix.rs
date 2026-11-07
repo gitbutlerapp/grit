@@ -1,6 +1,7 @@
 //! Exercise index.rs APIs against git-produced repositories (coverage + compatibility).
 
 use crate::support;
+use grit_lib::error::ObjectError;
 
 use std::fs;
 use std::process::Command;
@@ -124,7 +125,7 @@ fn overlay_tree_on_index_peels_nested_tags_and_rejects_blobs() {
     );
     assert!(matches!(
         overlaid("blob-tag"),
-        Err(grit_lib::error::Error::ObjectNotFound(_))
+        Err(grit_lib::error::Error::Object(ObjectError::NotFound { .. }))
     ));
 }
 

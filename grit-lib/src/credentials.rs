@@ -51,7 +51,9 @@ use crate::error::{Error, Result};
 use crate::remote::RemoteError;
 
 fn credential_err(message: impl Into<String>) -> Error {
-    Error::Remote(RemoteError::Credential(message.into()))
+    Error::Remote(RemoteError::Credential {
+        detail: message.into(),
+    })
 }
 
 /// How [`RemoteError::CredentialsUnavailable`](crate::remote::RemoteError::CredentialsUnavailable) displays: credentials are required but

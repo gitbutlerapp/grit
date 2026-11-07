@@ -1,5 +1,7 @@
 //! Accepting pushes (`receive-pack`).
 
+use crate::error::ObjectError;
+use crate::error::RefError;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -14,7 +16,7 @@ use super::{
 use crate::config::ConfigSet;
 use crate::fsck_msg_policy::{ObjectFsckPolicy, SkipListError};
 use crate::fsck_standalone::FsckError;
-use crate::hooks::{run_hook_in_git_dir_with_cancel, HookError, HookResult};
+use crate::hooks::{run_hook_in_git_dir_with_cancel, HookResult};
 use crate::index_pack::{install_pack_path, IngestPackOptions};
 use crate::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
 use crate::objects::odb::OdbBuilder;
@@ -115,7 +117,9 @@ impl ReceivePackIngest {
                         continue;
                     }
                     let Some(obj) = overlay.read(oid)? else {
-                        return Err(crate::error::Error::ObjectNotFound(oid.to_hex()));
+                        return Err(crate::error::Error::Object(ObjectError::NotFound {
+                            name: oid.to_hex(),
+                        }));
                     };
                     primary.write(obj.kind, &obj.data, WriteOptions::default())?;
                 }
@@ -467,8 +471,8 @@ pub enum UnpackError {
     Malformed(#[from] PackStreamScanError),
     /// The pack arrived but its objects could not be stored (bad checksum,
     /// corrupt object, failed connectivity check, ...).
-    #[error(transparent)]
-    Ingest(Box<crate::error::Error>),
+    #[error("{0}")]
+    Ingest(crate::error::ErrorSummary),
     /// A pushed object failed [`ReceivePolicy::fsck_objects`].
     #[error("{0}")]
     Rejected(RejectedObject),
@@ -486,7 +490,10 @@ pub enum UnpackError {
 
 impl From<crate::error::Error> for UnpackError {
     fn from(err: crate::error::Error) -> Self {
-        Self::Ingest(Box::new(err))
+        match err {
+            crate::error::Error::Cancelled => Self::Cancelled,
+            other => Self::Ingest(crate::error::ErrorSummary::from(other)),
+        }
     }
 }
 
@@ -774,7 +781,7 @@ impl<'a> ReceivePack<'a> {
     ///
     /// # Errors
     ///
-    /// See [`ReceivePack`]; [`ServeError::Cancelled`] when the cancel token is already set
+    /// See [`ReceivePack`]; [`Error::Cancelled`](crate::error::Error::Cancelled) when the cancel token is already set
     /// or fires before the ref updates are committed.
     pub fn run(self, input: &mut dyn Read, output: &mut dyn Write) -> Result<ReceiveOutcome> {
         receive_pack(
@@ -800,7 +807,7 @@ pub(crate) fn receive_pack(
     cancel: &CancelToken,
 ) -> Result<ReceiveOutcome> {
     let stop = CancelSignal::new(cancel);
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    stop.poll()?;
     if opts.advertise_refs || !opts.stateless_rpc {
         if opts.protocol == ProtocolVersion::V1 {
             write_line(output, "version 1")?;
@@ -906,7 +913,7 @@ pub(crate) fn receive_pack(
         None => None,
     };
     if matches!(unpack_error, Some(UnpackError::Cancelled)) {
-        return Err(ServeError::Cancelled);
+        return Err(crate::error::Error::Cancelled);
     }
 
     let shallow = match ingest.as_ref() {
@@ -935,7 +942,7 @@ pub(crate) fn receive_pack(
             .map(|c| c.refused(RefUpdateRefusal::UnpackerError))
             .collect()
     } else {
-        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        stop.poll()?;
         let applied = apply_commands_with_hooks(
             repo,
             &request,
@@ -1082,7 +1089,10 @@ fn read_commands(repo: &Repository, input: &mut dyn Read) -> Result<Option<PushR
                 let (Some(old), Some(new), Some(refname)) =
                     (parts.next(), parts.next(), parts.next())
                 else {
-                    return Err(ServeError::Protocol(format!("malformed command '{line}'")));
+                    return Err(ServeError::Protocol {
+                        detail: format!("malformed command '{line}'"),
+                    }
+                    .into());
                 };
                 let old = parse_oid(repo, old)?;
                 let new = parse_oid(repo, new)?;
@@ -1093,9 +1103,10 @@ fn read_commands(repo: &Repository, input: &mut dyn Read) -> Result<Option<PushR
                 });
             }
             Some(other) => {
-                return Err(ServeError::Protocol(format!(
-                    "unexpected packet in command list: {other:?}"
-                )))
+                return Err(ServeError::Protocol {
+                    detail: format!("unexpected packet in command list: {other:?}"),
+                }
+                .into())
             }
         }
     }
@@ -1111,9 +1122,10 @@ fn read_commands(repo: &Repository, input: &mut dyn Read) -> Result<Option<PushR
                     push_options.push(line);
                 }
                 Some(other) => {
-                    return Err(ServeError::Protocol(format!(
-                        "unexpected packet in push options: {other:?}"
-                    )))
+                    return Err(ServeError::Protocol {
+                        detail: format!("unexpected packet in push options: {other:?}"),
+                    }
+                    .into())
                 }
             }
         }
@@ -1195,7 +1207,7 @@ impl ShallowPlan {
         let Some(file) = &self.hook_file else {
             return Ok(Vec::new());
         };
-        crate::shallow::git_shallow_hook_env(file.path()).map_err(ServeError::Repository)
+        crate::shallow::git_shallow_hook_env(file.path())
     }
 }
 
@@ -1281,7 +1293,7 @@ fn apply_commands_with_hooks(
 
     let scripts = ReceiveHookScripts::new(repo, &request.push_options, shallow.hook_env()?, cancel);
     let all_cmds: Vec<&RefCommand> = request.commands.iter().collect();
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    stop.poll()?;
     let pre_result = scripts.pre_receive(
         &all_cmds,
         ingest.as_ref().and_then(|i| i.files_quarantine()),
@@ -1299,7 +1311,7 @@ fn apply_commands_with_hooks(
 
     let mut migrated_pack_keeps = Vec::new();
     if let Some(ing) = ingest {
-        migrated_pack_keeps = ing.migrate(repo).map_err(ServeError::Repository)?;
+        migrated_pack_keeps = ing.migrate(repo)?;
         repo.odb().invalidate_packs();
     }
 
@@ -1311,7 +1323,7 @@ fn apply_commands_with_hooks(
             result.error = Some(refusal);
             continue;
         }
-        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        stop.poll()?;
         let update_result = scripts.update(cmd)?;
         relay_hook_sideband(&mut sideband_out, &update_result)?;
         hook_records.push(hook_record("update", &update_result));
@@ -1373,7 +1385,7 @@ fn apply_commands_with_hooks(
     let ref_lock_wait = store.ref_lock_wait();
     if atomic {
         let batch: Vec<_> = pending.iter().map(|(_, u)| u.clone()).collect();
-        if let Err(crate::error::Error::RefStore(e)) =
+        if let Err(crate::error::Error::Ref(RefError::Store(e))) =
             crate::refs::commit_ref_updates_on_store_with_wait(store, &batch, || ref_lock_wait)
         {
             let refusal = ref_update_refusal_from_store(&e);
@@ -1399,7 +1411,7 @@ fn apply_commands_with_hooks(
     let mut post_receive_callback_error = None;
     let mut post_update_callback_error = None;
     if !successful.is_empty() {
-        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        stop.poll()?;
         let post_result = scripts.post_receive(&successful)?;
         relay_hook_sideband(&mut sideband_out, &post_result)?;
         hook_records.push(hook_record("post-receive", &post_result));
@@ -1413,7 +1425,7 @@ fn apply_commands_with_hooks(
             )
             .err();
 
-        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        stop.poll()?;
         let pu_result = scripts.post_update(&successful)?;
         relay_hook_sideband(&mut sideband_out, &pu_result)?;
         hook_records.push(hook_record("post-update", &pu_result));
@@ -1498,7 +1510,7 @@ impl<'a> ReceiveHookScripts<'a> {
         &self,
         commands: &[&RefCommand],
         quarantine: Option<&ReceiveQuarantine>,
-    ) -> std::result::Result<HookResult, ServeError> {
+    ) -> crate::error::Result<HookResult> {
         let mut env = self.receive_env.clone();
         if let Some(q) = quarantine {
             env.extend(q.hook_env());
@@ -1507,7 +1519,7 @@ impl<'a> ReceiveHookScripts<'a> {
     }
 
     /// Run `update` for one command, with `<ref> <old> <new>` as arguments.
-    pub(crate) fn update(&self, cmd: &RefCommand) -> std::result::Result<HookResult, ServeError> {
+    pub(crate) fn update(&self, cmd: &RefCommand) -> crate::error::Result<HookResult> {
         let algo = self.repo.odb().hash_algo();
         let hex = |oid: Option<ObjectId>| oid.unwrap_or_else(|| ObjectId::null(algo)).to_hex();
         let (old, new) = (hex(cmd.old), hex(cmd.new));
@@ -1519,15 +1531,12 @@ impl<'a> ReceiveHookScripts<'a> {
     pub(crate) fn post_receive(
         &self,
         commands: &[&RefCommand],
-    ) -> std::result::Result<HookResult, ServeError> {
+    ) -> crate::error::Result<HookResult> {
         self.run_with_commands("post-receive", commands, &self.receive_env)
     }
 
     /// Run `post-update` with the names of the applied `commands` as arguments.
-    pub(crate) fn post_update(
-        &self,
-        commands: &[&RefCommand],
-    ) -> std::result::Result<HookResult, ServeError> {
+    pub(crate) fn post_update(&self, commands: &[&RefCommand]) -> crate::error::Result<HookResult> {
         let args: Vec<&str> = commands.iter().map(|c| c.refname.as_str()).collect();
         self.run_git_dir_hook("post-update", &args, None, &pairs(&self.update_env))
     }
@@ -1538,7 +1547,7 @@ impl<'a> ReceiveHookScripts<'a> {
         args: &[&str],
         stdin_data: Option<&[u8]>,
         env: &[(&str, &str)],
-    ) -> std::result::Result<HookResult, ServeError> {
+    ) -> crate::error::Result<HookResult> {
         match run_hook_in_git_dir_with_cancel(
             self.repo,
             hook_name,
@@ -1548,7 +1557,7 @@ impl<'a> ReceiveHookScripts<'a> {
             self.cancel,
         ) {
             Ok(result) => Ok(result),
-            Err(HookError::Cancelled) => Err(ServeError::Cancelled),
+            Err(crate::error::Error::Cancelled) => Err(crate::error::Error::Cancelled),
             Err(_) => Ok(hook_declined()),
         }
     }
@@ -1558,7 +1567,7 @@ impl<'a> ReceiveHookScripts<'a> {
         hook_name: &str,
         commands: &[&RefCommand],
         env: &[(String, String)],
-    ) -> std::result::Result<HookResult, ServeError> {
+    ) -> crate::error::Result<HookResult> {
         let zero = ObjectId::null(self.repo.odb().hash_algo());
         let stdin: String = commands
             .iter()
@@ -1647,7 +1656,7 @@ fn commit_receive_ref_updates_on_store(
                 (
                     idx,
                     match &e {
-                        crate::error::Error::RefStore(store) => {
+                        crate::error::Error::Ref(RefError::Store(store)) => {
                             ref_update_refusal_from_store(store)
                         }
                         other => RefUpdateRefusal::RefStore(other.to_string()),

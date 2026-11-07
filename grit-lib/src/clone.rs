@@ -1,6 +1,8 @@
 //! Clone a remote repository: initialize, configure `origin`, fetch, set up the default branch,
 //! and optionally check out the working tree.
 
+use crate::error::ObjectError;
+use crate::worktree::WorktreeError;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -11,7 +13,7 @@ use thiserror::Error;
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::environment::Environment;
 use crate::environment::RepositoryOptions;
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorSummary, PromisorFetchFailure, Result};
 use crate::fetch::{fetch_operation_identity, Progress};
 use crate::objects::{HashAlgo, ObjectId};
 use crate::partial_clone::{ObjectFilterSpec, PartialCloneConfig};
@@ -30,34 +32,38 @@ use crate::transport_path::{
     should_store_absolute_local_clone_url, url_is_local_not_ssh, NoDirectoryName,
 };
 
-/// Errors during [`clone`].
+/// Clone-specific failures from [`clone`]; remote, object, and repository failures are reported
+/// in their own areas.
+///
+/// Surfaced on the umbrella as [`RemoteError::Clone`](crate::remote::RemoteError::Clone).
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum CloneError {
     /// Destination exists and is not empty.
     ///
     /// Grit does not create or modify the destination in this case; callers must not run
     /// [`cleanup_failed_clone`] on the path.
-    #[error("destination '{0}' already exists and is not empty")]
-    DestNotEmpty(String),
+    #[error("destination '{path}' already exists and is not empty")]
+    DestNotEmpty {
+        /// The destination path.
+        path: String,
+    },
     /// Named branch or tag from [`CloneOptions::branch`] was not advertised by the remote.
-    #[error("remote ref '{0}' not found")]
-    RemoteRefNotFound(String),
+    #[error("remote ref '{name}' not found")]
+    RemoteRefNotFound {
+        /// The ref name that was requested.
+        name: String,
+    },
     /// [`CloneOptions::depth`] was zero (`git clone --depth 0` is invalid).
     #[error("depth 0 is not a positive number")]
     InvalidCloneDepth,
-    /// Non-remote library failure during clone.
-    #[error(transparent)]
-    Nested(#[from] Box<Error>),
-    /// Remote resolution or transport failure.
-    #[error(transparent)]
-    Remote(#[from] crate::remote::RemoteError),
     /// Every object and ref arrived and `HEAD` is set, but checking out the work tree
     /// failed, for example because a partial clone could not fetch the blobs it needs.
     ///
     /// As with Git, the repository is kept so the checkout can be retried (for example
     /// with a hard reset to `HEAD`); [`Self::should_cleanup_failed_clone`] is `false`. A
-    /// checkout cancelled part way is [`CloneError::Nested`] with [`Error::Cancelled`]
-    /// instead, and is cleaned up like any other cancelled clone.
+    /// checkout cancelled part way is [`Error::Cancelled`] instead, and is cleaned up like any
+    /// other cancelled clone.
     #[error("cloned into '{}', but checking out {commit} failed: {source}", .path.display())]
     CheckoutFailed {
         /// Destination of the clone, where the repository was kept.
@@ -66,65 +72,36 @@ pub enum CloneError {
         commit: ObjectId,
         /// Why the checkout failed.
         #[source]
-        source: Box<Error>,
+        source: ErrorSummary,
+        /// The first promised object the checkout could not get, when it failed on
+        /// [`ObjectError::PromisorFetchFailed`] or [`ObjectError::PromisedMissing`].
+        missing_object: Option<ObjectId>,
+        /// Each promisor remote that failed to supply missing blobs, when the checkout failed
+        /// because of [`ObjectError::PromisorFetchFailed`].
+        promisor_failures: Vec<PromisorFetchFailure>,
     },
-}
-
-impl From<Error> for CloneError {
-    fn from(e: Error) -> Self {
-        Self::Nested(Box::new(e))
-    }
 }
 
 impl CloneError {
     /// Whether [`cleanup_failed_clone`] may run after this failure.
     ///
-    /// Returns `false` when the destination must be left unchanged: [`CloneError::DestNotEmpty`]
-    /// and pre-initialization failures such as [`RemoteError::InvalidRemoteName`], and
-    /// [`CloneError::CheckoutFailed`], whose repository is kept.
+    /// Returns `false` when the destination must be left unchanged: [`CloneError::DestNotEmpty`],
+    /// [`CloneError::InvalidCloneDepth`], and [`CloneError::CheckoutFailed`], whose repository is
+    /// kept. See [`should_cleanup_failed_clone`] for any [`Error`](enum@crate::error::Error) a clone returns.
     #[must_use]
     pub fn should_cleanup_failed_clone(&self) -> bool {
         match self {
-            Self::DestNotEmpty(_) | Self::InvalidCloneDepth | Self::CheckoutFailed { .. } => false,
-            Self::Remote(RemoteError::InvalidRemoteName(_)) => false,
-            Self::RemoteRefNotFound(_) => true,
-            Self::Nested(_) | Self::Remote(_) => true,
+            Self::DestNotEmpty { .. } | Self::InvalidCloneDepth | Self::CheckoutFailed { .. } => {
+                false
+            }
+            Self::RemoteRefNotFound { .. } => true,
         }
     }
 
     /// Whether the failure is a missing `-b` / `--branch` ref (destination may be removed).
     #[must_use]
     pub fn is_remote_ref_not_found(&self) -> bool {
-        matches!(self, Self::RemoteRefNotFound(_))
-    }
-
-    /// Whether the source could not be read at all ([`RemoteError::Unreadable`]), as opposed to
-    /// an empty remote with no branches or a local failure.
-    #[must_use]
-    pub fn is_remote_unreadable(&self) -> bool {
-        match self {
-            Self::Nested(e) => e.is_remote_unreadable(),
-            Self::Remote(e) => e.is_remote_unreadable(),
-            Self::DestNotEmpty(_)
-            | Self::RemoteRefNotFound(_)
-            | Self::InvalidCloneDepth
-            | Self::CheckoutFailed { .. } => false,
-        }
-    }
-
-    /// Whether the clone was cancelled ([`Error::Cancelled`]).
-    ///
-    /// When this returns `true`, [`Self::should_cleanup_failed_clone`] is also `true`.
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        match self {
-            Self::Nested(e) => e.is_cancelled(),
-            Self::Remote(e) => e.is_cancelled(),
-            Self::DestNotEmpty(_)
-            | Self::RemoteRefNotFound(_)
-            | Self::InvalidCloneDepth
-            | Self::CheckoutFailed { .. } => false,
-        }
+        matches!(self, Self::RemoteRefNotFound { .. })
     }
 
     /// The repository a failed clone left in place ([`CloneError::CheckoutFailed`]).
@@ -146,45 +123,56 @@ impl CloneError {
     /// # Returns
     ///
     /// The first object still missing when the checkout failed on
-    /// [`Error::PromisorFetchFailed`] or [`Error::PromisedObjectMissing`] (for example
+    /// [`ObjectError::PromisorFetchFailed`] or [`ObjectError::PromisedMissing`] (for example
     /// with lazy fetch turned off); `None` otherwise.
     #[must_use]
     pub fn missing_promised_object(&self) -> Option<ObjectId> {
-        let Self::CheckoutFailed { source, .. } = self else {
-            return None;
-        };
-        match promisor_cause(source)? {
-            Error::PromisorFetchFailed { missing, .. } => Some(*missing),
-            Error::PromisedObjectMissing(oid) => Some(*oid),
+        match self {
+            Self::CheckoutFailed { missing_object, .. } => *missing_object,
             _ => None,
         }
     }
 
-    /// The promisor remotes that failed while a [`CloneError::CheckoutFailed`] checkout
-    /// fetched its missing objects.
-    ///
-    /// # Returns
-    ///
-    /// Each failing remote's name with its first error, in the order they were tried;
-    /// empty when the checkout did not fail on [`Error::PromisorFetchFailed`].
+    /// Each promisor remote that failed during the checkout ([`CloneError::CheckoutFailed`]),
+    /// in the order they were tried; empty for any other failure.
     #[must_use]
-    pub fn failed_promisor_remotes(&self) -> &[(String, Box<Error>)] {
-        let Self::CheckoutFailed { source, .. } = self else {
-            return &[];
-        };
-        match promisor_cause(source) {
-            Some(Error::PromisorFetchFailed { failures, .. }) => failures,
+    pub fn failed_promisor_remotes(&self) -> &[PromisorFetchFailure] {
+        match self {
+            Self::CheckoutFailed {
+                promisor_failures, ..
+            } => promisor_failures,
             _ => &[],
         }
     }
 }
 
-/// The promisor fetch failure behind a checkout error, looking through a checkout whose
-/// rollback was also incomplete.
-fn promisor_cause(err: &Error) -> Option<&Error> {
+/// Whether [`cleanup_failed_clone`] may run after `err`, an error returned by [`clone`].
+///
+/// `false` for clone failures that leave the destination as it was or keep the repository
+/// ([`CloneError::should_cleanup_failed_clone`]) and for an invalid remote name, which fails
+/// before anything is created; `true` for every other failure, including cancellation.
+#[must_use]
+pub fn should_cleanup_failed_clone(err: &Error) -> bool {
     match err {
-        Error::PromisorFetchFailed { .. } | Error::PromisedObjectMissing(_) => Some(err),
-        Error::CheckoutRollbackIncomplete { source, .. } => promisor_cause(source),
+        Error::Remote(RemoteError::Clone(clone)) => clone.should_cleanup_failed_clone(),
+        Error::Remote(RemoteError::InvalidRemoteName { .. }) => false,
+        _ => true,
+    }
+}
+
+/// The promisor remotes that failed behind a checkout error.
+fn promisor_failures(err: &Error) -> Vec<PromisorFetchFailure> {
+    match err {
+        Error::Object(ObjectError::PromisorFetchFailed { failures, .. }) => failures.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// The promised object a checkout error could not get.
+fn missing_promised_object(err: &Error) -> Option<ObjectId> {
+    match err {
+        Error::Object(ObjectError::PromisorFetchFailed { missing, .. }) => Some(*missing),
+        Error::Object(ObjectError::PromisedMissing { oid }) => Some(*oid),
         _ => None,
     }
 }
@@ -433,11 +421,13 @@ pub fn dest_preexisted_empty(path: &Path) -> bool {
 struct CloneDestinationGuard;
 
 impl CloneDestinationGuard {
-    fn try_claim(dest: &Path, bare: bool) -> std::result::Result<(), CloneError> {
+    fn try_claim(dest: &Path, bare: bool) -> crate::error::Result<()> {
         let label = dest
             .to_str()
             .ok_or_else(|| {
-                CloneError::from(Error::InvalidPath("non-UTF-8 destination path".into()))
+                Error::Worktree(WorktreeError::InvalidPath {
+                    path: "non-UTF-8 destination path".into(),
+                })
             })?
             .to_owned();
         if bare {
@@ -447,64 +437,64 @@ impl CloneDestinationGuard {
         }
     }
 
-    fn try_claim_non_bare(dest: &Path, label: String) -> std::result::Result<(), CloneError> {
+    fn try_claim_non_bare(dest: &Path, label: String) -> crate::error::Result<()> {
         if dest.is_dir() && !dir_is_empty(dest) {
-            return Err(CloneError::DestNotEmpty(label));
+            return Err(CloneError::DestNotEmpty { path: label }.into());
         }
 
         if !dest.is_dir() {
             if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent).map_err(|e| CloneError::from(Error::Io(e)))?;
+                fs::create_dir_all(parent).map_err(Error::Io)?;
             }
             match fs::create_dir(dest) {
                 Ok(()) => {}
                 Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(source) => {
-                    return Err(CloneError::from(Error::Io(source)));
+                    return Err(Error::Io(source));
                 }
             }
         }
 
         if !dest.is_dir() {
-            return Err(CloneError::DestNotEmpty(label));
+            return Err(CloneError::DestNotEmpty { path: label }.into());
         }
         if !dir_is_empty(dest) {
-            return Err(CloneError::DestNotEmpty(label));
+            return Err(CloneError::DestNotEmpty { path: label }.into());
         }
 
         let git_dir = dest.join(".git");
         match fs::create_dir(&git_dir) {
             Ok(()) => Ok(()),
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-                Err(CloneError::DestNotEmpty(label))
+                Err(CloneError::DestNotEmpty { path: label }.into())
             }
-            Err(source) => Err(CloneError::from(Error::Io(source))),
+            Err(source) => Err(Error::Io(source)),
         }
     }
 
-    fn try_claim_bare(dest: &Path, label: String) -> std::result::Result<(), CloneError> {
+    fn try_claim_bare(dest: &Path, label: String) -> crate::error::Result<()> {
         if dest.is_dir() && !dir_is_empty(dest) {
-            return Err(CloneError::DestNotEmpty(label));
+            return Err(CloneError::DestNotEmpty { path: label }.into());
         }
 
         if !dest.is_dir() {
             if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent).map_err(|e| CloneError::from(Error::Io(e)))?;
+                fs::create_dir_all(parent).map_err(Error::Io)?;
             }
             match fs::create_dir(dest) {
                 Ok(()) => {}
                 Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(source) => {
-                    return Err(CloneError::from(Error::Io(source)));
+                    return Err(Error::Io(source));
                 }
             }
         }
 
         if !dest.is_dir() {
-            return Err(CloneError::DestNotEmpty(label));
+            return Err(CloneError::DestNotEmpty { path: label }.into());
         }
         if !dir_is_empty(dest) {
-            return Err(CloneError::DestNotEmpty(label));
+            return Err(CloneError::DestNotEmpty { path: label }.into());
         }
 
         // Reserve the bare git directory before concurrent inits race on `config` / `HEAD`.
@@ -512,9 +502,9 @@ impl CloneDestinationGuard {
         match fs::create_dir(&objects) {
             Ok(()) => Ok(()),
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-                Err(CloneError::DestNotEmpty(label))
+                Err(CloneError::DestNotEmpty { path: label }.into())
             }
-            Err(source) => Err(CloneError::from(Error::Io(source))),
+            Err(source) => Err(Error::Io(source)),
         }
     }
 }
@@ -688,14 +678,14 @@ pub fn clone_into(
     progress: &mut dyn Progress,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
-) -> std::result::Result<CloneIntoOutcome, CloneError> {
+) -> crate::error::Result<CloneIntoOutcome> {
     if opts.depth == Some(0) {
-        return Err(CloneError::InvalidCloneDepth);
+        return Err(CloneError::InvalidCloneDepth.into());
     }
     if !crate::remote::is_valid_remote_name(&opts.remote_name) {
-        return Err(CloneError::Remote(RemoteError::InvalidRemoteName(
-            opts.remote_name.clone(),
-        )));
+        return Err(crate::error::Error::from(RemoteError::InvalidRemoteName {
+            name: opts.remote_name.clone(),
+        }));
     }
     ensure_clone_remote_object_format(&repo, &opts.url, &opts.environment)?;
     let clone_opts = opts.clone_options_for_repo(&repo);
@@ -727,11 +717,12 @@ pub fn clone(
     progress: &mut dyn Progress,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
-) -> std::result::Result<CloneOutcome, CloneError> {
-    let dir = opts
-        .dest
-        .to_str()
-        .ok_or_else(|| CloneError::from(Error::InvalidPath("non-UTF-8 destination path".into())))?;
+) -> crate::error::Result<CloneOutcome> {
+    let dir = opts.dest.to_str().ok_or_else(|| {
+        Error::Worktree(WorktreeError::InvalidPath {
+            path: "non-UTF-8 destination path".into(),
+        })
+    })?;
     if opts.dest.is_dir()
         && opts
             .dest
@@ -739,15 +730,18 @@ pub fn clone(
             .map(|mut entries| entries.next().is_some())
             .unwrap_or(false)
     {
-        return Err(CloneError::DestNotEmpty(dir.to_owned()));
+        return Err(CloneError::DestNotEmpty {
+            path: dir.to_owned(),
+        }
+        .into());
     }
     if opts.depth == Some(0) {
-        return Err(CloneError::InvalidCloneDepth);
+        return Err(CloneError::InvalidCloneDepth.into());
     }
     if !crate::remote::is_valid_remote_name(&opts.remote_name) {
-        return Err(CloneError::Remote(RemoteError::InvalidRemoteName(
-            opts.remote_name.clone(),
-        )));
+        return Err(crate::error::Error::from(RemoteError::InvalidRemoteName {
+            name: opts.remote_name.clone(),
+        }));
     }
 
     ensure_local_clone_source_readable(&opts.url, &opts.environment)?;
@@ -757,8 +751,7 @@ pub fn clone(
     let discovery_cwd = opts.environment.discovery_cwd();
     let object_format =
         local_clone_source_hash_algo(&opts.url, &discovery_cwd).unwrap_or(HashAlgo::Sha1);
-    init_repository_with_object_format(&opts.dest, bare, &opts.initial_branch, object_format)
-        .map_err(CloneError::from)?;
+    init_repository_with_object_format(&opts.dest, bare, &opts.initial_branch, object_format)?;
     let git_dir = if bare {
         opts.dest.clone()
     } else {
@@ -770,8 +763,7 @@ pub fn clone(
         bare,
         &opts.environment,
         opts.promisor_fetcher.clone(),
-    )
-    .map_err(CloneError::from)?;
+    )?;
     populate_repo_from_remote(repo, opts, progress, cancel, http_factory)
 }
 
@@ -781,7 +773,7 @@ fn populate_repo_from_remote(
     progress: &mut dyn Progress,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
-) -> std::result::Result<CloneOutcome, CloneError> {
+) -> crate::error::Result<CloneOutcome> {
     let bare = opts.bare;
     clone_after_claim(repo, opts, progress, cancel, http_factory, bare)
 }
@@ -791,7 +783,7 @@ fn ensure_clone_remote_object_format(
     repo: &Repository,
     url: &str,
     environment: &Environment,
-) -> std::result::Result<(), CloneError> {
+) -> crate::error::Result<()> {
     if repo.odb().uses_files_primary() {
         return Ok(());
     }
@@ -800,12 +792,10 @@ fn ensure_clone_remote_object_format(
     };
     let local = repo.odb().hash_algo();
     if local != remote_algo {
-        return Err(CloneError::from(Error::Repository(
-            RepositoryError::ObjectFormatMismatch {
-                repository: local,
-                store: remote_algo,
-            },
-        )));
+        return Err(Error::Repository(RepositoryError::ObjectFormatMismatch {
+            repository: local,
+            store: remote_algo,
+        }));
     }
     Ok(())
 }
@@ -817,7 +807,7 @@ fn clone_after_claim(
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
     bare: bool,
-) -> std::result::Result<CloneOutcome, CloneError> {
+) -> crate::error::Result<CloneOutcome> {
     let git_dir = repo.git_dir().to_path_buf();
     let preserve_injected_store = !repo.odb().uses_files_primary();
 
@@ -835,8 +825,7 @@ fn clone_after_claim(
         &opts.environment,
         Some(repo.git_dir()),
         &crate::config::LoadConfigOptions::standard(&opts.environment, Some(repo.git_dir())),
-    )
-    .map_err(CloneError::from)?;
+    )?;
     let mut remote = Remote::from_config(&config, &opts.remote_name)?;
     if bare {
         // Bare clones have no `remote.*.fetch` refspec; avoid synthesizing tracking refspecs
@@ -870,8 +859,7 @@ fn clone_after_claim(
     }
 
     let clone_message = format!("clone: from {}", opts.url);
-    let identity =
-        fetch_operation_identity(&opts.environment, repo.git_dir()).map_err(CloneError::from)?;
+    let identity = fetch_operation_identity(&opts.environment, repo.git_dir())?;
     let clone_reflog = CloneReflog {
         identity: identity.clone(),
         message: clone_message.clone(),
@@ -905,18 +893,18 @@ fn clone_after_claim(
         _ => crate::bundle_uri::BundleSeed::NotOffered,
     };
     if cancel.is_cancelled() {
-        return Err(CloneError::from(Error::Cancelled));
+        return Err(Error::Cancelled);
     }
     if let crate::bundle_uri::BundleSeed::Failed { reason, .. } = &bundle {
         if crate::transport::pending_http::is_low_speed_transport_message(reason) {
-            return Err(CloneError::Remote(RemoteError::HttpLowSpeedStall(
-                reason.clone(),
-            )));
+            return Err(crate::error::Error::from(RemoteError::HttpLowSpeedStall {
+                detail: reason.clone(),
+            }));
         }
     }
     let mut fetch_outcome = remote.fetch(&repo, fetch_opts, progress, cancel, http_factory)?;
     if let crate::bundle_uri::BundleSeed::Seeded(seeded) = &bundle {
-        crate::bundle_uri::remove_bundle_refs(&repo).map_err(CloneError::from)?;
+        crate::bundle_uri::remove_bundle_refs(&repo)?;
         fetch_outcome.transfer += seeded.transfer;
     }
     if !preserve_injected_store {
@@ -928,19 +916,16 @@ fn clone_after_claim(
             bare,
             &opts.environment,
             opts.promisor_fetcher.clone(),
-        )
-        .map_err(CloneError::from)?;
+        )?;
     }
 
     let used_filter = match opts.filter {
         Some(spec) => {
-            PartialCloneConfig::write(repo.git_dir(), &opts.remote_name, &spec)
-                .map_err(CloneError::from)?;
+            PartialCloneConfig::write(repo.git_dir(), &opts.remote_name, &spec)?;
             Some(spec)
         }
         None if opts.auto_filter => {
-            PartialCloneConfig::write_auto(repo.git_dir(), &opts.remote_name)
-                .map_err(CloneError::from)?;
+            PartialCloneConfig::write_auto(repo.git_dir(), &opts.remote_name)?;
             fetch_outcome
                 .promisor
                 .as_ref()
@@ -990,13 +975,16 @@ fn clone_after_claim(
             ) = perform_clone_checkout(&repo, checkout_oid, progress, cancel).map_err(
                 |source| {
                     if source.is_cancelled() {
-                        CloneError::from(source)
+                        source
                     } else {
                         CloneError::CheckoutFailed {
                             path: opts.dest.clone(),
                             commit: checkout_oid,
-                            source: Box::new(source),
+                            missing_object: missing_promised_object(&source),
+                            promisor_failures: promisor_failures(&source),
+                            source: ErrorSummary::from(source),
                         }
+                        .into()
                     }
                 },
             )?;
@@ -1089,9 +1077,8 @@ fn resolve_clone_ref(repo: &Repository, refname: &str) -> ObjectId {
     refs::resolve_ref_in(repo, refname).unwrap_or(ObjectId::zero())
 }
 
-fn write_clone_head_symref(repo: &Repository, target: &str) -> std::result::Result<(), CloneError> {
+fn write_clone_head_symref(repo: &Repository, target: &str) -> crate::error::Result<()> {
     refs::write_symbolic_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", target)
-        .map_err(CloneError::from)
 }
 
 fn local_branch_names_with_commits(repo: &Repository) -> Vec<String> {
@@ -1153,18 +1140,16 @@ fn resolve_requested_clone_ref(
     remote: &Remote,
     repo: &Repository,
     http_factory: Option<&dyn HttpClientFactory>,
-) -> std::result::Result<CloneRequestedRef, CloneError> {
-    let refs = remote
-        .list_refs(
-            Some(repo),
-            &ListRefsOptions {
-                symrefs: true,
-                peel: true,
-                ..Default::default()
-            },
-            http_factory,
-        )
-        .map_err(CloneError::Remote)?;
+) -> crate::error::Result<CloneRequestedRef> {
+    let refs = remote.list_refs(
+        Some(repo),
+        &ListRefsOptions {
+            symrefs: true,
+            peel: true,
+            ..Default::default()
+        },
+        http_factory,
+    )?;
     let head_ref = format!("refs/heads/{name}");
     if refs.iter().any(|r| r.name == head_ref) {
         return Ok(CloneRequestedRef::Branch(name.to_owned()));
@@ -1172,11 +1157,17 @@ fn resolve_requested_clone_ref(
     let tag_ref = format!("refs/tags/{name}");
     let folded = fold_peeled_refs(&refs);
     let Some(tag) = folded.iter().find(|r| r.name == tag_ref) else {
-        return Err(CloneError::RemoteRefNotFound(name.to_owned()));
+        return Err(CloneError::RemoteRefNotFound {
+            name: name.to_owned(),
+        }
+        .into());
     };
     let peel = tag.peeled.filter(|oid| !oid.is_zero()).unwrap_or(tag.oid);
     if peel.is_zero() {
-        return Err(CloneError::RemoteRefNotFound(name.to_owned()));
+        return Err(CloneError::RemoteRefNotFound {
+            name: name.to_owned(),
+        }
+        .into());
     }
     Ok(CloneRequestedRef::Tag {
         name: name.to_owned(),
@@ -1194,7 +1185,7 @@ fn clone_initial_fetch_refspec(
     remote: &Remote,
     repo: &Repository,
     http_factory: Option<&dyn HttpClientFactory>,
-) -> std::result::Result<String, CloneError> {
+) -> crate::error::Result<String> {
     if clone_effective_single_branch(opts) {
         return match requested {
             CloneRequestedRef::Tag { name, .. } => {
@@ -1263,7 +1254,9 @@ fn append_clone_reflog_on_store(
     identity: &crate::ident::Signature,
     message: &str,
 ) -> Result<()> {
-    identity.validate().map_err(Error::InvalidSignature)?;
+    identity
+        .validate()
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     let formatted =
         refs::store::format_reflog_identity(&identity.reflog_name_email(), identity.time);
     let config = repo.config().snapshot()?;
@@ -1286,15 +1279,13 @@ fn setup_clone_head(
     fetch_outcome: &crate::transfer::FetchOutcome,
     identity: &crate::ident::Signature,
     clone_message: &str,
-) -> std::result::Result<(CloneHead, ObjectId), CloneError> {
+) -> crate::error::Result<(CloneHead, ObjectId)> {
     let zero = ObjectId::zero();
     match requested {
         CloneRequestedRef::Tag { name, peel } => {
             if !peel.is_zero() {
-                refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", peel)
-                    .map_err(CloneError::from)?;
-                append_clone_reflog_on_store(repo, "HEAD", &zero, peel, identity, clone_message)
-                    .map_err(CloneError::from)?;
+                refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", peel)?;
+                append_clone_reflog_on_store(repo, "HEAD", &zero, peel, identity, clone_message)?;
             }
             Ok((
                 CloneHead::Detached {
@@ -1317,8 +1308,7 @@ fn setup_clone_head(
                         repo.git_dir(),
                         &branch_ref,
                         &oid,
-                    )
-                    .map_err(CloneError::from)?;
+                    )?;
                     append_clone_reflog_on_store(
                         repo,
                         &branch_ref,
@@ -1326,15 +1316,13 @@ fn setup_clone_head(
                         &oid,
                         identity,
                         clone_message,
-                    )
-                    .map_err(CloneError::from)?;
+                    )?;
                 }
                 oid
             };
             write_clone_head_symref(repo, &branch_ref)?;
             if !oid.is_zero() {
-                append_clone_reflog_on_store(repo, "HEAD", &zero, &oid, identity, clone_message)
-                    .map_err(CloneError::from)?;
+                append_clone_reflog_on_store(repo, "HEAD", &zero, &oid, identity, clone_message)?;
             }
             if !opts.bare {
                 set_local_config(
@@ -1371,8 +1359,7 @@ fn setup_clone_head(
                         repo.git_dir(),
                         &branch_ref,
                         &oid,
-                    )
-                    .map_err(CloneError::from)?;
+                    )?;
                     append_clone_reflog_on_store(
                         repo,
                         &branch_ref,
@@ -1380,15 +1367,13 @@ fn setup_clone_head(
                         &oid,
                         identity,
                         clone_message,
-                    )
-                    .map_err(CloneError::from)?;
+                    )?;
                 }
                 oid
             };
             write_clone_head_symref(repo, &branch_ref)?;
             if !oid.is_zero() {
-                append_clone_reflog_on_store(repo, "HEAD", &zero, &oid, identity, clone_message)
-                    .map_err(CloneError::from)?;
+                append_clone_reflog_on_store(repo, "HEAD", &zero, &oid, identity, clone_message)?;
             }
             if !opts.bare {
                 set_local_config(
@@ -1416,17 +1401,15 @@ fn advertised_default_branch_from_remote(
     http_factory: Option<&dyn HttpClientFactory>,
     url: &str,
     initial_branch: &str,
-) -> std::result::Result<String, CloneError> {
-    let refs = remote
-        .list_refs(
-            Some(repo),
-            &ListRefsOptions {
-                symrefs: true,
-                ..Default::default()
-            },
-            http_factory,
-        )
-        .map_err(CloneError::Remote)?;
+) -> crate::error::Result<String> {
+    let refs = remote.list_refs(
+        Some(repo),
+        &ListRefsOptions {
+            symrefs: true,
+            ..Default::default()
+        },
+        http_factory,
+    )?;
     for entry in &refs {
         if entry.name == "HEAD" {
             if let Some(target) = &entry.symref_target {
@@ -1579,7 +1562,7 @@ fn open_clone_repository(
 fn ensure_local_clone_source_readable(
     url: &str,
     environment: &Environment,
-) -> std::result::Result<(), CloneError> {
+) -> crate::error::Result<()> {
     let url = url.trim();
     if !is_local_path_remote_url(url) {
         return Ok(());
@@ -1588,14 +1571,13 @@ fn ensure_local_clone_source_readable(
         return Ok(());
     }
     let discovery_cwd = environment.discovery_cwd();
-    let source_path =
-        resolve_local_clone_source_path(url, &discovery_cwd).map_err(CloneError::from)?;
+    let source_path = resolve_local_clone_source_path(url, &discovery_cwd)?;
     if crate::bundle_remote::is_bundle_path(&source_path) {
         return Ok(());
     }
     let probe_git = discovery_cwd.join(".git");
     let remote_git = resolve_local_remote_git_dir(url, &probe_git, Some(&discovery_cwd));
-    crate::transfer::ensure_local_remote_repository(&remote_git).map_err(CloneError::from)
+    crate::transfer::ensure_local_remote_repository(&remote_git)
 }
 
 /// When cloning from a local path, match the source repository's object hash up front.
@@ -1661,12 +1643,13 @@ mod tests {
 
     #[test]
     fn dest_not_empty_skips_failed_clone_cleanup() {
-        assert!(!CloneError::DestNotEmpty("x".into()).should_cleanup_failed_clone());
-        assert!(
-            !CloneError::Remote(RemoteError::InvalidRemoteName("bad".into()))
-                .should_cleanup_failed_clone()
-        );
-        assert!(CloneError::from(Error::PathError("x".into())).should_cleanup_failed_clone());
+        assert!(!CloneError::DestNotEmpty { path: "x".into() }.should_cleanup_failed_clone());
+        assert!(!should_cleanup_failed_clone(&Error::Remote(
+            RemoteError::InvalidRemoteName { name: "bad".into() }
+        )));
+        assert!(should_cleanup_failed_clone(&Error::Worktree(
+            WorktreeError::Path { detail: "x".into() }
+        )));
     }
 
     #[cfg_attr(
@@ -2225,8 +2208,10 @@ mod tests {
             None,
         )
         .expect_err("missing ref");
-        assert!(matches!(err, CloneError::RemoteRefNotFound(_)));
-        assert!(err.should_cleanup_failed_clone());
+        assert!(
+            matches!(&err, crate::error::Error::Remote(crate::remote::RemoteError::Clone(clone)) if matches!(**clone, CloneError::RemoteRefNotFound { .. }))
+        );
+        assert!(should_cleanup_failed_clone(&err));
         cleanup_failed_clone(&dest, false);
         assert!(!dest.exists());
     }
@@ -2243,7 +2228,9 @@ mod tests {
             None,
         )
         .expect_err("non-empty dest");
-        assert!(matches!(err, CloneError::DestNotEmpty(_)));
+        assert!(
+            matches!(&err, crate::error::Error::Remote(crate::remote::RemoteError::Clone(clone)) if matches!(**clone, CloneError::DestNotEmpty { .. }))
+        );
         assert!(dest.path().join("notes.txt").is_file());
         assert!(!dest.path().join(".git").exists());
     }

@@ -8,6 +8,7 @@ use crate::error::Error;
 use crate::objects::ObjectKind;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
+use crate::worktree::WorktreeError;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs;
@@ -385,17 +386,25 @@ fn read_mailmap_file_nofollow(path: &Path) -> Result<String> {
             .custom_flags(libc::O_NOFOLLOW)
             .open(path)
             .map_err(|_| {
-                Error::PathError(format!("unable to open mailmap at {}", path.display()))
+                Error::Worktree(WorktreeError::Path {
+                    detail: format!("unable to open mailmap at {}", path.display()),
+                })
             })?;
         let mut s = String::new();
-        file.read_to_string(&mut s)
-            .map_err(|e| Error::PathError(format!("reading {}: {e}", path.display())))?;
+        file.read_to_string(&mut s).map_err(|e| {
+            Error::Worktree(WorktreeError::Path {
+                detail: format!("reading {}: {e}", path.display()),
+            })
+        })?;
         Ok(s)
     }
     #[cfg(not(unix))]
     {
-        fs::read_to_string(path)
-            .map_err(|e| Error::PathError(format!("reading {}: {e}", path.display())))
+        fs::read_to_string(path).map_err(|e| {
+            Error::Worktree(WorktreeError::Path {
+                detail: format!("reading {}: {e}", path.display()),
+            })
+        })
     }
 }
 
@@ -406,8 +415,11 @@ fn read_optional_mailmap_file(path: &Path, nofollow: bool) -> Result<String> {
     if nofollow {
         read_mailmap_file_nofollow(path)
     } else {
-        fs::read_to_string(path)
-            .map_err(|e| Error::PathError(format!("reading {}: {e}", path.display())))
+        fs::read_to_string(path).map_err(|e| {
+            Error::Worktree(WorktreeError::Path {
+                detail: format!("reading {}: {e}", path.display()),
+            })
+        })
     }
 }
 
@@ -415,17 +427,20 @@ fn read_optional_mailmap_file(path: &Path, nofollow: bool) -> Result<String> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::PathError`] when `spec` does not resolve, the object cannot be read,
+/// Returns [`crate::worktree::WorktreeError::Path`] when `spec` does not resolve, the object cannot be read,
 /// or it names an object that is not a blob.
 #[allow(dead_code)] // integration / re-export use only
 pub(crate) fn read_mailmap_blob(repo: &Repository, spec: &str) -> Result<String> {
-    let oid = resolve_revision(repo, spec)
-        .map_err(|e| Error::PathError(format!("resolving mailmap blob '{spec}': {e}")))?;
+    let oid = resolve_revision(repo, spec).map_err(|e| {
+        Error::Worktree(WorktreeError::Path {
+            detail: format!("resolving mailmap blob '{spec}': {e}"),
+        })
+    })?;
     match read_blob_text(repo, &oid, spec)? {
         BlobText::Text(text) => Ok(text),
-        BlobText::NotABlob(kind) => Err(Error::PathError(format!(
-            "mailmap blob '{spec}' is a {kind}, not a blob"
-        ))),
+        BlobText::NotABlob(kind) => Err(Error::Worktree(WorktreeError::Path {
+            detail: format!("mailmap blob '{spec}' is a {kind}, not a blob"),
+        })),
     }
 }
 
@@ -440,10 +455,11 @@ fn read_blob_text(
     oid: &crate::objects::ObjectId,
     spec: &str,
 ) -> Result<BlobText> {
-    let obj = repo
-        .odb()
-        .read(oid)
-        .map_err(|e| Error::PathError(format!("reading mailmap blob '{spec}': {e}")))?;
+    let obj = repo.odb().read(oid).map_err(|e| {
+        Error::Worktree(WorktreeError::Path {
+            detail: format!("reading mailmap blob '{spec}': {e}"),
+        })
+    })?;
     if obj.kind != ObjectKind::Blob {
         return Ok(BlobText::NotABlob(obj.kind));
     }

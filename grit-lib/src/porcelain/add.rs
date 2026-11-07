@@ -4,6 +4,7 @@
 //! [`StageMode::All`] is selected). It does **not** compute the index-vs-HEAD diff
 //! that full [`super::status::status`] requires.
 
+use crate::worktree::WorktreeError;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -15,7 +16,7 @@ use crate::diff::{
     materialize_worktree_blob, mode_from_metadata, read_submodule_head_oid, DiffEntry,
     DiffIndexToWorktreeOptions, DiffStatus, EmbeddedGitRepoStage,
 };
-use crate::error::{Error, Result};
+use crate::error::{Error, PathOutsideRepoError, Result, SubmoduleError};
 use crate::hash::Parallelism;
 use crate::ignore::IgnoreMatcher;
 use crate::index::{
@@ -91,9 +92,9 @@ pub struct StageOptions {
     pub dry_run: bool,
     /// Record intent-to-add entries (empty blob, extended flag) instead of hashing file content.
     pub intent_to_add: bool,
-    /// Stage explicitly named ignored paths instead of returning [`Error::PathspecIgnored`].
+    /// Stage explicitly named ignored paths instead of returning [`crate::worktree::WorktreeError::PathspecIgnored`].
     pub force_ignored: bool,
-    /// Skip [`Error::PathspecIgnored`] validation (integration tests only; use test_support knobs with the test-support feature).
+    /// Skip [`crate::worktree::WorktreeError::PathspecIgnored`] validation (integration tests only; use test_support knobs with the test-support feature).
     #[cfg(any(test, feature = "test-support"))]
     pub skip_pathspec_ignore_check: bool,
     #[cfg(not(any(test, feature = "test-support")))]
@@ -243,7 +244,7 @@ pub fn stage_on_index(
 }
 
 /// Like [`stage_on_index`], but paths already staged at stage 0 in `ignore_exempt_index` skip
-/// [`Error::PathspecIgnored`] (used by path-scoped commits that stage on a parent-tree index).
+/// [`crate::worktree::WorktreeError::PathspecIgnored`] (used by path-scoped commits that stage on a parent-tree index).
 pub(crate) fn stage_on_index_with_pathspec_ignore_exempt(
     repo: &Repository,
     index: &mut Index,
@@ -296,8 +297,9 @@ pub(crate) fn validate_commit_staging_pathspecs(
 /// `index.lock` is released (blobs already hashed may remain as unreachable loose objects).
 /// Returns [`Error::LockHeld`] when another process
 /// still holds `index.lock` after the `core.filesRefLockTimeout` wait (nothing is staged;
-/// the caller may retry), [`Error::Verbatim`] when an explicit pathspec matches nothing,
-/// [`Error::PathspecIgnored`] when a path exists but is excluded by ignore rules,
+/// the caller may retry), [`crate::worktree::WorktreeError::PathspecNoMatch`] when an explicit
+/// pathspec matches nothing,
+/// [`crate::worktree::WorktreeError::PathspecIgnored`] when a path exists but is excluded by ignore rules,
 /// or I/O / object-store failures while reading the work tree.
 pub fn stage(
     repo: &Repository,
@@ -423,12 +425,9 @@ pub(crate) fn blob_path_matches_restrict_pathspecs(
     if pathspecs.is_empty() {
         return Ok(true);
     }
-    if pathspecs.iter().any(|s| pathspec_has_attr_magic(s)) {
-        let matcher = attr_matcher.ok_or_else(|| {
-            Error::Verbatim(
-                "internal error: attr pathspec matcher missing for tree path filter".into(),
-            )
-        })?;
+    if let Some(matcher) =
+        attr_matcher.filter(|_| pathspecs.iter().any(|s| pathspec_has_attr_magic(s)))
+    {
         return Ok(matcher.matches_entry(path, mode));
     }
     if staging_pathspecs_need_entry_mode_context(pathspecs) {
@@ -988,9 +987,9 @@ fn stage_inner_on_index(
         collapsed_rejects.extend(conflict_marker_rejects);
         collapsed_rejects.sort_unstable();
         collapsed_rejects.dedup();
-        return Err(Error::UnmergedConflictMarkers {
+        return Err(Error::Worktree(WorktreeError::UnmergedConflictMarkers {
             paths: collapsed_rejects,
-        });
+        }));
     }
 
     if dry_run {
@@ -1021,9 +1020,9 @@ fn stage_inner_on_index(
     if !conflict_marker_rejects.is_empty() {
         conflict_marker_rejects.sort_unstable();
         conflict_marker_rejects.dedup();
-        return Err(Error::UnmergedConflictMarkers {
+        return Err(Error::Worktree(WorktreeError::UnmergedConflictMarkers {
             paths: conflict_marker_rejects,
-        });
+        }));
     }
 
     Ok(outcome)
@@ -1105,9 +1104,10 @@ fn stage_unmerged_paths_matching_pathspecs(
                 .iter()
                 .any(|e| e.path == *raw_path && e.mode == MODE_GITLINK)
             {
-                return Err(Error::Verbatim(format!(
-                    "could not resolve submodule HEAD for '{rel}'"
-                )));
+                return Err(SubmoduleError::HeadUnreadable {
+                    path: rel.to_string(),
+                }
+                .into());
             }
         }
         if dry_run {
@@ -1125,8 +1125,7 @@ fn stage_unmerged_paths_matching_pathspecs(
             rel,
             None,
             Some(rules.filter_process()),
-        )
-        .map_err(|e| Error::Verbatim(format!("could not store {rel}: {e}")))?;
+        )?;
         let mut entry = entry_from_metadata(&meta, raw_path, oid, mode);
         entry.mode = mode;
         index.stage_file(entry);
@@ -1212,9 +1211,7 @@ struct TrackedStagePlan {
 fn lock_rules(
     rules: &std::sync::Mutex<WorktreeRules>,
 ) -> Result<std::sync::MutexGuard<'_, WorktreeRules>> {
-    rules
-        .lock()
-        .map_err(|e| Error::Verbatim(format!("worktree rules lock poisoned: {e}")))
+    rules.lock().or_else(|poisoned| Ok(poisoned.into_inner()))
 }
 
 /// Merge unstaged diff rows into one staging action per path (unmerged paths may appear twice).
@@ -1311,7 +1308,9 @@ fn apply_tracked_stage_plan(
         })?;
         let oid = if plan.oid.is_zero() {
             read_submodule_head_oid(&abs).ok_or_else(|| {
-                Error::Verbatim(format!("could not resolve submodule HEAD for '{rel_path}'"))
+                Error::from(SubmoduleError::HeadUnreadable {
+                    path: rel_path.to_string(),
+                })
             })?
         } else {
             plan.oid
@@ -1675,8 +1674,7 @@ fn stage_untracked_path(
             &index_relpath,
             None,
             Some(rules.filter_process()),
-        )
-        .map_err(|e| Error::Verbatim(format!("could not hash {index_relpath}: {e}")))?
+        )?
     } else {
         materialize_worktree_blob(
             repo.odb(),
@@ -1687,8 +1685,7 @@ fn stage_untracked_path(
             &index_relpath,
             None,
             Some(rules.filter_process()),
-        )
-        .map_err(|e| Error::Verbatim(format!("could not store {index_relpath}: {e}")))?
+        )?
     };
 
     let index_path = storage_bytes(&index_relpath);
@@ -1816,9 +1813,9 @@ fn validate_pathspecs(
         let matches_repo = checker.matches(resolved)?
             || pathspec_matches_unmerged_index_entries(index, &unmerged_paths, resolved, ctx);
         if !matches_repo {
-            return Err(Error::PathspecNoMatch {
+            return Err(Error::Worktree(WorktreeError::PathspecNoMatch {
                 spec: (*label).to_owned(),
-            });
+            }));
         }
         if opts.force_ignored || opts.skip_pathspec_ignore_check {
             continue;
@@ -1843,9 +1840,9 @@ fn validate_pathspecs(
     if !ignored_paths.is_empty() {
         ignored_paths.sort_unstable();
         ignored_paths.dedup();
-        return Err(Error::PathspecIgnored {
+        return Err(Error::Worktree(WorktreeError::PathspecIgnored {
             paths: ignored_paths,
-        });
+        }));
     }
     Ok(())
 }
@@ -2000,8 +1997,14 @@ fn walk_worktree_files_under(
 }
 
 fn pathdiff_worktree(work_tree: &Path, abs: &Path) -> Result<String> {
-    crate::repo_relpath::strip_worktree_prefix_stored(abs, work_tree)
-        .ok_or_else(|| Error::Verbatim("path escaped the work tree during force-add walk".into()))
+    crate::repo_relpath::strip_worktree_prefix_stored(abs, work_tree).ok_or_else(|| {
+        PathOutsideRepoError::OutsideRepository {
+            path: abs.display().to_string(),
+            subpath: abs.display().to_string(),
+            repo_root: work_tree.display().to_string(),
+        }
+        .into()
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2038,9 +2041,7 @@ fn stage_intent_to_add_paths(
     let mut outcome = StageOutcome::default();
     let empty = empty_blob_oid();
     if !dry_run {
-        repo.odb()
-            .write(crate::objects::ObjectKind::Blob, b"")
-            .map_err(|e| Error::Verbatim(format!("could not store empty blob: {e}")))?;
+        repo.odb().write(crate::objects::ObjectKind::Blob, b"")?;
     }
     let precompose = rules.config().precompose_unicode();
 
@@ -2184,7 +2185,7 @@ mod tests {
         };
         assert!(matches!(
             validate_commit_staging_pathspecs(&repo, &index, &opts),
-            Err(Error::PathspecIgnored { .. })
+            Err(Error::Worktree(WorktreeError::PathspecIgnored { .. }))
         ));
     }
 
@@ -2751,7 +2752,7 @@ mod tests {
             )
             .unwrap_err();
             assert!(
-                matches!(&err, Error::PathspecNoMatch { spec } if spec == missing),
+                matches!(&err, Error::Worktree(WorktreeError::PathspecNoMatch { spec }) if spec == missing),
                 "{missing}: {err:?}"
             );
         }
@@ -2776,7 +2777,10 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::PathspecIgnored { .. }));
+        assert!(matches!(
+            err,
+            Error::Worktree(WorktreeError::PathspecIgnored { .. })
+        ));
     }
 
     #[test]
@@ -2800,7 +2804,9 @@ mod tests {
         )
         .unwrap_err();
         match err {
-            Error::PathspecIgnored { paths } => assert_eq!(paths, vec!["build".to_owned()]),
+            Error::Worktree(WorktreeError::PathspecIgnored { paths }) => {
+                assert_eq!(paths, vec!["build".to_owned()])
+            }
             other => panic!("expected PathspecIgnored, got {other:?}"),
         }
     }
@@ -3001,10 +3007,13 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::UnmergedConflictMarkers { .. }),
+            matches!(
+                err,
+                Error::Worktree(WorktreeError::UnmergedConflictMarkers { .. })
+            ),
             "explicit add must refuse marked file: {err}"
         );
-        if let Error::UnmergedConflictMarkers { paths } = err {
+        if let Error::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) = err {
             assert_eq!(paths, vec!["f".to_owned()]);
         }
 
@@ -3038,7 +3047,7 @@ mod tests {
         assert!(
             !matches!(
                 &result,
-                Err(Error::Verbatim(msg)) if msg.contains("did not match any files")
+                Err(Error::Worktree(WorktreeError::PathspecNoMatch { .. }))
             ),
             "pathspec validation must see unmerged index stages: {result:?}"
         );
@@ -3070,7 +3079,10 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::UnmergedConflictMarkers { .. }),
+            matches!(
+                err,
+                Error::Worktree(WorktreeError::UnmergedConflictMarkers { .. })
+            ),
             "dry-run explicit add must not claim success: {err}"
         );
     }
@@ -3097,7 +3109,10 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::UnmergedConflictMarkers { .. }),
+            matches!(
+                err,
+                Error::Worktree(WorktreeError::UnmergedConflictMarkers { .. })
+            ),
             "must honor conflict-marker-size=10: {err}"
         );
         assert!(repo.load_index().unwrap().has_unmerged_entries());
@@ -3126,7 +3141,10 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::UnmergedConflictMarkers { .. }),
+            matches!(
+                err,
+                Error::Worktree(WorktreeError::UnmergedConflictMarkers { .. })
+            ),
             "{err}"
         );
     }
@@ -3163,7 +3181,10 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::UnmergedConflictMarkers { .. }),
+            matches!(
+                err,
+                Error::Worktree(WorktreeError::UnmergedConflictMarkers { .. })
+            ),
             "{err}"
         );
         let index = repo.load_index().unwrap();
@@ -3215,7 +3236,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        let Error::UnmergedConflictMarkers { paths } = err else {
+        let Error::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) = err else {
             panic!("expected marker rejection, got {err}");
         };
         assert_eq!(paths, vec!["b.txt".to_owned()]);
@@ -3483,7 +3504,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            Error::EmbeddedRepoWithoutCommit { path } if path == "tool/sub"
+            Error::Worktree(WorktreeError::EmbeddedRepoWithoutCommit { path }) if path == "tool/sub"
         ));
 
         let index = repo.load_index().unwrap();
@@ -3786,7 +3807,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            Error::EmbeddedRepoWithoutCommit { path } if path == "sub"
+            Error::Worktree(WorktreeError::EmbeddedRepoWithoutCommit { path }) if path == "sub"
         ));
         assert_eq!(fs::read(&index_path).unwrap(), index_before);
         let index = repo.load_index().unwrap();

@@ -25,6 +25,7 @@
 //! # }
 //! ```
 
+use crate::error::RefError;
 use std::fs;
 use std::path::Path;
 
@@ -489,7 +490,7 @@ fn resolve_head_from_store(store: &dyn crate::refs::store::RefStore) -> Result<H
         Some(RawRef::Symbolic(refname)) => symbolic_head_state(refname, |name| {
             match store.resolve(RefNameRef::from_trusted(name)) {
                 Ok(oid) => Ok(Some(oid)),
-                Err(Error::RefStore(RefStoreError::NotFound { .. })) => Ok(None),
+                Err(Error::Ref(RefError::Store(RefStoreError::NotFound { .. }))) => Ok(None),
                 Err(err) => Err(err),
             }
         }),
@@ -505,14 +506,14 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// - [`Error::UnbornHead`] when `HEAD` names a branch with no commits yet.
-    /// - [`Error::InvalidHead`] when `HEAD` is missing or names something that is not a ref.
+    /// - [`crate::error::RefError::UnbornHead`] when `HEAD` names a branch with no commits yet.
+    /// - [`crate::error::RefError::InvalidHead`] when `HEAD` is missing or names something that is not a ref.
     /// - Ref store read failures while resolving `HEAD`.
     pub fn head_commit(&self) -> Result<ObjectId> {
         match resolve_head_for_repository(self)? {
             HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
-            HeadState::Branch { oid: None, .. } => Err(Error::UnbornHead),
-            HeadState::Invalid => Err(Error::InvalidHead),
+            HeadState::Branch { oid: None, .. } => Err(Error::Ref(RefError::UnbornHead)),
+            HeadState::Invalid => Err(Error::Ref(RefError::InvalidHead)),
         }
     }
 
@@ -523,12 +524,12 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// - [`Error::InvalidHead`] when `HEAD` is missing or names something that is not a ref.
+    /// - [`crate::error::RefError::InvalidHead`] when `HEAD` is missing or names something that is not a ref.
     /// - Ref store read failures while resolving `HEAD`.
     /// - The errors of [`Odb::commit_tree`](crate::objects::odb::Odb::commit_tree) for the `HEAD` commit.
     pub fn head_tree(&self) -> Result<Option<ObjectId>> {
         match resolve_head_for_repository(self)? {
-            HeadState::Invalid => Err(Error::InvalidHead),
+            HeadState::Invalid => Err(Error::Ref(RefError::InvalidHead)),
             head => head.tree(self.odb()),
         }
     }
@@ -585,7 +586,7 @@ fn resolve_head_impl(git_dir: &Path, repo: Option<&crate::repo::Repository>) -> 
         }
         match crate::refs::resolve_ref(git_dir, refname) {
             Ok(oid) => Ok(Some(oid)),
-            Err(Error::RefStore(RefStoreError::NotFound { .. })) => Ok(None),
+            Err(Error::Ref(RefError::Store(RefStoreError::NotFound { .. }))) => Ok(None),
             Err(e) => Err(e),
         }
     };
@@ -660,8 +661,7 @@ pub(crate) fn read_grit_rebase_stopped_source(
         return Ok(None);
     }
     let raw = fs::read_to_string(git_dir.join("rebase-merge/stopped-sha"))?;
-    let oid =
-        ObjectId::from_hex(raw.trim()).map_err(|e| crate::error::Error::Verbatim(e.to_string()))?;
+    let oid = ObjectId::from_hex(raw.trim())?;
     Ok(Some(oid))
 }
 
@@ -1366,6 +1366,8 @@ mod merge_sentinel_tests {
 #[cfg(test)]
 mod head_state_tests {
     #![allow(clippy::unwrap_used)]
+    use crate::error::ObjectError;
+    use crate::error::RefError;
 
     use super::{resolve_head, resolve_head_for_repository, HeadState};
     use crate::error::Error;
@@ -1449,7 +1451,10 @@ mod head_state_tests {
         let repo =
             init_repository(tmp.path(), false, "main", None, RefStorageFormat::Files).unwrap();
         std::fs::write(repo.git_dir().join("HEAD"), "ref: refs/tags/missing\n").unwrap();
-        assert!(matches!(repo.head_tree(), Err(Error::InvalidHead)));
+        assert!(matches!(
+            repo.head_tree(),
+            Err(Error::Ref(RefError::InvalidHead))
+        ));
         assert_eq!(HeadState::Invalid.tree(repo.odb()).unwrap(), None);
     }
 
@@ -1462,11 +1467,11 @@ mod head_state_tests {
         std::fs::write(repo.git_dir().join("HEAD"), format!("{blob}\n")).unwrap();
         assert!(matches!(
             repo.head_tree(),
-            Err(Error::UnexpectedObjectKind {
+            Err(Error::Object(ObjectError::UnexpectedKind {
                 expected: ObjectKind::Commit,
                 actual: ObjectKind::Blob,
                 ..
-            })
+            }))
         ));
     }
 }

@@ -326,6 +326,7 @@ pub fn resolve_symbolic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ObjectError;
     use crate::refs::store::{Expected, RefUpdateFlags, ReflogUpdate};
     use crate::refs::RefnameUnavailable;
 
@@ -657,7 +658,9 @@ mod tests {
             seen.push(*id);
             match id.as_bytes()[19] {
                 1 => Ok(Some(ObjectKind::Commit)),
-                _ => Err(crate::error::Error::CorruptObject("bad header".to_owned())),
+                _ => Err(crate::error::Error::Object(ObjectError::Corrupt {
+                    detail: "bad header".to_owned(),
+                })),
             }
         })
         .expect_err("lookup failure");
@@ -672,7 +675,7 @@ mod tests {
         assert_eq!((name.as_str(), id), ("refs/heads/b", oid(2)));
         assert!(matches!(
             source.downcast_ref::<crate::error::Error>(),
-            Some(crate::error::Error::CorruptObject(_))
+            Some(crate::error::Error::Object(ObjectError::Corrupt { .. }))
         ));
         assert_eq!(seen, vec![oid(1), oid(2)]);
     }

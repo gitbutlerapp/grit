@@ -42,7 +42,7 @@ impl fmt::Display for LinkedWorktreeOperation {
 /// Wrapped by [`WorktreeError::Linked`](crate::worktree::WorktreeError::Linked) and surfaced as
 /// [`Error::Worktree`](crate::error::Error::Worktree). Branch problems during add use
 /// [`BranchError`](crate::porcelain::branch_error::BranchError); a branch checked out elsewhere uses
-/// [`Error::BranchCheckedOutInWorktree`](crate::error::Error::BranchCheckedOutInWorktree).
+/// [`crate::porcelain::branch_error::BranchError::CheckedOut`](crate::porcelain::branch_error::BranchError::CheckedOut).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum LinkedWorktreeError {

@@ -86,6 +86,45 @@ pub enum BranchError {
         /// Short branch name.
         name: String,
     },
+
+    /// [`list_branches`](crate::branch_tracking::list_branches) with
+    /// [`BranchDetail::Names`](crate::branch_tracking::BranchDetail::Names) cannot use date sort.
+    #[error("branch list with Names detail cannot use date sort (date sort reads commit objects)")]
+    ListNamesDateSort,
+
+    /// A switch target names a tag; `HEAD` can only be attached to a branch, so the tag has to
+    /// be checked out detached.
+    #[error("'{name}' is a tag, not a branch; check it out detached instead")]
+    IsTag {
+        /// The tag name as given.
+        name: String,
+    },
+}
+
+impl BranchError {
+    /// Stable snake_case slug for this failure.
+    ///
+    /// Lookups and checked-out refusals keep their former umbrella slugs
+    /// (`branch_not_found`, `branch_checked_out_in_worktree`); the other branch porcelain
+    /// failures report `branch`.
+    #[must_use]
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Self::NotFound { .. } => "branch_not_found",
+            Self::CheckedOut { .. } => "branch_checked_out_in_worktree",
+            Self::ListNamesDateSort => "branch_list_names_date_sort",
+            Self::AlreadyExists { .. }
+            | Self::NoPreviousBranch
+            | Self::InvalidName { .. }
+            | Self::NotFullyMerged { .. }
+            | Self::CurrentlyCheckedOut { .. }
+            | Self::NoCommits
+            | Self::InvalidStartPoint { .. }
+            | Self::UpstreamNotTracking { .. }
+            | Self::NoUpstream { .. }
+            | Self::IsTag { .. } => "branch",
+        }
+    }
 }
 
 /// Start commit and reflog label for [`crate::porcelain::branch::CreateBranchOptions::start`].

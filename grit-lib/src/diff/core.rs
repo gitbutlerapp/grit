@@ -21,7 +21,10 @@
 //! Output formats: unified patch, raw (`:old-mode new-mode ...`), stat,
 //! numstat.
 
+use crate::error::ObjectError;
+use crate::error::RefError;
 use crate::git_path::CanonicalizeExt;
+use crate::worktree::WorktreeError;
 use std::borrow::Cow;
 use std::fs;
 #[cfg(unix)]
@@ -3339,13 +3342,13 @@ pub(crate) fn diff_trees_with_renames_for_pathspecs_and_policy_result(
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidRef`] when `commit_oid` is not a commit, and object read/parse
+/// Returns [`crate::error::RefError::Invalid`] when `commit_oid` is not a commit, and object read/parse
 /// errors when it is missing or malformed.
 pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> {
     odb.commit_tree(commit_oid).map_err(|err| match err {
-        Error::UnexpectedObjectKind { .. } => {
-            Error::InvalidRef(format!("invalid ref: {commit_oid} is not a commit"))
-        }
+        Error::Object(ObjectError::UnexpectedKind { .. }) => Error::Ref(RefError::Invalid {
+            detail: format!("invalid ref: {commit_oid} is not a commit"),
+        }),
         other => other,
     })
 }
@@ -3354,7 +3357,7 @@ pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> 
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidRef`] when `oid` is not a commit or tree, and object read/parse
+/// Returns [`crate::error::RefError::Invalid`] when `oid` is not a commit or tree, and object read/parse
 /// errors when it is missing or malformed.
 pub(crate) fn tree_oid_for_diff_side(odb: &Odb, oid: &ObjectId) -> Result<ObjectId> {
     use crate::objects::{CommitRef, ObjectKind};
@@ -3362,9 +3365,9 @@ pub(crate) fn tree_oid_for_diff_side(odb: &Odb, oid: &ObjectId) -> Result<Object
     match object.kind {
         ObjectKind::Commit => Ok(CommitRef::parse(&object.data)?.tree()),
         ObjectKind::Tree => Ok(*oid),
-        actual => Err(Error::InvalidRef(format!(
-            "invalid ref: {oid} is not a commit or tree ({actual:?})"
-        ))),
+        actual => Err(Error::Ref(RefError::Invalid {
+            detail: format!("invalid ref: {oid} is not a commit or tree ({actual:?})"),
+        })),
     }
 }
 
@@ -5721,10 +5724,14 @@ fn unreadable_worktree_blob_is_modified(err: &Error, materialize_dirty_blobs: bo
     !materialize_dirty_blobs
         && matches!(
             err,
-            Error::WorktreePathIo {
-                operation: crate::worktree::WorktreePathOperation::Read,
-                ..
-            }
+            Error::Worktree(crate::worktree::WorktreeError::PathIo(
+                crate::error::PathIoError {
+                    operation: crate::error::PathIoOperation::Worktree(
+                        crate::worktree::WorktreePathOperation::Read
+                    ),
+                    ..
+                }
+            ))
         )
 }
 
@@ -5761,11 +5768,11 @@ fn blob_disk_lookup_io_result(
         warn_worktree_access_failed(diagnostics, path, &err);
         return Ok(());
     }
-    Err(Error::WorktreePathIo {
-        operation: crate::worktree::WorktreePathOperation::Metadata,
-        path: path.to_owned(),
-        source: err,
-    })
+    Err(Error::from(crate::error::PathIoError::worktree(
+        path.to_owned(),
+        crate::worktree::WorktreePathOperation::Metadata,
+        err,
+    )))
 }
 
 fn io_err_is_permission_denied(err: &std::io::Error) -> bool {
@@ -5787,11 +5794,14 @@ fn status_skips_inaccessible_worktree_error(
     }
     match err {
         Error::Io(e) => io_err_is_permission_denied(e),
-        Error::WorktreePathIo {
-            operation: crate::worktree::WorktreePathOperation::Metadata,
+        Error::Worktree(crate::worktree::WorktreeError::PathIo(crate::error::PathIoError {
+            operation:
+                crate::error::PathIoOperation::Worktree(
+                    crate::worktree::WorktreePathOperation::Metadata,
+                ),
             source,
             ..
-        } => io_err_is_permission_denied(source),
+        })) => io_err_is_permission_denied(source),
         _ => false,
     }
 }
@@ -5803,7 +5813,7 @@ fn warn_and_skip_status_inaccessible(
 ) -> bool {
     let detail = match err {
         Error::Io(e) => e.to_string(),
-        Error::WorktreePathIo { source, .. } => source.to_string(),
+        Error::Worktree(crate::worktree::WorktreeError::PathIo(io)) => io.source.to_string(),
         _ => return false,
     };
     if let Some(handle) = diagnostics {
@@ -5850,11 +5860,11 @@ fn probe_worktree_symlink_metadata(
                 warn_worktree_access_failed(diagnostics, path_str, &e);
                 Ok(WorktreeSymlinkMetadata::Inaccessible)
             } else {
-                Err(Error::WorktreePathIo {
-                    operation: crate::worktree::WorktreePathOperation::Metadata,
-                    path: path_str.to_owned(),
-                    source: e,
-                })
+                Err(Error::from(crate::error::PathIoError::worktree(
+                    path_str.to_owned(),
+                    crate::worktree::WorktreePathOperation::Metadata,
+                    e,
+                )))
             }
         }
     }
@@ -6237,9 +6247,11 @@ fn worktree_diff_pass1_index_entry(
             oid == ie.oid
         } else {
             if error_on_broken_gitlinks && submodule_embedded_git_dir(&sub_dir).is_some() {
-                return Err(Error::Submodule(SubmoduleError::HeadUnreadable {
-                    path: path_str_ref.to_owned(),
-                }));
+                return Err(Error::Worktree(WorktreeError::Submodule(
+                    SubmoduleError::HeadUnreadable {
+                        path: path_str_ref.to_owned(),
+                    },
+                )));
             }
             uninitialized_gitlink_worktree_matches_index(&sub_dir)
         };
@@ -6261,9 +6273,11 @@ fn worktree_diff_pass1_index_entry(
             return Ok(());
         }
         if sub_head_oid.is_some() && submodule_head_object_broken(&sub_dir) {
-            return Err(Error::Submodule(SubmoduleError::HeadCommitMissing {
-                path: path_str_ref.to_owned(),
-            }));
+            return Err(Error::Worktree(WorktreeError::Submodule(
+                SubmoduleError::HeadCommitMissing {
+                    path: path_str_ref.to_owned(),
+                },
+            )));
         }
         let mut flags = submodule_porcelain_flags(work_tree, path_str_ref, ie.oid);
         if ignore_submodule_untracked {
@@ -6380,15 +6394,11 @@ fn diff_index_to_worktree_inner(
     let size_change_proves_modified =
         !materialize_dirty_blobs && (options.for_status || options.size_change_proves_modified);
 
-    let rules_lock = options
-        .worktree_rules
-        .as_ref()
-        .map(|shared| {
-            shared
-                .lock()
-                .map_err(|e| Error::Verbatim(format!("worktree rules lock poisoned: {e}")))
-        })
-        .transpose()?;
+    let rules_lock = options.worktree_rules.as_ref().map(|shared| {
+        shared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    });
     let config = if let Some(rules) = rules_lock.as_ref() {
         rules.config().clone()
     } else if let Some(c) = options.config.as_ref() {
@@ -7809,13 +7819,11 @@ pub(crate) fn refresh_index_stat_content_verified_with_rules(
     };
 
     let index_mtime = index_mtime_for_diff(index, index_mtime);
-    let rules_lock = worktree_rules
-        .map(|shared| {
-            shared
-                .lock()
-                .map_err(|e| Error::Verbatim(format!("worktree rules lock poisoned: {e}")))
-        })
-        .transpose()?;
+    let rules_lock = worktree_rules.map(|shared| {
+        shared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    });
     let config = rules_lock
         .as_ref()
         .map(|r| r.config().clone())
@@ -8811,7 +8819,7 @@ fn worktree_file_oid(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] when the file cannot be read, and [`Error::Filter`] when a
+/// Returns [`Error::Io`] when the file cannot be read, and [`crate::worktree::WorktreeError::Filter`] when a
 /// `filter.<driver>.required` clean filter fails or cannot be started; content is never
 /// stored or hashed unfiltered in that case.
 #[allow(clippy::too_many_arguments)]
@@ -8882,7 +8890,7 @@ pub(crate) fn hash_worktree_file_with_mode(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] when the file cannot be read, and [`Error::Filter`] when a
+/// Returns [`Error::Io`] when the file cannot be read, and [`crate::worktree::WorktreeError::Filter`] when a
 /// `filter.<driver>.required` clean filter fails or cannot be started; content is never
 /// stored or hashed unfiltered in that case.
 #[allow(clippy::too_many_arguments)]
@@ -10025,7 +10033,7 @@ pub fn detect_renames_with_policy(
 /// used when `find_copies_harder` is true to consider unmodified files as copy sources.
 /// # Errors
 ///
-/// Returns [`Error::HashCollision`] when hashing worktree blob content for copy detection
+/// Returns [`crate::error::ObjectError::HashCollision`] when hashing worktree blob content for copy detection
 /// would produce a known-bad SHA-1 object id.
 #[allow(dead_code)]
 fn detect_copies(
@@ -10450,13 +10458,17 @@ fn read_new_side_bytes(
         return blob_bytes(odb, &entry.new_oid);
     }
     let path = entry.new_path.as_deref().ok_or_else(|| {
-        Error::ObjectNotFound("modified entry missing new_path for worktree read".into())
+        Error::Object(ObjectError::NotFound {
+            name: "modified entry missing new_path for worktree read".into(),
+        })
     })?;
     let root = work_root.ok_or_else(|| {
-        Error::ObjectNotFound(format!(
-            "worktree bytes required for {} but no work_root was provided",
-            path
-        ))
+        Error::Object(ObjectError::NotFound {
+            name: format!(
+                "worktree bytes required for {} but no work_root was provided",
+                path
+            ),
+        })
     })?;
     if let Some(wctx) = worktree {
         let mode = entry.new_mode.bits();
@@ -10475,7 +10487,9 @@ fn worktree_side_differs_after_normalize(
     config: &ConfigSet,
 ) -> Result<bool> {
     let path = entry.new_path.as_deref().ok_or_else(|| {
-        Error::ObjectNotFound("modified entry missing new_path for worktree read".into())
+        Error::Object(ObjectError::NotFound {
+            name: "modified entry missing new_path for worktree read".into(),
+        })
     })?;
     let raw = fs::read(work_root.join(path)).map_err(Error::Io)?;
     let canonical = read_new_side_bytes(odb, entry, Some(work_root), Some(worktree), config)?;
@@ -13314,7 +13328,7 @@ pub(crate) enum EmbeddedGitRepoStage {
 ///
 /// Returns [`EmbeddedGitRepoStage::NotEmbedded`] when the path is not a nested checkout.
 /// Returns [`EmbeddedGitRepoStage::Gitlink`] when HEAD resolves. Otherwise returns
-/// [`crate::error::Error::EmbeddedRepoWithoutCommit`].
+/// [`crate::worktree::WorktreeError::EmbeddedRepoWithoutCommit`].
 pub(crate) fn classify_embedded_git_repo_for_stage(
     _index: &Index,
     rel: &str,
@@ -13332,7 +13346,9 @@ pub(crate) fn classify_embedded_git_repo_for_stage(
     let path = rel.trim_end_matches('/').to_owned();
     match read_submodule_head_oid_for_stage(abs) {
         Some(oid) => Ok(EmbeddedGitRepoStage::Gitlink(oid)),
-        None => Err(crate::error::Error::EmbeddedRepoWithoutCommit { path }),
+        None => Err(crate::error::Error::Worktree(
+            WorktreeError::EmbeddedRepoWithoutCommit { path },
+        )),
     }
 }
 
@@ -14323,7 +14339,10 @@ mod diff_index_to_tree_cache_tree_tests {
             .write(ObjectKind::Tree, b"100644 name-without-oid")
             .expect("tree");
         let err = diff_trees(&odb, Some(&good), Some(&corrupt), "").expect_err("corrupt");
-        assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+            "{err:?}"
+        );
     }
 }
 
@@ -16732,11 +16751,11 @@ mod line_coverage_tests {
         assert_eq!(tree_oid_of_commit(&odb, &commit).expect("tree"), tree);
         assert!(matches!(
             tree_oid_of_commit(&odb, &blob),
-            Err(Error::InvalidRef(_))
+            Err(Error::Ref(RefError::Invalid { .. }))
         ));
         assert!(matches!(
             tree_oid_of_commit(&odb, &tree),
-            Err(Error::InvalidRef(_))
+            Err(Error::Ref(RefError::Invalid { .. }))
         ));
     }
 

@@ -203,7 +203,15 @@ fn promisor_remote_without_names_is_refused() {
         let err = UploadPack::new(&repo, &mut v2_opts(false, false))
             .run(&mut Cursor::new(ls_refs_request(&[bad])), &mut out)
             .expect_err(bad);
-        assert!(matches!(err, ServeError::Protocol(_)), "{bad}: {err:?}");
+        assert!(
+            matches!(
+                err,
+                grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Serve(
+                    ServeError::Protocol { .. }
+                ))
+            ),
+            "{bad}: {err:?}"
+        );
 
         // Smart HTTP gets the error as an ERR packet.
         let mut out = Vec::new();
@@ -222,7 +230,9 @@ fn allow_any_sha1_in_want_serves_unreachable_objects() {
     let err = UploadPack::new(&repo, &mut v2_opts(false, false))
         .run(&mut Cursor::new(fetch_request(&[], loose)), &mut out)
         .expect_err("unreachable want refused by default");
-    assert!(matches!(err, ServeError::NotOurRef(oid) if oid == loose));
+    assert!(
+        matches!(err, grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Serve(ServeError::NotOurRef(oid))) if oid == loose)
+    );
 
     let tmp = tempfile::tempdir().unwrap();
     let (repo, _, loose) = bare_repo(tmp.path(), "[uploadpack]\n\tallowAnySHA1InWant = true\n");
@@ -240,7 +250,12 @@ fn allow_any_sha1_in_want_serves_unreachable_objects() {
             &mut Vec::new(),
         )
         .expect_err("missing object");
-    assert!(matches!(err, ServeError::NotOurRef(_)));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Serve(
+            ServeError::NotOurRef(_)
+        ))
+    ));
 }
 
 #[test]

@@ -1341,7 +1341,7 @@ fn bundles_create_failure_preserves_existing_bundle_and_object_not_found_error()
         )
         .expect_err("missing object");
     assert!(
-        matches!(err, BundleError::ObjectNotFound(_)),
+        matches!(err, BundleError::ObjectNotFound { .. }),
         "expected ObjectNotFound, got {err:?}"
     );
     assert_eq!(
@@ -1444,7 +1444,7 @@ fn malformed_header_errors() {
     let mut cur = std::io::Cursor::new(truncated.into_bytes());
     assert!(matches!(
         read_header(&mut cur).unwrap_err(),
-        BundleError::MalformedLine(_)
+        BundleError::MalformedLine { .. }
     ));
 
     let cap = b"# v3 git bundle\n@object-format=sha256\n@filter=blob:none\n\nPACK";

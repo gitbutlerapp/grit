@@ -390,7 +390,7 @@ fn clone_invalid_remote_on_nonempty_destination_preserves_files() {
     .expect_err("nonempty destination must fail before remote-name validation matters");
 
     assert!(
-        matches!(err, CloneError::DestNotEmpty(_)),
+        matches!(err, CloneError::DestNotEmpty { .. }),
         "expected DestNotEmpty, got {err:?}"
     );
     assert!(
@@ -481,7 +481,7 @@ fn clone_rejects_invalid_remote_name() {
     .expect_err("invalid remote name");
 
     match err {
-        CloneError::Remote(grit_lib::remote::RemoteError::InvalidRemoteName(name))
+        CloneError::Remote(grit_lib::remote::RemoteError::InvalidRemoteName { name })
             if name == "bad name" => {}
         other => panic!("expected InvalidRemoteName, got {other:?}"),
     }

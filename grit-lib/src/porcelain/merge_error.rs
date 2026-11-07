@@ -2,7 +2,6 @@
 
 use thiserror::Error;
 
-use crate::error::Error;
 use crate::objects::ObjectId;
 use crate::state::InProgressOperation;
 
@@ -101,26 +100,20 @@ pub enum MergeError {
         missing: &'static str,
     },
 
+    /// Pull-specific failure (no upstream, detached `HEAD`, rejected fetch).
+    #[error(transparent)]
+    Pull(#[from] crate::porcelain::pull::PullError),
+
     /// A `.git/sequencer/created` journal line could not be parsed.
     #[error("invalid sequencer created record: {detail}")]
     SequencerCreatedParse {
         /// What was wrong with the line.
         detail: &'static str,
     },
-
-    /// Underlying repository, commit, or I/O failure during merge/replay.
-    #[error(transparent)]
-    Library(Box<Error>),
 }
 
 impl MergeError {
-    /// Whether a [`crate::error::Error::Cancelled`] is carried in [`Self::Library`].
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Library(e) if e.is_cancelled())
-    }
-
-    /// Stable snake_case slug for this failure (matches former [`Error::kind_name`] values).
+    /// Stable snake_case slug for this failure (matches former [`Error::kind_name`](crate::error::Error::kind_name) values).
     #[must_use]
     pub fn kind_name(&self) -> &'static str {
         match self {
@@ -142,16 +135,7 @@ impl MergeError {
             Self::MessageOverrideNotForMultiCommit => "message",
             Self::MergeStateIncomplete { .. } => "message",
             Self::SequencerCreatedParse { .. } => "message",
-            Self::Library(e) => e.kind_name(),
-        }
-    }
-}
-
-impl From<Error> for MergeError {
-    fn from(err: Error) -> Self {
-        match err {
-            Error::Merge(inner) => inner,
-            other => Self::Library(Box::new(other)),
+            Self::Pull(..) => "pull",
         }
     }
 }

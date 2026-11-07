@@ -1,6 +1,7 @@
 //! Loose refs and symbolic refs (t1400/t1401/t0600/t1405/t1430 subsets).
 
 use crate::support;
+use grit_lib::error::RefError;
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
@@ -244,7 +245,7 @@ fn t1401_symref_chain_max_depth_both_backends() {
         build_symref_chain(&git_dir, fail_depth, &oid);
         let grit_err = resolve_ref(&git_dir, "refs/heads/chain-top").unwrap_err();
         assert!(
-            matches!(grit_err, Error::InvalidRef(_)),
+            matches!(grit_err, Error::Ref(RefError::Invalid { .. })),
             "expected InvalidRef, got {grit_err:?}"
         );
 
@@ -344,7 +345,7 @@ fn t1400_delete_missing_ref_typed_error_both_backends() {
         assert!(
             matches!(
                 err,
-                Error::RefStore(RefStoreError::NotFound { ref name })
+                Error::Ref(RefError::Store(RefStoreError::NotFound { ref name }))
                     if name == "refs/heads/never-created"
             ),
             "{err:?}"
@@ -361,7 +362,7 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
         assert!(
             matches!(
                 err,
-                Error::RefStore(RefStoreError::NotFound { ref name })
+                Error::Ref(RefError::Store(RefStoreError::NotFound { ref name }))
                     if name == "refs/heads/never-created"
             ),
             "{err:?}"
@@ -372,7 +373,7 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
         assert!(
             matches!(
                 err,
-                Error::RefStore(RefStoreError::NotFound { ref name }) if name == "refs/heads/gone"
+                Error::Ref(RefError::Store(RefStoreError::NotFound { ref name })) if name == "refs/heads/gone"
             ),
             "{err:?}"
         );
@@ -382,7 +383,7 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
         assert!(
             matches!(
                 store.resolve(RefNameRef::from_trusted("refs/heads/dangling")),
-                Err(Error::RefStore(RefStoreError::NotFound { ref name })) if name == "refs/heads/gone"
+                Err(Error::Ref(RefError::Store(RefStoreError::NotFound { ref name }))) if name == "refs/heads/gone"
             ),
             "{}",
             backend_label(backend)
@@ -455,9 +456,9 @@ fn t0600_nonempty_directory_blocks_create() {
         assert!(
             matches!(
                 err,
-                Error::RefStore(RefStoreError::NameUnavailable {
+                Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
                     reason: RefnameUnavailable::DescendantExists { ref blocking, .. }
-                }) if blocking == "refs/heads/blocker/sibling"
+                })) if blocking == "refs/heads/blocker/sibling"
             ),
             "the ref inside the directory should block create: {err:?}"
         );
@@ -481,7 +482,9 @@ fn t0600_directory_of_lock_files_blocks_create() {
         assert!(
             matches!(
                 err,
-                Error::RefLock(grit_lib::error::RefLockError::DirectoryInTheWay { .. })
+                Error::Ref(RefError::Lock(
+                    grit_lib::error::RefLockError::DirectoryInTheWay { .. }
+                ))
             ),
             "a directory holding no ref should block create: {err:?}"
         );
@@ -501,11 +504,11 @@ fn t0600_broken_ref_file_blocks_create() {
         fs::write(&broken, "not-a-ref\n").expect("garbage ref");
 
         let read_err = read_ref_file(&broken).unwrap_err();
-        assert!(matches!(read_err, Error::InvalidRef(_)));
+        assert!(matches!(read_err, Error::Ref(RefError::Invalid { .. })));
 
         let err = write_ref(&git_dir, "refs/heads/broken-file", &oid).unwrap_err();
         assert!(
-            matches!(err, Error::InvalidRef(ref m) if m.contains("reference broken")),
+            matches!(err, Error::Ref(RefError::Invalid { detail: ref m }) if m.contains("reference broken")),
             "updating broken ref should fail: {err:?}"
         );
 
@@ -540,7 +543,7 @@ fn t0600_short_hash_in_ref_rejected() {
         fs::write(&short_path, "193006e\n").expect("short oid");
 
         let grit_err = read_ref_file(&short_path).unwrap_err();
-        assert!(matches!(grit_err, Error::InvalidRef(_)));
+        assert!(matches!(grit_err, Error::Ref(RefError::Invalid { .. })));
 
         let git_ok = std::process::Command::new("git")
             .current_dir(repo.worktree())

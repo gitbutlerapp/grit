@@ -3,6 +3,7 @@
 //! [`DeltaIndex`] indexes a base buffer with a rolling fingerprint so many targets can be
 //! encoded against the same base efficiently (pack-objects style windows).
 
+use crate::error::ObjectError;
 use crate::error::{Error, Result};
 
 /// Bytes in each indexed window (Git `RABIN_WINDOW` in diff-delta).
@@ -137,9 +138,9 @@ pub fn encode_delta(base: &[u8], target: &[u8], max_size: usize) -> Option<Vec<u
 /// Build a delta when `target` begins with the entire `base` buffer (strict extension).
 pub fn encode_prefix_extension_delta(base: &[u8], target: &[u8]) -> Result<Vec<u8>> {
     if !target.starts_with(base) || target.len() <= base.len() {
-        return Err(Error::CorruptObject(
-            "encode_prefix_extension_delta: target must strictly extend base".into(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "encode_prefix_extension_delta: target must strictly extend base".into(),
+        }));
     }
     let mut out = Vec::new();
     write_delta_varint(&mut out, base.len());
@@ -151,8 +152,11 @@ pub fn encode_prefix_extension_delta(base: &[u8], target: &[u8]) -> Result<Vec<u
 
 /// Encode a binary delta from `base` to `target`.
 pub fn encode_lcp_delta(base: &[u8], target: &[u8]) -> Result<Vec<u8>> {
-    encode_delta(base, target, 0)
-        .ok_or_else(|| Error::CorruptObject("encode_lcp_delta: delta encoding failed".into()))
+    encode_delta(base, target, 0).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "encode_lcp_delta: delta encoding failed".into(),
+        })
+    })
 }
 
 #[cfg(test)]
@@ -313,7 +317,7 @@ mod tests {
     fn prefix_extension_requires_strict_suffix() {
         let base = b"same";
         let err = encode_prefix_extension_delta(base, base).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)));
+        assert!(matches!(err, Error::Object(ObjectError::Corrupt { .. })));
     }
 
     #[test]

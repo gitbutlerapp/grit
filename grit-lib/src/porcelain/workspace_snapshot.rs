@@ -4,6 +4,7 @@
 //! This is not a Git stash: stash commits require a merged index. Workspace snapshots preserve
 //! unmerged index stages and record the worktree as it appears on disk.
 
+use crate::error::RefError;
 use crate::error::{Error, Result};
 use crate::index::{entry_from_stat, Index, MODE_GITLINK, MODE_TREE};
 use crate::lockfile::LockWait;
@@ -71,10 +72,14 @@ pub struct WorkspaceRestoreOptions {}
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidRef`] when `caller_id` produces an invalid refname.
+/// Returns [`crate::error::RefError::Invalid`] when `caller_id` produces an invalid refname.
 pub fn workspace_snapshot_pin_ref_name(caller_id: &str) -> Result<String> {
     let name = format!("{WORKSPACE_SNAPSHOT_PIN_REF_PREFIX}{caller_id}");
-    RefName::try_from(name.as_str()).map_err(|err| Error::InvalidRef(err.to_string()))?;
+    RefName::try_from(name.as_str()).map_err(|err| {
+        Error::Ref(RefError::Invalid {
+            detail: err.to_string(),
+        })
+    })?;
     Ok(name)
 }
 
@@ -336,12 +341,7 @@ fn build_worktree_tree(repo: &Repository, include_untracked: bool) -> Result<Obj
         }
     }
     out.sort();
-    Ok(write_tree_update_index(
-        repo.odb(),
-        &mut out,
-        "",
-        WriteTreeFlags::silent(),
-    )?)
+    write_tree_update_index(repo.odb(), &mut out, "", WriteTreeFlags::silent())
 }
 
 fn stage_worktree_path_for_tree(
@@ -503,12 +503,7 @@ fn build_pre_restore_disk_tree(
         }
     }
     out.sort();
-    Ok(write_tree_update_index(
-        repo.odb(),
-        &mut out,
-        "",
-        WriteTreeFlags::silent(),
-    )?)
+    write_tree_update_index(repo.odb(), &mut out, "", WriteTreeFlags::silent())
 }
 
 fn restore_worktree_tree(

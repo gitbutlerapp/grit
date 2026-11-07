@@ -1,5 +1,6 @@
 //! Git parity for blame ignore-revision lists (upstream `t8013` intent).
 
+use grit_lib::error::DiffError;
 use std::path::Path;
 use std::process::Command;
 
@@ -546,7 +547,10 @@ fn typed_errors_for_bad_rev_and_file() {
         },
     )
     .unwrap_err();
-    assert!(matches!(err, Error::BlameIgnoreRevUnknown { .. }));
+    assert!(matches!(
+        err,
+        Error::Diff(DiffError::BlameIgnoreRevUnknown { .. })
+    ));
 
     let err = IgnoreRevs::load(
         &repo,
@@ -556,7 +560,10 @@ fn typed_errors_for_bad_rev_and_file() {
         },
     )
     .unwrap_err();
-    assert!(matches!(err, Error::BlameIgnoreRevsFileOpen { .. }));
+    assert!(matches!(
+        err,
+        Error::Diff(DiffError::BlameIgnoreRevsFileOpen { .. })
+    ));
 
     std::fs::write(dir.path().join("ignore_norev"), "NOREV\n").unwrap();
     let err = IgnoreRevs::load(
@@ -567,5 +574,8 @@ fn typed_errors_for_bad_rev_and_file() {
         },
     )
     .unwrap_err();
-    assert!(matches!(err, Error::BlameIgnoreRevsFileInvalidRev { .. }));
+    assert!(matches!(
+        err,
+        Error::Diff(DiffError::BlameIgnoreRevsFileInvalidRev { .. })
+    ));
 }

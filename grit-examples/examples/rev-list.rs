@@ -1,7 +1,7 @@
 // API docs: https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.ObjectFilter.html
 use grit_lib::revwalk::rev_list::ObjectFilter;
 
-fn main() -> Result<(), String> {
+fn main() -> Result<(), grit_lib::revwalk::rev_list::ObjectFilterError> {
     let filter = ObjectFilter::parse("blob:limit=1m")?;
     match filter {
         ObjectFilter::BlobLimit(bytes) => {

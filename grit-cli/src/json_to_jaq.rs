@@ -676,8 +676,8 @@ mod tests {
         let Val::Obj(root) = val else {
             panic!("expected object");
         };
-        let files_key = doc.files.first().map(|_| ()).expect("nonempty");
-        let _ = files_key;
+        doc.files.first().map(|_| ()).expect("nonempty");
+        ();
         let files = root.get(&Val::utf8_str("files")).expect("files field");
         let Val::Arr(files) = files else {
             panic!("expected files array");

@@ -680,7 +680,7 @@ pub fn run_prune(name: &str, dry_run: bool) -> Result<RemoteOutcome> {
         .remotes()
         .prune(name, dry_run, Some(&factory))
         .map_err(|e| match e {
-            RemoteError::UnknownRemote(_) => {
+            grit_lib::error::Error::Remote(RemoteError::UnknownRemote { .. }) => {
                 anyhow::Error::from(RemoteUsageError).context(map_remote_error(e))
             }
             other => map_remote_error(other),
@@ -699,7 +699,7 @@ pub fn run_set_head(name: &str, mode: SetHead, dry_run: bool) -> Result<RemoteOu
         .remotes()
         .set_head(name, mode, dry_run, Some(&factory))
         .map_err(|e| match e {
-            RemoteError::UnknownRemote(_) => {
+            grit_lib::error::Error::Remote(RemoteError::UnknownRemote { .. }) => {
                 anyhow::Error::from(RemoteUsageError).context(map_remote_error(e))
             }
             other => map_remote_error(other),
@@ -739,7 +739,7 @@ pub fn run_remove(name: &str, dry_run: bool) -> Result<RemoteOutcome> {
         .remotes()
         .remove(name, RemoveOptions { dry_run })
         .map_err(|e| match e {
-            RemoteError::UnknownRemote(_) => {
+            grit_lib::error::Error::Remote(RemoteError::UnknownRemote { .. }) => {
                 anyhow::Error::from(RemoteUsageError).context(map_remote_error(e))
             }
             other => map_remote_error(other),

@@ -5,6 +5,7 @@
 //! with "last matching pattern wins" precedence. With `core.ignorecase=true`, patterns match
 //! without regard to ASCII case, as in Git.
 
+use crate::worktree::WorktreeError;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -1471,7 +1472,7 @@ pub(crate) fn submodule_containing_path(repo_rel_path: &str, index: &Index) -> O
 ///
 /// # Errors
 ///
-/// Returns [`Error::PathError`] if the repository has no work tree or the path resolves
+/// Returns [`crate::worktree::WorktreeError::Path`] if the repository has no work tree or the path resolves
 /// outside it.
 pub fn normalize_repo_relative(repo: &Repository, cwd: &Path, path: &str) -> Result<String> {
     RepoPathNormalizer::new(repo, cwd)?.normalize(path)
@@ -1522,12 +1523,12 @@ impl<'a> RepoPathNormalizer<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::PathError`] when `repo` has no work tree.
+    /// Returns [`crate::worktree::WorktreeError::Path`] when `repo` has no work tree.
     pub fn new(repo: &'a Repository, cwd: &'a Path) -> Result<Self> {
         let Some(work_tree) = repo.work_tree() else {
-            return Err(Error::PathError(
-                "this operation must be run in a work tree".to_owned(),
-            ));
+            return Err(Error::Worktree(WorktreeError::Path {
+                detail: "this operation must be run in a work tree".to_owned(),
+            }));
         };
         let cwd_rel = normalize_path(cwd)
             .strip_prefix(work_tree)
@@ -1557,7 +1558,7 @@ impl<'a> RepoPathNormalizer<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::PathError`] if the path resolves outside the work tree.
+    /// Returns [`crate::worktree::WorktreeError::Path`] if the path resolves outside the work tree.
     pub fn normalize(&self, path: &str) -> Result<String> {
         if path.starts_with(':') {
             return Ok(path.to_owned());
@@ -1617,7 +1618,9 @@ impl<'a> RepoPathNormalizer<'a> {
             Ok(relative) => crate::git_path::path_to_git_slash(relative),
             Err(_) => {
                 crate::git_path::strip_worktree_prefix(&normalized, work_tree).ok_or_else(|| {
-                    Error::PathError(format!("path '{path}' is outside repository work tree"))
+                    Error::Worktree(WorktreeError::Path {
+                        detail: format!("path '{path}' is outside repository work tree"),
+                    })
                 })?
             }
         };
@@ -1659,7 +1662,7 @@ mod normalization_tests {
         .unwrap();
         assert!(matches!(
             normalize_repo_relative(&repo, dir.path(), "missing/file"),
-            Err(Error::PathError(_))
+            Err(Error::Worktree(WorktreeError::Path { .. }))
         ));
     }
 

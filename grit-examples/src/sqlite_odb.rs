@@ -3,6 +3,8 @@
 //! Each object is stored as a row keyed by [`ObjectId`] with zlib-compressed canonical
 //! Git store bytes (the same payload written under `objects/xx/…` for loose objects).
 
+use grit_lib::error::ObjectError;
+use grit_lib::error::RefError;
 use std::io::{self, Read, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
@@ -114,10 +116,9 @@ impl SqliteOdbStore {
             let obj = parse_store_bytes(&raw)?;
             let computed = hash::hash_object(self.algo, obj.kind, &obj.data)?;
             if computed != oid {
-                return Err(Error::CorruptObject(format!(
-                    "sqlite odb hash mismatch for {}",
-                    oid.to_hex()
-                )));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: format!("sqlite odb hash mismatch for {}", oid.to_hex()),
+                }));
             }
             WritableObjectStore::write(loose, obj.kind, &obj.data, WriteOptions::default())?;
         }
@@ -166,7 +167,11 @@ impl SqliteOdbStore {
         {
             let mut enc = ZlibEncoder::new(&mut zlib, compression);
             enc.write_all(store_bytes).map_err(Error::Io)?;
-            enc.finish().map_err(|e| Error::Zlib(e.to_string()))?;
+            enc.finish().map_err(|e| {
+                Error::Object(ObjectError::Zlib {
+                    detail: e.to_string(),
+                })
+            })?;
         }
         state
             .conn
@@ -192,10 +197,9 @@ impl ObjectStore for SqliteOdbStore {
         let obj = parse_store_bytes(&raw)?;
         let computed = hash::hash_object(self.algo, obj.kind, &obj.data)?;
         if computed != *oid {
-            return Err(Error::CorruptObject(format!(
-                "sqlite odb hash mismatch for {}",
-                oid.to_hex()
-            )));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("sqlite odb hash mismatch for {}", oid.to_hex()),
+            }));
         }
         Ok(Some(obj))
     }
@@ -264,7 +268,9 @@ impl ObjectStore for SqliteOdbStore {
             return Ok(None);
         };
         let size = u64::try_from(obj.data.len()).map_err(|_| {
-            Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("object size overflow for {}", oid.to_hex()),
+            })
         })?;
         Ok(Some(ObjectStream {
             kind: obj.kind,
@@ -301,10 +307,10 @@ impl ObjectStore for SqliteOdbStore {
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
         let prefix = prefix.to_ascii_lowercase();
         if !prefix.is_empty() && !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(Error::InvalidObjectId(prefix));
+            return Err(Error::Object(ObjectError::InvalidId { input: prefix }));
         }
         if prefix.len() > self.algo.hex_len() {
-            return Err(Error::InvalidObjectId(prefix));
+            return Err(Error::Object(ObjectError::InvalidId { input: prefix }));
         }
         let guard = self
             .db
@@ -401,11 +407,15 @@ fn read_algo(conn: &Connection) -> Result<HashAlgo> {
             [],
             |row| row.get(0),
         )
-        .map_err(|_| Error::CorruptObject("sqlite odb missing schema_version".into()))?;
+        .map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "sqlite odb missing schema_version".into(),
+            })
+        })?;
     if version != SCHEMA_VERSION {
-        return Err(Error::CorruptObject(format!(
-            "unsupported sqlite odb schema version {version}"
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("unsupported sqlite odb schema version {version}"),
+        }));
     }
     let algo_value: i64 = conn
         .query_row(
@@ -413,7 +423,11 @@ fn read_algo(conn: &Connection) -> Result<HashAlgo> {
             [],
             |row| row.get(0),
         )
-        .map_err(|_| Error::CorruptObject("sqlite odb missing hash_algo".into()))?;
+        .map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "sqlite odb missing hash_algo".into(),
+            })
+        })?;
     parse_algo_meta_value(algo_value)
 }
 
@@ -428,26 +442,24 @@ fn parse_algo_meta_value(value: i64) -> Result<HashAlgo> {
     match value {
         1 => Ok(HashAlgo::Sha1),
         2 => Ok(HashAlgo::Sha256),
-        _ => Err(Error::CorruptObject(format!(
-            "unknown sqlite odb hash_algo value {value}"
-        ))),
+        _ => Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("unknown sqlite odb hash_algo value {value}"),
+        })),
     }
 }
 
 fn parse_oid_blob(bytes: &[u8], algo: HashAlgo) -> Result<ObjectId> {
     let expected = algo.len();
     if bytes.len() != expected {
-        return Err(Error::CorruptObject(format!(
-            "sqlite odb oid length {} expected {expected}",
-            bytes.len()
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("sqlite odb oid length {} expected {expected}", bytes.len()),
+        }));
     }
     let oid = ObjectId::from_bytes(bytes)?;
     if oid.algo() != algo {
-        return Err(Error::CorruptObject(format!(
-            "sqlite odb oid algorithm mismatch for {}",
-            oid.to_hex()
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("sqlite odb oid algorithm mismatch for {}", oid.to_hex()),
+        }));
     }
     Ok(oid)
 }
@@ -459,9 +471,11 @@ fn sqlite_err(err: rusqlite::Error) -> Error {
 fn decompress_zlib(zlib: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = ZlibDecoder::new(zlib);
     let mut raw = Vec::new();
-    decoder
-        .read_to_end(&mut raw)
-        .map_err(|e| Error::Zlib(e.to_string()))?;
+    decoder.read_to_end(&mut raw).map_err(|e| {
+        Error::Object(ObjectError::Zlib {
+            detail: e.to_string(),
+        })
+    })?;
     Ok(raw)
 }
 
@@ -473,33 +487,49 @@ fn build_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
 }
 
 fn parse_store_bytes(raw: &[u8]) -> Result<Object> {
-    let nul = raw
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| Error::CorruptObject("missing object header terminator".into()))?;
-    let header = std::str::from_utf8(&raw[..nul])
-        .map_err(|_| Error::CorruptObject("invalid object header utf-8".into()))?;
+    let nul = raw.iter().position(|&b| b == 0).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "missing object header terminator".into(),
+        })
+    })?;
+    let header = std::str::from_utf8(&raw[..nul]).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "invalid object header utf-8".into(),
+        })
+    })?;
     let mut parts = header.splitn(2, ' ');
-    let kind_str = parts
-        .next()
-        .ok_or_else(|| Error::CorruptObject("empty object header".into()))?;
-    let size_str = parts
-        .next()
-        .ok_or_else(|| Error::CorruptObject("missing object size".into()))?;
-    let kind: ObjectKind = kind_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("unknown object kind {kind_str}")))?;
-    let size: usize = size_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("invalid object size {size_str}")))?;
-    let payload = raw
-        .get(nul + 1..)
-        .ok_or_else(|| Error::CorruptObject("object payload shorter than header".into()))?;
+    let kind_str = parts.next().ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "empty object header".into(),
+        })
+    })?;
+    let size_str = parts.next().ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "missing object size".into(),
+        })
+    })?;
+    let kind: ObjectKind = kind_str.parse().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("unknown object kind {kind_str}"),
+        })
+    })?;
+    let size: usize = size_str.parse().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("invalid object size {size_str}"),
+        })
+    })?;
+    let payload = raw.get(nul + 1..).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "object payload shorter than header".into(),
+        })
+    })?;
     if payload.len() != size {
-        return Err(Error::CorruptObject(format!(
-            "object size {size} does not match payload {}",
-            payload.len()
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!(
+                "object size {size} does not match payload {}",
+                payload.len()
+            ),
+        }));
     }
     Ok(Object {
         kind,
@@ -511,8 +541,11 @@ fn info_from_store_bytes(raw: &[u8]) -> Result<ObjectInfo> {
     let obj = parse_store_bytes(raw)?;
     Ok(ObjectInfo {
         kind: obj.kind,
-        size: u64::try_from(obj.data.len())
-            .map_err(|_| Error::CorruptObject("object size overflow".into()))?,
+        size: u64::try_from(obj.data.len()).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "object size overflow".into(),
+            })
+        })?,
     })
 }
 
@@ -563,7 +596,11 @@ pub fn run_sqlite_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
         .write(ObjectKind::Commit, commit_body.as_bytes())?;
     // The commit lives in the custom store, which only the repository's own ref store checks.
     repo.references().update(
-        &RefName::try_from("refs/heads/main").map_err(|e| Error::InvalidRef(e.to_string()))?,
+        &RefName::try_from("refs/heads/main").map_err(|e| {
+            Error::Ref(RefError::Invalid {
+                detail: e.to_string(),
+            })
+        })?,
         &commit,
     )?;
 

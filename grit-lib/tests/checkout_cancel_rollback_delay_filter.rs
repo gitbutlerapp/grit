@@ -1,5 +1,6 @@
 //! Checkout rollback must finish delayed process-filter smudges (#2330 review).
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -160,7 +161,7 @@ fn cancelled_checkout_restores_process_filtered_file() {
     assert!(
         matches!(
             err,
-            Error::Cancelled | Error::CheckoutRollbackIncomplete { .. }
+            Error::Cancelled | Error::Worktree(WorktreeError::CheckoutRollbackIncomplete { .. })
         ),
         "unexpected error: {err:?}"
     );

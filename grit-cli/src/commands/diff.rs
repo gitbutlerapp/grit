@@ -29,6 +29,7 @@ use grit_lib::diff::{
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ParallelOp;
 use grit_lib::worktree::pathspec::pathdiff;
+use grit_lib::worktree::WorktreeError;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::IsTerminal;
@@ -1127,12 +1128,13 @@ fn resolve_diff_target(
 
 /// Keep library failures downcastable to [`grit_lib::error::Error`] so revision messages, error
 /// hints and `--json` kinds see them.
-pub(crate) fn map_diff_arguments_error(err: ResolveDiffArgumentsError) -> anyhow::Error {
+pub(crate) fn map_diff_arguments_error(err: grit_lib::error::Error) -> anyhow::Error {
     match err {
-        ResolveDiffArgumentsError::Library(err) => (*err).into(),
-        ResolveDiffArgumentsError::UnresolvedRevision { spec, source } => {
-            anyhow::Error::new(*source).context(format!("could not resolve '{spec}'"))
-        }
+        grit_lib::error::Error::Diff(grit_lib::error::DiffError::Arguments(
+            ResolveDiffArgumentsError::UnresolvedRevision { spec, source },
+        )) => anyhow::Error::new(grit_lib::error::Error::Revision(*source))
+            .context(format!("could not resolve '{spec}'")),
+        grit_lib::error::Error::Diff(grit_lib::error::DiffError::Arguments(args)) => args.into(),
         other => other.into(),
     }
 }
@@ -1614,8 +1616,11 @@ fn stream_tree_patch_diff(
             &thread_policy,
             |structured| {
                 let file = file_diff_from_tree_structured(structured);
-                let map_cli_err =
-                    |e: anyhow::Error| grit_lib::error::Error::PathError(e.to_string());
+                let map_cli_err = |e: anyhow::Error| {
+                    grit_lib::error::Error::Worktree(WorktreeError::Path {
+                        detail: e.to_string(),
+                    })
+                };
                 match mode {
                     OutputMode::Human => {
                         render_file(w, &file, color, path_display.as_ref()).map_err(map_cli_err)?

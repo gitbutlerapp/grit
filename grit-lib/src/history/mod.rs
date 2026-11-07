@@ -47,7 +47,6 @@
 mod absorb;
 mod apply;
 mod drop;
-mod engine_error;
 mod error;
 mod exec;
 mod fixup;
@@ -81,7 +80,6 @@ pub use apply::{
     verify_rewrite_plan, RewriteApplyRecovery,
 };
 pub use drop::drop;
-pub use engine_error::HistoryEngineError;
 pub use error::HistoryError;
 pub use exec::{verify_rebase_with_exec, ExecReport, ExecRunRecord, ExecSpec};
 pub use fixup::{
@@ -115,9 +113,8 @@ pub use undo::{undo_last_rewrite, undo_last_rewrite_with_cancel};
 
 /// Read and parse commit `oid`.
 ///
-/// Returns the library [`Error`](crate::error::Error); [`?`] maps it through [`super::error::engine_err`]
-/// (typically [`HistoryError::Engine`]) for rewrites, and [`RebaseSessionError::Library`] for rebase
-/// sessions, which the CLI forwards typed.
+/// Read failures are object-area errors ([`Error::Object`](crate::error::Error::Object)) and pass
+/// through rewrites and rebase sessions unchanged.
 fn load_commit(
     repo: &crate::repo::Repository,
     oid: crate::objects::ObjectId,
@@ -136,6 +133,7 @@ fn commit_tree(
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
+    use crate::error::ObjectError;
 
     use super::*;
     use crate::change_id::ChangeIdError;
@@ -205,12 +203,15 @@ mod tests {
         let (_dir, repo, _tip, blob) = repo_with_history();
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("hex");
         let err = load_commit(&repo, missing).unwrap_err();
-        assert!(matches!(err, Error::ObjectNotFound(_)), "{err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::NotFound { .. })),
+            "{err:?}"
+        );
         let err = commit_tree(&repo, blob).unwrap_err();
         assert!(
             matches!(
                 err,
-                Error::UnexpectedObjectKind { oid, expected: ObjectKind::Commit, actual: ObjectKind::Blob }
+                Error::Object(ObjectError::UnexpectedKind { oid, expected: ObjectKind::Commit, actual: ObjectKind::Blob })
                     if oid == blob
             ),
             "{err:?}"
@@ -220,27 +221,16 @@ mod tests {
     #[test]
     fn helper_errors_land_in_each_callers_library_variant() {
         let (_dir, repo, _tip, blob) = repo_with_history();
-        let history = || -> Result<ObjectId, HistoryError> { Ok(commit_tree(&repo, blob)?) };
+        let history = || -> crate::error::Result<ObjectId> { Ok(commit_tree(&repo, blob)?) };
         let err = history().unwrap_err();
         assert!(
-            matches!(
-                &err,
-                HistoryError::Engine(e)
-                    if matches!(
-                        e.as_ref(),
-                        crate::history::HistoryEngineError::UnexpectedObjectKind { .. }
-                    )
-            ),
+            matches!(&err, Error::Object(ObjectError::UnexpectedKind { .. })),
             "{err:?}"
         );
-        let session =
-            || -> Result<ObjectId, RebaseSessionError> { Ok(repo.odb().commit_tree(&blob)?) };
+        let session = || -> crate::error::Result<ObjectId> { Ok(repo.odb().commit_tree(&blob)?) };
         let err = session().unwrap_err();
         assert!(
-            matches!(
-                &err,
-                RebaseSessionError::Library(Error::UnexpectedObjectKind { .. })
-            ),
+            matches!(&err, Error::Object(ObjectError::UnexpectedKind { .. })),
             "{err:?}"
         );
     }
@@ -250,14 +240,7 @@ mod tests {
         let (_dir, repo, _tip, blob) = repo_with_history();
         let err = drop(&repo, blob, &rewrite_opts()).unwrap_err();
         assert!(
-            matches!(
-                &err,
-                HistoryError::Engine(e)
-                    if matches!(
-                        e.as_ref(),
-                        crate::history::HistoryEngineError::UnexpectedObjectKind { .. }
-                    )
-            ),
+            matches!(&err, Error::Object(ObjectError::UnexpectedKind { .. })),
             "{err:?}"
         );
     }
@@ -273,14 +256,12 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                HistoryError::Engine(e)
-                    if matches!(
-                        e.as_ref(),
-                        crate::history::HistoryEngineError::RevisionNotFound(_)
-                            | crate::history::HistoryEngineError::RevParse(
-                                crate::rev_parse_error::RevParseError::AmbiguousArgument { .. }
-                            )
-                    )
+                Error::Revision(
+                    crate::error::RevisionError::NotFound { .. }
+                        | crate::error::RevisionError::Parse(
+                            crate::rev_parse_error::RevParseError::AmbiguousArgument { .. }
+                        )
+                )
             ),
             "{err:?}"
         );

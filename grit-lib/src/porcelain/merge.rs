@@ -26,6 +26,9 @@
 
 use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
+use crate::error::ObjectError;
+use crate::error::RefError;
+use crate::error::RevisionError;
 use crate::error::{Error, OverwriteReason, Result};
 use crate::hooks::{run_post_merge, PostOperationHooks};
 use crate::ident::{parse_signature_times, Signature};
@@ -46,6 +49,7 @@ use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind}
 use crate::operation::{conflicts_from_tree_merge, tree_merge_has_conflicts, Conflict};
 use crate::path_population::validate_tree_walk_entry;
 use crate::path_validate::ProtectOptions;
+use crate::porcelain::branch_error::BranchError;
 use crate::porcelain::checkout;
 use crate::porcelain::commit::{
     normalize_commit_message, stamp_change_id_on_new_commit, write_commit_object,
@@ -75,6 +79,7 @@ use crate::state::{
     write_orig_head,
 };
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
+use crate::worktree::WorktreeError;
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -116,11 +121,11 @@ fn tree_to_index_entries_with_protect(
 ) -> Result<Vec<IndexEntry>> {
     let obj = repo.odb().read(oid)?;
     if obj.kind != ObjectKind::Tree {
-        return Err(Error::UnexpectedObjectKind {
+        return Err(Error::Object(ObjectError::UnexpectedKind {
             oid: *oid,
             expected: ObjectKind::Tree,
             actual: obj.kind,
-        });
+        }));
     }
     let entries = parse_tree(&obj.data)?;
     let mut result = Vec::new();
@@ -664,8 +669,8 @@ pub struct MergeSource {
 ///
 /// # Errors
 ///
-/// - [`Error::RevisionNotFound`] when `spec` names nothing.
-/// - [`Error::UnexpectedObjectKind`] when `spec` names (or a tag peels to) a tree or blob.
+/// - [`crate::error::RevisionError::NotFound`] when `spec` names nothing.
+/// - [`crate::error::ObjectError::UnexpectedKind`] when `spec` names (or a tag peels to) a tree or blob.
 /// - Object database errors (missing or corrupt objects behind a ref) are propagated.
 pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource> {
     let named = [
@@ -682,13 +687,15 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
     // A full-length hex id parses without an object lookup, so a missing object only shows up
     // when peeling; that is still "names nothing", unlike a ref pointing at a missing object.
     let not_found = |err: Error| match err {
-        Error::ObjectNotFound(_)
-        | Error::RevParse(
+        Error::Object(ObjectError::NotFound { .. })
+        | Error::Revision(RevisionError::Parse(
             RevParseError::InvalidObjectName { .. }
             | RevParseError::RevisionOutOfRange { .. }
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::NoSuchBranch { .. },
-        ) => Error::RevisionNotFound(spec.to_owned()),
+        )) => Error::Revision(RevisionError::NotFound {
+            spec: spec.to_owned(),
+        }),
         other => other,
     };
     let (peeled, actual, kind) = match named {
@@ -700,7 +707,9 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
             // The revision parser resolves `a...b` to a merge base; a range never names the
             // commit to merge.
             if crate::rev_parse::is_top_level_range(spec) {
-                return Err(Error::RevisionNotFound(spec.to_owned()));
+                return Err(Error::Revision(RevisionError::NotFound {
+                    spec: spec.to_owned(),
+                }));
             }
             let oid = crate::rev_parse::resolve_revision_without_index_dwim(repo, spec)
                 .map_err(not_found)?;
@@ -709,11 +718,11 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
         }
     };
     if actual != ObjectKind::Commit {
-        return Err(Error::UnexpectedObjectKind {
+        return Err(Error::Object(ObjectError::UnexpectedKind {
             oid: peeled,
             expected: ObjectKind::Commit,
             actual,
-        });
+        }));
     }
     Ok(MergeSource { oid: peeled, kind })
 }
@@ -903,7 +912,7 @@ pub enum IntegrateBranchOutcome {
 /// `into_ref` is the branch being merged into: either a full ref name (for example
 /// `refs/heads/main`) or a short local branch name (for example `main` or
 /// `feature/nested`, stored as `refs/heads/{into_ref}`). Short names that do not resolve
-/// return [`Error::BranchNotFound`].
+/// return [`crate::porcelain::branch_error::BranchError::NotFound`].
 ///
 /// `label` names the other side in merge messages and reflogs: the default merge commit
 /// subject is `Merge {label}` (see [`MergeOptions::message`]), and branch reflog lines
@@ -924,11 +933,11 @@ pub enum IntegrateBranchOutcome {
 ///
 /// # Errors
 ///
-/// Propagates merge, checkout, ref, and I/O failures. Returns [`Error::WouldOverwrite`]
+/// Propagates merge, checkout, ref, and I/O failures. Returns [`crate::worktree::WorktreeError::WouldOverwrite`]
 /// when local or untracked paths would be overwritten by the merge tree, and
-/// [`Error::DirtyWorktree`] when the worktree is not clean but no specific paths were
+/// [`crate::worktree::WorktreeError::DirtyWorktree`] when the worktree is not clean but no specific paths were
 /// collected. Returns [`MergeError::UnrelatedHistories`] when the histories are unrelated. Returns
-/// [`Error::RefStore`] with [`crate::refs::store::RefStoreError::ExpectedMismatch`] when
+/// [`crate::error::RefError::Store`] with [`crate::refs::store::RefStoreError::ExpectedMismatch`] when
 /// the canonical branch ref no longer points at `into_oid` (checked before the worktree
 /// is touched, and again when the ref moves).
 /// Returns [`Error::Cancelled`] when cancelled; the branch, `HEAD`, the index and the merge
@@ -1024,9 +1033,9 @@ fn canonical_integrate_into_ref(repo: &Repository, into_ref: &str) -> Result<Str
         .resolve(RefNameRef::from_trusted(canonical.as_str()))
         .is_err()
     {
-        return Err(Error::BranchNotFound {
-            branch: into_ref.to_owned(),
-        });
+        return Err(Error::Branch(BranchError::NotFound {
+            name: into_ref.to_owned(),
+        }));
     }
     Ok(canonical)
 }
@@ -1539,15 +1548,6 @@ pub fn squash_conflict_merge_in_progress(git_dir: &Path) -> bool {
         && git_dir.join("MERGE_MSG").is_file()
 }
 
-/// Deprecated alias — use [`MergeError`] for [`continue_merge`] failures.
-pub type ContinueMergeError = MergeError;
-
-impl From<crate::index::IndexError> for ContinueMergeError {
-    fn from(err: crate::index::IndexError) -> Self {
-        Error::from(err).into()
-    }
-}
-
 /// Finish an in-progress merge after conflicts are resolved or after `--no-commit`.
 ///
 /// Builds a merge commit from the current index tree with parents `HEAD` and each
@@ -1558,36 +1558,35 @@ impl From<crate::index::IndexError> for ContinueMergeError {
 /// # Errors
 ///
 /// Returns [`MergeError::NoMergeInProgress`] when no merge is active,
-/// [`MergeError::ContinueUnmergedPaths`] when conflict stages remain, or propagates
-/// commit and I/O failures (including [`Error::Cancelled`]) as [`MergeError::Library`].
+/// [`MergeError::ContinueUnmergedPaths`] when conflict stages remain, and propagates
+/// commit and I/O failures (including [`Error::Cancelled`]).
 pub fn continue_merge(
     repo: &Repository,
     options: &ContinueOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> std::result::Result<ContinueOutcome, ContinueMergeError> {
+) -> Result<ContinueOutcome> {
     let merge_heads = read_merge_heads(repo.git_dir())?;
     if merge_heads.is_empty() {
-        return Err(MergeError::NoMergeInProgress);
+        return Err(MergeError::NoMergeInProgress.into());
     }
 
-    let config = repo.config().snapshot().map_err(MergeError::from)?;
+    let config = repo.config().snapshot()?;
     let auto_stage = default_commit_scope_from_config(config.as_ref()) == CommitScope::AutoStage;
 
     let mut index = repo.load_index()?;
     if auto_stage {
-        stage_for_commit_on_index(repo, &mut index, progress, cancel, false)
-            .map_err(MergeError::from)?;
+        stage_for_commit_on_index(repo, &mut index, progress, cancel, false)?;
     }
     if index.has_unmerged_entries() {
         let paths = unmerged_index_paths(&index);
         if !auto_stage {
             let resolved = resolved_not_staged_paths(repo, &index, &paths);
             if !resolved.is_empty() {
-                return Err(MergeError::ContinueResolvedNotStaged { paths: resolved });
+                return Err(MergeError::ContinueResolvedNotStaged { paths: resolved }.into());
             }
         }
-        return Err(MergeError::ContinueUnmergedPaths { paths });
+        return Err(MergeError::ContinueUnmergedPaths { paths }.into());
     }
 
     let message = resolve_continue_merge_message(repo.git_dir(), options.message.as_deref())?;
@@ -1599,8 +1598,7 @@ pub fn continue_merge(
         allow_empty: false,
         ..Default::default()
     };
-    let outcome = create_commit_with_loaded_index(repo, &mut index, &req, progress, cancel)
-        .map_err(MergeError::from)?;
+    let outcome = create_commit_with_loaded_index(repo, &mut index, &req, progress, cancel)?;
     Ok(ContinueOutcome {
         oid: outcome.oid,
         change_id: outcome.change_id,
@@ -1611,13 +1609,13 @@ pub fn continue_merge(
 fn resolve_continue_merge_message(
     git_dir: &Path,
     override_message: Option<&str>,
-) -> std::result::Result<String, MergeError> {
+) -> Result<String> {
     if let Some(raw) = override_message {
-        return normalize_commit_message(raw).map_err(|_| MergeError::ContinueEmptyMessage);
+        return Ok(normalize_commit_message(raw).map_err(|_| MergeError::ContinueEmptyMessage)?);
     }
 
-    let Some(raw) = read_merge_msg(git_dir).map_err(MergeError::from)? else {
-        return Err(MergeError::ContinueEmptyMessage);
+    let Some(raw) = read_merge_msg(git_dir)? else {
+        return Err(MergeError::ContinueEmptyMessage.into());
     };
     let processed = stripspace_process(
         raw.as_bytes(),
@@ -1625,7 +1623,7 @@ fn resolve_continue_merge_message(
     );
     let message = String::from_utf8(processed).map_err(|_| MergeError::ContinueEmptyMessage)?;
     if message.trim().is_empty() {
-        return Err(MergeError::ContinueEmptyMessage);
+        return Err(MergeError::ContinueEmptyMessage.into());
     }
     let mut message = message;
     if !message.ends_with('\n') {
@@ -1914,11 +1912,11 @@ fn merge_overwrite_error_message(paths: &[String]) -> Error {
         let mut paths = paths.to_vec();
         paths.sort();
         paths.dedup();
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             message: "local changes would be overwritten by merge".into(),
-        }
+        })
     }
 }
 
@@ -2123,7 +2121,7 @@ fn ensure_detached_head_tip(repo: &Repository, expected: ObjectId) -> Result<()>
     {
         Some(RawRef::Direct(oid)) => Some(oid),
         Some(RawRef::Symbolic(_)) => {
-            return Err(MergeError::Library(Box::new(Error::InvalidHead)).into());
+            return Err(Error::Ref(RefError::InvalidHead));
         }
         None => None,
     };
@@ -2644,7 +2642,9 @@ mod integrate_tests {
             &crate::progress::CancelToken::never(),
         )
         .expect_err("missing branch");
-        assert!(matches!(err, Error::BranchNotFound { branch } if branch == "no-such-branch"));
+        assert!(
+            matches!(err, Error::Branch(BranchError::NotFound { name: branch}) if branch == "no-such-branch")
+        );
         assert!(!tmp_missing.path().join(".git/ORIG_HEAD").exists());
         let tip: ObjectId = grit_test_support::git(tmp_missing.path(), &["rev-parse", "main"])
             .trim()
@@ -2666,7 +2666,7 @@ mod integrate_tests {
         assert!(
             matches!(
                 err,
-                Error::RefStore(RefStoreError::ExpectedMismatch { ref name, .. })
+                Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { ref name, .. }))
                     if name == "refs/heads/main"
             ),
             "unexpected {err:?}"

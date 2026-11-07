@@ -5,6 +5,7 @@
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::error::Error;
+use grit_lib::error::ObjectError;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::test_support::objects_pack::{
@@ -471,14 +472,14 @@ fn empty_pack_index_from_git() {
 
 fn assert_corrupt(result: Result<(), Error>) {
     match result {
-        Err(Error::CorruptObject(_)) => {}
+        Err(Error::Object(ObjectError::Corrupt { .. })) => {}
         other => panic!("expected CorruptObject, got {other:?}"),
     }
 }
 
 fn assert_corrupt_contains(result: Result<(), Error>, needle: &str) {
     match result {
-        Err(Error::CorruptObject(msg)) => {
+        Err(Error::Object(ObjectError::Corrupt { detail: msg })) => {
             assert!(
                 msg.contains(needle),
                 "expected CorruptObject containing {needle:?}, got {msg:?}"
@@ -567,7 +568,9 @@ fn truncated_idx_bad_magic_version_and_trailer() {
     trailer_bytes[last] ^= 0xff;
     std::fs::write(&bad_trailer, &trailer_bytes).expect("write bad trailer idx");
     match read_pack_index(&bad_trailer) {
-        Err(Error::PackIndexChecksumMismatch { path, .. }) => assert_eq!(path, bad_trailer),
+        Err(Error::Object(ObjectError::PackIndexChecksumMismatch { path, .. })) => {
+            assert_eq!(path, bad_trailer)
+        }
         other => panic!(
             "expected PackIndexChecksumMismatch, got {:?}",
             other.map(|_| ())
@@ -595,7 +598,10 @@ fn pack_index_object_count_mismatch_errors() {
     idx_bad.pack_path = bad_pack;
     let err = read_object_from_pack(&idx_bad, &oid).unwrap_err();
     assert!(
-        matches!(err, Error::CorruptObject(_) | Error::Io(_)),
+        matches!(
+            err,
+            Error::Object(ObjectError::Corrupt { .. }) | Error::Io(_)
+        ),
         "unexpected error: {err:?}"
     );
 
@@ -739,12 +745,15 @@ fn bogus_offsets_and_ofs_delta_rejected_without_panic() {
     bad32_idx.pack_path = bad32_pack.clone();
     let bad32_read = read_object_from_pack(&bad32_idx, &oid1);
     assert!(
-        matches!(bad32_read, Err(Error::CorruptObject(_))),
+        matches!(bad32_read, Err(Error::Object(ObjectError::Corrupt { .. }))),
         "bogus 32-bit offset read: {bad32_read:?}"
     );
     let bad32_verify = verify_pack_and_collect(&bad32_path);
     assert!(
-        matches!(bad32_verify, Err(Error::CorruptObject(_))),
+        matches!(
+            bad32_verify,
+            Err(Error::Object(ObjectError::Corrupt { .. }))
+        ),
         "bogus 32-bit offset verify: {bad32_verify:?}"
     );
 
@@ -779,14 +788,14 @@ fn bogus_offsets_and_ofs_delta_rejected_without_panic() {
     assert!(
         matches!(
             read_object_from_pack(&ext_bad_idx, &ext_oid),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ),
         "bogus 64-bit table offset must fail read"
     );
     assert!(
         matches!(
             verify_pack_and_collect(&ext_bad),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ),
         "bogus 64-bit table offset must fail verify"
     );

@@ -1,6 +1,9 @@
 //! `RevWalk::resolve` with `ResolveOptions`: every `Peel` x `IndexDwim` combination, and the
 //! behavior of each `resolve_revision*` variant the options replaced.
 
+use grit_lib::error::ObjectError;
+use grit_lib::error::RefError;
+use grit_lib::error::RevisionError;
 use std::path::Path;
 
 use grit_lib::error::Error;
@@ -146,7 +149,7 @@ fn peel_and_index_dwim_matrix_on_a_branch_name() {
                 Peel::Any | Peel::Commit => assert_eq!(got.ok(), Some(f.second), "{peel:?}"),
                 Peel::Tree => assert_eq!(got.ok(), Some(tree), "{peel:?} {index_dwim:?}"),
                 _ => assert!(
-                    matches!(got, Err(Error::ObjectNotFound(_))),
+                    matches!(got, Err(Error::Object(ObjectError::NotFound { .. }))),
                     "{peel:?} {index_dwim:?}: a commit is not a blob, got {got:?}"
                 ),
             }
@@ -164,14 +167,18 @@ fn peel_and_index_dwim_matrix_on_a_tracked_path() {
                 IndexDwim::On => assert!(
                     matches!(
                         got,
-                        Err(Error::RevParse(RevParseError::AmbiguousArgument { .. }))
+                        Err(Error::Revision(RevisionError::Parse(
+                            RevParseError::AmbiguousArgument { .. }
+                        )))
                     ),
                     "{peel:?}: a tracked path is a possible pathspec, got {got:?}"
                 ),
                 _ => assert!(
                     matches!(
                         got,
-                        Err(Error::RevParse(RevParseError::InvalidObjectName { .. }))
+                        Err(Error::Revision(RevisionError::Parse(
+                            RevParseError::InvalidObjectName { .. }
+                        )))
                     ),
                     "{peel:?}: without index DWIM it is a bad revision, got {got:?}"
                 ),
@@ -195,7 +202,10 @@ fn peel_and_index_dwim_matrix_on_an_annotated_tag() {
             resolve_spec(&f.repo, "v1", &peel_dwim_options(Peel::Tree, index_dwim)).expect("tree");
         assert_eq!(peeled_tree, tree);
         let blob = resolve_spec(&f.repo, "v1", &peel_dwim_options(Peel::Blob, index_dwim));
-        assert!(matches!(blob, Err(Error::ObjectNotFound(_))), "{blob:?}");
+        assert!(
+            matches!(blob, Err(Error::Object(ObjectError::NotFound { .. }))),
+            "{blob:?}"
+        );
     }
 }
 
@@ -220,7 +230,10 @@ fn peel_and_index_dwim_matrix_on_a_tree_path() {
             "main:tracked.txt",
             &peel_dwim_options(Peel::Commit, index_dwim),
         );
-        assert!(matches!(commit, Err(Error::InvalidRef(_))), "{commit:?}");
+        assert!(
+            matches!(commit, Err(Error::Ref(RefError::Invalid { .. }))),
+            "{commit:?}"
+        );
         let tree = resolve_spec(&f.repo, "main:", &peel_dwim_options(Peel::Tree, index_dwim));
         assert_eq!(
             tree.ok(),
@@ -249,7 +262,9 @@ fn removed_resolve_revision_is_the_default() {
         assert!(
             matches!(
                 got,
-                Err(Error::RevParse(RevParseError::AmbiguousArgument { .. }))
+                Err(Error::Revision(RevisionError::Parse(
+                    RevParseError::AmbiguousArgument { .. }
+                )))
             ),
             "{unknown}: {got:?}"
         );
@@ -271,7 +286,9 @@ fn removed_without_index_dwim_is_index_dwim_off() {
         assert!(
             matches!(
                 got,
-                Err(Error::RevParse(RevParseError::InvalidObjectName { .. }))
+                Err(Error::Revision(RevisionError::Parse(
+                    RevParseError::InvalidObjectName { .. }
+                )))
             ),
             "{unknown}: {got:?}"
         );
@@ -306,7 +323,9 @@ fn removed_for_range_end_prefers_commits_for_ambiguous_hex() {
     assert!(
         matches!(
             plain,
-            Err(Error::RevParse(RevParseError::AmbiguousShortObject { .. }))
+            Err(Error::Revision(RevisionError::Parse(
+                RevParseError::AmbiguousShortObject { .. }
+            )))
         ),
         "plain resolution must report the ambiguity, got {plain:?}"
     );
@@ -331,7 +350,9 @@ fn removed_for_verify_is_range_end_without_index_dwim() {
     assert!(
         matches!(
             path,
-            Err(Error::RevParse(RevParseError::InvalidObjectName { .. }))
+            Err(Error::Revision(RevisionError::Parse(
+                RevParseError::InvalidObjectName { .. }
+            )))
         ),
         "--verify must not read the index, got {path:?}"
     );
@@ -367,7 +388,10 @@ fn removed_as_commit_is_peel_commit() {
         Some(f.first)
     );
     let tree = resolve_spec(&f.repo, "main^{tree}", &commit);
-    assert!(matches!(tree, Err(Error::InvalidRef(_))), "{tree:?}");
+    assert!(
+        matches!(tree, Err(Error::Ref(RefError::Invalid { .. }))),
+        "{tree:?}"
+    );
 
     f.repo
         .odb()
@@ -391,7 +415,9 @@ fn removed_as_commit_without_index_dwim() {
     assert!(
         matches!(
             path,
-            Err(Error::RevParse(RevParseError::InvalidObjectName { .. }))
+            Err(Error::Revision(RevisionError::Parse(
+                RevParseError::InvalidObjectName { .. }
+            )))
         ),
         "a tracked path is not a revision without index DWIM, got {path:?}"
     );
@@ -495,11 +521,11 @@ fn peel_helpers_match_resolve_options() {
     );
     assert!(matches!(
         walk.peel_to_commit(f.tracked_blob),
-        Err(Error::InvalidRef(_))
+        Err(Error::Ref(RefError::Invalid { .. }))
     ));
     assert!(matches!(
         walk.peel_to_tree(f.tracked_blob),
-        Err(Error::ObjectNotFound(_))
+        Err(Error::Object(ObjectError::NotFound { .. }))
     ));
     let blob_at = walk.blob_at_path("v1:tracked.txt").expect("blob at path");
     assert_eq!(blob_at.oid, f.tracked_blob);

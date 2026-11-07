@@ -236,7 +236,7 @@ struct Cut {
 }
 
 impl HttpClient for Cut {
-    fn get(&self, url: &str, gp: Option<&str>) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    fn get(&self, url: &str, gp: Option<&str>) -> grit_lib::error::Result<Vec<u8>> {
         self.inner.get(url, gp)
     }
 
@@ -247,7 +247,7 @@ impl HttpClient for Cut {
         accept: &str,
         body: &[u8],
         gp: Option<&str>,
-    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
+    ) -> grit_lib::error::Result<Vec<u8>> {
         self.inner.post(url, ct, accept, body, gp)
     }
 

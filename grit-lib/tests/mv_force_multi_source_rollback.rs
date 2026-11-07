@@ -1,5 +1,6 @@
 //! Forced multi-source move rollback when a later source is missing from the work tree.
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::path::Path;
 
@@ -49,7 +50,10 @@ fn multi_source_missing_later_source_rolls_back_earlier_forced_move() {
     .expect_err("missing later source");
 
     assert!(
-        matches!(err, grit_lib::error::Error::MoveBadSource { .. }),
+        matches!(
+            err,
+            grit_lib::error::Error::Worktree(WorktreeError::MoveBadSource { .. })
+        ),
         "unexpected error: {err:?}"
     );
     assert_eq!(

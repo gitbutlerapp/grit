@@ -1,5 +1,7 @@
 //! Loose-object storage under `objects/xx/<suffix>` (zlib-compressed Git objects).
 
+use crate::error::ObjectError;
+use crate::worktree::WorktreeError;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -239,7 +241,7 @@ impl LooseStore {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Zlib`] when compression fails.
+    /// Returns [`crate::error::ObjectError::Zlib`] when compression fails.
     pub fn zlib_compress_store_bytes(&self, store_bytes: &[u8]) -> Result<Vec<u8>> {
         zlib_compress_store_bytes(store_bytes, self.compression)
     }
@@ -273,15 +275,19 @@ impl LooseStore {
     ) -> Result<ObjectId> {
         parse_object_bytes(store_bytes)?;
         if oid.algo() != self.hash_algo {
-            return Err(Error::InvalidObjectId(oid.to_hex()));
+            return Err(Error::Object(ObjectError::InvalidId {
+                input: oid.to_hex(),
+            }));
         }
         if let Some(existing) = self.try_finish_if_loose_present(oid, options)? {
             return Ok(existing);
         }
         let path = self.object_path(oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
+        let prefix_dir = path.parent().ok_or_else(|| {
+            Error::Worktree(WorktreeError::Path {
+                detail: "object path has no parent".to_owned(),
+            })
+        })?;
         let zlib = zlib_compress_store_bytes(store_bytes, self.compression)?;
         publish_loose_object(&self.objects_dir, &path, prefix_dir, false, |mut file| {
             file.write_all(&zlib).map_err(|source| {
@@ -309,15 +315,19 @@ impl LooseStore {
         options: WriteOptions,
     ) -> Result<ObjectId> {
         if oid.algo() != self.hash_algo {
-            return Err(Error::InvalidObjectId(oid.to_hex()));
+            return Err(Error::Object(ObjectError::InvalidId {
+                input: oid.to_hex(),
+            }));
         }
         if let Some(existing) = self.try_finish_if_loose_present(oid, options)? {
             return Ok(existing);
         }
         let path = self.object_path(oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
+        let prefix_dir = path.parent().ok_or_else(|| {
+            Error::Worktree(WorktreeError::Path {
+                detail: "object path has no parent".to_owned(),
+            })
+        })?;
         publish_loose_object(
             &self.objects_dir,
             &path,
@@ -353,15 +363,19 @@ impl LooseStore {
         options: WriteOptions,
     ) -> Result<ObjectId> {
         if oid.algo() != self.hash_algo {
-            return Err(Error::InvalidObjectId(oid.to_hex()));
+            return Err(Error::Object(ObjectError::InvalidId {
+                input: oid.to_hex(),
+            }));
         }
         if let Some(existing) = self.try_finish_if_loose_present(oid, options)? {
             return Ok(existing);
         }
         let path = self.object_path(oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
+        let prefix_dir = path.parent().ok_or_else(|| {
+            Error::Worktree(WorktreeError::Path {
+                detail: "object path has no parent".to_owned(),
+            })
+        })?;
         publish_loose_object(
             &self.objects_dir,
             &path,
@@ -377,9 +391,9 @@ impl LooseStore {
     ///
     /// # Errors
     ///
-    /// - [`Error::Zlib`] — decompression failed.
-    /// - [`Error::CorruptObject`] — header is malformed.
-    /// - [`Error::LooseHashMismatch`] — payload OID does not match `expected_oid`.
+    /// - [`crate::error::ObjectError::Zlib`] — decompression failed.
+    /// - [`crate::error::ObjectError::Corrupt`] — header is malformed.
+    /// - [`crate::error::ObjectError::LooseHashMismatch`] — payload OID does not match `expected_oid`.
     pub fn read_verify_oid(path: &Path, expected_oid: &ObjectId) -> Result<Object> {
         let file = fs::File::open(path).map_err(Error::Io)?;
         let raw = match read_zlib_loose_payload(file) {
@@ -404,10 +418,10 @@ impl LooseStore {
         };
         let computed = hash::hash_object(expected_oid.algo(), obj.kind, &obj.data)?;
         if computed != *expected_oid {
-            return Err(Error::LooseHashMismatch {
+            return Err(Error::Object(ObjectError::LooseHashMismatch {
                 path: path.display().to_string(),
                 real_oid: computed.to_hex(),
-            });
+            }));
         }
         Ok(obj)
     }
@@ -419,8 +433,8 @@ impl LooseStore {
     ///
     /// # Errors
     ///
-    /// Same as [`ObjectStore::read`]: [`Error::Io`], [`Error::Zlib`] or
-    /// [`Error::CorruptObject`] for unreadable or malformed objects.
+    /// Same as [`ObjectStore::read`]: [`Error::Io`], [`crate::error::ObjectError::Zlib`] or
+    /// [`crate::error::ObjectError::Corrupt`] for unreadable or malformed objects.
     pub(crate) fn read_unless_larger(
         &self,
         oid: &ObjectId,
@@ -558,9 +572,11 @@ impl WritableObjectStore for LooseStore {
             return Ok(existing);
         }
         let path = self.object_path(&oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
+        let prefix_dir = path.parent().ok_or_else(|| {
+            Error::Worktree(WorktreeError::Path {
+                detail: "object path has no parent".to_owned(),
+            })
+        })?;
         publish_loose_object(&self.objects_dir, &path, prefix_dir, false, |file| {
             deflate_object_into(file, kind, data, self.compression)
         })?;
@@ -692,22 +708,28 @@ pub(crate) fn strip_decompressed_object_header(
     buf: &mut Vec<u8>,
     oid_hint: Option<&ObjectId>,
 ) -> Result<ObjectKind> {
-    let nul = buf
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
+    let nul = buf.iter().position(|&b| b == 0).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "missing NUL in object header".to_owned(),
+        })
+    })?;
     let (kind, size) = parse_object_header_prefix(buf)?;
     let payload_start = nul + 1;
-    let size_usize = usize::try_from(size)
-        .map_err(|_| Error::CorruptObject(format!("invalid object size: {size}")))?;
+    let size_usize = usize::try_from(size).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("invalid object size: {size}"),
+        })
+    })?;
     if buf.len().saturating_sub(payload_start) != size_usize {
         let oid_str = oid_hint.map(ObjectId::to_hex).unwrap_or_else(|| {
             hash_algo_digest_hex(HashAlgo::Sha1, buf).unwrap_or_else(|_| "?".to_owned())
         });
-        return Err(Error::CorruptObject(format!(
-            "object {oid_str} size mismatch: header says {size}, got {}",
-            buf.len().saturating_sub(payload_start)
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!(
+                "object {oid_str} size mismatch: header says {size}, got {}",
+                buf.len().saturating_sub(payload_start)
+            ),
+        }));
     }
     if payload_start > 0 {
         buf.copy_within(payload_start.., 0);
@@ -765,84 +787,108 @@ pub(crate) fn zlib_compress_store_bytes(
 ) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     let mut encoder = ZlibEncoder::new(&mut out, compression);
-    encoder
-        .write_all(store_bytes)
-        .map_err(|e| Error::Zlib(e.to_string()))?;
-    encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
+    encoder.write_all(store_bytes).map_err(|e| {
+        Error::Object(ObjectError::Zlib {
+            detail: e.to_string(),
+        })
+    })?;
+    encoder.finish().map_err(|e| {
+        Error::Object(ObjectError::Zlib {
+            detail: e.to_string(),
+        })
+    })?;
     Ok(out)
 }
 
 pub(crate) fn decompress_zlib_loose_bytes(zlib: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = flate2::read::ZlibDecoder::new(zlib);
     let mut raw = Vec::new();
-    decoder
-        .read_to_end(&mut raw)
-        .map_err(|e| Error::Zlib(e.to_string()))?;
+    decoder.read_to_end(&mut raw).map_err(|e| {
+        Error::Object(ObjectError::Zlib {
+            detail: e.to_string(),
+        })
+    })?;
     Ok(raw)
 }
 
 /// Parse `"<type> <size>\0"` from decompressed bytes that include at least the header prefix.
 pub(crate) fn parse_object_header_prefix(raw: &[u8]) -> Result<(ObjectKind, u64)> {
-    let nul = raw
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
+    let nul = raw.iter().position(|&b| b == 0).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "missing NUL in object header".to_owned(),
+        })
+    })?;
 
     let header = &raw[..nul];
-    let sp = header
-        .iter()
-        .position(|&b| b == b' ')
-        .ok_or_else(|| Error::CorruptObject("missing space in object header".to_owned()))?;
+    let sp = header.iter().position(|&b| b == b' ').ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "missing space in object header".to_owned(),
+        })
+    })?;
 
     if sp > 32 {
-        return Err(Error::ObjectHeaderTooLong {
+        return Err(Error::Object(ObjectError::HeaderTooLong {
             oid: hash_algo_digest_hex(HashAlgo::Sha1, raw).unwrap_or_else(|_| "?".to_owned()),
-        });
+        }));
     }
 
     let kind = ObjectKind::from_bytes(&header[..sp])?;
-    let size_str = std::str::from_utf8(&header[sp + 1..])
-        .map_err(|_| Error::CorruptObject("non-UTF-8 object size".to_owned()))?;
-    let size: u64 = size_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("invalid object size: {size_str}")))?;
+    let size_str = std::str::from_utf8(&header[sp + 1..]).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "non-UTF-8 object size".to_owned(),
+        })
+    })?;
+    let size: u64 = size_str.parse().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("invalid object size: {size_str}"),
+        })
+    })?;
     Ok((kind, size))
 }
 
 fn parse_object_bytes_inner(raw: &[u8], oid_hint: Option<&ObjectId>) -> Result<Object> {
-    let nul = raw
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
+    let nul = raw.iter().position(|&b| b == 0).ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "missing NUL in object header".to_owned(),
+        })
+    })?;
 
     let header = &raw[..nul];
     let data = raw[nul + 1..].to_vec();
 
-    let sp = header
-        .iter()
-        .position(|&b| b == b' ')
-        .ok_or_else(|| Error::CorruptObject("missing space in object header".to_owned()))?;
+    let sp = header.iter().position(|&b| b == b' ').ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "missing space in object header".to_owned(),
+        })
+    })?;
 
     if sp > 32 {
         let oid_str = oid_hint.map(|o| o.to_hex()).unwrap_or_else(|| {
             hash_algo_digest_hex(HashAlgo::Sha1, raw).unwrap_or_else(|_| "?".to_owned())
         });
-        return Err(Error::ObjectHeaderTooLong { oid: oid_str });
+        return Err(Error::Object(ObjectError::HeaderTooLong { oid: oid_str }));
     }
 
     let kind = ObjectKind::from_bytes(&header[..sp])?;
 
-    let size_str = std::str::from_utf8(&header[sp + 1..])
-        .map_err(|_| Error::CorruptObject("non-UTF-8 object size".to_owned()))?;
-    let size: usize = size_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("invalid object size: {size_str}")))?;
+    let size_str = std::str::from_utf8(&header[sp + 1..]).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "non-UTF-8 object size".to_owned(),
+        })
+    })?;
+    let size: usize = size_str.parse().map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: format!("invalid object size: {size_str}"),
+        })
+    })?;
 
     if data.len() != size {
-        return Err(Error::CorruptObject(format!(
-            "object size mismatch: header says {size} but got {}",
-            data.len()
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!(
+                "object size mismatch: header says {size} but got {}",
+                data.len()
+            ),
+        }));
     }
 
     Ok(Object::new(kind, data))
@@ -870,7 +916,11 @@ fn deflate_object_into(
     data: &[u8],
     compression: Compression,
 ) -> Result<()> {
-    let zlib_err = |e: io::Error| Error::Zlib(e.to_string());
+    let zlib_err = |e: io::Error| {
+        Error::Object(ObjectError::Zlib {
+            detail: e.to_string(),
+        })
+    };
     let mut encoder = ZlibEncoder::new(file, compression);
     write!(encoder, "{} {}\0", kind, data.len()).map_err(zlib_err)?;
     encoder.write_all(data).map_err(zlib_err)?;
@@ -887,14 +937,16 @@ fn read_payload_chunks(
     let mut buf = [0u8; STREAM_CHUNK];
     while remaining > 0 {
         let want = usize::try_from(remaining.min(STREAM_CHUNK as u64)).map_err(|_| {
-            Error::CorruptObject(format!("object size {size} exceeds address space"))
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("object size {size} exceeds address space"),
+            })
         })?;
         let n = match reader.read(&mut buf[..want]) {
             Ok(0) => {
-                return Err(Error::ObjectStreamTruncated {
+                return Err(Error::Object(ObjectError::StreamTruncated {
                     expected: size,
                     actual: size - remaining,
-                })
+                }))
             }
             Ok(n) => n,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -948,7 +1000,11 @@ impl LooseStore {
             .create_new(true)
             .open(&tmp_path)
             .map_err(Error::Io)?;
-        let zlib_err = |e: io::Error| Error::Zlib(e.to_string());
+        let zlib_err = |e: io::Error| {
+            Error::Object(ObjectError::Zlib {
+                detail: e.to_string(),
+            })
+        };
         let mut encoder = ZlibEncoder::new(file, compression);
         if let Err(e) = (|| {
             write!(encoder, "{} {}\0", kind, size).map_err(zlib_err)?;
@@ -974,9 +1030,11 @@ impl LooseStore {
             return Ok(existing);
         }
         let path = self.object_path(&oid);
-        let dest_prefix = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
+        let dest_prefix = path.parent().ok_or_else(|| {
+            Error::Worktree(WorktreeError::Path {
+                detail: "object path has no parent".to_owned(),
+            })
+        })?;
         if let Err(e) = fs::create_dir_all(dest_prefix) {
             let _ = fs::remove_file(&tmp_path);
             return Err(Error::Io(e));
@@ -1167,10 +1225,11 @@ impl LoosePayloadReader {
                 break;
             }
         }
-        let nul = header_buf
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
+        let nul = header_buf.iter().position(|&b| b == 0).ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "missing NUL in object header".to_owned(),
+            })
+        })?;
         let (kind, size) = parse_object_header_prefix(&header_buf[..=nul])?;
         self.extra_payload = header_buf[nul + 1..].to_vec();
         self.header_buf = header_buf;
@@ -1221,9 +1280,13 @@ impl LoosePayloadReader {
             Ok(s) => s,
             Err(e) => {
                 if self.preset_dictionary {
-                    return Err(Error::Zlib("needs dictionary".to_owned()));
+                    return Err(Error::Object(ObjectError::Zlib {
+                        detail: "needs dictionary".to_owned(),
+                    }));
                 }
-                return Err(Error::Zlib(e.to_string()));
+                return Err(Error::Object(ObjectError::Zlib {
+                    detail: e.to_string(),
+                }));
             }
         };
         // Both are bounded by the slices just passed to the inflater.
@@ -1662,7 +1725,10 @@ mod tests {
         let odb = Odb::new(&objects);
         let payload = b"written externally into an existing fanout dir\n";
         let oid = odb.hash(ObjectKind::Blob, payload).unwrap();
-        assert!(matches!(odb.read(&oid), Err(Error::ObjectNotFound(_))));
+        assert!(matches!(
+            odb.read(&oid),
+            Err(Error::Object(ObjectError::NotFound { .. }))
+        ));
 
         let mut child = Command::new("git")
             .args(["hash-object", "-w", "--stdin"])

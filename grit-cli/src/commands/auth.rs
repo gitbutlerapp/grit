@@ -435,7 +435,7 @@ fn server_error(server: &ServerUrl, err: ServerAuthError) -> anyhow::Error {
         ServerAuthError::LoginExpired => {
             anyhow!("the code expired before you approved it. Run `grit auth {root}` to try again.")
         }
-        ServerAuthError::NotGritServer(_) => anyhow!(
+        ServerAuthError::NotGritServer { .. } => anyhow!(
             "{root} is not a `grit serve` host; `grit auth <url>` signs in only to GitHub and grit serve.\n\
              Store a user name and token (or password) for it with \
              `grit auth {root} --username <user> --token <token>`, \
@@ -684,7 +684,7 @@ fn device_flow_error(err: DeviceFlowError) -> anyhow::Error {
             };
             anyhow::Error::new(source).context(doing)
         }
-        DeviceFlowError::DeviceCodeRejected(code) => {
+        DeviceFlowError::DeviceCodeRejected { code } => {
             anyhow!("GitHub rejected the device-code request: {code}")
         }
         DeviceFlowError::MissingField(field) => anyhow!("GitHub response had no {field}"),
@@ -695,7 +695,7 @@ fn device_flow_error(err: DeviceFlowError) -> anyhow::Error {
             anyhow!("the code expired before you authorized. Run `grit auth` to try again.")
         }
         DeviceFlowError::AccessDenied => anyhow!("authorization was denied on GitHub."),
-        DeviceFlowError::TokenRejected(code) => {
+        DeviceFlowError::TokenRejected { code } => {
             anyhow!("GitHub returned an error while authorizing: {code}")
         }
         DeviceFlowError::UnexpectedResponse => {

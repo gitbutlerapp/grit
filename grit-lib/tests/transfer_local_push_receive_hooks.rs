@@ -174,7 +174,7 @@ fn grit_push(
     remote: &str,
     refspecs: &[&str],
     opts: PushOptions,
-) -> Result<PushOutcome, RemoteError> {
+) -> grit_lib::error::Result<PushOutcome> {
     let config = repo.config().snapshot().expect("config");
     let ctx = repo
         .remotes()

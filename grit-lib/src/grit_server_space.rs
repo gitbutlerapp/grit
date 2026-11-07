@@ -19,7 +19,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::Error;
+use crate::error::{Error, ErrorSummary};
 use crate::grit_server_auth::{not_grit_server_or_http, ServerAuthError, ServerUrl};
 use crate::remote::RemoteError;
 use crate::transport::http::HttpClient;
@@ -173,7 +173,9 @@ pub fn fetch_space(
 ) -> std::result::Result<Space, ServerAuthError> {
     let url = format!("{}{SPACE_PATH}/{project}", server.root_url());
     let body = post_json(http, server, &url, b"{}")?;
-    serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer(server.root_url()))
+    serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer {
+        url: server.root_url(),
+    })
 }
 
 /// Ask `server` to merge `request.branch` of the signed-in user's space for
@@ -191,9 +193,11 @@ pub fn integrate_branch(
 ) -> std::result::Result<IntegrateBranchReply, ServerAuthError> {
     let url = format!("{}{INTEGRATE_PATH}/{project}", server.root_url());
     let request = serde_json::to_vec(request)
-        .map_err(|e| ServerAuthError::Http(Error::Verbatim(e.to_string())))?;
+        .map_err(|e| ServerAuthError::Http(ErrorSummary::from(Error::Io(e.into()))))?;
     let body = post_json(http, server, &url, &request)?;
-    serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer(server.root_url()))
+    serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer {
+        url: server.root_url(),
+    })
 }
 
 fn post_json(
@@ -204,7 +208,7 @@ fn post_json(
 ) -> std::result::Result<Vec<u8>, ServerAuthError> {
     http.post(url, JSON_CONTENT_TYPE, JSON_CONTENT_TYPE, body, None)
         .map_err(|e| match e {
-            RemoteError::Auth { .. } => ServerAuthError::TokenRejected,
+            crate::error::Error::Remote(RemoteError::Auth { .. }) => ServerAuthError::TokenRejected,
             other => not_grit_server_or_http(server, other),
         })
 }
@@ -271,11 +275,7 @@ mod tests {
     }
 
     impl HttpClient for Canned {
-        fn get(
-            &self,
-            _url: &str,
-            _git_protocol: Option<&str>,
-        ) -> crate::remote::RemoteResult<Vec<u8>> {
+        fn get(&self, _url: &str, _git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
             unreachable!("space requests only POST")
         }
 
@@ -286,18 +286,13 @@ mod tests {
             _accept: &str,
             body: &[u8],
             _git_protocol: Option<&str>,
-        ) -> crate::remote::RemoteResult<Vec<u8>> {
+        ) -> crate::error::Result<Vec<u8>> {
             assert_eq!(content_type, JSON_CONTENT_TYPE);
             self.seen
                 .lock()
                 .unwrap()
                 .push((url.to_owned(), body.to_vec()));
-            self.answer
-                .lock()
-                .unwrap()
-                .take()
-                .unwrap()
-                .map_err(RemoteError::from)
+            self.answer.lock().unwrap().take().unwrap()
         }
     }
 

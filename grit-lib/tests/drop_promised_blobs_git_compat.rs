@@ -17,7 +17,7 @@ use grit_lib::maintenance::{
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::transport::http::HttpClient;
-use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
+use grit_lib::remote::{HttpClientFactory, RemoteError};
 use grit_lib::repo::Repository;
 use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_test_support::{git_at_least, git_cmd, Output};
@@ -59,11 +59,11 @@ fn days_ago(days: u64) -> u64 {
 struct NoHttp;
 
 impl HttpClientFactory for NoHttp {
-    fn create(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+    fn create(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
         Err(RemoteError::UnsupportedScheme)
     }
 
-    fn create_for_preflight(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+    fn create_for_preflight(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
         Err(RemoteError::UnsupportedScheme)
     }
 }

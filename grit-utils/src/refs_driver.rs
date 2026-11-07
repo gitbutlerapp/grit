@@ -1,5 +1,6 @@
 //! Library-backed ref workloads matched to `git for-each-ref` and `git update-ref --stdin`.
 
+use grit_lib::error::ObjectError;
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
@@ -34,7 +35,7 @@ pub fn for_each_ref(repo: &Repository, pattern: Option<&str>) -> Result<()> {
                 None => {
                     let kind = match repo.odb().read_info(&oid) {
                         Ok(info) => info.kind.as_str(),
-                        Err(Error::ObjectNotFound(_)) => "missing",
+                        Err(Error::Object(ObjectError::NotFound { .. })) => "missing",
                         Err(e) => return Err(e.into()),
                     };
                     kind_by_oid.insert(oid, kind);

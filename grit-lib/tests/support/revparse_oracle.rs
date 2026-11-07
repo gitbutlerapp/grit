@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
+use grit_lib::error::RevisionError;
 use std::path::Path;
 
 use grit_lib::error::Error;
@@ -148,7 +149,7 @@ pub fn oracle_expect_rev_parse_error(
         });
     }
     match grit_resolve(repo, spec, mode) {
-        Err(Error::RevParse(e)) if pred(&e) => Ok(()),
+        Err(Error::Revision(RevisionError::Parse(e))) if pred(&e) => Ok(()),
         Ok(oid) => Err(OracleMismatch::GitErrGritOk {
             spec: spec.to_owned(),
             grit: oid,

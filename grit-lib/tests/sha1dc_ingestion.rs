@@ -1,5 +1,6 @@
 //! SHA-1 collision detection on object ingestion paths (sha1dc).
 
+use grit_lib::error::ObjectError;
 use std::io::Write;
 use std::num::NonZeroUsize;
 use std::process::{Command, Stdio};
@@ -33,7 +34,10 @@ fn shattered_prefix(which: u8) -> Vec<u8> {
 }
 
 fn assert_hash_collision<T: std::fmt::Debug>(result: Result<T, Error>) {
-    assert!(matches!(result, Err(Error::HashCollision { .. })));
+    assert!(matches!(
+        result,
+        Err(Error::Object(ObjectError::HashCollision { .. }))
+    ));
 }
 
 fn shattered_blob_store_bytes(which: u8) -> Vec<u8> {
@@ -193,7 +197,7 @@ fn parallel_hash_surfaces_collision() {
     let err = try_par_hash_with_force(&items, threads, |bytes| HashAlgo::Sha1.digest(bytes))
         .expect_err("parallel");
     match err {
-        ParallelHashError::Task(Error::HashCollision { .. }) => {}
+        ParallelHashError::Task(Error::Object(ObjectError::HashCollision { .. })) => {}
         other => panic!("unexpected error: {other:?}"),
     }
 

@@ -24,8 +24,8 @@ pub struct RewordOptions {
 /// # Errors
 ///
 /// Returns [`HistoryError::EmptyMessage`] when the cleaned body would be empty.
-pub fn normalize_rewrite_message(raw: &str) -> Result<String, HistoryError> {
-    normalize_commit_message(raw).map_err(|_| HistoryError::EmptyMessage)
+pub fn normalize_rewrite_message(raw: &str) -> crate::error::Result<String> {
+    normalize_commit_message(raw).map_err(|_| HistoryError::EmptyMessage.into())
 }
 
 fn author_date_suffix_from_ident(ident: &str) -> Option<String> {
@@ -41,7 +41,7 @@ fn resolve_reword_author(
     repo: &Repository,
     original_author: &str,
     author_arg: &str,
-) -> Result<String, HistoryError> {
+) -> crate::error::Result<String> {
     let contact = parse_author_arg(author_arg)?;
     let date_override = author_date_suffix_from_ident(original_author);
     Ok(author_identity_line(
@@ -67,14 +67,14 @@ pub fn reword_with(
     commit: ObjectId,
     options: &RewordOptions,
     opts: &RewriteOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     let has_message = options.message.is_some();
     let has_author = options
         .author
         .as_ref()
         .is_some_and(|a| !a.trim().is_empty());
     if !has_message && !has_author {
-        return Err(HistoryError::NothingToReword);
+        return Err(HistoryError::NothingToReword.into());
     }
 
     let message = if let Some(ref raw) = options.message {
@@ -87,11 +87,8 @@ pub fn reword_with(
         if arg.trim().is_empty() {
             None
         } else {
-            let raw = repo
-                .odb()
-                .read(&commit)
-                .map_err(crate::history::error::engine_err)?;
-            let parsed = parse_commit(&raw.data).map_err(crate::history::error::engine_err)?;
+            let raw = repo.odb().read(&commit)?;
+            let parsed = parse_commit(&raw.data)?;
             Some(resolve_reword_author(repo, &parsed.author, arg)?)
         }
     } else {
@@ -124,7 +121,7 @@ pub fn reword(
     commit: ObjectId,
     message: String,
     opts: &RewriteOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     reword_with(
         repo,
         commit,

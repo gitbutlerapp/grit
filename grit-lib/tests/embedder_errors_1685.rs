@@ -2,6 +2,7 @@
 
 use grit_lib::blame::{self, compute_blame, BlameDiffAlgorithm};
 use grit_lib::error::Error;
+use grit_lib::error::RevisionError;
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -70,7 +71,7 @@ fn assert_blame_path_not_in_revision(err: Error, expected_path: &str, expected_r
     assert!(
         matches!(
             err,
-            Error::RevParse(RevParseError::PathNotInRevision { ref path, ref revision, .. })
+            Error::Revision(RevisionError::Parse(RevParseError::PathNotInRevision { ref path, ref revision, .. }))
                 if path == expected_path && revision == expected_revision
         ),
         "got {err:?}"
@@ -128,7 +129,7 @@ fn deep_parent_navigation_is_revision_out_of_range() {
     assert!(
         matches!(
             err,
-            Error::RevParse(RevParseError::RevisionOutOfRange { ref spec, .. }) if spec == "main~99"
+            Error::Revision(RevisionError::Parse(RevParseError::RevisionOutOfRange { ref spec, .. })) if spec == "main~99"
         ),
         "got {err:?}"
     );

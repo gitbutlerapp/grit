@@ -1,5 +1,6 @@
 //! `remove_paths` / `move_path` compatibility with the system `git` binary.
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -275,7 +276,10 @@ fn rm_modified_refused_without_force() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("rm should refuse");
-    assert!(matches!(err, grit_lib::error::Error::RemoveBlocked { .. }));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Worktree(WorktreeError::RemoveBlocked { .. })
+    ));
 }
 
 #[test]
@@ -369,7 +373,7 @@ fn mv_file_to_missing_directory_with_trailing_slash_refused() {
     .expect_err("mv file missing/");
     assert!(matches!(
         err,
-        grit_lib::error::Error::MoveDestinationNotDirectory { .. }
+        grit_lib::error::Error::Worktree(WorktreeError::MoveDestinationNotDirectory { .. })
     ));
     assert!(repo_dir.join("c").is_file());
     assert!(git_porcelain(repo_dir).trim().is_empty());
@@ -549,7 +553,10 @@ fn mv_self_move_with_force_is_non_destructive() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("self mv");
-    assert!(matches!(err, grit_lib::error::Error::MoveIntoSelf { .. }));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Worktree(WorktreeError::MoveIntoSelf { .. })
+    ));
 
     assert!(repo_dir.join("a").is_file(), "worktree file must remain");
     let status = git_porcelain(repo_dir);
@@ -579,7 +586,10 @@ fn mv_directory_refuses_missing_tracked_child() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("mv missing child");
-    assert!(matches!(err, grit_lib::error::Error::MoveBadSource { .. }));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Worktree(WorktreeError::MoveBadSource { .. })
+    ));
 
     assert!(repo_dir.join("d/a").is_file());
     assert!(!repo_dir.join("d/b").exists());
@@ -615,7 +625,7 @@ fn rm_directory_pathspec_refused_without_recursive() {
     .expect_err("rm dir without -r");
     assert!(matches!(
         err,
-        grit_lib::error::Error::NotRemovingRecursively(_)
+        grit_lib::error::Error::Worktree(WorktreeError::NotRemovingRecursively { .. })
     ));
     assert!(repo_dir.join("dir_hidden/file").is_file());
 }
@@ -637,7 +647,10 @@ fn mv_rejects_destination_outside_work_tree() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("mv outside repo");
-    assert!(matches!(err, grit_lib::error::Error::PathOutsideRepo(_)));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Worktree(WorktreeError::OutsideRepo(_))
+    ));
     let msg = err.to_string();
     assert!(
         msg.contains("'../escaped' is outside repository at '"),
@@ -706,7 +719,10 @@ fn mv_worktree_failure_leaves_index_unchanged() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("mv into file");
-    assert!(matches!(err, grit_lib::error::Error::PathError(_)));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Worktree(WorktreeError::Path { .. })
+    ));
     assert!(repo_dir.join("tracked").is_file());
     assert!(repo_dir.join("blocked").is_file());
     assert_eq!(
@@ -777,7 +793,10 @@ fn mv_rejects_in_repo_absolute_destination() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("absolute destination");
-    assert!(matches!(err, grit_lib::error::Error::InvalidPath(_)));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Worktree(WorktreeError::InvalidPath { .. })
+    ));
 
     assert!(repo_dir.join("source").is_file());
     assert!(repo_dir.join("destination").is_file());
@@ -806,7 +825,10 @@ fn mv_rejects_parent_component_in_source() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err(".. source");
-    assert!(matches!(err, grit_lib::error::Error::PathOutsideRepo(_)));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Worktree(WorktreeError::OutsideRepo(_))
+    ));
 
     assert!(repo_dir.join("source").is_file());
     assert!(!repo_dir.join("moved").exists());
@@ -846,7 +868,10 @@ fn mv_force_failure_restores_destination_and_index() {
     )
     .expect_err("forced mv");
     assert!(
-        matches!(err, grit_lib::error::Error::PathError(_)),
+        matches!(
+            err,
+            grit_lib::error::Error::Worktree(WorktreeError::Path { .. })
+        ),
         "unexpected error: {err:?}"
     );
 
@@ -1059,8 +1084,8 @@ fn mv_ignorecase_symlink_pair_not_case_only_directory() {
     assert!(
         matches!(
             err,
-            grit_lib::error::Error::MoveDestinationExists { .. }
-                | grit_lib::error::Error::MoveIntoSubdirectory { .. }
+            grit_lib::error::Error::Worktree(WorktreeError::MoveDestinationExists { .. })
+                | grit_lib::error::Error::Worktree(WorktreeError::MoveIntoSubdirectory { .. })
         ),
         "unexpected error: {err:?}"
     );
@@ -1192,7 +1217,7 @@ fn mv_destination_exists_refused() {
     .expect_err("mv");
     assert!(matches!(
         err,
-        grit_lib::error::Error::MoveDestinationExists { .. }
+        grit_lib::error::Error::Worktree(WorktreeError::MoveDestinationExists { .. })
     ));
 }
 
@@ -1269,7 +1294,7 @@ fn rm_opts(path: &str, cached: bool) -> RemoveOptions {
 
 fn blocked_reasons(err: grit_lib::error::Error) -> Vec<(String, RemoveBlockReason)> {
     match err {
-        grit_lib::error::Error::RemoveBlocked { paths } => {
+        grit_lib::error::Error::Worktree(WorktreeError::RemoveBlocked { paths }) => {
             paths.into_iter().map(|b| (b.path, b.reason)).collect()
         }
         other => panic!("expected RemoveBlocked, got {other:?}"),

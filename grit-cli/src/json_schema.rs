@@ -425,14 +425,14 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             _ => return None,
         },
         "rebase" => {
-            if args.iter().any(|a| *a == "--check") {
+            if args.contains(&"--check") {
                 "rebase.check"
             } else {
                 "rebase"
             }
         }
         "fetch" => {
-            if args.iter().any(|a| *a == "--all") {
+            if args.contains(&"--all") {
                 "fetch.all"
             } else {
                 "fetch"
@@ -525,10 +525,8 @@ pub fn schema_key_for_doc_example(
             return Some("reflog.list".into());
         }
     }
-    if page_command == "rebase" {
-        if instance.get("check").and_then(|v| v.as_bool()) == Some(true) {
-            return Some("rebase.check".into());
-        }
+    if page_command == "rebase" && instance.get("check").and_then(|v| v.as_bool()) == Some(true) {
+        return Some("rebase.check".into());
     }
     if page_command == "stash" {
         if instance.is_array() {

@@ -1,5 +1,6 @@
 //! Object selection for pack-objects (walk or pack bitmap reachability).
 
+use crate::error::ObjectError;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::Arc;
@@ -270,9 +271,9 @@ pub fn try_bitmap_reachable_for_upload(
         MissingAction::Allow,
     ) {
         Ok(sets) => Ok(Some(sets)),
-        Err(BitmapWalkError::Unsupported(_)) => Ok(None),
-        Err(BitmapWalkError::Bitmap(_)) => Ok(None),
-        Err(BitmapWalkError::Repository(e)) => Err(e),
+        Err(Error::Object(ObjectError::BitmapWalk(BitmapWalkError::Unsupported(_)))) => Ok(None),
+        Err(Error::Object(ObjectError::BitmapWalk(BitmapWalkError::Bitmap(_)))) => Ok(None),
+        Err(e) => Err(e),
     }
 }
 
@@ -461,7 +462,7 @@ pub(crate) struct TagCandidate {
 ///
 /// # Errors
 ///
-/// [`Error::ObjectNotFound`] or [`Error::CorruptObject`] for an unreadable tag in a
+/// [`crate::error::ObjectError::NotFound`] or [`crate::error::ObjectError::Corrupt`] for an unreadable tag in a
 /// chain that is added.
 pub(crate) fn append_included_tags(
     odb: &Odb,
@@ -509,7 +510,7 @@ pub(crate) fn append_included_tags(
 ///
 /// # Errors
 ///
-/// [`Error::ObjectNotFound`] or [`Error::CorruptObject`] for an unreadable tag in a
+/// [`crate::error::ObjectError::NotFound`] or [`crate::error::ObjectError::Corrupt`] for an unreadable tag in a
 /// qualifying chain.
 pub(crate) fn included_tag_chains(
     odb: &Odb,
@@ -529,7 +530,9 @@ pub(crate) fn included_tag_chains(
             }
             let tag = odb.read(&current)?;
             current = tag_object_line_oid(&tag.data).ok_or_else(|| {
-                Error::CorruptObject(format!("tag {current} has no valid object header"))
+                Error::Object(ObjectError::Corrupt {
+                    detail: format!("tag {current} has no valid object header"),
+                })
             })?;
         }
     }
@@ -938,9 +941,9 @@ fn try_bitmap_peer_held(
         MissingAction::Allow,
     ) {
         Ok(set) => Ok(Some(set)),
-        Err(BitmapWalkError::Unsupported(_)) => Ok(None),
-        Err(BitmapWalkError::Bitmap(_)) => Ok(None),
-        Err(BitmapWalkError::Repository(e)) => Err(e),
+        Err(Error::Object(ObjectError::BitmapWalk(BitmapWalkError::Unsupported(_)))) => Ok(None),
+        Err(Error::Object(ObjectError::BitmapWalk(BitmapWalkError::Bitmap(_)))) => Ok(None),
+        Err(e) => Err(e),
     }
 }
 
@@ -1799,7 +1802,7 @@ impl<'a> EnumerationWalk<'a> {
         }
         let info = if self.missing.is_some() {
             match self.odb.read_info_without_fetch(oid) {
-                Err(crate::error::Error::ObjectNotFound(_)) => return Ok(None),
+                Err(crate::error::Error::Object(ObjectError::NotFound { .. })) => return Ok(None),
                 other => other,
             }
         } else {

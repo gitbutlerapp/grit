@@ -4,6 +4,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::error::ObjectError;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -28,7 +29,7 @@ use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transport::http::HttpClient;
-use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
+use grit_lib::remote::{HttpClientFactory, RemoteError};
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_lib::state::InProgressOperation;
 use grit_lib::test_support::objects_pack::{
@@ -54,12 +55,12 @@ fn days_ago(days: u64) -> SystemTime {
 struct NoHttp;
 
 impl HttpClientFactory for NoHttp {
-    fn create(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
-        Err(RemoteError::UnsupportedScheme)
+    fn create(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
+        Err(grit_lib::error::Error::from(RemoteError::UnsupportedScheme))
     }
 
-    fn create_for_preflight(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
-        Err(RemoteError::UnsupportedScheme)
+    fn create_for_preflight(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
+        Err(grit_lib::error::Error::from(RemoteError::UnsupportedScheme))
     }
 }
 
@@ -568,7 +569,7 @@ fn refusals_are_typed() {
     let (plain, _) = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
     assert!(matches!(
         drop_promised_blobs(&plain, &opts(LIMIT, None)),
-        Err(Error::NoPromisorRemote { .. })
+        Err(Error::Object(ObjectError::NoPromisorRemote { .. }))
     ));
 
     let fx = Fixture::new().with_old_versions_fetched();
@@ -594,7 +595,9 @@ fn refusals_are_typed() {
     .unwrap();
     assert!(matches!(
         drop_promised_blobs(&fx.offline(), &opts(LIMIT, None)),
-        Err(Error::MaintenanceRunning { .. })
+        Err(Error::Repository(
+            RepositoryError::MaintenanceRunning { .. }
+        ))
     ));
     std::fs::remove_file(fx.git_dir.join("gc.pid")).unwrap();
 

@@ -109,7 +109,7 @@ fn set_url_unknown_remote_typed_error() {
     assert!(matches!(
         repo.remotes()
             .set_url("missing", "x", RemoteUrlKind::Fetch, false),
-        Err(RemoteError::UnknownRemote(name)) if name == "missing"
+        Err(RemoteError::UnknownRemote { name }) if name == "missing"
     ));
 }
 

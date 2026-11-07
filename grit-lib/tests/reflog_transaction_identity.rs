@@ -3,6 +3,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::error::ObjectError;
+use grit_lib::error::RefError;
 
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
@@ -41,8 +43,11 @@ fn forged_head_update(tip: ObjectId) -> RefUpdate {
 }
 
 fn assert_invalid_reflog_signature(err: Error) {
-    let is_invalid = matches!(err, Error::InvalidSignature(_))
-        || matches!(err, Error::RefStore(RefStoreError::InvalidReflog(_)));
+    let is_invalid = matches!(err, Error::Object(ObjectError::InvalidSignature(_)))
+        || matches!(
+            err,
+            Error::Ref(RefError::Store(RefStoreError::InvalidReflog(_)))
+        );
     assert!(is_invalid, "expected invalid reflog/signature, got {err:?}");
 }
 

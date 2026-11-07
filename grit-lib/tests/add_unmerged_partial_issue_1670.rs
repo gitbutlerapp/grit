@@ -7,6 +7,7 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::WorktreeError;
 use grit_test_support::git;
 use std::fs;
 
@@ -69,7 +70,7 @@ fn add_dot_stages_resolved_and_unrelated_while_naming_marked_conflicts() {
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
-    let Error::UnmergedConflictMarkers { paths } = err else {
+    let Error::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) = err else {
         panic!("expected marker paths, got {err}");
     };
     assert_eq!(paths, vec!["b.txt".to_owned()]);
@@ -109,7 +110,7 @@ fn add_single_marked_unmerged_path_names_that_path() {
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
-    let Error::UnmergedConflictMarkers { paths } = err else {
+    let Error::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) = err else {
         panic!("expected marker paths, got {err}");
     };
     assert_eq!(paths, vec!["b.txt".to_owned()]);

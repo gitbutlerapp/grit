@@ -15,6 +15,7 @@
 //! only for objects that are searched or recompressed, and the pack streams to a
 //! staging file, so memory does not grow with the size of the repository.
 
+use crate::error::ObjectError;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -145,7 +146,7 @@ struct SourcePack {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] for malformed source packs or CRC mismatches,
+/// Returns [`crate::error::ObjectError::Corrupt`] for malformed source packs or CRC mismatches,
 /// object read failures, and [`Error::Io`] when writing the staging file fails.
 pub(crate) fn write_repack_pack(
     odb: &Odb,
@@ -154,8 +155,11 @@ pub(crate) fn write_repack_pack(
     settings: &RepackPackSettings,
     staging_path: &Path,
 ) -> Result<Vec<(ObjectId, u64, u32)>> {
-    let n = u32::try_from(objects.len())
-        .map_err(|_| Error::CorruptObject("too many objects for one pack".to_owned()))?;
+    let n = u32::try_from(objects.len()).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "too many objects for one pack".to_owned(),
+        })
+    })?;
     let _pack_context = odb.pack_read_context_guard();
     let mut packs = open_source_packs(odb)?;
     let stored = locate_objects(odb, objects, &mut packs)?;
@@ -272,8 +276,11 @@ fn locate_objects(
             }
             let sp = &packs[pack as usize];
             let offset = sp.idx.offset_at(row as usize)?;
-            let mut pos = usize::try_from(offset)
-                .map_err(|_| Error::CorruptObject("pack offset exceeds memory".to_owned()))?;
+            let mut pos = usize::try_from(offset).map_err(|_| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "pack offset exceeds memory".to_owned(),
+                })
+            })?;
             let (packed_type, size) = parse_pack_object_header(&sp.data, &mut pos)?;
             let kind = match packed_type {
                 PackedType::Commit => ObjectKind::Commit,
@@ -305,7 +312,11 @@ fn locate_objects(
                     let base_oid = sp
                         .data
                         .get(pos..pos + hash_len)
-                        .ok_or_else(|| Error::CorruptObject("truncated ref-delta base".to_owned()))
+                        .ok_or_else(|| {
+                            Error::Object(ObjectError::Corrupt {
+                                detail: "truncated ref-delta base".to_owned(),
+                            })
+                        })
                         .and_then(ObjectId::from_bytes)?;
                     pos += hash_len;
                     let base = object_number(&base_oid, packs, &loose_numbers);
@@ -494,8 +505,11 @@ fn stored_kind(
 }
 
 fn delta_result_size(sp: &SourcePack, data_start: u64) -> Result<u64> {
-    let mut pos = usize::try_from(data_start)
-        .map_err(|_| Error::CorruptObject("pack offset exceeds memory".to_owned()))?;
+    let mut pos = usize::try_from(data_start).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "pack offset exceeds memory".to_owned(),
+        })
+    })?;
     read_delta_result_size_from_pack_zlib(&sp.data, &mut pos)
 }
 
@@ -568,8 +582,11 @@ fn write_pack(
     };
     let algo = odb.hash_algo();
     let compression = odb.pack_compression()?;
-    let count = u32::try_from(order.len())
-        .map_err(|_| Error::CorruptObject("pack object count exceeds u32".to_owned()))?;
+    let count = u32::try_from(order.len()).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "pack object count exceeds u32".to_owned(),
+        })
+    })?;
     let file = File::create(staging_path).map_err(pack_io)?;
     let mut out = HashingWriter::new(algo, BufWriter::with_capacity(1 << 20, file));
     let mut header = Vec::with_capacity(32);
@@ -602,8 +619,11 @@ fn write_pack(
                 end,
                 delta_size,
             } => {
-                let size = usize::try_from(*delta_size)
-                    .map_err(|_| Error::CorruptObject("delta size exceeds memory".to_owned()))?;
+                let size = usize::try_from(*delta_size).map_err(|_| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "delta size exceeds memory".to_owned(),
+                    })
+                })?;
                 delta_header(
                     &mut header,
                     plan,
@@ -621,7 +641,9 @@ fn write_pack(
                     delta_len, zlib, ..
                 } = &plan[n]
                 else {
-                    return Err(Error::CorruptObject("delta plan changed".to_owned()));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: "delta plan changed".to_owned(),
+                    }));
                 };
                 delta_header(
                     &mut header,
@@ -744,9 +766,9 @@ fn checked_entry(
         .crc32_at(row as usize)
         .is_some_and(|want| want != crc)
     {
-        return Err(Error::CorruptObject(format!(
-            "packed object {oid} does not match its index CRC"
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("packed object {oid} does not match its index CRC"),
+        }));
     }
     Ok((offset, end, crc))
 }
@@ -757,7 +779,11 @@ fn source_slice(packs: &[SourcePack], pack: u32, start: u64, end: u64) -> Result
         .ok()
         .zip(usize::try_from(end).ok())
         .and_then(|(s, e)| data.get(s..e))
-        .ok_or_else(|| Error::CorruptObject("pack entry out of bounds".to_owned()))
+        .ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "pack entry out of bounds".to_owned(),
+            })
+        })
 }
 
 /// Header of a delta entry at `offset` whose base was written earlier.
@@ -772,15 +798,16 @@ fn delta_header(
     size: usize,
     settings: &RepackPackSettings,
 ) -> Result<()> {
-    let base = plan[n]
-        .base()
-        .ok_or_else(|| Error::CorruptObject("delta without base".to_owned()))?
-        as usize;
+    let base = plan[n].base().ok_or_else(|| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "delta without base".to_owned(),
+        })
+    })? as usize;
     let base_offset = new_offset[base];
     if base_offset == u64::MAX {
-        return Err(Error::CorruptObject(
-            "delta base not written before its target".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "delta base not written before its target".to_owned(),
+        }));
     }
     if settings.use_ofs_delta {
         encode_pack_object_header(header, 6, size);

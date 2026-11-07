@@ -6,9 +6,6 @@ use crate::error::{GitDirPathOperation, LockHeldError, PathIoError, PathIoOperat
 use crate::objects::HashAlgo;
 use thiserror::Error;
 
-/// Result type for index operations ([`IndexError`] only).
-pub type IndexResult<T> = std::result::Result<T, IndexError>;
-
 /// Why index bytes or an extension payload could not be parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -126,10 +123,6 @@ pub enum IndexCorruptReason {
     },
     /// write-tree: missing index entry during traversal.
     WriteTreeMissingIndexEntry,
-    /// write-tree: zlib/deflate failed while writing a tree object.
-    WriteTreeZlibCompression,
-    /// write-tree: object database returned an unexpected umbrella error.
-    WriteTreeUnexpectedUmbrella,
     /// Resolve-undo extension payload truncated (path).
     ResolveUndoTruncatedPath,
     /// Resolve-undo mode field truncated.
@@ -294,6 +287,17 @@ pub enum IndexError {
         /// Why the mode change was rejected.
         reason: IndexChmodReason,
     },
+
+    /// The `core.fsmonitor` hook exited unsuccessfully.
+    #[error("fsmonitor hook exited with {}", status.map_or_else(|| "a signal".to_owned(), |s| format!("status {s}")))]
+    FsmonitorHookFailed {
+        /// Exit status, when the hook exited normally.
+        status: Option<i32>,
+    },
+
+    /// The `core.fsmonitor` hook (protocol version 2) answered without a token.
+    #[error("fsmonitor hook returned empty token")]
+    FsmonitorHookEmptyToken,
 }
 
 impl IndexError {
@@ -311,6 +315,8 @@ impl IndexError {
             Self::LockHeld(_) => "lock_held",
             Self::PathIo(_) => "git_dir_path_io",
             Self::Chmod { .. } => "message",
+            Self::FsmonitorHookFailed { .. } => "index_fsmonitor_hook_failed",
+            Self::FsmonitorHookEmptyToken => "index_fsmonitor_hook_empty_token",
         }
     }
 
@@ -433,12 +439,6 @@ fn corrupt_detail(corrupt: &IndexCorrupt) -> String {
         IndexCorruptReason::WriteTreeMissingIndexEntry => {
             "missing index entry during tree walk".to_owned()
         }
-        IndexCorruptReason::WriteTreeZlibCompression => {
-            "write-tree: zlib compression failed".to_owned()
-        }
-        IndexCorruptReason::WriteTreeUnexpectedUmbrella => {
-            "write-tree: unexpected error".to_owned()
-        }
         IndexCorruptReason::ResolveUndoTruncatedPath => "truncated resolve-undo path".to_owned(),
         IndexCorruptReason::ResolveUndoTruncatedMode => "truncated resolve-undo mode".to_owned(),
         IndexCorruptReason::ResolveUndoInvalidModeUtf8 => {
@@ -508,24 +508,12 @@ impl From<crate::lockfile::LockError> for IndexError {
     }
 }
 
-impl From<crate::error::ConfigError> for IndexError {
-    fn from(err: crate::error::ConfigError) -> Self {
-        Self::from(crate::error::Error::Config(err))
-    }
-}
-
 impl From<IndexError> for crate::error::Error {
     fn from(err: IndexError) -> Self {
         match err {
             IndexError::LockHeld(h) => Self::LockHeld(h),
             IndexError::PathIo(p) => p.into(),
-            IndexError::Unmerged { .. } => Self::Index(err),
-            IndexError::PathPrefixConflict { .. } => Self::Index(err),
-            IndexError::FsmonitorExtensionTruncated => Self::Index(err),
-            IndexError::FsmonitorExtensionBadVersion(_) => Self::Index(err),
-            IndexError::FsmonitorExtensionEwahInvalid => Self::Index(err),
-            IndexError::CacheTreeCorrupt => Self::Index(err),
-            IndexError::Corrupt { .. } | IndexError::Chmod { .. } => Self::Index(err),
+            other => Self::Index(other),
         }
     }
 }
@@ -539,58 +527,5 @@ impl From<std::io::Error> for IndexError {
             path: None,
             source,
         })
-    }
-}
-
-impl From<crate::error::Error> for IndexError {
-    #[allow(deprecated)]
-    fn from(err: crate::error::Error) -> Self {
-        match err {
-            crate::error::Error::IndexError(detail) => Self::Corrupt {
-                corrupt: IndexCorrupt::new(IndexCorruptReason::Truncated),
-                detail,
-            },
-            crate::error::Error::IndexUnmerged => Self::unmerged(),
-            crate::error::Error::IndexPathPrefixConflict { directory, file } => {
-                Self::PathPrefixConflict { directory, file }
-            }
-            crate::error::Error::IndexFsmonitorExtensionTruncated => {
-                Self::FsmonitorExtensionTruncated
-            }
-            crate::error::Error::IndexFsmonitorExtensionBadVersion(v) => {
-                Self::FsmonitorExtensionBadVersion(v)
-            }
-            crate::error::Error::IndexFsmonitorExtensionEwahInvalid => {
-                Self::FsmonitorExtensionEwahInvalid
-            }
-            crate::error::Error::CacheTreeCorrupt => Self::CacheTreeCorrupt,
-            crate::error::Error::Index(index) => index,
-            crate::error::Error::LockHeld(h) => Self::LockHeld(h),
-            crate::error::Error::Io(source) => Self::PathIo(PathIoError {
-                operation: PathIoOperation::GitDir(GitDirPathOperation::WriteIndex),
-                path: None,
-                source,
-            }),
-            crate::error::Error::Repository(crate::repo::RepositoryError::GitDirPathIo(source)) => {
-                Self::PathIo(source)
-            }
-            crate::error::Error::WorktreePathIo {
-                operation,
-                path,
-                source,
-            } => Self::PathIo(PathIoError {
-                operation: PathIoOperation::Worktree(operation),
-                path: Some(PathBuf::from(path)),
-                source,
-            }),
-            crate::error::Error::Zlib(detail) => Self::Corrupt {
-                corrupt: IndexCorrupt::new(IndexCorruptReason::WriteTreeZlibCompression),
-                detail,
-            },
-            other => Self::Corrupt {
-                corrupt: IndexCorrupt::new(IndexCorruptReason::WriteTreeUnexpectedUmbrella),
-                detail: other.to_string(),
-            },
-        }
     }
 }

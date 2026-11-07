@@ -280,7 +280,7 @@ fn remove_unknown_remote_typed_error() {
         .remotes()
         .remove("nosuch", RemoveOptions::default())
         .expect_err("unknown");
-    assert!(matches!(err, RemoteError::UnknownRemote(name) if name == "nosuch"));
+    assert!(matches!(err, RemoteError::UnknownRemote { name } if name == "nosuch"));
 }
 
 #[test]

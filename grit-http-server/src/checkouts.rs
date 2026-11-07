@@ -305,13 +305,21 @@ fn open(repo: &ServedRepository, options: &RepositoryOptions) -> Result<Reposito
 /// The response for a snapshot that could not be made: `409` when its blobs are on
 /// a promisor remote this server does not fetch from, `502` when fetching them
 /// failed, `500` otherwise.
-fn snapshot_failed(e: &CheckoutError) -> Rejection {
-    match e {
-        CheckoutError::PromisedBlobs { .. } => error(StatusCode::CONFLICT, e.to_string()),
-        CheckoutError::PromisedBlobsNotFetched { .. } => {
+fn snapshot_failed(e: &grit_lib::error::Error) -> Rejection {
+    match snapshot_error(e) {
+        Some(CheckoutError::PromisedBlobs { .. }) => error(StatusCode::CONFLICT, e.to_string()),
+        Some(CheckoutError::PromisedBlobsNotFetched { .. }) => {
             error(StatusCode::BAD_GATEWAY, e.to_string())
         }
-        other => internal(other),
+        _ => internal(e),
+    }
+}
+
+/// The snapshot-checkout failure inside `e`, when it is one.
+fn snapshot_error(e: &grit_lib::error::Error) -> Option<&CheckoutError> {
+    match e {
+        grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Snapshot(err)) => Some(err),
+        _ => None,
     }
 }
 
@@ -493,11 +501,11 @@ fn create_blocking(
     let snapshot = repo
         .snapshot_checkouts()
         .make_snapshot(head, &paths, None)
-        .map_err(|e| match e {
-            CheckoutError::MissingPath { .. } | CheckoutError::InvalidPath { .. } => {
+        .map_err(|e| match snapshot_error(&e) {
+            Some(CheckoutError::MissingPath { .. } | CheckoutError::InvalidPath { .. }) => {
                 error(StatusCode::BAD_REQUEST, e.to_string())
             }
-            other => snapshot_failed(&other),
+            _ => snapshot_failed(&e),
         })?;
     let store = CheckoutStore::for_repository(repo);
     std::fs::create_dir_all(store.dir().join("bundles")).map_err(|e| internal(&e))?;
@@ -567,9 +575,11 @@ pub(crate) fn reserve_work_branch(
     let mut names = locks.branches();
     let reserved = CheckoutStore::for_repository(repo)
         .reserve_work_branch(repo, wanted, names.start(wanted))
-        .map_err(|e| match e {
-            CheckoutError::InvalidBranchName(_) => error(StatusCode::BAD_REQUEST, e.to_string()),
-            other => internal(&other),
+        .map_err(|e| match snapshot_error(&e) {
+            Some(CheckoutError::InvalidBranchName { .. }) => {
+                error(StatusCode::BAD_REQUEST, e.to_string())
+            }
+            _ => internal(&e),
         })?;
     names.reached(wanted, reserved.next);
     Ok(reserved.name)
@@ -858,12 +868,14 @@ async fn update<H: CheckoutHost>(
                 }
                 let parent = ObjectId::from_hex(&info.root).map_err(|e| internal(&e))?;
                 let snapshot =
-                    repo.snapshot_checkouts().make_snapshot(head, &info.paths, Some(parent)).map_err(|e| match e {
-                        CheckoutError::MissingPath { .. } => error(
-                            StatusCode::CONFLICT,
-                            format!("{e}; the checkout's paths are gone from {}", info.branch),
-                        ),
-                        other => snapshot_failed(&other),
+                    repo.snapshot_checkouts().make_snapshot(head, &info.paths, Some(parent)).map_err(|e| {
+                        match snapshot_error(&e) {
+                            Some(CheckoutError::MissingPath { .. }) => error(
+                                StatusCode::CONFLICT,
+                                format!("{e}; the checkout's paths are gone from {}", info.branch),
+                            ),
+                            _ => snapshot_failed(&e),
+                        }
                     })?;
                 // The checkout's own ref, written only while its lock is held.
                 grit_lib::refs::write_ref(repo.git_dir(), target_ref(&id), &snapshot.commit)
@@ -1001,6 +1013,7 @@ fn projection_refused(name: &str, follows: &str, refusal: &ProjectError) -> Reje
                 "{name} builds on {commit} of {follows}, from before this checkout's first snapshot; rebase it onto a newer {follows} first"
             ),
         ),
+        other => (StatusCode::CONFLICT, format!("cannot check in {name}: {other}")),
     };
     error(status, message)
 }

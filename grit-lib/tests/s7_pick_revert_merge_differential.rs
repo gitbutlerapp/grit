@@ -1,5 +1,6 @@
 //! s7-style differential: full library pick, revert, and merge vs system git (tree and worktree).
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::process::Command;
 
@@ -279,10 +280,10 @@ fn s7_differential_pick_refuses_dirty_worktree() {
     assert!(
         matches!(
             &err,
-            grit_lib::error::Error::DirtyWorktree {
+            grit_lib::error::Error::Worktree(WorktreeError::DirtyWorktree {
                 operation: grit_lib::error::WorktreeOperation::Pick,
                 paths,
-            } if paths == &["a.txt"]
+            }) if paths == &["a.txt"]
         ),
         "{err:?}"
     );

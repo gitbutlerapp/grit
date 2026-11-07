@@ -82,11 +82,7 @@ pub fn map_worktree_io(
     operation: WorktreePathOperation,
     source: io::Error,
 ) -> Error {
-    Error::WorktreePathIo {
-        path: path.into(),
-        operation,
-        source,
-    }
+    crate::error::PathIoError::worktree(path, operation, source).into()
 }
 
 /// Attach path context to [`std::io::Result`].

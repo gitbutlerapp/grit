@@ -27,9 +27,8 @@ use crate::diff::{
     diff_index_to_worktree_with_options, is_unregistered_embedded_git_repo, DiffEntry,
     DiffIndexToWorktreeOptions, DiffStatus,
 };
-use crate::error::{ConfigError, Error, Result};
+use crate::error::{ConfigError, Result};
 use crate::hash::{try_par_hash_with, ParallelHashError};
-use crate::history::HistoryEngineError;
 use crate::ignore::IgnoreMatcher;
 use crate::index::{index_file_mtime, Index, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
@@ -578,7 +577,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
     } else {
         let worktree_rules = rules_arc
             .lock()
-            .map_err(|e| Error::Verbatim(format!("worktree rules lock poisoned: {e}")))?;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (untracked, _, _) = collect_untracked_and_ignored_inner(
             repo,
             index,
@@ -2416,12 +2415,8 @@ pub fn status(
     let interrupted_rewrite = if persist_index_to_disk {
         match crate::history::recover_interrupted_rewrite_apply(repo) {
             Ok(recovery) => recovery.map(InterruptedRewrite::from),
-            Err(crate::history::HistoryError::Engine(e))
-                if matches!(*e, HistoryEngineError::LockHeld(_)) =>
-            {
-                Some(InterruptedRewrite::Pending)
-            }
-            Err(err) => return Err(crate::error::Error::History(err)),
+            Err(crate::error::Error::LockHeld(_)) => Some(InterruptedRewrite::Pending),
+            Err(err) => return Err(err),
         }
     } else if crate::history::rewrite_apply_journal_active(repo.git_dir()) {
         Some(InterruptedRewrite::Pending)
@@ -2586,9 +2581,9 @@ pub fn status(
         if opts.untracked == UntrackedMode::No && opts.ignored == IgnoredMode::No {
             (Vec::new(), Vec::new())
         } else {
-            let rules_guard = worktree_rules.lock().map_err(|e| {
-                crate::error::Error::Verbatim(format!("worktree rules lock poisoned: {e}"))
-            })?;
+            let rules_guard = worktree_rules
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let (mut untracked, ignored, collect_meta) =
                 collect_untracked_and_ignored_with_rules_and_cancel(
                     repo,

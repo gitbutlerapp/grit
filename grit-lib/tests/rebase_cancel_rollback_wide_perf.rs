@@ -118,7 +118,7 @@ fn run_rebase(
     side: grit_lib::objects::ObjectId,
     topic: grit_lib::objects::ObjectId,
     cancel_at_checkout: bool,
-) -> Result<Duration, RebaseSessionError> {
+) -> grit_lib::error::Result<Duration> {
     let opts = StartRebaseOptions {
         request: RebaseRequest {
             upstream: side,

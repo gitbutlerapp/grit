@@ -24,7 +24,7 @@ use grit_lib::remote::serve::{
     ServeOptions, UploadPack,
 };
 use grit_lib::remote::transport::http::HttpClient;
-use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
+use grit_lib::remote::{HttpClientFactory, RemoteError};
 use grit_lib::repo::{InitOptions, Repository};
 
 const BIG: usize = 20 * 1024;
@@ -33,12 +33,12 @@ const BIG: usize = 20 * 1024;
 struct NoHttp;
 
 impl HttpClientFactory for NoHttp {
-    fn create(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
-        Err(RemoteError::UnsupportedScheme)
+    fn create(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
+        Err(grit_lib::error::Error::from(RemoteError::UnsupportedScheme))
     }
 
-    fn create_for_preflight(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
-        Err(RemoteError::UnsupportedScheme)
+    fn create_for_preflight(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
+        Err(grit_lib::error::Error::from(RemoteError::UnsupportedScheme))
     }
 }
 
@@ -231,7 +231,7 @@ fn serve(
     repo: &Repository,
     request: Vec<u8>,
     opts: &mut ServeOptions,
-) -> (Vec<u8>, Result<(), ServeError>) {
+) -> (Vec<u8>, grit_lib::error::Result<()>) {
     let mut out = Vec::new();
     let result = UploadPack::new(repo, opts)
         .run(&mut Cursor::new(request), &mut out)
@@ -279,10 +279,10 @@ fn client_that_accepts_nothing_gets_an_err_line_naming_the_lop() {
     let (out, result) = serve(&repo, fetch_request(&[], &[want(fx.tip)]), &mut v2(false));
     assert!(matches!(
         result,
-        Err(ServeError::ObjectMissing {
+        Err(grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Serve(ServeError::ObjectMissing {
             oid,
             reason: MissingObjectReason::Promised
-        }) if oid == fx.big
+        }))) if oid == fx.big
     ));
     // Skip the advertisement; the response ends with the ERR line.
     let text = String::from_utf8_lossy(&out);
@@ -418,10 +418,12 @@ fn a_session_without_lazy_fetch_drops_the_repositorys_fetcher() {
     let (_, result) = serve(&repo, fetch_request(&[], &[want(fx.tip)]), &mut forced);
     assert!(matches!(
         result,
-        Err(ServeError::ObjectMissing {
-            reason: MissingObjectReason::NoFetcher,
-            ..
-        })
+        Err(grit_lib::error::Error::Remote(
+            grit_lib::remote::RemoteError::Serve(ServeError::ObjectMissing {
+                reason: MissingObjectReason::NoFetcher,
+                ..
+            })
+        ))
     ));
     assert!(!repo.odb().exists_stored(&fx.big));
 
@@ -453,10 +455,12 @@ fn lazy_fetch_without_a_fetcher_says_so() {
     let (_, result) = serve(&repo, fetch_request(&[], &[want(fx.tip)]), &mut opts);
     assert!(matches!(
         result,
-        Err(ServeError::ObjectMissing {
-            reason: MissingObjectReason::NoFetcher,
-            ..
-        })
+        Err(grit_lib::error::Error::Remote(
+            grit_lib::remote::RemoteError::Serve(ServeError::ObjectMissing {
+                reason: MissingObjectReason::NoFetcher,
+                ..
+            })
+        ))
     ));
 }
 
@@ -492,10 +496,12 @@ fn v0_client_is_told_on_the_error_band() {
     let (out, result) = serve(&repo, request, &mut opts);
     assert!(matches!(
         result,
-        Err(ServeError::ObjectMissing {
-            reason: MissingObjectReason::Promised,
-            ..
-        })
+        Err(grit_lib::error::Error::Remote(
+            grit_lib::remote::RemoteError::Serve(ServeError::ObjectMissing {
+                reason: MissingObjectReason::Promised,
+                ..
+            })
+        ))
     ));
     let text = String::from_utf8_lossy(&out);
     assert!(text.contains("\u{3}object"), "{text}");
@@ -517,10 +523,12 @@ fn v0_want_of_a_promised_blob_gets_an_err_line() {
     let (out, result) = serve(&repo, request, &mut opts);
     assert!(matches!(
         result,
-        Err(ServeError::ObjectMissing {
-            reason: MissingObjectReason::Promised,
-            ..
-        })
+        Err(grit_lib::error::Error::Remote(
+            grit_lib::remote::RemoteError::Serve(ServeError::ObjectMissing {
+                reason: MissingObjectReason::Promised,
+                ..
+            })
+        ))
     ));
     let mut reader = Cursor::new(out);
     match read_packet(&mut reader).unwrap() {
@@ -559,10 +567,10 @@ fn a_truly_missing_blob_is_not_promised() {
     );
     assert!(matches!(
         result,
-        Err(ServeError::ObjectMissing {
+        Err(grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Serve(ServeError::ObjectMissing {
             oid,
             reason: MissingObjectReason::NotPromised
-        }) if oid == ghost
+        }))) if oid == ghost
     ));
 }
 
@@ -586,7 +594,9 @@ fn repositories_without_promisor_remotes_keep_the_old_path() {
     let repo = Repository::open(dir.path(), &RepositoryOptions::empty().for_serving()).unwrap();
     let (_, result) = serve(&repo, fetch_request(&[], &[want(tip)]), &mut v2(false));
     match result {
-        Err(ServeError::ObjectMissing { .. }) => panic!("planner ran for an ordinary repository"),
+        Err(grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Serve(
+            ServeError::ObjectMissing { .. },
+        ))) => panic!("planner ran for an ordinary repository"),
         Err(_) => {}
         Ok(()) => panic!("a missing blob cannot be served"),
     }

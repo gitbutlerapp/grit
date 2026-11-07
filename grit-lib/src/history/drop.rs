@@ -15,22 +15,22 @@ use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
 /// # Errors
 ///
 /// Returns [`HistoryError::RootCommit`] when `commit` has no parents, or
-/// [`HistoryError::MergeCommitInReplay`] when `commit` is a merge, and [`HistoryError::Engine`]
+/// [`HistoryError::MergeCommitInReplay`] when `commit` is a merge, and an object error
 /// when `commit` cannot be read as a commit (for example
-/// [`HistoryEngineError::UnexpectedObjectKind`](super::HistoryEngineError::UnexpectedObjectKind)).
+/// [`ObjectError::UnexpectedKind`](crate::error::ObjectError::UnexpectedKind)).
 /// Other failures
 /// come from [`plan_rewrite`].
 pub fn drop(
     repo: &Repository,
     commit: ObjectId,
     opts: &RewriteOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     let parsed = super::load_commit(repo, commit)?;
     if parsed.parents.is_empty() {
-        return Err(HistoryError::RootCommit { commit });
+        return Err(HistoryError::RootCommit { commit }.into());
     }
     if parsed.parents.len() > 1 {
-        return Err(HistoryError::MergeCommitInReplay { commit });
+        return Err(HistoryError::MergeCommitInReplay { commit }.into());
     }
     let mut edits = HistoryEdits::new();
     edits.insert(commit, CommitEdit::Drop);

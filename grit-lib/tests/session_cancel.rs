@@ -21,7 +21,7 @@ use grit_lib::revwalk::history::{
     continue_rebase, start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome,
     RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
-use grit_lib::stash::{StashApplyOptions, StashError, StashMode, StashPushOptions, StashResult};
+use grit_lib::stash::{StashApplyOptions, StashError, StashMode, StashPushOptions};
 
 const IDENT: &str = "Cancel Test <cancel@example.com> 1700000000 +0000";
 const FILES: usize = 300;
@@ -176,10 +176,10 @@ fn assert_cancelled<T: std::fmt::Debug>(result: grit_lib::error::Result<T>) {
     }
 }
 
-fn assert_stash_cancelled<T: std::fmt::Debug>(result: StashResult<T>) {
+fn assert_stash_cancelled<T: std::fmt::Debug>(result: grit_lib::error::Result<T>) {
     match result {
-        Err(StashError::Cancelled) => {}
-        other => panic!("expected StashError::Cancelled, got {other:?}"),
+        Err(grit_lib::error::Error::Cancelled) => {}
+        other => panic!("expected grit_lib::error::Error::Cancelled, got {other:?}"),
     }
 }
 
@@ -776,7 +776,11 @@ fn conflicting_rebase_stop_completes_once_published_and_continue_needs_resolutio
     )
     .expect_err("continue must require resolution");
     assert!(
-        matches!(err, RebaseSessionError::UnmergedPaths),
+        matches!(
+            &err,
+            grit_lib::error::Error::History(grit_lib::revwalk::history::HistoryError::RebaseSession(session))
+                if matches!(session.as_ref(), RebaseSessionError::UnmergedPaths)
+        ),
         "got {err:?}"
     );
     assert_eq!(branch(&repo, "topic"), topic, "the branch has not moved");
@@ -808,8 +812,8 @@ fn rebase_cancelled_during_checkout_rolls_back() {
     let err =
         start_rebase(&repo, &rebase_start(side, topic), &mut sink, &cancel).expect_err("cancelled");
     assert!(
-        matches!(&err, RebaseSessionError::Library(e) if e.is_cancelled()),
-        "expected RebaseSessionError::Library(Cancelled), got {err:?}"
+        matches!(&err, grit_lib::error::Error::Cancelled),
+        "expected Error::Cancelled, got {err:?}"
     );
     assert!(err.is_cancelled());
     assert_eq!(branch(&repo, "topic"), topic, "refs roll back");

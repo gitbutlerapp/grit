@@ -2,6 +2,10 @@
 
 #![allow(deprecated)]
 
+use grit_lib::error::ObjectError;
+use grit_lib::error::RefError;
+use grit_lib::error::RevisionError;
+use grit_lib::worktree::WorktreeError;
 use std::path::Path;
 
 use anyhow::Error;
@@ -66,17 +70,17 @@ fn structured(kind: ErrorKind, human: &str, hint: Option<&str>) -> Error {
 }
 
 fn human_ref_branch_missing() -> String {
-    human_message_for_lib(&LibError::RefStore(RefStoreError::NotFound {
+    human_message_for_lib(&LibError::Ref(RefError::Store(RefStoreError::NotFound {
         name: "refs/heads/missing".into(),
-    }))
+    })))
 }
 
 static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "ref_store_branch_not_found",
-        build: || Error::new(LibError::RefStore(RefStoreError::NotFound {
+        build: || Error::new(LibError::Ref(RefError::Store(RefStoreError::NotFound {
             name: "refs/heads/missing".into(),
-        })),
+        }))),
         kind: None,
         exit: ExitStatus::Failure,
         human: human_ref_branch_missing,
@@ -92,7 +96,7 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "remote_not_found",
-        build: || Error::new(RemoteError::UnknownRemote("up".into())),
+        build: || Error::new(RemoteError::UnknownRemote { name: "up".into() }),
         kind: Some(ErrorKind::RemoteNotFound),
         exit: ExitStatus::Failure,
         human: || "unknown remote 'up'".to_owned(),
@@ -142,7 +146,7 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "hash_collision",
-        build: || map_lib_error(LibError::HashCollision { oid: oid() }),
+        build: || map_lib_error(LibError::Object(ObjectError::HashCollision { oid: oid() })),
         kind: Some(ErrorKind::HashCollision),
         exit: ExitStatus::Failure,
         human: || format!(
@@ -228,11 +232,11 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "would_overwrite",
         build: || {
-            Error::new(LibError::WouldOverwrite {
+            Error::new(LibError::Worktree(WorktreeError::WouldOverwrite {
                 reason: OverwriteReason::LocalChanges,
                 paths: vec!["f.txt".into()],
                 message: "local changes would be overwritten by checkout".into(),
-            })
+            }))
         },
         kind: Some(ErrorKind::WouldOverwrite),
         exit: ExitStatus::Failure,
@@ -297,16 +301,16 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "pathspec_no_match",
         build: || {
-            Error::new(LibError::PathspecNoMatch {
+            Error::new(LibError::Worktree(WorktreeError::PathspecNoMatch {
                 spec: "nosuch".into(),
-            })
+            }))
         },
         kind: Some(ErrorKind::PathspecNoMatch),
         exit: ExitStatus::Failure,
         human: || {
-            LibError::PathspecNoMatch {
+            LibError::Worktree(WorktreeError::PathspecNoMatch {
                 spec: "nosuch".into(),
-            }
+            })
             .to_string()
         },
         hint: None,
@@ -401,12 +405,12 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "remove_blocked",
         build: || {
-            Error::new(LibError::RemoveBlocked {
+            Error::new(LibError::Worktree(WorktreeError::RemoveBlocked {
                 paths: vec![BlockedRemoval {
                     path: "tracked.txt".into(),
                     reason: RemoveBlockReason::LocalModifications,
                 }],
-            })
+            }))
         },
         kind: None,
         exit: ExitStatus::Failure,
@@ -418,14 +422,14 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_ambiguous_change_id",
         build: || {
-            Error::new(LibError::RevParse(RevParseError::AmbiguousChangeId {
+            Error::new(LibError::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
                     prefix: "abc".into(),
                     candidates: vec![AmbiguousChangeIdHint {
                         oid_hex: "f92d74e3874587aaf443d1db961d4e26dde13e9c".into(),
                         change_id: "changeid123456".into(),
                         subject: "fix bug".into(),
                     }],
-                }))
+                })))
         },
         kind: None,
         exit: ExitStatus::Failure,
@@ -437,9 +441,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_invalid_object_name",
         build: || {
-            Error::new(LibError::RevParse(RevParseError::InvalidObjectName {
+            Error::new(LibError::Revision(RevisionError::Parse(RevParseError::InvalidObjectName {
                     name: "deadbeef".into(),
-                }))
+                })))
         },
         kind: Some(ErrorKind::RevisionNotFound),
         exit: ExitStatus::Failure,
@@ -449,9 +453,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_ambiguous_argument",
         build: || {
-            Error::new(LibError::RevParse(RevParseError::AmbiguousArgument {
+            Error::new(LibError::Revision(RevisionError::Parse(RevParseError::AmbiguousArgument {
                     spec: "HEAD:foo".into(),
-                }))
+                })))
         },
         kind: Some(ErrorKind::RevisionNotFound),
         exit: ExitStatus::Failure,
@@ -461,9 +465,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_reflog_date_unparseable",
         build: || {
-            Error::new(LibError::RevParse(RevParseError::ReflogDateUnparseable {
+            Error::new(LibError::Revision(RevisionError::Parse(RevParseError::ReflogDateUnparseable {
                     date: "not-a-date".into(),
-                }))
+                })))
         },
         kind: None,
         exit: ExitStatus::Failure,
@@ -485,7 +489,7 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "index_unmerged",
-        build: || Error::new(LibError::IndexUnmerged),
+        build: || Error::new(LibError::Index(grit_lib::index::IndexError::unmerged())),
         kind: Some(ErrorKind::UnmergedPaths),
         exit: ExitStatus::Failure,
         human: || {
@@ -504,11 +508,11 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "rev_parse_path_missing_worktree_and_index",
         build: || {
-            Error::new(LibError::RevParse(
+            Error::new(LibError::Revision(RevisionError::Parse(
                 RevParseError::PathMissingFromWorktreeAndIndex {
                     path: "missing.txt".into(),
                 },
-            ))
+            )))
         },
         kind: Some(ErrorKind::PathNotFound),
         exit: ExitStatus::Failure,
@@ -520,9 +524,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "move_source_not_tracked",
         build: || {
-            Error::new(LibError::MoveSourceNotTracked {
+            Error::new(LibError::Worktree(WorktreeError::MoveSourceNotTracked {
                 src: "untracked.txt".into(),
-            })
+            }))
         },
         kind: Some(ErrorKind::BranchError),
         exit: ExitStatus::Failure,
@@ -584,7 +588,7 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "lib_object_not_found",
-        build: || Error::new(LibError::ObjectNotFound("deadbeef".into())),
+        build: || Error::new(LibError::Object(ObjectError::NotFound { name: "deadbeef".into() })),
         kind: None,
         exit: ExitStatus::Failure,
         human: || "revision 'deadbeef' not found".to_owned(),
@@ -593,9 +597,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "remote_library_object_not_found",
         build: || {
-            map_remote_error(RemoteError::Nested(Box::new(LibError::ObjectNotFound(
+            map_remote_error(LibError::Object(ObjectError::NotFound { name:
                 "deadbeef".into(),
-            ))))
+             }))
         },
         kind: None,
         exit: ExitStatus::Failure,
@@ -672,7 +676,7 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "lib_revision_not_found",
-        build: || map_lib_error(LibError::RevisionNotFound("missing".into())),
+        build: || map_lib_error(LibError::Revision(RevisionError::NotFound { spec: "missing".into() })),
         kind: Some(ErrorKind::RevisionNotFound),
         exit: ExitStatus::Failure,
         human: || "no branch, tag or commit named 'missing'".to_owned(),
@@ -680,7 +684,7 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "lib_invalid_ref",
-        build: || Error::new(LibError::InvalidRef("not a valid object name: bad".into())),
+        build: || Error::new(LibError::Ref(RefError::Invalid { detail: "not a valid object name: bad".into() })),
         kind: None,
         exit: ExitStatus::Failure,
         human: || "invalid ref: not a valid object name: bad".to_owned(),
@@ -688,9 +692,9 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "pathspec_ignored",
-        build: || Error::new(LibError::PathspecIgnored {
+        build: || Error::new(LibError::Worktree(WorktreeError::PathspecIgnored {
             paths: vec!["build".into()],
-        }),
+        })),
         kind: None,
         exit: ExitStatus::Failure,
         human: || pathspec_ignored_human(&["build".into()]),
@@ -698,9 +702,9 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "stage_conflict_markers",
-        build: || Error::new(LibError::UnmergedConflictMarkers {
+        build: || Error::new(LibError::Worktree(WorktreeError::UnmergedConflictMarkers {
             paths: vec!["f.txt".into()],
-        }),
+        })),
         kind: Some(ErrorKind::UnmergedPaths),
         exit: ExitStatus::Failure,
         human: || stage_conflict_markers_human(&["f.txt".into()]),
@@ -709,21 +713,21 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "restore_path_unmerged",
         build: || {
-            Error::new(LibError::RestorePathUnmerged {
+            Error::new(LibError::Worktree(WorktreeError::RestorePathUnmerged {
                 paths: vec!["a b".into()],
-            })
+            }))
         },
         kind: Some(ErrorKind::UnmergedPaths),
         exit: ExitStatus::Failure,
-        human: || LibError::RestorePathUnmerged {
+        human: || LibError::Worktree(WorktreeError::RestorePathUnmerged {
             paths: vec!["a b".into()],
-        }
+        })
         .to_string(),
         hint: Some("take one side with `grit restore --ours 'a b'` or `grit restore --theirs 'a b'`, bring the conflict markers back with `grit restore --merge 'a b'`, or edit out the markers and run `grit add 'a b'`"),
     },
     ContractRow {
         label: "unborn_head",
-        build: || map_lib_error(LibError::UnbornHead),
+        build: || map_lib_error(LibError::Ref(RefError::UnbornHead)),
         kind: Some(ErrorKind::BranchNoCommits),
         exit: ExitStatus::Failure,
         human: || {
@@ -734,9 +738,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "embedded_repo_stage_refused",
         build: || {
-            map_stage_lib_error(LibError::EmbeddedRepoWithoutCommit {
+            map_stage_lib_error(LibError::Worktree(WorktreeError::EmbeddedRepoWithoutCommit {
                 path: "sub".into(),
-            })
+            }))
         },
         kind: Some(ErrorKind::EmbeddedRepoWithoutCommit),
         exit: ExitStatus::Failure,
@@ -768,10 +772,10 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "path_not_found",
         build: || {
-            Error::new(LibError::RevParse(RevParseError::PathNotInRevision {
+            Error::new(LibError::Revision(RevisionError::Parse(RevParseError::PathNotInRevision {
                 path: "missing.txt".into(),
                 revision: "HEAD".into(),
-            }))
+            })))
         },
         kind: Some(ErrorKind::PathNotFound),
         exit: ExitStatus::Failure,
@@ -781,9 +785,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "embedded_repo_without_commit",
         build: || {
-            Error::new(LibError::EmbeddedRepoWithoutCommit {
+            Error::new(LibError::Worktree(WorktreeError::EmbeddedRepoWithoutCommit {
                 path: "sub".into(),
-            })
+            }))
         },
         kind: Some(ErrorKind::EmbeddedRepoWithoutCommit),
         exit: ExitStatus::Failure,
@@ -793,38 +797,40 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "worktree_path_io",
         build: || {
-            Error::new(LibError::WorktreePathIo {
-                path: "a.txt".into(),
-                operation: WorktreePathOperation::Replace,
-                source: std::io::Error::from_raw_os_error(16),
-            })
+            Error::new(LibError::from(grit_lib::error::PathIoError::worktree(
+                "a.txt",
+                WorktreePathOperation::Replace,
+                std::io::Error::from_raw_os_error(16),
+            )))
         },
         kind: Some(ErrorKind::WorktreePathIo),
         exit: ExitStatus::Failure,
-        human: || LibError::WorktreePathIo {
-            path: "a.txt".into(),
-            operation: WorktreePathOperation::Replace,
-            source: std::io::Error::from_raw_os_error(16),
-        }
-        .to_string(),
+        human: || {
+            LibError::from(grit_lib::error::PathIoError::worktree(
+                "a.txt",
+                WorktreePathOperation::Replace,
+                std::io::Error::from_raw_os_error(16),
+            ))
+            .to_string()
+        },
         hint: Some("close programs that may have the file open, then try again"),
     },
     ContractRow {
         label: "checkout_incomplete",
         build: || {
-            Error::new(LibError::CheckoutRollbackIncomplete {
-                source: Box::new(LibError::Cancelled),
+            Error::new(LibError::Worktree(WorktreeError::CheckoutRollbackIncomplete {
+                source: (&LibError::Cancelled).into(),
                 unrestored: vec!["x".into()],
-            })
+            }))
         },
         kind: Some(ErrorKind::CheckoutIncomplete),
         exit: ExitStatus::Failure,
         human: || format!(
             "{}{}",
-            LibError::CheckoutRollbackIncomplete {
-                source: Box::new(LibError::Cancelled),
+            LibError::Worktree(WorktreeError::CheckoutRollbackIncomplete {
+                source: (&LibError::Cancelled).into(),
                 unrestored: vec!["x".into()],
-            },
+            }),
             crate::error_map::indented_paths(&["x".to_owned()])
         ),
         hint: Some("HEAD and the index did not move; `grit status` shows the listed paths, and `grit reset --hard` plus `grit clean -f` put them back"),
@@ -915,10 +921,10 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "branch_checked_out",
         build: || {
-            map_branch_error(LibError::BranchCheckedOutInWorktree {
-                branch: "main".into(),
-                worktree_path: "/wt".into(),
-            })
+            map_branch_error(LibError::Branch(BranchError::CheckedOut {
+                name: "main".into(),
+                worktree: "/wt".into(),
+            }))
         },
         kind: Some(ErrorKind::BranchCheckedOut),
         exit: ExitStatus::Failure,
@@ -972,17 +978,17 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "branch_error_move",
         build: || {
-            Error::new(LibError::MoveDestinationExists {
+            Error::new(LibError::Worktree(WorktreeError::MoveDestinationExists {
                 destination: "dest".into(),
                 src: "src".into(),
-            })
+            }))
         },
         kind: Some(ErrorKind::BranchError),
         exit: ExitStatus::Failure,
-        human: || LibError::MoveDestinationExists {
+        human: || LibError::Worktree(WorktreeError::MoveDestinationExists {
             destination: "dest".into(),
             src: "src".into(),
-        }
+        })
         .to_string(),
         hint: Some("remove or rename 'dest' first, or run `grit mv --force` to replace it"),
     },
@@ -1011,18 +1017,20 @@ static CONTRACT: &[ContractRow] = &[
             Error::new(CloneError::CheckoutFailed {
                 path: "/tmp/r".into(),
                 commit: oid(),
-                source: Box::new(LibError::Verbatim("checkout failed".into())),
+                source: (&LibError::Cancelled).into(),
+                missing_object: None,
+                promisor_failures: Vec::new(),
             })
         },
         kind: Some(ErrorKind::CloneCheckoutFailed),
         exit: ExitStatus::Failure,
-        human: || "the clone into '/tmp/r' succeeded, but its checkout failed: checkout failed".to_owned(),
+        human: || "the clone into '/tmp/r' succeeded, but its checkout failed: operation cancelled".to_owned(),
         hint: Some("the repository was kept; run `grit reset --hard` in '/tmp/r' to finish the checkout"),
     },
     ContractRow {
         label: "clone_remote_unreadable_wrapped",
         build: || {
-            Error::new(CloneError::Remote(RemoteError::Unreadable {
+            Error::new(LibError::Remote(RemoteError::Unreadable {
                 url: Some("https://example.com/x.git".to_owned()),
                 reason: RemoteUnreadableReason::HttpStatus { status: 404 },
             }))
@@ -1102,8 +1110,92 @@ struct ControlFlowAllowance {
 /// Explicit control-flow matches on library errors outside `error_map.rs` (not presentation).
 static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
     ControlFlowAllowance {
+        file: "src/commands/add.rs",
+        line_contains: "grit_lib::error::Error::is_cancelled",
+    },
+    ControlFlowAllowance {
+        file: "src/revision_errors.rs",
+        line_contains:
+            "grit_lib::error::Error::Revision(grit_lib::error::RevisionError::Resolve(resolve))",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "LibError::History(HistoryError::HunkSelect(h))",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "LibError::Diff(grit_lib::error::DiffError::HunkSelection(h))",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "LibError::History(HistoryError::Exec",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "LibError::History(HistoryError::RebaseSession(",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "LibError::Commit(grit_lib::porcelain::CommitError::NothingToCommit)",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "anyhow::Error::new(LibError::from(err))",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "LibError::History(history) => map_history_error(history, operation)",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/diff.rs",
+        line_contains: "grit_lib::error::Error::Diff(grit_lib::error::DiffError::Arguments(",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/diff.rs",
+        line_contains: "anyhow::Error::new(grit_lib::error::Error::Revision(*source))",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/diff.rs",
+        line_contains: "grit_lib::error::Error::Worktree(WorktreeError::Path {",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/pull.rs",
+        line_contains: "remote_err @ grit_lib::error::Error::Remote(_)",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/pull.rs",
+        line_contains:
+            "grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Snapshot(checkout))",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/pull.rs",
+        line_contains:
+            "remote @ grit_lib::error::Error::Remote(_) => return map_remote_error(remote)",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/pull.rs",
+        line_contains: "anyhow::Error::new(grit_lib::error::Error::from(other))",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/checkin.rs",
+        line_contains: "remote @ grit_lib::error::Error::Remote(_)",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/remote.rs",
+        line_contains: "grit_lib::error::Error::Remote(RemoteError::UnknownRemote { .. })",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/stash.rs",
+        line_contains: "LibError::Diff(DiffError::HunkSelection(_))",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/add.rs",
+        line_contains:
+            "grit_lib::error::Error::Diff(grit_lib::error::DiffError::HunkSelection(sel))",
+    },
+    ControlFlowAllowance {
         file: "src/unborn_errors.rs",
-        line_contains: "Some(LibError::UnbornHead)",
+        line_contains: "Some(LibError::Ref(RefError::UnbornHead))",
     },
     ControlFlowAllowance {
         file: "src/json_error.rs",

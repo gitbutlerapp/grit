@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 
 use crate::environment::RepositoryOptions;
+use crate::error::ObjectError;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
@@ -1033,8 +1034,11 @@ pub(crate) fn write_delta_pack_stream(
     };
     let delta_count = plan.entries.iter().filter(|e| e.base.is_some()).count() as u32;
     Ok(PackStats {
-        object_count: u32::try_from(plan.entries.len())
-            .map_err(|_| Error::CorruptObject("pack object count exceeds u32".to_owned()))?,
+        object_count: u32::try_from(plan.entries.len()).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "pack object count exceeds u32".to_owned(),
+            })
+        })?,
         pack_bytes: reuse_stats.0,
         delta_count,
         verbatim_reuse_bytes: reuse_stats.1.verbatim_reuse_bytes,
@@ -1051,8 +1055,11 @@ fn write_delta_plan_stream_body(
     opts: &PackBuildOptions,
     reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
 ) -> Result<(PackIndexRows, u64)> {
-    let count = u32::try_from(plan.entries.len())
-        .map_err(|_| Error::CorruptObject("pack object count exceeds u32".to_owned()))?;
+    let count = u32::try_from(plan.entries.len()).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "pack object count exceeds u32".to_owned(),
+        })
+    })?;
     write_pack_header(w, count)?;
     let mut index_rows = Vec::with_capacity(plan.entries.len());
     let body_bytes = write_planned_entries(w, odb, plan, opts, 12, reuse, &mut index_rows)?;
@@ -1176,11 +1183,16 @@ fn write_planned_entries(
         };
         let in_pack_offset = oid_to_offset.get(&base_oid).copied();
         if let Some((delta_size, pack_bytes, zlib_start, zlib_end)) = &entry.reused_delta_zlib {
-            let delta_len = usize::try_from(*delta_size)
-                .map_err(|_| Error::CorruptObject("reused delta size exceeds usize".to_owned()))?;
+            let delta_len = usize::try_from(*delta_size).map_err(|_| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "reused delta size exceeds usize".to_owned(),
+                })
+            })?;
             if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
                 let dist = start.checked_sub(base_off).ok_or_else(|| {
-                    Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "ofs-delta distance underflow".to_owned(),
+                    })
                 })?;
                 encode_pack_object_header(&mut chunk, 6, delta_len);
                 encode_ofs_delta_distance(&mut chunk, dist);
@@ -1210,9 +1222,9 @@ fn write_planned_entries(
                         DeltaIndex::new(&base_data)
                             .encode(&target_data, 0)
                             .ok_or_else(|| {
-                                Error::CorruptObject(
-                                    "failed to encode pack delta for object".into(),
-                                )
+                                Error::Object(ObjectError::Corrupt {
+                                    detail: "failed to encode pack delta for object".into(),
+                                })
                             })?
                     };
                     let mut buf = Vec::new();
@@ -1223,16 +1235,18 @@ fn write_planned_entries(
             };
             if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
                 let dist = start.checked_sub(base_off).ok_or_else(|| {
-                    Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "ofs-delta distance underflow".to_owned(),
+                    })
                 })?;
                 encode_pack_object_header(&mut chunk, 6, delta_len);
                 encode_ofs_delta_distance(&mut chunk, dist);
             } else {
                 encode_pack_object_header(&mut chunk, 7, delta_len);
                 if base_oid.as_bytes().len() != algo.len() {
-                    return Err(Error::CorruptObject(
-                        "ref-delta base oid width mismatch".to_owned(),
-                    ));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: "ref-delta base oid width mismatch".to_owned(),
+                    }));
                 }
                 chunk.extend_from_slice(base_oid.as_bytes());
             }
@@ -1619,8 +1633,11 @@ fn serialize_pack(odb: &Odb, oids: &[ObjectId], opts: &PackBuildOptions) -> Resu
     let mut buf = Vec::new();
     buf.extend_from_slice(b"PACK");
     buf.extend_from_slice(&2u32.to_be_bytes());
-    let count = u32::try_from(oids.len())
-        .map_err(|_| Error::CorruptObject("pack object count exceeds u32".to_owned()))?;
+    let count = u32::try_from(oids.len()).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "pack object count exceeds u32".to_owned(),
+        })
+    })?;
     buf.extend_from_slice(&count.to_be_bytes());
 
     for oid in oids {
@@ -1667,7 +1684,9 @@ pub(crate) fn write_whole_pack_object_to_odb(
         let mut counter = ByteCounter { inner: w, n: 0 };
         odb.with_stream(&oid, |mut stream| {
             let payload_len = usize::try_from(stream.size).map_err(|_| {
-                Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+                Error::Object(ObjectError::Corrupt {
+                    detail: format!("object size overflow for {}", oid.to_hex()),
+                })
             })?;
             encode_pack_object_header_to(&mut counter, pack_type_code(kind), payload_len)?;
             crate::odb::deflate_stream_to_writer(
@@ -1679,7 +1698,7 @@ pub(crate) fn write_whole_pack_object_to_odb(
             )?;
             Ok(())
         })?
-        .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))?;
+        .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))?;
         return Ok(counter.n);
     }
     let obj = odb.read(&oid)?;
@@ -2144,8 +2163,11 @@ fn search_new_deltas(
     has_local_packs: bool,
     stop: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<SearchedDelta>> {
-    u32::try_from(send.len() + thin_bases.bases.len())
-        .map_err(|_| Error::CorruptObject("too many objects for one pack".to_owned()))?;
+    u32::try_from(send.len() + thin_bases.bases.len()).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "too many objects for one pack".to_owned(),
+        })
+    })?;
     let ids: Vec<u32> = (0..send.len())
         .filter(|&i| infos[i].size > 0 && !skip(&send[i]))
         .map(|i| i as u32)

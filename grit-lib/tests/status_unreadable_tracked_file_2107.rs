@@ -1,6 +1,8 @@
 //! A tracked file that cannot be opened for content comparison is reported as modified, not a
 //! failed scan (issue #2107). Mirrors a file held exclusively by another process on Windows.
 
+use grit_lib::worktree::WorktreeError;
+
 #[cfg(unix)]
 mod unix {
     use std::fs;
@@ -204,11 +206,11 @@ mod unix {
         )
         .expect_err("switch must refuse to overwrite the unreadable path");
         match err {
-            Error::WouldOverwrite {
+            Error::Worktree(WorktreeError::WouldOverwrite {
                 reason: OverwriteReason::LocalChanges,
                 paths,
                 ..
-            } => assert_eq!(paths, ["a.txt"]),
+            }) => assert_eq!(paths, ["a.txt"]),
             other => panic!("unexpected error: {other:?}"),
         }
         assert_eq!(git(fx.root(), &["rev-parse", "HEAD"]), head_before);

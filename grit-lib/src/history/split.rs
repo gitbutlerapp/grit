@@ -33,9 +33,9 @@ pub fn split(
     split_message: String,
     opts: &SplitOptions,
     rewrite_opts: &RewriteOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     if pathspec.is_empty() {
-        return Err(HistoryError::SplitSelectsNothing);
+        return Err(HistoryError::SplitSelectsNothing.into());
     }
 
     let split_message = normalize_rewrite_message(&split_message)?;
@@ -48,7 +48,7 @@ pub fn split(
     let parsed = repo.odb().read_commit(&commit)?;
 
     if parsed.parents.len() > 1 {
-        return Err(HistoryError::InsertBeforeOnMerge { commit });
+        return Err(HistoryError::InsertBeforeOnMerge { commit }.into());
     }
 
     let parent_tree = if parsed.parents.is_empty() {
@@ -82,12 +82,12 @@ fn build_split_tree(
     commit_tree: ObjectId,
     pathspec: Pathspec<'_>,
     ctx: PathspecMatchContext,
-) -> Result<ObjectId, HistoryError> {
+) -> crate::error::Result<ObjectId> {
     let odb = repo.odb();
     let diff = diff_trees_with_renames(odb, Some(&parent_tree), Some(&commit_tree), "", 50)?;
 
     if diff.is_empty() {
-        return Err(HistoryError::SplitSelectsNothing);
+        return Err(HistoryError::SplitSelectsNothing.into());
     }
 
     let mut selected = Vec::new();
@@ -103,17 +103,17 @@ fn build_split_tree(
     }
 
     if selected.is_empty() {
-        return Err(HistoryError::SplitSelectsNothing);
+        return Err(HistoryError::SplitSelectsNothing.into());
     }
     if selects_every_change {
-        return Err(HistoryError::SplitSelectsEverything);
+        return Err(HistoryError::SplitSelectsEverything.into());
     }
 
     let mut index = index_from_tree(repo, &parent_tree)?;
     for (entry, sides) in &selected {
         apply_diff_entry_to_index(&mut index, entry, *sides)?;
     }
-    write_tree_from_index(odb, &index, "").map_err(HistoryError::from)
+    write_tree_from_index(odb, &index, "")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,7 +183,7 @@ fn apply_diff_entry_to_index(
     index: &mut Index,
     entry: &DiffEntry,
     sides: PathspecSides,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     match entry.status {
         DiffStatus::Added | DiffStatus::Copied => {
             if !sides.new {
@@ -242,9 +242,7 @@ fn apply_diff_entry_to_index(
             }
         }
         DiffStatus::Unmerged => {
-            return Err(HistoryError::Planning(
-                PlanningError::SplitUnexpectedUnmergedDiff,
-            ));
+            return Err(HistoryError::Planning(PlanningError::SplitUnexpectedUnmergedDiff).into());
         }
     }
     Ok(())

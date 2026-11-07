@@ -81,8 +81,8 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     ///
     /// [`CheckoutError::PromisedBlobs`] when blobs are missing and the repository has
     /// no promisor fetcher, [`CheckoutError::PromisedBlobsNotFetched`] when the fetch
-    /// failed or left some missing, [`CheckoutError::Library`] with
-    /// [`crate::error::Error::ObjectNotFound`] for a missing blob nothing promises,
+    /// failed or left some missing,
+    /// [`crate::error::ObjectError::NotFound`] for a missing blob nothing promises,
     /// and object read failures.
     pub fn fetch_promised_blobs(&self, snapshot: ObjectId) -> Result<usize> {
         super::fetch_promised_blobs(self.repo, snapshot)
@@ -430,7 +430,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// # Errors
     ///
     /// [`CheckoutError::OperationInProgress`] before anything is fetched, the
-    /// errors of fetching the snapshot, and [`CheckoutError::Pull`] when the branch
+    /// errors of fetching the snapshot, and pull or history errors when the branch
     /// could not be integrated (the new snapshot is fetched and recorded by then).
     pub fn refresh<P: Progress>(
         &self,
@@ -486,9 +486,9 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// [`upstream_ref`]`(<name>)`; [`CheckoutError::UnrelatedBranch`] for a local
     /// branch that shares nothing with the projection;
     /// [`CheckoutError::RefKeptMoving`] when the branch moved meanwhile;
-    /// [`CheckoutError::Library`] for a branch checked out (or being rebased or
+    /// branch and worktree errors for a branch checked out (or being rebased or
     /// bisected) in another worktree, or a switch that would overwrite local
-    /// changes; [`CheckoutError::Pull`] when the rebase fails;
+    /// changes; [`PullError`](crate::porcelain::pull::PullError) and history errors when the rebase fails;
     /// [`CheckoutError::StillSwitched`] when it fails and `HEAD` can't be
     /// switched back; and ref, walk and object failures.
     pub fn refresh_branch(
@@ -518,7 +518,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     ///
     /// # Errors
     ///
-    /// [`CheckoutError::Remote`] when the server can't be reached or read.
+    /// [`RemoteError`](crate::remote::RemoteError) when the server can't be reached or read.
     pub fn push_for_checkin(
         &self,
         marker: &CheckoutMarker,
@@ -561,7 +561,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// # Errors
     ///
     /// [`CheckoutError::Protocol`] for an answer naming no valid branch, or the
-    /// branch the checkout follows, or no commit; [`CheckoutError::Remote`] when
+    /// branch the checkout follows, or no commit; [`RemoteError`](crate::remote::RemoteError) when
     /// the fetch fails; [`CheckoutError::BranchMoved`] when what arrived is not
     /// `info`'s projection.
     pub fn fetch_branch(

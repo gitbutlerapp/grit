@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::error::{Error, ObjectError};
 use grit_lib::objects::bitmap::BitmapIndex;
 use grit_lib::objects::bitmap::{BitmapWalkError, ReachabilityQuery};
 use grit_lib::objects::ObjectId;
@@ -89,7 +90,7 @@ fn main() -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        Err(BitmapWalkError::Unsupported(_)) => {
+        Err(Error::Object(ObjectError::BitmapWalk(BitmapWalkError::Unsupported(_)))) => {
             eprintln!("bitmap walk unsupported for this query (use rev-list without bitmaps)");
             ExitCode::from(1)
         }

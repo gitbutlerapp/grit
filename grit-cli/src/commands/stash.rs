@@ -1,5 +1,6 @@
 //! `grit stash` — save and restore shelved work.
 
+use grit_lib::error::DiffError;
 use grit_lib::objects::short_hex;
 use grit_lib::progress::ProgressSink;
 use std::io::IsTerminal;
@@ -380,7 +381,7 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     if err.downcast_ref::<HunkSelectError>().is_some()
         || err
             .downcast_ref::<LibError>()
-            .is_some_and(|e| matches!(e, LibError::HunkSelection(_)))
+            .is_some_and(|e| matches!(e, LibError::Diff(DiffError::HunkSelection(_))))
     {
         2
     } else {
@@ -828,9 +829,9 @@ fn resolve_stash_index(repo: &grit_lib::repo::Repository, spec: Option<&str>) ->
             if let Some(n) = repo.stash().index_for_oid(&oid) {
                 Ok(n)
             } else {
-                Err(map_stash_error(grit_lib::stash::StashError::NotFound {
-                    n: 0,
-                }))
+                Err(map_stash_error(
+                    grit_lib::stash::StashError::NotFound { n: 0 }.into(),
+                ))
             }
         }
     }
@@ -849,16 +850,21 @@ fn stash_reference_parts(
                 .into_iter()
                 .find(|e| e.index == n)
                 .map(|e| e.oid)
-                .ok_or_else(|| grit_lib::stash::StashError::NotFound { n })
-                .map_err(map_stash_error)?;
+                .ok_or_else(|| {
+                    map_stash_error(grit_lib::stash::StashError::NotFound { n }.into())
+                })?;
             Ok((Some(n), oid))
         }
         StashReference::Commit(oid) => Ok((repo.stash().index_for_oid(&oid), oid)),
     }
 }
 
-fn map_stash_error(err: grit_lib::stash::StashError) -> anyhow::Error {
+fn map_stash_error(err: Error) -> anyhow::Error {
     use grit_lib::stash::{StashError, StashPushValidationError};
+    let err = match err {
+        Error::Stash(stash) => stash,
+        other => return crate::json_error::map_lib_error(other),
+    };
     match err {
         StashError::NoInitialCommit => {
             anyhow::anyhow!("you do not have the initial commit yet")
@@ -887,8 +893,9 @@ fn map_stash_error(err: grit_lib::stash::StashError) -> anyhow::Error {
         }
         StashError::PushValidation(other) => anyhow::anyhow!("{other}"),
         StashError::Branch(branch_err) => anyhow::Error::new(Error::Branch(branch_err)),
-        StashError::HunkSelection(hunk_err) => anyhow::Error::new(Error::HunkSelection(hunk_err)),
-        StashError::Library(lib) => crate::json_error::map_lib_error(*lib),
-        other => anyhow::Error::new(other),
+        StashError::HunkSelection(hunk_err) => {
+            anyhow::Error::new(Error::Diff(DiffError::HunkSelection(hunk_err)))
+        }
+        other => anyhow::Error::new(Error::Stash(other)),
     }
 }

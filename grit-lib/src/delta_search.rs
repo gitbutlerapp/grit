@@ -12,6 +12,7 @@
 //! Chunk boundaries depend only on the candidate list, never on the number of
 //! threads, so the chosen deltas are the same on every machine.
 
+use crate::error::ObjectError;
 use std::cmp::Ordering as CmpOrdering;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -452,7 +453,11 @@ fn zlib_compress(zlib: &mut flate2::Compress, data: &[u8]) -> Result<Vec<u8>> {
         let consumed = zlib.total_in() as usize;
         let status = zlib
             .compress_vec(&data[consumed..], &mut out, flate2::FlushCompress::Finish)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
+            .map_err(|e| {
+                Error::Object(ObjectError::Zlib {
+                    detail: e.to_string(),
+                })
+            })?;
         if status == flate2::Status::StreamEnd {
             return Ok(out);
         }

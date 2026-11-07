@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::midx_support;
+use grit_lib::error::ObjectError;
 
 use std::fs;
 
@@ -153,9 +154,9 @@ fn verify_hash_version_mismatch() {
     });
     assert_verify_reports(&objects, "hash version");
     match try_read_object_via_midx(&objects, &oid) {
-        Err(grit_lib::error::Error::Midx(grit_lib::error::MidxError::HashVersionMismatch {
-            ..
-        })) => {}
+        Err(grit_lib::error::Error::Object(ObjectError::Midx(
+            grit_lib::error::MidxError::HashVersionMismatch { .. },
+        ))) => {}
         other => panic!("expected hash-version MIDX error, got {other:?}"),
     }
     assert_read_fallback_via_odb(&repo, &objects, &oid);
@@ -597,6 +598,6 @@ fn pack_names_reject_out_of_bounds_pnam_without_panicking() {
     clear_pack_cache();
     assert!(matches!(
         read_midx_pack_idx_names(&objects),
-        Err(grit_lib::error::Error::CorruptObject(_))
+        Err(grit_lib::error::Error::Object(ObjectError::Corrupt { .. }))
     ));
 }

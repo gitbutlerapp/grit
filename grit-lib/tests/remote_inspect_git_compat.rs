@@ -408,7 +408,7 @@ fn inspect_unknown_remote_typed_error() {
         .expect_err("missing remote");
     assert!(matches!(
         err,
-        grit_lib::remote::RemoteError::UnknownRemote(name) if name == "nosuch"
+        grit_lib::remote::RemoteError::UnknownRemote { name } if name == "nosuch"
     ));
 }
 

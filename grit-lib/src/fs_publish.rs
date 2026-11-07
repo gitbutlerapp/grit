@@ -5,6 +5,7 @@
 //! exists holds the bytes the caller is about to write. Publishing therefore never
 //! replaces or truncates an existing file: losing the race to another writer is success.
 
+use crate::worktree::WorktreeError;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -37,16 +38,20 @@ pub(crate) fn publish_no_clobber(staged: TempPath, dst: &Path) -> io::Result<boo
 fn ensure_linkable_regular_file(src: &Path) -> Result<()> {
     let meta = fs::symlink_metadata(src).map_err(Error::Io)?;
     if meta.file_type().is_symlink() {
-        return Err(Error::PathError(format!(
-            "refusing to link symlink object store entry {}",
-            src.display()
-        )));
+        return Err(Error::Worktree(WorktreeError::Path {
+            detail: format!(
+                "refusing to link symlink object store entry {}",
+                src.display()
+            ),
+        }));
     }
     if !meta.is_file() {
-        return Err(Error::PathError(format!(
-            "refusing to link non-regular object store entry {}",
-            src.display()
-        )));
+        return Err(Error::Worktree(WorktreeError::Path {
+            detail: format!(
+                "refusing to link non-regular object store entry {}",
+                src.display()
+            ),
+        }));
     }
     Ok(())
 }
@@ -60,13 +65,15 @@ fn ensure_linkable_regular_file(src: &Path) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::PathError`] when `src` is a symlink or not a regular file, and
+/// Returns [`crate::worktree::WorktreeError::Path`] when `src` is a symlink or not a regular file, and
 /// [`Error::Io`] when neither linking nor copying succeeds.
 pub(crate) fn hard_link_or_copy(src: &Path, dst: &Path) -> Result<()> {
     ensure_linkable_regular_file(src)?;
-    let parent = dst
-        .parent()
-        .ok_or_else(|| Error::PathError(format!("no parent directory for {}", dst.display())))?;
+    let parent = dst.parent().ok_or_else(|| {
+        Error::Worktree(WorktreeError::Path {
+            detail: format!("no parent directory for {}", dst.display()),
+        })
+    })?;
     fs::create_dir_all(parent).map_err(Error::Io)?;
     match fs::hard_link(src, dst) {
         Ok(()) => Ok(()),

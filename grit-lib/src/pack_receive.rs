@@ -6,6 +6,7 @@
 
 #![allow(dead_code)]
 
+use crate::error::ObjectError;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -273,7 +274,11 @@ fn pkt_line_payload_len(len_buf: &[u8; 4]) -> Result<usize> {
             b'0'..=b'9' => (b - b'0') as usize,
             b'a'..=b'f' => (b - b'a' + 10) as usize,
             b'A'..=b'F' => (b - b'A' + 10) as usize,
-            _ => return Err(Error::CorruptObject("bad pkt length".to_owned())),
+            _ => {
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "bad pkt length".to_owned(),
+                }))
+            }
         };
         len = (len << 4) | digit;
     }
@@ -455,9 +460,9 @@ fn read_sideband_pack_tail_buffered(
                 continue;
             }
             n if n <= 4 => {
-                return Err(Error::CorruptObject(format!(
-                    "invalid pkt-line length in side-band stream: {n}"
-                )))
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: format!("invalid pkt-line length in side-band stream: {n}"),
+                }))
             }
             _ => {}
         }
@@ -544,9 +549,9 @@ fn read_sideband_pack_tail_read_exact_loop(
             }
             1 | 2 => continue,
             n if n <= 4 => {
-                return Err(Error::CorruptObject(format!(
-                    "invalid pkt-line length in side-band stream: {n}"
-                )))
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: format!("invalid pkt-line length in side-band stream: {n}"),
+                }))
             }
             _ => {}
         }
@@ -697,10 +702,12 @@ fn assert_received_pack_durable(path: &Path, expected_len: u64) -> Result<()> {
             if attempt + 1 < MAX_ATTEMPTS {
                 continue;
             }
-            return Err(Error::CorruptObject(format!(
-                "received pack size mismatch: expected {expected_len}, got {}",
-                meta.len()
-            )));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!(
+                    "received pack size mismatch: expected {expected_len}, got {}",
+                    meta.len()
+                ),
+            }));
         }
         let mut header = [0u8; 4];
         let mut f = match File::open(path) {
@@ -714,9 +721,9 @@ fn assert_received_pack_durable(path: &Path, expected_len: u64) -> Result<()> {
             Err(e) => return Err(Error::Io(e)),
         }
         if &header != b"PACK" {
-            return Err(Error::CorruptObject(
-                "received data is not a pack stream".to_owned(),
-            ));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: "received data is not a pack stream".to_owned(),
+            }));
         }
         return Ok(());
     }

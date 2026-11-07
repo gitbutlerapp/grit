@@ -12,6 +12,7 @@ use crate::pathspec::{
 use crate::repo::Repository;
 use crate::state::resolve_head_for_repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
+use crate::worktree::WorktreeError;
 use std::collections::HashSet;
 
 /// Returns whether `resolved` matches at least one path in the index (stage 0), `HEAD` tree,
@@ -24,7 +25,7 @@ pub fn pathspec_matches_known_in_repository(repo: &Repository, resolved: &str) -
     KnownPathspecChecker::new(repo).matches(resolved)
 }
 
-/// Like [`pathspec_matches_known_in_repository`], but returns [`Error::PathspecNoMatch`] when
+/// Like [`pathspec_matches_known_in_repository`], but returns [`crate::worktree::WorktreeError::PathspecNoMatch`] when
 /// nothing matches.
 pub fn ensure_pathspec_matches_known_in_repository(
     repo: &Repository,
@@ -74,26 +75,26 @@ impl<'r> KnownPathspecChecker<'r> {
         self.matches_known_paths(resolved)
     }
 
-    /// Like [`Self::matches`], but maps a miss to [`Error::PathspecNoMatch`] and a literal path
-    /// through a symlinked directory to [`Error::PathspecBeyondSymlink`].
+    /// Like [`Self::matches`], but maps a miss to [`crate::worktree::WorktreeError::PathspecNoMatch`] and a literal path
+    /// through a symlinked directory to [`crate::worktree::WorktreeError::PathspecBeyondSymlink`].
     ///
     /// # Errors
     ///
     /// The errors above, plus failures loading the index or reading `HEAD`'s tree.
     pub(crate) fn ensure(&mut self, display_spec: &str, resolved: &str) -> Result<()> {
         if self.traverses_symlink_dir(resolved) {
-            return Err(Error::PathspecBeyondSymlink {
+            return Err(Error::Worktree(WorktreeError::PathspecBeyondSymlink {
                 spec: display_spec.to_owned(),
-            });
+            }));
         }
         let matched = (is_literal_worktree_pathspec(resolved) && self.exists_in_worktree(resolved))
             || self.matches_known_paths(resolved)?;
         if matched {
             Ok(())
         } else {
-            Err(Error::PathspecNoMatch {
+            Err(Error::Worktree(WorktreeError::PathspecNoMatch {
                 spec: display_spec.to_owned(),
-            })
+            }))
         }
     }
 
@@ -146,7 +147,7 @@ impl<'a> RepositoryPathspecFilter<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidAttrPathspec`] when an attribute pathspec is malformed.
+    /// Returns [`crate::worktree::WorktreeError::InvalidAttrPathspec`] when an attribute pathspec is malformed.
     pub(crate) fn try_new(repo: &Repository, pathspecs: &'a [String]) -> Result<Self> {
         if pathspecs.iter().any(|s| pathspec_has_attr_magic(s)) {
             Ok(Self::Attr(repo.pathspec_matcher(pathspecs)?))
@@ -482,7 +483,9 @@ mod tests {
         assert!(checker.matches("dir/*.txt").expect("glob"));
         assert!(checker.known.is_some());
         let err = checker.ensure("nope", "nope").expect_err("unknown path");
-        assert!(matches!(err, Error::PathspecNoMatch { spec } if spec == "nope"));
+        assert!(
+            matches!(err, Error::Worktree(WorktreeError::PathspecNoMatch { spec }) if spec == "nope")
+        );
         assert!(!checker.matches("*.rs").expect("glob miss"));
     }
 
@@ -501,7 +504,10 @@ mod tests {
         let err = checker
             .ensure(":(attr:diff=go)", ":(attr:diff=go)")
             .expect_err("no go files");
-        assert!(matches!(err, Error::PathspecNoMatch { .. }));
+        assert!(matches!(
+            err,
+            Error::Worktree(WorktreeError::PathspecNoMatch { .. })
+        ));
     }
 
     #[test]
@@ -514,7 +520,9 @@ mod tests {
         symlink("real", dir.path().join("dl")).expect("symlink");
         let mut checker = KnownPathspecChecker::new(&repo);
         let err = checker.ensure("dl/f", "dl/f").expect_err("beyond symlink");
-        assert!(matches!(err, Error::PathspecBeyondSymlink { spec } if spec == "dl/f"));
+        assert!(
+            matches!(err, Error::Worktree(WorktreeError::PathspecBeyondSymlink { spec }) if spec == "dl/f")
+        );
         assert!(!checker.matches("dl/f").expect("check"));
         checker.ensure("real/f", "real/f").expect("real path");
     }

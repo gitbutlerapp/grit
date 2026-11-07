@@ -2,8 +2,10 @@
 
 pub use super::linked_worktree_error::{LinkedWorktreeError, LinkedWorktreeOperation};
 
+#[cfg(doc)]
+use crate::error::Error;
 use crate::error::{
-    AttrPathspecError, Error, FilterError, OverwriteReason, PathOutsideRepoError,
+    AttrPathspecError, ErrorSummary, FilterError, OverwriteReason, PathOutsideRepoError,
     PathspecFromFileParseError, SubmoduleError, WorktreeOperation as DirtyWorktreeOperation,
 };
 
@@ -33,6 +35,13 @@ pub enum WorktreeError {
     Path {
         /// What went wrong with the path.
         detail: String,
+    },
+
+    /// A path that must be UTF-8 for this operation is not.
+    #[error("path is not valid UTF-8: {path}")]
+    NonUtf8Path {
+        /// The path with invalid bytes replaced.
+        path: String,
     },
 
     /// A path string failed validation (legacy invalid-path checks).
@@ -154,6 +163,21 @@ pub enum WorktreeError {
     #[error("you must specify path(s) to remove")]
     RemovePathsRequired,
 
+    /// Clean refused to remove a directory that contains the current working directory.
+    #[error("refusing to remove '{path}' because it contains the current directory")]
+    RemoveContainsCurrentDirectory {
+        /// Repository-relative directory path.
+        path: String,
+    },
+
+    /// Restore called with no pathspecs.
+    #[error("you must specify path(s) to restore")]
+    RestorePathsRequired,
+
+    /// Restore was asked both to pick a conflict side and to rebuild conflict markers.
+    #[error("cannot combine choosing a conflict side with rebuilding the conflict")]
+    RestoreStageWithRemerge,
+
     /// Operation requires a checked-out work tree.
     #[error("this operation must be run in a work tree")]
     RequiresWorkTree,
@@ -249,13 +273,32 @@ pub enum WorktreeError {
         paths: Vec<String>,
     },
 
-    /// Checkout stopped before completion and rollback left paths unrestored.
+    /// A checkout failed or was cancelled before it finished, and putting the work tree back
+    /// failed for some paths.
+    ///
+    /// Refs and the index are unchanged, as after any failed checkout; only `unrestored`
+    /// differ from the index. [`Error::is_cancelled`] reports whether `source` was a
+    /// cancellation.
     #[error("{source}; {} work-tree path(s) could not be restored", unrestored.len())]
     CheckoutRollbackIncomplete {
         /// Why the checkout stopped.
-        source: Box<Error>,
+        source: ErrorSummary,
         /// Repository-relative paths left different from the index (sorted, deduplicated).
         unrestored: Vec<String>,
+    },
+
+    /// A move failed, and putting the work tree back failed too.
+    ///
+    /// The index is unchanged; renames that could not be reversed and forced-destination
+    /// backups that could not be restored are left as they are on disk.
+    #[error("{}", move_rollback_incomplete_message(source, *unreversed, backup_restore.as_ref()))]
+    MoveRollbackIncomplete {
+        /// Why the move stopped.
+        source: ErrorSummary,
+        /// Number of completed renames that could not be reversed.
+        unreversed: usize,
+        /// Why restoring the destinations a forced move replaced failed, when it did.
+        backup_restore: Option<ErrorSummary>,
     },
 
     /// Staging refused paths that still contain conflict markers.
@@ -275,6 +318,17 @@ pub enum WorktreeError {
 }
 
 impl WorktreeError {
+    /// Whether this failure records a cancellation (a checkout whose rollback was incomplete
+    /// after it was cancelled).
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::CheckoutRollbackIncomplete { source, .. }
+            | Self::MoveRollbackIncomplete { source, .. } => source.is_cancelled(),
+            _ => false,
+        }
+    }
+
     /// Stable snake_case slug for this failure (matches former [`Error::kind_name`] values).
     #[must_use]
     pub fn kind_name(&self) -> &'static str {
@@ -286,6 +340,7 @@ impl WorktreeError {
             },
             Self::FileChanged { .. } => "worktree_file_changed",
             Self::Path { .. } => "path_error",
+            Self::NonUtf8Path { .. } => "non_utf8_path",
             Self::InvalidPath { .. } => "invalid_path",
             Self::InvalidPathComponent { .. } => "invalid_path_component",
             Self::OutsideRepo(_) => "path_outside_repo",
@@ -304,6 +359,10 @@ impl WorktreeError {
             Self::RemoveBlocked { .. } => "remove_blocked",
             Self::NotRemovingRecursively { .. } => "not_removing_recursively",
             Self::RemovePathsRequired => "remove_paths_required",
+            Self::RemoveContainsCurrentDirectory { .. } => "remove_contains_current_directory",
+            Self::RestorePathsRequired => "restore_paths_required",
+            Self::RestoreStageWithRemerge => "restore_stage_with_remerge",
+            Self::MoveRollbackIncomplete { .. } => "move_rollback_incomplete",
             Self::RequiresWorkTree => "requires_work_tree",
             Self::MoveSourceNotTracked { .. } => "move_source_not_tracked",
             Self::MoveDestinationExists { .. } => "move_destination_exists",
@@ -322,4 +381,23 @@ impl WorktreeError {
             Self::Submodule(_) => "submodule",
         }
     }
+}
+
+fn move_rollback_incomplete_message(
+    source: &ErrorSummary,
+    unreversed: usize,
+    backup_restore: Option<&ErrorSummary>,
+) -> String {
+    let mut message = source.to_string();
+    if unreversed > 0 {
+        message.push_str(&format!(
+            "; incomplete worktree rollback ({unreversed} rename(s) could not be reversed)"
+        ));
+    }
+    if let Some(err) = backup_restore {
+        message.push_str(&format!(
+            "; restoring forced-destination backups failed: {err}"
+        ));
+    }
+    message
 }

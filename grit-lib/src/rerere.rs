@@ -2,6 +2,7 @@
 //!
 //! Behaviour matches `git/rerere.c` for upstream harness tests.
 
+use crate::worktree::WorktreeError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -746,9 +747,11 @@ fn write_preimage_normalized(
 }
 
 fn stage_resolved_path(repo: &Repository, index: &mut Index, path: &str) -> Result<()> {
-    let wt = repo
-        .work_tree()
-        .ok_or_else(|| crate::error::Error::PathError("no work tree".to_string()))?;
+    let wt = repo.work_tree().ok_or_else(|| {
+        crate::error::Error::Worktree(WorktreeError::Path {
+            detail: "no work tree".to_string(),
+        })
+    })?;
     let abs = wt.join(path);
     let data = fs::read(&abs)?;
     let oid = repo.odb().write(ObjectKind::Blob, &data)?;
@@ -1340,9 +1343,11 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEve
     if !rerere_enabled(&config, repo.git_dir()) {
         return Ok(events);
     }
-    let wt = repo
-        .work_tree()
-        .ok_or_else(|| crate::error::Error::PathError("no work tree".to_string()))?;
+    let wt = repo.work_tree().ok_or_else(|| {
+        crate::error::Error::Worktree(WorktreeError::Path {
+            detail: "no work tree".to_string(),
+        })
+    })?;
     let path = {
         let cwd = repo.environment().cwd.clone();
         if let Ok(prefix) = cwd.strip_prefix(wt) {
@@ -1359,9 +1364,9 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEve
     let path = path.as_str();
     let fp = wt.join(path);
     if !fp.exists() {
-        return Err(crate::error::Error::PathError(format!(
-            "no such path '{path}' in the working tree"
-        )));
+        return Err(crate::error::Error::Worktree(WorktreeError::Path {
+            detail: format!("no such path '{path}' in the working tree"),
+        }));
     }
     let index_path = repo.git_dir().join("index");
     let index = repo.load_index_at(&index_path)?;
@@ -1384,9 +1389,9 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEve
     let synth = match synthesize_conflict_from_index(repo, &index, path)? {
         Some(s) => s,
         None => {
-            return Err(crate::error::Error::PathError(format!(
-                "could not parse conflict hunks in '{path}'"
-            )));
+            return Err(crate::error::Error::Worktree(WorktreeError::Path {
+                detail: format!("could not parse conflict hunks in '{path}'"),
+            }));
         }
     };
     let marker_size = conflict_marker_size(path);
@@ -1394,9 +1399,9 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEve
     let digest_len = algo.len();
     let mut hash = [0u8; 32];
     if handle_path(&synth, marker_size, algo, Some(&mut hash[..digest_len])) != 1 {
-        return Err(crate::error::Error::PathError(format!(
-            "could not parse conflict hunks in '{path}'"
-        )));
+        return Err(crate::error::Error::Worktree(WorktreeError::Path {
+            detail: format!("could not parse conflict hunks in '{path}'"),
+        }));
     }
     let hex = hex::encode(&hash[..digest_len]);
     let work = fs::read_to_string(&fp)?;

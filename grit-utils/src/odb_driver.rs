@@ -1,5 +1,6 @@
 //! Library-backed workloads matched to common `git` ODB-heavy commands.
 
+use grit_lib::error::ObjectError;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, BufRead, BufWriter, Read, Write};
 use std::path::Path;
@@ -57,7 +58,7 @@ pub fn cat_file_batch(repo: &Repository) -> Result<()> {
             if let Some(reader) = fast.as_mut() {
                 match reader.read_object(&oid) {
                     Ok(object) => write_batch_object_body(&mut stdout, hex, &object)?,
-                    Err(Error::ObjectNotFound(_)) => {
+                    Err(Error::Object(ObjectError::NotFound { .. })) => {
                         write_batch_object(&mut stdout, repo, hex, &oid)?;
                     }
                     Err(e) => return Err(e.into()),
@@ -99,7 +100,7 @@ pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
             let info_result = if let Some(reader) = fast.as_mut() {
                 match reader.read_info(&oid) {
                     Ok(info) => Ok(info),
-                    Err(Error::ObjectNotFound(_)) => repo.odb().read_info(&oid),
+                    Err(Error::Object(ObjectError::NotFound { .. })) => repo.odb().read_info(&oid),
                     Err(e) => Err(e),
                 }
             } else {
@@ -109,7 +110,7 @@ pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
                 Ok(info) => {
                     writeln!(stdout, "{hex_str} {} {}", info.kind.as_str(), info.size)?;
                 }
-                Err(Error::ObjectNotFound(_)) => {
+                Err(Error::Object(ObjectError::NotFound { .. })) => {
                     writeln!(stdout, "{hex_str} missing")?;
                 }
                 Err(e) => return Err(e.into()),
@@ -172,7 +173,7 @@ fn write_batch_object(
     let hex_str = std::str::from_utf8(hex).context("oid line utf-8")?;
     match repo.odb().read(oid) {
         Ok(object) => write_batch_object_body(out, hex, &object),
-        Err(Error::ObjectNotFound(_)) => {
+        Err(Error::Object(ObjectError::NotFound { .. })) => {
             writeln!(out, "{hex_str} missing")?;
             Ok(())
         }

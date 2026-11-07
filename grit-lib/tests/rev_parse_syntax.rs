@@ -1,6 +1,7 @@
 //! Rev-parse syntax oracle tests (upstream t1500/t1503/t1505–t1514/t6101 subsets).
 
 use crate::support;
+use grit_lib::error::RevisionError;
 
 use std::fs;
 use std::path::Path;
@@ -205,7 +206,9 @@ fn t1506_ambiguous_path_vs_rev_typed_errors() {
             .revwalk()
             .resolve(spec, &grit_lib::revwalk::ResolveOptions::default())
         {
-            Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {}
+            Err(Error::Revision(RevisionError::Parse(RevParseError::AmbiguousArgument {
+                ..
+            }))) => {}
             other => panic!("expected AmbiguousArgument for {spec}, got {other:?}"),
         }
     }
@@ -216,9 +219,9 @@ fn t1506_ambiguous_path_vs_rev_typed_errors() {
             .with_index_dwim(grit_lib::revwalk::IndexDwim::Off)
             .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
     ) {
-        Err(Error::RevParse(
+        Err(Error::Revision(RevisionError::Parse(
             RevParseError::PathNotInRevision { .. } | RevParseError::InvalidObjectName { .. },
-        )) => {}
+        ))) => {}
         other => panic!("expected path/rev failure for missing:path, got {other:?}"),
     }
 }

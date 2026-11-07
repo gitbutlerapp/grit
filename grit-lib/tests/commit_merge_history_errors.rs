@@ -4,6 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::error::RefError;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{
@@ -96,7 +97,10 @@ fn commit_error_variants() {
         &CancelToken::never(),
     )
     .unwrap_err();
-    assert!(matches!(err, CommitError::EmptyCommitMessage));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Commit(CommitError::EmptyCommitMessage)
+    ));
 
     let err = commit_with_scope(
         &repo,
@@ -106,7 +110,10 @@ fn commit_error_variants() {
         &CancelToken::never(),
     )
     .unwrap_err();
-    assert!(matches!(err, CommitError::CommitPathsRequired));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Commit(CommitError::CommitPathsRequired)
+    ));
 }
 
 #[test]
@@ -152,7 +159,8 @@ fn merge_error_variants() {
     .unwrap_err();
     assert!(matches!(
         err,
-        MergeError::ContinueUnmergedPaths { .. } | MergeError::Library(_)
+        grit_lib::error::Error::Merge(MergeError::ContinueUnmergedPaths { .. })
+            | grit_lib::error::Error::Index(_)
     ));
 
     let side_tip = topic;
@@ -195,11 +203,13 @@ fn history_error_has_no_string_catch_all() {
 }
 
 #[test]
-fn history_error_from_umbrella_is_nested_not_engine() {
-    let err = Error::InvalidHead;
-    let h: grit_lib::revwalk::history::HistoryError = err.into();
+fn history_failures_from_other_areas_keep_their_area() {
+    let err = Error::Ref(RefError::InvalidHead);
+    assert_eq!(err.area(), "ref");
+    let history = Error::from(grit_lib::revwalk::history::HistoryError::NothingToReword);
+    assert_eq!(history.area(), "history");
     assert!(matches!(
-        h,
-        grit_lib::revwalk::history::HistoryError::Nested(_)
+        history,
+        Error::History(grit_lib::revwalk::history::HistoryError::NothingToReword)
     ));
 }

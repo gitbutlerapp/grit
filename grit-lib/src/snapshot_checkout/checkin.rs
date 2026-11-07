@@ -387,7 +387,8 @@ fn set_branch_reading(
     }
     Err(CheckoutError::RefKeptMoving {
         refname: refname.to_owned(),
-    })
+    }
+    .into())
 }
 
 /// The server's branch whose name differs from `refname`'s only in case, when

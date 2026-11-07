@@ -10,6 +10,7 @@
 
 use crate::commit_graph_file::CommitGraphChain;
 use crate::config::ConfigSet;
+use crate::error::RefError;
 use crate::error::{Error, Result};
 use crate::ident::Signature;
 use crate::index::MODE_TREE;
@@ -950,8 +951,12 @@ pub(crate) fn parse_reflog_expire_spec(raw: &str, now: i64) -> Result<i64> {
     if s.eq_ignore_ascii_case("now") || s.eq_ignore_ascii_case("all") {
         return Ok(i64::MAX);
     }
-    crate::git_date::parse_date_cutoff(s, now)
-        .map_err(|_| Error::Verbatim(format!("invalid reflog expiry: {raw:?}")))
+    crate::git_date::parse_date_cutoff(s, now).map_err(|_| {
+        RefError::InvalidReflogExpiry {
+            value: raw.to_owned(),
+        }
+        .into()
+    })
 }
 
 /// Default `gc.reflogExpire`: reachable reflog entries older than this are dropped.
@@ -1616,9 +1621,9 @@ fn rewrite_reflog_from_snapshot(
         let name = refname.to_owned();
         match store.rewrite_reflog_str(RefNameRef::from_trusted(refname), &mut move |current| {
             if current.len() < snap.len() || current[..snap.len()] != snap[..] {
-                return Err(Error::RefStore(RefStoreError::ReflogRewriteStale {
-                    name: name.clone(),
-                }));
+                return Err(Error::Ref(RefError::Store(
+                    RefStoreError::ReflogRewriteStale { name: name.clone() },
+                )));
             }
             let mut kept = Vec::new();
             for (i, entry) in current.into_iter().enumerate() {
@@ -1633,7 +1638,7 @@ fn rewrite_reflog_from_snapshot(
             Ok(kept)
         }) {
             Ok(()) => return Ok(()),
-            Err(Error::RefStore(RefStoreError::ReflogRewriteStale { .. }))
+            Err(Error::Ref(RefError::Store(RefStoreError::ReflogRewriteStale { .. })))
                 if attempt + 1 < REFLOG_REWRITE_RETRIES =>
             {
                 continue;
@@ -1641,9 +1646,9 @@ fn rewrite_reflog_from_snapshot(
             Err(err) => return Err(err),
         }
     }
-    Err(Error::RefStore(RefStoreError::Corrupt(format!(
-        "reflog '{refname}' kept changing during rewrite"
-    ))))
+    Err(Error::Ref(RefError::Store(RefStoreError::Corrupt {
+        detail: format!("reflog '{refname}' kept changing during rewrite"),
+    })))
 }
 
 /// Per-ref `gc.<pattern>.reflogExpire*` rules plus global `gc.reflogExpire` / `gc.reflogExpireUnreachable`.

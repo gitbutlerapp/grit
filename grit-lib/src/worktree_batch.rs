@@ -1,5 +1,7 @@
 //! Parallel read, filter, hash, and compress of worktree file blobs (`add` and tracked-file restage).
 
+use crate::error::ObjectError;
+use crate::worktree::WorktreeError;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -51,7 +53,7 @@ impl PreparedBlobPayload {
     /// # Errors
     ///
     /// Propagates write failures from the loose store or the custom primary.
-    /// [`Error::WorktreeFileChanged`] when a streamed file no longer hashes to `oid`.
+    /// [`crate::worktree::WorktreeError::FileChanged`] when a streamed file no longer hashes to `oid`.
     pub fn store(
         &self,
         odb: &Odb,
@@ -74,9 +76,9 @@ impl PreparedBlobPayload {
                 let size = file.metadata()?.len();
                 let written = odb.write_stream(ObjectKind::Blob, size, &mut file, options)?;
                 if written != *oid {
-                    return Err(Error::WorktreeFileChanged {
+                    return Err(Error::Worktree(WorktreeError::FileChanged {
                         path: index_relpath.to_owned(),
-                    });
+                    }));
                 }
             }
         }
@@ -225,11 +227,12 @@ impl PrepareBlobContext {
 /// Name the index path in I/O errors from storing a blob.
 fn with_path_context(index_relpath: &str, err: Error) -> Error {
     match err {
-        Error::Io(source) => Error::LooseObjectWrite {
+        Error::Io(source) => Error::Object(ObjectError::LooseObjectWrite {
             path: index_relpath.to_owned(),
             source,
-        },
-        Error::WorktreePathIo { .. } | Error::Repository(RepositoryError::GitDirPathIo(_)) => err,
+        }),
+        Error::Worktree(crate::worktree::WorktreeError::PathIo(_))
+        | Error::Repository(RepositoryError::GitDirPathIo(_)) => err,
         other => other,
     }
 }

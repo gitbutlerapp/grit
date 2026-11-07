@@ -1,5 +1,6 @@
 //! Group walked commits for summary views (author shortlog-style reports).
 
+use crate::error::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -276,9 +277,11 @@ fn try_count_authors_via_bitmap(
             try_bitmap_reachable_commit_set_for_specs(repo, positive, negative, &opts)?
         {
             if let Some(pack_idx) = index.backing_pack_index() {
-                let positions = reachable
-                    .reachable_commit_bitmap_positions()
-                    .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?;
+                let positions = reachable.reachable_commit_bitmap_positions().map_err(|e| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: format!("pack bitmap: {e}"),
+                    })
+                })?;
                 let mut counter = count_authors_at_pack_rows(
                     repo,
                     objects_dir,
@@ -376,7 +379,11 @@ fn count_authors_at_pack_rows(
     if entries.len() < PARALLEL_AUTHOR_COUNT_MIN || threads <= 1 {
         let mut reader =
             SingleLocalPackReader::open_for_pack_index(objects_dir, Arc::clone(pack_idx))?
-                .ok_or_else(|| Error::CorruptObject("missing pack reader".into()))?;
+                .ok_or_else(|| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "missing pack reader".into(),
+                    })
+                })?;
         let mut counter = AuthorCounter::new();
         count_authors_at_pack_rows_serial(
             repo,
@@ -400,7 +407,11 @@ fn count_authors_at_pack_rows(
             handles.push(scope.spawn(move || -> Result<AuthorCounter> {
                 let mut reader =
                     SingleLocalPackReader::open_for_pack_index(objects_dir, Arc::clone(&pack_idx))?
-                        .ok_or_else(|| Error::CorruptObject("missing pack reader".into()))?;
+                        .ok_or_else(|| {
+                            Error::Object(ObjectError::Corrupt {
+                                detail: "missing pack reader".into(),
+                            })
+                        })?;
                 let mut counter = AuthorCounter::new();
                 count_authors_at_pack_rows_serial(
                     repo,
@@ -415,11 +426,11 @@ fn count_authors_at_pack_rows(
         }
         let mut merged = AuthorCounter::new();
         for handle in handles {
-            merged.absorb(
-                handle
-                    .join()
-                    .map_err(|_| Error::CorruptObject("author count worker panicked".into()))??,
-            );
+            merged.absorb(handle.join().map_err(|_| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "author count worker panicked".into(),
+                })
+            })??);
         }
         Ok(merged)
     })
@@ -529,7 +540,7 @@ fn load_commit_prefix_and_count_author(
                 accumulate_author_count(&obj.data, mailmap, counter)?;
                 return Ok(Some(obj.data));
             }
-            Err(Error::ObjectNotFound(_)) => {
+            Err(Error::Object(ObjectError::NotFound { .. })) => {
                 reader.clear_commit_header_prefix();
                 *pack_reader = None;
                 continue;
@@ -617,7 +628,9 @@ fn count_authors_stack_walk(
                         .map(SingleLocalPackReader::commit_header_prefix)
                 })
                 .ok_or_else(|| {
-                    Error::CorruptObject("commit missing parent header after author count".into())
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "commit missing parent header after author count".into(),
+                    })
                 })?;
             parent_oids_from_commit_bytes(prefix, first_parent)?
         };
@@ -633,8 +646,11 @@ fn parent_oids_from_commit_bytes(data: &[u8], first_parent: bool) -> Result<Vec<
             break;
         }
         if line.starts_with(b"parent ") {
-            let hex = std::str::from_utf8(&line[7..])
-                .map_err(|_| Error::CorruptObject("commit parent is not UTF-8".into()))?;
+            let hex = std::str::from_utf8(&line[7..]).map_err(|_| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "commit parent is not UTF-8".into(),
+                })
+            })?;
             parents.push(ObjectId::from_hex(hex.trim())?);
             if first_parent {
                 break;
@@ -713,10 +729,16 @@ fn accumulate_author_count(
 }
 
 fn author_slices_from_commit_bytes(data: &[u8]) -> Result<(&str, &str)> {
-    let author_bytes = scan_author_line_borrowed(data)
-        .ok_or_else(|| crate::error::Error::CorruptObject("commit missing author header".into()))?;
-    let line = std::str::from_utf8(author_bytes)
-        .map_err(|_| crate::error::Error::CorruptObject("commit author is not UTF-8".into()))?;
+    let author_bytes = scan_author_line_borrowed(data).ok_or_else(|| {
+        crate::error::Error::Object(ObjectError::Corrupt {
+            detail: "commit missing author header".into(),
+        })
+    })?;
+    let line = std::str::from_utf8(author_bytes).map_err(|_| {
+        crate::error::Error::Object(ObjectError::Corrupt {
+            detail: "commit author is not UTF-8".into(),
+        })
+    })?;
     Ok(parse_contact_fields(strip_author_timestamp(line.trim())))
 }
 
@@ -755,8 +777,11 @@ fn author_from_commit_bytes(
     data: &[u8],
     mailmap: Option<&MailmapTable>,
 ) -> Result<(String, String)> {
-    let (author_raw, encoding) = scan_author_raw_and_encoding(data)
-        .ok_or_else(|| crate::error::Error::CorruptObject("commit missing author header".into()))?;
+    let (author_raw, encoding) = scan_author_raw_and_encoding(data).ok_or_else(|| {
+        crate::error::Error::Object(ObjectError::Corrupt {
+            detail: "commit missing author header".into(),
+        })
+    })?;
     let author_bytes = author_raw.as_bytes();
     if encoding.is_none() {
         if let Ok(line) = std::str::from_utf8(author_bytes) {

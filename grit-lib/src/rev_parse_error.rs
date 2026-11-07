@@ -250,10 +250,11 @@ pub struct AmbiguousObjectHint {
 mod tests {
     use super::*;
     use crate::error::Error;
+    use crate::error::RevisionError;
 
     fn assert_rev_parse_variant(result: Result<(), Error>, f: impl FnOnce(&RevParseError) -> bool) {
         match result {
-            Err(Error::RevParse(e)) if f(&e) => {}
+            Err(Error::Revision(RevisionError::Parse(e))) if f(&e) => {}
             other => panic!("expected RevParse variant, got {other:?}"),
         }
     }
@@ -265,7 +266,7 @@ mod tests {
         });
         assert!(matches!(
             err,
-            Error::RevParse(RevParseError::NoUpstream { .. })
+            Error::Revision(RevisionError::Parse(RevParseError::NoUpstream { .. }))
         ));
     }
 
@@ -274,7 +275,7 @@ mod tests {
         let err = Error::from(RevParseError::PushDefaultNothing);
         assert!(matches!(
             err,
-            Error::RevParse(RevParseError::PushDefaultNothing)
+            Error::Revision(RevisionError::Parse(RevParseError::PushDefaultNothing))
         ));
     }
 
@@ -283,7 +284,9 @@ mod tests {
         let err = Error::from(RevParseError::AmbiguousArgument { spec: "foo".into() });
         assert!(matches!(
             err,
-            Error::RevParse(RevParseError::AmbiguousArgument { .. })
+            Error::Revision(RevisionError::Parse(
+                RevParseError::AmbiguousArgument { .. }
+            ))
         ));
     }
 

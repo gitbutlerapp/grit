@@ -3,6 +3,7 @@
 //! Source for the library guide "Objects" page (included in the docs site).
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::error::ObjectError;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{parse_commit, parse_tree, NewCommit, ObjectKind, TreeEntry, TreeRefIter};
 use grit_lib::repo::{InitOptions, Repository};
@@ -39,9 +40,11 @@ fn write_demo_objects(
 
     let tree_obj = repo.objects().read(&tree_oid)?;
     let mut iter_entries = TreeRefIter::infer_oid_len(&tree_obj.data)?;
-    let first = iter_entries
-        .next()
-        .ok_or_else(|| grit_lib::error::Error::CorruptObject("tree has no entries".into()))??;
+    let first = iter_entries.next().ok_or_else(|| {
+        grit_lib::error::Error::Object(ObjectError::Corrupt {
+            detail: "tree has no entries".into(),
+        })
+    })??;
     assert_eq!(first.oid, blob_oid);
     assert_eq!(parse_tree(&tree_obj.data)?[0].oid, blob_oid);
 

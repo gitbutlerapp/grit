@@ -178,7 +178,7 @@ struct MockHttp {
 }
 
 impl HttpClient for MockHttp {
-    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
         Ok(self.body.clone())
     }
 
@@ -189,7 +189,7 @@ impl HttpClient for MockHttp {
         _accept: &str,
         _body: &[u8],
         _git_protocol: Option<&str>,
-    ) -> crate::remote::RemoteResult<Vec<u8>> {
+    ) -> crate::error::Result<Vec<u8>> {
         Ok(Vec::new())
     }
 
@@ -197,7 +197,7 @@ impl HttpClient for MockHttp {
         &self,
         _url: &str,
         _git_protocol: Option<&str>,
-    ) -> crate::remote::RemoteResult<(Vec<u8>, Option<String>)> {
+    ) -> crate::error::Result<(Vec<u8>, Option<String>)> {
         Ok((self.body.clone(), None))
     }
 }

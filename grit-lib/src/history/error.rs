@@ -1,29 +1,21 @@
 //! Typed failures for history rewrite planning.
 
-use crate::error::Error;
+use crate::error::{Error, ErrorSummary};
 use crate::objects::ObjectId;
 use crate::operation::Conflict;
 use crate::refs::store::RefStoreError;
-use thiserror::Error;
 
-pub(crate) use super::engine_error::error_to_engine;
-use super::HistoryEngineError;
 use super::PlanningError;
 
 /// Failure modes while building a [`super::RewritePlan`](crate::history::RewritePlan).
-#[derive(Debug, Error)]
+///
+/// Surfaced on the umbrella as [`Error::History`](crate::error::Error::History); repository,
+/// object, ref, and I/O failures during a rewrite are reported in their own areas.
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HistoryError {
-    /// Repository read, revision walk, ref resolution, or other engine-level failure without an
-    /// umbrella [`crate::error::Error`] wrapper (see [`HistoryEngineError`]).
-    #[error(transparent)]
-    Engine(Box<HistoryEngineError>),
-
-    /// Wraps a top-level library failure when no more specific [`HistoryError`] applies.
-    #[error(transparent)]
-    Nested(#[from] Box<Error>),
-
-    /// Invalid or inconsistent planning inputs (distinct from [`Self::Engine`]).
+    /// Invalid or inconsistent planning inputs (distinct from repository read failures, which
+    /// surface as their own [`Error`](enum@crate::error::Error) area).
     #[error(transparent)]
     Planning(#[from] PlanningError),
 
@@ -285,11 +277,19 @@ pub enum HistoryError {
     RefApply(#[from] RefStoreError),
 
     /// Index or worktree update failed after refs were already moved.
-    #[error("worktree update failed")]
+    #[error("worktree update failed: {source}")]
     WorktreeApply {
         /// Underlying failure after ref updates.
         #[source]
-        source: Box<HistoryEngineError>,
+        source: ErrorSummary,
+    },
+
+    /// The worktree update after refs moved could not proceed (missing snapshot data, a path
+    /// that could not be restored, or no work tree).
+    #[error("worktree update failed: {detail}")]
+    WorktreeApplyFailed {
+        /// What could not be done.
+        detail: String,
     },
 
     /// No `.git/grit/history-last` record exists.
@@ -304,19 +304,34 @@ pub enum HistoryError {
     },
 
     /// Failed to read `.git/grit/history-last` or rewrite journal files.
-    #[error("could not read history undo record")]
+    #[error("could not read history undo record: {source}")]
     UndoRecordRead {
-        /// Underlying I/O or parse failure.
+        /// Underlying I/O failure.
         #[source]
-        source: Box<HistoryEngineError>,
+        source: ErrorSummary,
+    },
+
+    /// `.git/grit/history-last` or a rewrite journal file is malformed.
+    #[error("history undo record is malformed: {detail}")]
+    UndoRecordCorrupt {
+        /// What is wrong with the record.
+        detail: String,
     },
 
     /// Failed to write `.git/grit/history-last` or rewrite journal files.
-    #[error("could not write history undo record")]
+    #[error("could not write history undo record: {source}")]
     UndoRecordWrite {
         /// Underlying I/O or lock failure.
         #[source]
-        source: Box<HistoryEngineError>,
+        source: ErrorSummary,
+    },
+
+    /// A history undo record or rewrite journal could not be written because its contents
+    /// are invalid (for example a snapshot path that is not repository-relative).
+    #[error("could not write history undo record: {detail}")]
+    UndoRecordUnwritable {
+        /// What is wrong with the contents.
+        detail: String,
     },
 
     /// Refs were updated but the worktree checkout did not finish (see `.git/grit/rewrite-apply/`).
@@ -324,117 +339,88 @@ pub enum HistoryError {
     RewriteApplyIncomplete,
 
     /// Checkout failed after refs were updated; rollback or worktree restore may also have failed.
-    #[error("checkout failed after refs were updated")]
+    #[error("checkout failed after refs were updated: {checkout}")]
     ApplyRollbackIncomplete {
         /// Primary checkout failure.
         #[source]
-        checkout: Box<HistoryEngineError>,
+        checkout: ErrorSummary,
         /// Ref rollback error, when rolling back failed.
-        ref_rollback: Option<Box<HistoryEngineError>>,
+        ref_rollback: Option<ErrorSummary>,
         /// Worktree/index restore error after checkout failed.
-        worktree_restore: Option<Box<HistoryEngineError>>,
+        worktree_restore: Option<ErrorSummary>,
     },
 }
 
-/// Map a top-level library error into [`HistoryEngineError`] for [`HistoryError::Engine`].
+/// [`HistoryError::WorktreeApply`] for an I/O failure.
 #[must_use]
-pub(crate) fn engine_err(err: Error) -> HistoryError {
-    HistoryError::Engine(Box::new(error_to_engine(err)))
+pub(crate) fn worktree_apply_io(err: std::io::Error) -> Error {
+    worktree_apply_engine(Error::Io(err))
 }
 
-/// Map I/O failure into [`HistoryError::WorktreeApply`].
+/// [`HistoryError::WorktreeApply`] for a library failure.
 #[must_use]
-pub(crate) fn worktree_apply_io(err: std::io::Error) -> HistoryError {
+pub(crate) fn worktree_apply_engine(err: impl Into<Error>) -> Error {
     HistoryError::WorktreeApply {
-        source: Box::new(HistoryEngineError::Io(err)),
+        source: ErrorSummary::from(err.into()),
     }
+    .into()
 }
 
-/// Map a library error into [`HistoryError::WorktreeApply`].
+/// [`HistoryError::WorktreeApplyFailed`] with `detail`.
 #[must_use]
-pub(crate) fn worktree_apply_engine(err: impl Into<Error>) -> HistoryError {
-    HistoryError::WorktreeApply {
-        source: Box::new(error_to_engine(err.into())),
+pub(crate) fn worktree_apply_str(detail: impl Into<String>) -> Error {
+    HistoryError::WorktreeApplyFailed {
+        detail: detail.into(),
     }
-}
-
-/// Worktree/index apply failure described by a short summary (no umbrella [`Error`]).
-#[must_use]
-pub(crate) fn worktree_apply_str(message: impl Into<String>) -> HistoryError {
-    HistoryError::WorktreeApply {
-        source: Box::new(HistoryEngineError::UmbrellaMessage(message.into())),
-    }
+    .into()
 }
 
 #[must_use]
-pub(crate) fn undo_record_write_engine(err: Error) -> HistoryError {
+pub(crate) fn undo_record_write_engine(err: impl Into<Error>) -> Error {
     HistoryError::UndoRecordWrite {
-        source: Box::new(error_to_engine(err)),
+        source: ErrorSummary::from(err.into()),
     }
+    .into()
 }
 
 #[must_use]
-pub(crate) fn undo_record_read_io(err: std::io::Error) -> HistoryError {
+pub(crate) fn undo_record_read_io(err: std::io::Error) -> Error {
     HistoryError::UndoRecordRead {
-        source: Box::new(HistoryEngineError::Io(err)),
+        source: ErrorSummary::from(Error::Io(err)),
     }
+    .into()
 }
 
 #[must_use]
-pub(crate) fn undo_record_write_io(err: std::io::Error) -> HistoryError {
-    HistoryError::UndoRecordWrite {
-        source: Box::new(HistoryEngineError::Io(err)),
-    }
+pub(crate) fn undo_record_write_io(err: std::io::Error) -> Error {
+    undo_record_write_engine(Error::Io(err))
 }
 
 #[must_use]
-pub(crate) fn undo_record_read_str(message: impl Into<String>) -> HistoryError {
-    HistoryError::UndoRecordRead {
-        source: Box::new(HistoryEngineError::UmbrellaMessage(message.into())),
+pub(crate) fn undo_record_read_str(detail: impl Into<String>) -> Error {
+    HistoryError::UndoRecordCorrupt {
+        detail: detail.into(),
     }
+    .into()
 }
 
 #[must_use]
-pub(crate) fn undo_record_write_str(message: impl Into<String>) -> HistoryError {
-    HistoryError::UndoRecordWrite {
-        source: Box::new(HistoryEngineError::UmbrellaMessage(message.into())),
+pub(crate) fn undo_record_write_str(detail: impl Into<String>) -> Error {
+    HistoryError::UndoRecordUnwritable {
+        detail: detail.into(),
     }
-}
-
-#[must_use]
-pub(crate) fn history_error_to_engine_box(err: HistoryError) -> Box<HistoryEngineError> {
-    match err {
-        HistoryError::Engine(e) => e,
-        HistoryError::Planning(p) => Box::new(HistoryEngineError::Planning(p)),
-        HistoryError::RebaseSession(err) => Box::new(HistoryEngineError::RebaseSession(err)),
-        HistoryError::Nested(boxed) => match *boxed {
-            Error::History(inner) => history_error_to_engine_box(inner),
-            other => Box::new(error_to_engine(other)),
-        },
-        HistoryError::WorktreeApply { source } => source,
-        HistoryError::RefApply(r) => Box::new(HistoryEngineError::RefStore(r.clone())),
-        other => Box::new(HistoryEngineError::UmbrellaMessage(other.to_string())),
-    }
-}
-
-impl From<HistoryEngineError> for HistoryError {
-    fn from(err: HistoryEngineError) -> Self {
-        Self::Engine(Box::new(err))
-    }
+    .into()
 }
 
 impl HistoryError {
-    /// Whether the rewrite was cancelled ([`Error::Cancelled`]).
+    /// Whether the rewrite was cancelled (a cancellation recorded as the cause of a failed
+    /// worktree update, undo-record access, or rollback).
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         match self {
-            Self::Engine(e) => e.is_cancelled(),
-            Self::Nested(e) => e.is_cancelled(),
-            Self::RebaseSession(e) => e.is_cancelled(),
-            Self::WorktreeApply { source } => source.is_cancelled(),
-            Self::UndoRecordRead { source } | Self::UndoRecordWrite { source } => {
-                source.is_cancelled()
-            }
+            Self::WorktreeApply { source }
+            | Self::UndoRecordRead { source }
+            | Self::UndoRecordWrite { source } => source.is_cancelled(),
             Self::ApplyRollbackIncomplete {
                 checkout,
                 ref_rollback,
@@ -446,27 +432,5 @@ impl HistoryError {
             }
             _ => false,
         }
-    }
-}
-
-impl From<Error> for HistoryError {
-    /// Unwraps [`Error::History`] back to the history failure it carries.
-    ///
-    /// Most library failures map into [`Self::Engine`] via [`error_to_engine`]. A small set of
-    /// umbrella-only errors (for example [`Error::InvalidHead`]) stay as [`Self::Nested`] so the
-    /// ratchet can count intentional umbrella wrapping where there is no structured history
-    /// variant.
-    fn from(err: Error) -> Self {
-        match err {
-            Error::History(inner) => inner,
-            Error::InvalidHead => Self::Nested(Box::new(Error::InvalidHead)),
-            other => engine_err(other),
-        }
-    }
-}
-
-impl From<crate::index::IndexError> for HistoryError {
-    fn from(err: crate::index::IndexError) -> Self {
-        Error::from(err).into()
     }
 }

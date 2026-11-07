@@ -1,5 +1,6 @@
 //! Compare `blame_file` attributions with `git blame --line-porcelain`.
 
+use grit_lib::error::RevisionError;
 use std::path::Path;
 use std::process::Command;
 
@@ -270,7 +271,9 @@ fn blame_from_subdirectory_cwd_is_repository_relative() {
 
     let err = blame_file(&repo, "f.txt", &BlameOptions::default()).unwrap_err();
     match err {
-        Error::RevParse(RevParseError::PathNotInRevision { path, .. }) => {
+        Error::Revision(RevisionError::Parse(RevParseError::PathNotInRevision {
+            path, ..
+        })) => {
             assert_eq!(path, "f.txt");
         }
         other => panic!("expected PathNotInRevision, got {other:?}"),

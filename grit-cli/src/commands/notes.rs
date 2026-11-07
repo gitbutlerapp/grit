@@ -1,5 +1,6 @@
 //! `grit notes` — list, show, add, and remove Git notes.
 
+use grit_lib::error::NotesError;
 use std::io::Write;
 
 use anyhow::{bail, Context, Result};
@@ -424,7 +425,7 @@ fn notes_write_options(
 
 fn map_notes_error(err: Error) -> anyhow::Error {
     match err {
-        Error::NoteAlreadyExists { object } => {
+        Error::Notes(NotesError::AlreadyExists { object }) => {
             anyhow::anyhow!(
                 "note for object {} already exists (use --force)",
                 object.to_hex()

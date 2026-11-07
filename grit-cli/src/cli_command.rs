@@ -63,7 +63,7 @@ pub fn build_cli_command() -> clap::Command {
         .spawn(build_on_large_stack)
         .ok()
         .and_then(|handle| handle.join().ok())
-        .unwrap_or_else(|| Cli::command())
+        .unwrap_or_else(Cli::command)
 }
 
 /// The whole command tree, built as if no subcommand were deferred, for help output and

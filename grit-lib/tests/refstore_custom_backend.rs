@@ -1,6 +1,7 @@
 //! A ref backend written outside grit-lib, using only the public `refs::store::backend`
 //! helpers, passes the same conformance suite as the built-in stores.
 
+use grit_lib::error::RefError;
 use std::fmt;
 use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
@@ -389,7 +390,7 @@ fn backend_errors_stay_typed_and_downcastable() {
     let err = Offline
         .resolve(RefNameRef::from_trusted("HEAD"))
         .expect_err("offline");
-    let Error::RefStore(RefStoreError::Backend(inner)) = &err else {
+    let Error::Ref(RefError::Store(RefStoreError::Backend(inner))) = &err else {
         panic!("expected a backend error, got {err:?}");
     };
     assert!(inner.downcast_ref::<ConnectionLost>().is_some());

@@ -125,12 +125,8 @@ pub struct RewriteOptions {
 
 impl RewriteOptions {
     /// The validated header line for [`Self::committer`], checked before any object is written.
-    pub(crate) fn committer_line(&self) -> Result<String, super::HistoryError> {
-        self.committer.validate().map_err(|err| {
-            super::HistoryError::Engine(Box::new(crate::history::error::error_to_engine(
-                crate::error::Error::InvalidSignature(err),
-            )))
-        })?;
+    pub(crate) fn committer_line(&self) -> crate::error::Result<String> {
+        self.committer.validate()?;
         Ok(self.committer.header_line())
     }
 }

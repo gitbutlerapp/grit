@@ -133,10 +133,6 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     }
 }
 
-fn map_hunk_error(err: HunkSelectError) -> anyhow::Error {
-    anyhow::Error::new(err)
-}
-
 /// Run partial restore via hunk ids and/or line ranges.
 pub fn run_hunks(
     args: &PathspecArgs,
@@ -149,10 +145,10 @@ pub fn run_hunks(
     let repo = context::discover()?;
     let resolved = args.resolve(&repo)?;
     let pathspecs = resolved.specs().to_vec();
-    let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_error)?;
+    let mut selection = parse_hunk_id_list(hunks).map_err(super::add::map_hunk_error)?;
     selection.ranges = super::add::parse_line_range_list(lines)?;
     let outcome = restore_hunks(&repo, &selection, &pathspecs, staged, worktree, dry_run)
-        .map_err(map_hunk_error)?;
+        .map_err(super::add::map_hunk_error)?;
     Ok(RestoreCliOutcome::from(outcome).with_path_display(&repo))
 }
 

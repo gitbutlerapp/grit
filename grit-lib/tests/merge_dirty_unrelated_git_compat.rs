@@ -1,5 +1,6 @@
 //! Issue #1321: merge allows uncommitted edits on paths the merge does not touch.
 
+use grit_lib::worktree::WorktreeError;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -128,11 +129,11 @@ fn merge_refuses_dirty_overlapping_path() {
     )
     .expect_err("merge must refuse overlapping dirty path");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => {
+        }) => {
             assert_eq!(paths, vec!["a.txt".to_owned()]);
         }
         other => panic!("unexpected error: {other:?}"),
@@ -189,11 +190,11 @@ fn merge_refuses_dirty_overlapping_paths_sorted() {
     )
     .expect_err("merge must refuse overlapping dirty paths");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => {
+        }) => {
             assert_eq!(paths, vec!["a.txt".to_owned(), "b.txt".to_owned()]);
         }
         other => panic!("unexpected error: {other:?}"),

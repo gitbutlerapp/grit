@@ -63,6 +63,7 @@ pub struct HunkSelection {
 
 /// Failure while resolving or staging hunk ids.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum HunkSelectError {
     /// Id string is not 12 lowercase hex characters.
     #[error("unknown hunk id {id}")]
@@ -140,30 +141,9 @@ pub enum HunkSelectError {
     /// A patch passed in for restoring names neither an old nor a new path.
     #[error("patch names no path")]
     MissingPath,
-    /// Repository or diff engine failure (not a hunk-id selection error).
-    ///
-    /// Match on the boxed [`crate::error::Error`] to branch on the underlying failure, for
-    /// example [`RepositoryError::RequiresWorkTree`] when the repository is bare.
-    #[error(transparent)]
-    Repository(Box<Error>),
     /// Selected hunks could not be turned into an apply patch.
     #[error("could not build patch for selected hunks")]
     PatchBuild,
-    /// Caller cancelled before the index was written.
-    #[error("operation cancelled")]
-    Cancelled,
-}
-
-impl From<Error> for HunkSelectError {
-    fn from(err: Error) -> Self {
-        HunkSelectError::Repository(Box::new(err))
-    }
-}
-
-impl From<crate::index::IndexError> for HunkSelectError {
-    fn from(err: crate::index::IndexError) -> Self {
-        Error::from(err).into()
-    }
 }
 
 /// Result of [`stage_hunks`].
@@ -226,9 +206,7 @@ pub fn unstaged_file_diffs(
 /// # Errors
 ///
 /// Returns [`HunkSelectError::UnknownId`] for malformed tokens.
-pub fn parse_hunk_id_list(
-    tokens: &[String],
-) -> std::result::Result<HunkSelection, HunkSelectError> {
+pub fn parse_hunk_id_list(tokens: &[String]) -> crate::error::Result<HunkSelection> {
     let mut ids = Vec::new();
     for token in tokens {
         for part in token.split(',').map(str::trim).filter(|s| !s.is_empty()) {
@@ -259,7 +237,7 @@ pub fn resolve_selection(
     selection: &HunkSelection,
     pathspecs: &[String],
     diff_options: DiffOptions,
-) -> std::result::Result<Vec<FilePatch>, HunkSelectError> {
+) -> crate::error::Result<Vec<FilePatch>> {
     // Returns index-ready patches; see [`resolve_selection_with_staged`] for staged id map.
     Ok(resolve_selection_with_staged(repo, side, selection, pathspecs, diff_options)?.patches)
 }
@@ -287,7 +265,7 @@ pub(crate) fn resolve_unstaged_selection(
     repo: &Repository,
     selection: &HunkSelection,
     pathspecs: &[String],
-) -> std::result::Result<ResolvedSelection, HunkSelectError> {
+) -> crate::error::Result<ResolvedSelection> {
     let diff_opts = diff_options_for_hunk_select(repo)?;
     resolve_selection_with_staged(repo, DiffSide::Unstaged, selection, pathspecs, diff_opts)
 }
@@ -320,7 +298,7 @@ fn resolve_selection_with_staged(
     selection: &HunkSelection,
     pathspecs: &[String],
     diff_options: DiffOptions,
-) -> std::result::Result<ResolvedSelection, HunkSelectError> {
+) -> crate::error::Result<ResolvedSelection> {
     resolve_selection_in(repo, None, side, selection, pathspecs, diff_options)
 }
 
@@ -333,7 +311,7 @@ fn resolve_selection_in(
     selection: &HunkSelection,
     pathspecs: &[String],
     diff_options: DiffOptions,
-) -> std::result::Result<ResolvedSelection, HunkSelectError> {
+) -> crate::error::Result<ResolvedSelection> {
     if selection.ids.is_empty() && selection.ranges.is_empty() {
         return Ok(ResolvedSelection::default());
     }
@@ -378,11 +356,12 @@ fn resolve_selection_in(
             if !selection.ranges.is_empty() {
                 return Err(HunkSelectError::RangeSelectsNothing {
                     path: selection.ranges[0].path.clone(),
-                });
+                }
+                .into());
             }
             resolve_staged(repo, pathspecs, opts, &requested)
         }
-        DiffSide::Other => Err(HunkSelectError::UnselectableSide { side }),
+        DiffSide::Other => Err(HunkSelectError::UnselectableSide { side }.into()),
     }
 }
 
@@ -391,7 +370,7 @@ fn resolve_staged(
     pathspecs: &[String],
     opts: DiffOptions,
     requested: &HashSet<HunkId>,
-) -> std::result::Result<ResolvedSelection, HunkSelectError> {
+) -> crate::error::Result<ResolvedSelection> {
     let files = collect_files_for_target(repo, &DiffTarget::IndexVsHead, pathspecs, opts)?;
     resolve_on_files(
         DiffSide::Staged,
@@ -409,7 +388,7 @@ fn resolve_unstaged(
     pathspecs: &[String],
     opts: DiffOptions,
     requested: &HashSet<HunkId>,
-) -> std::result::Result<ResolvedSelection, HunkSelectError> {
+) -> crate::error::Result<ResolvedSelection> {
     let mut patches = Vec::new();
     let mut staged_hunks = BTreeMap::new();
     let mut whole_files = BTreeSet::new();
@@ -451,12 +430,13 @@ fn resolve_unstaged(
                 id: wrong,
                 actual_side: DiffSide::Staged,
                 requested_side: DiffSide::Unstaged,
-            });
+            }
+            .into());
         }
         if pathspecs.len() == 1 {
             let path = &pathspecs[0];
             if changes.iter().any(|c| c.path == *path && c.binary) {
-                return Err(HunkSelectError::Binary { path: path.clone() });
+                return Err(HunkSelectError::Binary { path: path.clone() }.into());
             }
         }
         let files: Vec<FileDiff> = changes
@@ -469,7 +449,8 @@ fn resolve_unstaged(
             id,
             path: stale_path_hint(pathspecs, &files),
             current_ids,
-        });
+        }
+        .into());
     }
 
     Ok(ResolvedSelection {
@@ -517,7 +498,7 @@ fn resolve_file_change_by_unified_body(
     peer_hunks: &[StructuredHunk],
     requested: &HashSet<HunkId>,
     diff_options: &DiffOptions,
-) -> std::result::Result<UnifiedHunkResolve, HunkSelectError> {
+) -> crate::error::Result<UnifiedHunkResolve> {
     let old_text = side_text(&change.old_bytes);
     let new_text = side_text(&change.new_bytes);
     let body =
@@ -568,7 +549,7 @@ fn resolve_file_change_by_unified_body(
 fn file_patch_from_unified_slices(
     change: &FileChange,
     slices: &[&str],
-) -> std::result::Result<FilePatch, HunkSelectError> {
+) -> crate::error::Result<FilePatch> {
     let path = &change.path;
     let is_new = change.old_mode == FileMode::ABSENT;
     let mut is_deleted =
@@ -654,7 +635,7 @@ fn find_id_on_staged_side(
     pathspecs: &[String],
     opts: DiffOptions,
     requested: &HashSet<HunkId>,
-) -> std::result::Result<Option<HunkId>, HunkSelectError> {
+) -> crate::error::Result<Option<HunkId>> {
     let files = collect_files_for_target(repo, &DiffTarget::IndexVsHead, pathspecs, opts)?;
     Ok(files.into_iter().find_map(|file| {
         if file.binary {
@@ -672,7 +653,7 @@ fn resolve_on_files(
     peer_hunks: HashMap<String, Vec<StructuredHunk>>,
     requested: &HashSet<HunkId>,
     pathspecs: &[String],
-) -> std::result::Result<ResolvedSelection, HunkSelectError> {
+) -> crate::error::Result<ResolvedSelection> {
     let mut found = HashSet::new();
     let mut patches = Vec::new();
     let mut staged_by_path: BTreeMap<String, Vec<HunkId>> = BTreeMap::new();
@@ -714,7 +695,7 @@ fn resolve_on_files(
                 .find(|f| f.path == path)
                 .is_some_and(|f| f.binary)
             {
-                return Err(HunkSelectError::Binary { path });
+                return Err(HunkSelectError::Binary { path }.into());
             }
         }
         let current_ids = current_ids_for_stale(side, pathspecs, &files, &peer_hunks);
@@ -722,7 +703,8 @@ fn resolve_on_files(
             id,
             path: stale_path_hint(pathspecs, &files),
             current_ids,
-        });
+        }
+        .into());
     }
 
     Ok(ResolvedSelection {
@@ -769,11 +751,12 @@ fn current_ids_for_stale(
 fn file_patch_from_hunks(
     file: &FileDiff,
     hunks: &[StructuredHunk],
-) -> std::result::Result<FilePatch, HunkSelectError> {
+) -> crate::error::Result<FilePatch> {
     if file.binary {
         return Err(HunkSelectError::Binary {
             path: file.path.clone(),
-        });
+        }
+        .into());
     }
     // Index preimage always comes from the existing stage-0 entry (including intent-to-add).
     let is_new = false;
@@ -880,7 +863,7 @@ fn validate_line_ranges(
     path: &str,
     intervals: &[(usize, usize)],
     max_line: usize,
-) -> std::result::Result<(), HunkSelectError> {
+) -> crate::error::Result<()> {
     for &(start, end) in intervals {
         if start == 0 || end == 0 || start > end || end > max_line {
             return Err(HunkSelectError::RangeOutOfBounds {
@@ -888,7 +871,8 @@ fn validate_line_ranges(
                 start,
                 end,
                 max_line,
-            });
+            }
+            .into());
         }
     }
     Ok(())
@@ -1027,7 +1011,7 @@ fn resolve_line_ranges_unstaged(
     opts: &DiffOptions,
     selection: &HunkSelection,
     id_selected: &HashSet<HunkId>,
-) -> std::result::Result<ResolvedSelection, HunkSelectError> {
+) -> crate::error::Result<ResolvedSelection> {
     let mut by_path: BTreeMap<String, Vec<(usize, usize)>> = BTreeMap::new();
     let mut labels: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for range in &selection.ranges {
@@ -1051,11 +1035,11 @@ fn resolve_line_ranges_unstaged(
             .find(|c| c.path == path)
             .ok_or_else(|| HunkSelectError::RangeSelectsNothing { path: path.clone() })?;
         if change.binary {
-            return Err(HunkSelectError::Binary { path: path.clone() });
+            return Err(HunkSelectError::Binary { path: path.clone() }.into());
         }
         let file = build_file_diff(change, opts);
         if !include_file_in_diff(&file, opts) {
-            return Err(HunkSelectError::RangeSelectsNothing { path });
+            return Err(HunkSelectError::RangeSelectsNothing { path }.into());
         }
         validate_line_ranges(&path, &intervals, new_side_line_count(change))?;
         let peer = peer_hunks.get(&path).map(|h| h.as_slice()).unwrap_or(&[]);
@@ -1077,7 +1061,7 @@ fn resolve_line_ranges_unstaged(
             .zip(ids.iter())
             .any(|(_, id)| id_selected.contains(id));
         if !selected_any && !id_covered_any {
-            return Err(HunkSelectError::RangeSelectsNothing { path: path.clone() });
+            return Err(HunkSelectError::RangeSelectsNothing { path: path.clone() }.into());
         }
         if selected_any {
             patches.push(file_patch_from_hunks(&file, &partial)?);
@@ -1152,7 +1136,7 @@ pub fn restore_hunks(
     restore_staged: bool,
     restore_worktree: bool,
     dry_run: bool,
-) -> std::result::Result<RestoreHunksOutcome, HunkSelectError> {
+) -> crate::error::Result<RestoreHunksOutcome> {
     let diff_opts = diff_options_for_hunk_select(repo)?;
     let restore_worktree = restore_worktree || !restore_staged;
     let mut outcome = RestoreHunksOutcome {
@@ -1199,7 +1183,7 @@ pub fn restore_hunks(
             pathspecs,
             diff_opts,
         )?;
-        let rules = WorktreeRules::from_repository(repo, &index).map_err(HunkSelectError::from)?;
+        let rules = WorktreeRules::from_repository(repo, &index)?;
         let planned = plan_worktree_reverse(
             repo,
             &index,
@@ -1267,11 +1251,11 @@ fn plan_worktree_reverse(
     rules: &WorktreeRules,
     patches: &[FilePatch],
     whole_files: &BTreeSet<String>,
-) -> std::result::Result<Vec<WorktreeReversePlan>, HunkSelectError> {
+) -> crate::error::Result<Vec<WorktreeReversePlan>> {
     let work_tree = repo
         .work_tree()
-        .ok_or_else(|| HunkSelectError::from(Error::from(RepositoryError::RequiresWorkTree)))?;
-    let config = repo.config().snapshot().map_err(HunkSelectError::from)?;
+        .ok_or_else(|| Error::from(RepositoryError::RequiresWorkTree))?;
+    let config = repo.config().snapshot()?;
     let mut out = Vec::with_capacity(patches.len());
     for patch in patches {
         let path = patch
@@ -1279,12 +1263,12 @@ fn plan_worktree_reverse(
             .ok_or(HunkSelectError::MissingPath)?
             .to_string();
         if patch.involves_gitlink() {
-            return Err(HunkSelectError::Gitlink { path });
+            return Err(HunkSelectError::Gitlink { path }.into());
         }
         let entry = index.get(path.as_bytes(), 0);
         let mode = entry.map(|e| e.mode).unwrap_or(MODE_REGULAR);
         if mode != MODE_REGULAR && mode != MODE_EXECUTABLE {
-            return Err(HunkSelectError::Binary { path: path.clone() });
+            return Err(HunkSelectError::Binary { path: path.clone() }.into());
         }
         let abs = crate::repo_relpath::worktree_abs(work_tree, &path);
         let clean = if patch.is_deleted || !abs.exists() {
@@ -1298,8 +1282,7 @@ fn plan_worktree_reverse(
                 config.as_ref(),
                 entry,
                 Some(rules),
-            )
-            .map_err(HunkSelectError::from)?
+            )?
         };
         let new_clean = apply_hunks_to_blob(&clean, &patch.hunks, &ApplyOptions { reverse: true })
             .map_err(HunkSelectError::Apply)?;
@@ -1326,11 +1309,11 @@ fn commit_worktree_reverse(
     rules: &WorktreeRules,
     planned: &[WorktreeReversePlan],
     outcome: &mut RestoreHunksOutcome,
-) -> std::result::Result<(), HunkSelectError> {
+) -> crate::error::Result<()> {
     let work_tree = repo
         .work_tree()
-        .ok_or_else(|| HunkSelectError::from(Error::from(RepositoryError::RequiresWorkTree)))?;
-    let config = repo.config().snapshot().map_err(HunkSelectError::from)?;
+        .ok_or_else(|| Error::from(RepositoryError::RequiresWorkTree))?;
+    let config = repo.config().snapshot()?;
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     let has_symlinks = dir_cache.has_symlinks();
     for plan in planned {
@@ -1344,8 +1327,7 @@ fn commit_worktree_reverse(
             let oid = repo
                 .odb()
                 .hash_algo()
-                .hash_object(ObjectKind::Blob, &plan.clean_bytes)
-                .map_err(HunkSelectError::from)?;
+                .hash_object(ObjectKind::Blob, &plan.clean_bytes)?;
             smudged = smudge_bytes_for_worktree_path(
                 repo,
                 rules,
@@ -1353,8 +1335,7 @@ fn commit_worktree_reverse(
                 plan.mode,
                 &plan.clean_bytes,
                 &oid,
-            )
-            .map_err(HunkSelectError::from)?;
+            )?;
             smudged.as_slice()
         };
         write_to_worktree_cached(
@@ -1551,7 +1532,7 @@ pub fn stage_hunks(
     diff_options: DiffOptions,
     dry_run: bool,
     cancel: &crate::progress::CancelToken,
-) -> std::result::Result<StageHunksOutcome, HunkSelectError> {
+) -> crate::error::Result<StageHunksOutcome> {
     // Lock first so the selection is resolved against the index the patches are applied to. The
     // index is reloaded rather than kept across the diff, which would add it to the diff's peak.
     let handle = repo.index();
@@ -1560,11 +1541,9 @@ pub fn stage_hunks(
     } else {
         Some(handle.begin_update()?)
     };
-    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
-        .map_err(|_| HunkSelectError::Cancelled)?;
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)?;
     let resolved = resolve_selection_in(repo, None, side, selection, pathspecs, diff_options)?;
-    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
-        .map_err(|_| HunkSelectError::Cancelled)?;
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)?;
     let mut index = handle.load()?;
     let apply = apply_patch_to_index(
         repo,
@@ -1575,11 +1554,9 @@ pub fn stage_hunks(
             ..IndexApplyOptions::default()
         },
     )?;
-    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
-        .map_err(|_| HunkSelectError::Cancelled)?;
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)?;
     if let Some(lock) = lock.as_mut() {
-        crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
-            .map_err(|_| HunkSelectError::Cancelled)?;
+        crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)?;
         handle.commit_update(lock, &mut index, false)?;
     }
     Ok(StageHunksOutcome::from_apply(
@@ -1640,6 +1617,7 @@ mod tests {
     use super::*;
     use crate::diff::hunk_diff_bundle;
     use crate::diff::hunk_ids;
+    use crate::error::RefError;
     use crate::index::write_tree::write_tree_from_index;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::progress::NullProgress;
@@ -1936,7 +1914,12 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, HunkSelectError::Binary { .. }),
+            matches!(
+                err,
+                crate::error::Error::Diff(crate::error::DiffError::HunkSelection(
+                    HunkSelectError::Binary { .. }
+                ))
+            ),
             "expected Binary, got {err:?}"
         );
     }
@@ -1968,7 +1951,12 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, HunkSelectError::StaleId { .. }));
+        assert!(matches!(
+            err,
+            crate::error::Error::Diff(crate::error::DiffError::HunkSelection(
+                HunkSelectError::StaleId { .. }
+            ))
+        ));
         let after = repo.index().load().unwrap();
         assert_eq!(before.entries.len(), after.entries.len());
     }
@@ -2012,11 +2000,13 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            HunkSelectError::WrongSide {
-                actual_side: DiffSide::Staged,
-                requested_side: DiffSide::Unstaged,
-                ..
-            }
+            crate::error::Error::Diff(crate::error::DiffError::HunkSelection(
+                HunkSelectError::WrongSide {
+                    actual_side: DiffSide::Staged,
+                    requested_side: DiffSide::Unstaged,
+                    ..
+                }
+            ))
         ));
     }
 
@@ -2035,12 +2025,12 @@ mod tests {
 
     #[test]
     fn repository_error_keeps_typed_source() {
-        let err = HunkSelectError::from(Error::InvalidHead);
-        assert_eq!(err.to_string(), Error::InvalidHead.to_string());
-        match err {
-            HunkSelectError::Repository(inner) => assert!(matches!(*inner, Error::InvalidHead)),
-            other => panic!("expected Repository, got {other:?}"),
-        }
+        let err = Error::Ref(RefError::InvalidHead);
+        assert_eq!(
+            err.to_string(),
+            Error::Ref(RefError::InvalidHead).to_string()
+        );
+        assert!(matches!(err, Error::Ref(RefError::InvalidHead)));
     }
 
     #[test]
@@ -2065,9 +2055,11 @@ mod tests {
             assert!(
                 matches!(
                     err,
-                    HunkSelectError::UnselectableSide {
-                        side: DiffSide::Other
-                    }
+                    crate::error::Error::Diff(crate::error::DiffError::HunkSelection(
+                        HunkSelectError::UnselectableSide {
+                            side: DiffSide::Other
+                        }
+                    ))
                 ),
                 "{err:?}"
             );
@@ -2087,7 +2079,7 @@ mod tests {
     fn plan_without_selection(
         repo: &Repository,
         patches: &[FilePatch],
-    ) -> std::result::Result<Vec<WorktreeReversePlan>, HunkSelectError> {
+    ) -> crate::error::Result<Vec<WorktreeReversePlan>> {
         let index = Index::new();
         let rules = WorktreeRules::from_repository(repo, &index)?;
         plan_worktree_reverse(repo, &index, &rules, patches, &BTreeSet::new())
@@ -2108,12 +2100,7 @@ mod tests {
             .err()
             .unwrap();
         match err {
-            HunkSelectError::Repository(inner) => {
-                assert!(
-                    matches!(*inner, Error::Repository(RepositoryError::RequiresWorkTree)),
-                    "{inner:?}"
-                );
-            }
+            Error::Repository(RepositoryError::RequiresWorkTree) => {}
             other => panic!("expected Repository(RequiresWorkTree), got {other:?}"),
         }
     }
@@ -2127,7 +2114,7 @@ mod tests {
         gitlink.new_mode = Some("160000".into());
         let err = plan_without_selection(&repo, &[gitlink]).err().unwrap();
         assert!(
-            matches!(&err, HunkSelectError::Gitlink { path } if path == "sub"),
+            matches!(&err, crate::error::Error::Diff(crate::error::DiffError::HunkSelection(HunkSelectError::Gitlink { path })) if path == "sub"),
             "{err:?}"
         );
 
@@ -2135,7 +2122,15 @@ mod tests {
         pathless.old_path = None;
         pathless.new_path = None;
         let err = plan_without_selection(&repo, &[pathless]).err().unwrap();
-        assert!(matches!(err, HunkSelectError::MissingPath), "{err:?}");
+        assert!(
+            matches!(
+                err,
+                crate::error::Error::Diff(crate::error::DiffError::HunkSelection(
+                    HunkSelectError::MissingPath
+                ))
+            ),
+            "{err:?}"
+        );
     }
 
     #[cfg_attr(
@@ -2566,7 +2561,12 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, HunkSelectError::RangeSelectsNothing { .. }),
+            matches!(
+                err,
+                crate::error::Error::Diff(crate::error::DiffError::HunkSelection(
+                    HunkSelectError::RangeSelectsNothing { .. }
+                ))
+            ),
             "expected RangeSelectsNothing, got {err:?}"
         );
     }
@@ -2600,7 +2600,12 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, HunkSelectError::RangeOutOfBounds { .. }));
+        assert!(matches!(
+            err,
+            crate::error::Error::Diff(crate::error::DiffError::HunkSelection(
+                HunkSelectError::RangeOutOfBounds { .. }
+            ))
+        ));
     }
 
     #[cfg(unix)]

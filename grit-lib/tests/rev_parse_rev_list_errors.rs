@@ -2,6 +2,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::error::RevisionError;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
@@ -56,7 +57,7 @@ fn upstream_missing_reports_no_upstream_variant() {
         .unwrap_err();
     assert!(matches!(
         err,
-        Error::RevParse(RevParseError::NoUpstream { .. })
+        Error::Revision(RevisionError::Parse(RevParseError::NoUpstream { .. }))
     ));
 }
 
@@ -83,7 +84,7 @@ fn push_default_nothing_reports_variant() {
         .unwrap_err();
     assert!(matches!(
         err,
-        Error::RevParse(RevParseError::PushDefaultNothing)
+        Error::Revision(RevisionError::Parse(RevParseError::PushDefaultNothing))
     ));
 }
 
@@ -100,7 +101,9 @@ fn ambiguous_spec_reports_ambiguous_argument() {
         .unwrap_err();
     assert!(matches!(
         err,
-        Error::RevParse(RevParseError::AmbiguousArgument { .. })
+        Error::Revision(RevisionError::Parse(
+            RevParseError::AmbiguousArgument { .. }
+        ))
     ));
 }
 
@@ -116,7 +119,9 @@ fn sparse_blob_unreadable_for_missing_spec() {
         .unwrap_err();
     assert!(matches!(
         err,
-        Error::RevList(RevListError::SparseBlobUnreadable { .. })
+        Error::Revision(RevisionError::List(
+            RevListError::SparseBlobUnreadable { .. }
+        ))
     ));
 }
 
@@ -132,7 +137,9 @@ fn sparse_filter_unparsable_when_commit_not_blob() {
         .unwrap_err();
     assert!(matches!(
         err,
-        Error::RevList(RevListError::SparseFilterUnparsable { .. })
+        Error::Revision(RevisionError::List(
+            RevListError::SparseFilterUnparsable { .. }
+        ))
     ));
 }
 
@@ -152,7 +159,9 @@ fn sparse_filter_unparsable_on_invalid_utf8_blob() {
         .unwrap_err();
     assert!(matches!(
         err,
-        Error::RevList(RevListError::SparseFilterUnparsable { .. })
+        Error::Revision(RevisionError::List(
+            RevListError::SparseFilterUnparsable { .. }
+        ))
     ));
 }
 
@@ -174,7 +183,9 @@ fn push_refspec_missing_when_branch_not_mapped() {
     assert!(
         matches!(
             err,
-            Error::RevParse(RevParseError::PushRefspecMissing { .. })
+            Error::Revision(RevisionError::Parse(
+                RevParseError::PushRefspecMissing { .. }
+            ))
         ),
         "unexpected error: {err:?}"
     );

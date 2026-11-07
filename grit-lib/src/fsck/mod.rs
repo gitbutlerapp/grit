@@ -26,6 +26,7 @@
 mod diagnostics;
 mod roots;
 
+use crate::error::ObjectError;
 use std::borrow::Cow;
 use std::collections::{HashSet, VecDeque};
 use std::fs;
@@ -784,11 +785,13 @@ fn check_local_loose_object(
 ) -> LooseCheckOutcome {
     let (oid, path) = item;
     match Odb::read_loose_verify_oid(path, oid) {
-        Err(Error::LooseHashMismatch { .. }) => LooseCheckOutcome::Issue(FsckIssue::HashMismatch {
-            oid: *oid,
-            path: path.clone(),
-        }),
-        Err(Error::HashCollision { oid: colliding }) => {
+        Err(Error::Object(ObjectError::LooseHashMismatch { .. })) => {
+            LooseCheckOutcome::Issue(FsckIssue::HashMismatch {
+                oid: *oid,
+                path: path.clone(),
+            })
+        }
+        Err(Error::Object(ObjectError::HashCollision { oid: colliding })) => {
             LooseCheckOutcome::Issue(FsckIssue::BadObject {
                 oid: *oid,
                 error: FsckError::new(
@@ -932,8 +935,7 @@ fn verify_loose_objects(
             || fsck_opts,
             |opts, item| Ok(check_local_loose_object(item, *opts)),
             |batch, outcomes| record_outcomes(batch, outcomes),
-        )
-        .map_err(|e| Error::Verbatim(format!("parallel fsck: {e}")))?;
+        )?;
     } else {
         for item in &loose {
             let outcome = check_local_loose_object(item, fsck_opts);
@@ -984,7 +986,7 @@ fn verify_custom_primary_objects(
         if checked.is_multiple_of(128) {
             progress.set(checked as u64);
             if cancel.is_cancelled() {
-                return Err(Error::Verbatim("cancelled".into()));
+                return Err(Error::Cancelled);
             }
         }
         checked += 1;
@@ -1012,7 +1014,7 @@ fn verify_custom_primary_objects(
                 );
                 continue;
             }
-            Err(Error::HashCollision { oid: colliding }) => {
+            Err(Error::Object(ObjectError::HashCollision { oid: colliding })) => {
                 push_bad_object(
                     issues,
                     config,
@@ -1059,11 +1061,11 @@ fn verify_custom_primary_objects(
 
 fn pack_object_read_issue(oid: ObjectId, err: Error) -> FsckIssue {
     match err {
-        Error::ObjectNotFound(_) => FsckIssue::MissingObject {
+        Error::Object(ObjectError::NotFound { .. }) => FsckIssue::MissingObject {
             oid,
             referrer: MissingObjectReferrer::Pack,
         },
-        Error::HashCollision { oid: colliding } => FsckIssue::BadObject {
+        Error::Object(ObjectError::HashCollision { oid: colliding }) => FsckIssue::BadObject {
             oid,
             error: FsckError::new(
                 "sha1Collision",
@@ -1233,12 +1235,12 @@ fn verify_pack_objects(
         let pack_path = idx_path.with_extension("pack");
         let (prep, trailer_issue) = match prepare_pack_for_object_fsck(idx_path) {
             Ok(v) => v,
-            Err(Error::PackIndexChecksumMismatch { .. }) => {
+            Err(Error::Object(ObjectError::PackIndexChecksumMismatch { .. })) => {
                 issues.push(FsckIssue::IdxMismatch { pack: pack_path });
                 progress.set((i + 1) as u64);
                 continue;
             }
-            Err(Error::CorruptObject(_)) => {
+            Err(Error::Object(ObjectError::Corrupt { .. })) => {
                 issues.push(FsckIssue::PackChecksum { pack: pack_path });
                 progress.set((i + 1) as u64);
                 continue;
@@ -1556,7 +1558,7 @@ fn walk_connectivity(
             } else {
                 match odb.read_into_caching_delta_bases(&oid, &mut read_buf) {
                     Ok(kind) => kind,
-                    Err(Error::ObjectNotFound(_)) => {
+                    Err(Error::Object(ObjectError::NotFound { .. })) => {
                         if root_kind == WalkRootKind::IndexOnly && parent.is_zero() {
                             // Report once from [`fsck_index_missing_blobs`].
                         } else if should_emit(config, strict, "missingObject") {
@@ -2397,7 +2399,7 @@ mod tests {
     impl crate::promisor_fetch::PromisorFetcher for RecordingFetcher {
         fn fetch_missing(&self, _repo: &Repository, _oids: &[ObjectId]) -> Result<()> {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err(Error::Verbatim("fsck must not fetch".to_owned()))
+            Err(Error::Io(std::io::Error::other("fsck must not fetch")))
         }
     }
 

@@ -3,6 +3,7 @@
 //! [`LogWalkCursor`] encodes the heap and visited sets of the date-order reachable walk
 //! so `--cursor` continues the same traversal instead of restarting from a single commit.
 
+use crate::error::ObjectError;
 use std::io::{Cursor, Read, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -195,7 +196,7 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] for an invalid cursor, when the query changed since
+    /// Returns [`crate::error::ObjectError::Corrupt`] for an invalid cursor, when the query changed since
     /// the cursor was issued, or when commit objects cannot be read.
     pub fn step(
         repo: &Repository,
@@ -215,9 +216,10 @@ impl LogWalkCursor {
             None => None,
             Some(c) => {
                 if c.query != *query {
-                    return Err(Error::CorruptObject(
-                        "log walk cursor does not match the current revision selection".to_owned(),
-                    ));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: "log walk cursor does not match the current revision selection"
+                            .to_owned(),
+                    }));
                 }
                 Some(c.walk.clone())
             }
@@ -248,7 +250,7 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] if internal serialization fails.
+    /// Returns [`crate::error::ObjectError::Corrupt`] if internal serialization fails.
     pub fn encode(&self) -> Result<String> {
         let mut buf = Vec::new();
         write_snapshot_v3(&mut buf, &self.query, &self.walk)?;
@@ -259,7 +261,7 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] if internal serialization fails, or [`Error::Io`] when
+    /// Returns [`crate::error::ObjectError::Corrupt`] if internal serialization fails, or [`Error::Io`] when
     /// the snapshot cannot be written.
     pub fn encode_short(&self, repo: &Repository) -> Result<String> {
         let mut buf = Vec::new();
@@ -275,7 +277,7 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the token is malformed.
+    /// Returns [`crate::error::ObjectError::Corrupt`] when the token is malformed.
     pub fn decode(token: &str) -> Result<Self> {
         Self::decode_with_git_dir(token, None)
     }
@@ -284,28 +286,37 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the token is malformed.
+    /// Returns [`crate::error::ObjectError::Corrupt`] when the token is malformed.
     pub fn decode_with_git_dir(token: &str, git_dir: Option<&Path>) -> Result<Self> {
         if let Some(id) = token.strip_prefix(SHORT_CURSOR_PREFIX) {
             if id.len() != SHORT_CURSOR_ID_LEN || !id.bytes().all(is_short_cursor_id_byte) {
-                return Err(Error::CorruptObject(
-                    "malformed short log walk cursor".to_owned(),
-                ));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: "malformed short log walk cursor".to_owned(),
+                }));
             }
             let git_dir = git_dir.ok_or_else(|| {
-                Error::CorruptObject("short log walk cursor requires an open repository".to_owned())
+                Error::Object(ObjectError::Corrupt {
+                    detail: "short log walk cursor requires an open repository".to_owned(),
+                })
             })?;
             let path = log_walk_store_dir(git_dir).join(id);
             let bytes = std::fs::read(&path).map_err(|e| {
-                Error::CorruptObject(format!("short log walk cursor not found: {e}"))
+                Error::Object(ObjectError::Corrupt {
+                    detail: format!("short log walk cursor not found: {e}"),
+                })
             })?;
             return read_snapshot(&bytes);
         }
-        let payload = token
-            .strip_prefix(CURSOR_PREFIX)
-            .ok_or_else(|| Error::CorruptObject("unrecognized log walk cursor".to_owned()))?;
-        let bytes = base64_decode(payload.as_bytes())
-            .map_err(|_| Error::CorruptObject("log walk cursor base64 decode failed".to_owned()))?;
+        let payload = token.strip_prefix(CURSOR_PREFIX).ok_or_else(|| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "unrecognized log walk cursor".to_owned(),
+            })
+        })?;
+        let bytes = base64_decode(payload.as_bytes()).map_err(|_| {
+            Error::Object(ObjectError::Corrupt {
+                detail: "log walk cursor base64 decode failed".to_owned(),
+            })
+        })?;
         read_snapshot(&bytes)
     }
 }
@@ -370,8 +381,11 @@ fn write_walk_body(out: &mut Vec<u8>, walk: &ReachableWalkSnapshot) -> Result<()
 fn read_snapshot(bytes: &[u8]) -> Result<LogWalkCursor> {
     let mut cur = Cursor::new(bytes);
     let mut magic = [0u8; 4];
-    cur.read_exact(&mut magic)
-        .map_err(|_| Error::CorruptObject("truncated log walk cursor".to_owned()))?;
+    cur.read_exact(&mut magic).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "truncated log walk cursor".to_owned(),
+        })
+    })?;
     let query = if &magic == MAGIC_V3 {
         let tips = read_oid_vec(&mut cur)?;
         let hide = read_oid_vec(&mut cur)?;
@@ -393,15 +407,15 @@ fn read_snapshot(bytes: &[u8]) -> Result<LogWalkCursor> {
             cutoffs: ReachableWalkCommitterCutoffs::default(),
         }
     } else {
-        return Err(Error::CorruptObject(
-            "log walk cursor version mismatch".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "log walk cursor version mismatch".to_owned(),
+        }));
     };
     let walk = read_walk_body(&mut cur)?;
     if cur.position() != bytes.len() as u64 {
-        return Err(Error::CorruptObject(
-            "log walk cursor trailing bytes".to_owned(),
-        ));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: "log walk cursor trailing bytes".to_owned(),
+        }));
     }
     Ok(LogWalkCursor { query, walk })
 }
@@ -448,22 +462,31 @@ fn write_i64(out: &mut Vec<u8>, v: i64) -> Result<()> {
 
 fn read_u32(cur: &mut Cursor<&[u8]>) -> Result<u32> {
     let mut buf = [0u8; 4];
-    cur.read_exact(&mut buf)
-        .map_err(|_| Error::CorruptObject("truncated log walk cursor".to_owned()))?;
+    cur.read_exact(&mut buf).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "truncated log walk cursor".to_owned(),
+        })
+    })?;
     Ok(u32::from_le_bytes(buf))
 }
 
 fn read_u64(cur: &mut Cursor<&[u8]>) -> Result<u64> {
     let mut buf = [0u8; 8];
-    cur.read_exact(&mut buf)
-        .map_err(|_| Error::CorruptObject("truncated log walk cursor".to_owned()))?;
+    cur.read_exact(&mut buf).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "truncated log walk cursor".to_owned(),
+        })
+    })?;
     Ok(u64::from_le_bytes(buf))
 }
 
 fn read_i64(cur: &mut Cursor<&[u8]>) -> Result<i64> {
     let mut buf = [0u8; 8];
-    cur.read_exact(&mut buf)
-        .map_err(|_| Error::CorruptObject("truncated log walk cursor".to_owned()))?;
+    cur.read_exact(&mut buf).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "truncated log walk cursor".to_owned(),
+        })
+    })?;
     Ok(i64::from_le_bytes(buf))
 }
 
@@ -486,8 +509,11 @@ fn read_oid_vec(cur: &mut Cursor<&[u8]>) -> Result<Vec<ObjectId>> {
 
 fn read_oid(cur: &mut Cursor<&[u8]>) -> Result<ObjectId> {
     let mut buf = [0u8; 20];
-    cur.read_exact(&mut buf)
-        .map_err(|_| Error::CorruptObject("truncated log walk cursor".to_owned()))?;
+    cur.read_exact(&mut buf).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "truncated log walk cursor".to_owned(),
+        })
+    })?;
     ObjectId::from_bytes(&buf)
 }
 
@@ -852,10 +878,19 @@ mod tests {
     fn decodes_v3_cursor_with_filled_reserved_list() -> Result<()> {
         let tip: ObjectId = "1111111111111111111111111111111111111111"
             .parse()
-            .map_err(|_| Error::CorruptObject("oid".to_owned()))?;
-        let parent: ObjectId = "2222222222222222222222222222222222222222"
-            .parse()
-            .map_err(|_| Error::CorruptObject("oid".to_owned()))?;
+            .map_err(|_| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "oid".to_owned(),
+                })
+            })?;
+        let parent: ObjectId =
+            "2222222222222222222222222222222222222222"
+                .parse()
+                .map_err(|_| {
+                    Error::Object(ObjectError::Corrupt {
+                        detail: "oid".to_owned(),
+                    })
+                })?;
         let mut buf = Vec::new();
         buf.extend_from_slice(MAGIC_V3);
         write_oid_vec(&mut buf, &[tip])?;

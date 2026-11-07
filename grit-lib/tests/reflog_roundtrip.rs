@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::error::RefError;
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
@@ -1226,7 +1227,10 @@ fn delete_out_of_range_is_typed_error() {
             .reflogs()
             .delete(&name, &[9], false)
             .expect_err("out of range");
-        assert!(matches!(err, Error::ReflogIndexOutOfRange { .. }));
+        assert!(matches!(
+            err,
+            Error::Ref(RefError::ReflogIndexOutOfRange { .. })
+        ));
         let _ = backend;
     });
 }

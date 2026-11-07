@@ -2,6 +2,7 @@
 //! HEAD (issue #1791). The `pre-commit` hook stands in for that process.
 #![cfg(unix)]
 
+use grit_lib::error::RefError;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -84,7 +85,7 @@ fn assert_branch_moved_error(err: &Error) {
     assert!(
         matches!(
             err,
-            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) if name == "refs/heads/main"
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { name, .. })) if name == "refs/heads/main"
         ),
         "{err:?}"
     );

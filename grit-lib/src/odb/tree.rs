@@ -33,8 +33,8 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`crate::error::Error::ObjectNotFound`] when a tree on the way is missing.
-    /// - [`crate::error::Error::CorruptObject`] when a tree on the way is not a tree object or
+    /// - [`crate::error::ObjectError::NotFound`] when a tree on the way is missing.
+    /// - [`crate::error::ObjectError::Corrupt`] when a tree on the way is not a tree object or
     ///   does not parse.
     /// - Any other error [`Self::read`] reports.
     pub fn tree_entry_at_path(&self, tree: &ObjectId, path: &[u8]) -> Result<Option<TreeEntry>> {
@@ -82,6 +82,7 @@ impl Odb {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
+    use crate::error::ObjectError;
 
     use super::*;
     use crate::error::Error;
@@ -215,13 +216,13 @@ mod tests {
         let blob = odb.write(ObjectKind::Blob, b"not a tree").unwrap();
         assert!(matches!(
             odb.tree_entry_at_path(&blob, b"x"),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ));
 
         let missing = ObjectId::from_hex("2222222222222222222222222222222222222222").unwrap();
         assert!(matches!(
             odb.tree_entry_at_path(&missing, b"x"),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::NotFound { .. }))
         ));
     }
 }

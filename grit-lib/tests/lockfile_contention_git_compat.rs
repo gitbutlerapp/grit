@@ -1,6 +1,7 @@
 //! Ref lock backoff when another process briefly holds `refs/heads/*.lock`.
 
 use crate::support;
+use grit_lib::error::RefError;
 
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -75,7 +76,7 @@ fn lockfile_contention_held_forever_preserves_foreign_lock() {
     let err = write_ref(&git_dir, "refs/heads/blocked", &base).expect_err("budget exhausted");
     assert!(
         matches!(&err, Error::LockHeld(lock) if lock.holder.is_none() && lock.path == lock_path)
-            || matches!(&err, Error::RefStore(RefStoreError::LockHeld { name }) if name == "refs/heads/blocked"),
+            || matches!(&err, Error::Ref(RefError::Store(RefStoreError::LockHeld { name })) if name == "refs/heads/blocked"),
         "unexpected error: {err:?}"
     );
     assert_eq!(

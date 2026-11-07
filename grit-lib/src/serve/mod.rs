@@ -47,12 +47,19 @@ use crate::refs::store::{RawRef, RefNameRef};
 use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
 
-/// Errors produced while serving a fetch or a push.
+/// Protocol-level failures while serving a fetch or a push; repository failures are reported in
+/// their own areas.
+///
+/// Surfaced on the umbrella as [`RemoteError::Serve`](crate::remote::RemoteError::Serve).
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ServeError {
     /// The peer sent something that does not follow the wire protocol.
-    #[error("protocol error: {0}")]
-    Protocol(String),
+    #[error("protocol error: {detail}")]
+    Protocol {
+        /// What the client sent that broke the protocol.
+        detail: String,
+    },
     /// The client asked for an object that is not an advertised ref tip.
     #[error("not our ref: {0}")]
     NotOurRef(ObjectId),
@@ -61,7 +68,7 @@ pub enum ServeError {
     /// Only raised before any pack byte is written, so the client gets a clean
     /// `ERR` line (protocol v2) or a side-band error (v0/v1) instead of a pack cut
     /// short. Repositories without promisor remotes report missing objects the
-    /// way they always did, as a [`ServeError::Repository`] error.
+    /// way they always did, as an object store error.
     #[error("object {oid} is missing: {reason}")]
     ObjectMissing {
         /// The missing object.
@@ -70,8 +77,11 @@ pub enum ServeError {
         reason: MissingObjectReason,
     },
     /// The client requested a v2 command this server does not implement.
-    #[error("unknown command: {0}")]
-    UnknownCommand(String),
+    #[error("unknown command: {command}")]
+    UnknownCommand {
+        /// The command name the client sent.
+        command: String,
+    },
     /// A `deepen-not` argument (`--shallow-exclude`) cannot be used as a
     /// shallow-history exclusion point.
     #[error("invalid deepen-not '{spec}': {reason}")]
@@ -92,21 +102,20 @@ pub enum ServeError {
         /// Hash algorithm of the served repository.
         repository: &'static str,
     },
-    /// Reading or writing repository data failed.
-    #[error(transparent)]
-    Repository(#[from] crate::error::Error),
-    /// The underlying stream failed.
+    /// Reading the request or writing the response stream failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// The session was stopped by a cancel signal before finishing.
-    #[error("cancelled")]
-    Cancelled,
     /// Sending the pack failed after part of it had gone out, so the response
     /// cannot be turned into a clean error any more. With a side band the
     /// client was told on band 3; the transport should end the response as
     /// failed rather than complete it.
-    #[error("the pack failed partway through: {0}")]
-    PackInterrupted(Box<ServeError>),
+    #[error("the pack failed partway through: {cause}")]
+    PackInterrupted {
+        /// What stopped the pack.
+        cause: crate::error::ErrorSummary,
+        /// Whether the pack stopped because the client closed its end of the stream.
+        broken_pipe: bool,
+    },
 }
 
 /// A fetch request body grew past the transport's decoded-size limit.
@@ -162,6 +171,7 @@ pub enum MissingObjectReason {
 
 /// Why a `deepen-not` argument was rejected; see [`ServeError::InvalidDeepenNot`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum DeepenNotError {
     /// The argument names neither an existing ref nor an object in the repository.
     #[error("no such ref or object")]
@@ -175,7 +185,7 @@ pub enum DeepenNotError {
 }
 
 /// Result alias for serving operations.
-pub type Result<T> = std::result::Result<T, ServeError>;
+pub type Result<T> = crate::error::Result<T>;
 
 /// Wire protocol version requested by the client.
 ///
@@ -605,12 +615,14 @@ pub(crate) enum Packet {
 
 /// Parse a full-width hex object id for the repository's hash algorithm.
 pub(crate) fn parse_oid(repo: &Repository, hex: &str) -> Result<ObjectId> {
-    let oid = ObjectId::from_hex(hex)
-        .map_err(|_| ServeError::Protocol(format!("invalid object id '{hex}'")))?;
+    let oid = ObjectId::from_hex(hex).map_err(|_| ServeError::Protocol {
+        detail: format!("invalid object id '{hex}'"),
+    })?;
     if oid.algo() != repo.odb().hash_algo() {
-        return Err(ServeError::Protocol(format!(
-            "object id '{hex}' does not match the repository hash algorithm"
-        )));
+        return Err(ServeError::Protocol {
+            detail: format!("object id '{hex}' does not match the repository hash algorithm"),
+        }
+        .into());
     }
     Ok(oid)
 }
@@ -622,7 +634,8 @@ pub(crate) fn check_object_format(repo: &Repository, client: Option<&str>) -> Re
         Some(name) if name != ours => Err(ServeError::ObjectFormatMismatch {
             client: name.to_owned(),
             repository: ours,
-        }),
+        }
+        .into()),
         _ => Ok(()),
     }
 }

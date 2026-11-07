@@ -1,5 +1,7 @@
 //! Remote configuration and transport operations scoped to a [`Repository`](crate::repo::Repository).
 
+use crate::error::RefError;
+use crate::worktree::WorktreeError;
 use std::collections::{BTreeSet, HashSet};
 
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
@@ -92,10 +94,13 @@ impl<'repo> RepositoryRemotes<'repo> {
         url: &str,
         kind: RemoteUrlKind,
         dry_run: bool,
-    ) -> std::result::Result<UrlChange, RemoteError> {
-        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
+    ) -> crate::error::Result<UrlChange> {
+        let config = self.repo.config().snapshot()?;
         if !has_remote_section(config.as_ref(), name) {
-            return Err(RemoteError::UnknownRemote(name.to_owned()));
+            return Err(RemoteError::UnknownRemote {
+                name: name.to_owned(),
+            }
+            .into());
         }
         let old = match kind {
             RemoteUrlKind::Fetch => config.value(&format!("remote.{name}.url")),
@@ -146,12 +151,18 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// - [`RemoteError::InvalidRemoteName`] when `refs/remotes/<name>/…` would not be a valid ref.
     /// - [`RemoteError::RemoteExists`] when any `remote.<name>.*` key is already configured.
     /// - [`RemoteError::from`] when the config cannot be read, parsed, or written.
-    pub fn add(&self, name: &str, url: &str) -> std::result::Result<(), RemoteError> {
+    pub fn add(&self, name: &str, url: &str) -> crate::error::Result<()> {
         if !crate::remote::is_valid_remote_name(name) {
-            return Err(RemoteError::InvalidRemoteName(name.to_owned()));
+            return Err(RemoteError::InvalidRemoteName {
+                name: name.to_owned(),
+            }
+            .into());
         }
         if has_remote_section(self.repo.config().snapshot()?.as_ref(), name) {
-            return Err(RemoteError::RemoteExists(name.to_owned()));
+            return Err(RemoteError::RemoteExists {
+                name: name.to_owned(),
+            }
+            .into());
         }
         // Git keeps remotes in the common config even when a worktree admin dir has its own.
         let path = crate::repo::common_git_dir_for_config(self.repo.git_dir()).join("config");
@@ -178,7 +189,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # Errors
     ///
     /// Same as [`Self::add`].
-    pub fn add_origin_if_none(&self, url: &str) -> std::result::Result<bool, RemoteError> {
+    pub fn add_origin_if_none(&self, url: &str) -> crate::error::Result<bool> {
         if !configured_remotes(self.repo.config().snapshot()?.as_ref()).is_empty() {
             return Ok(false);
         }
@@ -205,8 +216,8 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get(&self, name: &str) -> std::result::Result<Remote, RemoteError> {
-        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
+    pub fn get(&self, name: &str) -> crate::error::Result<Remote> {
+        let config = self.repo.config().snapshot()?;
         Remote::from_config(config.as_ref(), name)
     }
 
@@ -215,7 +226,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # Errors
     ///
     /// Same as [`Self::get`].
-    pub fn get_or_default(&self, name: &str) -> std::result::Result<Remote, RemoteError> {
+    pub fn get_or_default(&self, name: &str) -> crate::error::Result<Remote> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             self.get(DEFAULT_REMOTE)
@@ -249,7 +260,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         remote: &Remote,
         options: &ListRefsOptions,
         http_factory: Option<&dyn HttpClientFactory>,
-    ) -> std::result::Result<Vec<RemoteRef>, RemoteError> {
+    ) -> crate::error::Result<Vec<RemoteRef>> {
         remote.list_refs(Some(self.repo), options, http_factory)
     }
 
@@ -285,7 +296,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         progress: &mut dyn Progress,
         cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
-    ) -> std::result::Result<FetchOutcome, RemoteError> {
+    ) -> crate::error::Result<FetchOutcome> {
         remote.fetch(self.repo, options, progress, cancel, http_factory)
     }
 
@@ -410,7 +421,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         progress: &mut dyn Progress,
         cancel: &CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
-    ) -> Result<Vec<(String, std::result::Result<FetchOutcome, RemoteError>)>> {
+    ) -> Result<Vec<(String, crate::error::Result<FetchOutcome>)>> {
         use crate::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags};
 
         let config = self.repo.config().snapshot()?;
@@ -440,8 +451,8 @@ impl<'repo> RepositoryRemotes<'repo> {
             let outcome = self
                 .get(&name)
                 .and_then(|remote| self.fetch(&remote, opts, progress, cancel, http_factory));
-            if matches!(&outcome, Err(RemoteError::Cancelled)) {
-                return Err(RemoteError::Cancelled.into());
+            if matches!(&outcome, Err(crate::error::Error::Cancelled)) {
+                return Err(crate::error::Error::Cancelled);
             }
             results.push((name, outcome));
             crate::progress::poll_cancel(progress, cancel)?;
@@ -483,7 +494,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         progress: &mut dyn Progress,
         cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
-    ) -> std::result::Result<PushOutcome, RemoteError> {
+    ) -> crate::error::Result<PushOutcome> {
         remote.push(self.repo, refs, options, progress, cancel, http_factory)
     }
 
@@ -503,7 +514,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         name: &str,
         options: &InspectOptions,
         http_factory: Option<&dyn HttpClientFactory>,
-    ) -> std::result::Result<RemoteSummary, RemoteError> {
+    ) -> crate::error::Result<RemoteSummary> {
         inspect_remote(self.repo, name, options, http_factory)
     }
 
@@ -524,10 +535,13 @@ impl<'repo> RepositoryRemotes<'repo> {
         name: &str,
         dry_run: bool,
         http_factory: Option<&dyn HttpClientFactory>,
-    ) -> std::result::Result<Vec<String>, RemoteError> {
-        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
+    ) -> crate::error::Result<Vec<String>> {
+        let config = self.repo.config().snapshot()?;
         if !has_remote_section(config.as_ref(), name) {
-            return Err(RemoteError::UnknownRemote(name.to_owned()));
+            return Err(RemoteError::UnknownRemote {
+                name: name.to_owned(),
+            }
+            .into());
         }
         let specs = load_remote_fetch_specs(config.as_ref(), name)?;
         let positive: Vec<RefspecItem> = specs.iter().filter(|s| !s.negative).cloned().collect();
@@ -542,8 +556,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         )?;
         let remote_pairs: Vec<(String, crate::objects::ObjectId)> =
             advertised.iter().map(|r| (r.name.clone(), r.oid)).collect();
-        let stale = tracking_refs_gone_in(self.repo, &positive, &remote_pairs)
-            .map_err(RemoteError::from)?;
+        let stale = tracking_refs_gone_in(self.repo, &positive, &remote_pairs)?;
         let mut refs: Vec<String> = stale
             .into_iter()
             .filter(|(local_ref, _)| fetch_specs_bind_local_ref(&specs, local_ref).is_some())
@@ -587,15 +600,17 @@ impl<'repo> RepositoryRemotes<'repo> {
         mode: SetHead,
         dry_run: bool,
         http_factory: Option<&dyn HttpClientFactory>,
-    ) -> std::result::Result<SetHeadOutcome, RemoteError> {
-        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
+    ) -> crate::error::Result<SetHeadOutcome> {
+        let config = self.repo.config().snapshot()?;
         if !has_remote_section(config.as_ref(), name) {
-            return Err(RemoteError::UnknownRemote(name.to_owned()));
+            return Err(RemoteError::UnknownRemote {
+                name: name.to_owned(),
+            }
+            .into());
         }
         let head_ref = format!("refs/remotes/{name}/HEAD");
         let store = self.repo.ref_store();
-        let previous_target = crate::refs::read_symbolic_ref_for_repository(self.repo, &head_ref)
-            .map_err(RemoteError::from)?;
+        let previous_target = crate::refs::read_symbolic_ref_for_repository(self.repo, &head_ref)?;
 
         let target = match mode {
             SetHead::Delete => {
@@ -604,8 +619,7 @@ impl<'repo> RepositoryRemotes<'repo> {
                     Ok(None)
                 );
                 if !dry_run && exists {
-                    crate::refs::delete_ref_on_store(store, &head_ref)
-                        .map_err(RemoteError::from)?;
+                    crate::refs::delete_ref_on_store(store, &head_ref)?;
                 }
                 return Ok(SetHeadOutcome {
                     target: None,
@@ -616,9 +630,9 @@ impl<'repo> RepositoryRemotes<'repo> {
             SetHead::Branch(branch) => {
                 let branch = branch.trim().to_owned();
                 if branch.is_empty() {
-                    return Err(RemoteError::Nested(Box::new(Error::InvalidRef(
-                        "branch name required".to_owned(),
-                    ))));
+                    return Err(Error::Ref(RefError::Invalid {
+                        detail: "branch name required".to_owned(),
+                    }));
                 }
                 format!("refs/remotes/{name}/{branch}")
             }
@@ -642,9 +656,9 @@ impl<'repo> RepositoryRemotes<'repo> {
         };
 
         if crate::refs::resolve_ref_in(self.repo, &target).is_err() {
-            return Err(RemoteError::Nested(Box::new(Error::InvalidRef(format!(
-                "Not a valid ref: {target}"
-            )))));
+            return Err(Error::Ref(RefError::Invalid {
+                detail: format!("Not a valid ref: {target}"),
+            }));
         }
         if !dry_run {
             crate::refs::write_symbolic_ref_on_store(
@@ -652,8 +666,7 @@ impl<'repo> RepositoryRemotes<'repo> {
                 self.repo.git_dir(),
                 &head_ref,
                 &target,
-            )
-            .map_err(RemoteError::from)?;
+            )?;
         }
         Ok(SetHeadOutcome {
             target: Some(target),
@@ -674,10 +687,13 @@ impl<'repo> RepositoryRemotes<'repo> {
         &self,
         name: &str,
         options: RemoveOptions,
-    ) -> std::result::Result<RemoteRemoval, RemoteError> {
-        let config = self.repo.config().snapshot().map_err(RemoteError::from)?;
+    ) -> crate::error::Result<RemoteRemoval> {
+        let config = self.repo.config().snapshot()?;
         if !has_remote_section(config.as_ref(), name) {
-            return Err(RemoteError::UnknownRemote(name.to_owned()));
+            return Err(RemoteError::UnknownRemote {
+                name: name.to_owned(),
+            }
+            .into());
         }
 
         let refs_to_delete = refs_to_delete_for_remote(self.repo, config.as_ref(), name)?;
@@ -745,9 +761,9 @@ impl<'repo> RepositoryRemotes<'repo> {
         crate::refs::commit_owned_ref_updates_on_store(self.repo.ref_store(), updates)?;
 
         if !file.remove_section(&format!("remote.{name}"))? {
-            return Err(RemoteError::Nested(Box::new(Error::PathError(format!(
-                "could not remove config section remote.{name}"
-            )))));
+            return Err(Error::Worktree(WorktreeError::Path {
+                detail: format!("could not remove config section remote.{name}"),
+            }));
         }
         file.write()?;
         self.repo.reload_config()?;
@@ -871,7 +887,7 @@ fn remote_has_fetch_keys(config: &ConfigSet, remote: &str) -> bool {
 fn load_remote_fetch_specs(
     config: &ConfigSet,
     remote: &str,
-) -> std::result::Result<Vec<RefspecItem>, RemoteError> {
+) -> crate::error::Result<Vec<RefspecItem>> {
     let had_fetch_keys = remote_has_fetch_keys(config, remote);
     let mut raw = config.values_all(&format!("remote.{remote}.fetch"));
     raw.retain(|s| !s.trim().is_empty());
@@ -907,7 +923,7 @@ fn refs_to_delete_for_remote(
     repo: &Repository,
     config: &ConfigSet,
     remote: &str,
-) -> std::result::Result<Vec<String>, RemoteError> {
+) -> crate::error::Result<Vec<String>> {
     let specs = load_remote_fetch_specs(config, remote)?;
     let other_specs: Vec<Vec<RefspecItem>> = configured_remotes(config)
         .into_iter()
@@ -916,7 +932,7 @@ fn refs_to_delete_for_remote(
         .filter_map(|name| load_remote_fetch_specs(config, &name).ok())
         .collect();
 
-    let all_refs = list_refs_for_repository(repo, "refs/").map_err(RemoteError::from)?;
+    let all_refs = list_refs_for_repository(repo, "refs/")?;
     let mut refs_to_delete = BTreeSet::new();
     for (refname, _) in all_refs {
         if !refname.starts_with("refs/remotes/") {
@@ -1199,11 +1215,11 @@ mod tests {
         repo.remotes().add("origin", "/tmp/a.git").expect("add");
         assert!(matches!(
             repo.remotes().add("origin", "/tmp/b.git"),
-            Err(RemoteError::RemoteExists(name)) if name == "origin"
+            Err(crate::error::Error::Remote(RemoteError::RemoteExists { name })) if name == "origin"
         ));
         assert!(matches!(
             repo.remotes().add("bad name", "/tmp/b.git"),
-            Err(RemoteError::InvalidRemoteName(name)) if name == "bad name"
+            Err(crate::error::Error::Remote(RemoteError::InvalidRemoteName { name })) if name == "bad name"
         ));
         assert_eq!(
             repo.config()

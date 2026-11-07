@@ -15,7 +15,7 @@ use grit_lib::remote::transfer::{
     resolve_fetch_prune, resolve_fetch_tags, FetchAllOptions, FetchDepth, FetchOptions,
     FetchOutcome as LibFetchOutcome, TagMode, TransferStats, UpdateKind, UpdateMode,
 };
-use grit_lib::remote::{DefaultHttpClientFactory, RemoteError};
+use grit_lib::remote::DefaultHttpClientFactory;
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -577,7 +577,7 @@ fn fetch_once(
 
 pub(crate) use crate::error_map::map_remote_error;
 
-fn map_remote_fetch_error(err: RemoteError) -> anyhow::Error {
+fn map_remote_fetch_error(err: grit_lib::error::Error) -> anyhow::Error {
     map_remote_error(err)
 }
 
@@ -592,8 +592,8 @@ fn plural(n: usize) -> &'static str {
 #[cfg(test)]
 mod map_remote_error_tests {
     use grit_lib::error::Error as LibError;
+    use grit_lib::error::ObjectError;
     use grit_lib::objects::ObjectId;
-    use grit_lib::remote::RemoteError;
 
     use super::map_remote_error;
     use crate::cli_messages::human_error_message;
@@ -601,9 +601,12 @@ mod map_remote_error_tests {
 
     #[test]
     fn library_object_not_found_keeps_remote_display() {
-        let err = map_remote_error(RemoteError::Nested(Box::new(LibError::ObjectNotFound(
-            "deadbeef".into(),
-        ))));
+        let err = map_remote_error(
+            ObjectError::NotFound {
+                name: "deadbeef".into(),
+            }
+            .into(),
+        );
         assert!(err.downcast_ref::<LibError>().is_none());
         assert_eq!(
             human_error_message(&err),
@@ -616,9 +619,7 @@ mod map_remote_error_tests {
     #[test]
     fn library_hash_collision_stays_typed_for_json() {
         let oid = ObjectId::from_hex("f92d74e3874587aaf443d1db961d4e26dde13e9c").expect("oid");
-        let err = map_remote_error(RemoteError::Nested(Box::new(LibError::HashCollision {
-            oid,
-        })));
+        let err = map_remote_error(ObjectError::HashCollision { oid }.into());
         let payload = structured_json_payload(&err).expect("structured payload");
         assert_eq!(payload.kind, crate::error_kind::ErrorKind::HashCollision);
         assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));

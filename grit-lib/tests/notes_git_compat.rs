@@ -1,5 +1,6 @@
 //! Notes tree read/write/merge round-trips with system `git`.
 
+use grit_lib::error::NotesError;
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -503,7 +504,10 @@ fn uppercase_hex_leaf_read_and_add_sees_existing_note() {
         )
         .expect_err("note already exists");
     assert!(
-        matches!(outcome, grit_lib::error::Error::NoteAlreadyExists { .. }),
+        matches!(
+            outcome,
+            grit_lib::error::Error::Notes(NotesError::AlreadyExists { .. })
+        ),
         "add without force must not treat uppercase leaf as missing"
     );
 

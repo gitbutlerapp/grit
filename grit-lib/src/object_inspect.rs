@@ -4,20 +4,23 @@
 //! [`Repository::read_object_for_display`] loads and parses object bytes for programmatic use.
 //!
 //! ```rust
-//! use grit_lib::revwalk::object_inspect::ResolveError;
+//! use grit_lib::error::{Error, RevisionError};
 //! use grit_lib::repo::{InitOptions, Repository};
+//! use grit_lib::revwalk::object_inspect::ResolveError;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;
 //! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //! match repo.resolve("HEAD") {
 //!     Ok(_resolved) => {}
-//!     Err(ResolveError::UnknownRevision { .. }) => {}
+//!     Err(Error::Revision(RevisionError::Resolve(ResolveError::UnknownRevision { .. }))) => {}
 //!     Err(e) => return Err(e.into()),
 //! }
 //! # Ok(())
 //! # }
 //! ```
 
+use crate::error::ObjectError;
+use crate::error::RevisionError;
 use thiserror::Error;
 
 use crate::diagnostics::Warning;
@@ -101,10 +104,6 @@ pub enum ResolveError {
         /// Text inside `@{...}` that was treated as a date selector.
         date: String,
     },
-
-    /// The spec resolved to an object id but its stored copy could not be read.
-    #[error("{0}")]
-    DamagedObject(#[source] Error),
 }
 
 impl From<RevParseError> for ResolveError {
@@ -207,7 +206,7 @@ impl Repository {
     /// # Errors
     ///
     /// Returns an object-store error if a named tag's object cannot be read, or
-    /// [`Error::CorruptObject`] if an annotated tag cannot be parsed.
+    /// [`crate::error::ObjectError::Corrupt`] if an annotated tag cannot be parsed.
     #[inline]
     pub fn revision_label(&self, spec: &str) -> Result<Option<RevisionLabel>> {
         if spec == "HEAD" {
@@ -261,43 +260,52 @@ impl Repository {
     /// Returns [`ResolveError::UnknownRevision`] when the spec cannot be resolved,
     /// [`ResolveError::AmbiguousShortObject`] when a short oid is ambiguous, and
     /// [`ResolveError::PathNotInTree`] when a `rev:path` path is missing.
-    pub fn resolve(&self, spec: &str) -> std::result::Result<ResolvedObject, ResolveError> {
+    pub fn resolve(&self, spec: &str) -> crate::error::Result<ResolvedObject> {
         let oid = match resolve_revision(self, spec) {
             Ok(o) => o,
-            Err(Error::ObjectNotFound(_)) => {
+            Err(Error::Object(ObjectError::NotFound { .. })) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
-                });
+                }
+                .into());
             }
-            Err(Error::RevParse(RevParseError::AmbiguousShortObject { spec: prefix })) => {
+            Err(Error::Revision(RevisionError::Parse(RevParseError::AmbiguousShortObject {
+                spec: prefix,
+            }))) => {
                 let candidates =
                     ambiguous_object_hint_lines(self, &prefix, None).unwrap_or_default();
                 return Err(ResolveError::AmbiguousShortObject {
                     spec: spec.to_owned(),
                     candidates,
-                });
+                }
+                .into());
             }
-            Err(Error::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates })) => {
+            Err(Error::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
+                prefix,
+                candidates,
+            }))) => {
                 return Err(ResolveError::AmbiguousChangeId {
                     spec: prefix,
                     candidates,
-                });
+                }
+                .into());
             }
-            Err(Error::RevParse(e)) => return Err(e.into()),
+            Err(Error::Revision(RevisionError::Parse(e))) => return Err(e.into()),
             Err(_) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
-                });
+                }
+                .into());
             }
         };
 
         let info = self.read_info_replaced(&oid).map_err(|e| {
             if e.is_damaged_object() {
-                ResolveError::DamagedObject(e)
+                e
             } else {
-                ResolveError::UnknownRevision {
+                crate::error::Error::from(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
-                }
+                })
             }
         })?;
         let ref_names = infer_ref_names(self, spec, oid);
@@ -326,52 +334,62 @@ impl Repository {
         &self,
         spec: &str,
         expected: Option<ObjectKind>,
-    ) -> std::result::Result<ObjectId, ResolveError> {
+    ) -> crate::error::Result<ObjectId> {
         if split_double_dot_range(spec).is_some()
             || split_triple_dot_range(spec).is_some()
             || is_revision_set_exclude_spec(spec)
         {
             return Err(ResolveError::RevisionRange {
                 spec: spec.to_owned(),
-            });
+            }
+            .into());
         }
 
         let oid = match resolve_revision_for_verify(self, spec) {
             Ok(o) => o,
-            Err(Error::ObjectNotFound(_)) => {
+            Err(Error::Object(ObjectError::NotFound { .. })) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
-                });
+                }
+                .into());
             }
-            Err(Error::RevParse(RevParseError::AmbiguousShortObject { spec: prefix })) => {
+            Err(Error::Revision(RevisionError::Parse(RevParseError::AmbiguousShortObject {
+                spec: prefix,
+            }))) => {
                 let candidates =
                     ambiguous_object_hint_lines(self, &prefix, None).unwrap_or_default();
                 return Err(ResolveError::AmbiguousShortObject {
                     spec: spec.to_owned(),
                     candidates,
-                });
+                }
+                .into());
             }
-            Err(Error::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates })) => {
+            Err(Error::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
+                prefix,
+                candidates,
+            }))) => {
                 return Err(ResolveError::AmbiguousChangeId {
                     spec: prefix,
                     candidates,
-                });
+                }
+                .into());
             }
-            Err(Error::RevParse(e)) => return Err(e.into()),
+            Err(Error::Revision(RevisionError::Parse(e))) => return Err(e.into()),
             Err(_) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
-                });
+                }
+                .into());
             }
         };
 
         let info = self.read_info_replaced(&oid).map_err(|e| {
             if e.is_damaged_object() {
-                ResolveError::DamagedObject(e)
+                e
             } else {
-                ResolveError::UnknownRevision {
+                crate::error::Error::from(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
-                }
+                })
             }
         })?;
 
@@ -381,7 +399,8 @@ impl Repository {
                     spec: spec.to_owned(),
                     found: info.kind,
                     expected: want,
-                });
+                }
+                .into());
             }
         }
 
@@ -456,7 +475,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ObjectNotFound`] when the object is missing.
+    /// Returns [`crate::error::ObjectError::NotFound`] when the object is missing.
     pub fn read_object_raw_for_display(&self, oid: &ObjectId) -> Result<Object> {
         self.read_replaced(oid)
     }
@@ -468,7 +487,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ObjectNotFound`] when the object is missing.
+    /// Returns [`crate::error::ObjectError::NotFound`] when the object is missing.
     pub fn read_object_info_for_display(&self, oid: &ObjectId) -> Result<ObjectInfo> {
         self.read_info_replaced(oid)
     }
@@ -497,8 +516,8 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ObjectNotFound`] when the object is missing and
-    /// [`Error::CorruptObject`] when parsing fails.
+    /// Returns [`crate::error::ObjectError::NotFound`] when the object is missing and
+    /// [`crate::error::ObjectError::Corrupt`] when parsing fails.
     pub fn read_object_for_display(&self, oid: &ObjectId) -> Result<ObjectContents> {
         let obj = self.read_object_raw_for_display(oid)?;
         match obj.kind {
@@ -554,7 +573,7 @@ pub fn format_tree_entries_cat_file_p(entries: &[TreeEntry]) -> Vec<u8> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when `data` is not a valid tree.
+/// Returns [`crate::error::ObjectError::Corrupt`] when `data` is not a valid tree.
 pub fn format_tree_cat_file_p(data: &[u8]) -> Result<Vec<u8>> {
     let entries = parse_tree(data)?;
     Ok(format_tree_entries_cat_file_p(&entries))
@@ -624,7 +643,7 @@ mod abbreviate_for_display_tests {
 
 fn map_resolve_ref_error(err: Error) -> RevParseError {
     match err {
-        Error::RevParse(e) => e,
+        Error::Revision(RevisionError::Parse(e)) => e,
         other => RevParseError::InvalidObjectName {
             name: other.to_string(),
         },
@@ -793,7 +812,7 @@ mod tests {
         crate::refs::write_ref(repo.git_dir(), "refs/tags/broken", &broken).expect("tag ref");
         assert!(matches!(
             repo.revision_label("broken"),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::Corrupt { .. }))
         ));
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
         let dangling = crate::refs::store::RefTransaction::new()
@@ -814,7 +833,7 @@ mod tests {
             .expect("dangling tag ref");
         assert!(matches!(
             repo.revision_label("missing"),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::NotFound { .. }))
         ));
     }
     #[test]

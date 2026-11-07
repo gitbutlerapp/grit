@@ -93,7 +93,7 @@ fn pull_grit(repo: &Repository, options: &PullOptions) -> grit_lib::porcelain::p
 fn try_pull_grit(
     repo: &Repository,
     options: &PullOptions,
-) -> Result<grit_lib::porcelain::pull::PullOutcome, PullError> {
+) -> grit_lib::error::Result<grit_lib::porcelain::pull::PullOutcome> {
     let mut progress = NoProgress;
     pull(repo, options, &mut progress, &CancelToken::never(), None)
 }

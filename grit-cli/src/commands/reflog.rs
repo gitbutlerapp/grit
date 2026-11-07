@@ -1,5 +1,6 @@
 //! `grit reflog` — inspect and maintain reference logs.
 
+use grit_lib::error::RefError;
 use std::io::Write;
 
 use anyhow::{Context, Result};
@@ -362,7 +363,7 @@ fn person_from_signature(sig: &Signature) -> Person {
 // Include the integer parser's explanation in CLI output as well as the error chain.
 fn map_selector_error(err: Error) -> anyhow::Error {
     match err {
-        Error::ReflogInvalidIndex { spec, source } => {
+        Error::Ref(RefError::ReflogInvalidIndex { spec, source }) => {
             anyhow::Error::new(source).context(format!("invalid reflog index in '{spec}'"))
         }
         other => anyhow::Error::new(other),
@@ -371,8 +372,10 @@ fn map_selector_error(err: Error) -> anyhow::Error {
 
 fn map_reflog_error(err: Error) -> anyhow::Error {
     match err {
-        Error::ReflogUnknownRef { refname } => anyhow::anyhow!("unknown ref '{refname}'"),
-        Error::ReflogIndexOutOfRange { refname, index } => {
+        Error::Ref(RefError::ReflogUnknownRef { refname }) => {
+            anyhow::anyhow!("unknown ref '{refname}'")
+        }
+        Error::Ref(RefError::ReflogIndexOutOfRange { refname, index }) => {
             anyhow::anyhow!("reflog entry {refname}@{{{index}}} not found")
         }
         other => anyhow::Error::new(other),

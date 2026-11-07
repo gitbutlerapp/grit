@@ -136,19 +136,30 @@ pub enum PackBitmapWriteError {
     #[error("bitmap write requires a files-backed object database")]
     NotFilesBacked,
     /// Pack index or sidecar path is invalid.
-    #[error("invalid pack index path: {0}")]
-    InvalidPackPath(String),
+    #[error("invalid pack index path: {path}")]
+    InvalidPackPath {
+        /// The pack index path as given.
+        path: String,
+    },
     /// Unexpected I/O failure.
-    #[error("I/O error: {0}")]
-    Io(String),
+    #[error("I/O error: {detail}")]
+    Io {
+        /// What failed while reading or writing.
+        detail: String,
+    },
     /// Object database or pack data could not be read.
-    #[error("object read error: {0}")]
-    Object(String),
+    #[error("object read error: {detail}")]
+    Object {
+        /// What failed while reading the object.
+        detail: String,
+    },
 }
 
 impl PackBitmapWriteError {
     fn io(err: std::io::Error) -> Self {
-        Self::Io(err.to_string())
+        Self::Io {
+            detail: err.to_string(),
+        }
     }
 
     /// Missing object ids when [`Self::NotClosed`] ended the write.
@@ -174,8 +185,12 @@ impl MidxBitmapWriter {
         bitmap_path: &Path,
         options: &PackBitmapWriteOptions,
     ) -> Result<PathBuf, PackBitmapWriteError> {
-        let order = BitmapOrder::from_midx_bytes_and_rid_order(midx_bytes, rid_order)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+        let order =
+            BitmapOrder::from_midx_bytes_and_rid_order(midx_bytes, rid_order).map_err(|e| {
+                PackBitmapWriteError::Object {
+                    detail: e.to_string(),
+                }
+            })?;
         write_bitmap_for_order(repo, &order, midx_checksum, bitmap_path, options)
     }
 
@@ -203,8 +218,12 @@ impl MidxBitmapWriter {
             .files_objects_dir()
             .ok_or(PackBitmapWriteError::NotFilesBacked)?;
         let order = BitmapOrder::load_midx(objects_dir)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
-            .ok_or_else(|| PackBitmapWriteError::InvalidPackPath("no MIDX loaded".into()))?;
+            .map_err(|e| PackBitmapWriteError::Object {
+                detail: e.to_string(),
+            })?
+            .ok_or_else(|| PackBitmapWriteError::InvalidPackPath {
+                path: "no MIDX loaded".into(),
+            })?;
         write_bitmap_for_order(repo, &order, midx_checksum, bitmap_path, options)
     }
 }
@@ -230,19 +249,26 @@ impl PackBitmapWriter {
         if !repo.odb().uses_files_primary() {
             return Err(PackBitmapWriteError::NotFilesBacked);
         }
-        let idx = read_pack_index(pack_idx_path)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+        let idx = read_pack_index(pack_idx_path).map_err(|e| PackBitmapWriteError::Object {
+            detail: e.to_string(),
+        })?;
         let objects_dir = repo
             .odb()
             .files_objects_dir()
             .ok_or(PackBitmapWriteError::NotFilesBacked)?;
         ensure_rev_sidecar(&idx)?;
-        let order = BitmapOrder::load_pack(objects_dir, Arc::new(idx))
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+        let order = BitmapOrder::load_pack(objects_dir, Arc::new(idx)).map_err(|e| {
+            PackBitmapWriteError::Object {
+                detail: e.to_string(),
+            }
+        })?;
         let pack_checksum = read_pack_trailer(
-            order.pack_index().as_ref().ok_or_else(|| {
-                PackBitmapWriteError::InvalidPackPath("pack index missing".into())
-            })?,
+            order
+                .pack_index()
+                .as_ref()
+                .ok_or_else(|| PackBitmapWriteError::InvalidPackPath {
+                    path: "pack index missing".into(),
+                })?,
             repo.odb().hash_algo().len(),
         )?;
         let bitmap_path = bitmap_path_for_index(pack_idx_path);
@@ -275,8 +301,11 @@ fn write_bitmap_for_order_in_context(
 ) -> Result<PathBuf, PackBitmapWriteError> {
     let roots = match &options.reachability_roots {
         Some(roots) => roots.clone(),
-        None => collect_referenced_object_roots(repo.git_dir())
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?,
+        None => collect_referenced_object_roots(repo.git_dir()).map_err(|e| {
+            PackBitmapWriteError::Object {
+                detail: e.to_string(),
+            }
+        })?,
     };
     let strict = options.verify_reachability_closure;
     // Shallow boundary commits have no parents for reachability, as in Git.
@@ -323,9 +352,9 @@ fn read_pack_trailer(idx: &PackIndex, hash_len: usize) -> Result<Vec<u8>, PackBi
     let len = file.metadata().map_err(PackBitmapWriteError::io)?.len();
     let trailer_len = hash_len as u64;
     if len < trailer_len {
-        return Err(PackBitmapWriteError::InvalidPackPath(
-            "pack file too short".into(),
-        ));
+        return Err(PackBitmapWriteError::InvalidPackPath {
+            path: "pack file too short".into(),
+        });
     }
     file.seek(SeekFrom::Start(len - trailer_len))
         .map_err(PackBitmapWriteError::io)?;
@@ -345,14 +374,17 @@ fn ensure_rev_sidecar(idx: &PackIndex) -> Result<(), PackBitmapWriteError> {
     let offsets: Vec<u64> = (0..idx.len())
         .map(|i| idx.offset_at(i))
         .collect::<crate::error::Result<Vec<_>>>()
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+        .map_err(|e| PackBitmapWriteError::Object {
+            detail: e.to_string(),
+        })?;
     let rev_bytes =
         build_pack_rev_bytes_from_index_order_offsets_and_checksum(&offsets, &pack_checksum);
-    let tmp =
-        NamedTempFile::new_in(rev_path.parent().ok_or_else(|| {
-            PackBitmapWriteError::InvalidPackPath("rev path has no parent".into())
-        })?)
-        .map_err(PackBitmapWriteError::io)?;
+    let tmp = NamedTempFile::new_in(rev_path.parent().ok_or_else(|| {
+        PackBitmapWriteError::InvalidPackPath {
+            path: "rev path has no parent".into(),
+        }
+    })?)
+    .map_err(PackBitmapWriteError::io)?;
     tmp.as_file()
         .write_all(&rev_bytes)
         .map_err(PackBitmapWriteError::io)?;
@@ -364,7 +396,9 @@ fn ensure_rev_sidecar(idx: &PackIndex) -> Result<(), PackBitmapWriteError> {
 fn write_bitmap_atomically(path: &Path, bytes: &[u8]) -> Result<(), PackBitmapWriteError> {
     let parent = path
         .parent()
-        .ok_or_else(|| PackBitmapWriteError::InvalidPackPath("bitmap path has no parent".into()))?;
+        .ok_or_else(|| PackBitmapWriteError::InvalidPackPath {
+            path: "bitmap path has no parent".into(),
+        })?;
     let tmp = NamedTempFile::new_in(parent).map_err(PackBitmapWriteError::io)?;
     tmp.as_file()
         .write_all(bytes)
@@ -438,8 +472,9 @@ impl CommitTable {
             return Ok(Cow::Borrowed(&row.parents));
         }
         let obj = read_object(repo, oid)?;
-        let commit =
-            parse_commit(&obj.data).map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+        let commit = parse_commit(&obj.data).map_err(|e| PackBitmapWriteError::Object {
+            detail: e.to_string(),
+        })?;
         Ok(Cow::Owned(self.graft_parents(oid, commit.parents)))
     }
 }
@@ -447,7 +482,9 @@ impl CommitTable {
 fn read_object(repo: &Repository, oid: &ObjectId) -> Result<Object, PackBitmapWriteError> {
     repo.odb()
         .read(oid)
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))
+        .map_err(|e| PackBitmapWriteError::Object {
+            detail: e.to_string(),
+        })
 }
 
 /// Kind of each position of a single-pack `order`, read from pack entry headers.
@@ -464,22 +501,30 @@ fn pack_entry_kinds(
         return Ok(Vec::new());
     };
     let Some(reader) = SingleLocalPackReader::open_for_pack_index(objects_dir, Arc::clone(&idx))
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
+        .map_err(|e| PackBitmapWriteError::Object {
+            detail: e.to_string(),
+        })?
     else {
         return Ok(Vec::new());
     };
     let offsets = (0..order.object_count())
         .map(|pos| {
             let row = order.storage_row_for_bitmap_rank(pos).ok_or_else(|| {
-                PackBitmapWriteError::Object("bitmap position out of range".into())
+                PackBitmapWriteError::Object {
+                    detail: "bitmap position out of range".into(),
+                }
             })?;
             idx.offset_at(row as usize)
-                .map_err(|e| PackBitmapWriteError::Object(e.to_string()))
+                .map_err(|e| PackBitmapWriteError::Object {
+                    detail: e.to_string(),
+                })
         })
         .collect::<Result<Vec<u64>, _>>()?;
     reader
         .object_kinds_at_sorted_offsets(&offsets)
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))
+        .map_err(|e| PackBitmapWriteError::Object {
+            detail: e.to_string(),
+        })
 }
 
 /// Type bitmaps for every position in `order`, plus the parsed commits.
@@ -501,14 +546,18 @@ fn build_type_bitmaps_and_commits(
     for pos in 0..n {
         let oid = order
             .oid_at(pos)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+            .map_err(|e| PackBitmapWriteError::Object {
+                detail: e.to_string(),
+            })?;
         let p = pos as usize;
         let kind = match header_kinds.get(p).copied().flatten() {
             Some(kind) => kind,
             None => {
                 repo.odb()
                     .read_info(&oid)
-                    .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
+                    .map_err(|e| PackBitmapWriteError::Object {
+                        detail: e.to_string(),
+                    })?
                     .kind
             }
         };
@@ -516,8 +565,9 @@ fn build_type_bitmaps_and_commits(
             ObjectKind::Commit => {
                 commit_bm.set(p);
                 let obj = read_object(repo, &oid)?;
-                let c = parse_commit(&obj.data)
-                    .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+                let c = parse_commit(&obj.data).map_err(|e| PackBitmapWriteError::Object {
+                    detail: e.to_string(),
+                })?;
                 let committer_date = parse_signature_times(&c.committer)
                     .map(|t| t.unix_seconds)
                     .unwrap_or(0);
@@ -585,7 +635,9 @@ fn commit_tips_from_roots(
                 }
                 ObjectKind::Tag => {
                     oid = parse_tag(&obj.data)
-                        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
+                        .map_err(|e| PackBitmapWriteError::Object {
+                            detail: e.to_string(),
+                        })?
                         .object;
                 }
                 ObjectKind::Tree => {
@@ -626,7 +678,9 @@ fn collect_missing_in_tree(
         }
         let obj = read_object(repo, &tree_oid)?;
         for entry in TreeRefIter::with_oid_len(&obj.data, hash_len) {
-            let entry = entry.map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+            let entry = entry.map_err(|e| PackBitmapWriteError::Object {
+                detail: e.to_string(),
+            })?;
             let kind = TreeChild::from_mode(entry.mode);
             if kind == TreeChild::Gitlink {
                 continue;
@@ -673,8 +727,10 @@ fn tip_needs_flags(
         needs.extend(tips.iter().copied());
         return Ok(needs);
     }
-    for (name, oid) in refs::list_refs_for_repository(repo, "refs/")
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
+    for (name, oid) in
+        refs::list_refs_for_repository(repo, "refs/").map_err(|e| PackBitmapWriteError::Object {
+            detail: e.to_string(),
+        })?
     {
         let peeled = peel_to_commit(repo, oid)?;
         let Some(commit) = peeled else { continue };
@@ -712,7 +768,9 @@ fn peel_to_commit(
 ) -> Result<Option<ObjectId>, PackBitmapWriteError> {
     repo.odb()
         .peel_to_commit(oid)
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))
+        .map_err(|e| PackBitmapWriteError::Object {
+            detail: e.to_string(),
+        })
 }
 
 fn pick_window_commit(window: &[CommitRow], needs_bitmap: &HashSet<ObjectId>) -> ObjectId {
@@ -951,7 +1009,9 @@ impl TreeBitmapFill<'_> {
         }
         let obj = read_object(self.repo, &tree)?;
         for entry in TreeRefIter::with_oid_len(&obj.data, self.hash_len) {
-            let entry = entry.map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+            let entry = entry.map_err(|e| PackBitmapWriteError::Object {
+                detail: e.to_string(),
+            })?;
             let kind = TreeChild::from_mode(entry.mode);
             if kind == TreeChild::Gitlink {
                 continue;
@@ -1033,9 +1093,9 @@ fn assemble_bitmap_bytes(
         flags |= BITMAP_OPT_LOOKUP_TABLE;
     }
     if flags & BITMAP_OPT_FULL_DAG == 0 {
-        return Err(PackBitmapWriteError::InvalidPackPath(
-            "FULL_DAG required".into(),
-        ));
+        return Err(PackBitmapWriteError::InvalidPackPath {
+            path: "FULL_DAG required".into(),
+        });
     }
 
     let mut body = Vec::new();
@@ -1068,16 +1128,18 @@ fn assemble_bitmap_bytes(
             .and_then(|opt| opt.map(|prev| i - prev))
             .unwrap_or(0);
         if xor_off > u8::MAX as usize || xor_off > MAX_XOR_SEARCH {
-            return Err(PackBitmapWriteError::Object(
-                "xor offset out of range".into(),
-            ));
+            return Err(PackBitmapWriteError::Object {
+                detail: "xor offset out of range".into(),
+            });
         }
         body.push(xor_off as u8);
         body.push(0); // flags
         xor_plan
             .payload
             .get(i)
-            .ok_or_else(|| PackBitmapWriteError::Object("missing xor payload".into()))?
+            .ok_or_else(|| PackBitmapWriteError::Object {
+                detail: "missing xor payload".into(),
+            })?
             .serialize(&mut body);
     }
 

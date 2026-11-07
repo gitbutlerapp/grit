@@ -1,6 +1,7 @@
 //! Rev-parse diagnose helpers: tree/index prefix mismatches and reflog edges.
 
 use crate::support;
+use grit_lib::error::RevisionError;
 
 use std::path::Path;
 
@@ -29,7 +30,7 @@ fn expect_rev_parse(repo: &Repository, spec: &str, pred: fn(&RevParseError) -> b
                 .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
         )
         .expect_err(spec);
-    let Error::RevParse(inner) = err else {
+    let Error::Revision(RevisionError::Parse(inner)) = err else {
         panic!("{spec}: expected RevParse, got {err}");
     };
     assert!(pred(&inner), "{spec}: got {inner:?}");

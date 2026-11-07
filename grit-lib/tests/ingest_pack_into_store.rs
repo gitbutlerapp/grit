@@ -6,6 +6,7 @@
 //! and hash to its id, and a pack built from the custom store must pass
 //! `git index-pack --strict`.
 
+use grit_lib::error::ObjectError;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Cursor, Write};
@@ -260,7 +261,7 @@ fn thin_pack_bases_come_from_the_bases_view() {
     )
     .expect_err("thin pack without its bases");
     assert!(
-        matches!(&err, Error::UnresolvedDeltas { count } if *count > 0),
+        matches!(&err, Error::Object(ObjectError::UnresolvedDeltas { count }) if *count > 0),
         "unexpected error: {err:?}"
     );
 
@@ -316,7 +317,7 @@ fn strict_ingest_rejects_a_pack_with_dangling_references() {
     )
     .expect_err("strict ingest must reject missing blobs");
     assert!(
-        matches!(&err, Error::CorruptObject(msg) if msg.starts_with("strict:")),
+        matches!(&err, Error::Object(ObjectError::Corrupt { detail: msg }) if msg.starts_with("strict:")),
         "unexpected error: {err:?}"
     );
 
@@ -346,7 +347,10 @@ fn corrupt_and_truncated_packs_are_rejected() {
         &UnpackOptions::default(),
     )
     .expect_err("checksum mismatch");
-    assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+    assert!(
+        matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+        "{err:?}"
+    );
 
     let truncated = &pack[..pack.len() / 2];
     let err = ingest_pack_into(
@@ -357,7 +361,10 @@ fn corrupt_and_truncated_packs_are_rejected() {
     )
     .expect_err("truncated pack");
     assert!(
-        matches!(err, Error::CorruptObject(_) | Error::Zlib(_)),
+        matches!(
+            err,
+            Error::Object(ObjectError::Corrupt { .. }) | Error::Object(ObjectError::Zlib { .. })
+        ),
         "{err:?}"
     );
 
@@ -368,7 +375,10 @@ fn corrupt_and_truncated_packs_are_rejected() {
         &UnpackOptions::default(),
     )
     .expect_err("not a pack");
-    assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+    assert!(
+        matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+        "{err:?}"
+    );
 
     let err = ingest_pack_into(
         &mut Cursor::new(&pack),
@@ -380,7 +390,10 @@ fn corrupt_and_truncated_packs_are_rejected() {
         },
     )
     .expect_err("max input size");
-    assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+    assert!(
+        matches!(err, Error::Object(ObjectError::Corrupt { .. })),
+        "{err:?}"
+    );
 }
 
 #[test]
@@ -799,7 +812,7 @@ fn custom_primary_ingest_rollback_on_failure() {
 
     let err = ingest_received_pack(corrupt, repo.odb(), &IngestPackOptions::default())
         .expect_err("checksum mismatch");
-    assert!(matches!(err, Error::CorruptObject(_)));
+    assert!(matches!(err, Error::Object(ObjectError::Corrupt { .. })));
     assert_eq!(primary.snapshot().rollbacks, 1);
     assert_eq!(primary.snapshot().flushes, 0);
 }

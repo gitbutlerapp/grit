@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::porcelain::branch::BranchError;
 use std::path::Path;
 use std::process::Command;
 
@@ -249,7 +250,7 @@ fn names_detail_rejects_date_sort_without_reading_objects() {
     };
     let err = list_branches(&repo, &date_query, BranchDetail::Names).unwrap_err();
     assert!(
-        matches!(err, Error::BranchListNamesDateSort),
+        matches!(err, Error::Branch(BranchError::ListNamesDateSort)),
         "expected typed sort error, got {err:?}"
     );
 }

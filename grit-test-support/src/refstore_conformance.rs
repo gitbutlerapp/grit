@@ -20,6 +20,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
+use grit_lib::error::RefError;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::thread;
@@ -326,7 +327,7 @@ pub fn resolve_missing_ref_is_not_found(store: Arc<dyn RefStore>) {
     assert!(
         matches!(
             missing,
-            Error::RefStore(RefStoreError::NotFound { ref name }) if name == "refs/heads/absent"
+            Error::Ref(RefError::Store(RefStoreError::NotFound { ref name })) if name == "refs/heads/absent"
         ),
         "{missing:?}"
     );
@@ -338,7 +339,7 @@ pub fn resolve_missing_ref_is_not_found(store: Arc<dyn RefStore>) {
     assert!(
         matches!(
             dangling,
-            Error::RefStore(RefStoreError::NotFound { ref name }) if name == "refs/heads/unborn"
+            Error::Ref(RefError::Store(RefStoreError::NotFound { ref name })) if name == "refs/heads/unborn"
         ),
         "{dangling:?}"
     );

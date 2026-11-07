@@ -3,6 +3,7 @@
 //! reflogs.
 
 use crate::error::Error;
+use crate::error::RefError;
 use crate::ident::Signature;
 use crate::objects::ObjectId;
 use crate::refs::store::{Expected, RawRef, RefNameRef, RefStoreError, ReflogUpdate};
@@ -129,8 +130,8 @@ pub(crate) fn swap_ref_as(
         reflog,
     ) {
         Ok(()) => Ok(Swap::Done),
-        Err(Error::RefStore(RefStoreError::ExpectedMismatch { .. })) => Ok(Swap::Moved),
-        Err(e) => Err(e.into()),
+        Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))) => Ok(Swap::Moved),
+        Err(e) => Err(e),
     }
 }
 

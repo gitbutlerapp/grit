@@ -47,9 +47,9 @@ fn apply_ref_change(trial: &mut BTreeMap<String, RawRef>, update: &RefUpdate) ->
         Some(new_value) => {
             if should_deref_symref_update(trial, update) {
                 let RawRef::Direct(oid) = new_value else {
-                    return Err(RefStoreError::Corrupt(
-                        "deref update requires direct oid".to_owned(),
-                    ));
+                    return Err(RefStoreError::Corrupt {
+                        detail: "deref update requires direct oid".to_owned(),
+                    });
                 };
                 let target = symref_peel_write_target(trial, update.name.as_str())?;
                 trial.insert(target, RawRef::Direct(*oid));
@@ -87,9 +87,9 @@ fn symref_peel_write_target(
     sym_name: &str,
 ) -> StoreResult<String> {
     let Some(RawRef::Symbolic(first)) = refs.get(sym_name) else {
-        return Err(RefStoreError::Corrupt(format!(
-            "not a symbolic ref: {sym_name}"
-        )));
+        return Err(RefStoreError::Corrupt {
+            detail: format!("not a symbolic ref: {sym_name}"),
+        });
     };
     resolve_symref_peel_target(refs, first)
 }

@@ -33,6 +33,7 @@ use encoding_rs::UTF_8;
 
 /// Working-tree encoding conversion failure (Git `reencode_string_len` returning NULL).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum WorkTreeEncodingError {
     /// The encoding label is not supported by `encoding_rs` / the commit encoding helpers.
     #[error("unsupported encoding '{label}'")]
@@ -42,32 +43,38 @@ pub enum WorkTreeEncodingError {
     },
 }
 
-/// Error from internal encoding helpers (not public convert_to_git surface).
+/// Failure inside the working-tree encoding helpers; surfaced to callers as
+/// [`FilterError::NotFilteredProperly`] detail text.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ConversionError {
-    /// Working-tree encoding could not be resolved or converted.
+pub(crate) enum ConversionError {
+    /// Working-tree encoding could not be resolved.
     #[error(transparent)]
     Encoding(WorkTreeEncodingError),
-    /// Filter, safecrlf, BOM validation, or other conversion failure (Git-compatible message).
-    #[error("{0}")]
-    Message(String),
+    /// A UTF-16/UTF-32 file breaks the byte-order-mark rule for its declared encoding.
+    #[error("BOM is {} in '{path}' if encoded as {label}", if *required { "required" } else { "prohibited" })]
+    ByteOrderMark {
+        /// Repository-relative path.
+        path: String,
+        /// Declared `working-tree-encoding`.
+        label: String,
+        /// Whether the encoding requires a BOM (as opposed to prohibiting one).
+        required: bool,
+    },
+    /// The content cannot be represented in the target encoding.
+    #[error("failed to encode '{path}' from {from} to {to}")]
+    Unrepresentable {
+        /// Repository-relative path.
+        path: String,
+        /// Source encoding.
+        from: String,
+        /// Target encoding.
+        to: String,
+    },
 }
 
 impl From<WorkTreeEncodingError> for ConversionError {
     fn from(value: WorkTreeEncodingError) -> Self {
         Self::Encoding(value)
-    }
-}
-
-impl From<String> for ConversionError {
-    fn from(value: String) -> Self {
-        Self::Message(value)
-    }
-}
-
-impl From<&str> for ConversionError {
-    fn from(value: &str) -> Self {
-        Self::Message(value.to_owned())
     }
 }
 
@@ -996,59 +1003,37 @@ fn is_missing_required_utf_bom(canon: &str, data: &[u8]) -> bool {
     }
 }
 
-/// Git `validate_encoding`: emit the advice line to stderr and return an error body when the BOM
-/// presence is wrong for a UTF-16/UTF-32 encoding.
+/// Git `validate_encoding`: whether the BOM presence is right for a UTF-16/UTF-32 encoding.
 ///
-/// `label` is the original attribute spelling (preserved in messages, like Git). When
-/// `die_on_error` is true (`CONV_WRITE_OBJECT`) the body is prefixed `fatal:` so the top-level
-/// printer surfaces it verbatim; otherwise the `error:` line is printed here (Git `error()` returns
-/// "content unmodified") and the same body is returned for the caller to swallow.
+/// `label` is the original attribute spelling (preserved in the error, like Git).
 fn validate_utf_bom(
     canon: &str,
     label: &str,
     rel_path: &str,
     data: &[u8],
-    die_on_error: bool,
-) -> Result<(), String> {
-    if has_prohibited_utf_bom(canon, data) {
-        // Advice cuts the trailing "be"/"le" so the user sees the BOM-capable name (UTF-16/UTF-32).
-        let stripped = label
-            .strip_prefix("utf")
-            .or_else(|| label.strip_prefix("UTF"));
-        let _utf_num = stripped
-            .map(|s| s.trim_start_matches('-'))
-            .and_then(|s| s.get(..s.len().saturating_sub(2)))
-            .unwrap_or("");
-        let body = format!("BOM is prohibited in '{rel_path}' if encoded as {label}");
-        if die_on_error {
-            return Err(body);
-        }
-        return Err(body);
-    }
-    if is_missing_required_utf_bom(canon, data) {
-        let _utf_num = label
-            .strip_prefix("utf")
-            .or_else(|| label.strip_prefix("UTF"))
-            .map(|s| s.trim_start_matches('-'))
-            .unwrap_or("");
-        let body = format!("BOM is required in '{rel_path}' if encoded as {label}");
-        if die_on_error {
-            return Err(body);
-        }
-        return Err(body);
-    }
-    Ok(())
+) -> Result<(), ConversionError> {
+    let required = if has_prohibited_utf_bom(canon, data) {
+        false
+    } else if is_missing_required_utf_bom(canon, data) {
+        true
+    } else {
+        return Ok(());
+    };
+    Err(ConversionError::ByteOrderMark {
+        path: rel_path.to_owned(),
+        label: label.to_owned(),
+        required,
+    })
 }
 
 /// Decode raw working-tree bytes (`enc_label`) into UTF-8 for the object DB (Git `encode_to_git`).
 ///
-/// When `validate` is true (writing to the object DB), enforce Git's UTF BOM rules and surface the
-/// matching fatal message + advice (`die_on_error`). For internal diff/status reads it is false.
+/// UTF-16/UTF-32 byte-order-mark rules are checked on every decode; callers that are not writing
+/// to the object database keep the bytes unmodified when decoding fails.
 fn decode_working_tree_bytes_to_utf8(
     src: &[u8],
     rel_path: &str,
     enc_label: &str,
-    validate: bool,
 ) -> Result<Vec<u8>, ConversionError> {
     let label = enc_label.trim();
     if label.is_empty() {
@@ -1061,7 +1046,7 @@ fn decode_working_tree_bytes_to_utf8(
     // writing to the object DB it dies, otherwise (diff/status reads) it prints `error:` and treats
     // the content as unmodified — `validate` here is Git's `die_on_error` (`CONV_WRITE_OBJECT`).
     if let Some(ref c) = canon {
-        validate_utf_bom(c, label, rel_path, src, validate)?;
+        validate_utf_bom(c, label, rel_path, src)?;
     }
 
     // UTF-8 is the default encoding: no conversion (Git `git_path_check_encoding`).
@@ -1106,9 +1091,11 @@ fn decode_working_tree_bytes_to_utf8(
             }
             let (cow, _, had_errors) = enc.decode(src);
             if had_errors {
-                return Err(ConversionError::Message(format!(
-                    "failed to encode '{rel_path}' from {label} to UTF-8"
-                )));
+                return Err(ConversionError::Unrepresentable {
+                    path: rel_path.to_owned(),
+                    from: label.to_owned(),
+                    to: "UTF-8".to_owned(),
+                });
             }
             return Ok(cow.into_owned().into_bytes());
         }
@@ -1124,10 +1111,10 @@ fn decode_utf_bytes_with_encoding_rs(
     label: &str,
     iconv_from: &str,
 ) -> Result<Vec<u8>, ConversionError> {
-    let fail = || {
-        ConversionError::Message(format!(
-            "failed to encode '{rel_path}' from {label} to UTF-8"
-        ))
+    let fail = || ConversionError::Unrepresentable {
+        path: rel_path.to_owned(),
+        from: label.to_owned(),
+        to: "UTF-8".to_owned(),
     };
     match iconv_from {
         "UTF-16BE" => {
@@ -1173,10 +1160,10 @@ fn decode_utf32_body_to_utf8_bytes(
     rel_path: &str,
     big_endian: bool,
 ) -> Result<Vec<u8>, ConversionError> {
-    let fail = || {
-        ConversionError::Message(format!(
-            "failed to encode '{rel_path}' from UTF-32 to UTF-8"
-        ))
+    let fail = || ConversionError::Unrepresentable {
+        path: rel_path.to_owned(),
+        from: "UTF-32".to_owned(),
+        to: "UTF-8".to_owned(),
     };
     if !body.len().is_multiple_of(4) {
         return Err(fail());
@@ -1228,10 +1215,10 @@ fn encode_utf8_blob_to_working_tree_bytes(
         return Ok(src.to_vec());
     }
 
-    let fail = || {
-        ConversionError::Message(format!(
-            "failed to encode '{rel_path}' from UTF-8 to {label}"
-        ))
+    let fail = || ConversionError::Unrepresentable {
+        path: rel_path.to_owned(),
+        from: "UTF-8".to_owned(),
+        to: label.to_owned(),
     };
 
     // The `*-BOM` aliases: encode to the raw form, then prepend the requested BOM.
@@ -1444,7 +1431,7 @@ pub(crate) fn convert_to_git_owned(
         }
         // `CONV_WRITE_OBJECT` → validate BOM rules and die on error (Git `encode_to_git`).
         let writing_object = opts.check_safecrlf;
-        match decode_working_tree_bytes_to_utf8(&buf, rel_path, enc, writing_object) {
+        match decode_working_tree_bytes_to_utf8(&buf, rel_path, enc) {
             Ok(decoded) => buf = decoded,
             Err(e) if writing_object => return Err(filter_detail(rel_path, e.to_string())),
             // Reads for diff/status/hashing keep the bytes as they are when they cannot be

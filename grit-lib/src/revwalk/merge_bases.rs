@@ -3,8 +3,7 @@ use std::collections::HashSet;
 
 use crate::error::Result;
 use crate::merge_base::{
-    self, MergeBaseForDiffError, ReachableCountFilter, ReachableWalkCommitterCutoffs,
-    ReachableWalkLimit,
+    self, ReachableCountFilter, ReachableWalkCommitterCutoffs, ReachableWalkLimit,
 };
 use crate::objects::ObjectId;
 use crate::revwalk::RevWalk;
@@ -141,14 +140,11 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`MergeBaseForDiffError::None`] for unrelated histories,
-    /// [`MergeBaseForDiffError::Multiple`] when there is more than one base, and
-    /// [`MergeBaseForDiffError::Other`] for read errors.
-    pub fn merge_base_for_diff(
-        &self,
-        a: ObjectId,
-        b: ObjectId,
-    ) -> std::result::Result<ObjectId, MergeBaseForDiffError> {
+    /// Returns [`RevisionError::NoMergeBase`](crate::error::RevisionError::NoMergeBase) for
+    /// unrelated histories,
+    /// [`RevisionError::MultipleMergeBases`](crate::error::RevisionError::MultipleMergeBases) when
+    /// there is more than one base, and object read errors from the walk.
+    pub fn merge_base_for_diff(&self, a: ObjectId, b: ObjectId) -> Result<ObjectId> {
         merge_base::merge_base_for_diff_two_commits(self.repository(), a, b)
     }
 

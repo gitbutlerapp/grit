@@ -15,7 +15,7 @@ use crate::stdio;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error as LibError;
-use grit_lib::remote::serve::{self, ProtocolVersion, ReceivePolicy, ServeError, ServeOptions};
+use grit_lib::remote::serve::{self, ProtocolVersion, ReceivePolicy, ServeOptions};
 use grit_lib::repo::Repository;
 
 /// Which server program to run.
@@ -100,7 +100,7 @@ pub fn run(
                 .run(&mut input, &mut output)
             {
                 Ok(_summary) => {}
-                Err(ServeError::Cancelled) => {
+                Err(LibError::Cancelled) => {
                     return Err(anyhow::Error::new(LibError::Cancelled));
                 }
                 Err(err) => return Err(err.into()),

@@ -310,7 +310,7 @@ fn want_ref_is_refused_unless_allowed() {
     let body = fetch_request(&["want-ref refs/heads/main"]);
     assert!(matches!(
         serve_grit_err(&bare, &body),
-        ServeError::Protocol(_)
+        ServeError::Protocol { .. }
     ));
     let resp = String::from_utf8_lossy(&serve_grit(&bare, &body)).into_owned();
     assert!(resp.contains("ERR "), "expected ERR, got {resp}");
@@ -324,7 +324,9 @@ fn duplicate_want_ref_is_a_protocol_error() {
     git(&bare, &["config", "uploadpack.allowRefInWant", "true"]);
     let body = fetch_request(&["want-ref refs/heads/main", "want-ref refs/heads/main"]);
     match serve_grit_err(&bare, &body) {
-        ServeError::Protocol(msg) => assert!(msg.contains("duplicate want-ref"), "{msg}"),
+        ServeError::Protocol { detail: msg } => {
+            assert!(msg.contains("duplicate want-ref"), "{msg}")
+        }
         other => panic!("unexpected error {other:?}"),
     }
     let resp = String::from_utf8_lossy(&serve_grit(&bare, &body)).into_owned();
@@ -343,7 +345,7 @@ fn sideband_all_is_refused_unless_allowed() {
     let body = fetch_request(&["sideband-all", &format!("want {tip}")]);
     assert!(matches!(
         serve_grit_err(&bare, &body),
-        ServeError::Protocol(_)
+        ServeError::Protocol { .. }
     ));
     let resp = String::from_utf8_lossy(&serve_grit(&bare, &body)).into_owned();
     assert!(resp.contains("ERR "), "expected ERR, got {resp}");

@@ -20,6 +20,7 @@ use crate::pack_objects::{write_upload_pack_selection, write_upload_pack_stream_
 use crate::pkt_line::SidebandChannel1Writer;
 use crate::progress::{CancelSignal, CancelToken};
 use crate::promisor_remote::{parse_accepted_reply, PromisorAdvertisement};
+use crate::remote::RemoteError;
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
 use crate::transfer::PackBuildOptions;
@@ -116,13 +117,6 @@ impl UploadSession {
     }
 }
 
-fn map_repo_cancel(err: ServeError) -> ServeError {
-    match err {
-        ServeError::Repository(crate::error::Error::Cancelled) => ServeError::Cancelled,
-        other => other,
-    }
-}
-
 /// One fetch session served from a repository (the server side of `git-upload-pack`):
 /// advertise refs, negotiate, and send a pack.
 ///
@@ -211,7 +205,7 @@ impl<'a> UploadPack<'a> {
     }
 
     /// Stop the session when `cancel` fires: object enumeration and pack generation poll
-    /// it and return [`ServeError::Cancelled`] without writing a pack.
+    /// it and return [`Error::Cancelled`](crate::error::Error::Cancelled) without writing a pack.
     pub fn with_cancel(mut self, cancel: &'a CancelToken) -> Self {
         self.cancel = cancel;
         self
@@ -221,7 +215,7 @@ impl<'a> UploadPack<'a> {
     ///
     /// # Errors
     ///
-    /// See [`UploadPack`]; [`ServeError::Cancelled`] when the cancel token fires.
+    /// See [`UploadPack`]; [`Error::Cancelled`](crate::error::Error::Cancelled) when the cancel token fires.
     pub fn run(self, input: &mut dyn Read, output: &mut dyn Write) -> Result<UploadOutcome> {
         upload_pack(self.repo, input, output, self.options, self.cancel)
     }
@@ -236,7 +230,7 @@ pub(crate) fn upload_pack(
     cancel: &CancelToken,
 ) -> Result<UploadOutcome> {
     let stop = CancelSignal::new(cancel);
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    stop.poll()?;
     let mut counter = CountingWriter {
         inner: output,
         bytes: 0,
@@ -252,55 +246,70 @@ pub(crate) fn upload_pack(
             counter.flush()?;
             Ok(session.into_outcome(counter.bytes))
         }
-        Err(err) => {
-            let err = map_repo_cancel(err);
-            match err {
-                ServeError::Cancelled => {
-                    counter.flush()?;
-                    Err(ServeError::Cancelled)
-                }
-                // Part of the pack is out: an `ERR` line now would land inside it.
-                err @ ServeError::PackInterrupted(_) => {
-                    counter.flush()?;
-                    Err(err)
-                }
-                // Raised before any pack byte: tell the client why instead of hanging up.
-                err @ ServeError::ObjectMissing { .. } if opts.protocol == ProtocolVersion::V2 => {
-                    write_line(
-                        &mut counter,
-                        &format!("ERR {}", client_error_message(repo, &err)),
-                    )?;
-                    write_flush(&mut counter)?;
-                    counter.flush()?;
-                    if opts.stateless_rpc {
-                        Ok(UploadOutcome {
-                            bytes_written: counter.bytes,
-                            ..UploadOutcome::default()
-                        })
-                    } else {
-                        Err(err)
-                    }
-                }
-                ServeError::Io(ref e) if super::io_error_is_request_body_limit(e) => {
-                    counter.flush()?;
-                    Err(err)
-                }
-                err if opts.stateless_rpc && opts.protocol == ProtocolVersion::V2 => {
-                    let msg = serve_error_client_message(&err);
-                    write_line(&mut counter, &format!("ERR {msg}"))?;
-                    write_flush(&mut counter)?;
-                    counter.flush()?;
+        Err(err) => match err {
+            crate::error::Error::Cancelled => {
+                counter.flush()?;
+                Err(crate::error::Error::Cancelled)
+            }
+            // Part of the pack is out: an `ERR` line now would land inside it.
+            err @ crate::error::Error::Remote(RemoteError::Serve(ServeError::PackInterrupted {
+                ..
+            })) => {
+                counter.flush()?;
+                Err(err)
+            }
+            // Raised before any pack byte: tell the client why instead of hanging up.
+            crate::error::Error::Remote(RemoteError::Serve(
+                serve @ ServeError::ObjectMissing { .. },
+            )) if opts.protocol == ProtocolVersion::V2 => {
+                write_line(
+                    &mut counter,
+                    &format!("ERR {}", client_error_message(repo, &serve)),
+                )?;
+                write_flush(&mut counter)?;
+                counter.flush()?;
+                if opts.stateless_rpc {
                     Ok(UploadOutcome {
                         bytes_written: counter.bytes,
                         ..UploadOutcome::default()
                     })
-                }
-                err => {
-                    counter.flush()?;
-                    Err(err)
+                } else {
+                    Err(serve.into())
                 }
             }
-        }
+            crate::error::Error::Io(e) if super::io_error_is_request_body_limit(&e) => {
+                counter.flush()?;
+                Err(ServeError::Io(e).into())
+            }
+            err if matches!(
+                &err,
+                crate::error::Error::Remote(RemoteError::Serve(ServeError::Io(e)))
+                    if super::io_error_is_request_body_limit(e)
+            ) =>
+            {
+                counter.flush()?;
+                Err(err)
+            }
+            err if opts.stateless_rpc && opts.protocol == ProtocolVersion::V2 => {
+                let msg = match &err {
+                    crate::error::Error::Remote(RemoteError::Serve(serve)) => {
+                        serve_error_client_message(serve)
+                    }
+                    other => other.to_string(),
+                };
+                write_line(&mut counter, &format!("ERR {msg}"))?;
+                write_flush(&mut counter)?;
+                counter.flush()?;
+                Ok(UploadOutcome {
+                    bytes_written: counter.bytes,
+                    ..UploadOutcome::default()
+                })
+            }
+            err => {
+                counter.flush()?;
+                Err(err)
+            }
+        },
     }
 }
 
@@ -344,18 +353,16 @@ fn serve_error_client_message(err: &ServeError) -> String {
                 "object {oid} is missing and the server's promisor remotes did not supply it"
             ),
         },
-        ServeError::Protocol(msg) => msg.clone(),
-        ServeError::PackInterrupted(inner) => serve_error_client_message(inner),
+        ServeError::Protocol { detail: msg } => msg.clone(),
+        ServeError::PackInterrupted { cause, .. } => cause.message().to_owned(),
         ServeError::UploadFilter(e) => e.to_string(),
         ServeError::NotOurRef(oid) => format!("not our ref {}", oid.to_hex()),
-        ServeError::UnknownCommand(cmd) => format!("unknown command {cmd}"),
+        ServeError::UnknownCommand { command: cmd } => format!("unknown command {cmd}"),
         ServeError::InvalidDeepenNot { spec, reason } => format!("deepen-not {spec}: {reason}"),
         ServeError::ObjectFormatMismatch { client, repository } => {
             format!("object format mismatch: client wants {client}, repository uses {repository}")
         }
-        ServeError::Repository(e) => e.to_string(),
         ServeError::Io(e) => e.to_string(),
-        ServeError::Cancelled => "cancelled".to_owned(),
     }
 }
 
@@ -435,7 +442,7 @@ fn serve_v0(
     opts: &ServeOptions,
     stop: &CancelSignal<'_>,
 ) -> Result<UploadSession> {
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    stop.poll()?;
     let config = repo_config(repo);
     let policy = UploadPackPolicy::from_config(&config);
     let head = head_info(repo);
@@ -464,10 +471,16 @@ fn serve_v0(
     // lazy fetch) covers a missing want.
     if let Some(mode) = missing_objects_mode(repo, &config, &policy, opts, None) {
         if let Err(err) = resolve_missing_wants(repo, &mut request.wants, mode) {
-            if matches!(err, ServeError::ObjectMissing { .. }) {
+            if let crate::error::Error::Remote(RemoteError::Serve(
+                serve @ ServeError::ObjectMissing { .. },
+            )) = &err
+            {
                 // The client reads ACK/NAK next; an `ERR` line there is reported
                 // as a remote error, as for Git's own refusals of a want.
-                write_line(output, &format!("ERR {}", client_error_message(repo, &err)))?;
+                write_line(
+                    output,
+                    &format!("ERR {}", client_error_message(repo, serve)),
+                )?;
                 output.flush()?;
             }
             return Err(err);
@@ -521,7 +534,7 @@ fn serve_v0(
     let mut round_last_common: Option<ObjectId> = None;
     let mut negotiation_rounds = 0u32;
     loop {
-        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        stop.poll()?;
         match read_packet(input)? {
             None => {
                 if opts.stateless_rpc && !stateless_shallow_before_ack {
@@ -538,9 +551,10 @@ fn serve_v0(
             Some(Packet::Data(line)) if line == "done" => break,
             Some(Packet::Data(line)) => {
                 let Some(hex) = line.strip_prefix("have ") else {
-                    return Err(ServeError::Protocol(format!(
-                        "expected have or done, got '{line}'"
-                    )));
+                    return Err(ServeError::Protocol {
+                        detail: format!("expected have or done, got '{line}'"),
+                    }
+                    .into());
                 };
                 let oid = parse_oid(repo, hex.trim())?;
                 if !seen.insert(oid) {
@@ -585,9 +599,10 @@ fn serve_v0(
                 output.flush()?;
             }
             Some(other) => {
-                return Err(ServeError::Protocol(format!(
-                    "unexpected packet during negotiation: {other:?}"
-                )))
+                return Err(ServeError::Protocol {
+                    detail: format!("unexpected packet during negotiation: {other:?}"),
+                }
+                .into())
             }
         }
     }
@@ -604,7 +619,7 @@ fn serve_v0(
     }
     output.flush()?;
     let sideband = request.caps.contains("side-band-64k");
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    stop.poll()?;
     let pack = write_response_pack_from_v0(
         repo,
         &advertisement.tag_candidates,
@@ -701,7 +716,7 @@ fn read_v0_request(
     let mut shallow = ShallowRequest::default();
     let mut filter: Option<ObjectFilter> = None;
     loop {
-        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        stop.poll()?;
         match read_packet(input)? {
             None | Some(Packet::Flush) => break,
             Some(Packet::Data(line)) => {
@@ -717,14 +732,16 @@ fn read_v0_request(
                 if parse_shallow_line(repo, &line, &mut shallow, config, policy, &mut filter)? {
                     continue;
                 }
-                return Err(ServeError::Protocol(format!(
-                    "unsupported request line '{line}'"
-                )));
+                return Err(ServeError::Protocol {
+                    detail: format!("unsupported request line '{line}'"),
+                }
+                .into());
             }
             Some(other) => {
-                return Err(ServeError::Protocol(format!(
-                    "unexpected packet in want list: {other:?}"
-                )))
+                return Err(ServeError::Protocol {
+                    detail: format!("unexpected packet in want list: {other:?}"),
+                }
+                .into())
             }
         }
     }
@@ -757,19 +774,15 @@ fn parse_shallow_line(
         return Ok(true);
     }
     if let Some(rest) = line.strip_prefix("deepen ") {
-        shallow.depth = Some(
-            rest.trim()
-                .parse()
-                .map_err(|_| ServeError::Protocol(format!("invalid deepen value '{rest}'")))?,
-        );
+        shallow.depth = Some(rest.trim().parse().map_err(|_| ServeError::Protocol {
+            detail: format!("invalid deepen value '{rest}'"),
+        })?);
         return Ok(true);
     }
     if let Some(rest) = line.strip_prefix("deepen-since ") {
-        shallow.deepen_since = Some(
-            rest.trim()
-                .parse()
-                .map_err(|_| ServeError::Protocol(format!("invalid deepen-since '{rest}'")))?,
-        );
+        shallow.deepen_since = Some(rest.trim().parse().map_err(|_| ServeError::Protocol {
+            detail: format!("invalid deepen-since '{rest}'"),
+        })?);
         return Ok(true);
     }
     if let Some(rest) = line.strip_prefix("deepen-not ") {
@@ -811,19 +824,31 @@ fn resolve_deepen_not(repo: &Repository, spec: &str) -> Result<ObjectId> {
             let (matches, name) = crate::refs::shorten::expand_ref_dwim_full_name(repo, spec)?;
             let name = match (matches, name) {
                 (1, Some(name)) => name,
-                (0, _) | (_, None) => return Err(invalid(DeepenNotError::UnknownRef)),
-                _ => return Err(invalid(DeepenNotError::AmbiguousRef)),
+                (0, _) | (_, None) => {
+                    return Err(crate::error::Error::from(invalid(
+                        DeepenNotError::UnknownRef,
+                    )))
+                }
+                _ => {
+                    return Err(crate::error::Error::from(invalid(
+                        DeepenNotError::AmbiguousRef,
+                    )))
+                }
             };
             repo.resolve_ref_oid(&name)
                 .map_err(|_| invalid(DeepenNotError::UnknownRef))?
         }
     };
     if !repo.odb().contains(&oid)? {
-        return Err(invalid(DeepenNotError::UnknownRef));
+        return Err(crate::error::Error::from(invalid(
+            DeepenNotError::UnknownRef,
+        )));
     }
     match repo.odb().peel_tags(oid)? {
         (commit, ObjectKind::Commit) => Ok(commit),
-        _ => Err(invalid(DeepenNotError::NotACommit)),
+        _ => Err(crate::error::Error::from(invalid(
+            DeepenNotError::NotACommit,
+        ))),
     }
 }
 
@@ -884,12 +909,14 @@ fn write_response_pack_from_v0(
     };
     let prepared = match prepare_response_pack(&input) {
         Ok(prepared) => prepared,
-        Err(err @ ServeError::ObjectMissing { .. }) if sideband => {
+        Err(crate::error::Error::Remote(RemoteError::Serve(
+            err @ ServeError::ObjectMissing { .. },
+        ))) if sideband => {
             // Nothing of the pack is out yet: say why on the error band.
             let message = format!("{}\n", client_error_message(repo, &err));
             let _ = crate::pkt_line::write_sideband_packet(output, 3, message.as_bytes())
                 .and_then(|()| output.flush());
-            return Err(err);
+            return Err(err.into());
         }
         Err(err) => return Err(err),
     };
@@ -903,7 +930,7 @@ fn serve_v2(
     opts: &mut ServeOptions,
     stop: &CancelSignal<'_>,
 ) -> Result<UploadSession> {
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    stop.poll()?;
     let config = repo_config(repo);
     let policy = UploadPackPolicy::from_config(&config);
     let promisor_adv = PromisorAdvertisement::from_server_config(&config);
@@ -947,7 +974,7 @@ fn serve_v2(
 
     let mut aggregate = UploadSession::default();
     loop {
-        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        stop.poll()?;
         opts.server_options.clear();
         let Some(request) = read_v2_request(input, opts, promisor_adv.as_ref())? else {
             return Ok(aggregate);
@@ -967,7 +994,12 @@ fn serve_v2(
                 bundle_uri(output, opts)?;
                 UploadSession::default()
             }
-            other => return Err(ServeError::UnknownCommand(other.to_owned())),
+            other => {
+                return Err(ServeError::UnknownCommand {
+                    command: other.to_owned(),
+                }
+                .into())
+            }
         };
         output.flush()?;
         if opts.stateless_rpc {
@@ -1005,7 +1037,10 @@ fn read_v2_request(
                 if command.is_none() {
                     return Ok(None);
                 }
-                return Err(ServeError::Protocol("truncated command request".into()));
+                return Err(ServeError::Protocol {
+                    detail: "truncated command request".into(),
+                }
+                .into());
             }
             Some(Packet::Flush) => break,
             Some(Packet::Delim) if !in_args => in_args = true,
@@ -1031,9 +1066,10 @@ fn read_v2_request(
                 // agent= and unknown capabilities are ignored.
             }
             Some(other) => {
-                return Err(ServeError::Protocol(format!(
-                    "unexpected packet in command request: {other:?}"
-                )))
+                return Err(ServeError::Protocol {
+                    detail: format!("unexpected packet in command request: {other:?}"),
+                }
+                .into())
             }
         }
     }
@@ -1044,9 +1080,10 @@ fn read_v2_request(
             args,
         })),
         None if args.is_empty() => Ok(None),
-        None => Err(ServeError::Protocol(
-            "command request without command".into(),
-        )),
+        None => Err(ServeError::Protocol {
+            detail: "command request without command".into(),
+        }
+        .into()),
     }
 }
 
@@ -1059,14 +1096,17 @@ fn record_accepted_promisors(
 ) -> Result<()> {
     let Some(value) = rest.strip_prefix('=') else {
         if rest.is_empty() {
-            return Err(ServeError::Protocol(
-                "promisor-remote capability without a value".into(),
-            ));
+            return Err(ServeError::Protocol {
+                detail: "promisor-remote capability without a value".into(),
+            }
+            .into());
         }
         // Some other capability that merely starts with the same letters.
         return Ok(());
     };
-    let names = parse_accepted_reply(value).map_err(|e| ServeError::Protocol(e.to_string()))?;
+    let names = parse_accepted_reply(value).map_err(|e| ServeError::Protocol {
+        detail: e.to_string(),
+    })?;
     let Some(adv) = promisor_adv else {
         return Ok(());
     };
@@ -1142,7 +1182,7 @@ fn fetch_v2(
     opts: &mut ServeOptions,
     stop: &CancelSignal<'_>,
 ) -> Result<UploadSession> {
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    stop.poll()?;
     let config = repo_config(repo);
     let policy = UploadPackPolicy::from_config(&config);
     let mut wants = Vec::new();
@@ -1163,17 +1203,13 @@ fn fetch_v2(
             haves.push(parse_oid(repo, hex.trim())?);
         } else if arg.starts_with("shallow ") {
         } else if let Some(rest) = arg.strip_prefix("deepen ") {
-            deepen = Some(
-                rest.trim()
-                    .parse()
-                    .map_err(|_| ServeError::Protocol(format!("bad deepen '{arg}'")))?,
-            );
+            deepen = Some(rest.trim().parse().map_err(|_| ServeError::Protocol {
+                detail: format!("bad deepen '{arg}'"),
+            })?);
         } else if let Some(rest) = arg.strip_prefix("deepen-since ") {
-            deepen_since = Some(
-                rest.trim()
-                    .parse()
-                    .map_err(|_| ServeError::Protocol(format!("bad deepen-since '{arg}'")))?,
-            );
+            deepen_since = Some(rest.trim().parse().map_err(|_| ServeError::Protocol {
+                detail: format!("bad deepen-since '{arg}'"),
+            })?);
         } else if let Some(rest) = arg.strip_prefix("deepen-not ") {
             deepen_not.push(resolve_deepen_not(repo, rest.trim())?);
         } else if let Some(spec) = arg.strip_prefix("filter ") {
@@ -1181,7 +1217,10 @@ fn fetch_v2(
         } else if let Some(name) = arg.strip_prefix("want-ref ").filter(|_| policy.ref_in_want) {
             let name = name.trim();
             if want_ref_names.iter().any(|n| n == name) {
-                return Err(ServeError::Protocol(format!("duplicate want-ref {name}")));
+                return Err(ServeError::Protocol {
+                    detail: format!("duplicate want-ref {name}"),
+                }
+                .into());
             }
             want_ref_names.push(name.to_owned());
         } else if arg == "done" {
@@ -1199,9 +1238,10 @@ fn fetch_v2(
         {
             caps.insert(arg.clone());
         } else {
-            return Err(ServeError::Protocol(format!(
-                "unsupported fetch argument '{arg}'"
-            )));
+            return Err(ServeError::Protocol {
+                detail: format!("unsupported fetch argument '{arg}'"),
+            }
+            .into());
         }
     }
     let mut advertisement = UploadAdvertisement::collect(repo, &opts.hidden_refs)?;
@@ -1329,7 +1369,7 @@ fn fetch_v2(
     }
 
     write_v2_fetch_line(output, "packfile", sideband_all)?;
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    stop.poll()?;
     // Protocol v2 always side-band-64k frames the packfile section payload (band 1),
     // even when `sideband-all` was not negotiated.
     let pack = write_prepared_pack(&input, &prepared, output, true, stop)?;
@@ -1365,11 +1405,7 @@ fn ready_to_send_pack(repo: &Repository, wants: &[ObjectId], common: &[ObjectId]
             have_commits.push(*oid);
         }
     }
-    Ok(crate::merge_base::wants_covered_by_haves(
-        repo,
-        &want_commits,
-        &have_commits,
-    )?)
+    crate::merge_base::wants_covered_by_haves(repo, &want_commits, &have_commits)
 }
 
 fn write_v2_section_delim(output: &mut dyn Write) -> Result<()> {
@@ -1473,7 +1509,7 @@ fn write_prepared_pack(
     sideband: bool,
     stop: &CancelSignal<'_>,
 ) -> Result<PackStats> {
-    stop.poll().map_err(|_| ServeError::Cancelled)?;
+    stop.poll()?;
     let mut progress = crate::progress::NullProgress;
     let mut send = |out: &mut dyn Write| match &prepared.planned {
         Some(selection) => {
@@ -1500,7 +1536,7 @@ fn write_prepared_pack(
         };
         return match send(&mut counted) {
             Ok(stats) => Ok(stats),
-            Err(e) => Err(pack_failure(e, counted.bytes)),
+            Err(e) => Err(crate::error::Error::from(pack_failure(e, counted.bytes))),
         };
     }
     let sent = {
@@ -1524,25 +1560,40 @@ fn write_prepared_pack(
             write_flush(output)?;
             Ok(stats)
         }
-        Err(ServeError::PackInterrupted(err)) => {
-            // hygiene: band 3 carries the remote error line Git clients print verbatim
-            let message = format!("error: {}\n", serve_error_client_message(&err));
-            let _ = crate::pkt_line::write_sideband_packet(output, 3, message.as_bytes())
-                .and_then(|()| output.flush());
-            Err(ServeError::PackInterrupted(err))
+        Err(err) => {
+            if let ServeError::PackInterrupted { cause, .. } = &err {
+                // hygiene: band 3 carries the remote error line Git clients print verbatim
+                let message = format!("error: {}\n", cause.message());
+                let _ = crate::pkt_line::write_sideband_packet(output, 3, message.as_bytes())
+                    .and_then(|()| output.flush());
+            }
+            Err(err.into())
         }
-        Err(err) => Err(err),
     }
 }
 
 /// Classify a pack-writing failure: before any byte went out it is returned
 /// as is (a cancel stays a cancel), after it is [`ServeError::PackInterrupted`].
 fn pack_failure(err: crate::error::Error, written: u64) -> ServeError {
-    let err = map_repo_cancel(ServeError::Repository(err));
-    if written == 0 || matches!(err, ServeError::Cancelled) {
-        return err;
+    if written == 0 || err.is_cancelled() {
+        return match err {
+            crate::error::Error::Remote(RemoteError::Serve(serve)) => serve,
+            crate::error::Error::Io(io) => ServeError::Io(io),
+            other => ServeError::PackInterrupted {
+                broken_pipe: false,
+                cause: crate::error::ErrorSummary::from(other),
+            },
+        };
     }
-    ServeError::PackInterrupted(Box::new(err))
+    let broken_pipe = matches!(
+        &err,
+        crate::error::Error::Io(e) | crate::error::Error::Remote(RemoteError::Serve(ServeError::Io(e)))
+            if e.kind() == std::io::ErrorKind::BrokenPipe
+    );
+    ServeError::PackInterrupted {
+        broken_pipe,
+        cause: crate::error::ErrorSummary::from(err),
+    }
 }
 
 /// [`pack_failure`] for an I/O error from finishing the side band.
@@ -1550,7 +1601,10 @@ fn pack_failure_io(err: std::io::Error, written: u64) -> ServeError {
     if written == 0 {
         return ServeError::Io(err);
     }
-    ServeError::PackInterrupted(Box::new(ServeError::Io(err)))
+    ServeError::PackInterrupted {
+        broken_pipe: err.kind() == std::io::ErrorKind::BrokenPipe,
+        cause: crate::error::ErrorSummary::from(crate::error::Error::Io(err)),
+    }
 }
 
 #[cfg(test)]
@@ -2101,7 +2155,9 @@ mod tests {
             .run(&mut input, &mut output)
             .expect_err("limit must fail before v2 ERR output");
         match err {
-            ServeError::Io(e) => assert!(super::super::io_error_is_request_body_limit(&e)),
+            crate::error::Error::Remote(crate::remote::RemoteError::Serve(ServeError::Io(e))) => {
+                assert!(super::super::io_error_is_request_body_limit(&e))
+            }
             other => panic!("expected Io limit error, got {other:?}"),
         }
         assert!(

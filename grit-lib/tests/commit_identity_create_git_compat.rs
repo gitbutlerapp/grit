@@ -1,6 +1,7 @@
 //! [`create_commit`] identities must pass `git fsck --strict`, and typed identities that cannot
 //! be written are rejected before anything is recorded.
 
+use grit_lib::error::ObjectError;
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
@@ -221,7 +222,9 @@ fn create_commit_rejects_unwritable_signatures() {
     assert!(
         matches!(
             err,
-            Error::InvalidSignature(SignatureError::ForbiddenCharacter { .. })
+            Error::Object(ObjectError::InvalidSignature(
+                SignatureError::ForbiddenCharacter { .. }
+            ))
         ),
         "unexpected error: {err}"
     );

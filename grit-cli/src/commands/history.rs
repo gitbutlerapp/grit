@@ -10,7 +10,7 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::operation::Conflict;
-use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError, HunkSelection};
+use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelection};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     abort_rebase, absorb, apply_absorb_rewrite_with_cancel, apply_fixup_hunk_selection_with_cancel,
@@ -18,11 +18,10 @@ use grit_lib::revwalk::history::{
     format_hunk_range_header, move_commit, plan_rebase, plan_rebase_check, rebase_run_request,
     reword_with, skip_rebase, split, squash, staged_fixup_paths, start_rebase,
     start_rebase_with_exec, undo_last_rewrite_with_cancel, verify_rewrite_plan, AbsorbOptions,
-    ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec, FixupOptions, HistoryEngineError,
-    HistoryError, HunkAssignment, HunkRange, Placement, PreRebase, RebaseCheckPlan,
-    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope,
-    RewordOptions, RewriteOptions, RewritePlan, SplitOptions, SquashMessage, SquashOptions,
-    StartRebaseOptions, UnassignedHunk,
+    ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec, FixupOptions, HistoryError, HunkAssignment,
+    HunkRange, Placement, PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan,
+    RebaseRequest, RebaseSessionError, RefScope, RewordOptions, RewriteOptions, RewritePlan,
+    SplitOptions, SquashMessage, SquashOptions, StartRebaseOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::{Peel, ResolveOptions};
 
@@ -1010,18 +1009,15 @@ fn hunk_selection_from_args(hunks: &[String], lines: &[String]) -> Result<Option
     if hunks.is_empty() && lines.is_empty() {
         return Ok(None);
     }
-    let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_select_error)?;
+    let mut selection = parse_hunk_id_list(hunks).map_err(crate::commands::add::map_hunk_error)?;
     selection.ranges = crate::commands::add::parse_line_range_list(lines)?;
     Ok(Some(selection))
 }
 
-fn map_hunk_select_error(err: HunkSelectError) -> anyhow::Error {
-    anyhow::Error::new(err)
-}
-
-fn map_fixup_error(err: HistoryError) -> anyhow::Error {
+fn map_fixup_error(err: LibError) -> anyhow::Error {
     match err {
-        HistoryError::HunkSelect(h) => anyhow::Error::new(h),
+        LibError::History(HistoryError::HunkSelect(h))
+        | LibError::Diff(grit_lib::error::DiffError::HunkSelection(h)) => anyhow::Error::new(h),
         other => history_error("history fixup")(other),
     }
 }
@@ -1333,18 +1329,18 @@ fn run_rebase_with_exec(
             RebaseCliOutcome::from_rewrite(HistoryRewriteOutcome::up_to_date("rebase", false))
         }
         Ok(outcome) => map_rebase_outcome(outcome)?,
-        Err(RebaseSessionError::History(HistoryError::ExecDirty {
+        Err(LibError::History(HistoryError::ExecDirty {
             commit,
             command,
             paths,
             runs,
         })) => RebaseCliOutcome::from_exec_dirty(commit, command, paths, runs),
-        Err(RebaseSessionError::History(HistoryError::ExecConflict {
+        Err(LibError::History(HistoryError::ExecConflict {
             commit,
             conflicts,
             runs,
         })) => RebaseCliOutcome::from_exec_conflict(commit, conflicts.as_ref(), &runs),
-        Err(RebaseSessionError::History(HistoryError::ExecFailed {
+        Err(LibError::History(HistoryError::ExecFailed {
             exit_code,
             stdout,
             stderr,
@@ -1374,9 +1370,13 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
     let repo = context::discover()?;
     if opts.abort {
         let abort = abort_rebase(&repo, &reflog_identity(&repo)?).map_err(|err| match err {
-            RebaseSessionError::ForeignRebaseInProgress => anyhow::anyhow!(
-                "this rebase was started by git and cannot be restored by grit; cancel it with `git rebase --abort`"
-            ),
+            LibError::History(HistoryError::RebaseSession(ref session))
+                if matches!(**session, RebaseSessionError::ForeignRebaseInProgress) =>
+            {
+                anyhow::anyhow!(
+                    "this rebase was started by git and cannot be restored by grit; cancel it with `git rebase --abort`"
+                )
+            }
             other => map_rebase_session_error(&repo, other),
         })?;
         let mut outcome = RebaseCliOutcome::aborted();
@@ -1431,18 +1431,18 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
         };
         let rendered = match outcome {
             Ok(outcome) => map_rebase_outcome(outcome)?,
-            Err(RebaseSessionError::History(HistoryError::ExecDirty {
+            Err(LibError::History(HistoryError::ExecDirty {
                 commit,
                 command,
                 paths,
                 runs,
             })) => RebaseCliOutcome::from_exec_dirty(commit, command, paths, runs),
-            Err(RebaseSessionError::History(HistoryError::ExecConflict {
+            Err(LibError::History(HistoryError::ExecConflict {
                 commit,
                 conflicts,
                 runs,
             })) => RebaseCliOutcome::from_exec_conflict(commit, conflicts.as_ref(), &runs),
-            Err(RebaseSessionError::History(HistoryError::ExecFailed {
+            Err(LibError::History(HistoryError::ExecFailed {
                 exit_code,
                 stdout,
                 stderr,
@@ -1597,9 +1597,16 @@ fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
     }
 }
 
-fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyhow::Error {
+fn map_rebase_session_error(repo: &Repository, err: LibError) -> anyhow::Error {
+    let err = match err {
+        LibError::History(HistoryError::RebaseSession(session)) => *session,
+        LibError::Commit(grit_lib::porcelain::CommitError::NothingToCommit) => {
+            RebaseSessionError::NothingToCommit
+        }
+        other => return history_error("rebase")(other),
+    };
     match err {
-        RebaseSessionError::NoRebaseInProgress => anyhow::Error::new(err),
+        RebaseSessionError::NoRebaseInProgress => anyhow::Error::new(LibError::from(err)),
         RebaseSessionError::RebaseAlreadyInProgress => {
             let kind = grit_lib::state::operation_blocking_switch(repo.git_dir())
                 .ok()
@@ -1610,7 +1617,7 @@ fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyho
         RebaseSessionError::ForeignRebaseInProgress => anyhow::anyhow!(
             "this rebase was started by git; finish it with `git rebase --continue` or `git rebase --skip`, or cancel it with `grit rebase --abort`"
         ),
-        RebaseSessionError::UnmergedPaths => anyhow::Error::new(err),
+        RebaseSessionError::UnmergedPaths => anyhow::Error::new(LibError::from(err)),
         RebaseSessionError::NothingToCommit => {
             anyhow::anyhow!("nothing to commit after conflict resolution")
         }
@@ -1637,9 +1644,7 @@ fn map_rebase_session_error(repo: &Repository, err: RebaseSessionError) -> anyho
         RebaseSessionError::InvalidStateOid { value } => anyhow::anyhow!(
             "the saved rebase plan is corrupt ({value:?} is not an object id); remove .git/rebase-merge to discard it"
         ),
-        RebaseSessionError::History(e) => history_error("rebase")(e),
-        RebaseSessionError::Library(e) => e.into(),
-        _ => err.into(),
+        _ => anyhow::Error::new(LibError::from(err)),
     }
 }
 
@@ -1647,7 +1652,7 @@ fn run_rebase_check(
     repo: &Repository,
     request: &RebaseRequest,
     opts: &RebaseOntoOptions,
-    on_err: impl Fn(HistoryError) -> anyhow::Error + Copy,
+    on_err: impl Fn(LibError) -> anyhow::Error + Copy,
 ) -> Result<RebaseRunOutcome> {
     match plan_rebase_check(repo, request, opts).map_err(on_err)? {
         RebaseCheckPlan::UpToDate => Ok(RebaseRunOutcome::Check(RebaseCheckOutcome::up_to_date())),
@@ -1798,19 +1803,15 @@ fn format_absorb_hunk_header(range: &HunkRangeOut) -> String {
 }
 
 /// Error mapper for `operation` (for example `history drop`), for use with `map_err`.
-pub(crate) fn history_error(
-    operation: &'static str,
-) -> impl Fn(HistoryError) -> anyhow::Error + Copy {
-    move |err| map_history_error(err, operation)
+pub(crate) fn history_error(operation: &'static str) -> impl Fn(LibError) -> anyhow::Error + Copy {
+    move |err| match err {
+        LibError::History(history) => map_history_error(history, operation),
+        other => anyhow::Error::new(other),
+    }
 }
 
 fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
     match err {
-        HistoryError::Engine(engine) => match *engine {
-            HistoryEngineError::Cancelled => anyhow::Error::new(LibError::Cancelled),
-            HistoryEngineError::Hook(hook) => anyhow::Error::new(LibError::Hook(hook)),
-            engine => anyhow::Error::new(engine),
-        },
         HistoryError::Planning(planning) => {
             anyhow::anyhow!("history rewrite planning failed: {planning}")
         }

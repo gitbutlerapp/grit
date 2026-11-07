@@ -486,14 +486,19 @@ pub fn timestamp_for_at_ct(ts: SignatureTimestamp) -> Option<i64> {
 
 /// First fsck error for commit headers (tree/parents/author/committer), or `Ok`.
 ///
-/// Returns a [`crate::fsck_standalone::FsckError::report_line`] string (`msg-id: detail`); compare msg-ids to Git, not detail text.
-pub fn fsck_commit_idents(data: &[u8], hash_algo: HashAlgo) -> Result<(), String> {
+/// # Errors
+///
+/// The first [`crate::fsck_standalone::FsckError`] the commit breaks; compare its `id` with
+/// Git's fsck message ids.
+pub fn fsck_commit_idents(
+    data: &[u8],
+    hash_algo: HashAlgo,
+) -> Result<(), crate::fsck_standalone::FsckError> {
     crate::fsck_standalone::fsck_object(
         ObjectKind::Commit,
         data,
         crate::fsck_standalone::FsckObjectOptions::new(hash_algo),
     )
-    .map_err(|e| e.report_line())
 }
 
 /// Committer seconds for ordering (`rev-list --date-order`, etc.): unknown/corrupt → `0`.
@@ -560,6 +565,7 @@ impl AuthorContact {
 
 /// Failure to parse [`parse_author_arg`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum AuthorArgError {
     /// The string is not a recognized author form.
     #[error("invalid author: expected 'Name <email>' or a bare email address")]
@@ -623,6 +629,7 @@ pub fn author_identity_line(
 
 /// Failure to normalize a commit author or committer string.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum CommitIdentityError {
     /// Newlines, carriage returns, or other C0 controls (except tab) in the input.
     #[error("invalid identity: embedded control character")]

@@ -4,12 +4,14 @@
 //! default merge-base selection, `--all`, `--octopus`, `--independent`,
 //! and `--is-ancestor`.
 
+use crate::error::ObjectError;
+use crate::error::RefError;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
 use std::rc::Rc;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, RevisionError};
 use crate::ewah_bitmap::Bitmap;
 use crate::log_walk::WalkedCommits;
 use crate::objects::{
@@ -98,30 +100,19 @@ pub(crate) fn merge_bases_first_vs_rest(
 
 /// Merge base of two commits, matching `git diff --merge-base <a> <b>` / `diff-tree --merge-base`.
 ///
-/// Returns an error when there is no merge base or more than one.
+/// Returns [`RevisionError::NoMergeBase`] or [`RevisionError::MultipleMergeBases`] when there is
+/// no merge base or more than one.
 pub(crate) fn merge_base_for_diff_two_commits(
     repo: &Repository,
     a: ObjectId,
     b: ObjectId,
-) -> std::result::Result<ObjectId, MergeBaseForDiffError> {
-    let bases = merge_bases_first_vs_rest(repo, a, &[b])
-        .map_err(|e| MergeBaseForDiffError::Other(e.to_string()))?;
+) -> Result<ObjectId> {
+    let bases = merge_bases_first_vs_rest(repo, a, &[b])?;
     match bases.len() {
-        0 => Err(MergeBaseForDiffError::None),
+        0 => Err(RevisionError::NoMergeBase { left: a, right: b }.into()),
         1 => Ok(bases[0]),
-        _ => Err(MergeBaseForDiffError::Multiple),
+        _ => Err(RevisionError::MultipleMergeBases { left: a, right: b }.into()),
     }
-}
-
-/// Failure modes for [`RevWalk::merge_base_for_diff`](crate::revwalk::RevWalk::merge_base_for_diff).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MergeBaseForDiffError {
-    /// No common ancestor between the commits.
-    None,
-    /// More than one minimal merge base (criss-cross history).
-    Multiple,
-    /// Resolution or object read error; message is suitable for stderr.
-    Other(String),
 }
 
 /// Compute merge bases common to all supplied commits (`--octopus` mode).
@@ -501,7 +492,7 @@ pub(crate) fn is_ancestor_odb_walk_with_graph(
                 Some(&time) => time,
                 None => {
                     let linkage = match read_commit_linkage(odb, graph, &parent) {
-                        Err(Error::ObjectNotFound(_)) => None,
+                        Err(Error::Object(ObjectError::NotFound { .. })) => None,
                         other => other?,
                     };
                     let Some((time, grandparents)) = linkage else {
@@ -579,8 +570,7 @@ fn reflog_commits_for_fork_point(
     reflog_ref: &str,
     upstream_tip: ObjectId,
 ) -> Result<Vec<ObjectId>> {
-    let entries = read_reflog(repo.git_dir(), reflog_ref)
-        .map_err(|e| Error::Verbatim(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
+    let entries = read_reflog(repo.git_dir(), reflog_ref)?;
     let mut commits = Vec::new();
     let mut seen = oid_hash_set();
     let mut initial = true;
@@ -729,8 +719,7 @@ pub(crate) fn fork_point(
         resolve_fork_point_reflog_ref(repo, upstream_spec)
     };
 
-    let entries = read_reflog(repo.git_dir(), &reflog_ref)
-        .map_err(|e| Error::Verbatim(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
+    let entries = read_reflog(repo.git_dir(), &reflog_ref)?;
 
     let mut candidates = Vec::new();
     let mut seen = oid_hash_set();
@@ -755,9 +744,11 @@ pub(crate) fn fork_point(
 
     let mut bases = merge_bases_first_vs_rest(repo, upstream_tip, &[head])?;
     if bases.is_empty() {
-        return Err(Error::Verbatim(
-            "no merge base found between upstream and HEAD".to_owned(),
-        ));
+        return Err(RevisionError::NoMergeBase {
+            left: upstream_tip,
+            right: head,
+        }
+        .into());
     }
     bases.sort();
     Ok(bases[0])
@@ -767,7 +758,7 @@ pub(crate) fn fork_point(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] if an encountered object is not a commit.
+/// Returns [`crate::error::ObjectError::Corrupt`] if an encountered object is not a commit.
 pub(crate) fn ancestor_closure(repo: &Repository, tip: ObjectId) -> Result<HashSet<ObjectId>> {
     let mut cache = CommitGraphCache::new(repo);
     Ok(cache.ancestor_closure(tip)?.into_iter().collect())
@@ -850,7 +841,7 @@ pub(crate) fn ahead_behind_of_target_commits(
 /// applying the hide filter). Use this for bounded ahead-of-target lists and status shortlogs.
 ///
 /// Shallow boundaries (`.git/shallow`) stop parent traversal without following
-/// absent parent objects. Other missing commits propagate [`Error::ObjectNotFound`].
+/// absent parent objects. Other missing commits propagate [`crate::error::ObjectError::NotFound`].
 ///
 /// # Errors
 ///
@@ -1489,7 +1480,11 @@ fn try_count_diff_via_stored_commit_bitmaps(
     let Some(index) = repo
         .odb()
         .with_pack_read_context(|| BitmapIndex::open(repo))
-        .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?
+        .map_err(|e| {
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("pack bitmap: {e}"),
+            })
+        })?
     else {
         return Ok(None);
     };
@@ -1508,7 +1503,11 @@ fn try_count_diff_via_stored_commit_bitmaps(
     index
         .type_bitmap(ObjectKind::Commit)
         .expand_into_bitmap(&mut commit_type)
-        .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?;
+        .map_err(|e| {
+            Error::Object(ObjectError::Corrupt {
+                detail: format!("pack bitmap: {e}"),
+            })
+        })?;
     commit_type.and_assign(&reachable);
     Ok(Some(commit_type.count_ones()))
 }
@@ -1881,13 +1880,10 @@ impl RangeWalkHide {
         if self.hide_tips.contains(&oid) {
             return Ok(true);
         }
-        if let Some(lazy) = &self.lazy {
-            let cache = cache.as_mut().ok_or_else(|| {
-                Error::Verbatim("lazy range hide requires a CommitGraphCache".into())
-            })?;
-            return lazy.borrow_mut().is_hidden(cache, &self.hide_tips, oid);
+        match (&self.lazy, cache.as_mut()) {
+            (Some(lazy), Some(cache)) => lazy.borrow_mut().is_hidden(cache, &self.hide_tips, oid),
+            _ => Ok(self.is_hidden(oid)),
         }
-        Ok(self.is_hidden_eager(oid))
     }
 
     fn is_hidden_eager(&self, oid: ObjectId) -> bool {
@@ -2112,9 +2108,9 @@ pub(crate) fn independent_commits(
 fn ensure_is_commit(repo: &Repository, oid: ObjectId) -> Result<()> {
     let object = repo.odb().read(&oid)?;
     if object.kind != ObjectKind::Commit {
-        return Err(Error::CorruptObject(format!(
-            "object {oid} is not a commit"
-        )));
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("object {oid} is not a commit"),
+        }));
     }
     Ok(())
 }
@@ -2235,10 +2231,11 @@ impl OpenQueueTally {
 
 fn first_parent_oid(cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<ObjectId> {
     let parents = cache.parents_of(oid)?;
-    parents
-        .first()
-        .copied()
-        .ok_or_else(|| Error::ObjectNotFound(format!("{oid} has no parent")))
+    parents.first().copied().ok_or_else(|| {
+        Error::Object(ObjectError::NotFound {
+            name: format!("{oid} has no parent"),
+        })
+    })
 }
 
 /// Classify `first` and `second` along first-parent chains, using commit-graph generations
@@ -2959,7 +2956,7 @@ impl PaintWalk {
         let committed_at = match cache.commit_time(oid) {
             Ok(time) => time,
             // Hidden either way, and unpainted ancestors count as hidden too.
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::NotFound { .. }))
                 if self.skip_missing_right && after & PAINT_RIGHT != 0 =>
             {
                 return Ok(());
@@ -3282,7 +3279,7 @@ impl<'r> CommitGraphCache<'r> {
         self.ensure_single_pack_reader();
         if let Some(reader) = self.single_pack.as_mut() {
             match reader.read_object_into_with_delta_policy(oid, true, buf) {
-                Err(Error::ObjectNotFound(_)) => {}
+                Err(Error::Object(ObjectError::NotFound { .. })) => {}
                 read => return read,
             }
         }
@@ -3382,14 +3379,16 @@ impl<'r> CommitGraphCache<'r> {
         if self.shallow_boundaries.contains(&oid) {
             let commit_oid =
                 peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-                    Error::InvalidRef(msg) => Error::CorruptObject(msg),
+                    Error::Ref(RefError::Invalid { detail: msg }) => {
+                        Error::Object(ObjectError::Corrupt { detail: msg })
+                    }
                     other => other,
                 })?;
             let object = self.repo.odb().read(&commit_oid)?;
             if object.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
-                )));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: format!("object {commit_oid} is not a commit"),
+                }));
             }
             let commit = CommitRef::parse(&object.data)?;
             let time = commit.committer_timestamp();
@@ -3441,15 +3440,17 @@ impl<'r> CommitGraphCache<'r> {
         } else {
             let commit_oid =
                 peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-                    Error::InvalidRef(msg) => Error::CorruptObject(msg),
+                    Error::Ref(RefError::Invalid { detail: msg }) => {
+                        Error::Object(ObjectError::Corrupt { detail: msg })
+                    }
                     other => other,
                 })?;
             let kind =
                 self.read_object_into(&self.repo.object_id_after_replace(&commit_oid), buf)?;
             if kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
-                )));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: format!("object {commit_oid} is not a commit"),
+                }));
             }
             commit_oid
         };
@@ -3961,9 +3962,9 @@ impl<'repo> RefContainsMemo<'repo> {
             // without reading its ancestors; expensive probes can extend it on demand.
             for parent in graph.parents_of(targets[0])? {
                 if parent == targets[0] {
-                    return Err(Error::CorruptObject(format!(
-                        "commit ancestry cycle at {parent}"
-                    )));
+                    return Err(Error::Object(ObjectError::Corrupt {
+                        detail: format!("commit ancestry cycle at {parent}"),
+                    }));
                 }
                 if known.insert(parent, false).is_none() {
                     negative_pending.push(parent);
@@ -4000,9 +4001,9 @@ impl<'repo> RefContainsMemo<'repo> {
             for parent in self.graph.parents_of(key.oid)? {
                 match self.known.get(&parent) {
                     Some(true) => {
-                        return Err(Error::CorruptObject(format!(
-                            "commit ancestry cycle at {parent}"
-                        )))
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: format!("commit ancestry cycle at {parent}"),
+                        }))
                     }
                     Some(false) => {}
                     None => {
@@ -4080,9 +4081,9 @@ impl<'repo> RefContainsMemo<'repo> {
                 None => {}
             }
             if active.insert(parent, stack.len()).is_some() {
-                return Err(Error::CorruptObject(format!(
-                    "commit ancestry cycle at {parent}"
-                )));
+                return Err(Error::Object(ObjectError::Corrupt {
+                    detail: format!("commit ancestry cycle at {parent}"),
+                }));
             }
             visited += 1;
             stack.push(ContainsFrame {
@@ -5251,7 +5252,7 @@ mod tests {
         let tip = write_commit_same_time(&repo.odb(), &[missing], "tip", 100)?;
 
         let err = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None).unwrap_err();
-        assert!(matches!(err, Error::ObjectNotFound(_)));
+        assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
 
         Ok(())
     }
@@ -5314,7 +5315,7 @@ mod tests {
         assert!(!is_ancestor_odb_walk(&odb, base, tip)?);
         assert!(matches!(
             is_ancestor_odb_walk(&odb, missing, base),
-            Err(Error::ObjectNotFound(_))
+            Err(Error::Object(ObjectError::NotFound { .. }))
         ));
         Ok(())
     }

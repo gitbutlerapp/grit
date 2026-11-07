@@ -96,10 +96,7 @@ fn inline_section_key_parse_and_negotiation_errors() {
         "[fetch]\n\tnegotiationAlgorithm\n",
         ConfigScope::Local,
     );
-    assert!(matches!(
-        err,
-        Err(Error::Verbatim(_)) | Err(Error::Config(_))
-    ));
+    assert!(matches!(err, Err(Error::Config(_))));
 
     let inline = ConfigFile::parse(
         Path::new("c"),

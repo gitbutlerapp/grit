@@ -28,6 +28,7 @@ use std::time::Duration;
 use std::sync::mpsc::{self, RecvTimeoutError};
 
 use crate::error::{Error, Result};
+use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::progress::{poll_watch, StatScanCancel, CANCEL_POLL_STRIDE};
 
 type DirAbsFn = dyn Fn(&[u8]) -> PathBuf + Send + Sync;
@@ -327,7 +328,12 @@ fn entry_rel_path(index: &Index, entry_index: usize) -> Result<&[u8]> {
         .entries
         .get(entry_index)
         .map(|ie| ie.path.as_slice())
-        .ok_or_else(|| Error::Verbatim(format!("index entry {entry_index} out of range")))
+        .ok_or_else(|| {
+            IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::MissingIndexEntryDuringTreeWalk,
+            ))
+            .into()
+        })
 }
 
 fn entry_file_name(index: &Index, entry_index: usize) -> Result<&[u8]> {
@@ -1319,7 +1325,7 @@ where
     let worker_count = slices.len();
     let mut batches = Vec::with_capacity(worker_count);
     let (done_tx, done_rx) = mpsc::channel();
-    std::thread::scope(|scope| {
+    std::thread::scope(|scope| -> Result<()> {
         let worker_watch = cancel.watch.clone();
         for slice in slices {
             let dir_abs = Arc::clone(&dir_abs);
@@ -1361,20 +1367,15 @@ where
                 }
                 Ok(Err(e)) => return Err(e),
                 Err(RecvTimeoutError::Timeout) => cancel.poll()?,
-                Err(RecvTimeoutError::Disconnected) => {
-                    if batches.len() < worker_count {
-                        return Err(Error::Verbatim(
-                            "parallel blob stat worker exited before reporting".to_owned(),
-                        ));
-                    }
-                }
+                // A worker dropped its sender without reporting, so it panicked; leaving the
+                // scope re-raises that panic.
+                Err(RecvTimeoutError::Disconnected) => break,
             }
         }
-        if scanned_total != blob_count {
-            return Err(Error::Verbatim(format!(
-                "parallel blob stat preload expected {blob_count} scanned entries, got {scanned_total}"
-            )));
-        }
+        debug_assert!(
+            batches.len() < worker_count || scanned_total == blob_count,
+            "parallel blob stat preload scanned {scanned_total} of {blob_count} entries"
+        );
         Ok(())
     })?;
     Ok(batches)
@@ -1407,12 +1408,11 @@ where
         BlobScanSparseMode::Dense,
         &empty_cancel,
     )?;
-    if scanned != plan.len() {
-        return Err(Error::Verbatim(format!(
-            "blob scan expected {} entries, scanned {scanned}",
-            plan.len()
-        )));
-    }
+    debug_assert_eq!(
+        scanned,
+        plan.len(),
+        "blob scan must visit every planned entry"
+    );
     visit_blob_lookup_batches(vec![batch], visit)
 }
 
@@ -1529,11 +1529,10 @@ where
             sparse,
             &cancel,
         )?;
-        if scanned != blob_count {
-            return Err(Error::Verbatim(format!(
-                "blob scan expected {blob_count} scanned entries, got {scanned}"
-            )));
-        }
+        debug_assert_eq!(
+            scanned, blob_count,
+            "blob scan must visit every planned entry"
+        );
         vec![batch]
     };
     Ok(batches)

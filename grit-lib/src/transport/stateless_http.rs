@@ -141,9 +141,7 @@ impl StreamingPost {
                 chunk: Vec::new(),
                 pos: 0,
             };
-            Ok(client
-                .post_streaming(&url, &content_type, &accept, &mut body, None)
-                .map_err(Into::into))
+            Ok(client.post_streaming(&url, &content_type, &accept, &mut body, None))
         })?;
         Ok(Self { chunks, response })
     }
@@ -178,9 +176,9 @@ impl StreamingPost {
         match self.response.wait(&CancelToken::never()) {
             Err(e) => e,
             Ok(Err(e)) => e,
-            Ok(Ok(_)) => Error::Remote(RemoteError::Http(
-                "server answered before the request body was sent".into(),
-            )),
+            Ok(Ok(_)) => Error::Remote(RemoteError::Http {
+                detail: "server answered before the request body was sent".into(),
+            }),
         }
     }
 
@@ -391,9 +389,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         );
         let git_protocol = self.git_protocol.clone();
         let pending = PendingHttp::spawn("grit-http-post", move || {
-            client
-                .post_into_reader(&url, &content_type, &accept, &body, git_protocol.as_deref())
-                .map_err(Into::into)
+            client.post_into_reader(&url, &content_type, &accept, &body, git_protocol.as_deref())
         })
         .map_err(Error::Io)?;
         self.in_flight_upload = Some(pending);
@@ -420,7 +416,6 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
                 PendingReportPost::spawn("grit-http-post", move || {
                     client
                         .post_into_reader(&url, &content_type, &accept, &body, None)
-                        .map_err(Into::into)
                         .map(ReadResponse::read_from)
                 })
                 .map_err(Error::Io)
@@ -436,9 +431,9 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
     /// [`LARGE_POST`].
     fn write_receive_pack(&mut self, buf: &[u8]) -> Result<()> {
         if self.recv_posted {
-            return Err(Error::Remote(RemoteError::Http(
-                "receive-pack request already sent".to_owned(),
-            )));
+            return Err(Error::Remote(RemoteError::Http {
+                detail: "receive-pack request already sent".to_owned(),
+            }));
         }
         self.recv_body.extend_from_slice(buf);
         if self.recv_stream.is_none() {
@@ -481,9 +476,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         );
         let cancel = self.operation_cancel();
         let mut reply = PendingHttp::spawn("grit-http-post", move || {
-            client
-                .post_into_reader(&url, &content_type, &accept, b"0000", None)
-                .map_err(Into::into)
+            client.post_into_reader(&url, &content_type, &accept, b"0000", None)
         })
         .map_err(Error::Io)
         .and_then(|pending| self.wait_http(pending, Self::cancel_ref(&cancel), None))?;
@@ -637,8 +630,11 @@ mod tests {
     }
 
     impl HttpClient for FakeServer {
-        fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
-            Err(RemoteError::Http("no GETs here".to_owned()))
+        fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+            Err(RemoteError::Http {
+                detail: "no GETs here".to_owned(),
+            }
+            .into())
         }
 
         fn post(
@@ -648,7 +644,7 @@ mod tests {
             _: &str,
             body: &[u8],
             _: Option<&str>,
-        ) -> crate::remote::RemoteResult<Vec<u8>> {
+        ) -> crate::error::Result<Vec<u8>> {
             self.seen
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -664,11 +660,12 @@ mod tests {
             _: &str,
             body: &mut dyn Read,
             _: Option<&str>,
-        ) -> crate::remote::RemoteResult<Box<dyn Read + Send>> {
+        ) -> crate::error::Result<Box<dyn Read + Send>> {
             if self.refuse_stream {
-                return Err(RemoteError::Http(
-                    "HTTP 500 from the fake server".to_owned(),
-                ));
+                return Err(RemoteError::Http {
+                    detail: "HTTP 500 from the fake server".to_owned(),
+                }
+                .into());
             }
             let mut got = Vec::new();
             let mut largest = 0;
@@ -688,7 +685,10 @@ mod tests {
                 let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(end);
             }
             if failed {
-                return Err(RemoteError::Http("body did not finish".to_owned()));
+                return Err(RemoteError::Http {
+                    detail: "body did not finish".to_owned(),
+                }
+                .into());
             }
             let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
             seen.streamed = Some(got);

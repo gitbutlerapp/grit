@@ -5,6 +5,7 @@ use grit_lib::index::Index;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 
 fn init_repo() -> (tempfile::TempDir, Repository) {
@@ -88,7 +89,11 @@ fn add_attr_pathspec_stages_matching_modified_and_errors_when_nothing_matches() 
     fs::write(wt.join("b.txt"), b"again\n").unwrap();
     let err = stage_paths(&repo, &[":(attr:no-such)"]).expect_err("no match");
     assert!(
-        matches!(err, Error::Verbatim(ref m) if m.contains("did not match any files")),
+        matches!(
+            err,
+            Error::Worktree(grit_lib::worktree::WorktreeError::PathspecNoMatch { ref spec })
+                if spec == ":(attr:no-such)"
+        ),
         "{err:?}"
     );
 }
@@ -150,7 +155,10 @@ fn pathless_add_rejects_hostile_expanded_path() {
     fs::write(wt.join("ok.txt"), b"ok\n").unwrap();
     let err = stage_paths(&repo, &[]).expect_err("pathless add with git~1");
     assert!(
-        matches!(err, Error::InvalidPathComponent { .. }),
+        matches!(
+            err,
+            Error::Worktree(WorktreeError::InvalidPathComponent { .. })
+        ),
         "expected InvalidPathComponent, got {err:?}"
     );
 }
@@ -163,7 +171,10 @@ fn glob_add_rejects_hostile_match_before_index_insert() {
     fs::write(wt.join("good.txt"), b"ok\n").unwrap();
     let err = stage_paths(&repo, &["*"]).expect_err("glob should still validate git~1");
     assert!(
-        matches!(err, Error::InvalidPathComponent { .. }),
+        matches!(
+            err,
+            Error::Worktree(WorktreeError::InvalidPathComponent { .. })
+        ),
         "expected InvalidPathComponent, got {err:?}"
     );
 }

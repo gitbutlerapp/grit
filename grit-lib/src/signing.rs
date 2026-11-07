@@ -31,9 +31,6 @@ use crate::config::ConfigSet;
 use crate::error::{ConfigError, Error, Result};
 use crate::porcelain::commit_error::CommitError;
 
-/// Commit/tag signing outcome at the library boundary ([`CommitError`] only).
-pub type SigningResult<T> = std::result::Result<T, CommitError>;
-
 fn program_display(path: &std::path::Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -225,7 +222,7 @@ fn signing_spawn(
     cfg: &GpgConfig,
     spec: CommandSpec,
     payload: Option<&[u8]>,
-) -> SigningResult<CommandOutput> {
+) -> crate::error::Result<CommandOutput> {
     let program = spec.program.clone();
     let running = cfg
         .command_runner
@@ -360,7 +357,7 @@ impl GpgConfig {
     ///
     /// Mirrors Git's program resolution: a leading `~/` expands to `$HOME`, an
     /// absolute path is used verbatim, and a bare name is searched on `$PATH`.
-    pub fn resolve_program_path(&self) -> SigningResult<PathBuf> {
+    pub fn resolve_program_path(&self) -> crate::error::Result<PathBuf> {
         resolve_program(&self.program)
     }
 }
@@ -380,7 +377,7 @@ fn resolve_program_for_format(
 }
 
 /// Resolve a program string to an executable path.
-fn resolve_program(program: &str) -> SigningResult<PathBuf> {
+fn resolve_program(program: &str) -> crate::error::Result<PathBuf> {
     // `~` / `~/...` expansion relative to $HOME.
     if program == "~" {
         if let Some(home) = home_dir() {
@@ -518,7 +515,7 @@ pub fn sign_serialized_commit(
     committer_ident: &str,
     signing_key_override: Option<&str>,
     hash_algo: HashAlgo,
-) -> SigningResult<Vec<u8>> {
+) -> crate::error::Result<Vec<u8>> {
     let committer_key = committer_signing_default(committer_ident);
     let signing_key = cfg.resolve_signing_key(signing_key_override, &committer_key);
     let sig = sign_buffer(cfg, unsigned_bytes, &signing_key)?;
@@ -552,7 +549,7 @@ pub fn sign_serialized_tag(
     unsigned_bytes: &[u8],
     tagger_ident: &str,
     signing_key_override: Option<&str>,
-) -> SigningResult<Vec<u8>> {
+) -> crate::error::Result<Vec<u8>> {
     let tagger_key = committer_signing_default(tagger_ident);
     let signing_key = cfg.resolve_signing_key(signing_key_override, &tagger_key);
     let sig = sign_buffer(cfg, unsigned_bytes, &signing_key)?;
@@ -571,7 +568,11 @@ pub fn sign_serialized_tag(
 ///
 /// Returns [`[`CommitError::Signing`](crate::porcelain::commit_error::CommitError::Signing)`] when the program cannot be spawned, exits
 /// non-zero, or fails to produce a signature.
-pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> SigningResult<Vec<u8>> {
+pub fn sign_buffer(
+    cfg: &GpgConfig,
+    payload: &[u8],
+    signing_key: &str,
+) -> crate::error::Result<Vec<u8>> {
     if cfg.format == GpgFormat::Ssh {
         return sign_buffer_ssh(cfg, payload, signing_key);
     }
@@ -602,11 +603,11 @@ pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Signin
         } else {
             status_text.into_owned()
         };
-        return Err(commit_signing_process_failure(
+        return Err(crate::error::Error::from(commit_signing_process_failure(
             &program,
             output.status,
             format!("gpg failed to sign the data:\n{detail}"),
-        ));
+        )));
     }
 
     Ok(output.stdout)
@@ -645,14 +646,19 @@ fn is_literal_ssh_key(s: &str) -> Option<&str> {
 /// Returns [`[`CommitError::Signing`](crate::porcelain::commit_error::CommitError::Signing)`] when `signing_key` is empty, a temp file cannot be
 /// written, `ssh-keygen` cannot be run or exits non-zero, or the `.sig` output
 /// cannot be read.
-fn sign_buffer_ssh(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> SigningResult<Vec<u8>> {
+fn sign_buffer_ssh(
+    cfg: &GpgConfig,
+    payload: &[u8],
+    signing_key: &str,
+) -> crate::error::Result<Vec<u8>> {
     if signing_key.is_empty() {
         let program = cfg.resolve_program_path()?;
         return Err(CommitError::signing_failure(
             program_display(&program),
             None,
             "user.signingKey needs to be set for ssh signing",
-        ));
+        )
+        .into());
     }
 
     let program = cfg.resolve_program_path()?;
@@ -728,13 +734,13 @@ fn sign_buffer_ssh(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Signin
             return Err(CommitError::signing_from_message(
                 "ssh-keygen -Y sign is needed for ssh signing (available in openssh version 8.2p1+)"
                     .to_owned(),
-            ));
+            ).into());
         }
-        return Err(commit_signing_process_failure(
+        return Err(crate::error::Error::from(commit_signing_process_failure(
             &program,
             output.status,
             stderr.into_owned(),
-        ));
+        )));
     }
 
     let sig_path = sig_sibling(&buffer_path);
@@ -1006,7 +1012,7 @@ fn gpg_sig_header_line(line: &[u8]) -> Option<(&'static str, usize)> {
 /// signature to a temp file and runs `<program> --status-fd=1 <verify_args>
 /// --verify <sigfile> -`, feeding the payload on stdin, and parses the
 /// `[GNUPG:]` status lines.
-pub fn verify_commit(cfg: &GpgConfig, raw_commit: &[u8]) -> SigningResult<SignatureCheck> {
+pub fn verify_commit(cfg: &GpgConfig, raw_commit: &[u8]) -> crate::error::Result<SignatureCheck> {
     let (payload, signature) = match extract_signed_payload(raw_commit) {
         Some(parts) => parts,
         None => return Ok(SignatureCheck::default_none()),
@@ -1190,7 +1196,7 @@ fn verify_ssh_signed_buffer(
     cfg: &GpgConfig,
     payload: Vec<u8>,
     signature: Vec<u8>,
-) -> SigningResult<SignatureCheck> {
+) -> crate::error::Result<SignatureCheck> {
     let mut sigc = SignatureCheck {
         signature: signature.clone(),
         payload: payload.clone(),
@@ -1254,7 +1260,7 @@ fn verify_ssh_signed_buffer(
         return Err(CommitError::signing_from_message(
             "ssh-keygen -Y find-principals/verify is needed for ssh signature verification (available in openssh version 8.2p1+)"
                 .to_owned(),
-        ));
+        ).into());
     }
 
     let mut verify_stdout = String::new();
@@ -1592,7 +1598,7 @@ fn split_at_space(s: &str) -> (&str, &str) {
 }
 
 /// Write `data` to a fresh temp file and return its path.
-fn write_temp_file(data: &[u8]) -> SigningResult<PathBuf> {
+fn write_temp_file(data: &[u8]) -> crate::error::Result<PathBuf> {
     write_temp_file_named(data, "git_vtag")
 }
 
@@ -1605,7 +1611,7 @@ fn temp_file_path(stem: &str) -> PathBuf {
 }
 
 /// Write `data` to a fresh temp file named with `stem` and return its path.
-fn write_temp_file_named(data: &[u8], stem: &str) -> SigningResult<PathBuf> {
+fn write_temp_file_named(data: &[u8], stem: &str) -> crate::error::Result<PathBuf> {
     let path = temp_file_path(stem);
     let mut f = std::fs::File::create(&path).map_err(|e| {
         CommitError::signing_from_message(format!("could not create temporary file: {e}"))
@@ -1672,7 +1678,7 @@ pub fn parse_signed_buffer(buf: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
 /// signature armor (`get_format_by_sig`), reusing the internal `verify_ssh_signed_buffer` helper
 /// for ssh and the gpg/gpgsm path otherwise.  Returns the "no signature" result
 /// when the tag carries no signature.
-pub fn verify_tag(cfg: &GpgConfig, raw_tag: &[u8]) -> SigningResult<SignatureCheck> {
+pub fn verify_tag(cfg: &GpgConfig, raw_tag: &[u8]) -> crate::error::Result<SignatureCheck> {
     let (payload, signature) = match parse_signed_buffer(raw_tag) {
         Some(parts) => parts,
         None => return Ok(SignatureCheck::default_none()),

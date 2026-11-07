@@ -3,6 +3,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::error::ObjectError;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
 use std::path::Path;
@@ -76,7 +77,7 @@ fn assert_commits_match_git(root: &Path) {
             assert!(
                 matches!(
                     err,
-                    Error::UnexpectedObjectKind { oid, expected: ObjectKind::Commit, actual: kind }
+                    Error::Object(ObjectError::UnexpectedKind { oid, expected: ObjectKind::Commit, actual: kind })
                         if oid == id && kind == actual
                 ),
                 "{rev}: {err:?}"

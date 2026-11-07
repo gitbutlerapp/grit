@@ -14,6 +14,7 @@
 //! # }
 //! ```
 
+use crate::error::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -599,7 +600,7 @@ impl BuiltCommitGraph {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] if the bytes fail verification (see
+    /// Returns [`crate::error::ObjectError::Corrupt`] if the bytes fail verification (see
     /// [`CommitGraphChain::from_bytes`]).
     pub fn to_chain(&self) -> Result<CommitGraphChain> {
         CommitGraphChain::from_bytes(self.bytes.clone())
@@ -807,7 +808,7 @@ pub fn write_commit_graph(
 ///
 /// Returns [`RepositoryError::UnsupportedObjectStore`] for non-files backends, [`Error::Config`] when
 /// `midx.version` is not an integer, [`crate::error::MidxError::UnknownWriteVersion`] (as
-/// [`Error::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
+/// [`crate::error::ObjectError::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
 pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteReport> {
     let odb = repo.odb();
     odb.require_files_primary(FilesOnlyOperation::MidxWrite)?;
@@ -1160,7 +1161,11 @@ fn repack_detail(
                         // Pack was built from an earlier root snapshot; live tips moved on
                         // (concurrent receive-pack). Skip the bitmap this run.
                     }
-                    Err(e) => return Err(Error::CorruptObject(e.to_string())),
+                    Err(e) => {
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: e.to_string(),
+                        }))
+                    }
                 }
             }
         }
@@ -1690,8 +1695,8 @@ fn duration_ms(d: std::time::Duration) -> u64 {
 ///
 /// # Errors
 ///
-/// [`Error::MaintenanceRunning`] when another process holds the `gc.pid` lock,
-/// [`RepositoryError::UnsupportedObjectStore`] with [`FilesOnlyOperation::Prune`] for a
+/// [`crate::repo::RepositoryError::MaintenanceRunning`] when another process holds the `gc.pid`
+/// lock, [`RepositoryError::UnsupportedObjectStore`] with [`FilesOnlyOperation::Prune`] for a
 /// custom primary without the prune capability, plus failures from each maintenance step.
 pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
     gc_with_cancel(repo, opts, &CancelToken::never())
@@ -1711,7 +1716,11 @@ pub fn gc_with_cancel(
     } else {
         match GcLock::try_acquire(repo, now)? {
             GcLockAttempt::Acquired(lock) => Some(lock),
-            GcLockAttempt::Held(holder) => return Err(Error::MaintenanceRunning { holder }),
+            GcLockAttempt::Held(holder) => {
+                return Err(Error::Repository(RepositoryError::MaintenanceRunning {
+                    holder,
+                }))
+            }
         }
     };
     match target {
@@ -3254,7 +3263,9 @@ mod tests {
         assert_eq!(GcLock::current_holder(&repo, now), Some(recorded));
         assert!(matches!(
             gc(&repo, &GcOptions::default()),
-            Err(Error::MaintenanceRunning { .. })
+            Err(Error::Repository(
+                RepositoryError::MaintenanceRunning { .. }
+            ))
         ));
         assert!(!repo.git_dir().join("gc.pid.lock").exists());
         drop(lock);

@@ -60,7 +60,7 @@ use crate::environment::Environment;
 use crate::error::{AuthFailure, Error, RemoteUnreadableReason, Result};
 use crate::progress::CancelToken;
 use crate::protocol::client_git_protocol_header_from_config;
-use crate::remote::{RemoteError, RemoteResult};
+use crate::remote::RemoteError;
 use crate::transport::http::{HttpMethod, HttpRequest, HttpResponse};
 use crate::transport_path::redact_url_for_display;
 
@@ -715,20 +715,22 @@ fn build_proxy(config: &ConfigSet) -> Result<Option<ureq::Proxy>> {
         .map(|(s, _)| s.to_ascii_lowercase())
         .unwrap_or_default();
     if scheme.starts_with("socks") {
-        return Err(Error::Remote(RemoteError::Http(format!(
+        return Err(Error::Remote(RemoteError::Http {
+            detail: format!(
             "http.proxy '{raw}': SOCKS proxies are not supported by the default ureq HTTP client; \
              implement a custom HttpClient or use an HTTP proxy"
-        ))));
+        ),
+        }));
     }
     if scheme != "http" && scheme != "https" {
-        return Err(Error::Remote(RemoteError::Http(format!(
-            "http.proxy '{raw}': unsupported proxy scheme '{scheme}'"
-        ))));
+        return Err(Error::Remote(RemoteError::Http {
+            detail: format!("http.proxy '{raw}': unsupported proxy scheme '{scheme}'"),
+        }));
     }
     let proxy = ureq::Proxy::new(&with_scheme).map_err(|e| {
-        Error::Remote(RemoteError::Http(format!(
-            "invalid http.proxy '{raw}': {e}"
-        )))
+        Error::Remote(RemoteError::Http {
+            detail: format!("invalid http.proxy '{raw}': {e}"),
+        })
     })?;
     Ok(Some(proxy))
 }
@@ -1195,10 +1197,9 @@ impl HttpClient for UreqHttpClient {
             .map(|settings| settings.window)
     }
 
-    fn get(&self, url: &str, git_protocol: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
         self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
             .map(|(body, _)| body)
-            .map_err(crate::remote::RemoteError::from)
     }
 
     fn post(
@@ -1208,12 +1209,11 @@ impl HttpClient for UreqHttpClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> crate::remote::RemoteResult<Vec<u8>> {
+    ) -> crate::error::Result<Vec<u8>> {
         self.with_auth_retry(url, |target, auth| {
             self.do_post(target, content_type, accept, body, git_protocol, auth)
         })
         .map(|(body, _)| body)
-        .map_err(crate::remote::RemoteError::from)
     }
 
     fn post_into_reader(
@@ -1223,7 +1223,7 @@ impl HttpClient for UreqHttpClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> crate::remote::RemoteResult<Box<dyn Read + Send>> {
+    ) -> crate::error::Result<Box<dyn Read + Send>> {
         Ok(Box::new(self.with_auth_retry_post_stream(
             url,
             content_type,
@@ -1240,7 +1240,7 @@ impl HttpClient for UreqHttpClient {
         accept: &str,
         body: &mut dyn Read,
         git_protocol: Option<&str>,
-    ) -> crate::remote::RemoteResult<Box<dyn Read + Send>> {
+    ) -> crate::error::Result<Box<dyn Read + Send>> {
         let auth = self.auth_header_for_url(url);
         let result = self
             .post_request(
@@ -1252,15 +1252,9 @@ impl HttpClient for UreqHttpClient {
             )
             .send(ureq::SendBody::from_reader(body));
         let (head, reader) = match result {
-            Ok(resp) => {
-                open_response_body(resp, &self.effective_timeouts()).map_err(RemoteError::from)?
-            }
+            Ok(resp) => open_response_body(resp, &self.effective_timeouts())?,
             Err(e) => {
-                return Err(RemoteError::from(map_ureq_transport_error(
-                    url,
-                    e,
-                    &self.effective_timeouts(),
-                )));
+                return Err(map_ureq_transport_error(url, e, &self.effective_timeouts()));
             }
         };
         self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
@@ -1268,11 +1262,11 @@ impl HttpClient for UreqHttpClient {
         if head.status == 401 {
             drain_response_body(reader);
             self.clear_auth_header();
-            return Err(auth_error(url, AuthFailure::Rejected).into());
+            return Err(auth_error(url, AuthFailure::Rejected));
         }
         if head.status >= 400 {
             drain_response_body(reader);
-            return Err(http_status_error(url, head.status).into());
+            return Err(http_status_error(url, head.status));
         }
         Ok(Box::new(reader))
     }
@@ -1281,10 +1275,9 @@ impl HttpClient for UreqHttpClient {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
+    ) -> crate::error::Result<(Vec<u8>, Option<String>)> {
         self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
             .map(|(body, final_url)| (body, Some(final_url)))
-            .map_err(RemoteError::from)
     }
 
     fn git_protocol_header(&self) -> Option<&str> {
@@ -1295,9 +1288,8 @@ impl HttpClient for UreqHttpClient {
         self.clear_auth_header();
     }
 
-    fn send(&self, request: &HttpRequest<'_>) -> RemoteResult<HttpResponse> {
+    fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
         self.send_with_auth_retry(request)
-            .map_err(RemoteError::from)
     }
 
     fn set_operation_cancel(&self, cancel: Option<std::sync::Arc<crate::progress::CancelToken>>) {
@@ -1648,10 +1640,9 @@ fn build_cookie_specs(path: Option<&std::path::Path>) -> Result<Vec<CookieSpec>>
         return Ok(Vec::new());
     }
     let data = std::fs::read_to_string(path).map_err(|e| {
-        Error::Remote(RemoteError::Http(format!(
-            "read cookie file '{}': {e}",
-            path.display()
-        )))
+        Error::Remote(RemoteError::Http {
+            detail: format!("read cookie file '{}': {e}", path.display()),
+        })
     })?;
     let mut out = Vec::new();
     for line in data.lines() {
@@ -1825,10 +1816,10 @@ mod tests {
         assert!(
             matches!(
                 err,
-                RemoteError::Unreadable {
+                Error::Remote(RemoteError::Unreadable {
                     reason: RemoteUnreadableReason::HttpStatus { status: 404 },
                     ..
-                }
+                })
             ),
             "{err:?}"
         );
@@ -2488,10 +2479,10 @@ mod tests {
         assert!(
             matches!(
                 err,
-                RemoteError::Auth {
+                Error::Remote(RemoteError::Auth {
                     reason: AuthFailure::Rejected,
                     ..
-                }
+                })
             ),
             "expected Rejected without a credential helper, got {err:?}"
         );
@@ -2524,14 +2515,14 @@ mod tests {
             String::from_utf8_lossy(&buf).into_owned()
         }
 
-        fn assert_rejected(err: RemoteError) {
+        fn assert_rejected(err: Error) {
             assert!(
                 matches!(
                     err,
-                    RemoteError::Auth {
+                    Error::Remote(RemoteError::Auth {
                         reason: AuthFailure::Rejected,
                         ..
-                    }
+                    })
                 ),
                 "expected Rejected, got {err:?}"
             );

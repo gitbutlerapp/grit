@@ -17,7 +17,7 @@ use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone, CloneOptions, CloneOutcome};
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transport::http::HttpClient;
-use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
+use grit_lib::remote::{HttpClientFactory, RemoteError};
 use grit_test_support::{git_at_least, git_cmd};
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -41,11 +41,11 @@ fn skip_old_git() -> bool {
 struct NoHttp;
 
 impl HttpClientFactory for NoHttp {
-    fn create(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+    fn create(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
         Err(RemoteError::UnsupportedScheme)
     }
 
-    fn create_for_preflight(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+    fn create_for_preflight(&self, _: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
         Err(RemoteError::UnsupportedScheme)
     }
 }

@@ -84,7 +84,7 @@ fn http_factory() -> Option<&'static dyn HttpClientFactory> {
     None
 }
 
-fn list_refs(url: &str) -> Result<usize, RemoteError> {
+fn list_refs(url: &str) -> grit_lib::error::Result<usize> {
     let remote = Remote::from_url(url).expect("parse url");
     remote
         .list_refs(None, &ListRefsOptions::default(), http_factory())
@@ -460,7 +460,7 @@ fn wrapper_helpers_classify_only_remote_unreadable() {
     assert!(CloneError::Nested(Box::new(unreadable())).is_remote_unreadable());
     assert!(CloneError::Remote(RemoteError::from(unreadable())).is_remote_unreadable());
     assert!(!CloneError::InvalidCloneDepth.is_remote_unreadable());
-    assert!(!CloneError::RemoteRefNotFound("x".into()).is_remote_unreadable());
+    assert!(!CloneError::RemoteRefNotFound { name: "x".into() }.is_remote_unreadable());
 
     assert!(PullError::Remote(RemoteError::from(unreadable())).is_remote_unreadable());
     assert!(PullError::Nested(Box::new(unreadable())).is_remote_unreadable());

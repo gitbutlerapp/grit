@@ -8,6 +8,7 @@
 //! clean paths; callers that may overwrite dirty files (hard reset) spool those first, and
 //! spooled bytes win over the index.
 
+use crate::worktree::WorktreeError;
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -328,7 +329,7 @@ impl CheckoutJournal {
     /// # Errors
     ///
     /// Returns the checkout's own error after a complete rollback, or
-    /// [`Error::CheckoutRollbackIncomplete`] wrapping it with the paths that could not be put
+    /// [`crate::worktree::WorktreeError::CheckoutRollbackIncomplete`] wrapping it with the paths that could not be put
     /// back.
     pub(crate) fn finish<T>(mut self, repo: &Repository, result: Result<T>) -> Result<T> {
         let err = match result {
@@ -345,10 +346,10 @@ impl CheckoutJournal {
         if unrestored.is_empty() {
             return Err(err);
         }
-        Err(Error::CheckoutRollbackIncomplete {
-            source: Box::new(err),
+        Err(Error::Worktree(WorktreeError::CheckoutRollbackIncomplete {
+            source: crate::error::ErrorSummary::from(err),
             unrestored,
-        })
+        }))
     }
 
     /// Undo every recorded change; returns the paths left in a different state.

@@ -3,6 +3,7 @@
 //! block the new name (ancestors and descendants, loose or packed) are still reported.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::error::RefError;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
@@ -73,7 +74,7 @@ fn lock_files(dir: &Path) -> Vec<String> {
 
 fn name_unavailable(err: Error) -> RefnameUnavailable {
     match err {
-        Error::RefStore(RefStoreError::NameUnavailable { reason }) => reason,
+        Error::Ref(RefError::Store(RefStoreError::NameUnavailable { reason })) => reason,
         other => panic!("expected a refname conflict, got {other:?}"),
     }
 }

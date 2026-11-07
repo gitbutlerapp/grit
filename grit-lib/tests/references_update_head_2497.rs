@@ -5,6 +5,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::zero_oid;
 use grit_lib::error::Error;
+use grit_lib::error::RefError;
 use grit_lib::ident::Signature;
 use grit_lib::objects::NewCommit;
 use grit_lib::refs::append_reflog;
@@ -237,7 +238,7 @@ fn compare_and_swap_refuses_stale_tip() {
         .expect_err("stale");
     assert!(matches!(
         err,
-        Error::RefStore(RefStoreError::ExpectedMismatch { .. })
+        Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
     ));
     assert_eq!(repo.references().resolve(&main).expect("main"), c1);
 }

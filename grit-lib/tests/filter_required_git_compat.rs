@@ -1,6 +1,7 @@
 //! Clean/smudge filter failures: `filter.<driver>.required` never stores unfiltered content,
 //! optional filters fall back to it like Git, and spawn failures keep their cause (#1810).
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -180,7 +181,7 @@ fn failing_required_clean_filter_fails_stage_and_leaves_index_alone() {
     assert!(
         matches!(
             &err,
-            Error::Filter(FilterError::ExternalFilterFailed { driver, path, phase: FilterPhase::Clean })
+            Error::Worktree(WorktreeError::Filter(FilterError::ExternalFilterFailed { driver, path, phase: FilterPhase::Clean }))
                 if driver == "up" && path == "y.up"
         ),
         "{err:?}"

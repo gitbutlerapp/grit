@@ -1,6 +1,7 @@
 //! After `switch_repository`, system `git` sees a clean index and worktree.
 
 use crate::switch_overwrite_git_helpers;
+use grit_lib::worktree::WorktreeError;
 
 use std::process::Command;
 
@@ -774,11 +775,11 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
     )
     .expect_err("grit switch must refuse racy dirty worktree like git");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => {
+        }) => {
             assert_eq!(paths, git_paths);
             assert!(paths.contains(&"hot.txt".to_owned()));
         }
@@ -885,11 +886,11 @@ fn switch_refuses_dirty_conflicting_path_and_leaves_file() {
     )
     .expect_err("dirty switch must fail");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => assert_eq!(paths, git_paths),
+        }) => assert_eq!(paths, git_paths),
         other => panic!("expected WouldOverwrite LocalChanges, got {other:?}"),
     }
     let after = std::fs::read(tmp.path().join("hot.txt")).expect("read after");
@@ -966,11 +967,11 @@ fn switch_refuses_dirty_second_path_when_first_has_stat_drift_only_like_git() {
     )
     .expect_err("grit switch must refuse when b.txt is dirty");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => assert_eq!(paths, git_paths),
+        }) => assert_eq!(paths, git_paths),
         other => panic!("expected WouldOverwrite LocalChanges, got {other:?}"),
     }
     assert_eq!(
@@ -1094,11 +1095,11 @@ fn switch_refuses_racy_second_path_when_first_has_stat_drift_only_like_git() {
     )
     .expect_err("grit switch must refuse racy dirty b.txt");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => assert_eq!(paths, git_paths),
+        }) => assert_eq!(paths, git_paths),
         other => panic!("expected WouldOverwrite LocalChanges, got {other:?}"),
     }
     assert_eq!(
@@ -1209,11 +1210,11 @@ fn switch_refuses_dirty_file_deleted_on_target_like_git() {
     )
     .expect_err("grit must refuse switch like git");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => assert_eq!(paths, git_paths),
+        }) => assert_eq!(paths, git_paths),
         other => panic!("expected WouldOverwrite LocalChanges, got {other:?}"),
     }
     assert_eq!(
@@ -1887,11 +1888,11 @@ fn issue_1160_dangling_symlink_with_staged_add_deleted_refuses_switch() {
     )
     .expect_err("grit must refuse switch for retargeted dangling symlink");
     match grit_err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => assert_eq!(paths, git_paths),
+        }) => assert_eq!(paths, git_paths),
         other => panic!("expected WouldOverwrite LocalChanges, got {other:?}"),
     }
     assert_eq!(
@@ -2318,11 +2319,11 @@ fn switch_refuses_staged_gitlink_that_differs_from_target_like_git() {
     )
     .expect_err("grit switch must refuse a staged gitlink the target would overwrite");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths,
             ..
-        } => assert_eq!(paths, git_paths),
+        }) => assert_eq!(paths, git_paths),
         other => panic!("expected WouldOverwrite LocalChanges, got {other:?}"),
     }
     assert_eq!(
@@ -2476,11 +2477,11 @@ fn switch_wholesale_fast_path_still_blocks_genuine_untracked_at_added_path() {
     )
     .expect_err("untracked at added path must block switch");
     match err {
-        Error::WouldOverwrite {
+        Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::Untracked,
             paths,
             ..
-        } => {
+        }) => {
             assert!(
                 paths.iter().any(|p| p == "slot/new.txt"),
                 "expected slot/new.txt in {paths:?}"

@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 use crate::config::ident_resolve::IdentityError;
-use crate::error::{ApplyError, Error};
+use crate::error::ApplyError;
 use crate::ident::CommitIdentityError;
 use crate::porcelain::hunk_select::HunkSelectError;
 
@@ -82,14 +82,10 @@ pub enum CommitError {
     /// Change-id generation failed for a new commit.
     #[error(transparent)]
     ChangeId(#[from] crate::change_id::ChangeIdError),
-
-    /// Underlying repository, hook, index, or I/O failure.
-    #[error(transparent)]
-    Library(Box<Error>),
 }
 
 impl CommitError {
-    /// Stable snake_case slug for this failure (matches former [`Error::kind_name`] values).
+    /// Stable snake_case slug for this failure (matches former [`Error::kind_name`](crate::error::Error::kind_name) values).
     #[must_use]
     pub fn kind_name(&self) -> &'static str {
         match self {
@@ -107,7 +103,6 @@ impl CommitError {
             Self::PatchApply(..) => "apply",
             Self::InvalidCommitMessage => "empty_commit_message",
             Self::ChangeId(..) => "message",
-            Self::Library(e) => e.kind_name(),
         }
     }
 }
@@ -134,26 +129,6 @@ impl CommitError {
             program: program.into(),
             status,
             stderr: Box::new(stderr.into()),
-        }
-    }
-
-    /// Whether an in-flight operation asked to stop ([`crate::error::Error::Cancelled`] in [`Self::Library`]).
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        match self {
-            Self::Library(e) => e.is_cancelled(),
-            _ => false,
-        }
-    }
-}
-
-impl From<Error> for CommitError {
-    fn from(err: Error) -> Self {
-        match err {
-            Error::Commit(inner) => inner,
-            Error::HunkSelection(e) => Self::HunkSelect(e),
-            Error::Apply(e) => Self::PatchApply(e),
-            other => Self::Library(Box::new(other)),
         }
     }
 }

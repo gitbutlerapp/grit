@@ -1,5 +1,6 @@
 //! Compare arbitrary filesystem paths without a repository (`git diff --no-index`).
 
+use crate::error::ObjectError;
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,7 +45,7 @@ pub enum NoIndexError {
 
 impl From<NoIndexError> for crate::error::Error {
     fn from(value: NoIndexError) -> Self {
-        Self::Verbatim(value.to_string())
+        Self::Diff(crate::error::DiffError::NoIndex(value))
     }
 }
 
@@ -291,7 +292,9 @@ fn hash_side_at_path(path: &str, mode: FileMode) -> Result<ObjectId, NoIndexErro
 
 fn hash_blob(data: &[u8]) -> Result<ObjectId, NoIndexError> {
     hash_object(HashAlgo::Sha1, ObjectKind::Blob, data).map_err(|e| match e {
-        crate::error::Error::HashCollision { .. } => NoIndexError::HashCollision,
+        crate::error::Error::Object(ObjectError::HashCollision { .. }) => {
+            NoIndexError::HashCollision
+        }
         other => panic!("unexpected error hashing no-index blob: {other}"),
     })
 }

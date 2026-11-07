@@ -45,6 +45,7 @@ use super::{
 /// Why a branch could not be projected for a checkout.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ProjectError {
     /// The name is not a valid branch name.
     #[error("not a valid branch name")]
@@ -311,7 +312,7 @@ fn projected_tree(
     if edits.is_empty() {
         return Ok(tree);
     }
-    Ok(edit(odb, Some(tree), &edits)?)
+    edit(odb, Some(tree), &edits)
 }
 
 /// The files under `tree` (at `prefix`) outside `paths`, without going into

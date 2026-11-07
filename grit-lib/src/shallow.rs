@@ -452,12 +452,10 @@ pub(crate) fn read_shallow_info_section_sideband(
             continue;
         }
         if let Some(rest) = line.strip_prefix("shallow ") {
-            let oid = ObjectId::from_hex(rest.trim())
-                .map_err(|_| Error::Verbatim(format!("parse shallow oid {}", rest.trim())))?;
+            let oid = ObjectId::from_hex(rest.trim())?;
             shallow.push(oid);
         } else if let Some(rest) = line.strip_prefix("unshallow ") {
-            let oid = ObjectId::from_hex(rest.trim())
-                .map_err(|_| Error::Verbatim(format!("parse unshallow oid {}", rest.trim())))?;
+            let oid = ObjectId::from_hex(rest.trim())?;
             unshallow.push(oid);
         }
     }

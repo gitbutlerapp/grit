@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::error::RefError;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -348,7 +349,7 @@ fn stack_tables_list_and_update_index_mechanics() {
     assert!(
         matches!(
             &err,
-            Error::Reftable(ReftableError::Locked { lock_path }) if *lock_path == lock
+            Error::Ref(RefError::Reftable(ReftableError::Locked { lock_path })) if *lock_path == lock
         ),
         "expected reftable Locked error, got {err:?}"
     );

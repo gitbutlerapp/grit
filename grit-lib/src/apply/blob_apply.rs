@@ -1,5 +1,6 @@
 //! Apply parsed [`FilePatch`] hunks to in-memory blob bytes (no I/O).
 
+use crate::error::DiffError;
 use std::borrow::Cow;
 
 use super::{BinaryPatchPayload, FilePatch, Hunk, HunkLine};
@@ -78,7 +79,7 @@ fn materialize_binary(
     payload: &BinaryPatchPayload,
 ) -> std::result::Result<Vec<u8>, ApplyError> {
     super::materialize_binary_patch_forward(payload, base).map_err(|e| match e {
-        Error::Apply(a) => a,
+        Error::Diff(DiffError::Apply(a)) => a,
         other => ApplyError::Failed {
             path: String::new(),
             message: other.to_string(),

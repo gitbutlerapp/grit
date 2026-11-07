@@ -5,15 +5,12 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::push_plan::PushPlanError;
-use crate::error::{AuthFailure, Error, RemoteUnreadableReason};
+use crate::error::{AuthFailure, RemoteUnreadableReason};
 use crate::fetch_request::FetchRefspecError;
 use crate::partial_clone::PartialCloneError;
 use crate::protocol::ProtocolError;
 use crate::resumable::ResumableError;
 use crate::serve::ServeError;
-
-/// Result of a remote operation ([`RemoteError`] on failure).
-pub type RemoteResult<T> = std::result::Result<T, RemoteError>;
 
 /// Errors for remote URL resolution, transport, fetch, push, and clone.
 #[non_exhaustive]
@@ -32,21 +29,33 @@ pub enum RemoteError {
     #[error("unsupported remote URL scheme")]
     UnsupportedScheme,
     /// A URL or path failed to parse.
-    #[error("{0}")]
-    InvalidUrl(String),
+    #[error("{detail}")]
+    InvalidUrl {
+        /// Why the URL or path could not be used.
+        detail: String,
+    },
     /// Smart HTTP requires the `http-ureq` feature or an injected HTTP client factory.
     #[error("HTTP remotes require the http-ureq feature or an HttpClientFactory")]
     HttpUnavailable,
     /// The argument is neither a configured remote name nor a URL or path.
-    #[error("unknown remote '{0}'")]
-    UnknownRemote(String),
+    #[error("unknown remote '{name}'")]
+    UnknownRemote {
+        /// The argument as given.
+        name: String,
+    },
     /// [`RepositoryRemotes::add`](crate::repo_handles::RepositoryRemotes::add) found an
     /// existing `remote.<name>.*` section.
-    #[error("remote '{0}' already exists")]
-    RemoteExists(String),
+    #[error("remote '{name}' already exists")]
+    RemoteExists {
+        /// The remote name.
+        name: String,
+    },
     /// The name cannot be used for a remote (`refs/remotes/<name>/…` would not be a valid ref).
-    #[error("'{0}' is not a valid remote name")]
-    InvalidRemoteName(String),
+    #[error("'{name}' is not a valid remote name")]
+    InvalidRemoteName {
+        /// The name as given.
+        name: String,
+    },
 
     /// HTTP authentication failed.
     #[error("authentication failed for {url}: {reason}")]
@@ -103,6 +112,9 @@ pub enum RemoteError {
     /// The upload-pack serving a local path or `file://` URL in this process failed.
     #[error("local upload-pack: {0}")]
     LocalUploadPack(Box<ServeError>),
+    /// Serving a fetch or push to a client failed at the protocol level.
+    #[error(transparent)]
+    Serve(ServeError),
     /// The thread serving a local path or `file://` URL panicked.
     #[error("local upload-pack stopped unexpectedly")]
     LocalUploadPackPanicked,
@@ -118,9 +130,6 @@ pub enum RemoteError {
         /// Short branch name under `refs/heads/`.
         branch: String,
     },
-    /// Operation stopped via [`CancelToken`](crate::progress::CancelToken).
-    #[error("operation cancelled")]
-    Cancelled,
     /// Protocol allow/deny policy blocked the transport.
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
@@ -139,8 +148,11 @@ pub enum RemoteError {
         detail: String,
     },
     /// SSH subprocess or URL setup failed.
-    #[error("{0}")]
-    Ssh(String),
+    #[error("{detail}")]
+    Ssh {
+        /// What failed while starting or talking to `ssh`.
+        detail: String,
+    },
     /// Low-level transport failure (connection, DNS, TLS, or I/O outside HTTP status handling).
     #[error("{}", crate::error::remote_transport_message(.url.as_deref(), .detail))]
     Transport {
@@ -158,20 +170,35 @@ pub enum RemoteError {
         status: u16,
     },
     /// HTTP client or worker failure outside unreadable/auth classification.
-    #[error("{0}")]
-    Http(String),
+    #[error("{detail}")]
+    Http {
+        /// What the HTTP client reported.
+        detail: String,
+    },
     /// HTTP worker thread panicked.
     #[error("HTTP worker thread panicked")]
     HttpWorkerPanicked,
     /// HTTP transfer stalled below the configured low-speed limit.
-    #[error("{0}")]
-    HttpLowSpeedStall(String),
+    #[error("{detail}")]
+    HttpLowSpeedStall {
+        /// The transfer rate and limit that were crossed.
+        detail: String,
+    },
     /// Credential helper or askpass failure.
-    #[error("{0}")]
-    Credential(String),
-    /// Non-remote library failure during a remote operation.
+    #[error("{detail}")]
+    Credential {
+        /// What the credential helper or askpass reported.
+        detail: String,
+    },
+    /// A snapshot checkout from a grit server failed for a server-specific reason.
     #[error(transparent)]
-    Nested(#[from] Box<Error>),
+    Snapshot(crate::snapshot_checkout::CheckoutError),
+    /// Clone-specific failure (destination not empty, missing `--branch` ref, failed checkout).
+    #[error(transparent)]
+    Clone(Box<crate::clone::CloneError>),
+    /// A bundle used as a remote (or written for one) could not be read, written, or applied.
+    #[error(transparent)]
+    Bundle(crate::bundle::BundleError),
 }
 
 impl RemoteError {
@@ -189,27 +216,17 @@ impl RemoteError {
         matches!(self, Self::Unreadable { .. })
     }
 
-    /// Whether the operation was cancelled.
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Cancelled)
-            || matches!(
-                self,
-                Self::Nested(err) if err.is_cancelled()
-            )
-    }
-
-    /// Stable slug aligned with former [`Error::kind_name`] values for absorbed variants.
+    /// Stable slug aligned with former [`Error::kind_name`](crate::error::Error::kind_name) values for absorbed variants.
     #[must_use]
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::NoUrl { .. } => "remote_no_url",
             Self::UnsupportedScheme => "unsupported_scheme",
-            Self::InvalidUrl(_) => "invalid_url",
+            Self::InvalidUrl { .. } => "invalid_url",
             Self::HttpUnavailable => "http_unavailable",
-            Self::UnknownRemote(_) => "unknown_remote",
-            Self::RemoteExists(_) => "remote_exists",
-            Self::InvalidRemoteName(_) => "invalid_remote_name",
+            Self::UnknownRemote { .. } => "unknown_remote",
+            Self::RemoteExists { .. } => "remote_exists",
+            Self::InvalidRemoteName { .. } => "invalid_remote_name",
             Self::Auth { .. } => "auth",
             Self::CredentialsUnavailable { .. } => "credentials_unavailable",
             Self::PushAtomicUnsupported => "push_atomic_unsupported",
@@ -221,33 +238,32 @@ impl RemoteError {
             Self::Unreadable { .. } => "remote_unreadable",
             Self::Fatal { .. } => "remote_fatal",
             Self::LocalUploadPack(_) => "local_upload_pack",
+            Self::Serve(_) => "serve",
             Self::LocalUploadPackPanicked => "local_upload_pack_panicked",
             Self::Resumable(_) => "resumable",
             Self::FetchRefspec(_) => "fetch_refspec",
             Self::FetchIntoCheckedOutBranch { .. } => "fetch_into_checked_out_branch",
-            Self::Cancelled => "cancelled",
             Self::Protocol(_) => "protocol",
             Self::PushPlan(_) => "push_plan",
             Self::PartialClone(_) => "partial_clone",
             Self::MalformedTransportUrl { .. } => "malformed_transport_url",
             Self::Transport { .. } => "transport",
             Self::HttpStatus { .. } => "http_status",
-            Self::Ssh(_) => "ssh",
-            Self::Http(_) => "http",
+            Self::Ssh { .. } => "ssh",
+            Self::Http { .. } => "http",
             Self::HttpWorkerPanicked => "http_worker_panicked",
-            Self::HttpLowSpeedStall(_) => "http_low_speed_stall",
-            Self::Credential(_) => "credential",
-            Self::Nested(err) => err.kind_name(),
+            Self::HttpLowSpeedStall { .. } => "http_low_speed_stall",
+            Self::Credential { .. } => "credential",
+            Self::Bundle(_) => "bundle",
+            Self::Clone(_) => "clone",
+            Self::Snapshot(_) => "snapshot",
         }
     }
 
     /// Functional area for analytics and JSON (`area`), matching [`Error::area`](crate::error::Error::area) when wrapped.
     #[must_use]
     pub fn area(&self) -> &'static str {
-        match self {
-            Self::Nested(err) => err.area(),
-            _ => "remote",
-        }
+        "remote"
     }
 
     /// Build [`RemoteError::Unreadable`] for `url`.
@@ -256,16 +272,6 @@ impl RemoteError {
         Self::Unreadable {
             url: Some(url.into()),
             reason,
-        }
-    }
-}
-
-impl From<Error> for RemoteError {
-    fn from(err: Error) -> Self {
-        match err {
-            Error::Remote(remote) => remote,
-            Error::Cancelled => Self::Cancelled,
-            other => Self::Nested(Box::new(other)),
         }
     }
 }

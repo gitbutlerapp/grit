@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::worktree::WorktreeError;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
@@ -385,10 +386,10 @@ fn legacy_tree_modes_switch_still_blocks_real_worktree_edit() {
     assert!(
         matches!(
             err,
-            Error::WouldOverwrite {
+            Error::Worktree(WorktreeError::WouldOverwrite {
                 reason: OverwriteReason::LocalChanges,
                 ..
-            }
+            })
         ),
         "expected local-changes overwrite, got {err}"
     );

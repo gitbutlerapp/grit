@@ -250,6 +250,7 @@ impl ObjectFsckPolicy {
 
 /// Why a skip list could not be loaded.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum SkipListError {
     /// The file could not be read.
     #[error("cannot read fsck skip list {}: {source}", path.display())]

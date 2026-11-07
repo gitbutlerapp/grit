@@ -32,7 +32,7 @@ pub(crate) fn subject_for_rewrite_row(
     repo: &Repository,
     old: &CommitData,
     new: Option<ObjectId>,
-) -> Result<Option<String>, HistoryError> {
+) -> crate::error::Result<Option<String>> {
     Ok(Some(if let Some(new) = new {
         message_first_line(&load_commit(repo, new)?.message)
     } else {
@@ -48,7 +48,7 @@ pub(crate) fn subject_for_rewrite_row(
 pub fn rewritten_row_subject(
     repo: &Repository,
     row: &RewrittenCommit,
-) -> Result<Option<String>, HistoryError> {
+) -> crate::error::Result<Option<String>> {
     if let Some(subject) = row.subject.as_ref() {
         return Ok(Some(subject.clone()));
     }

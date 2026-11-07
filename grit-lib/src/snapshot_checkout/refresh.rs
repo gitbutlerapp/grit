@@ -15,6 +15,7 @@ use crate::diff::{build_file_diffs, diff_trees, DiffDetail, DiffOptions, DiffTot
 use crate::fetch::Progress;
 use crate::merge_base::is_ancestor;
 use crate::objects::ObjectId;
+use crate::porcelain::branch_error::BranchError;
 use crate::porcelain::checkout_reflog::checkout_reflog_identity;
 use crate::porcelain::pull::{
     pull, FetchedUpstream, PullError, PullMode, PullOptions, PullOutcome,
@@ -108,7 +109,7 @@ pub struct RefreshOutcome {
 /// [`RepositorySnapshotCheckouts::ensure_refreshable`](crate::repo_handles::RepositorySnapshotCheckouts::ensure_refreshable) for `repo`.
 pub(crate) fn ensure_refreshable(repo: &Repository) -> Result<()> {
     match detect_in_progress(repo.git_dir()).into_iter().next() {
-        Some(operation) => Err(CheckoutError::OperationInProgress(operation)),
+        Some(operation) => Err(CheckoutError::OperationInProgress(operation).into()),
         None => Ok(()),
     }
 }
@@ -294,8 +295,8 @@ fn follow_landed_branches(
         // A branch another worktree has checked out moves only with that worktree.
         match crate::worktree::ensure_branch_not_checked_out_in_any_worktree(repo, &name) {
             Ok(()) => {}
-            Err(crate::error::Error::BranchCheckedOutInWorktree { .. }) => continue,
-            Err(e) => return Err(e.into()),
+            Err(crate::error::Error::Branch(BranchError::CheckedOut { .. })) => continue,
+            Err(e) => return Err(e),
         }
         let refname = format!("refs/heads/{name}");
         let swapped = swap_ref_as(
@@ -592,8 +593,10 @@ mod tests {
         assert_eq!(marker(&repo).roots, info.roots);
         assert!(matches!(
             refreshed(&repo, &info),
-            Err(CheckoutError::OperationInProgress(
-                InProgressOperation::Rebase
+            Err(crate::error::Error::Remote(
+                crate::remote::RemoteError::Snapshot(CheckoutError::OperationInProgress(
+                    InProgressOperation::Rebase
+                ))
             ))
         ));
 
@@ -631,7 +634,9 @@ mod tests {
         .expect("rewind");
         assert!(matches!(
             refreshed(&repo, &later),
-            Err(CheckoutError::SnapshotMoved { .. })
+            Err(crate::error::Error::Remote(
+                crate::remote::RemoteError::Snapshot(CheckoutError::SnapshotMoved { .. })
+            ))
         ));
         assert_eq!(marker(&repo).roots, info.roots);
     }
@@ -643,10 +648,12 @@ mod tests {
     }
 
     impl crate::transport::http::HttpClient for WorkNames {
-        fn get(&self, url: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
-            Err(crate::remote::RemoteError::Http(format!(
-                "unexpected GET {url}"
-            )))
+        fn get(&self, url: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+            Err(crate::error::Error::from(
+                crate::remote::RemoteError::Http {
+                    detail: format!("unexpected GET {url}"),
+                },
+            ))
         }
 
         fn post(
@@ -656,16 +663,18 @@ mod tests {
             _: &str,
             _: &[u8],
             _: Option<&str>,
-        ) -> crate::remote::RemoteResult<Vec<u8>> {
-            Err(crate::remote::RemoteError::Http(format!(
-                "unexpected POST {url}"
-            )))
+        ) -> crate::error::Result<Vec<u8>> {
+            Err(crate::error::Error::from(
+                crate::remote::RemoteError::Http {
+                    detail: format!("unexpected POST {url}"),
+                },
+            ))
         }
 
         fn send(
             &self,
             request: &crate::transport::http::HttpRequest<'_>,
-        ) -> crate::remote::RemoteResult<crate::transport::http::HttpResponse> {
+        ) -> crate::error::Result<crate::transport::http::HttpResponse> {
             self.seen.lock().expect("lock").push(format!(
                 "{} {} {}",
                 request.method.as_str(),
@@ -798,10 +807,12 @@ mod tests {
     struct Unreachable;
 
     impl crate::transport::http::HttpClient for Unreachable {
-        fn get(&self, url: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
-            Err(crate::remote::RemoteError::Http(format!(
-                "{url}: unreachable"
-            )))
+        fn get(&self, url: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+            Err(crate::error::Error::from(
+                crate::remote::RemoteError::Http {
+                    detail: format!("{url}: unreachable"),
+                },
+            ))
         }
 
         fn post(
@@ -811,10 +822,12 @@ mod tests {
             _: &str,
             _: &[u8],
             _: Option<&str>,
-        ) -> crate::remote::RemoteResult<Vec<u8>> {
-            Err(crate::remote::RemoteError::Http(format!(
-                "{url}: unreachable"
-            )))
+        ) -> crate::error::Result<Vec<u8>> {
+            Err(crate::error::Error::from(
+                crate::remote::RemoteError::Http {
+                    detail: format!("{url}: unreachable"),
+                },
+            ))
         }
     }
 

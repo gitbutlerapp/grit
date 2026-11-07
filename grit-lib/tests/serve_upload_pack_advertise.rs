@@ -23,10 +23,8 @@ fn upload_pack_v0_and_v2_advertise_refs_only() -> grit_lib::remote::serve::Resul
             .with_bare(true)
             .with_initial_branch("main")
             .with_ref_storage(RefStorageFormat::Files),
-    )
-    .map_err(ServeError::Repository)?;
-    let repo = Repository::open(dir.path(), &RepositoryOptions::empty())
-        .map_err(ServeError::Repository)?;
+    )?;
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
     let tree = repo.odb().write(ObjectKind::Tree, b"")?;
     let commit_body =
         format!("tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ninit\n");
@@ -116,10 +114,8 @@ fn modest_packed_refs_v0_advertisement_matches_system_git() -> grit_lib::remote:
             .with_bare(true)
             .with_initial_branch("main")
             .with_ref_storage(RefStorageFormat::Files),
-    )
-    .map_err(ServeError::Repository)?;
-    let repo = Repository::open(dir.path(), &RepositoryOptions::empty())
-        .map_err(ServeError::Repository)?;
+    )?;
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
     let tree = repo.odb().write(ObjectKind::Tree, b"")?;
     let commit_body =
         format!("tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ninit\n");
@@ -176,10 +172,8 @@ fn lying_sorted_packed_refs_v0_advertisement_matches_system_git(
             .with_bare(true)
             .with_initial_branch("main")
             .with_ref_storage(RefStorageFormat::Files),
-    )
-    .map_err(ServeError::Repository)?;
-    let repo = Repository::open(dir.path(), &RepositoryOptions::empty())
-        .map_err(ServeError::Repository)?;
+    )?;
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
     let tree = repo.odb().write(ObjectKind::Tree, b"")?;
     let commit_body =
         format!("tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ninit\n");
@@ -244,16 +238,14 @@ fn memory_serve_repo(
         &InitOptions::new()
             .with_bare(true)
             .with_initial_branch("master"),
-    )
-    .map_err(ServeError::Repository)?;
+    )?;
     let store = Arc::new(MemoryRefStore::new());
     let repo = Repository::open(
         dir,
         &(RepositoryOptions::empty()
             .with_ref_store(store.clone())
             .with_initial_branch("master")),
-    )
-    .map_err(ServeError::Repository)?;
+    )?;
     let tree = repo.odb().write(ObjectKind::Tree, b"")?;
     let commit_body =
         format!("tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ninit\n");

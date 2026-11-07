@@ -1,5 +1,8 @@
 //! [`compare_with_target`] ahead counts and oid lists vs `git rev-list`.
 
+use grit_lib::error::ObjectError;
+use grit_lib::error::RefError;
+use grit_lib::error::RevisionError;
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -135,9 +138,9 @@ fn compare_with_target_unknown_errors() {
     };
     let err = compare_with_target(&repo, &opts).unwrap_err();
     assert!(
-        matches!(err, Error::ObjectNotFound(_))
-            || matches!(err, Error::InvalidRef(_))
-            || matches!(err, Error::RevParse(_))
+        matches!(err, Error::Object(ObjectError::NotFound { .. }))
+            || matches!(err, Error::Ref(RefError::Invalid { .. }))
+            || matches!(err, Error::Revision(RevisionError::Parse(_)))
     );
 }
 

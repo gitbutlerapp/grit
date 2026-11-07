@@ -1325,7 +1325,7 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
     use grit_lib::config::environment::{Environment, RepositoryOptions};
     use grit_lib::remote::push_plan::open_push_destination;
     use grit_lib::remote::transport::http::HttpClient;
-    use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
+    use grit_lib::remote::{HttpClientFactory, RemoteError};
     use grit_lib::repo::Repository;
 
     /// Fills like the shared provider but drops `reject`.
@@ -1348,7 +1348,7 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
         probes: AtomicUsize,
     }
     impl HttpClientFactory for CountingFactory {
-        fn create(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+        fn create(&self, config: &ConfigSet) -> grit_lib::error::Result<Box<dyn HttpClient>> {
             self.creates.fetch_add(1, Ordering::SeqCst);
             Ok(Box::new(
                 UreqHttpClient::from_config(
@@ -1359,7 +1359,10 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
                 .with_credential_provider(Box::new(self.provider.clone())),
             ))
         }
-        fn create_for_preflight(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+        fn create_for_preflight(
+            &self,
+            config: &ConfigSet,
+        ) -> grit_lib::error::Result<Box<dyn HttpClient>> {
             self.probes.fetch_add(1, Ordering::SeqCst);
             Ok(Box::new(
                 UreqHttpClient::from_config(

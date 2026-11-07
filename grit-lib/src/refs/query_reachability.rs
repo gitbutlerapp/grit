@@ -1,5 +1,6 @@
 //! Reachability filters for [`super::listing::RefQuery`] (`--contains`, `--merged`, …).
 
+use crate::error::ObjectError;
 use std::collections::HashSet;
 
 use crate::error::Error;
@@ -10,25 +11,29 @@ use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::rev_parse::peel_to_commit_for_merge_base;
 
-use super::listing::{RefQuery, RefQueryError};
+use super::listing::RefQuery;
+use crate::error::RefError;
 
 /// Resolve a `--contains` / `--merged` object id to a commit.
 ///
 /// # Errors
 ///
-/// Returns [`RefQueryError::MissingObject`] when the object is absent and
-/// [`RefQueryError::NotCommit`] when it does not peel to a commit.
+/// Returns [`ObjectError::NotFound`] when the object is absent and
+/// [`RefError::QueryTargetNotCommit`] when it does not peel to a commit.
 pub fn resolve_commit_filter_target(
     repo: &Repository,
     oid: ObjectId,
-) -> std::result::Result<ObjectId, RefQueryError> {
+) -> crate::error::Result<ObjectId> {
     match repo.odb().read_info(&oid) {
-        Err(Error::ObjectNotFound(_)) => Err(RefQueryError::MissingObject(oid)),
-        Err(e) => Err(RefQueryError::Store(e)),
+        Err(Error::Object(ObjectError::NotFound { .. })) => {
+            Err(ObjectError::NotFound { name: oid.to_hex() }.into())
+        }
+        Err(e) => Err(e),
         Ok(info) => match info.kind {
             ObjectKind::Commit => Ok(oid),
             ObjectKind::Tag | ObjectKind::Tree | ObjectKind::Blob => {
-                peel_to_commit_for_merge_base(repo, oid).map_err(|_| RefQueryError::NotCommit(oid))
+                peel_to_commit_for_merge_base(repo, oid)
+                    .map_err(|_| RefError::QueryTargetNotCommit { oid }.into())
             }
         },
     }
@@ -39,7 +44,7 @@ pub fn resolve_commit_filter_target(
 /// # Errors
 ///
 /// Propagates object read and parse failures (except missing intermediate objects, which
-/// return `false`). Returns [`Error::CorruptObject`] when a tag peel cycle is detected.
+/// return `false`). Returns [`crate::error::ObjectError::Corrupt`] when a tag peel cycle is detected.
 pub fn ref_points_at(
     odb: &Odb,
     ref_oid: ObjectId,
@@ -52,13 +57,13 @@ pub fn ref_points_at(
     let mut seen = HashSet::new();
     loop {
         if !seen.insert(current) {
-            return Err(Error::CorruptObject(format!(
-                "annotated tag peel cycle at {current}"
-            )));
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("annotated tag peel cycle at {current}"),
+            }));
         }
         let obj = match odb.read(&current) {
             Ok(o) => o,
-            Err(Error::ObjectNotFound(_)) => return Ok(false),
+            Err(Error::Object(ObjectError::NotFound { .. })) => return Ok(false),
             Err(e) => return Err(e),
         };
         if obj.kind != ObjectKind::Tag {
@@ -86,10 +91,7 @@ pub fn ref_points_at_any(
     Ok(false)
 }
 
-fn resolve_targets(
-    repo: &Repository,
-    oids: &[ObjectId],
-) -> std::result::Result<Vec<ObjectId>, RefQueryError> {
+fn resolve_targets(repo: &Repository, oids: &[ObjectId]) -> crate::error::Result<Vec<ObjectId>> {
     oids.iter()
         .map(|&oid| resolve_commit_filter_target(repo, oid))
         .collect()
@@ -107,10 +109,7 @@ pub(super) struct ReachRow {
 }
 
 /// Commit `row` peels to, recording its tag peel when it was unknown.
-fn peel_row_tip(
-    repo: &Repository,
-    row: &mut ReachRow,
-) -> std::result::Result<Option<ObjectId>, RefQueryError> {
+fn peel_row_tip(repo: &Repository, row: &mut ReachRow) -> crate::error::Result<Option<ObjectId>> {
     let odb = repo.odb();
     if let Some(Some(p)) = row.peeled {
         if matches!(odb.read_info(&p), Ok(info) if info.kind == ObjectKind::Commit) {
@@ -118,12 +117,12 @@ fn peel_row_tip(
         }
     }
     if row.peeled.is_none() {
-        let (target, kind) = odb.peel_tags(row.oid).map_err(RefQueryError::Store)?;
+        let (target, kind) = odb.peel_tags(row.oid)?;
         row.peeled = Some((target != row.oid).then_some(target));
         if kind == ObjectKind::Commit {
             return Ok(Some(target));
         }
-    } else if let Some(commit) = odb.peel_to_commit(row.oid).map_err(RefQueryError::Store)? {
+    } else if let Some(commit) = odb.peel_to_commit(row.oid)? {
         return Ok(Some(commit));
     }
     Ok(peel_to_commit_for_merge_base(repo, row.oid).ok())
@@ -148,7 +147,7 @@ impl TipResolver {
         &mut self,
         repo: &Repository,
         row: &mut ReachRow,
-    ) -> std::result::Result<Option<ObjectId>, RefQueryError> {
+    ) -> crate::error::Result<Option<ObjectId>> {
         if let Some(&(tip, peeled)) = self.resolved.get(&row.oid) {
             row.peeled.get_or_insert(peeled);
             return Ok(tip);
@@ -179,14 +178,14 @@ fn row_passes_reachability(
     ctx: &ReachabilityFilterCtx<'_>,
     tip_idx: Option<usize>,
     batch: Option<&RefContainsBatch<'_>>,
-) -> std::result::Result<bool, RefQueryError> {
+) -> crate::error::Result<bool> {
     let needs_commit = !ctx.contains.is_empty()
         || !ctx.no_contains.is_empty()
         || !ctx.merged.is_empty()
         || !ctx.no_merged.is_empty();
 
     if !needs_commit {
-        return ref_points_at_any(odb, *ref_oid, &query.points_at).map_err(RefQueryError::Store);
+        return ref_points_at_any(odb, *ref_oid, &query.points_at);
     }
 
     let Some(tip) = tip else {
@@ -223,9 +222,7 @@ fn row_passes_reachability(
         return Ok(false);
     }
 
-    if !query.points_at.is_empty()
-        && !ref_points_at_any(odb, *ref_oid, &query.points_at).map_err(RefQueryError::Store)?
-    {
+    if !query.points_at.is_empty() && !ref_points_at_any(odb, *ref_oid, &query.points_at)? {
         return Ok(false);
     }
 
@@ -251,7 +248,7 @@ fn filter_bounded_contains(
     rows: &mut [ReachRow],
     mut evaluator: RefContainsMemo<'_>,
     limit: usize,
-) -> std::result::Result<Vec<bool>, RefQueryError> {
+) -> crate::error::Result<Vec<bool>> {
     let len = rows.len();
     let mut keep = vec![false; len];
     let mut kept = 0usize;
@@ -284,7 +281,7 @@ pub(super) fn filter_listings_by_reachability(
     repo: &Repository,
     query: &RefQuery,
     rows: &mut [ReachRow],
-) -> std::result::Result<Vec<bool>, RefQueryError> {
+) -> crate::error::Result<Vec<bool>> {
     let needs_commit = !query.contains.is_empty()
         || !query.no_contains.is_empty()
         || !query.merged.is_empty()
@@ -328,18 +325,12 @@ pub(super) fn filter_listings_by_reachability(
     let merged_owned = if merged.is_empty() {
         None
     } else {
-        Some(
-            branch_tips_merged_into(repo, &merged, &tips_for_merged)
-                .map_err(RefQueryError::Store)?,
-        )
+        Some(branch_tips_merged_into(repo, &merged, &tips_for_merged)?)
     };
     let no_merged_owned = if no_merged.is_empty() {
         None
     } else {
-        Some(
-            branch_tips_merged_into(repo, &no_merged, &tips_for_merged)
-                .map_err(RefQueryError::Store)?,
-        )
+        Some(branch_tips_merged_into(repo, &no_merged, &tips_for_merged)?)
     };
     let merged_tips = merged_owned.as_ref().unwrap_or(&empty_merged);
     let no_merged_tips = no_merged_owned.as_ref().unwrap_or(&empty_merged);

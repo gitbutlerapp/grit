@@ -65,7 +65,7 @@ fn process_environment(cwd: &Path) -> Environment {
     Environment::from_vars(std::env::vars_os(), cwd.to_path_buf())
 }
 
-fn run_captured(repo: &Repository, hook: &str) -> (Result<HookResult, HookError>, String) {
+fn run_captured(repo: &Repository, hook: &str) -> (grit_lib::error::Result<HookResult>, String) {
     let config = repo.config().snapshot().expect("config");
     let result = run_hook_opts(
         Some(repo),

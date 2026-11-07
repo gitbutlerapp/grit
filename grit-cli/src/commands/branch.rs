@@ -2,6 +2,8 @@
 
 use anyhow::{bail, Context, Error as AnyhowError, Result};
 use grit_lib::error::Error;
+use grit_lib::error::ObjectError;
+use grit_lib::error::RevisionError;
 use grit_lib::porcelain::branch::{
     create_branch, delete_branch, preview_unset_upstream, rename_branch, set_upstream,
     unset_upstream, validate_set_upstream, CreateBranchOptions, DeleteMode, RenameBranchOptions,
@@ -713,10 +715,10 @@ fn track_mode(opts: &BranchRunOptions) -> TrackMode {
 fn map_create_start_revision_error(rev: &str, err: Error) -> AnyhowError {
     use grit_lib::porcelain::branch::BranchError;
     match err {
-        Error::RevParse(
+        Error::Revision(RevisionError::Parse(
             RevParseError::InvalidObjectName { .. } | RevParseError::AmbiguousArgument { .. },
-        )
-        | Error::ObjectNotFound(_) => {
+        ))
+        | Error::Object(ObjectError::NotFound { .. }) => {
             map_branch_error(Error::Branch(BranchError::InvalidStartPoint {
                 label: rev.to_owned(),
                 reason: "revision not found".into(),

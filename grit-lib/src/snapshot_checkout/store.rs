@@ -122,7 +122,10 @@ impl CheckoutStore {
         start: u64,
     ) -> Result<ReservedName> {
         if !valid_branch_name(wanted) {
-            return Err(CheckoutError::InvalidBranchName(wanted.to_owned()));
+            return Err(CheckoutError::InvalidBranchName {
+                name: wanted.to_owned(),
+            }
+            .into());
         }
         let mut i = start.max(1);
         loop {
@@ -238,13 +241,13 @@ impl CheckoutRecord {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        serde_json::from_slice(&bytes)
+        Ok(serde_json::from_slice(&bytes)
             .map(Some)
             .map_err(|e| CheckoutError::DamagedRecord {
                 id: self.id.clone(),
                 path: self.path.clone(),
                 detail: e.to_string(),
-            })
+            })?)
     }
 
     /// Replace the record with `checkout`, atomically: it is written to a
@@ -346,7 +349,9 @@ mod tests {
         std::fs::write(record.path(), b"{not json").expect("damage");
         assert!(matches!(
             record.load(),
-            Err(CheckoutError::DamagedRecord { .. })
+            Err(crate::error::Error::Remote(
+                crate::remote::RemoteError::Snapshot(CheckoutError::DamagedRecord { .. })
+            ))
         ));
     }
 
@@ -394,7 +399,9 @@ mod tests {
         );
         assert!(matches!(
             store.reserve_work_branch(&repo, "bad..name", 1),
-            Err(CheckoutError::InvalidBranchName(_))
+            Err(crate::error::Error::Remote(
+                crate::remote::RemoteError::Snapshot(CheckoutError::InvalidBranchName { .. })
+            ))
         ));
     }
 }

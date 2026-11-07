@@ -28,12 +28,17 @@ pub enum BitmapError {
     #[error("bitmap EWAH data is invalid")]
     InvalidEwah,
     /// I/O while mapping or reading the bitmap file.
-    #[error("bitmap I/O error: {0}")]
-    Io(String),
+    #[error("bitmap I/O error: {detail}")]
+    Io {
+        /// What failed while reading or writing the bitmap.
+        detail: String,
+    },
 }
 
 impl BitmapError {
     pub(crate) fn io(err: std::io::Error) -> Self {
-        Self::Io(err.to_string())
+        Self::Io {
+            detail: err.to_string(),
+        }
     }
 }

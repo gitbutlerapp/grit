@@ -1,6 +1,7 @@
 //! Ref transactions, CAS batches, D/F conflicts, locking, and reftable atomic writes.
 
 use crate::support;
+use grit_lib::error::RefError;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -521,11 +522,11 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
                 },
             )
             .expect_err("stale expected tip must be rejected");
-            let Error::RefStore(RefStoreError::ExpectedMismatch {
+            let Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch {
                 name,
                 expected,
                 actual,
-            }) = err
+            })) = err
             else {
                 panic!("{backend:?}: expected ExpectedMismatch, got {err:?}");
             };
@@ -546,11 +547,11 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
     verify_branch_commit_cas(Some(oid), Some(oid), "refs/heads/main").expect("equal");
     assert!(matches!(
         verify_branch_commit_cas(Some(oid), None, "refs/heads/gone"),
-        Err(Error::RefStore(RefStoreError::ExpectedMismatch {
+        Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch {
             expected: Expected::Oid(want),
             actual: None,
             ..
-        })) if want == oid
+        }))) if want == oid
     ));
 }
 

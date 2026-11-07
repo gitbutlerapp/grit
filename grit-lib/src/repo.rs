@@ -26,7 +26,10 @@
 //! # }
 //! ```
 
+use crate::error::ObjectError;
+use crate::error::RefError;
 use crate::git_path::CanonicalizeExt;
+use crate::worktree::WorktreeError;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -44,7 +47,7 @@ use crate::error::{ConfigError, Error, NotARepositoryReason, Result};
 use crate::git_dir::io_error::{map_git_dir_io, map_index_write_error, GitDirPathOperation};
 use crate::git_path::path_for_error_message;
 use crate::hooks::run_hook;
-use crate::index::{Index, IndexError, IndexResult};
+use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
 use crate::objects::{parse_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -313,7 +316,11 @@ impl InitOptions {
 fn seed_unborn_head(store: &dyn crate::refs::store::RefStore, branch: &str) -> Result<()> {
     use crate::refs::store::{Expected, RawRef, RefStoreError, RefTransaction, RefUpdate};
 
-    RefName::branch(branch).map_err(|e| Error::InvalidRef(e.to_string()))?;
+    RefName::branch(branch).map_err(|e| {
+        Error::Ref(RefError::Invalid {
+            detail: e.to_string(),
+        })
+    })?;
     if store.read_raw(RefNameRef::from_trusted("HEAD"))?.is_some() {
         return Ok(());
     }
@@ -606,9 +613,8 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// [`CommitError::Identity`](crate::porcelain::CommitError::Identity) when no usable name,
-    /// email, or date is configured, and [`CommitError::Library`](crate::porcelain::CommitError::Library)
-    /// for config load failures.
+    /// [`CommitError::Identity`](crate::porcelain::CommitError::Identity) when no usable name, email, or date
+    /// is configured (wrapped in [`Error::Commit`]), and config load failures.
     ///
     /// # Examples
     ///
@@ -620,8 +626,8 @@ impl Repository {
     /// let (repo, _outcome) = Repository::init(dir.path(), &InitOptions::default())?;
     /// match repo.identity(IdentRole::Author, repo.identity_now()) {
     ///     Ok(author) => assert!(!author.email.is_empty()),
-    ///     Err(grit_lib::porcelain::CommitError::Identity(_)) => {}
-    ///     Err(other) => return Err(other.into()),
+    ///     Err(grit_lib::error::Error::Commit(grit_lib::porcelain::CommitError::Identity(_))) => {}
+    ///     Err(other) => return Err(other),
     /// }
     /// # Ok(())
     /// # }
@@ -630,12 +636,8 @@ impl Repository {
         &self,
         role: crate::config::ident_resolve::IdentRole,
         now: time::OffsetDateTime,
-    ) -> std::result::Result<crate::ident::Signature, crate::porcelain::commit_error::CommitError>
-    {
-        let config = self
-            .config()
-            .snapshot()
-            .map_err(crate::porcelain::commit_error::CommitError::from)?;
+    ) -> Result<crate::ident::Signature> {
+        let config = self.config().snapshot()?;
         Ok(crate::config::ident_resolve::resolve_signature_with(
             self.environment(),
             &config,
@@ -731,7 +733,7 @@ impl Repository {
     /// # Errors
     ///
     /// Discovery failures, [`RepositoryError::NotARepository`] when `admin_dir` is missing, and
-    /// [`Error::PathError`] when `work_tree` cannot be canonicalized.
+    /// [`crate::worktree::WorktreeError::Path`] when `work_tree` cannot be canonicalized.
     pub(crate) fn open_linked_worktree(&self, admin_dir: &Path, work_tree: &Path) -> Result<Self> {
         let options = self.linked_worktree_discover_options();
         if self.refs_on_disk() && self.odb.uses_files_primary() {
@@ -740,9 +742,11 @@ impl Repository {
         let git_dir = admin_dir
             .canonicalize_simplified()
             .map_err(|_| not_a_repository_at(admin_dir))?;
-        let work_tree = work_tree
-            .canonicalize_simplified()
-            .map_err(|_| Error::PathError(work_tree.display().to_string()))?;
+        let work_tree = work_tree.canonicalize_simplified().map_err(|_| {
+            Error::Worktree(WorktreeError::Path {
+                detail: work_tree.display().to_string(),
+            })
+        })?;
         let environment = Arc::new(options.environment);
         let caches = RepoCaches::with_diagnostics(
             Arc::clone(&self.command_runner),
@@ -1155,7 +1159,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::error::Error::TreeSha256MissingSubmodules`] when submodule
+    /// Returns [`crate::porcelain::tag::TagError::TreeSha256MissingSubmodules`] when submodule
     /// checkouts or objects needed for hashing are absent.
     pub fn tree_sha256(
         &self,
@@ -1273,7 +1277,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Propagates [`crate::refs::store::RefStoreError`] as [`Error::RefStore`].
+    /// Propagates [`crate::refs::store::RefStoreError`] as [`crate::error::RefError::Store`].
     pub(crate) fn resolve_ref_oid(&self, refname: &str) -> Result<crate::objects::ObjectId> {
         self.ref_store()
             .resolve(crate::refs::store::RefNameRef::from_trusted(refname))
@@ -1384,7 +1388,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Only when a spec carries attr magic: [`Error::InvalidAttrPathspec`] for a malformed or
+    /// Only when a spec carries attr magic: [`crate::worktree::WorktreeError::InvalidAttrPathspec`] for a malformed or
     /// repeated `attr:` clause, or the error from loading config or the attribute files (for
     /// example an unreadable `core.attributesFile` setting or a poisoned cache lock).
     pub(crate) fn pathspec_matcher_for<'s>(
@@ -1492,7 +1496,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::PathError`] when a pathspec resolves outside the work tree.
+    /// Returns [`crate::worktree::WorktreeError::Path`] when a pathspec resolves outside the work tree.
     pub fn resolve_rev_walk_pathspecs(
         &self,
         pathspec: &crate::pathspec::Pathspec,
@@ -1509,7 +1513,11 @@ impl Repository {
                 let prefix = Self::pathspec_argv_prefix(self, pathspec);
                 let spec = self
                     .resolve_worktree_pathspec(pathspec, prefix)
-                    .map_err(|e| Error::PathError(e.to_string()))?;
+                    .map_err(|e| {
+                        Error::Worktree(WorktreeError::Path {
+                            detail: e.to_string(),
+                        })
+                    })?;
                 resolved.push(spec);
             }
         } else {
@@ -1815,9 +1823,11 @@ impl Repository {
             Some(p) => {
                 let mut resolved = absolute(p);
                 if resolved.exists() {
-                    resolved = resolved
-                        .canonicalize_simplified()
-                        .map_err(|_| Error::PathError(p.display().to_string()))?;
+                    resolved = resolved.canonicalize_simplified().map_err(|_| {
+                        Error::Worktree(WorktreeError::Path {
+                            detail: p.display().to_string(),
+                        })
+                    })?;
                 }
                 Some(resolved)
             }
@@ -2156,14 +2166,14 @@ impl Repository {
     /// Load the index, expanding sparse-directory placeholders from the object database.
     ///
     /// Commands that operate on individual paths should use this instead of [`Index::load`].
-    pub(crate) fn load_index(&self) -> IndexResult<Index> {
+    pub(crate) fn load_index(&self) -> crate::error::Result<Index> {
         let path = self.index_path_for_env()?;
         self.load_index_at(&path)
     }
 
     /// Like [`Repository::load_index`], but reads from an explicit index file path
     /// (e.g. `GIT_INDEX_FILE` or a worktree-specific index).
-    pub(crate) fn load_index_at(&self, path: &std::path::Path) -> IndexResult<Index> {
+    pub(crate) fn load_index_at(&self, path: &std::path::Path) -> crate::error::Result<Index> {
         self.load_index_at_with_context(
             path,
             crate::index::IndexParseContext::from_policy(self.thread_policy()),
@@ -2174,7 +2184,7 @@ impl Repository {
         &self,
         path: &std::path::Path,
         parse_ctx: crate::index::IndexParseContext,
-    ) -> IndexResult<Index> {
+    ) -> crate::error::Result<Index> {
         let mut idx = self.load_index_at_preserving_sparse(path, parse_ctx)?;
         let cfg = self
             .config()
@@ -2189,7 +2199,7 @@ impl Repository {
     }
 
     /// Load rows for a sparse-aware operation, with the same repository context as `load_index`.
-    pub(crate) fn load_index_preserving_sparse(&self) -> IndexResult<Index> {
+    pub(crate) fn load_index_preserving_sparse(&self) -> crate::error::Result<Index> {
         self.load_index_at_preserving_sparse(
             &self.index_path_for_env()?,
             crate::index::IndexParseContext::from_policy(self.thread_policy()),
@@ -2202,15 +2212,13 @@ impl Repository {
         &self,
         path: &std::path::Path,
         parse_ctx: crate::index::IndexParseContext,
-    ) -> IndexResult<Index> {
+    ) -> crate::error::Result<Index> {
         crate::trace::trace_span!("grit.index.read");
         let cfg = self
             .config()
             .snapshot()
             .unwrap_or_else(|_| Arc::new(ConfigSet::new()));
-        cfg.as_ref()
-            .get_bool("index.sparse")
-            .map_err(crate::index::IndexError::from)?;
+        cfg.as_ref().get_bool("index.sparse")?;
         let mut idx = Index::load_preserving_sparse_optional_with_context(
             path,
             &self.odb,
@@ -2237,7 +2245,7 @@ impl Repository {
 
     /// Write the index to the default path after optionally collapsing skip-worktree
     /// subtrees into sparse-directory placeholders (when sparse index is enabled).
-    pub(crate) fn write_index(&self, index: &mut Index) -> IndexResult<()> {
+    pub(crate) fn write_index(&self, index: &mut Index) -> crate::error::Result<()> {
         self.write_index_with_post_index_change(index, false, false)
     }
 
@@ -2249,7 +2257,7 @@ impl Repository {
     /// # Errors
     ///
     /// Returns [`Error::Io`] when the lock file already exists or cannot be created.
-    pub(crate) fn begin_index_update(&self) -> IndexResult<crate::index::IndexLock> {
+    pub(crate) fn begin_index_update(&self) -> crate::error::Result<crate::index::IndexLock> {
         test_inject_index_write_fail()?;
         let _ = crate::porcelain::commit::reap_stale_next_index_files(self, false)?;
         let path = self.index_path_for_env()?;
@@ -2267,7 +2275,7 @@ impl Repository {
         lock: &mut crate::index::IndexLock,
         index: &mut Index,
         updated_workdir: bool,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         self.flush_index_update(lock, index)?;
         self.finish_index_update(lock, updated_workdir)
     }
@@ -2277,7 +2285,7 @@ impl Repository {
         &self,
         lock: &mut crate::index::IndexLock,
         index: &mut Index,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         let path = lock.index_path.clone();
         let (skip_hash, cfg) = self.prepare_index_for_disk_write(&path, index)?;
         self.odb.flush_for_publish()?;
@@ -2292,7 +2300,6 @@ impl Repository {
             Some(lock),
             false,
         )
-        .map_err(IndexError::from)
     }
 
     /// Commit a staged index lock after a successful working-tree update.
@@ -2300,11 +2307,10 @@ impl Repository {
         &self,
         lock: &mut crate::index::IndexLock,
         updated_workdir: bool,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         lock.commit_replace_index()?;
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
-        let _ = run_hook(self, "post-index-change", &[updated_workdir_arg, "0"], None)
-            .map_err(|e| IndexError::from(Error::from(e)))?;
+        let _ = run_hook(self, "post-index-change", &[updated_workdir_arg, "0"], None)?;
         Ok(())
     }
 
@@ -2322,10 +2328,12 @@ impl Repository {
         let path = self
             .odb
             .largest_pack_index_path()
-            .map_err(|e| crate::pack_bitmap::PackBitmapWriteError::Object(e.to_string()))?
-            .ok_or(crate::pack_bitmap::PackBitmapWriteError::InvalidPackPath(
-                "no pack index in object store".to_owned(),
-            ))?;
+            .map_err(|e| crate::pack_bitmap::PackBitmapWriteError::Object {
+                detail: e.to_string(),
+            })?
+            .ok_or(crate::pack_bitmap::PackBitmapWriteError::InvalidPackPath {
+                path: "no pack index in object store".to_owned(),
+            })?;
         crate::pack_bitmap::PackBitmapWriter::write(self, &path, options, now)
     }
 
@@ -2341,13 +2349,17 @@ impl Repository {
     ///
     /// Propagates non-recoverable failures (for example cache-tree verification or split-index
     /// constraints).
-    pub(crate) fn try_write_index(&self, index: &mut Index) -> IndexResult<bool> {
+    pub(crate) fn try_write_index(&self, index: &mut Index) -> crate::error::Result<bool> {
         self.try_write_index_at(&self.index_path_for_env()?, index)
     }
 
     /// Like [`Repository::try_write_index`], but writes to an explicit index file path
     /// (for example the path selected by `GIT_INDEX_FILE`).
-    pub(crate) fn try_write_index_at(&self, path: &Path, index: &mut Index) -> IndexResult<bool> {
+    pub(crate) fn try_write_index_at(
+        &self,
+        path: &Path,
+        index: &mut Index,
+    ) -> crate::error::Result<bool> {
         if !self.environment().git_optional_locks {
             return Ok(false);
         }
@@ -2368,10 +2380,11 @@ impl Repository {
         }
     }
 
-    fn opportunistic_index_write_skippable(err: &IndexError) -> bool {
+    fn opportunistic_index_write_skippable(err: &Error) -> bool {
         match err {
-            IndexError::LockHeld(..) => true,
-            IndexError::PathIo(path_io) => matches!(
+            Error::LockHeld(..) => true,
+            Error::Repository(RepositoryError::GitDirPathIo(path_io))
+            | Error::Worktree(crate::worktree::WorktreeError::PathIo(path_io)) => matches!(
                 path_io.source.kind(),
                 std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
             ),
@@ -2394,7 +2407,7 @@ impl Repository {
         index: &mut Index,
         updated_workdir: bool,
         updated_skipworktree: bool,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         let path = self.index_path_for_env()?;
         self.write_index_at_with_post_index_change(
             &path,
@@ -2409,7 +2422,7 @@ impl Repository {
         &self,
         path: &std::path::Path,
         index: &mut Index,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         self.write_index_at_with_post_index_change(path, index, false, false)
     }
 
@@ -2419,7 +2432,7 @@ impl Repository {
         path: &std::path::Path,
         index: &mut Index,
         split: WriteSplitIndexRequest,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         self.write_index_at_split(path, index, split)
     }
 
@@ -2443,7 +2456,7 @@ impl Repository {
         index: &mut Index,
         updated_workdir: bool,
         updated_skipworktree: bool,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         self.write_index_at_split_with_post_index_change(
             path,
             index,
@@ -2459,7 +2472,7 @@ impl Repository {
         path: &std::path::Path,
         index: &mut Index,
         split: WriteSplitIndexRequest,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         self.write_index_at_split_with_post_index_change(path, index, split, false, false)
     }
 
@@ -2482,7 +2495,7 @@ impl Repository {
         split: WriteSplitIndexRequest,
         updated_workdir: bool,
         updated_skipworktree: bool,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         self.write_index_file(
             path,
             index,
@@ -2491,7 +2504,6 @@ impl Repository {
             updated_skipworktree,
             None,
         )
-        .map_err(IndexError::from)
     }
 
     /// Persist `index` through `lock` (from [`Self::lock_index`] or [`Self::begin_index_update`])
@@ -2510,7 +2522,7 @@ impl Repository {
         lock: &mut crate::index::IndexLock,
         index: &mut Index,
         updated_workdir: bool,
-    ) -> IndexResult<()> {
+    ) -> crate::error::Result<()> {
         let path = lock.index_path.clone();
         self.write_index_file(
             &path,
@@ -2520,7 +2532,6 @@ impl Repository {
             false,
             Some(lock),
         )
-        .map_err(IndexError::from)
     }
 
     /// Lock the index selected by `GIT_INDEX_FILE` (or `$GIT_DIR/index`) without reading it.
@@ -2537,7 +2548,7 @@ impl Repository {
     pub(crate) fn lock_index(&self) -> Result<crate::index::IndexLock> {
         let path = self.index_path_for_env()?;
         let cfg = self.config().snapshot()?;
-        crate::index::IndexLock::acquire(&path, Some(cfg.as_ref())).map_err(Into::into)
+        crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))
     }
 
     /// Lock the index selected by `GIT_INDEX_FILE` (or `$GIT_DIR/index`), then load it.
@@ -2796,11 +2807,11 @@ impl Repository {
         let effective = self.object_id_after_replace(oid);
         let object = self.odb.read(&effective)?;
         if object.kind != ObjectKind::Commit {
-            return Err(Error::UnexpectedObjectKind {
+            return Err(Error::Object(ObjectError::UnexpectedKind {
                 oid: effective,
                 expected: ObjectKind::Commit,
                 actual: object.kind,
-            });
+            }));
         }
         Ok(object.data)
     }
@@ -3898,10 +3909,12 @@ fn validate_git_work_tree_path(path: &Path) -> Result<()> {
             Component::Normal(seg) => {
                 cur.push(seg);
                 if i != last_normal_idx && !cur.exists() {
-                    return Err(Error::PathError(format!(
-                        "Invalid path '{}': No such file or directory",
-                        cur.display()
-                    )));
+                    return Err(Error::Worktree(WorktreeError::Path {
+                        detail: format!(
+                            "Invalid path '{}': No such file or directory",
+                            cur.display()
+                        ),
+                    }));
                 }
             }
         }
@@ -4097,7 +4110,7 @@ fn parse_gitfile(content: &str, gitfile: &Path) -> Result<PathBuf> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidRef`] when the branch name is not a valid short branch name.
+/// Returns [`crate::error::RefError::Invalid`] when the branch name is not a valid short branch name.
 pub fn resolve_initial_branch(env: &Environment, explicit: Option<&str>) -> Result<String> {
     let name = match explicit {
         Some(name) => name.to_owned(),
@@ -4111,7 +4124,11 @@ pub fn resolve_initial_branch(env: &Environment, explicit: Option<&str>) -> Resu
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "main".to_owned()),
     };
-    RefName::branch(&name).map_err(|e| Error::InvalidRef(e.to_string()))?;
+    RefName::branch(&name).map_err(|e| {
+        Error::Ref(RefError::Invalid {
+            detail: e.to_string(),
+        })
+    })?;
     Ok(name)
 }
 
@@ -4352,7 +4369,8 @@ fn write_fresh_git_directory(
 ///
 /// # Errors
 ///
-/// Returns [`Error::WorktreePathIo`] or [`RepositoryError::git_dir_path_io`] on filesystem failures.
+/// Returns [`WorktreeError::PathIo`](crate::worktree::WorktreeError::PathIo) or
+/// [`RepositoryError::git_dir_path_io`] on filesystem failures.
 fn init_repository_separate_git_dir(
     work_tree: &Path,
     git_dir: &Path,
@@ -4516,7 +4534,8 @@ fn init_repository_at(path: &Path, bare: bool, layout: &InitLayout<'_>) -> Resul
 ///
 /// # Errors
 ///
-/// Returns [`Error::WorktreePathIo`] or [`RepositoryError::git_dir_path_io`] on filesystem failures.
+/// Returns [`WorktreeError::PathIo`](crate::worktree::WorktreeError::PathIo) or
+/// [`RepositoryError::git_dir_path_io`] on filesystem failures.
 fn init_bare_with_env_worktree(
     git_dir: &Path,
     work_tree: &Path,

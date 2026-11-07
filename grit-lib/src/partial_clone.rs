@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::{Error, Result};
-use crate::rev_list::{expand_object_filter_for_protocol, ObjectFilter};
+use crate::rev_list::{expand_object_filter_for_protocol, ObjectFilter, ObjectFilterError};
 
 /// Client-side object filter for fetch and clone (partial clone).
 ///
@@ -22,21 +22,19 @@ pub enum ObjectFilterSpec {
     BlobLimit(u64),
 }
 
-/// Errors parsing or applying partial-clone configuration.
+/// Errors parsing a partial-clone filter spec.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PartialCloneError {
-    /// The filter string is not a supported partial-clone spec.
-    #[error("{0}")]
-    InvalidFilter(String),
-    /// Non-filter repository failure.
+    /// The filter string is not a filter Git accepts.
     #[error(transparent)]
-    Nested(#[from] Box<Error>),
-}
-
-impl From<Error> for PartialCloneError {
-    fn from(e: Error) -> Self {
-        Self::Nested(Box::new(e))
-    }
+    InvalidFilter(#[from] ObjectFilterError),
+    /// The filter is valid but partial clone only fetches with `blob:none` or `blob:limit`.
+    #[error("partial clone filter must be blob:none or blob:limit, not {filter:?}")]
+    UnsupportedFilter {
+        /// The parsed filter.
+        filter: ObjectFilter,
+    },
 }
 
 impl ObjectFilterSpec {
@@ -46,7 +44,7 @@ impl ObjectFilterSpec {
     ///
     /// Returns [`PartialCloneError::InvalidFilter`] for unsupported filter kinds.
     pub fn parse(spec: &str) -> std::result::Result<Self, PartialCloneError> {
-        let filter = ObjectFilter::parse(spec.trim()).map_err(PartialCloneError::InvalidFilter)?;
+        let filter = ObjectFilter::parse(spec.trim())?;
         Self::from_object_filter(&filter)
     }
 
@@ -61,9 +59,9 @@ impl ObjectFilterSpec {
         match filter {
             ObjectFilter::BlobNone => Ok(Self::BlobNone),
             ObjectFilter::BlobLimit(n) => Ok(Self::BlobLimit(*n)),
-            other => Err(PartialCloneError::InvalidFilter(format!(
-                "partial clone filter must be blob:none or blob:limit, not {other:?}"
-            ))),
+            other => Err(PartialCloneError::UnsupportedFilter {
+                filter: other.clone(),
+            }),
         }
     }
 
@@ -88,8 +86,7 @@ impl ObjectFilterSpec {
     ///
     /// Returns [`PartialCloneError::InvalidFilter`] when expansion fails.
     pub fn expand_for_protocol(&self) -> std::result::Result<String, PartialCloneError> {
-        expand_object_filter_for_protocol(&self.to_wire_spec())
-            .map_err(PartialCloneError::InvalidFilter)
+        Ok(expand_object_filter_for_protocol(&self.to_wire_spec())?)
     }
 
     /// Parse `grit clone --blobs` values: `none` or a size with optional `k`/`m`/`g` suffix.

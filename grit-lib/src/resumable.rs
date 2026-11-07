@@ -110,6 +110,7 @@ fn resumable_exhausted_message(url: &str, attempts: u32, last: &str) -> String {
 
 /// Why a resumable transfer failed.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ResumableError {
     /// The server answered with a status the transfer cannot continue from.
     #[error("{}", resumable_status_message(.url, *status))]
@@ -137,32 +138,15 @@ pub enum ResumableError {
         /// The last failure.
         last: String,
     },
-    /// The HTTP client failed (transport or authentication).
-    #[error(transparent)]
-    Http(Box<crate::error::Error>),
-    /// Reading or writing the local file failed.
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    /// [`CancelToken`](crate::progress::CancelToken) asked the download to stop. The partial file is kept, so
-    /// the next call resumes it.
-    #[error("operation cancelled")]
-    Cancelled,
 }
 
-impl From<crate::error::Error> for ResumableError {
-    fn from(e: crate::error::Error) -> Self {
-        Self::Http(Box::new(e))
+impl From<ResumableError> for crate::error::Error {
+    fn from(err: ResumableError) -> Self {
+        Self::Remote(crate::remote::RemoteError::Resumable(Box::new(err)))
     }
 }
 
-impl From<crate::remote::RemoteError> for ResumableError {
-    fn from(e: crate::remote::RemoteError) -> Self {
-        Self::Http(Box::new(crate::error::Error::Remote(e)))
-    }
-}
-
-/// Result alias for resumable transfers.
-pub type Result<T> = std::result::Result<T, ResumableError>;
+use crate::error::Result;
 
 /// What [`download_resumable`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,7 +301,7 @@ pub fn discard_download(dest: &Path) -> std::io::Result<()> {
 ///
 /// [`ResumableError::Status`] when the server refuses the download,
 /// [`ResumableError::Exhausted`] when the connection keeps dropping,
-/// [`ResumableError::Cancelled`] when `cancel` fires, and I/O errors from the
+/// [`crate::error::Error::Cancelled`] when `cancel` fires, and I/O errors from the
 /// local files. The partial file is kept so a later call can resume.
 pub fn download_resumable(
     client: &dyn HttpClient,
@@ -357,7 +341,7 @@ pub fn download_resumable(
     let mut last_failure = String::new();
     loop {
         if cancel.is_cancelled() {
-            return Err(ResumableError::Cancelled);
+            return Err(crate::error::Error::Cancelled);
         }
         if attempt > 0 {
             let done = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
@@ -366,7 +350,8 @@ pub fn download_resumable(
                     url: url.to_owned(),
                     attempts: attempt,
                     last: last_failure,
-                });
+                }
+                .into());
             }
             progress.resumable_transfer(&ResumableEvent::Reconnecting { done, attempt });
         }
@@ -455,8 +440,13 @@ fn download_attempt(
     }
     let response = match client.send(&request) {
         Ok(r) => r,
-        Err(e) if matches!(e, crate::remote::RemoteError::Auth { .. }) => {
-            return Err(ResumableError::from(e));
+        Err(e)
+            if matches!(
+                e,
+                crate::error::Error::Remote(crate::remote::RemoteError::Auth { .. })
+            ) =>
+        {
+            return Err(e);
         }
         Err(e) => return Ok(AttemptOutcome::Dropped(e.to_string())),
     };
@@ -472,7 +462,8 @@ fn download_attempt(
                     return Err(ResumableError::Protocol {
                         url: url.to_owned(),
                         detail: format!("asked for bytes from {have}, got bytes from {start}"),
-                    });
+                    }
+                    .into());
                 }
                 (have, total)
             }
@@ -504,7 +495,8 @@ fn download_attempt(
                 return Err(ResumableError::Status {
                     url: url.to_owned(),
                     status,
-                })
+                }
+                .into())
             }
         };
     state.total = total;
@@ -528,7 +520,7 @@ fn download_attempt(
     loop {
         if cancel.is_cancelled() {
             file.flush()?;
-            return Err(ResumableError::Cancelled);
+            return Err(crate::error::Error::Cancelled);
         }
         let n = match body.read(&mut buf) {
             Ok(0) => break,
@@ -610,7 +602,8 @@ impl TusUpload {
             return Err(ResumableError::Status {
                 url: endpoint.to_owned(),
                 status: response.status,
-            });
+            }
+            .into());
         }
         let location = response
             .header("location")
@@ -642,7 +635,8 @@ impl TusUpload {
             status => Err(ResumableError::Status {
                 url: self.url.clone(),
                 status,
-            }),
+            }
+            .into()),
         }
     }
 
@@ -703,12 +697,21 @@ impl TusUpload {
                     });
                     continue;
                 }
-                Ok(r) if r.status == 404 || r.status == 410 => return Err(gone(r.status)),
+                Ok(r) if r.status == 404 || r.status == 410 => {
+                    return Err(crate::error::Error::from(gone(r.status)))
+                }
                 Ok(r) if r.status == 409 => format!("offset {offset} was out of date"),
-                Ok(r) if (400..500).contains(&r.status) => return Err(gone(r.status)),
+                Ok(r) if (400..500).contains(&r.status) => {
+                    return Err(crate::error::Error::from(gone(r.status)))
+                }
                 Ok(r) => format!("HTTP {}", r.status),
-                Err(e) if matches!(e, crate::remote::RemoteError::Auth { .. }) => {
-                    return Err(ResumableError::from(e));
+                Err(e)
+                    if matches!(
+                        e,
+                        crate::error::Error::Remote(crate::remote::RemoteError::Auth { .. })
+                    ) =>
+                {
+                    return Err(e);
                 }
                 Err(e) => e.to_string(),
             };
@@ -718,7 +721,8 @@ impl TusUpload {
                     url: self.url.clone(),
                     attempts: failures,
                     last: failure,
-                });
+                }
+                .into());
             }
             progress.resumable_transfer(&ResumableEvent::Reconnecting {
                 done: offset,
@@ -740,13 +744,13 @@ impl TusUpload {
 }
 
 fn upload_offset(response: &HttpResponse, url: &str) -> Result<u64> {
-    response
+    Ok(response
         .header("upload-offset")
         .and_then(|v| v.trim().parse().ok())
         .ok_or_else(|| ResumableError::Protocol {
             url: url.to_owned(),
             detail: "no Upload-Offset".to_owned(),
-        })
+        })?)
 }
 
 /// Resolve `reference` (absolute, or relative to `base`) to an absolute URL.
@@ -799,7 +803,7 @@ mod tests {
     }
 
     impl HttpClient for FileServer {
-        fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+        fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
             unreachable!()
         }
         fn post(
@@ -809,10 +813,10 @@ mod tests {
             _: &str,
             _: &[u8],
             _: Option<&str>,
-        ) -> crate::remote::RemoteResult<Vec<u8>> {
+        ) -> crate::error::Result<Vec<u8>> {
             unreachable!()
         }
-        fn send(&self, request: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
+        fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
             let range = request
                 .headers
                 .iter()
@@ -966,7 +970,8 @@ mod tests {
                 &mut NoProgress,
                 &CancelToken::never()
             ),
-            Err(ResumableError::Exhausted { .. })
+            Err(crate::error::Error::Remote(crate::remote::RemoteError::Resumable(ref r)))
+                if matches!(**r, ResumableError::Exhausted { .. })
         ));
         assert!(!dest.exists());
 
@@ -1078,7 +1083,7 @@ mod tests {
         };
         assert!(matches!(
             download_resumable(&srv, "http://h/b", &dest, &mut progress, &flag),
-            Err(ResumableError::Cancelled)
+            Err(crate::error::Error::Cancelled)
         ));
         assert!(!dest.exists());
         let (part, _) = download_paths(&dest);
@@ -1128,7 +1133,7 @@ mod tests {
 
         struct AuthClient;
         impl HttpClient for AuthClient {
-            fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+            fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
                 unreachable!()
             }
             fn post(
@@ -1138,14 +1143,15 @@ mod tests {
                 _: &str,
                 _: &[u8],
                 _: Option<&str>,
-            ) -> crate::remote::RemoteResult<Vec<u8>> {
+            ) -> crate::error::Result<Vec<u8>> {
                 unreachable!()
             }
-            fn send(&self, _: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
+            fn send(&self, _: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
                 Err(RemoteError::Auth {
                     url: "http://h/b".to_owned(),
                     reason: AuthFailure::Rejected,
-                })
+                }
+                .into())
             }
         }
 
@@ -1159,11 +1165,20 @@ mod tests {
             &CancelToken::never(),
         );
         assert!(
-            matches!(outcome, Err(ResumableError::Http(_))),
+            matches!(
+                outcome,
+                Err(crate::error::Error::Remote(
+                    crate::remote::RemoteError::Auth { .. }
+                ))
+            ),
             "auth errors must fail immediately: {outcome:?}"
         );
         assert!(
-            !matches!(outcome, Err(ResumableError::Exhausted { .. })),
+            !matches!(
+                &outcome,
+                Err(crate::error::Error::Remote(crate::remote::RemoteError::Resumable(r)))
+                    if matches!(**r, ResumableError::Exhausted { .. })
+            ),
             "auth must not be retried like a dropped connection"
         );
     }
@@ -1177,7 +1192,7 @@ mod tests {
         flag.cancel();
         assert!(matches!(
             download_resumable(&srv, "http://h/b", &dest, &mut NoProgress, &flag),
-            Err(ResumableError::Cancelled)
+            Err(crate::error::Error::Cancelled)
         ));
         assert!(srv
             .ranges
@@ -1218,7 +1233,7 @@ mod tests {
     }
 
     impl HttpClient for TusServer {
-        fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+        fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
             unreachable!()
         }
         fn post(
@@ -1228,10 +1243,10 @@ mod tests {
             _: &str,
             _: &[u8],
             _: Option<&str>,
-        ) -> crate::remote::RemoteResult<Vec<u8>> {
+        ) -> crate::error::Result<Vec<u8>> {
             unreachable!()
         }
-        fn send(&self, request: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
+        fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
             let header = |name: &str| {
                 request
                     .headers
@@ -1271,10 +1286,12 @@ mod tests {
                     match cut {
                         Some(keep) => {
                             stored.extend_from_slice(&request.body[..keep]);
-                            return Err(crate::remote::RemoteError::Transport {
-                                url: None,
-                                detail: "reset".to_owned(),
-                            });
+                            return Err(crate::error::Error::from(
+                                crate::remote::RemoteError::Transport {
+                                    url: None,
+                                    detail: "reset".to_owned(),
+                                },
+                            ));
                         }
                         None => {
                             stored.extend_from_slice(request.body);

@@ -7,7 +7,7 @@ use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::porcelain::CommitError;
 use crate::reflog::ReflogEntry;
-use crate::refs::listing::{query_refs, RefListing, RefQuery, RefQueryError, RefQueryOptions};
+use crate::refs::listing::{query_refs, RefListing, RefQuery, RefQueryOptions};
 use crate::refs::on_store::reflog_wanted;
 use crate::refs::store::{
     Expected, RawRef, RefName, RefNameRef, RefUpdate, RefUpdateFlags, ReflogUpdate,
@@ -176,13 +176,13 @@ impl<'repo> References<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`RefQueryError`] when the ref store cannot be read, when creator-date sort
+    /// Returns ref store errors when the ref store cannot be read, when creator-date sort
     /// is requested without object data, or when an object read fails.
     pub fn query(
         &self,
         query: &RefQuery,
         options: &RefQueryOptions,
-    ) -> std::result::Result<Vec<RefListing>, RefQueryError> {
+    ) -> crate::error::Result<Vec<RefListing>> {
         query_refs(self.repo, query, options)
     }
 
@@ -212,7 +212,7 @@ impl<'repo> References<'repo> {
     ///   `name` is a branch or `HEAD` and `oid` is not a commit.
     /// - Validation, locking, and I/O errors from the ref backend.
     ///
-    /// The two object errors are returned as [`crate::error::Error::RefStore`]. The ref is
+    /// The two object errors are returned as [`crate::error::RefError::Store`]. The ref is
     /// unchanged on error.
     ///
     /// # Examples
@@ -301,8 +301,8 @@ impl<'repo> References<'repo> {
             .identity(IdentRole::Committer, self.repo.identity_now())
         {
             Ok(sig) => Some(sig),
-            Err(CommitError::Identity(_)) => None,
-            Err(err) => return Err(err.into()),
+            Err(crate::error::Error::Commit(CommitError::Identity(_))) => None,
+            Err(err) => return Err(err),
         };
         let reflog_for = |target: &str| -> Result<Option<ReflogUpdate>> {
             let Some(sig) = signature.as_ref() else {

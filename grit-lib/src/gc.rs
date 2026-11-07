@@ -16,6 +16,7 @@
 //! Scope note: only the local / on-disk path is in scope here. `git://`,
 //! `http(s)`, and `ssh` remotes are out of scope and left as TODOs.
 
+use crate::error::ObjectError;
 use std::cell::OnceCell;
 use std::collections::{HashSet, VecDeque};
 use std::ops::ControlFlow;
@@ -77,7 +78,7 @@ pub struct PruneStats {
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] if a non-promised root is missing, an error if the walk runs
+/// Returns [`crate::error::ObjectError::NotFound`] if a non-promised root is missing, an error if the walk runs
 /// and a reachable object is missing or cannot be read or parsed, or on I/O failure
 /// while enumerating or deleting loose object files.
 /// [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore)
@@ -303,7 +304,7 @@ impl<'a> LazyReachable<'a> {
     ///
     /// # Errors
     ///
-    /// Same as the reachability walk: [`Error::ObjectNotFound`] for a missing non-promised
+    /// Same as the reachability walk: [`crate::error::ObjectError::NotFound`] for a missing non-promised
     /// object, and read or parse errors.
     pub(crate) fn get(&self) -> Result<&OidHashSet> {
         if let Some(closure) = self.closure.get() {
@@ -313,13 +314,13 @@ impl<'a> LazyReachable<'a> {
         Ok(self.closure.get_or_init(|| closure))
     }
 
-    /// Fail with [`Error::ObjectNotFound`] when a non-promised root is missing.
+    /// Fail with [`crate::error::ObjectError::NotFound`] when a non-promised root is missing.
     pub(crate) fn require_roots_exist(&self) -> Result<()> {
         if self.closure.get().is_some() {
             return Ok(());
         }
         match require_objects_exist(self.odb, self.roots, &HashSet::new()) {
-            Err(Error::ObjectNotFound(_)) => {
+            Err(Error::Object(ObjectError::NotFound { .. })) => {
                 require_objects_exist(self.odb, self.roots, self.promised()?)
             }
             result => result,
@@ -349,7 +350,7 @@ pub(crate) const S_IFDIR: u32 = 0o040000;
 ///
 /// # Errors
 ///
-/// [`Error::ObjectNotFound`] when a reachable object is missing, and read or parse
+/// [`crate::error::ObjectError::NotFound`] when a reachable object is missing, and read or parse
 /// errors for the objects that are walked.
 fn reachable_closure(
     odb: &Odb,
@@ -376,7 +377,7 @@ fn reachable_closure(
         }
         let obj = odb
             .try_read_once(&oid)?
-            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))?;
+            .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))?;
         match obj.kind {
             ObjectKind::Commit => {
                 let commit = parse_commit(&obj.data)?;
@@ -427,7 +428,7 @@ fn reachable_closure(
     Ok(seen)
 }
 
-/// Fail with [`Error::ObjectNotFound`] for the first of `oids` that does not exist.
+/// Fail with [`crate::error::ObjectError::NotFound`] for the first of `oids` that does not exist.
 ///
 /// Local pack indexes are loaded once and searched directly: going through
 /// [`Odb::exists`] or [`Odb::read_info`] per object revalidates the pack directory
@@ -440,7 +441,7 @@ fn require_objects_exist(odb: &Odb, oids: &[ObjectId], promised: &HashSet<Object
         }
         let packed = indexes.iter().any(|idx| idx.find_position(oid).is_some());
         if !packed && !odb.contains(oid)? {
-            return Err(Error::ObjectNotFound(oid.to_hex()));
+            return Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }));
         }
     }
     Ok(())
@@ -479,8 +480,7 @@ pub fn remote_default_branch_local(remote_git_dir: &Path) -> Result<Option<Strin
             symrefs: true,
             ..Default::default()
         },
-    )
-    .map_err(crate::error::Error::from)?;
+    )?;
 
     for entry in &entries {
         if entry.name == "HEAD" {
@@ -564,6 +564,7 @@ fn ref_transaction_item_to_store_update(item: &RefTransactionItem) -> RefUpdate 
 mod update_refs_tests {
     use super::*;
     use crate::error::Error;
+    use crate::error::RefError;
     use crate::refs::store::RefStoreError;
     use crate::repo::init_repository;
     use tempfile::TempDir;
@@ -598,7 +599,7 @@ mod update_refs_tests {
         ];
         let err = update_refs(&repo.git_dir(), &items).expect_err("duplicate");
         match &err {
-            Error::RefStore(RefStoreError::DuplicateUpdate { name }) => {
+            Error::Ref(RefError::Store(RefStoreError::DuplicateUpdate { name })) => {
                 assert_eq!(name, "refs/heads/dup");
             }
             other => panic!("expected DuplicateUpdate, got {other}"),
@@ -631,7 +632,7 @@ mod update_refs_tests {
         )
         .expect_err("stale cas");
         match &err {
-            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) => {
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { name, .. })) => {
                 assert_eq!(name, "refs/heads/cas");
             }
             other => panic!("expected ExpectedMismatch, got {other}"),
@@ -664,7 +665,10 @@ mod update_refs_tests {
         )
         .expect_err("stale cas");
         assert!(
-            matches!(err, Error::RefStore(RefStoreError::ExpectedMismatch { .. })),
+            matches!(
+                err,
+                Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
+            ),
             "{err}"
         );
         assert_eq!(
@@ -788,7 +792,7 @@ mod update_refs_tests {
 
         let err = worker.join().expect("join").expect_err("stale CAS");
         match &err {
-            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) => {
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { name, .. })) => {
                 assert_eq!(name, "refs/heads/last");
             }
             other => panic!("expected ExpectedMismatch for last ref, got {other}"),
@@ -951,7 +955,10 @@ mod prune_walk_tests {
             .expect("cached promises")
             .contains(&missing));
         let next = LazyReachable::new(repo.odb(), &roots, &shallow);
-        assert!(matches!(next.get(), Err(Error::ObjectNotFound(_))));
+        assert!(matches!(
+            next.get(),
+            Err(Error::Object(ObjectError::NotFound { .. }))
+        ));
     }
 
     #[test]

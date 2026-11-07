@@ -48,6 +48,7 @@ pub(crate) use validation::{
     validate_reflog_identity_string, validate_reflog_message, validate_reflog_update,
 };
 
+use crate::error::RefError;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
@@ -113,7 +114,7 @@ pub trait PreparedRefTransaction: Send {
 /// backends. You must implement [`Self::rewrite_reflog`] with the same writer exclusion as
 /// `prepare`/`commit` for that ref; the suite includes a case that fails unsafe read-transform-write
 /// paths. Report failures of your own storage as [`RefStoreError::Backend`] (or
-/// [`crate::error::Error::RefStore`] wrapping it from the `Result` methods).
+/// [`crate::error::RefError::Store`] wrapping it from the `Result` methods).
 pub trait RefStore: Send + Sync + Debug {
     /// Which on-disk or logical format this store uses.
     ///
@@ -393,8 +394,10 @@ fn resolve_via_raw<S: RefStore + ?Sized>(
         return Err(RefStoreError::SymrefLoop);
     }
     match store.read_raw(name).map_err(|err| match err {
-        crate::error::Error::RefStore(err) => err,
-        other => RefStoreError::Corrupt(other.to_string()),
+        crate::error::Error::Ref(RefError::Store(err)) => err,
+        other => RefStoreError::Corrupt {
+            detail: other.to_string(),
+        },
     })? {
         None => Err(RefStoreError::not_found(name.as_str())),
         Some(RawRef::Direct(oid)) => Ok(oid),

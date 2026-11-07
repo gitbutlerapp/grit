@@ -6,6 +6,7 @@
 //! when the replay would be a no-op (`Empty`, `AlreadyApplied`), nothing in the
 //! worktree, index, or refs is changed.
 
+use crate::error::RefError;
 use std::fs;
 
 use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
@@ -91,7 +92,7 @@ pub enum ReplayOutcome {
 ///
 /// # Errors
 ///
-/// - [`Error::UnbornHead`] when `HEAD` has no commits yet.
+/// - [`crate::error::RefError::UnbornHead`] when `HEAD` has no commits yet.
 /// - [`MergeError::MergeCommit`] when the source commit has more than one parent (pick or revert).
 /// - [`MergeError::ReplaySourceAtHead`] when picking a commit that is already `HEAD`.
 /// - I/O, ODB, merge, checkout, or ref update failures.
@@ -118,10 +119,10 @@ pub fn replay_commit(
             oid: Some(oid),
             ..
         } => (CheckoutTip::Branch(refname), oid),
-        HeadState::Branch { .. } => return Err(Error::UnbornHead),
+        HeadState::Branch { .. } => return Err(Error::Ref(RefError::UnbornHead)),
         HeadState::Detached { oid } => (CheckoutTip::Detached, oid),
         HeadState::Invalid => {
-            return Err(Error::Verbatim("HEAD is in an unknown state".into()));
+            return Err(Error::Ref(RefError::InvalidHead));
         }
     };
 

@@ -50,7 +50,9 @@ fn git_url_err(detail: impl Into<String>) -> Error {
 }
 
 fn ssh_transport_err(detail: impl Into<String>) -> Error {
-    remote_err(RemoteError::Ssh(detail.into()))
+    remote_err(RemoteError::Ssh {
+        detail: detail.into(),
+    })
 }
 
 fn transport_io_err(detail: impl Into<String>) -> Error {
@@ -1261,36 +1263,33 @@ pub(crate) fn connect_local_upload_pack(
     let served_env = client_env.for_local_transport();
     let server = std::thread::Builder::new()
         .name("grit-local-upload-pack".to_owned())
-        .spawn(
-            move || -> std::result::Result<(), crate::serve::ServeError> {
-                let lazy_fetch = ServeOptions::lazy_fetch_from_environment(&served_env);
-                let repo = crate::repo::Repository::open(
-                    &dir,
-                    &crate::environment::RepositoryOptions::with_environment(served_env)
-                        .for_serving(),
-                )?;
-                let config = crate::config::ConfigSet::load(
+        .spawn(move || -> crate::error::Result<()> {
+            let lazy_fetch = ServeOptions::lazy_fetch_from_environment(&served_env);
+            let repo = crate::repo::Repository::open(
+                &dir,
+                &crate::environment::RepositoryOptions::with_environment(served_env).for_serving(),
+            )?;
+            let config = crate::config::ConfigSet::load(
+                repo.environment(),
+                Some(repo.git_dir()),
+                &crate::config::LoadConfigOptions::standard(
                     repo.environment(),
                     Some(repo.git_dir()),
-                    &crate::config::LoadConfigOptions::standard(
-                        repo.environment(),
-                        Some(repo.git_dir()),
-                    ),
-                )
-                .unwrap_or_default();
-                let mut serve = ServeOptions {
-                    protocol,
-                    agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
-                    hidden_refs: crate::hide_refs::hide_ref_patterns_uploadpack(&config),
-                    lazy_fetch,
-                    ..ServeOptions::default()
-                };
-                serve.attach_promisor_fetcher(&repo, promisor_fetcher);
-                crate::serve::UploadPack::new(&repo, &mut serve)
-                    .run(&mut server_input, &mut server_output)
-                    .map(|_| ())
-            },
-        )?;
+                ),
+            )
+            .unwrap_or_default();
+            let mut serve = ServeOptions {
+                protocol,
+                agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
+                hidden_refs: crate::hide_refs::hide_ref_patterns_uploadpack(&config),
+                lazy_fetch,
+                ..ServeOptions::default()
+            };
+            serve.attach_promisor_fetcher(&repo, promisor_fetcher);
+            crate::serve::UploadPack::new(&repo, &mut serve)
+                .run(&mut server_input, &mut server_output)
+                .map(|_| ())
+        })?;
     let mut conn = LocalUploadPackConnection {
         writer: Some(client_writer),
         reader: Some(BufReader::new(client_reader)),
@@ -1334,7 +1333,7 @@ struct LocalUploadPackConnection {
     /// Server → client pipe. `None` only while being torn down.
     reader: Option<BufReader<crate::mem_pipe::MemPipeReader>>,
     adv: Advertisement,
-    server: Option<std::thread::JoinHandle<std::result::Result<(), crate::serve::ServeError>>>,
+    server: Option<std::thread::JoinHandle<crate::error::Result<()>>>,
 }
 
 impl LocalUploadPackConnection {
@@ -1353,21 +1352,25 @@ impl LocalUploadPackConnection {
         match server.join() {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) if stopped_by_closed_pipe(&err) => Ok(()),
-            Ok(Err(crate::serve::ServeError::Repository(err))) => Err(err),
-            Ok(Err(err)) => Err(RemoteError::LocalUploadPack(Box::new(err)).into()),
+            Ok(Err(Error::Remote(RemoteError::Serve(err)))) => {
+                Err(RemoteError::LocalUploadPack(Box::new(err)).into())
+            }
+            Ok(Err(err)) => Err(err),
             Err(_) => Err(RemoteError::LocalUploadPackPanicked.into()),
         }
     }
 }
 
 /// Whether `err` is the server failing to write because the client closed its end.
-fn stopped_by_closed_pipe(err: &crate::serve::ServeError) -> bool {
+fn stopped_by_closed_pipe(err: &Error) -> bool {
     use crate::serve::ServeError;
     match err {
-        ServeError::Io(e) | ServeError::Repository(Error::Io(e)) => {
+        Error::Io(e) | Error::Remote(RemoteError::Serve(ServeError::Io(e))) => {
             e.kind() == std::io::ErrorKind::BrokenPipe
         }
-        ServeError::PackInterrupted(inner) => stopped_by_closed_pipe(inner),
+        Error::Remote(RemoteError::Serve(ServeError::PackInterrupted { broken_pipe, .. })) => {
+            *broken_pipe
+        }
         _ => false,
     }
 }

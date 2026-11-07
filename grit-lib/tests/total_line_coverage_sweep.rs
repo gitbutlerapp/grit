@@ -19,7 +19,7 @@ use grit_lib::worktree::pathspec::{
     bloom_lookup_prefix, bloom_lookup_prefix_with_cwd, has_glob_chars, parse_pathspecs_from_source,
     path_allowed_by_pathspec_list, pathspec_contributes_match, pathspec_has_top,
     pathspec_is_exclude, pathspec_wants_descent_into_tree, simple_length, validate_attr_pathspecs,
-    validate_global_pathspec_flags, Pathspec, PathspecGlobalFlags,
+    Pathspec, PathspecGlobalFlags,
 };
 use tempfile::tempdir;
 
@@ -56,7 +56,7 @@ fn pathspec_public_api_matrix() {
         }
     }
     let _ = bloom_lookup_prefix_with_cwd("*.rs", Some("/tmp/wt"));
-    let _ = validate_global_pathspec_flags();
+    assert!(PathspecGlobalFlags::default().validate().is_ok());
     let _ = validate_attr_pathspecs(&["*.rs".to_owned()]);
     let list: Vec<String> = specs.iter().map(|s| (*s).to_owned()).collect();
     let ps = Pathspec::scoped(list.clone(), PathspecGlobalFlags::default());

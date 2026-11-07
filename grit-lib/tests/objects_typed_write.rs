@@ -3,6 +3,7 @@
 
 use grit_lib::change_id::{change_id, ChangeId};
 use grit_lib::error::Error;
+use grit_lib::error::ObjectError;
 use grit_lib::ident::{parse_signature, Signature, SignatureError, SignatureField};
 use grit_lib::objects::{
     serialize_commit, serialize_tree, CommitData, HashAlgo, NewCommit, ObjectId, ObjectKind,
@@ -87,7 +88,7 @@ fn write_rejects_unsorted_tree_and_leaves_no_object() {
         .write(ObjectKind::Tree, &unsorted)
         .expect_err("unsorted tree must be refused");
     match err {
-        Error::InvalidObject { kind, check } => {
+        Error::Object(ObjectError::Invalid { kind, check }) => {
             assert_eq!(kind, ObjectKind::Tree);
             assert_eq!(check.id, "treeNotSorted");
         }
@@ -114,7 +115,7 @@ fn write_rejects_commit_with_identity_missing_timestamp() {
         .write(ObjectKind::Commit, &body)
         .expect_err("identity without date must be refused");
     assert!(
-        matches!(&err, Error::InvalidObject { kind: ObjectKind::Commit, check } if check.id == "missingSpaceBeforeDate"),
+        matches!(&err, Error::Object(ObjectError::Invalid { kind: ObjectKind::Commit, check }) if check.id == "missingSpaceBeforeDate"),
         "{err:?}"
     );
     git_fsck_strict(dir.path());
@@ -133,7 +134,7 @@ fn write_rejects_malformed_tag() {
         .write(ObjectKind::Tag, body.as_bytes())
         .expect_err("tag without tagger must be refused");
     assert!(
-        matches!(&err, Error::InvalidObject { kind: ObjectKind::Tag, check } if check.id == "missingTaggerEntry"),
+        matches!(&err, Error::Object(ObjectError::Invalid { kind: ObjectKind::Tag, check }) if check.id == "missingTaggerEntry"),
         "{err:?}"
     );
 }
@@ -212,11 +213,11 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
     assert!(
         matches!(
             blob_as_tree,
-            Err(Error::UnexpectedObjectKind {
+            Err(Error::Object(ObjectError::UnexpectedKind {
                 expected: ObjectKind::Tree,
                 actual: ObjectKind::Blob,
                 ..
-            })
+            }))
         ),
         "{blob_as_tree:?}"
     );
@@ -227,7 +228,10 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         oid: missing,
     }]);
     assert!(
-        matches!(missing_file, Err(Error::ObjectNotFound(_))),
+        matches!(
+            missing_file,
+            Err(Error::Object(ObjectError::NotFound { .. }))
+        ),
         "{missing_file:?}"
     );
 
@@ -239,10 +243,10 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
     assert!(
         matches!(
             gitmodules_link,
-            Err(Error::InvalidTreeEntry(TreeEntryError::ForbiddenDotSymlink {
+            Err(Error::Object(ObjectError::InvalidTreeEntry(TreeEntryError::ForbiddenDotSymlink {
                 ref name,
                 reserved_file: ".gitmodules",
-            })) if name == b".gitmodules"
+            }))) if name == b".gitmodules"
         ),
         "{gitmodules_link:?}"
     );
@@ -255,10 +259,10 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
     assert!(
         matches!(
             ntfs_gitmodules_link,
-            Err(Error::InvalidTreeEntry(TreeEntryError::ForbiddenDotSymlink {
+            Err(Error::Object(ObjectError::InvalidTreeEntry(TreeEntryError::ForbiddenDotSymlink {
                 ref name,
                 reserved_file: ".gitmodules",
-            })) if name == b"foo\\.gitmodules"
+            }))) if name == b"foo\\.gitmodules"
         ),
         "{ntfs_gitmodules_link:?}"
     );
@@ -344,11 +348,11 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
     assert!(
         matches!(
             still_wrong,
-            Err(Error::UnexpectedObjectKind {
+            Err(Error::Object(ObjectError::UnexpectedKind {
                 expected: ObjectKind::Tree,
                 actual: ObjectKind::Blob,
                 ..
-            })
+            }))
         ),
         "{still_wrong:?}"
     );
@@ -367,12 +371,12 @@ fn write_tree_rejects_ntfs_backslash_gitmodules_symlink_git_fsck() {
     assert!(
         matches!(
             repo.objects().write_tree([entry.clone()]),
-            Err(Error::InvalidTreeEntry(
+            Err(Error::Object(ObjectError::InvalidTreeEntry(
                 TreeEntryError::ForbiddenDotSymlink {
                     reserved_file: ".gitmodules",
                     ..
                 }
-            ))
+            )))
         ),
         "typed write_tree must reject NTFS backslash spelling"
     );
@@ -400,7 +404,7 @@ fn write_tree_returns_typed_errors() {
         .expect_err("duplicate");
     assert!(matches!(
         err,
-        Error::InvalidTreeEntry(TreeEntryError::DuplicateName { ref name }) if name == b"same"
+        Error::Object(ObjectError::InvalidTreeEntry(TreeEntryError::DuplicateName { ref name })) if name == b"same"
     ));
     let err = repo
         .objects()
@@ -408,10 +412,10 @@ fn write_tree_returns_typed_errors() {
         .expect_err("slash");
     assert!(matches!(
         err,
-        Error::InvalidTreeEntry(TreeEntryError::InvalidName {
+        Error::Object(ObjectError::InvalidTreeEntry(TreeEntryError::InvalidName {
             reason: PathComponentError::ContainsSlash,
             ..
-        })
+        }))
     ));
     let err = repo
         .objects()
@@ -423,7 +427,10 @@ fn write_tree_returns_typed_errors() {
         .expect_err("mode");
     assert!(matches!(
         err,
-        Error::InvalidTreeEntry(TreeEntryError::InvalidMode { mode: 0o100600, .. })
+        Error::Object(ObjectError::InvalidTreeEntry(TreeEntryError::InvalidMode {
+            mode: 0o100600,
+            ..
+        }))
     ));
     let empty = repo
         .objects()
@@ -530,11 +537,11 @@ fn write_commit_checks_tree_and_parent_kinds() {
         .expect_err("tree must be a tree");
     assert!(matches!(
         err,
-        Error::UnexpectedObjectKind {
+        Error::Object(ObjectError::UnexpectedKind {
             expected: ObjectKind::Tree,
             actual: ObjectKind::Blob,
             ..
-        }
+        })
     ));
     let err = repo
         .objects()
@@ -545,18 +552,21 @@ fn write_commit_checks_tree_and_parent_kinds() {
         .expect_err("parent must be a commit");
     assert!(matches!(
         err,
-        Error::UnexpectedObjectKind {
+        Error::Object(ObjectError::UnexpectedKind {
             expected: ObjectKind::Commit,
             actual: ObjectKind::Tree,
             ..
-        }
+        })
     ));
     let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
     let err = repo
         .objects()
         .write_commit(&NewCommit::new(missing, ada(1), ada(1), "missing tree"))
         .expect_err("tree must exist");
-    assert!(matches!(err, Error::ObjectNotFound(_)), "{err:?}");
+    assert!(
+        matches!(err, Error::Object(ObjectError::NotFound { .. })),
+        "{err:?}"
+    );
 }
 
 #[test]
@@ -635,7 +645,7 @@ fn signature_new_rejects_header_breaking_input() {
     let err: Error = SignatureError::BeforeEpoch.into();
     assert!(matches!(
         err,
-        Error::InvalidSignature(SignatureError::BeforeEpoch)
+        Error::Object(ObjectError::InvalidSignature(SignatureError::BeforeEpoch))
     ));
     let message = Signature::new("A\nB", "a@example.com", t)
         .expect_err("newline")

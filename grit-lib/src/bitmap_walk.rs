@@ -3,6 +3,7 @@
 //! Computes want/have sets with optional object filters, falling back to callers when a query
 //! cannot be served from on-disk bitmaps alone.
 
+use crate::error::ObjectError;
 use std::collections::{BinaryHeap, HashSet, VecDeque};
 
 use crate::error::Error;
@@ -32,8 +33,12 @@ pub struct ReachabilityQuery<'a> {
 #[error("bitmap reachability walk is not supported for this repository or query")]
 pub struct BitmapWalkUnsupported;
 
-/// Errors during a bitmap reachability walk.
+/// Bitmap-specific failures during a reachability walk; object and ref failures are reported in
+/// their own areas.
+///
+/// Surfaced on the umbrella as [`ObjectError::BitmapWalk`](crate::error::ObjectError::BitmapWalk).
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum BitmapWalkError {
     /// Filter or repository shape requires a non-bitmap walk.
     #[error(transparent)]
@@ -41,9 +46,6 @@ pub enum BitmapWalkError {
     /// On-disk bitmap could not be read.
     #[error(transparent)]
     Bitmap(#[from] BitmapError),
-    /// Repository or object access failure.
-    #[error(transparent)]
-    Repository(#[from] Error),
 }
 
 /// Reachable objects from a [`ReachabilityQuery`]: in-index bits plus out-of-namespace oids.
@@ -78,7 +80,7 @@ impl ReachableSet {
     /// # Errors
     ///
     /// Propagates bitmap type-index decode failures.
-    pub fn count_by_kind(&self, kind: ObjectKind) -> std::result::Result<usize, BitmapWalkError> {
+    pub fn count_by_kind(&self, kind: ObjectKind) -> crate::error::Result<usize> {
         self.count_by_kind_popcount(kind)
     }
 
@@ -87,10 +89,7 @@ impl ReachableSet {
     /// # Errors
     ///
     /// Propagates bitmap type-index decode failures.
-    pub fn count_by_kind_popcount(
-        &self,
-        kind: ObjectKind,
-    ) -> std::result::Result<usize, BitmapWalkError> {
+    pub fn count_by_kind_popcount(&self, kind: ObjectKind) -> crate::error::Result<usize> {
         let mut type_bits = Bitmap::new();
         self.index
             .type_bitmap(kind)
@@ -158,9 +157,7 @@ impl ReachableSet {
     }
 
     /// Reachable commit bitmap bit positions in ascending order (indexed namespace only).
-    pub(crate) fn reachable_commit_bitmap_positions(
-        &self,
-    ) -> std::result::Result<Vec<u32>, BitmapWalkError> {
+    pub(crate) fn reachable_commit_bitmap_positions(&self) -> crate::error::Result<Vec<u32>> {
         let Ok(mut type_bits) = (|| {
             let mut tb = Bitmap::new();
             self.index
@@ -229,7 +226,7 @@ fn peel_tips(
     repo: &Repository,
     tips: &[ObjectId],
     missing: MissingAction,
-) -> std::result::Result<PeeledTips, BitmapWalkError> {
+) -> crate::error::Result<PeeledTips> {
     let mut out = PeeledTips {
         commits: Vec::new(),
         tags: Vec::new(),
@@ -246,12 +243,14 @@ fn peel_one(
     mut oid: ObjectId,
     missing: MissingAction,
     out: &mut PeeledTips,
-) -> std::result::Result<(), BitmapWalkError> {
+) -> crate::error::Result<()> {
     loop {
         let object = match repo.odb().read(&oid) {
             Ok(obj) => obj,
-            Err(Error::ObjectNotFound(_)) if missing != MissingAction::Error => return Ok(()),
-            Err(err) => return Err(err.into()),
+            Err(Error::Object(ObjectError::NotFound { .. })) if missing != MissingAction::Error => {
+                return Ok(())
+            }
+            Err(err) => return Err(err),
         };
         match object.kind {
             ObjectKind::Commit => {
@@ -282,7 +281,7 @@ impl BitmapIndex {
         repo: &Repository,
         query: ReachabilityQuery<'_>,
         missing: MissingAction,
-    ) -> std::result::Result<ReachableSet, BitmapWalkError> {
+    ) -> crate::error::Result<ReachableSet> {
         self.reachability_and_haves(repo, query, missing, missing)
             .map(|(wants, _)| wants)
     }
@@ -297,7 +296,7 @@ impl BitmapIndex {
         query: ReachabilityQuery<'_>,
         want_missing: MissingAction,
         have_missing: MissingAction,
-    ) -> std::result::Result<(ReachableSet, ReachableSet), BitmapWalkError> {
+    ) -> crate::error::Result<(ReachableSet, ReachableSet)> {
         if !shallow_boundary_oids(repo.git_dir()).is_empty()
             || crate::shallow::shallow_file_path(repo.git_dir()).is_file()
         {
@@ -328,7 +327,7 @@ impl BitmapIndex {
         repo: &Repository,
         commit: &ObjectId,
         missing: MissingAction,
-    ) -> std::result::Result<bool, BitmapWalkError> {
+    ) -> crate::error::Result<bool> {
         let Some(stored) = self.commit_bitmap(commit) else {
             return Ok(false);
         };
@@ -351,7 +350,7 @@ impl BitmapIndex {
         filter: Option<&ObjectFilter>,
         missing: MissingAction,
         filter_want_tips: &[ObjectId],
-    ) -> std::result::Result<ReachableSet, BitmapWalkError> {
+    ) -> crate::error::Result<ReachableSet> {
         if !shallow_boundary_oids(repo.git_dir()).is_empty()
             || crate::shallow::shallow_file_path(repo.git_dir()).is_file()
         {
@@ -381,7 +380,7 @@ fn find_objects_union(
     missing: MissingAction,
     ignore_stored_commit_bitmaps: bool,
     seed: Option<&ReachableSet>,
-) -> std::result::Result<ReachableSet, BitmapWalkError> {
+) -> crate::error::Result<ReachableSet> {
     if tips.is_empty() {
         return Ok(ReachableSet {
             index: std::sync::Arc::clone(index),
@@ -409,7 +408,7 @@ fn find_objects_peeled(
     missing: MissingAction,
     ignore_stored_commit_bitmaps: bool,
     seed: Option<&ReachableSet>,
-) -> std::result::Result<ReachableSet, BitmapWalkError> {
+) -> crate::error::Result<ReachableSet> {
     let (mut bits, mut extended, mut extended_set) = match seed {
         Some(seed) => (
             seed.bits.clone(),
@@ -443,11 +442,7 @@ fn find_objects_peeled(
         )?;
     }
     for oid in peeled.extra_objects {
-        let kind = repo
-            .odb()
-            .read_info(&oid)
-            .map_err(BitmapWalkError::from)?
-            .kind;
+        let kind = repo.odb().read_info(&oid)?.kind;
         mark_object(
             repo,
             index,
@@ -544,11 +539,11 @@ fn queue_walk_commit(
     repo: &Repository,
     queue: &mut BinaryHeap<WalkCommit>,
     oid: ObjectId,
-) -> std::result::Result<(), BitmapWalkError> {
+) -> crate::error::Result<()> {
     let object = match repo.odb().read(&oid) {
         Ok(obj) => obj,
-        Err(Error::ObjectNotFound(_)) => return Ok(()),
-        Err(err) => return Err(err.into()),
+        Err(Error::Object(ObjectError::NotFound { .. })) => return Ok(()),
+        Err(err) => return Err(err),
     };
     if object.kind != ObjectKind::Commit {
         return Ok(());
@@ -569,7 +564,7 @@ fn try_or_commit_bitmap(
     bits: &mut Bitmap,
     commit: &ObjectId,
     ignore_stored: bool,
-) -> std::result::Result<bool, BitmapWalkError> {
+) -> crate::error::Result<bool> {
     if ignore_stored {
         return Ok(false);
     }
@@ -619,7 +614,7 @@ fn mark_object(
     oid: ObjectId,
     kind: ObjectKind,
     missing: MissingAction,
-) -> std::result::Result<(), BitmapWalkError> {
+) -> crate::error::Result<()> {
     if already_marked(index, bits, extended_set, &oid) {
         return Ok(());
     }
@@ -642,14 +637,16 @@ fn walk_tree(
     extended_set: &mut OidHashSet,
     tree: ObjectId,
     missing: MissingAction,
-) -> std::result::Result<(), BitmapWalkError> {
+) -> crate::error::Result<()> {
     if already_marked(index, bits, extended_set, &tree) {
         return Ok(());
     }
     let object = match repo.odb().read(&tree) {
         Ok(obj) => obj,
-        Err(Error::ObjectNotFound(_)) if missing != MissingAction::Error => return Ok(()),
-        Err(err) => return Err(err.into()),
+        Err(Error::Object(ObjectError::NotFound { .. })) if missing != MissingAction::Error => {
+            return Ok(())
+        }
+        Err(err) => return Err(err),
     };
     if object.kind != ObjectKind::Tree {
         return Ok(());
@@ -692,7 +689,7 @@ fn apply_filter(
     set: &mut ReachableSet,
     filter: Option<&ObjectFilter>,
     want_tips: &[ObjectId],
-) -> std::result::Result<(), BitmapWalkError> {
+) -> crate::error::Result<()> {
     let Some(filter) = filter else {
         return Ok(());
     };
@@ -706,7 +703,7 @@ fn apply_filter_one(
     set: &mut ReachableSet,
     filter: &ObjectFilter,
     want_tips: &[ObjectId],
-) -> std::result::Result<(), BitmapWalkError> {
+) -> crate::error::Result<()> {
     match filter {
         ObjectFilter::Combine(parts) => {
             for part in parts {
@@ -794,17 +791,12 @@ fn explicit_filter_roots(
     repo: &Repository,
     index: &BitmapIndex,
     tips: &[ObjectId],
-) -> std::result::Result<ExplicitFilterRoots, BitmapWalkError> {
+) -> crate::error::Result<ExplicitFilterRoots> {
     let peeled = peel_tips(repo, tips, MissingAction::Error)?;
     let mut trees = oid_hash_set();
     let mut blobs = oid_hash_set();
     for oid in peeled.extra_objects {
-        match repo
-            .odb()
-            .read_info(&oid)
-            .map_err(BitmapWalkError::from)?
-            .kind
-        {
+        match repo.odb().read_info(&oid)?.kind {
             ObjectKind::Tree => {
                 trees.insert(oid);
             }
@@ -856,15 +848,9 @@ fn keep_only_object_type(set: &mut ReachableSet, kind: FilterObjectKind) {
     rebuild_extended_set(set);
 }
 
-fn expand_type(
-    index: &BitmapIndex,
-    kind: ObjectKind,
-) -> std::result::Result<Bitmap, BitmapWalkError> {
+fn expand_type(index: &BitmapIndex, kind: ObjectKind) -> crate::error::Result<Bitmap> {
     let mut out = Bitmap::new();
-    index
-        .type_bitmap(kind)
-        .expand_into_bitmap(&mut out)
-        .map_err(BitmapWalkError::from)?;
+    index.type_bitmap(kind).expand_into_bitmap(&mut out)?;
     Ok(out)
 }
 
@@ -872,7 +858,7 @@ fn tip_blob_oids(
     repo: &Repository,
     index: &BitmapIndex,
     tips: &[ObjectId],
-) -> std::result::Result<OidHashSet, BitmapWalkError> {
+) -> crate::error::Result<OidHashSet> {
     Ok(explicit_filter_roots(repo, index, tips)?.blobs)
 }
 
@@ -882,7 +868,7 @@ fn filter_blob_limit(
     bits: &mut Bitmap,
     tip_blobs: &OidHashSet,
     limit: u64,
-) -> std::result::Result<(), BitmapWalkError> {
+) -> crate::error::Result<()> {
     let mut blob_type = expand_type(index, ObjectKind::Blob)?;
     blob_type.and_assign(bits);
     let objects_dir = repo.odb().objects_dir();
@@ -894,9 +880,7 @@ fn filter_blob_limit(
         if tip_blobs.contains(&oid) {
             continue;
         }
-        let size = read_object_info_from_packs(objects_dir, &oid)
-            .map_err(BitmapWalkError::from)?
-            .size;
+        let size = read_object_info_from_packs(objects_dir, &oid)?.size;
         if size >= limit {
             bits.clear(pos);
         }

@@ -57,18 +57,16 @@ struct ResolvedSquashRange {
 /// # Errors
 ///
 /// Returns [`HistoryError::Planning`] when `range` is empty, is not a `<base>..<tip>` range, or
-/// selects fewer than two commits; [`HistoryError::Engine`] when a revision does not resolve or
-/// an object, ref or revision-walk read fails; and other [`HistoryError`] variants when markers
+/// selects fewer than two commits; the revision, object or ref area
+/// error when a revision does not resolve or a read fails; and other [`HistoryError`] variants when markers
 /// refuse or planning fails.
 pub fn squash(
     repo: &Repository,
     range: &[&str],
     opts: &SquashOptions,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     if range.is_empty() {
-        return Err(HistoryError::Planning(
-            PlanningError::SquashRevisionRangeRequired,
-        ));
+        return Err(HistoryError::Planning(PlanningError::SquashRevisionRangeRequired).into());
     }
     let resolved = resolve_squash_range(repo, range, &opts.message)?;
     check_divergent_branch_tips(
@@ -143,12 +141,12 @@ fn resolve_squash_range(
     repo: &Repository,
     range: &[&str],
     message_policy: &SquashMessage,
-) -> Result<ResolvedSquashRange, HistoryError> {
+) -> crate::error::Result<ResolvedSquashRange> {
     let RevWalkParsedSpecs {
         positive, negative, ..
     } = parse_rev_walk_tokens(repo, range)?;
     if negative.is_empty() {
-        return Err(HistoryError::Planning(PlanningError::SquashRangeNotDotDot));
+        return Err(HistoryError::Planning(PlanningError::SquashRangeNotDotDot).into());
     }
     let walk_opts = RevListOptions {
         ancestry_path: true,
@@ -161,9 +159,7 @@ fn resolve_squash_range(
     let walk = rev_list(repo, &positive, &negative, &walk_opts)?;
     let commits = walk.commits;
     if commits.is_empty() {
-        return Err(HistoryError::Planning(
-            PlanningError::SquashRevisionRangeEmpty,
-        ));
+        return Err(HistoryError::Planning(PlanningError::SquashRevisionRangeEmpty).into());
     }
     validate_connected_range(repo, &commits)?;
     let oldest = commits[0];
@@ -171,13 +167,11 @@ fn resolve_squash_range(
         .last()
         .ok_or_else(|| HistoryError::Planning(PlanningError::SquashRevisionRangeEmpty))?;
     if oldest == tip {
-        return Err(HistoryError::Planning(
-            PlanningError::SquashSingleCommitInRange,
-        ));
+        return Err(HistoryError::Planning(PlanningError::SquashSingleCommitInRange).into());
     }
     let oldest_commit = load_commit(repo, oldest)?;
     if oldest_commit.parents.is_empty() {
-        return Err(HistoryError::RootCommit { commit: oldest });
+        return Err(HistoryError::RootCommit { commit: oldest }.into());
     }
     let selected: HashSet<ObjectId> = commits.iter().copied().collect();
     let subject_index = RangeSubjectIndex::build(repo, &commits, &selected)?;
@@ -204,7 +198,7 @@ fn check_divergent_branch_tips(
     tip: ObjectId,
     commits: &[ObjectId],
     scope: &super::types::RefScope,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     if !matches!(scope, super::types::RefScope::Branches) {
         return Ok(());
     }
@@ -223,19 +217,22 @@ fn check_divergent_branch_tips(
         if is_ancestor(repo, branch_tip, tip)? && selected.contains(&branch_tip) {
             return Err(HistoryError::DivergentBranch {
                 name: name.as_str().to_owned(),
-            });
+            }
+            .into());
         }
         if !is_ancestor(repo, branch_tip, tip)? {
             return Err(HistoryError::DivergentBranch {
                 name: name.as_str().to_owned(),
-            });
+            }
+            .into());
         }
     }
     if let Ok(crate::state::HeadState::Detached { oid }) = resolve_head_for_repository(repo) {
         if oid != tip && is_ancestor(repo, oldest, oid)? && !is_ancestor(repo, tip, oid)? {
             return Err(HistoryError::DivergentBranch {
                 name: "HEAD".into(),
-            });
+            }
+            .into());
         }
         if oid != tip
             && is_ancestor(repo, oldest, oid)?
@@ -244,13 +241,14 @@ fn check_divergent_branch_tips(
         {
             return Err(HistoryError::DivergentBranch {
                 name: "HEAD".into(),
-            });
+            }
+            .into());
         }
     }
     Ok(())
 }
 
-fn validate_connected_range(repo: &Repository, commits: &[ObjectId]) -> Result<(), HistoryError> {
+fn validate_connected_range(repo: &Repository, commits: &[ObjectId]) -> crate::error::Result<()> {
     let selected: HashSet<ObjectId> = commits.iter().copied().collect();
     let oldest = commits[0];
     let oldest_commit = load_commit(repo, oldest)?;
@@ -266,7 +264,7 @@ fn validate_connected_range(repo: &Repository, commits: &[ObjectId]) -> Result<(
                 }
                 let allowed = selected.contains(parent) || oldest_parent_set.contains(parent);
                 if !allowed {
-                    return Err(HistoryError::RangeNotConnected);
+                    return Err(HistoryError::RangeNotConnected.into());
                 }
             }
         }
@@ -274,7 +272,7 @@ fn validate_connected_range(repo: &Repository, commits: &[ObjectId]) -> Result<(
         tip_count += 1;
     }
     if tip_count != 1 {
-        return Err(HistoryError::MultipleTips);
+        return Err(HistoryError::MultipleTips.into());
     }
     Ok(())
 }
@@ -300,7 +298,7 @@ impl RangeSubjectIndex {
         repo: &Repository,
         commits: &[ObjectId],
         selected: &HashSet<ObjectId>,
-    ) -> Result<Self, HistoryError> {
+    ) -> crate::error::Result<Self> {
         let mut by_subject = HashMap::new();
         for &oid in commits {
             let commit = load_commit(repo, oid)?;
@@ -376,12 +374,12 @@ impl OldestMessageDraft {
         body: &str,
         target: &MarkerTarget,
         policy: &SquashMessage,
-    ) -> Result<(), HistoryError> {
+    ) -> crate::error::Result<()> {
         if !target.folds_into_oldest_message() {
-            return Err(HistoryError::MarkerTargetOutsideRange { commit: marker_oid });
+            return Err(HistoryError::MarkerTargetOutsideRange { commit: marker_oid }.into());
         }
         if self.text.starts_with("squash! ") && !self.allows_message_discard(policy) {
-            return Err(HistoryError::SquashDiscardsMessage { commit: marker_oid });
+            return Err(HistoryError::SquashDiscardsMessage { commit: marker_oid }.into());
         }
         if self.text.starts_with("fixup! ") {
             self.text.replace_range(0..5, "amend!");
@@ -406,9 +404,9 @@ impl OldestMessageDraft {
         body: &str,
         target: &MarkerTarget,
         policy: &SquashMessage,
-    ) -> Result<(), HistoryError> {
+    ) -> crate::error::Result<()> {
         if !target.folds_into_oldest_message() {
-            return Err(HistoryError::MarkerTargetOutsideRange { commit: marker_oid });
+            return Err(HistoryError::MarkerTargetOutsideRange { commit: marker_oid }.into());
         }
         if self.text.starts_with("fixup! ") {
             if let Some(pos) = self.text.find('\n') {
@@ -426,7 +424,7 @@ impl OldestMessageDraft {
         } else if self.allows_message_discard(policy) {
             Ok(())
         } else {
-            Err(HistoryError::SquashDiscardsMessage { commit: marker_oid })
+            Err(HistoryError::SquashDiscardsMessage { commit: marker_oid }.into())
         }
     }
 }
@@ -449,7 +447,7 @@ impl OutsideTargetMarkerPolicy {
         oldest: ObjectId,
         index: &RangeSubjectIndex,
         selected: &HashSet<ObjectId>,
-    ) -> Result<Self, HistoryError> {
+    ) -> crate::error::Result<Self> {
         let mut allowed_outside_label: Option<String> = None;
         for &oid in commits {
             let commit = load_commit(repo, oid)?;
@@ -501,7 +499,7 @@ impl MarkerTarget {
         oldest: ObjectId,
         index: &RangeSubjectIndex,
         selected: &HashSet<ObjectId>,
-    ) -> Result<Self, HistoryError> {
+    ) -> crate::error::Result<Self> {
         if let Some(oid) = index.lookup(label) {
             if !selected.contains(&oid) {
                 return Ok(Self::Outside {
@@ -542,7 +540,7 @@ impl MarkerTarget {
                 label: label.to_owned(),
             });
         }
-        Err(HistoryError::MarkerTargetOutsideRange { commit: marker_oid })
+        Err(HistoryError::MarkerTargetOutsideRange { commit: marker_oid }.into())
     }
 }
 
@@ -554,7 +552,7 @@ fn apply_fixup_markers_in_range(
     index: &RangeSubjectIndex,
     selected: &HashSet<ObjectId>,
     policy: &SquashMessage,
-) -> Result<String, HistoryError> {
+) -> crate::error::Result<String> {
     let outside_policy =
         OutsideTargetMarkerPolicy::compute(repo, commits, oldest, index, selected)?;
     let mut draft = OldestMessageDraft::from_oldest_commit(oldest_message);
@@ -568,7 +566,7 @@ fn apply_fixup_markers_in_range(
             MarkerTarget::resolve(repo, &marker.target_label, oid, oldest, index, selected)?;
         if let MarkerTarget::Outside { ref label } = target {
             if !outside_policy.allows_outside_label(label) {
-                return Err(HistoryError::MarkerTargetOutsideRange { commit: oid });
+                return Err(HistoryError::MarkerTargetOutsideRange { commit: oid }.into());
             }
         }
         match marker.kind {
@@ -595,7 +593,7 @@ fn choose_squash_message(
     repo: &Repository,
     resolved: &ResolvedSquashRange,
     opts: &SquashOptions,
-) -> Result<String, HistoryError> {
+) -> crate::error::Result<String> {
     match &opts.message {
         SquashMessage::Oldest => normalize_rewrite_message(&resolved.oldest_message),
         SquashMessage::Combine => {
@@ -609,7 +607,7 @@ fn choose_squash_message(
 fn build_combined_squash_message(
     repo: &Repository,
     commits: &[ObjectId],
-) -> Result<String, HistoryError> {
+) -> crate::error::Result<String> {
     let mut buf = String::new();
     let nr = commits.len();
     buf.push_str(&format!("# This is a combination of {nr} commits.\n"));

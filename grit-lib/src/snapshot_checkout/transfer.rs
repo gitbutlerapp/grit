@@ -24,7 +24,7 @@ impl CheckoutMarker {
     ///
     /// # Errors
     ///
-    /// [`CheckoutError::Remote`] for a URL no transport handles.
+    /// [`RemoteError`](crate::remote::RemoteError) for a URL no transport handles.
     pub fn remote(&self) -> Result<Remote> {
         let mut remote = Remote::from_url(&self.url)?;
         remote.fetch_refspecs = vec![snapshot_fetch_refspec(&self.id, &self.branch)];
@@ -51,14 +51,14 @@ pub(crate) fn push_for_checkin(
             ..Default::default()
         })
         .collect();
-    Ok(marker.remote()?.push(
+    marker.remote()?.push(
         repo,
         &specs,
         PushOptions::default(),
         progress,
         cancel,
         http_factory,
-    )?)
+    )
 }
 
 /// What [`fetch_snapshot`] did.
@@ -144,7 +144,8 @@ pub(crate) fn fetch_snapshot(
                 got: got
                     .map(|g| g.to_hex())
                     .unwrap_or_else(|| "nothing".to_owned()),
-            });
+            }
+            .into());
         }
     }
     let updated = CheckoutMarker {
@@ -178,10 +179,10 @@ pub(crate) fn fetch_branch(
         detail,
     };
     if !valid_branch_name(&info.name) || same_branch_name(&info.name, &marker.branch) {
-        return Err(protocol(format!(
+        return Err(crate::error::Error::from(protocol(format!(
             "the server answered with branch {:?}, which this checkout can't take",
             info.name
-        )));
+        ))));
     }
     let projected = ObjectId::from_hex(&info.projected).map_err(|e| {
         protocol(format!(
@@ -214,7 +215,8 @@ pub(crate) fn fetch_branch(
             got: got
                 .map(|g| g.to_hex())
                 .unwrap_or_else(|| "nothing".to_owned()),
-        });
+        }
+        .into());
     }
     Ok(transfer)
 }

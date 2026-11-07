@@ -3,6 +3,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::worktree::WorktreeError;
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
@@ -1208,7 +1209,9 @@ fn ignorecase_case_renamed_tracked_paths_are_not_ignored_like_git() {
     )
     .expect_err("build/t is under an ignored directory");
     match err {
-        grit_lib::error::Error::PathspecIgnored { paths } => assert_eq!(paths, ["build"]),
+        grit_lib::error::Error::Worktree(WorktreeError::PathspecIgnored { paths }) => {
+            assert_eq!(paths, ["build"])
+        }
         other => panic!("expected PathspecIgnored, got {other:?}"),
     }
     assert!(

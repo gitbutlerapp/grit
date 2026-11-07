@@ -4,6 +4,7 @@ use crate::command_runner::{
     run_sh_dash_c, CommandOutput, CommandRunner, CommandStdin, CommandStdio,
 };
 use crate::error::Error;
+use crate::error::RefError;
 use crate::merge_file::{ConflictStyle, MergeFavor};
 use crate::merge_trees::{merge_trees_three_way, DirectoryRenameMode, WhitespaceMergeOptions};
 use crate::objects::ObjectId;
@@ -21,6 +22,7 @@ use crate::refs::store::RefName;
 use crate::refs::{update_direct_ref_on_store, write_symbolic_ref_on_store};
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
+use crate::worktree::WorktreeError;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -103,7 +105,7 @@ struct ExecDetachedSession<'a> {
 }
 
 impl ExecDetachedSession<'_> {
-    fn restore(&mut self) -> Result<(), HistoryError> {
+    fn restore(&mut self) -> crate::error::Result<()> {
         if !self.active {
             return Ok(());
         }
@@ -113,7 +115,7 @@ impl ExecDetachedSession<'_> {
 
     /// Restore the saved `HEAD`, index, and tracked files, then drop only untracked
     /// paths that appeared after the per-command snapshot taken before the failing run.
-    fn restore_after_failed_command(&mut self) -> Result<(), HistoryError> {
+    fn restore_after_failed_command(&mut self) -> crate::error::Result<()> {
         if !self.active {
             return Ok(());
         }
@@ -122,7 +124,7 @@ impl ExecDetachedSession<'_> {
         remove_untracked_created_during_exec(self.repo, &self.untracked_before_command)
     }
 
-    fn snapshot_untracked_before_command(&mut self) -> Result<(), HistoryError> {
+    fn snapshot_untracked_before_command(&mut self) -> crate::error::Result<()> {
         self.untracked_before_command = snapshot_untracked_paths(self.repo)?;
         Ok(())
     }
@@ -130,9 +132,9 @@ impl ExecDetachedSession<'_> {
 
 fn fail_exec_session(
     session: &mut ExecDetachedSession<'_>,
-    err: HistoryError,
+    err: crate::error::Error,
     preserve_grit_rebase: bool,
-) -> HistoryError {
+) -> crate::error::Error {
     match session.restore_after_failed_command() {
         Ok(()) => {
             if !preserve_grit_rebase {
@@ -186,7 +188,7 @@ impl ExecRewrites {
         plan: &mut RewritePlan,
         row: usize,
         opts: &RewriteOptions,
-    ) -> Result<(), HistoryError> {
+    ) -> crate::error::Result<()> {
         let Some(planned) = self.planned[row] else {
             return Ok(());
         };
@@ -241,7 +243,7 @@ impl ExecRewrites {
     }
 
     /// Point ref updates and the `HEAD` effect at the rewritten commits.
-    fn finish(&self, repo: &Repository, plan: &mut RewritePlan) -> Result<(), HistoryError> {
+    fn finish(&self, repo: &Repository, plan: &mut RewritePlan) -> crate::error::Result<()> {
         if self.remap.is_empty() {
             return Ok(());
         }
@@ -287,7 +289,7 @@ fn set_row_replacement(
     repo: &Repository,
     row: &mut super::RewrittenCommit,
     commit: ObjectId,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     let data = repo.odb().read_commit(&commit)?;
     row.new = Some(commit);
     row.change_id = crate::change_id::logical_change_id_for_commit(repo, commit)?;
@@ -302,7 +304,7 @@ fn classify_head_move(
     repo: &Repository,
     tip: ObjectId,
     head: ObjectId,
-) -> Result<Option<HeadMove>, HistoryError> {
+) -> crate::error::Result<Option<HeadMove>> {
     let base = commit_parents(repo, tip)?.first().copied();
     let mut current = head;
     loop {
@@ -370,7 +372,7 @@ pub fn verify_rebase_with_exec(
     spec: &ExecSpec,
     rewrite: &RewriteOptions,
     runner: &dyn CommandRunner,
-) -> Result<ExecReport, HistoryError> {
+) -> crate::error::Result<ExecReport> {
     verify_rebase_with_exec_inner(
         repo,
         plan,
@@ -392,7 +394,7 @@ pub(super) fn verify_rebase_with_exec_resume(
     spec: &ExecSpec,
     rewrite: &RewriteOptions,
     runner: &dyn CommandRunner,
-) -> Result<ExecReport, HistoryError> {
+) -> crate::error::Result<ExecReport> {
     verify_rebase_with_exec_inner(
         repo,
         plan,
@@ -424,12 +426,12 @@ fn verify_rebase_with_exec_inner(
     rewrite: &RewriteOptions,
     runner: &dyn CommandRunner,
     options: ExecVerifyOptions,
-) -> Result<ExecReport, HistoryError> {
+) -> crate::error::Result<ExecReport> {
     if spec.commands.is_empty() {
         return Ok(ExecReport::default());
     }
     if repo.is_bare() {
-        return Err(HistoryError::BareRepository);
+        return Err(HistoryError::BareRepository.into());
     }
     let merge = repo.git_dir().join("rebase-merge");
     if repo.git_dir().join("rebase-apply").exists()
@@ -482,7 +484,7 @@ pub(super) fn run_exec_at_tip(
     spec: &ExecSpec,
     runner: &dyn CommandRunner,
     tip: ObjectId,
-) -> Result<(ObjectId, Vec<ExecRunRecord>), HistoryError> {
+) -> crate::error::Result<(ObjectId, Vec<ExecRunRecord>)> {
     if spec.commands.is_empty() {
         return Ok((tip, Vec::new()));
     }
@@ -532,7 +534,11 @@ pub(super) fn run_exec_at_tip(
                 stderr,
                 completed_runs,
             };
-            return Err(fail_exec_session(&mut session, exec_err, true));
+            return Err(fail_exec_session(
+                &mut session,
+                crate::error::Error::from(exec_err),
+                true,
+            ));
         }
         let head = exec_head(repo, tip)?;
         if head != tip {
@@ -554,12 +560,14 @@ pub(super) fn run_exec_at_tip(
         });
         if let Err(err) = clean {
             return Err(match err {
-                Error::DirtyWorktree { paths, .. } => HistoryError::ExecDirty {
-                    commit: tip,
-                    command: command.clone(),
-                    paths,
-                    runs,
-                },
+                Error::Worktree(WorktreeError::DirtyWorktree { paths, .. }) => {
+                    crate::error::Error::from(HistoryError::ExecDirty {
+                        commit: tip,
+                        command: command.clone(),
+                        paths,
+                        runs,
+                    })
+                }
                 other => exec_io(other),
             });
         }
@@ -568,13 +576,14 @@ pub(super) fn run_exec_at_tip(
 }
 
 /// Read the detached `HEAD` a successful command left behind.
-fn exec_head(repo: &Repository, tip: ObjectId) -> Result<ObjectId, HistoryError> {
+fn exec_head(repo: &Repository, tip: ObjectId) -> crate::error::Result<ObjectId> {
     match resolve_head_for_repository(repo).map_err(exec_io)? {
         HeadState::Detached { oid } => Ok(oid),
         other => Err(HistoryError::ExecHeadMoved {
             commit: tip,
             head: other.oid().copied(),
-        }),
+        }
+        .into()),
     }
 }
 
@@ -589,7 +598,7 @@ fn execute_plan(
     start: ExecCursor,
     clear_state_on_success: bool,
     preserve_grit_rebase: bool,
-) -> Result<ExecReport, HistoryError> {
+) -> crate::error::Result<ExecReport> {
     let repo = session.repo;
     let mut runs = Vec::new();
     let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
@@ -597,7 +606,7 @@ fn execute_plan(
         session.active = true;
         if let Err(err) = rewrites.replay_row(repo, plan, row, rewrite) {
             return Err(match err {
-                HistoryError::Conflict { conflicts, .. }
+                crate::error::Error::History(HistoryError::Conflict { conflicts, .. })
                     if rewrites.replays_single_parent(repo, row) =>
                 {
                     stop_on_replay_conflict(
@@ -697,9 +706,17 @@ fn execute_plan(
                     completed_runs,
                 };
                 if signaled {
-                    return Err(fail_exec_session(session, exec_err, preserve_grit_rebase));
+                    return Err(fail_exec_session(
+                        session,
+                        crate::error::Error::from(exec_err),
+                        preserve_grit_rebase,
+                    ));
                 }
-                return Err(fail_exec_session(session, exec_err, preserve_grit_rebase));
+                return Err(fail_exec_session(
+                    session,
+                    crate::error::Error::from(exec_err),
+                    preserve_grit_rebase,
+                ));
             }
             match adopt_exec_head(repo, plan, rewrites, row, tip) {
                 Ok(Some(head)) => {
@@ -752,12 +769,14 @@ fn execute_plan(
                     },
                 )?;
                 return Err(match err {
-                    Error::DirtyWorktree { paths, .. } => HistoryError::ExecDirty {
-                        commit: tip,
-                        command: command.clone(),
-                        paths,
-                        runs,
-                    },
+                    Error::Worktree(WorktreeError::DirtyWorktree { paths, .. }) => {
+                        crate::error::Error::from(HistoryError::ExecDirty {
+                            commit: tip,
+                            command: command.clone(),
+                            paths,
+                            runs,
+                        })
+                    }
                     other => exec_io(other),
                 });
             }
@@ -797,7 +816,7 @@ fn adopt_exec_head(
     rewrites: &mut ExecRewrites,
     row: usize,
     tip: ObjectId,
-) -> Result<Option<ObjectId>, HistoryError> {
+) -> crate::error::Result<Option<ObjectId>> {
     let head = exec_head(repo, tip)?;
     if head == tip {
         return Ok(None);
@@ -814,7 +833,8 @@ fn adopt_exec_head(
             return Err(HistoryError::ExecHeadMoved {
                 commit: tip,
                 head: Some(head),
-            })
+            }
+            .into())
         }
     }
     rewrites.set_tip(row, head);
@@ -835,9 +855,9 @@ fn stop_on_replay_conflict(
     conflicts: Vec<crate::operation::Conflict>,
     runs: Vec<ExecRunRecord>,
     preserve_grit_rebase: bool,
-) -> HistoryError {
+) -> crate::error::Error {
     let repo = session.repo;
-    let mut checkout = || -> Result<ObjectId, HistoryError> {
+    let mut checkout = || -> crate::error::Result<ObjectId> {
         let planned = rewrites.planned[row].ok_or_else(|| exec_io("invalid exec replay row"))?;
         let data = repo.odb().read_commit(&planned)?;
         let old_parent = *data
@@ -897,22 +917,22 @@ fn stop_on_replay_conflict(
         return fail_exec_session(session, err, preserve_grit_rebase);
     }
     session.active = false;
-    HistoryError::ExecConflict {
+    crate::error::Error::from(HistoryError::ExecConflict {
         commit: plan.commits[row].old,
         conflicts: Box::new(conflicts),
         runs,
-    }
+    })
 }
 
 fn checkout_exec_tree_transition(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     match verify_tree_transition_allow_local(repo, from_tree, to_tree) {
         Ok(()) => {}
         Err(TreeTransitionVerifyError::WouldOverwrite(paths)) => {
-            return Err(HistoryError::LocalChangesWouldBeOverwritten { paths });
+            return Err(HistoryError::LocalChangesWouldBeOverwritten { paths }.into());
         }
         Err(TreeTransitionVerifyError::Failed(err)) => {
             return Err(worktree_apply_engine(err));
@@ -925,7 +945,7 @@ fn run_exec_command(
     runner: &dyn CommandRunner,
     command: &str,
     worktree: &Path,
-) -> Result<CommandOutput, HistoryError> {
+) -> crate::error::Result<CommandOutput> {
     run_sh_dash_c(
         runner,
         command,
@@ -936,14 +956,16 @@ fn run_exec_command(
     .map_err(worktree_apply_io)
 }
 
-fn map_clean_error(err: crate::error::Error) -> HistoryError {
+fn map_clean_error(err: crate::error::Error) -> crate::error::Error {
     match err {
-        crate::error::Error::DirtyWorktree { .. } => HistoryError::UncommittedChanges,
+        crate::error::Error::Worktree(WorktreeError::DirtyWorktree { .. }) => {
+            crate::error::Error::from(HistoryError::UncommittedChanges)
+        }
         other => worktree_apply_engine(other),
     }
 }
 
-fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError> {
+fn capture_exec_prestate(repo: &Repository) -> crate::error::Result<ExecPrestate> {
     let head_state = resolve_head_for_repository(repo).map_err(worktree_apply_engine)?;
     // The clean check ran against this same HEAD, so the saved HEAD and the tree restored
     // afterwards must come from this one read; mixing sources restores a HEAD that does
@@ -955,7 +977,7 @@ fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError
             ..
         } => (SavedHead::Symbolic(RefName::from_trusted(refname)), oid),
         HeadState::Detached { oid } => (SavedHead::Detached(oid), oid),
-        HeadState::Branch { oid: None, .. } => return Err(Error::UnbornHead.into()),
+        HeadState::Branch { oid: None, .. } => return Err(Error::Ref(RefError::UnbornHead)),
         HeadState::Invalid => {
             return Err(worktree_apply_str("HEAD is in an unknown state"));
         }
@@ -972,7 +994,7 @@ fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError
     })
 }
 
-fn snapshot_untracked_paths(repo: &Repository) -> Result<HashSet<String>, HistoryError> {
+fn snapshot_untracked_paths(repo: &Repository) -> crate::error::Result<HashSet<String>> {
     use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
     let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
     let mut index = repo.load_index().map_err(exec_io)?;
@@ -985,7 +1007,7 @@ fn snapshot_untracked_paths(repo: &Repository) -> Result<HashSet<String>, Histor
 fn remove_untracked_created_during_exec(
     repo: &Repository,
     baseline: &HashSet<String>,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
     let current = snapshot_untracked_paths(repo)?;
     for path in current {
@@ -1006,13 +1028,14 @@ fn restore_exec_prestate(
     repo: &Repository,
     pre: &ExecPrestate,
     current_tree: ObjectId,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     match &pre.head {
         SavedHead::Symbolic(refname) => {
             if repo.resolve_ref_oid(refname.as_str())? != pre.head_commit {
                 return Err(HistoryError::RefCasMismatch {
                     name: refname.as_str().to_owned(),
-                });
+                }
+                .into());
             }
             write_symbolic_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", refname.as_str())
                 .map_err(worktree_apply_engine)?;
@@ -1070,7 +1093,7 @@ struct StoredExec {
     untracked_paths: Vec<String>,
 }
 
-fn exec_io(err: impl std::fmt::Display) -> HistoryError {
+fn exec_io(err: impl std::fmt::Display) -> crate::error::Error {
     worktree_apply_str(err.to_string())
 }
 
@@ -1083,7 +1106,7 @@ fn store_exec_stop(
     spec: &ExecSpec,
     rewrite: &RewriteOptions,
     stop: ExecStop,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     use std::io::Write;
     let pre = session.prestate;
     let state = StoredExec {
@@ -1126,7 +1149,7 @@ fn store_exec_stop(
         untracked_paths: pre.untracked_paths.iter().cloned().collect(),
     };
     let dir = session.repo.git_dir().join("rebase-merge");
-    let write = || -> Result<(), HistoryError> {
+    let write = || -> crate::error::Result<()> {
         fs::create_dir_all(&dir).map_err(exec_io)?;
         let mut lock = crate::lockfile::LockFile::acquire(
             &dir.join("grit-exec.lock"),
@@ -1151,14 +1174,14 @@ fn store_exec_stop(
     })
 }
 
-fn load_exec_stop(repo: &Repository) -> Result<StoredExec, HistoryError> {
+fn load_exec_stop(repo: &Repository) -> crate::error::Result<StoredExec> {
     serde_json::from_slice(
         &fs::read(repo.git_dir().join("rebase-merge/grit-exec")).map_err(exec_io)?,
     )
     .map_err(exec_io)
 }
 
-fn stored_prestate(state: &StoredExec) -> Result<ExecPrestate, HistoryError> {
+fn stored_prestate(state: &StoredExec) -> crate::error::Result<ExecPrestate> {
     let head_commit = ObjectId::from_hex(&state.original_head)?;
     Ok(ExecPrestate {
         head: state
@@ -1178,7 +1201,7 @@ fn stored_plan(
     repo: &Repository,
     state: &StoredExec,
     prestate: &ExecPrestate,
-) -> Result<RewritePlan, HistoryError> {
+) -> crate::error::Result<RewritePlan> {
     use super::{HeadEffect, PlannedRefUpdate, RewrittenCommit};
     let parse_opt = |hex: &Option<String>| hex.as_deref().map(ObjectId::from_hex).transpose();
     Ok(RewritePlan {
@@ -1200,7 +1223,7 @@ fn stored_plan(
                     reused: *reused,
                 })
             })
-            .collect::<Result<_, HistoryError>>()?,
+            .collect::<crate::error::Result<_>>()?,
         ref_updates: state
             .refs
             .iter()
@@ -1211,7 +1234,7 @@ fn stored_plan(
                     new: ObjectId::from_hex(new)?,
                 })
             })
-            .collect::<Result<_, HistoryError>>()?,
+            .collect::<crate::error::Result<_>>()?,
         head: HeadEffect {
             commit_changes: state.commit_changes,
             old_commit: Some(prestate.head_commit),
@@ -1223,7 +1246,7 @@ fn stored_plan(
     })
 }
 
-fn stored_rewrites(state: &StoredExec) -> Result<ExecRewrites, HistoryError> {
+fn stored_rewrites(state: &StoredExec) -> crate::error::Result<ExecRewrites> {
     Ok(ExecRewrites {
         planned: state
             .planned
@@ -1234,7 +1257,7 @@ fn stored_rewrites(state: &StoredExec) -> Result<ExecRewrites, HistoryError> {
             .remap
             .iter()
             .map(|(k, v)| Ok((ObjectId::from_hex(k)?, ObjectId::from_hex(v)?)))
-            .collect::<Result<_, HistoryError>>()?,
+            .collect::<crate::error::Result<_>>()?,
     })
 }
 
@@ -1248,17 +1271,17 @@ pub(super) fn resume_exec_rebase(
     skip: bool,
     progress: &mut dyn crate::progress::ProgressSink,
     cancel: &crate::progress::CancelToken,
-) -> Result<super::RebaseOutcome, super::RebaseSessionError> {
+) -> crate::error::Result<super::RebaseOutcome> {
     let state = load_exec_stop(repo)?;
     let rewrite = &state.rewrite;
     let prestate = stored_prestate(&state)?;
     let mut plan = stored_plan(repo, &state, &prestate)?;
     let mut rewrites = stored_rewrites(&state)?;
     if rewrites.planned.len() != plan.commits.len() || state.row >= plan.commits.len() {
-        return Err(exec_io("invalid exec replay position").into());
+        return Err(exec_io("invalid exec replay position"));
     }
     ensure_exec_plan_current(repo, &prestate, &plan)?;
-    let expected = ObjectId::from_hex(&state.head).map_err(HistoryError::from)?;
+    let expected = ObjectId::from_hex(&state.head)?;
     let head = resolve_head_for_repository(repo).map_err(exec_io)?;
     if head != (HeadState::Detached { oid: expected }) {
         let still_on_branch = match &prestate.head {
@@ -1270,10 +1293,11 @@ pub(super) fn resume_exec_rebase(
             repo.odb().flush_for_publish().map_err(exec_io)?;
             update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &expected)
                 .map_err(exec_io)?;
-            checkout_exec_tree_transition(repo, None, &tip_tree)
-                .map_err(super::RebaseSessionError::History)?;
+            checkout_exec_tree_transition(repo, None, &tip_tree)?;
         } else {
-            return Err(super::RebaseSessionError::ExecHeadChanged { expected });
+            return Err(crate::error::Error::from(
+                super::RebaseSessionError::ExecHeadChanged { expected },
+            ));
         }
     }
     let row = state.row;
@@ -1297,7 +1321,9 @@ pub(super) fn resume_exec_rebase(
         } else {
             let mut index = repo.load_index()?;
             if index.has_unmerged_entries() {
-                return Err(super::RebaseSessionError::UnmergedPaths);
+                return Err(crate::error::Error::from(
+                    super::RebaseSessionError::UnmergedPaths,
+                ));
             }
             let tree = crate::write_tree::write_tree_update_index(
                 repo.odb(),
@@ -1306,7 +1332,9 @@ pub(super) fn resume_exec_rebase(
                 crate::write_tree::WriteTreeFlags::silent(),
             )?;
             if tree == commit_tree_for_apply(repo, expected)? {
-                return Err(super::RebaseSessionError::NothingToCommit);
+                return Err(crate::error::Error::from(
+                    super::RebaseSessionError::NothingToCommit,
+                ));
             }
             let resolved = write_resolved_replay(repo, planned, tree, expected, rewrite)?;
             set_row_replacement(repo, &mut plan.commits[row], resolved)?;
@@ -1323,19 +1351,21 @@ pub(super) fn resume_exec_rebase(
     } else {
         if let Err(err) = ensure_worktree_clean_for_rebase_exec(repo) {
             return Err(match err {
-                Error::DirtyWorktree { paths, .. } => HistoryError::ExecDirty {
-                    commit: expected,
-                    command: state
-                        .commands
-                        .get(state.next_command.saturating_sub(1))
-                        .cloned()
-                        .ok_or_else(|| exec_io("invalid exec command position"))?,
-                    paths,
-                    runs: Vec::new(),
-                },
+                Error::Worktree(WorktreeError::DirtyWorktree { paths, .. }) => {
+                    HistoryError::ExecDirty {
+                        commit: expected,
+                        command: state
+                            .commands
+                            .get(state.next_command.saturating_sub(1))
+                            .cloned()
+                            .ok_or_else(|| exec_io("invalid exec command position"))?,
+                        paths,
+                        runs: Vec::new(),
+                    }
+                    .into()
+                }
                 other => exec_io(other),
-            }
-            .into());
+            });
         }
         let command = if skip {
             state.commands.len()
@@ -1376,15 +1406,15 @@ pub(super) fn resume_exec_rebase(
         // These errors are returned only after a successful rollback. The saved stop
         // no longer describes HEAD, so finish cancelling that session too.
         Err(
-            err @ (HistoryError::ExecFailed { .. }
-            | HistoryError::ExecHeadMoved { .. }
-            | HistoryError::Conflict { .. }
-            | HistoryError::BecameEmpty { .. }),
+            err @ (crate::error::Error::History(HistoryError::ExecFailed { .. })
+            | crate::error::Error::History(HistoryError::ExecHeadMoved { .. })
+            | crate::error::Error::History(HistoryError::Conflict { .. })
+            | crate::error::Error::History(HistoryError::BecameEmpty { .. })),
         ) => {
             super::rebase_session::clear_rebase_state(repo.git_dir())?;
-            return Err(err.into());
+            return Err(err);
         }
-        Err(err) => return Err(err.into()),
+        Err(err) => return Err(err),
     };
     // Restore the exact pre-exec HEAD/index before applying the updated atomic plan.
     // Keep the stop state until apply succeeds, so ref failures remain recoverable.
@@ -1403,7 +1433,7 @@ fn ensure_exec_plan_current(
     repo: &Repository,
     prestate: &ExecPrestate,
     plan: &RewritePlan,
-) -> Result<(), super::RebaseSessionError> {
+) -> crate::error::Result<()> {
     let branch = match &prestate.head {
         SavedHead::Symbolic(name) => Some((name.as_str(), prestate.head_commit)),
         SavedHead::Detached(_) => None,
@@ -1416,11 +1446,13 @@ fn ensure_exec_plan_current(
     for (name, expected) in branch.into_iter().chain(planned) {
         let actual = repo.references().resolve_if_exists(name)?;
         if actual != Some(expected) {
-            return Err(super::RebaseSessionError::StaleExecPlan {
-                name: name.to_owned(),
-                expected,
-                actual,
-            });
+            return Err(crate::error::Error::from(
+                super::RebaseSessionError::StaleExecPlan {
+                    name: name.to_owned(),
+                    expected,
+                    actual,
+                },
+            ));
         }
     }
     Ok(())
@@ -1432,7 +1464,7 @@ fn reset_moved_exec_branch(
     repo: &Repository,
     prestate: &ExecPrestate,
     identity: &crate::ident::Signature,
-) -> Result<Option<super::PlannedRefUpdate>, super::RebaseSessionError> {
+) -> crate::error::Result<Option<super::PlannedRefUpdate>> {
     use crate::refs::store::{Expected, RawRef, RefStoreError, RefUpdate, RefUpdateFlags};
     let SavedHead::Symbolic(name) = &prestate.head else {
         return Ok(None);
@@ -1464,19 +1496,19 @@ fn reset_moved_exec_branch(
             old,
             new: prestate.head_commit,
         })),
-        Err(Error::RefStore(RefStoreError::ExpectedMismatch { .. })) => {
-            Err(super::RebaseSessionError::AbortRefMoved {
+        Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))) => Err(
+            crate::error::Error::from(super::RebaseSessionError::AbortRefMoved {
                 name: name.as_str().to_owned(),
-            })
-        }
-        Err(err) => Err(err.into()),
+            }),
+        ),
+        Err(err) => Err(err),
     }
 }
 
 pub(super) fn abort_exec_rebase(
     repo: &Repository,
     identity: &crate::ident::Signature,
-) -> Result<super::RebaseAbort, super::RebaseSessionError> {
+) -> crate::error::Result<super::RebaseAbort> {
     let state = load_exec_stop(repo)?;
     let prestate = stored_prestate(&state)?;
     let head = resolve_head_for_repository(repo).map_err(exec_io)?;
@@ -1487,8 +1519,10 @@ pub(super) fn abort_exec_rebase(
     let current_tree = commit_tree_for_apply(repo, current)?;
     let overwritten = reset_moved_exec_branch(repo, &prestate, identity)?;
     restore_exec_prestate(repo, &prestate, current_tree).map_err(|err| match err {
-        HistoryError::RefCasMismatch { name } => super::RebaseSessionError::AbortRefMoved { name },
-        other => other.into(),
+        crate::error::Error::History(HistoryError::RefCasMismatch { name }) => {
+            super::RebaseSessionError::AbortRefMoved { name }.into()
+        }
+        other => other,
     })?;
     if matches!(prestate.head, SavedHead::Symbolic(_)) {
         super::apply::log_head_oid_move(
@@ -1873,9 +1907,9 @@ mod tests {
             verify_rebase_with_exec(&repo, &mut plan, &spec, &test_rewrite(), runner.as_ref())
                 .expect_err("fail");
         match err {
-            HistoryError::ExecFailed {
+            crate::error::Error::History(HistoryError::ExecFailed {
                 commit, exit_code, ..
-            } => {
+            }) => {
                 assert_eq!(commit, rewritten[1]);
                 assert_eq!(exit_code, 9);
             }
@@ -1923,7 +1957,10 @@ mod tests {
             runner.as_ref(),
         )
         .expect_err("spawn error");
-        assert!(matches!(err, HistoryError::WorktreeApply { .. }));
+        assert!(matches!(
+            err,
+            crate::error::Error::History(HistoryError::WorktreeApply { .. })
+        ));
         assert_eq!(
             resolve_ref(repo.git_dir(), "HEAD").expect("head"),
             head_before
@@ -1979,7 +2016,7 @@ mod tests {
         .expect_err("must not clobber untracked");
         assert!(matches!(
             err,
-            HistoryError::LocalChangesWouldBeOverwritten { .. }
+            crate::error::Error::History(HistoryError::LocalChangesWouldBeOverwritten { .. })
         ));
         assert_eq!(
             fs::read(&collision).expect("untracked survives"),
@@ -2008,7 +2045,9 @@ mod tests {
             verify_rebase_with_exec(&repo, &mut plan, &spec, &test_rewrite(), runner.as_ref())
                 .expect_err("exec fail");
         match err {
-            HistoryError::ExecFailed { exit_code, .. } => assert_eq!(exit_code, 7),
+            crate::error::Error::History(HistoryError::ExecFailed { exit_code, .. }) => {
+                assert_eq!(exit_code, 7)
+            }
             other => panic!("unexpected {other:?}"),
         }
         assert_eq!(
@@ -2086,7 +2125,9 @@ mod tests {
             &runner,
         )
         .expect_err("racy edit");
-        assert!(matches!(err, HistoryError::ExecDirty { paths, .. } if paths == ["a.txt"]));
+        assert!(
+            matches!(err, crate::error::Error::History(HistoryError::ExecDirty { paths, .. }) if paths == ["a.txt"])
+        );
         assert_eq!(
             fs::read(repo.work_tree().expect("wt").join("a.txt")).expect("edit"),
             b"X\n"
@@ -2266,6 +2307,9 @@ mod tests {
             runner.as_ref(),
         )
         .expect_err("dirty");
-        assert!(matches!(err, HistoryError::UncommittedChanges));
+        assert!(matches!(
+            err,
+            crate::error::Error::History(HistoryError::UncommittedChanges)
+        ));
     }
 }

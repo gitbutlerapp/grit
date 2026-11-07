@@ -1,6 +1,7 @@
 //! Targeted rev-parse coverage for index DWIM, diagnose helpers, and conflict stages.
 
 use crate::support;
+use grit_lib::error::RevisionError;
 
 use std::fs;
 use std::path::Path;
@@ -34,7 +35,7 @@ fn expect_rev_parse_variant(repo: &Repository, spec: &str, pred: fn(&RevParseErr
                 .with_purpose(grit_lib::revwalk::ResolvePurpose::RangeEnd),
         )
         .expect_err(spec);
-    let Error::RevParse(inner) = err else {
+    let Error::Revision(RevisionError::Parse(inner)) = err else {
         panic!("{spec}: expected RevParse error, got {err}");
     };
     assert!(pred(&inner), "{spec}: unexpected variant {inner:?}");

@@ -5,6 +5,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::{serialize_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
+use grit_lib::porcelain::tag::TagError;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::tree_sha256::{
     path_matches_glob, tree_sha256, MissingSubmoduleReason, TreeSha256, TreeSha256Options,
@@ -209,7 +210,7 @@ fn missing_submodules_all_listed() {
         .unwrap();
     let err = tree_sha256(&repo, head, &TreeSha256Options::default()).unwrap_err();
     match err {
-        Error::TreeSha256MissingSubmodules(list) => {
+        Error::Tag(TagError::TreeSha256MissingSubmodules { submodules: list }) => {
             assert_eq!(list.len(), 2);
             let paths: Vec<_> = list.iter().map(|m| m.path.as_str()).collect();
             assert!(paths.contains(&"missing-a"));
@@ -553,7 +554,7 @@ fn gitlink_commit_in_super_odb_still_requires_checkout() {
         .unwrap();
     let err = tree_sha256(&repo, head, &TreeSha256Options::default()).unwrap_err();
     match err {
-        Error::TreeSha256MissingSubmodules(list) => {
+        Error::Tag(TagError::TreeSha256MissingSubmodules { submodules: list }) => {
             assert_eq!(list.len(), 1);
             assert_eq!(list[0].path, "module");
             assert_eq!(list[0].reason, MissingSubmoduleReason::NotCheckedOut);
@@ -839,7 +840,7 @@ fn deep_nested_submodule_missing_paths_are_qualified() {
     let head: ObjectId = git(&root, &["rev-parse", "HEAD"]).trim().parse().unwrap();
     let err = tree_sha256(&repo, head, &TreeSha256Options::default()).unwrap_err();
     match err {
-        Error::TreeSha256MissingSubmodules(list) => {
+        Error::Tag(TagError::TreeSha256MissingSubmodules { submodules: list }) => {
             assert_eq!(list.len(), 1);
             assert_eq!(list[0].path, "inner/mid/leaf");
             assert_eq!(list[0].reason, MissingSubmoduleReason::NotCheckedOut);

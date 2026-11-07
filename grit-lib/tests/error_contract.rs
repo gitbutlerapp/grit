@@ -15,13 +15,8 @@ use grit_lib::index::IndexError;
 use grit_lib::porcelain::CommitError;
 use grit_lib::remote::RemoteError;
 
-/// Slugs emitted by [`Error::kind_name`], in source order, with [`Index`], [`RepositoryError`],
-/// and [`RemoteError`] delegated kinds expanded (duplicates from delegation appear once at their
-/// first occurrence).
-///
-/// [`Index`]: grit_lib::index::IndexError
-/// [`RepositoryError`]: grit_lib::error::RepositoryError
-/// [`RemoteError`]: grit_lib::remote::RemoteError
+/// Slugs [`Error::kind_name`] emitted before the umbrella collapsed to one variant per area.
+/// Each must still be emitted by some area's `kind_name` table.
 const EXPECTED_KIND_NAMES: &[&str] = &[
     "not_a_repository",
     "forbidden_bare_repository",
@@ -211,52 +206,136 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "blame_ignore_revs_file_invalid_rev",
 ];
 
-/// Size of [`Error`] when the error-contract step landed (area enums must stay ≤ this until step 12).
+/// Slugs emitted by the area enums' `kind_name` tables beyond [`EXPECTED_KIND_NAMES`], sorted.
+///
+/// Every umbrella variant delegates [`Error::kind_name`] to its area enum, so these tables are
+/// part of the stable contract too. Add new slugs here; never rename or remove one.
+const AREA_KIND_NAMES: &[&str] = &[
+    "bitmap_walk",
+    "blame_copy_level_too_high",
+    "bundle",
+    "clone",
+    "corrupt_stash",
+    "diff_arguments",
+    "funcname_pattern",
+    "head_not_detached",
+    "head_not_on_branch",
+    "index_fsmonitor_hook_empty_token",
+    "index_fsmonitor_hook_failed",
+    "invalid_reflog_expiry",
+    "move_rollback_incomplete",
+    "multiple_merge_bases",
+    "no_index",
+    "no_merge_base",
+    "non_utf8_path",
+    "pickaxe",
+    "promisor_fetch_too_deep",
+    "pull",
+    "ref_lock_released",
+    "ref_query_needs_object_database",
+    "ref_query_target_not_commit",
+    "remove_contains_current_directory",
+    "resolve",
+    "restore_paths_required",
+    "restore_stage_with_remerge",
+    "serve",
+    "snapshot",
+    "stash_bare_repository",
+    "stash_commit_not_on_stack",
+    "stash_could_not_restore_untracked",
+    "stash_index_conflict",
+    "stash_index_write",
+    "stash_missing_head",
+    "stash_no_initial_commit",
+    "stash_not_found",
+    "stash_option_conflict",
+    "stash_symlink_not_utf8",
+    "stash_worktree_update_failed",
+    "stash_would_overwrite_local_changes",
+    "textconv_failed",
+    "textconv_spawn",
+];
+
+/// Size of [`Error`] when the error-contract step landed; area enums must keep it at or below.
 const ERROR_SIZE_CEILING: usize = 112;
 
-fn extract_kind_name_match_body<'a>(src: &'a str, impl_anchor: &str) -> &'a str {
-    let idx = src
-        .find(impl_anchor)
-        .unwrap_or_else(|| panic!("{impl_anchor} not found"));
-    let sub = &src[idx..];
-    let fn_start = sub
-        .find("pub fn kind_name")
-        .unwrap_or_else(|| panic!("pub fn kind_name not found after {impl_anchor}"));
-    let sub = &sub[fn_start..];
-    let match_kw = "match self {";
-    let m_start = sub
-        .find(match_kw)
-        .unwrap_or_else(|| panic!("{match_kw} not found in kind_name"));
-    let after_open = m_start + match_kw.len();
-    let mut brace = 1usize;
-    let mut i = after_open;
-    while i < sub.len() && brace > 0 {
-        match sub.as_bytes()[i] {
-            b'{' => brace += 1,
-            b'}' => brace -= 1,
-            _ => {}
+/// Sources whose `kind_name` tables together produce every [`Error::kind_name`] slug.
+const KIND_NAME_SOURCES: &[(&str, &str)] = &[
+    ("error/mod.rs", include_str!("../src/error/mod.rs")),
+    ("error/object.rs", include_str!("../src/error/object.rs")),
+    ("error/refs.rs", include_str!("../src/error/refs.rs")),
+    (
+        "error/revision.rs",
+        include_str!("../src/error/revision.rs"),
+    ),
+    ("error/diff.rs", include_str!("../src/error/diff.rs")),
+    ("error/notes.rs", include_str!("../src/error/notes.rs")),
+    (
+        "repo/repository_error.rs",
+        include_str!("../src/repo/repository_error.rs"),
+    ),
+    ("index/error.rs", include_str!("../src/index/error.rs")),
+    (
+        "worktree/error.rs",
+        include_str!("../src/worktree/error.rs"),
+    ),
+    (
+        "porcelain/commit_error.rs",
+        include_str!("../src/porcelain/commit_error.rs"),
+    ),
+    (
+        "porcelain/merge_error.rs",
+        include_str!("../src/porcelain/merge_error.rs"),
+    ),
+    (
+        "porcelain/stash_error.rs",
+        include_str!("../src/porcelain/stash_error.rs"),
+    ),
+    (
+        "porcelain/branch_error.rs",
+        include_str!("../src/porcelain/branch_error.rs"),
+    ),
+    ("porcelain/tag.rs", include_str!("../src/porcelain/tag.rs")),
+    ("remote/error.rs", include_str!("../src/remote/error.rs")),
+];
+
+/// Bodies of every `pub fn kind_name(&self) -> &'static str` in `src`.
+fn kind_name_bodies(src: &str) -> Vec<&str> {
+    let signature = "pub fn kind_name(&self) -> &'static str {";
+    let mut bodies = Vec::new();
+    let mut rest = src;
+    while let Some(start) = rest.find(signature) {
+        let open = start + signature.len();
+        let mut depth = 1usize;
+        let mut end = open;
+        for (offset, byte) in rest.as_bytes()[open..].iter().enumerate() {
+            match byte {
+                b'{' => depth += 1,
+                b'}' => depth -= 1,
+                _ => {}
+            }
+            if depth == 0 {
+                end = open + offset;
+                break;
+            }
         }
-        i += 1;
+        assert_eq!(depth, 0, "unbalanced braces in kind_name");
+        bodies.push(&rest[open..end]);
+        rest = &rest[end..];
     }
-    assert_eq!(brace, 0, "unbalanced braces in kind_name match");
-    &sub[after_open..i - 1]
+    bodies
 }
 
-fn literal_slugs_from_kind_match(body: &str) -> Vec<String> {
+/// String literals a `kind_name` body returns (`=> "slug"` or `=> { "slug" }`).
+fn literal_slugs(body: &str) -> Vec<String> {
     let mut out = Vec::new();
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.contains("=>") && trimmed.contains("kind_name()") {
-            continue;
-        }
-        let value = if let Some(pos) = line.find("=> \"") {
-            &line[pos + 4..]
-        } else if trimmed.starts_with('"') {
-            trimmed
-        } else {
+    let mut rest = body;
+    while let Some(arrow) = rest.find("=>") {
+        rest = &rest[arrow + 2..];
+        let value = rest.trim_start().trim_start_matches('{').trim_start();
+        let Some(value) = value.strip_prefix('"') else {
             continue;
         };
-        let value = value.trim_start_matches('"');
         let Some(end) = value.find('"') else {
             continue;
         };
@@ -265,116 +344,81 @@ fn literal_slugs_from_kind_match(body: &str) -> Vec<String> {
     out
 }
 
-fn expanded_kind_name_slugs() -> Vec<String> {
-    let umbrella =
-        extract_kind_name_match_body(include_str!("../src/error/mod.rs"), "impl Error {");
-    let index_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
-        include_str!("../src/index/error.rs"),
-        "impl IndexError {",
-    ));
-    let commit_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
-        include_str!("../src/porcelain/commit_error.rs"),
-        "impl CommitError {",
-    ));
-    let merge_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
-        include_str!("../src/porcelain/merge_error.rs"),
-        "impl MergeError {",
-    ));
-    let repository_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
-        include_str!("../src/repo/repository_error.rs"),
-        "impl RepositoryError {",
-    ));
-    let remote_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
-        include_str!("../src/remote/error.rs"),
-        "impl RemoteError {",
-    ));
-
-    let mut expanded: Vec<String> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    for line in umbrella.lines() {
-        let trimmed = line.trim();
-        if !trimmed.contains("=>") {
-            continue;
-        }
-        if trimmed.contains("Self::Repository(") && trimmed.contains("kind_name()") {
-            for s in &repository_slugs {
-                if seen.insert(s.clone()) {
-                    expanded.push(s.clone());
-                }
-            }
-            continue;
-        }
-        if trimmed.contains("Self::Remote(") && trimmed.contains("kind_name()") {
-            for s in &remote_slugs {
-                if seen.insert(s.clone()) {
-                    expanded.push(s.clone());
-                }
-            }
-            continue;
-        }
-        if trimmed.contains("Self::Index(") && trimmed.contains("kind_name()") {
-            for s in &index_slugs {
-                if seen.insert(s.clone()) {
-                    expanded.push(s.clone());
-                }
-            }
-            continue;
-        }
-        if trimmed.contains("Self::Commit(") && trimmed.contains("kind_name()") {
-            for s in &commit_slugs {
-                if seen.insert(s.clone()) {
-                    expanded.push(s.clone());
-                }
-            }
-            continue;
-        }
-        if trimmed.contains("Self::Merge(") && trimmed.contains("kind_name()") {
-            for s in &merge_slugs {
-                if seen.insert(s.clone()) {
-                    expanded.push(s.clone());
-                }
-            }
-            continue;
-        }
-        let value = if let Some(pos) = line.find("=> \"") {
-            &line[pos + 4..]
-        } else if trimmed.starts_with('"') {
-            trimmed
-        } else {
-            continue;
-        };
-        let value = value.trim_start_matches('"');
-        let Some(end) = value.find('"') else {
-            continue;
-        };
-        let slug = value[..end].to_owned();
-        if seen.insert(slug.clone()) {
-            expanded.push(slug);
+fn live_kind_name_slugs() -> HashSet<String> {
+    let mut live = HashSet::new();
+    for (name, src) in KIND_NAME_SOURCES {
+        let bodies = kind_name_bodies(src);
+        assert!(!bodies.is_empty(), "{name} has no kind_name table");
+        for body in bodies {
+            live.extend(literal_slugs(body));
         }
     }
-    expanded
+    live
 }
 
 #[test]
 fn error_kind_names_are_stable() {
-    let parsed = expanded_kind_name_slugs();
-    assert_eq!(
-        parsed.len(),
-        EXPECTED_KIND_NAMES.len(),
-        "update EXPECTED_KIND_NAMES when kind_name arms or delegated kind_name tables change"
-    );
-    for (idx, (live, pinned)) in parsed.iter().zip(EXPECTED_KIND_NAMES.iter()).enumerate() {
-        assert_eq!(live, pinned, "kind slug mismatch at index {idx}");
+    let live = live_kind_name_slugs();
+    for slug in EXPECTED_KIND_NAMES {
+        assert!(
+            live.contains(*slug),
+            "kind slug {slug} is no longer emitted; kind names are a stable contract"
+        );
     }
+    let pinned: HashSet<&str> = EXPECTED_KIND_NAMES
+        .iter()
+        .chain(AREA_KIND_NAMES)
+        .copied()
+        .collect();
+    assert_eq!(
+        pinned.len(),
+        EXPECTED_KIND_NAMES.len() + AREA_KIND_NAMES.len(),
+        "a slug is pinned twice"
+    );
+    let mut unpinned: Vec<&String> = live
+        .iter()
+        .filter(|s| !pinned.contains(s.as_str()))
+        .collect();
+    unpinned.sort();
+    assert!(
+        unpinned.is_empty(),
+        "add new kind slugs to AREA_KIND_NAMES: {unpinned:?}"
+    );
+    let mut sorted = AREA_KIND_NAMES.to_vec();
+    sorted.sort_unstable();
+    assert_eq!(sorted, AREA_KIND_NAMES, "keep AREA_KIND_NAMES sorted");
 }
 
 #[test]
-fn verbatim_kind_slug_is_legacy_message() {
-    assert_eq!(
-        Error::Verbatim("x".into()).kind_name(),
-        "message",
-        "serialized kind slug must stay `message` for this variant"
-    );
+fn legacy_kind_names_survive_the_area_collapse() {
+    use grit_lib::error::{ObjectError, RefError, RevisionError};
+    use grit_lib::repo::RepositoryError;
+
+    let cases: Vec<(Error, &str)> = vec![
+        (
+            Error::Repository(RepositoryError::InitObjectFormatChange),
+            "init_object_format_change",
+        ),
+        (
+            Error::Object(ObjectError::InvalidId { input: "x".into() }),
+            "invalid_object_id",
+        ),
+        (
+            Error::Object(ObjectError::NotFound { name: "x".into() }),
+            "object_not_found",
+        ),
+        (
+            Error::Revision(RevisionError::NotFound { spec: "x".into() }),
+            "revision_not_found",
+        ),
+        (Error::Ref(RefError::UnbornHead), "unborn_head"),
+        (Error::Cancelled, "cancelled"),
+        (Error::Io(std::io::Error::other("x")), "io"),
+    ];
+    for (err, kind) in cases {
+        assert_eq!(err.kind_name(), kind, "{err:?}");
+        assert!(EXPECTED_KIND_NAMES.contains(&kind));
+    }
 }
 
 #[test]
@@ -388,13 +432,12 @@ fn error_area_matches_umbrella_branch() {
         .area(),
         "repository"
     );
-    assert_eq!(Error::Verbatim("e".into()).area(), "verbatim");
-    assert_eq!(Error::Commit(CommitError::NothingToCommit).area(), "merge");
-    assert_eq!(Error::Remote(RemoteError::Cancelled).area(), "remote");
+    assert_eq!(Error::Commit(CommitError::NothingToCommit).area(), "commit");
+    assert_eq!(Error::Remote(RemoteError::HttpUnavailable).area(), "remote");
 }
 
 #[test]
-fn umbrella_area_delegates_from_wrapped_area_enums() {
+fn area_enum_area_agrees_with_the_umbrella() {
     let repo_err = RepositoryError::ForbiddenBareRepository {
         path: "/repo".into(),
     };
@@ -405,22 +448,15 @@ fn umbrella_area_delegates_from_wrapped_area_enums() {
         .area(),
         repo_err.area()
     );
+    assert_eq!(RemoteError::HttpUnavailable.area(), "remote");
 
-    assert_eq!(
-        Error::Remote(RemoteError::Nested(Box::new(Error::Verbatim("x".into())))).area(),
-        "verbatim",
-        "Nested(remote) must use the wrapped Error::area"
-    );
-
-    assert_eq!(
-        Error::Index(IndexError::LockHeld(LockHeldError {
-            path: PathBuf::from("index.lock"),
-            holder: None,
-        }))
-        .area(),
-        "lock",
-        "IndexError::LockHeld area matches Error::LockHeld"
-    );
+    let lock: Error = IndexError::LockHeld(LockHeldError {
+        path: PathBuf::from("index.lock"),
+        holder: None,
+    })
+    .into();
+    assert!(matches!(lock, Error::LockHeld(_)), "{lock:?}");
+    assert_eq!(lock.area(), "lock_held");
 }
 
 #[test]

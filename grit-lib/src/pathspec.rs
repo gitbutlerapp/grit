@@ -12,6 +12,7 @@
 //! library does not read the process environment for them.
 
 use crate::git_path::CanonicalizeExt;
+use crate::worktree::WorktreeError;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
@@ -273,8 +274,20 @@ impl PathspecGlobalFlags {
     }
 
     /// Validate flag combinations the same way Git does.
-    pub fn validate(&self) -> Result<(), String> {
-        validate_global_pathspec_flags_from(self)
+    ///
+    /// # Errors
+    ///
+    /// [`PathspecGlobalsError`] when the flags cannot be combined.
+    pub fn validate(&self) -> Result<(), PathspecGlobalsError> {
+        if self.glob_pathspecs && self.noglob_pathspecs {
+            return Err(PathspecGlobalsError::GlobWithNoglob);
+        }
+        if self.literal_pathspecs
+            && (self.glob_pathspecs || self.noglob_pathspecs || self.icase_pathspecs)
+        {
+            return Err(PathspecGlobalsError::LiteralWithOthers);
+        }
+        Ok(())
     }
 }
 
@@ -315,6 +328,20 @@ impl PathspecOptions {
     }
 }
 
+/// Global pathspec flags (`GIT_*_PATHSPECS`) that cannot be combined.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PathspecGlobalsError {
+    /// `glob` and `noglob` are both set.
+    #[error("global 'glob' and 'noglob' pathspec settings are incompatible")]
+    GlobWithNoglob,
+    /// `literal` is set together with `glob`, `noglob` or `icase`.
+    #[error(
+        "global 'literal' pathspec setting is incompatible with all other global pathspec settings"
+    )]
+    LiteralWithOthers,
+}
+
 /// Errors while assembling pathspec argv / from-file tokens (before work-tree resolution).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -329,8 +356,8 @@ pub enum PathspecParseError {
     #[error(transparent)]
     FromFile(#[from] PathspecFromFileParseError),
     /// Incompatible global pathspec flags.
-    #[error("{0}")]
-    IncompatibleGlobals(String),
+    #[error(transparent)]
+    IncompatibleGlobals(#[from] PathspecGlobalsError),
 }
 
 /// Parsed and optionally work-tree–resolved pathspec list for matching and display.
@@ -606,26 +633,6 @@ pub(crate) fn literal_pathspecs_enabled() -> bool {
     PathspecGlobalFlags::default().literal_pathspecs
 }
 
-fn validate_global_pathspec_flags_from(globals: &PathspecGlobalFlags) -> Result<(), String> {
-    if globals.glob_pathspecs && globals.noglob_pathspecs {
-        return Err("global 'glob' and 'noglob' pathspec settings are incompatible".to_string());
-    }
-    if globals.literal_pathspecs
-        && (globals.glob_pathspecs || globals.noglob_pathspecs || globals.icase_pathspecs)
-    {
-        return Err(
-            "global 'literal' pathspec setting is incompatible with all other global pathspec settings"
-                .to_string(),
-        );
-    }
-    Ok(())
-}
-
-/// Validates global pathspec flags the same way Git does (all flags unset / default).
-pub fn validate_global_pathspec_flags() -> Result<(), String> {
-    validate_global_pathspec_flags_from(&PathspecGlobalFlags::default())
-}
-
 fn is_valid_attr_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -683,7 +690,9 @@ fn split_attr_expr(expr: &str) -> Result<Vec<String>, AttrPathspecError> {
 fn parse_attr_requirements(expr: &str) -> Result<Vec<AttrRequirement>, AttrPathspecError> {
     let name_only = |name: &str| {
         if name.contains('=') || !is_valid_attr_name(name) {
-            Err(AttrPathspecError::InvalidName(name.to_owned()))
+            Err(AttrPathspecError::InvalidName {
+                name: name.to_owned(),
+            })
         } else {
             Ok(name.to_owned())
         }
@@ -732,13 +741,15 @@ fn attr_clauses(spec: &str) -> Vec<String> {
 ///
 /// # Errors
 ///
-/// [`crate::error::Error::InvalidAttrPathspec`] naming the first rejected spec and its
+/// [`crate::worktree::WorktreeError::InvalidAttrPathspec`] naming the first rejected spec and its
 /// [`AttrPathspecError`].
 pub fn validate_attr_pathspecs(specs: &[String]) -> crate::error::Result<()> {
     for spec in specs {
-        let invalid = |reason| crate::error::Error::InvalidAttrPathspec {
-            spec: spec.clone(),
-            reason,
+        let invalid = |reason| {
+            crate::error::Error::Worktree(WorktreeError::InvalidAttrPathspec {
+                spec: spec.clone(),
+                reason,
+            })
         };
         let clauses = attr_clauses(spec);
         if clauses.len() > 1 {

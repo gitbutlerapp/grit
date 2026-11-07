@@ -251,10 +251,9 @@ pub fn apply_case_only_ref_rename(
                 actual: None,
             })?;
     if state.refs.contains_key(rename.to.as_str()) {
-        return Err(RefStoreError::Corrupt(format!(
-            "case-only rename blocked: '{}' already exists",
-            rename.to
-        )));
+        return Err(RefStoreError::Corrupt {
+            detail: format!("case-only rename blocked: '{}' already exists", rename.to),
+        });
     }
     state.refs.insert(rename.to.as_str().to_owned(), value);
     Ok(())
@@ -279,10 +278,9 @@ fn apply_case_only_ref_rename_ctx(
     };
     ctx.refs.remove(rename.from.as_str());
     if ctx.refs.contains_key(rename.to.as_str()) {
-        return Err(RefStoreError::Corrupt(format!(
-            "case-only rename blocked: '{}' already exists",
-            rename.to
-        )));
+        return Err(RefStoreError::Corrupt {
+            detail: format!("case-only rename blocked: '{}' already exists", rename.to),
+        });
     }
     ctx.refs.insert(rename.to.as_str().to_owned(), value);
     Ok(())
@@ -496,23 +494,23 @@ fn symref_peel_write_target(
     sym_name: &str,
 ) -> StoreResult<String> {
     let Some(RawRef::Symbolic(first)) = refs.get(sym_name) else {
-        return Err(RefStoreError::Corrupt(format!(
-            "not a symbolic ref: {sym_name}"
-        )));
+        return Err(RefStoreError::Corrupt {
+            detail: format!("not a symbolic ref: {sym_name}"),
+        });
     };
     resolve_symref_peel_target(refs, first)
 }
 
 fn symref_peel_write_target_read(refs: &RefsRead<'_, '_>, sym_name: &str) -> StoreResult<String> {
     let Some(value) = refs.get(sym_name) else {
-        return Err(RefStoreError::Corrupt(format!(
-            "not a symbolic ref: {sym_name}"
-        )));
+        return Err(RefStoreError::Corrupt {
+            detail: format!("not a symbolic ref: {sym_name}"),
+        });
     };
     let RawRef::Symbolic(first) = value.as_ref() else {
-        return Err(RefStoreError::Corrupt(format!(
-            "not a symbolic ref: {sym_name}"
-        )));
+        return Err(RefStoreError::Corrupt {
+            detail: format!("not a symbolic ref: {sym_name}"),
+        });
     };
     resolve_symref_peel_target_read(refs, first.as_str())
 }

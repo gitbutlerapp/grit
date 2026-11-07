@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use grit_lib::porcelain::tag::TagError;
 use std::str::FromStr;
 
 use grit_lib::error::Error;
@@ -35,7 +36,7 @@ fn public_tree_sha256_types() {
     assert!(path_matches_glob("a/b", "a/*"));
     assert!(matches!(
         <TreeSha256 as FromStr>::from_str("not-hex"),
-        Err(Error::TreeSha256InvalidHex)
+        Err(Error::Tag(TagError::TreeSha256InvalidHex))
     ));
     let tmp = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
@@ -45,7 +46,7 @@ fn public_tree_sha256_types() {
         .unwrap();
     assert!(matches!(
         tree_sha256(&repo, blob, &TreeSha256Options::default()),
-        Err(Error::TreeSha256InvalidRevision { .. })
+        Err(Error::Tag(TagError::TreeSha256InvalidRevision { .. }))
     ));
     let empty_tree = repo
         .odb()
@@ -69,7 +70,7 @@ fn public_tree_sha256_types() {
         reason: MissingSubmoduleReason::NotCheckedOut,
     };
     match tree_sha256(&repo, commit, &TreeSha256Options::default()) {
-        Ok(_) | Err(Error::TreeSha256MissingSubmodules(_)) => {}
+        Ok(_) | Err(Error::Tag(TagError::TreeSha256MissingSubmodules { .. })) => {}
         Err(e) => panic!("unexpected {e:?}"),
     }
 }

@@ -10,7 +10,6 @@ use crate::repo::Repository;
 
 use super::error::{
     undo_record_read_io, undo_record_read_str, undo_record_write_io, undo_record_write_str,
-    HistoryError,
 };
 use super::types::{HeadEffect, PlannedRefUpdate, RewritePlan};
 use super::undo_work::{remove_undo_work, StagedUndoWork, UndoWork};
@@ -105,7 +104,7 @@ pub(crate) fn write_history_last(
     repo: &Repository,
     record: &HistoryLastRecord,
     work: Option<&UndoWork>,
-) -> Result<(), HistoryError> {
+) -> crate::error::Result<()> {
     let grit_dir = repo.git_dir().join("grit");
     std::fs::create_dir_all(&grit_dir).map_err(undo_record_write_io)?;
     let body = serialize_record(record);
@@ -133,8 +132,8 @@ pub(crate) fn write_history_last(
 ///
 /// # Errors
 ///
-/// Returns [`HistoryError::UndoRecordRead`] when the file exists but is invalid.
-pub fn read_history_last(repo: &Repository) -> Result<Option<HistoryLastRecord>, HistoryError> {
+/// Returns [`HistoryError::UndoRecordCorrupt`](crate::history::HistoryError::UndoRecordCorrupt) when the file exists but is invalid.
+pub fn read_history_last(repo: &Repository) -> crate::error::Result<Option<HistoryLastRecord>> {
     let path = history_last_path(repo);
     if !path.is_file() {
         return Ok(None);
@@ -167,7 +166,7 @@ fn serialize_record(record: &HistoryLastRecord) -> String {
     out
 }
 
-fn parse_record(bytes: &[u8]) -> Result<HistoryLastRecord, HistoryError> {
+fn parse_record(bytes: &[u8]) -> crate::error::Result<HistoryLastRecord> {
     let text = std::str::from_utf8(bytes).map_err(|e| undo_record_read_str(e.to_string()))?;
     let mut version: Option<u32> = None;
     let mut operation: Option<String> = None;
@@ -268,12 +267,12 @@ fn parse_record(bytes: &[u8]) -> Result<HistoryLastRecord, HistoryError> {
     })
 }
 
-fn parse_oid(token: Option<&str>, line_no: usize, label: &str) -> Result<ObjectId, HistoryError> {
+fn parse_oid(token: Option<&str>, line_no: usize, label: &str) -> crate::error::Result<ObjectId> {
     let hex = token.ok_or_else(|| parse_err(line_no, &format!("missing {label}")))?;
     ObjectId::from_hex(hex).map_err(|e| parse_err(line_no, &e.to_string()))
 }
 
-fn parse_err(line_no: usize, detail: &str) -> HistoryError {
+fn parse_err(line_no: usize, detail: &str) -> crate::error::Error {
     undo_record_read_str(format!("line {}: {detail}", line_no + 1))
 }
 

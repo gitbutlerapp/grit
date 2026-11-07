@@ -277,6 +277,14 @@ pub enum RepositoryError {
         /// The first injected store's algorithm that differs from `repository`.
         store: HashAlgo,
     },
+
+    /// Another maintenance run holds the repository's `gc.pid` lock
+    /// ([`crate::maintenance::GcLock`]); nothing was changed.
+    #[error("{}", crate::error::maintenance_running_message(holder))]
+    MaintenanceRunning {
+        /// Process recorded in `gc.pid`.
+        holder: crate::maintenance::GcLockHolder,
+    },
 }
 
 impl RepositoryError {
@@ -308,6 +316,7 @@ impl RepositoryError {
             Self::UnsupportedObjectStore { .. } => "unsupported_object_store",
             Self::PreciousObjectsRepository { .. } => "precious_objects_repository",
             Self::ObjectFormatMismatch { .. } => "object_format_mismatch",
+            Self::MaintenanceRunning { .. } => "maintenance_running",
         }
     }
 

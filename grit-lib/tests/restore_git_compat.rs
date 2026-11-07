@@ -1,5 +1,6 @@
 //! `restore_paths` compatibility with system `git`.
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::process::Command;
@@ -431,7 +432,7 @@ fn restore_many_literal_pathspecs_matches_git() {
     .unwrap_err();
     assert!(matches!(
         err,
-        grit_lib::error::Error::PathspecNoMatch { ref spec } if spec == "missing/"
+        grit_lib::error::Error::Worktree(WorktreeError::PathspecNoMatch { ref spec }) if spec == "missing/"
     ));
 }
 
@@ -451,7 +452,7 @@ fn restore_pathspec_no_match_errors() {
     .unwrap_err();
     assert!(matches!(
         err,
-        grit_lib::error::Error::PathspecNoMatch { .. }
+        grit_lib::error::Error::Worktree(WorktreeError::PathspecNoMatch { .. })
     ));
 }
 
@@ -472,7 +473,7 @@ fn restore_worktree_pathspec_no_match_when_only_in_head() {
     .unwrap_err();
     assert!(matches!(
         err,
-        grit_lib::error::Error::PathspecNoMatch { .. }
+        grit_lib::error::Error::Worktree(WorktreeError::PathspecNoMatch { .. })
     ));
 
     let git_out = Command::new("git")
@@ -746,7 +747,7 @@ fn restore_attr_pathspec_no_match_errors() {
     .expect_err("no match");
     assert!(matches!(
         err,
-        grit_lib::error::Error::PathspecNoMatch { .. }
+        grit_lib::error::Error::Worktree(WorktreeError::PathspecNoMatch { .. })
     ));
 }
 

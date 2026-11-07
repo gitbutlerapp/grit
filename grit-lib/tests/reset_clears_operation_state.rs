@@ -5,6 +5,7 @@
 #[path = "support/reset_snapshot.rs"]
 mod reset_snapshot;
 
+use grit_lib::error::ObjectError;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -377,7 +378,10 @@ fn assert_invalid_reset_preserves_operation(root: &Path, repo: &Repository, head
     ] {
         let mut opts = ResetOptions::new(head, mode, identity.clone(), "invalid reset");
         let err = grit_lib::porcelain::reset::preview_reset(repo, &opts).unwrap_err();
-        assert!(matches!(err, Error::InvalidSignature(_)), "{err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::InvalidSignature(_))),
+            "{err:?}"
+        );
         reset_snapshot::assert_unchanged(root, &before);
         for dry_run in [true, false] {
             opts.dry_run = dry_run;
@@ -388,7 +392,10 @@ fn assert_invalid_reset_preserves_operation(root: &Path, repo: &Repository, head
                 &grit_lib::progress::CancelToken::never(),
             )
             .unwrap_err();
-            assert!(matches!(err, Error::InvalidSignature(_)), "{err:?}");
+            assert!(
+                matches!(err, Error::Object(ObjectError::InvalidSignature(_))),
+                "{err:?}"
+            );
             reset_snapshot::assert_unchanged(root, &before);
         }
     }

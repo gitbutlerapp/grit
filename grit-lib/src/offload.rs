@@ -25,6 +25,7 @@
 //! of the main repository needs stay where they are. Running it again offloads blobs
 //! pushed since, and folds the main repository's packs back into one promisor pack.
 
+use crate::error::ObjectError;
 use std::path::{Path, PathBuf};
 
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
@@ -371,7 +372,7 @@ impl OffloadPack {
 ///
 /// # Errors
 ///
-/// [`Error::Offload`] for the [`OffloadError`] cases, [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore)
+/// [`crate::error::ObjectError::Offload`] for the [`OffloadError`] cases, [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore)
 /// without a files-backed object store, and read, write and config failures.
 pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
     let odb = repo.odb();
@@ -753,7 +754,7 @@ fn kept_object_the_promisor_pack_names(
         }
         let kind = match odb.read_info_without_fetch(&referrer) {
             Ok(info) => info.kind,
-            Err(Error::ObjectNotFound(_)) => continue,
+            Err(Error::Object(ObjectError::NotFound { .. })) => continue,
             Err(err) => return Err(err),
         };
         if kind == ObjectKind::Blob {
@@ -796,7 +797,7 @@ fn selected_blob_size(odb: &Odb, filter: ObjectFilterSpec, oid: &ObjectId) -> Re
     }
     let info = match odb.read_info_without_fetch(oid) {
         Ok(info) => info,
-        Err(Error::ObjectNotFound(_)) => return Ok(None),
+        Err(Error::Object(ObjectError::NotFound { .. })) => return Ok(None),
         Err(err) => return Err(err),
     };
     if info.kind != ObjectKind::Blob {
@@ -1581,7 +1582,7 @@ mod tests {
 
     fn offload_err(fx: &Fixture, opts: &OffloadOptions) -> OffloadError {
         match offload_blobs(&fx.main(), opts) {
-            Err(Error::Offload(err)) => err,
+            Err(Error::Object(ObjectError::Offload(err))) => err,
             other => panic!("expected an offload error, got {other:?}"),
         }
     }

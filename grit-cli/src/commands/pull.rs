@@ -14,7 +14,7 @@ use crate::output::OutputMode;
 use crate::progress::summary::transfer_header;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
+use grit_lib::porcelain::pull::{pull, PullMode, PullOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch_request::resolve_pull_invocation;
 use grit_lib::remote::snapshot_checkout::{
@@ -138,7 +138,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         Some(&factory),
     ) {
         Ok(outcome) => outcome,
-        Err(PullError::Remote(remote_err)) => {
+        Err(remote_err @ grit_lib::error::Error::Remote(_)) => {
             let mapped = map_remote_error(remote_err);
             if auth::offer_reauth(&mapped, url.as_deref().unwrap_or_default())? {
                 pull(
@@ -335,13 +335,15 @@ fn refresh_checkout(
 }
 
 /// A refresh failure in words that say what to do next.
-fn refresh_error(err: CheckoutError) -> anyhow::Error {
+fn refresh_error(err: grit_lib::error::Error) -> anyhow::Error {
+    let err = match err {
+        grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Snapshot(checkout)) => {
+            checkout
+        }
+        remote @ grit_lib::error::Error::Remote(_) => return map_remote_error(remote),
+        other => return anyhow::Error::new(other),
+    };
     match err {
-        CheckoutError::Remote(remote) => map_remote_error(*remote),
-        CheckoutError::Pull(pull) => match *pull {
-            PullError::Remote(remote) => map_remote_error(remote),
-            other => anyhow::Error::new(other),
-        },
         CheckoutError::OperationInProgress(operation) => {
             let next = match operation {
                 InProgressOperation::Rebase | InProgressOperation::RebaseInteractive => {
@@ -375,6 +377,6 @@ fn refresh_error(err: CheckoutError) -> anyhow::Error {
         CheckoutError::UnrelatedBranch { name } => anyhow::anyhow!(
             "your {name} has nothing in common with the server's {name}; rename yours (`grit branch -m {name} <new name>`), then `grit pull {name}` gets the server's"
         ),
-        other => other.into(),
+        other => anyhow::Error::new(grit_lib::error::Error::from(other)),
     }
 }

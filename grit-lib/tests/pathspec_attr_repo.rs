@@ -1,6 +1,7 @@
 //! `Repository::paths_match_pathspecs` evaluates `:(attr:...)` magic against the repository's
 //! `.gitattributes`, cross-checked against `git ls-files <specs>` (t6135 subset).
 
+use grit_lib::worktree::WorktreeError;
 use std::path::Path;
 use std::process::Command;
 
@@ -321,11 +322,15 @@ fn malformed_attr_pathspecs_are_rejected_like_git() {
         ),
         (
             ":(attr:bad/name)",
-            AttrPathspecError::InvalidName("bad/name".to_owned()),
+            AttrPathspecError::InvalidName {
+                name: "bad/name".to_owned(),
+            },
         ),
         (
             ":(attr:-a=b)",
-            AttrPathspecError::InvalidName("a=b".to_owned()),
+            AttrPathspecError::InvalidName {
+                name: "a=b".to_owned(),
+            },
         ),
     ];
     for (spec, reason) in cases {
@@ -340,10 +345,10 @@ fn malformed_attr_pathspecs_are_rejected_like_git() {
 
         let specs = vec![(*spec).to_owned()];
         match validate_attr_pathspecs(&specs) {
-            Err(Error::InvalidAttrPathspec {
+            Err(Error::Worktree(WorktreeError::InvalidAttrPathspec {
                 spec: got,
                 reason: why,
-            }) => {
+            })) => {
                 assert_eq!(got, *spec);
                 assert_eq!(&why, reason, "{spec}");
             }

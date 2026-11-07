@@ -1,5 +1,6 @@
 //! Parallel checkout planning and execution (`checkout.workers` policy).
 
+use crate::worktree::WorktreeError;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -786,7 +787,11 @@ pub(crate) fn execute_write_jobs_unrecorded(
         .into_iter()
         .enumerate()
         .map(|(i, o)| {
-            o.ok_or_else(|| Error::PathError(format!("missing checkout outcome for job {i}")))
+            o.ok_or_else(|| {
+                Error::Worktree(WorktreeError::Path {
+                    detail: format!("missing checkout outcome for job {i}"),
+                })
+            })
         })
         .collect()
 }

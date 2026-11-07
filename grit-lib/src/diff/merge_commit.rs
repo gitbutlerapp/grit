@@ -38,18 +38,14 @@ pub enum DiffMerges {
 }
 
 impl DiffMerges {
-    /// Parse `first-parent` or `combined` (Git `--diff-merges` spelling).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `value` is not a known mode name.
-    pub fn parse(value: &str) -> std::result::Result<Self, String> {
+    /// Parse `first-parent` or `combined` (Git `--diff-merges` spelling); `None` for any other
+    /// name.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "first-parent" | "first_parent" => Ok(Self::FirstParent),
-            "combined" | "dense-combined" | "dense_combined" => Ok(Self::Combined),
-            other => Err(format!(
-                "unknown --diff-merges mode '{other}' (expected first-parent or combined)"
-            )),
+            "first-parent" | "first_parent" => Some(Self::FirstParent),
+            "combined" | "dense-combined" | "dense_combined" => Some(Self::Combined),
+            _ => None,
         }
     }
 }

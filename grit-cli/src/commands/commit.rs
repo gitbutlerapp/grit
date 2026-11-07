@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::commit::{normalize_commit_date_override, parse_trailer_command_line_arg};
 use grit_lib::index::IndexError;
 use grit_lib::revwalk::{Peel, ResolveOptions};
+use grit_lib::worktree::WorktreeError;
 
 use crate::message_input::parse_author_cli;
 use grit_lib::config::ident_resolve::IdentRole;
@@ -11,7 +12,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::short_hex;
 use grit_lib::porcelain::commit::{
     commit_with_patch, commit_with_scope, default_commit_scope, pending_commit_message,
-    CommitPatchError, CommitPatchInput, CommitRequest, CommitScope, HookPolicy,
+    CommitPatchInput, CommitRequest, CommitScope, HookPolicy,
 };
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
 use grit_lib::porcelain::CommitError;
@@ -165,9 +166,13 @@ impl MarkdownRender for CommitOutcome {
 /// Exit code for `--hunks` failures (unknown, stale, or wrong-side ids).
 pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     if err.downcast_ref::<HunkSelectError>().is_some()
-        || err
-            .downcast_ref::<CommitPatchError>()
-            .is_some_and(|e| matches!(e, CommitPatchError::HunkSelect(_)))
+        || matches!(
+            err.downcast_ref::<Error>(),
+            Some(
+                Error::Commit(grit_lib::porcelain::CommitError::HunkSelect(_))
+                    | Error::Diff(grit_lib::error::DiffError::HunkSelection(_))
+            )
+        )
     {
         2
     } else {
@@ -175,17 +180,10 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     }
 }
 
-fn map_patch_error(err: CommitPatchError) -> anyhow::Error {
-    if let CommitPatchError::Library(locked) = err {
-        if matches!(*locked, Error::LockHeld(..)) {
-            return crate::json_error::map_lib_error(*locked);
-        }
-        return anyhow::Error::new(locked);
+fn map_patch_error(err: Error) -> anyhow::Error {
+    if matches!(err, Error::LockHeld(..)) {
+        return crate::json_error::map_lib_error(err);
     }
-    anyhow::Error::new(err)
-}
-
-fn map_hunk_parse(err: grit_lib::porcelain::hunk_select::HunkSelectError) -> anyhow::Error {
     anyhow::Error::new(err)
 }
 
@@ -214,7 +212,7 @@ pub fn run_hunks(
     refuse_gitbutler_workspace(&repo)?;
     let resolved = paths.resolve(&repo)?;
     let pathspecs = resolved.specs().to_vec();
-    let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_parse)?;
+    let mut selection = parse_hunk_id_list(hunks).map_err(crate::commands::add::map_hunk_error)?;
     selection.ranges = crate::commands::add::parse_line_range_list(lines)?;
     if selection.ids.is_empty() && selection.ranges.is_empty() {
         bail!("--hunks or --lines requires at least one hunk id or line range");
@@ -370,7 +368,7 @@ pub fn run(
         progress,
         &crate::interrupt::process_cancel_token(),
     )
-    .map_err(|e| map_commit_error(e.into()))?;
+    .map_err(map_commit_error)?;
     finish_commit_outcome(req, outcome, scope_json, dry_run)
 }
 
@@ -675,8 +673,10 @@ fn map_commit_error(err: Error) -> anyhow::Error {
         Error::Commit(CommitError::PartialCommitDuringReplay) => {
             anyhow::anyhow!("cannot do a partial commit during a cherry-pick or revert")
         }
-        pathspec @ Error::PathspecNoMatch { .. } => anyhow::Error::new(pathspec),
-        Error::EmbeddedRepoWithoutCommit { path } => {
+        pathspec @ Error::Worktree(WorktreeError::PathspecNoMatch { .. }) => {
+            anyhow::Error::new(pathspec)
+        }
+        Error::Worktree(WorktreeError::EmbeddedRepoWithoutCommit { path }) => {
             let human = format!(
                 "cannot commit: '{path}' is an embedded git repository with no commit checked out"
             );

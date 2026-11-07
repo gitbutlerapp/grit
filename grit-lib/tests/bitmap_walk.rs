@@ -124,7 +124,7 @@ fn bitmap_query(
     wants: &[ObjectId],
     haves: &[ObjectId],
     filter: Option<&ObjectFilter>,
-) -> Result<ReachableSet, BitmapWalkError> {
+) -> grit_lib::error::Result<ReachableSet> {
     index.reachability(
         repo,
         ReachabilityQuery {

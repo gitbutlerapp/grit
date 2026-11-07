@@ -5,6 +5,7 @@
 #[path = "support/reset_snapshot.rs"]
 mod reset_snapshot;
 
+use grit_lib::error::ObjectError;
 use std::fs;
 use std::path::Path;
 
@@ -81,7 +82,7 @@ fn invalid_identities() -> Vec<(Signature, SignatureError)> {
 
 fn assert_invalid(error: Error, expected: &SignatureError) {
     match error {
-        Error::InvalidSignature(actual) => assert_eq!(&actual, expected),
+        Error::Object(ObjectError::InvalidSignature(actual)) => assert_eq!(&actual, expected),
         other => panic!("expected InvalidSignature({expected:?}), got {other:?}"),
     }
 }

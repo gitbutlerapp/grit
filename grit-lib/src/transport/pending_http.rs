@@ -89,9 +89,9 @@ impl<T: Send + 'static> PendingHttp<T> {
                 return Err(Error::Cancelled);
             }
             if low_speed_window.is_some_and(|window| started.elapsed() >= window) {
-                return Err(remote_err(RemoteError::HttpLowSpeedStall(
-                    LOW_SPEED_STALL_MSG.to_owned(),
-                )));
+                return Err(remote_err(RemoteError::HttpLowSpeedStall {
+                    detail: LOW_SPEED_STALL_MSG.to_owned(),
+                }));
             }
             match self.0.recv_timeout(HTTP_CANCEL_POLL) {
                 Ok(response) => return response,
@@ -122,9 +122,9 @@ mod tests {
         let started = Instant::now();
         loop {
             if started.elapsed() >= low_speed_window {
-                return Err(remote_err(RemoteError::HttpLowSpeedStall(
-                    LOW_SPEED_STALL_MSG.to_owned(),
-                )));
+                return Err(remote_err(RemoteError::HttpLowSpeedStall {
+                    detail: LOW_SPEED_STALL_MSG.to_owned(),
+                }));
             }
             match rx.recv_timeout(HTTP_CANCEL_POLL) {
                 Ok(response) => return response,
@@ -149,7 +149,7 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                Error::Remote(RemoteError::HttpLowSpeedStall(msg)) if msg == LOW_SPEED_STALL_MSG
+                Error::Remote(RemoteError::HttpLowSpeedStall { detail: msg }) if msg == LOW_SPEED_STALL_MSG
             ),
             "unexpected error: {err:?}"
         );

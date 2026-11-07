@@ -1,5 +1,6 @@
 //! `:(attr:...)` pathspecs on restore, stash push, and `rm --cached` (issue #2417).
 
+use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::process::Command;
 
@@ -103,7 +104,10 @@ fn restore_attr_pathspec_no_match() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("no match");
-    assert!(matches!(err, Error::PathspecNoMatch { .. }));
+    assert!(matches!(
+        err,
+        Error::Worktree(WorktreeError::PathspecNoMatch { .. })
+    ));
 }
 
 #[test]

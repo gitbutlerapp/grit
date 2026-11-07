@@ -163,6 +163,7 @@ impl ObjectStore for CompositeStore {
 mod tests {
     use super::*;
     use crate::error::Error;
+    use crate::error::ObjectError;
     use crate::objects::ObjectKind;
     use crate::odb::store::{MemoryStore, WritableObjectStore};
     use crate::odb::WriteOptions;
@@ -271,11 +272,15 @@ mod tests {
     }
 
     fn corrupt() -> Error {
-        Error::CorruptObject("checksum mismatch".to_owned())
+        Error::Object(ObjectError::Corrupt {
+            detail: "checksum mismatch".to_owned(),
+        })
     }
 
     fn zlib() -> Error {
-        Error::Zlib("invalid stored block lengths".to_owned())
+        Error::Object(ObjectError::Zlib {
+            detail: "invalid stored block lengths".to_owned(),
+        })
     }
 
     fn assert_every_read_fails(
@@ -300,7 +305,9 @@ mod tests {
         let (rotten, oid) = rotten_with(b"precious data", corrupt);
         let empty = Arc::new(MemoryStore::new(HashAlgo::Sha1)) as Arc<dyn ObjectStore>;
         let composite = CompositeStore::new(vec![rotten, empty], HashAlgo::Sha1);
-        assert_every_read_fails(&composite, &oid, |e| matches!(e, Error::CorruptObject(_)));
+        assert_every_read_fails(&composite, &oid, |e| {
+            matches!(e, Error::Object(ObjectError::Corrupt { .. }))
+        });
     }
 
     #[test]
@@ -308,7 +315,9 @@ mod tests {
         let empty = Arc::new(MemoryStore::new(HashAlgo::Sha1)) as Arc<dyn ObjectStore>;
         let (rotten, oid) = rotten_with(b"precious data", zlib);
         let composite = CompositeStore::new(vec![empty, rotten], HashAlgo::Sha1);
-        assert_every_read_fails(&composite, &oid, |e| matches!(e, Error::Zlib(_)));
+        assert_every_read_fails(&composite, &oid, |e| {
+            matches!(e, Error::Object(ObjectError::Zlib { .. }))
+        });
     }
 
     #[test]
@@ -316,7 +325,9 @@ mod tests {
         let (zlib_store, oid) = rotten_with(b"precious data", zlib);
         let (corrupt_store, _) = rotten_with(b"precious data", corrupt);
         let composite = CompositeStore::new(vec![zlib_store, corrupt_store], HashAlgo::Sha1);
-        assert_every_read_fails(&composite, &oid, |e| matches!(e, Error::Zlib(_)));
+        assert_every_read_fails(&composite, &oid, |e| {
+            matches!(e, Error::Object(ObjectError::Zlib { .. }))
+        });
     }
 
     #[test]

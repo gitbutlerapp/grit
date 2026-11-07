@@ -7,6 +7,8 @@
 //!
 //! Single-commit callers should keep using [`crate::porcelain::replay::replay_commit`].
 
+use crate::error::ObjectError;
+use crate::error::RefError;
 use crate::progress::{CancelToken, ProgressSink};
 use std::fs;
 use std::num::NonZeroU32;
@@ -275,7 +277,7 @@ pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
 ///
 /// # Errors
 ///
-/// - [`Error::UnbornHead`], [`MergeError::MergeCommit`] (without `mainline`).
+/// - [`crate::error::RefError::UnbornHead`], [`MergeError::MergeCommit`] (without `mainline`).
 /// - [`MergeError::ReplaySourceAtHead`] when picking a commit already at `HEAD`.
 /// - Worktree cleanliness, merge, checkout, and ref update failures.
 pub fn start_replay_sequence(
@@ -339,7 +341,9 @@ pub fn continue_replay_sequence(
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<SequenceOutcome> {
-    identity.validate().map_err(Error::InvalidSignature)?;
+    identity
+        .validate()
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     let committer = identity.header_line();
     let active = load_active_replay(repo)?;
     let mut index = repo.load_index()?;
@@ -536,7 +540,9 @@ pub fn skip_replay_step(
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<SequenceOutcome> {
-    identity.validate().map_err(Error::InvalidSignature)?;
+    identity
+        .validate()
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     let committer = identity.header_line();
     let active = load_active_replay(repo)?;
     let (branch_ref, head_oid) = branch_head(repo)?;
@@ -714,9 +720,9 @@ fn branch_head(repo: &Repository) -> Result<(Option<String>, ObjectId)> {
             oid: Some(oid),
             ..
         } => Ok((Some(refname), oid)),
-        HeadState::Branch { .. } => Err(Error::UnbornHead),
+        HeadState::Branch { .. } => Err(Error::Ref(RefError::UnbornHead)),
         HeadState::Detached { oid } => Ok((None, oid)),
-        HeadState::Invalid => Err(Error::InvalidHead),
+        HeadState::Invalid => Err(Error::Ref(RefError::InvalidHead)),
     }
 }
 
@@ -1616,7 +1622,7 @@ fn write_sequencer_state(
     if rewrite_opts {
         let committer_sig = committer
             .parse::<crate::ident::Signature>()
-            .map_err(Error::InvalidSignature)?;
+            .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
         write_persisted_options(
             git_dir,
             &ReplaySequenceRequest {
@@ -2064,7 +2070,7 @@ fn hard_reset_replay_tip(
     let _ = branch_ref;
     let identity = "Grit <grit@local> 0 +0000"
         .parse()
-        .map_err(Error::InvalidSignature)?;
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     reset_to_commit(
         repo,
         &ResetOptions::new(target, ResetMode::Hard, identity, "abort replay"),
@@ -2076,12 +2082,7 @@ fn hard_reset_replay_tip(
 
 fn index_stage0_tree(repo: &Repository) -> Result<ObjectId> {
     let mut index = repo.load_index()?;
-    Ok(write_tree_update_index(
-        repo.odb(),
-        &mut index,
-        "",
-        WriteTreeFlags::silent(),
-    )?)
+    write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
 }
 
 fn apply_git_sequencer_opts(git_dir: &Path, opts: &mut ReplayOptions) {

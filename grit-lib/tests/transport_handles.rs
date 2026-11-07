@@ -415,20 +415,14 @@ fn receive_pack_session_stops_before_moving_refs_when_cancelled() {
         .with_cancel(&cancel)
         .run(&mut std::io::empty(), &mut Vec::new())
         .expect_err("cancelled");
-    assert!(matches!(
-        err,
-        grit_lib::remote::serve::ServeError::Cancelled
-    ));
+    assert!(err.is_cancelled(), "{err:?}");
 
     let mut options = serve_options();
     let err = UploadPack::new(&repo, &mut options)
         .with_cancel(&cancel)
         .run(&mut std::io::empty(), &mut Vec::new())
         .expect_err("cancelled");
-    assert!(matches!(
-        err,
-        grit_lib::remote::serve::ServeError::Cancelled
-    ));
+    assert!(err.is_cancelled(), "{err:?}");
 }
 
 #[test]

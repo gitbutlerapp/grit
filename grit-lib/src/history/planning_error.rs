@@ -3,7 +3,7 @@
 use crate::objects::ObjectId;
 
 /// Failure modes for invalid planning inputs, as opposed to repository read failures
-/// ([`super::HistoryError::Engine`](crate::history::HistoryError::Engine)).
+/// (which surface as their own [`Error`](enum@crate::error::Error) area).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlanningError {

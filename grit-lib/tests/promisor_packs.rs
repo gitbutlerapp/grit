@@ -3,6 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
+use grit_lib::error::ObjectError;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::promisor::{
     promisor_expanded_object_ids, promisor_pack_and_tag_targets, promisor_pack_object_ids,
@@ -170,7 +171,7 @@ fn promisor_partial_clone_pack_markers_and_config() {
     }
     let err = repo.odb().read(&missing_blob).unwrap_err();
     assert!(
-        matches!(err, Error::PromisedObjectMissing(_)),
+        matches!(err, Error::Object(ObjectError::PromisedMissing { .. })),
         "missing filtered blob without fetcher must be PromisedObjectMissing: {err:?}"
     );
 }

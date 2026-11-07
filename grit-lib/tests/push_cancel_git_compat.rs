@@ -22,7 +22,7 @@ fn push(
     remote_dir: &Path,
     tip: ObjectId,
     cancel: &CancelToken,
-) -> Result<Vec<PushRefStatus>, RemoteError> {
+) -> grit_lib::error::Result<Vec<PushRefStatus>> {
     let remote = Remote::from_url(&format!("file://{}", remote_dir.display())).expect("url");
     let spec = PushRefSpec {
         src: Some(tip),

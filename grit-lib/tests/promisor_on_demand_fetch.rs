@@ -3,6 +3,7 @@
 #![cfg(feature = "http-ureq")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::error::ObjectError;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -280,7 +281,7 @@ fn no_fetcher_returns_typed_promised_missing() {
     let oid = ObjectId::from_hex(blob_hex.trim()).expect("oid");
     let err = repo.odb().read(&oid).unwrap_err();
     assert!(
-        matches!(err, Error::PromisedObjectMissing(_)),
+        matches!(err, Error::Object(ObjectError::PromisedMissing { .. })),
         "expected PromisedObjectMissing, got {err:?}"
     );
 }
@@ -506,7 +507,7 @@ fn lazy_fetch_opt_out_config() {
     let oid = ObjectId::from_hex(blob_hex.trim()).expect("oid");
     let err = repo.odb().read(&oid).unwrap_err();
     assert!(
-        matches!(err, Error::PromisedObjectMissing(_)),
+        matches!(err, Error::Object(ObjectError::PromisedMissing { .. })),
         "opt-out must not fetch; got {err:?}"
     );
 }
@@ -976,7 +977,7 @@ fn hard_reset_preserves_lazy_fetch_opt_outs_and_missing_fetcher_errors() {
         let repo = Repository::open(repo.git_dir(), &opts).unwrap();
         let err = hard_reset(&repo, revision(&repo, "HEAD")).unwrap_err();
         assert!(
-            matches!(err, Error::PromisedObjectMissing(_)),
+            matches!(err, Error::Object(ObjectError::PromisedMissing { .. })),
             "{disable}: {err:?}"
         );
         assert!(fetcher.requests.lock().unwrap().is_empty());

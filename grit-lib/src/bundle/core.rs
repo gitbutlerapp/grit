@@ -5,6 +5,7 @@
 //! verifies prerequisite connectivity against a local repository, and ingests the pack
 //! without updating refs (callers apply [`BundleHeader::refs`] themselves).
 
+use crate::error::ObjectError;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, Read, Seek, Write};
@@ -47,11 +48,9 @@ impl FilterSpec {
     ///
     /// # Errors
     ///
-    /// Returns [`BundleError::MalformedLine`] when the spec is invalid.
+    /// Returns [`BundleError::InvalidFilter`] when the spec is invalid.
     pub fn parse(spec: &str) -> std::result::Result<Self, BundleError> {
-        ObjectFilter::parse(spec)
-            .map(Self)
-            .map_err(BundleError::MalformedLine)
+        Ok(Self(ObjectFilter::parse(spec)?))
     }
 
     /// Borrow the parsed filter.
@@ -149,11 +148,17 @@ pub enum BundleError {
     #[error("unsupported bundle version")]
     UnsupportedVersion,
     /// A v3 `@` capability was not recognized.
-    #[error("unknown bundle capability: {0}")]
-    UnsupportedCapability(String),
+    #[error("unknown bundle capability: {capability}")]
+    UnsupportedCapability {
+        /// The capability as written in the header.
+        capability: String,
+    },
     /// A header line could not be parsed.
-    #[error("malformed bundle header: {0}")]
-    MalformedLine(String),
+    #[error("malformed bundle header: {line}")]
+    MalformedLine {
+        /// The header line as written.
+        line: String,
+    },
     /// Header object format disagrees with the repository.
     #[error("bundle object format {bundle_name} does not match repository {repo_name}")]
     ObjectFormatMismatch {
@@ -178,11 +183,23 @@ pub enum BundleError {
     #[error("bundle pack stream missing or invalid")]
     MissingPack,
     /// Underlying I/O failure.
-    #[error("{0}")]
-    Io(String),
+    #[error("{detail}")]
+    Io {
+        /// What failed, with the path when known.
+        detail: String,
+    },
     /// A named object id is missing from the ODB.
-    #[error("object not found: {0}")]
-    ObjectNotFound(String),
+    #[error("object not found: {name}")]
+    ObjectNotFound {
+        /// Object id (hex) that was looked up.
+        name: String,
+    },
+    /// A v3 `@filter=` capability is not a filter Git accepts.
+    #[error(transparent)]
+    InvalidFilter(#[from] crate::rev_list::ObjectFilterError),
+    /// Bundle creation was given no revision to include and was not asked for every ref.
+    #[error("at least one revision is required")]
+    NoRevisions,
     /// The operation was cancelled before the bundle finished unpacking.
     #[error("operation cancelled")]
     Cancelled,
@@ -190,12 +207,16 @@ pub enum BundleError {
 
 impl From<std::io::Error> for BundleError {
     fn from(e: std::io::Error) -> Self {
-        Self::Io(e.to_string())
+        Self::Io {
+            detail: e.to_string(),
+        }
     }
 }
 
 fn io_open_path(path: &Path, source: std::io::Error) -> BundleError {
-    BundleError::Io(format!("could not open '{}': {source}", path.display()))
+    BundleError::Io {
+        detail: format!("could not open '{}': {source}", path.display()),
+    }
 }
 
 fn format_missing_prerequisite_commits(commits: &[(ObjectId, Option<String>)]) -> String {
@@ -352,8 +373,12 @@ impl Bundle {
         if report.missing_prerequisites.is_empty() {
             let prereq_oids: Vec<ObjectId> =
                 self.header.prerequisites.iter().map(|(o, _)| *o).collect();
-            let connected = bundle_prerequisites_connected_to_refs(repo, &prereq_oids)
-                .map_err(|e| BundleError::Io(e.to_string()))?;
+            let connected =
+                bundle_prerequisites_connected_to_refs(repo, &prereq_oids).map_err(|e| {
+                    BundleError::Io {
+                        detail: e.to_string(),
+                    }
+                })?;
             report.prerequisites_not_connected = !connected;
         }
         Ok(report)
@@ -410,8 +435,11 @@ impl Bundle {
             .map_err(bundle_ingest_error)?
         };
         if let (Some(_), Some(pack_path)) = (&self.header.filter, &ingested.pack_path) {
-            std::fs::write(pack_path.with_extension("promisor"), b"")
-                .map_err(|e| BundleError::Io(e.to_string()))?;
+            std::fs::write(pack_path.with_extension("promisor"), b"").map_err(|e| {
+                BundleError::Io {
+                    detail: e.to_string(),
+                }
+            })?;
             repo.odb().invalidate_packs();
         }
         let transfer = crate::transfer::TransferStats::from_ingested_pack(&ingested);
@@ -448,8 +476,9 @@ impl Bundle {
         );
         let pack_dir = repo.odb().objects_dir().join("pack");
         std::fs::create_dir_all(&pack_dir).map_err(BundleError::from)?;
-        let tmp = tempfile::NamedTempFile::new_in(&pack_dir)
-            .map_err(|e| BundleError::Io(e.to_string()))?;
+        let tmp = tempfile::NamedTempFile::new_in(&pack_dir).map_err(|e| BundleError::Io {
+            detail: e.to_string(),
+        })?;
         {
             let mut input = File::open(&self.path)?;
             Seek::seek(&mut input, std::io::SeekFrom::Start(self.pack_offset))
@@ -492,7 +521,9 @@ impl Bundle {
 fn bundle_ingest_error(e: Error) -> BundleError {
     match e {
         Error::Cancelled => BundleError::Cancelled,
-        other => BundleError::Io(other.to_string()),
+        other => BundleError::Io {
+            detail: other.to_string(),
+        },
     }
 }
 
@@ -544,14 +575,14 @@ fn read_header_lines(reader: &mut dyn BufRead) -> std::result::Result<BundleHead
                 .map(str::to_owned);
             prerequisites.push((oid, subject));
         } else {
-            let refname = tail.ok_or_else(|| {
-                BundleError::MalformedLine("ref line missing ref name".to_owned())
+            let refname = tail.ok_or_else(|| BundleError::MalformedLine {
+                line: "ref line missing ref name".to_owned(),
             })?;
             let refname = refname.trim();
             if refname.is_empty() {
-                return Err(BundleError::MalformedLine(
-                    "ref line missing ref name".to_owned(),
-                ));
+                return Err(BundleError::MalformedLine {
+                    line: "ref line missing ref name".to_owned(),
+                });
             }
             refs.push((refname.to_owned(), oid));
         }
@@ -723,8 +754,12 @@ fn bundle_header_parts(
 fn map_pack_error(e: Error) -> BundleError {
     match e {
         Error::Cancelled => BundleError::Cancelled,
-        Error::ObjectNotFound(id) => BundleError::ObjectNotFound(id),
-        other => BundleError::Io(other.to_string()),
+        Error::Object(ObjectError::NotFound { name: id }) => {
+            BundleError::ObjectNotFound { name: id }
+        }
+        other => BundleError::Io {
+            detail: other.to_string(),
+        },
     }
 }
 
@@ -888,16 +923,26 @@ fn write_header(
         }
     }
     for (oid, subject) in prerequisites {
-        write!(out, "-{} ", oid.to_hex()).map_err(|e| BundleError::Io(e.to_string()))?;
+        write!(out, "-{} ", oid.to_hex()).map_err(|e| BundleError::Io {
+            detail: e.to_string(),
+        })?;
         if let Some(s) = subject {
-            write!(out, "{s}").map_err(|e| BundleError::Io(e.to_string()))?;
+            write!(out, "{s}").map_err(|e| BundleError::Io {
+                detail: e.to_string(),
+            })?;
         }
-        writeln!(out).map_err(|e| BundleError::Io(e.to_string()))?;
+        writeln!(out).map_err(|e| BundleError::Io {
+            detail: e.to_string(),
+        })?;
     }
     for (oid, name) in refs {
-        writeln!(out, "{} {name}", oid.to_hex()).map_err(|e| BundleError::Io(e.to_string()))?;
+        writeln!(out, "{} {name}", oid.to_hex()).map_err(|e| BundleError::Io {
+            detail: e.to_string(),
+        })?;
     }
-    writeln!(out).map_err(|e| BundleError::Io(e.to_string()))
+    writeln!(out).map_err(|e| BundleError::Io {
+        detail: e.to_string(),
+    })
 }
 
 fn write_signature(
@@ -908,23 +953,27 @@ fn write_signature(
         BundleVersion::V2 => V2_SIGNATURE,
         BundleVersion::V3 => V3_SIGNATURE,
     };
-    out.write_all(sig.as_bytes())
-        .map_err(|e| BundleError::Io(e.to_string()))
+    out.write_all(sig.as_bytes()).map_err(|e| BundleError::Io {
+        detail: e.to_string(),
+    })
 }
 
 fn write_capability_object_format(
     out: &mut dyn Write,
     algo: HashAlgo,
 ) -> std::result::Result<(), BundleError> {
-    writeln!(out, "@object-format={}", algo.name()).map_err(|e| BundleError::Io(e.to_string()))
+    writeln!(out, "@object-format={}", algo.name()).map_err(|e| BundleError::Io {
+        detail: e.to_string(),
+    })
 }
 
 fn write_capability_filter(
     out: &mut dyn Write,
     filter: &FilterSpec,
 ) -> std::result::Result<(), BundleError> {
-    writeln!(out, "@filter={}", filter.to_capability_value())
-        .map_err(|e| BundleError::Io(e.to_string()))
+    writeln!(out, "@filter={}", filter.to_capability_value()).map_err(|e| BundleError::Io {
+        detail: e.to_string(),
+    })
 }
 
 fn parse_capability(
@@ -933,24 +982,27 @@ fn parse_capability(
     filter: &mut Option<FilterSpec>,
 ) -> std::result::Result<(), BundleError> {
     if let Some(name) = cap.strip_prefix("object-format=") {
-        *object_format = HashAlgo::from_name(name)
-            .ok_or_else(|| BundleError::MalformedLine(format!("unknown object format: {name}")))?;
+        *object_format = HashAlgo::from_name(name).ok_or_else(|| BundleError::MalformedLine {
+            line: format!("unknown object format: {name}"),
+        })?;
         return Ok(());
     }
     if let Some(spec) = cap.strip_prefix("filter=") {
         *filter = Some(FilterSpec::parse(spec)?);
         return Ok(());
     }
-    Err(BundleError::UnsupportedCapability(cap.to_owned()))
+    Err(BundleError::UnsupportedCapability {
+        capability: cap.to_owned(),
+    })
 }
 
 fn read_line(reader: &mut dyn BufRead) -> std::result::Result<String, BundleError> {
     let mut line = String::new();
     let n = reader.read_line(&mut line).map_err(BundleError::from)?;
     if n == 0 {
-        return Err(BundleError::MalformedLine(
-            "unexpected end of header".to_owned(),
-        ));
+        return Err(BundleError::MalformedLine {
+            line: "unexpected end of header".to_owned(),
+        });
     }
     if line.ends_with('\n') {
         line.pop();
@@ -967,26 +1019,31 @@ fn parse_oid_field(
 ) -> std::result::Result<(ObjectId, Option<&str>), BundleError> {
     let hex_len = algo.hex_len();
     if line.len() < hex_len {
-        return Err(BundleError::MalformedLine("short object id".to_owned()));
+        return Err(BundleError::MalformedLine {
+            line: "short object id".to_owned(),
+        });
     }
     let (hex, tail) = line.split_at(hex_len);
     if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(BundleError::MalformedLine("invalid object id".to_owned()));
+        return Err(BundleError::MalformedLine {
+            line: "invalid object id".to_owned(),
+        });
     }
-    let oid = ObjectId::from_hex(hex)
-        .map_err(|_| BundleError::MalformedLine("invalid object id".to_owned()))?;
+    let oid = ObjectId::from_hex(hex).map_err(|_| BundleError::MalformedLine {
+        line: "invalid object id".to_owned(),
+    })?;
     if hex.len() != algo.hex_len() {
-        return Err(BundleError::MalformedLine(
-            "object id length mismatch".to_owned(),
-        ));
+        return Err(BundleError::MalformedLine {
+            line: "object id length mismatch".to_owned(),
+        });
     }
     let tail = match tail.chars().next() {
         None => None,
         Some(c) if c.is_whitespace() => Some(tail.trim_start()),
         Some(_) => {
-            return Err(BundleError::MalformedLine(
-                "garbage after object id".to_owned(),
-            ))
+            return Err(BundleError::MalformedLine {
+                line: "garbage after object id".to_owned(),
+            })
         }
     };
     Ok((oid, tail))
@@ -995,9 +1052,9 @@ fn parse_oid_field(
 fn peel_to_commit(odb: &Odb, oid: ObjectId) -> Result<ObjectId> {
     match odb.peel_tags(oid)? {
         (commit, ObjectKind::Commit) => Ok(commit),
-        (other, _) => Err(Error::CorruptObject(format!(
-            "object {other} is not commit or tag"
-        ))),
+        (other, _) => Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("object {other} is not commit or tag"),
+        })),
     }
 }
 
@@ -1034,14 +1091,17 @@ fn prerequisite_commits(
     if excludes.is_empty() {
         return Ok(Vec::new());
     }
-    let exclude_set =
-        commit_closure_roots(odb, excludes).map_err(|e| BundleError::Io(e.to_string()))?;
+    let exclude_set = commit_closure_roots(odb, excludes).map_err(|e| BundleError::Io {
+        detail: e.to_string(),
+    })?;
     let mut prerequisites = Vec::new();
     let mut seen_prereq = HashSet::new();
     let mut walk_seen = HashSet::new();
     let mut q: VecDeque<ObjectId> = VecDeque::new();
     for &root in includes {
-        let c = peel_to_commit(odb, root).map_err(|e| BundleError::Io(e.to_string()))?;
+        let c = peel_to_commit(odb, root).map_err(|e| BundleError::Io {
+            detail: e.to_string(),
+        })?;
         if exclude_set.contains(&c) {
             continue;
         }
@@ -1050,10 +1110,14 @@ fn prerequisite_commits(
         }
     }
     while let Some(c) = q.pop_front() {
-        let parents = commit_parent_set(odb, c).map_err(|e| BundleError::Io(e.to_string()))?;
+        let parents = commit_parent_set(odb, c).map_err(|e| BundleError::Io {
+            detail: e.to_string(),
+        })?;
         for p in parents {
             if exclude_set.contains(&p) && seen_prereq.insert(p) {
-                let subject = commit_subject(odb, p).map_err(|e| BundleError::Io(e.to_string()))?;
+                let subject = commit_subject(odb, p).map_err(|e| BundleError::Io {
+                    detail: e.to_string(),
+                })?;
                 prerequisites.push((p, subject));
             }
             if !exclude_set.contains(&p) && walk_seen.insert(p) {
@@ -1183,7 +1247,7 @@ mod tests {
     fn unknown_capability() {
         let mut cur = Cursor::new(b"# v3 git bundle\n@unknown=yes\n\nPACK");
         let err = read_header(&mut cur).unwrap_err();
-        assert!(matches!(err, BundleError::UnsupportedCapability(_)));
+        assert!(matches!(err, BundleError::UnsupportedCapability { .. }));
     }
 
     #[test]
@@ -1192,7 +1256,7 @@ mod tests {
         let data = format!("# v2 git bundle\n{oid}\n\nPACK");
         let mut cur = Cursor::new(data.into_bytes());
         let err = read_header(&mut cur).unwrap_err();
-        assert!(matches!(err, BundleError::MalformedLine(_)));
+        assert!(matches!(err, BundleError::MalformedLine { .. }));
     }
 
     #[test]

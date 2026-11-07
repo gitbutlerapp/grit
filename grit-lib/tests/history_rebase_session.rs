@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::worktree::WorktreeError;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
@@ -2581,7 +2582,9 @@ fn conflicting_start_refuses_staged_and_unstaged_changes_instead_of_discarding_t
     )
     .expect_err("a stop would discard local changes");
     match err {
-        RebaseSessionError::Library(grit_lib::error::Error::DirtyWorktree { operation, paths }) => {
+        RebaseSessionError::Library(grit_lib::error::Error::Worktree(
+            WorktreeError::DirtyWorktree { operation, paths },
+        )) => {
             assert_eq!(operation, grit_lib::error::WorktreeOperation::Rebase);
             assert_eq!(paths, vec!["new.txt".to_owned()]);
         }
@@ -2615,11 +2618,11 @@ fn conflicting_start_refuses_to_overwrite_untracked_file() {
     assert!(
         matches!(
             &err,
-            RebaseSessionError::Library(grit_lib::error::Error::WouldOverwrite {
+            RebaseSessionError::Library(grit_lib::error::Error::Worktree(WorktreeError::WouldOverwrite {
                 reason: grit_lib::error::OverwriteReason::Untracked,
                 paths,
                 ..
-            }) if paths == &["added.txt".to_owned()]
+            })) if paths == &["added.txt".to_owned()]
         ),
         "unexpected {err:?}"
     );
@@ -3404,9 +3407,7 @@ fn exec_recovery_can_stop_again_at_next_command_and_final_commit() {
     let (fixture, opts, plan) = exec_fixture();
     let wt = fixture.worktree();
     let commands = ["echo first >> f", "echo second >> f"];
-    let mut result = run_exec(wt, &mut plan.clone(), &commands)
-        .map(|_| ())
-        .map_err(RebaseSessionError::from);
+    let mut result = run_exec(wt, &mut plan.clone(), &commands).map(|_| ());
     let commits: Vec<_> = plan.commits.iter().filter_map(|r| r.new).collect();
     for (step, expected_commit) in [commits[0], commits[0], commits[1], commits[1]]
         .into_iter()

@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, PathIoError, Result, WorktreePathOperation};
 use crate::index::{Index, MODE_GITLINK};
 use crate::porcelain::stash::remove_empty_dirs;
 use crate::porcelain::status::{
@@ -16,6 +16,8 @@ use crate::porcelain::status::{
 };
 use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
+use crate::worktree::WorktreeError;
 use crate::worktree_rules::WorktreeRules;
 
 /// Which untracked/ignored paths [`clean_untracked`] may remove.
@@ -86,9 +88,7 @@ pub fn clean_untracked_with_cancel(
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<CleanOutcome> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Verbatim("clean requires a working tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     let mut index = repo.load_index()?;
     let rules = WorktreeRules::from_repository(repo, &index)?;
@@ -198,9 +198,10 @@ pub fn clean_untracked_with_cancel(
                 path.trim_end_matches('/'),
                 repo.environment(),
             ) {
-                return Err(Error::Verbatim(format!(
-                    "refusing to remove '{path}' because it contains the current directory"
-                )));
+                return Err(WorktreeError::RemoveContainsCurrentDirectory {
+                    path: path.trim_end_matches('/').to_owned(),
+                }
+                .into());
             }
             removed.push(path);
         }
@@ -235,9 +236,7 @@ fn empty_untracked_directories(
     scope: CleanScope,
     already_listed: &[String],
 ) -> Result<Vec<String>> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Verbatim("clean requires a working tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let listed: BTreeSet<String> = already_listed
         .iter()
         .map(|p| p.trim_end_matches('/').to_owned())
@@ -538,9 +537,7 @@ fn expand_collapsed_dir_paths(
     scope: CleanScope,
     dir_rel: &str,
 ) -> Result<Vec<String>> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Verbatim("clean requires a working tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let mut paths = Vec::new();
     walk_expand_collapsed_dir(
         repo,
@@ -748,9 +745,12 @@ fn remove_one_path(
     let stored = rel.trim_end_matches('/');
     let abs = crate::repo_relpath::worktree_abs(work_tree, stored);
     if !abs.exists() && abs.symlink_metadata().is_err() {
-        return Err(Error::Verbatim(format!(
-            "failed to remove '{stored}': no such file or directory"
-        )));
+        return Err(PathIoError::worktree(
+            stored,
+            WorktreePathOperation::Remove,
+            std::io::ErrorKind::NotFound.into(),
+        )
+        .into());
     }
     if rel.ends_with('/') || abs.is_dir() {
         if is_nested_git_worktree(&abs) {

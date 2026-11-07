@@ -6,13 +6,17 @@ use thiserror::Error;
 
 /// Error returned when an upload-pack filter request is not allowed by config.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum UploadFilterError {
     /// `uploadpackfilter.tree.maxDepth` exists but is not a non-negative integer.
     #[error("unable to parse uploadpackfilter.tree.maxdepth")]
     InvalidTreeMaxDepth,
     /// A requested filter kind is disabled by `uploadpackfilter.*.allow`.
-    #[error("filter '{0}' not supported")]
-    UnsupportedFilter(String),
+    #[error("filter '{filter}' not supported")]
+    UnsupportedFilter {
+        /// The filter kind as Git names it (`blob:none`, `tree`, …).
+        filter: String,
+    },
     /// A `tree:<depth>` request exceeds `uploadpackfilter.tree.maxDepth`.
     #[error("tree filter allows max depth {max}, but got {actual}")]
     TreeDepthTooLarge {
@@ -22,8 +26,8 @@ pub enum UploadFilterError {
         actual: u64,
     },
     /// The filter specification could not be parsed.
-    #[error("{0}")]
-    InvalidFilterSpec(String),
+    #[error(transparent)]
+    InvalidFilterSpec(#[from] crate::rev_list::ObjectFilterError),
 }
 
 /// Validate upload-pack filter-related config that must be well-formed even
@@ -37,7 +41,7 @@ pub fn validate_upload_filter_request(
     config: &ConfigSet,
     spec: &str,
 ) -> Result<(), UploadFilterError> {
-    let filter = ObjectFilter::parse(spec).map_err(UploadFilterError::InvalidFilterSpec)?;
+    let filter = ObjectFilter::parse(spec)?;
     validate_filter(config, &filter)
 }
 
@@ -91,9 +95,9 @@ fn ensure_filter_allowed(
         if value {
             return Ok(());
         }
-        return Err(UploadFilterError::UnsupportedFilter(
-            display_kind.to_owned(),
-        ));
+        return Err(UploadFilterError::UnsupportedFilter {
+            filter: display_kind.to_owned(),
+        });
     }
 
     if config
@@ -104,8 +108,8 @@ fn ensure_filter_allowed(
     {
         Ok(())
     } else {
-        Err(UploadFilterError::UnsupportedFilter(
-            display_kind.to_owned(),
-        ))
+        Err(UploadFilterError::UnsupportedFilter {
+            filter: display_kind.to_owned(),
+        })
     }
 }
