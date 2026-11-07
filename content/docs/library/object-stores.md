@@ -131,6 +131,8 @@ Some parts of grit-lib read or write `objects/` on disk directly, because what t
 | Submodules and alternates | A submodule's git dir and `objects/info/alternates` name directories on disk. Alternates are read for the files primary unless `OdbBuilder::alternates(false)`, and for a custom primary only with `OdbBuilder::alternates(true)`. |
 | Local-path transport | Fetch, push and clone from a peer repository given as a local path open that repository's own files store. |
 | Gated fast paths | Rev-list, merge-base, fsck and bitmap walks read packs directly only after checking that the primary is the files backend, or that a pack bitmap exists. A custom primary takes the general path through `ObjectStore`. |
+| Git-directory fallbacks | Functions that take only a git directory path, such as `refs::write_ref`, `refs::pack_remote_tracking_refs_for_clone`, `remote::list_refs_from_git_dir` without an `Odb`, and `promisor_pack_object_ids`, have no repository to ask, so they use that directory's files database. Called through a `Repository`, the same work (ref updates, `packed-refs` peel lines, ls-refs peeling) goes through your store. |
+| Scratch databases | Throwaway, empty databases in a temporary directory, such as the one the thin-pack check indexes a received pack against. They never hold your objects. |
 
 A source-scan test in grit-lib (`storage_backend_guard`) keeps this list honest: any new direct access to `objects/` outside these areas fails the build, and the places that still bypass a custom store are tracked there until they go through it.
 

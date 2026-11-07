@@ -80,7 +80,12 @@ pub fn repo_treats_promisor_packs(_git_dir: &Path, config: &ConfigSet) -> bool {
 /// All object IDs stored in packfiles that have a sibling `.promisor` marker file.
 #[must_use]
 pub fn promisor_pack_object_ids(objects_dir: &Path) -> HashSet<ObjectId> {
-    let odb = Odb::new(objects_dir);
+    promisor_pack_object_ids_in(&Odb::new(objects_dir))
+}
+
+/// [`promisor_pack_object_ids`] for `odb`'s own files primary; empty for a custom primary,
+/// which has no packs.
+fn promisor_pack_object_ids_in(odb: &Odb) -> HashSet<ObjectId> {
     let Ok(primary) = odb.primary() else {
         return HashSet::new();
     };
@@ -100,7 +105,7 @@ pub fn promisor_pack_object_ids(objects_dir: &Path) -> HashSet<ObjectId> {
 /// annotated tag object still in the promisor pack (t0410).
 #[must_use]
 pub fn promisor_pack_peeled_tag_targets(repo: &Repository) -> HashSet<ObjectId> {
-    let seeds = promisor_pack_object_ids(repo.odb().objects_dir());
+    let seeds = promisor_pack_object_ids_in(repo.odb());
     let mut out = HashSet::new();
     for oid in seeds {
         let Ok(obj) = repo.odb().read(&oid) else {
@@ -119,7 +124,7 @@ pub fn promisor_pack_peeled_tag_targets(repo: &Repository) -> HashSet<ObjectId> 
 
 /// Promisor pack member OIDs plus peeled tag targets (one hop from each tag in the pack).
 pub fn promisor_pack_and_tag_targets(repo: &Repository) -> Result<HashSet<ObjectId>> {
-    let seeds = promisor_pack_object_ids(repo.odb().objects_dir());
+    let seeds = promisor_pack_object_ids_in(repo.odb());
     let mut out = seeds.clone();
     for oid in seeds {
         let obj = match repo.odb().read(&oid) {

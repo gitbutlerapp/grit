@@ -461,6 +461,14 @@ mod tests {
         /// backend (or that a pack bitmap exists); other stores take the
         /// general path.
         GatedFastPath,
+        /// Fallbacks for callers that have only a git directory path, such as the
+        /// public git-dir free functions and a files ref store opened on its own:
+        /// with no repository open, that directory's files database is the only
+        /// store there is. Callers holding a repository pass its store instead.
+        GitDirFallback,
+        /// Throwaway, empty databases in a temporary directory that never hold
+        /// the repository's objects.
+        ScratchDatabase,
     }
 
     /// The step of the storage-backend plan that removes a known leak.
@@ -471,10 +479,6 @@ mod tests {
         PrimaryStoreEnum,
         /// Step 5: change-id resolution and log grouping through the store.
         ChangeIdAndGroupBy,
-        /// Step 6: ref peeling and ref checks through the repository's store.
-        RefPeelingAndChecks,
-        /// Step 7: typed refusals for files-only operations.
-        TypedFilesOnlyRefusals,
     }
 
     struct ByDesign {
@@ -572,6 +576,20 @@ mod tests {
         by_design("merge_base.rs", SingleLocalPackReader, Area::GatedFastPath),
         by_design("rev_list.rs", ObjectsDir, Area::GatedFastPath),
         by_design("rev_list.rs", SingleLocalPackReader, Area::GatedFastPath),
+        // `open_checked_ref_store` serves only the git-dir ref writers.
+        by_design("refs/store/checked.rs", JoinObjects, Area::GitDirFallback),
+        by_design("refs/store/checked.rs", OdbNew, Area::GitDirFallback),
+        // `pack_remote_tracking_refs_for_clone`; the other `join("objects")` hit reads
+        // alternates.
+        by_design("refs/mod.rs", JoinObjects, Area::GitDirFallback),
+        by_design("refs/mod.rs", OdbNew, Area::GitDirFallback),
+        // Peeling for initial `packed-refs` records when no repository installed a store.
+        by_design("refs/store/files.rs", JoinObjects, Area::GitDirFallback),
+        by_design("refs/store/files.rs", OdbNew, Area::GitDirFallback),
+        by_design("promisor.rs", OdbNew, Area::GitDirFallback),
+        // The thin-pack probe indexes a received pack against an empty database.
+        by_design("unpack_objects.rs", JoinObjects, Area::ScratchDatabase),
+        by_design("unpack_objects.rs", OdbNew, Area::ScratchDatabase),
     ];
 
     const KNOWN_LEAKS: &[Leak] = &[
@@ -602,10 +620,8 @@ mod tests {
         // `reachable_commits` loads on-disk commit-graph files for any primary; the
         // pack spool hits in this file are files-only by design.
         leak("fetch.rs", ObjectsDir, FixStep::PrimaryStoreEnum),
-        // Scratch databases in temp dirs that could be in-memory stores.
+        // A scratch database in a temp dir that could be an in-memory store.
         leak("diff/no_index.rs", OdbNew, FixStep::PrimaryStoreEnum),
-        leak("unpack_objects.rs", JoinObjects, FixStep::PrimaryStoreEnum),
-        leak("unpack_objects.rs", OdbNew, FixStep::PrimaryStoreEnum),
         // Stored change-id header probe and single-pack commit reader.
         leak("change_id.rs", ObjectsDir, FixStep::ChangeIdAndGroupBy),
         leak(
@@ -624,33 +640,6 @@ mod tests {
             SingleLocalPackReader,
             FixStep::ChangeIdAndGroupBy,
         ),
-        // Peeling during pack-refs opens its own database on the git dir; the
-        // alternates hit in `refs/mod.rs` is files-only by design.
-        leak("refs/mod.rs", JoinObjects, FixStep::RefPeelingAndChecks),
-        leak("refs/mod.rs", OdbNew, FixStep::RefPeelingAndChecks),
-        leak(
-            "refs/store/files.rs",
-            JoinObjects,
-            FixStep::RefPeelingAndChecks,
-        ),
-        leak("refs/store/files.rs", OdbNew, FixStep::RefPeelingAndChecks),
-        // `open_checked_ref_store` checks ref targets against a files database.
-        leak(
-            "refs/store/checked.rs",
-            JoinObjects,
-            FixStep::RefPeelingAndChecks,
-        ),
-        leak(
-            "refs/store/checked.rs",
-            OdbNew,
-            FixStep::RefPeelingAndChecks,
-        ),
-        // Peeling ls-refs results opens a files database on the git dir.
-        leak("remote/core.rs", JoinObjects, FixStep::RefPeelingAndChecks),
-        leak("remote/core.rs", OdbNew, FixStep::RefPeelingAndChecks),
-        // `promisor_pack_object_ids` reads promisor packs by path.
-        leak("promisor.rs", ObjectsDir, FixStep::TypedFilesOnlyRefusals),
-        leak("promisor.rs", OdbNew, FixStep::TypedFilesOnlyRefusals),
     ];
 
     type Key = (&'static str, Access);

@@ -1507,6 +1507,14 @@ pub(crate) fn list_refs_from_git_dir_for_fetch(
     list_refs_from_git_dir_with_scan_prefixes(git_dir, odb, &opts, &prefixes)
 }
 
+/// List refs of the repository at `git_dir`, as `ls-remote` on a local path would.
+///
+/// With [`ListRefsOptions::peel`], annotated tags are peeled through `odb`; pass the
+/// repository's [`Odb`] when one is open (for example
+/// [`Repository::odb`](crate::repo::Repository::odb)), so a custom object store is used.
+/// When `odb` is `None` the files object database of `git_dir`'s common directory is opened.
+///
+/// # Errors
 ///
 /// Returns [`RemoteError::from`] on I/O or ref resolution failures.
 pub(crate) fn list_refs_from_git_dir(
@@ -1574,10 +1582,7 @@ fn list_refs_from_git_dir_with_scan_prefixes(
                 if should_emit_peel_line(&peel_name, &opts.prefixes) {
                     let peel_odb = match odb {
                         Some(o) => o,
-                        None => lazy_odb.get_or_insert_with(|| {
-                            Odb::new(&git_dir.join("objects"))
-                                .with_config_git_dir(git_dir.to_path_buf())
-                        }),
+                        None => lazy_odb.get_or_insert_with(|| open_odb(git_dir)),
                     };
                     if let Ok(Some(peeled)) = peel_odb.peel_tag_target(oid) {
                         entries.push(RemoteRef {

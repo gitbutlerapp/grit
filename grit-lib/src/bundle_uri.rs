@@ -475,8 +475,8 @@ fn bundle_error(e: crate::bundle::BundleError) -> Error {
 ///
 /// Ref listing or deletion failures.
 pub(crate) fn remove_bundle_refs(repo: &Repository) -> Result<()> {
-    for (name, _) in crate::refs::list_refs(repo.git_dir(), BUNDLE_REFS_PREFIX)? {
-        crate::refs::delete_ref(repo.git_dir(), &name)?;
+    for (name, _) in crate::refs::list_refs_for_repository(repo, BUNDLE_REFS_PREFIX)? {
+        crate::refs::delete_ref_on_store(repo.ref_store(), &name)?;
     }
     Ok(())
 }

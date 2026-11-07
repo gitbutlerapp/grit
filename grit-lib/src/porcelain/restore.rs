@@ -473,7 +473,14 @@ fn checkout_submodule_worktree_to_commit(sub_worktree: &Path, oid: ObjectId) -> 
                 .and_then(|c| parse_commit(&c.data).ok().map(|p| p.tree))
         });
     checkout_between_trees(&sub_repo, from_tree.as_ref(), &tree)?;
-    crate::refs::write_ref(&git_dir, "HEAD", &oid)?;
+    crate::refs::store_write_value_on_store(
+        sub_repo.ref_store(),
+        sub_repo.git_dir(),
+        "HEAD",
+        Some(crate::refs::store::RawRef::Direct(oid)),
+        crate::refs::store::Expected::Any,
+        None,
+    )?;
     Ok(())
 }
 
