@@ -48,7 +48,9 @@ use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::HashAlgo;
 use grit_lib::objects::ObjectId;
-use grit_lib::operation::{conflict_kind_from_stagemask, conflicts_from_index, ConflictKind};
+use grit_lib::operation::{
+    conflict_kind_from_stagemask, conflicts_from_index, Conflict, ConflictKind,
+};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitOutcome, CommitRequest};
 use grit_lib::porcelain::hunk_select::unstaged_file_diffs;
@@ -61,6 +63,7 @@ use grit_lib::porcelain::replay_sequence::{
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
+use grit_lib::refs::read_symbolic_ref_for_repository;
 use grit_lib::refs::store::RefName;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::Remote;
@@ -397,7 +400,7 @@ fn unmerged_stages_for_path(repo: &Repository, path: &str) -> Vec<u8> {
     stages
 }
 
-fn expected_remote_refs_from_bare(bare: &Repository) -> BTreeMap<String, String> {
+fn remote_refs_for_bare_heads(bare: &Repository) -> BTreeMap<String, String> {
     bare.references()
         .list("refs/heads/")
         .expect("list bare heads")
@@ -410,6 +413,21 @@ fn expected_remote_refs_from_bare(bare: &Repository) -> BTreeMap<String, String>
             (format!("refs/remotes/origin/{short}"), oid.to_hex())
         })
         .collect()
+}
+
+/// Expected `refs/remotes/origin/*` after fetch, derived only from the bare remote.
+fn expected_fetch_remote_refs_from_bare(bare: &Repository) -> BTreeMap<String, String> {
+    let mut expected = remote_refs_for_bare_heads(bare);
+    let default_branch = read_symbolic_ref_for_repository(bare, "HEAD")
+        .expect("read bare HEAD")
+        .unwrap_or_else(|| "refs/heads/main".into());
+    if let Some(short) = default_branch.strip_prefix("refs/heads/") {
+        let tracking = format!("refs/remotes/origin/{short}");
+        if let Some(oid) = expected.get(&tracking).cloned() {
+            expected.insert("refs/remotes/origin/HEAD".into(), oid);
+        }
+    }
+    expected
 }
 
 fn copy_tree(from: &Path, to: &Path) {
@@ -482,15 +500,15 @@ pub struct RepositorySnapshot {
     pub conflict_paths: Vec<String>,
     pub merge_in_progress_before_abort: bool,
     pub merge_conflicts_before_abort: Vec<String>,
-    /// `(path, conflict_kind)` from status during the conflicted merge.
-    pub conflict_details_before_abort: Vec<(String, String)>,
+    /// Typed conflict rows from status during the conflicted merge.
+    pub conflict_details_before_abort: Vec<Conflict>,
     /// Unmerged index stages (1–3) for `shared.txt` before merge abort.
     pub shared_unmerged_stages_before_abort: Vec<u8>,
-    pub shared_conflict_kind_before_abort: String,
-    pub index_conflicts_before_abort: Vec<(String, String)>,
-    pub index_conflicts_after_abort: Vec<(String, String)>,
+    pub shared_conflict_kind_before_abort: ConflictKind,
+    pub index_conflicts_before_abort: Vec<Conflict>,
+    pub index_conflicts_after_abort: Vec<Conflict>,
     pub merge_conflicts_after_abort: Vec<String>,
-    pub conflict_details_after_abort: Vec<(String, String)>,
+    pub conflict_details_after_abort: Vec<Conflict>,
     pub shared_has_conflict_markers: bool,
     pub main_head_at_conflict: ObjectId,
     pub head_after_merge_abort: ObjectId,
@@ -721,27 +739,19 @@ fn run_snapshot_on_repo(
     .expect("status during merge");
     let merge_in_progress_before_abort = status_during_merge.state.merge_in_progress;
     let merge_conflicts_before_abort = status_during_merge.conflicts.clone();
-    let conflict_details_before_abort: Vec<_> = status_during_merge
-        .conflict_details
-        .iter()
-        .map(|c| (c.path.clone(), c.kind.as_str().to_owned()))
-        .collect();
+    let conflict_details_before_abort = status_during_merge.conflict_details.clone();
     let shared_unmerged_stages_before_abort = unmerged_stages_for_path(repo, "shared.txt");
     let stage_mask = shared_unmerged_stages_before_abort
         .iter()
         .fold(0u8, |mask, &stage| mask | (1u8 << (stage - 1)));
-    let shared_conflict_kind_before_abort = conflict_kind_from_stagemask(stage_mask)
-        .map(|kind| kind.as_str().to_owned())
-        .unwrap_or_default();
-    let index_conflicts_before_abort: Vec<(String, String)> = conflicts_from_index(
+    let shared_conflict_kind_before_abort =
+        conflict_kind_from_stagemask(stage_mask).expect("shared.txt unmerged during merge");
+    let index_conflicts_before_abort = conflicts_from_index(
         &repo
             .index()
             .load_preserving_sparse()
             .expect("index during merge"),
-    )
-    .into_iter()
-    .map(|c| (c.path, c.kind.as_str().to_owned()))
-    .collect();
+    );
     let shared_has_conflict_markers = fs::read_to_string(work_tree(repo).join("shared.txt"))
         .expect("shared")
         .contains("<<<<<<<");
@@ -756,21 +766,14 @@ fn run_snapshot_on_repo(
     let main_head_at_conflict = main_conflict;
     let head_after_merge_abort = head_oid(repo, "main");
     let merge_in_progress_after_abort = status_after_abort.state.merge_in_progress;
-    let index_conflicts_after_abort: Vec<(String, String)> = conflicts_from_index(
+    let index_conflicts_after_abort = conflicts_from_index(
         &repo
             .index()
             .load_preserving_sparse()
             .expect("index after abort"),
-    )
-    .into_iter()
-    .map(|c| (c.path, c.kind.as_str().to_owned()))
-    .collect();
+    );
     let merge_conflicts_after_abort = status_after_abort.conflicts.clone();
-    let conflict_details_after_abort: Vec<_> = status_after_abort
-        .conflict_details
-        .iter()
-        .map(|c| (c.path.clone(), c.kind.as_str().to_owned()))
-        .collect();
+    let conflict_details_after_abort = status_after_abort.conflict_details.clone();
     let shared_content_after_abort =
         fs::read_to_string(work_tree(repo).join("shared.txt")).expect("shared after abort");
 
@@ -942,6 +945,7 @@ fn run_snapshot_on_repo(
 
     let bare_repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open bare");
     let bare_object_set = object_hex_set(&bare_repo);
+    let expected_fetch_remote_refs = expected_fetch_remote_refs_from_bare(&bare_repo);
 
     let bare_url = bare.to_str().expect("utf8");
     let origin = Remote::from_url(bare_url).expect("origin url");
@@ -992,14 +996,6 @@ fn run_snapshot_on_repo(
         .expect("fetch files");
     let files_fetch_object_set = object_hex_set(&files_fetch);
     let files_fetch_refs = ref_map(&files_fetch);
-
-    let mut expected_fetch_remote_refs = expected_remote_refs_from_bare(&bare_repo);
-    if let Some(head_oid) = remote_tracking_refs(&backend_fetch_refs)
-        .get("refs/remotes/origin/HEAD")
-        .cloned()
-    {
-        expected_fetch_remote_refs.insert("refs/remotes/origin/HEAD".into(), head_oid);
-    }
 
     let fsck = repo
         .fsck(
@@ -1179,15 +1175,21 @@ fn case_merge_conflict_abort(fixture: &impl BackendFixture) {
     assert_eq!(snap.shared_unmerged_stages_before_abort, vec![2, 3]);
     assert_eq!(
         snap.shared_conflict_kind_before_abort,
-        ConflictKind::BothAdded.as_str()
+        ConflictKind::BothAdded
     );
     assert_eq!(
         snap.conflict_details_before_abort,
-        vec![("shared.txt".into(), ConflictKind::BothAdded.as_str().into())]
+        vec![Conflict {
+            path: "shared.txt".into(),
+            kind: ConflictKind::BothAdded,
+        }]
     );
     assert_eq!(
         snap.index_conflicts_before_abort,
-        vec![("shared.txt".into(), ConflictKind::BothAdded.as_str().into())]
+        vec![Conflict {
+            path: "shared.txt".into(),
+            kind: ConflictKind::BothAdded,
+        }]
     );
     assert!(snap.shared_has_conflict_markers);
     assert!(snap.merge_conflicts_after_abort.is_empty());
@@ -1239,15 +1241,15 @@ fn case_stash(fixture: &impl BackendFixture) {
         .unstaged_paths_after_stash_pop
         .iter()
         .any(|p| p == "story.txt"));
-    assert!(snap
-        .untracked_paths_before_stash
-        .iter()
-        .any(|p| p == "untracked.txt"));
+    assert_eq!(
+        snap.untracked_paths_before_stash,
+        ["untracked.txt".to_owned()]
+    );
     assert!(snap.untracked_file_after_stash_pop);
     assert!(!snap.untracked_tracked_in_index_after_stash_pop);
     assert_eq!(
         snap.untracked_paths_after_stash_pop,
-        snap.untracked_paths_before_stash
+        ["untracked.txt".to_owned()]
     );
     assert_eq!(
         snap.staged_paths_after_stash_pop,
