@@ -271,7 +271,7 @@ pub struct WorkBranchResponse {
 }
 
 /// `POST /.grit/checkouts/<repo>/<id>/branch`: show the server's branch
-/// `name` to checkout `id` ([`project_branch`]).
+/// `name` to checkout `id` ([`project_branch`](crate::repo_handles::RepositorySnapshotCheckouts::project_branch)).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BranchRequest {
     /// The branch, without `refs/heads/`.
@@ -1369,7 +1369,7 @@ impl<'a> CheckoutClient<'a> {
     }
 
     /// Ask the server to show its branch `name` to checkout `id`: its
-    /// projection, put at `in_ref` to fetch ([`fetch_branch`]).
+    /// projection, put at `in_ref` to fetch ([`fetch_branch`](crate::repo_handles::RepositorySnapshotCheckouts::fetch_branch)).
     ///
     /// # Errors
     ///
@@ -1488,7 +1488,8 @@ pub struct CheckoutMarker {
     /// Tips of branches this checkout checked in that have landed in
     /// [`Self::branch`] (the server merged them into it, or it had them
     /// already): every later snapshot has their commits' changes, though not
-    /// as ancestors, so refreshes never replay them ([`land_integration`]).
+    /// as ancestors, so refreshes never replay them
+    /// ([`land_integration`](crate::repo_handles::RepositorySnapshotCheckouts::land_integration)).
     /// A tip no branch, and no worktree's detached `HEAD`, builds on any
     /// more is dropped.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

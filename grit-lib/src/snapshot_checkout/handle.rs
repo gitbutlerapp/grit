@@ -98,9 +98,9 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
         super::branches_with_work(self.repo, marker)
     }
 
-    /// Project the server's branch `name` for `checkout` (see [`project`](Self::project)),
-    /// record the new pairs in `known`, and point [`in_ref`] at the projection
-    /// for the checkout to fetch.
+    /// Project the server's branch `name` for `checkout`, record the new pairs in
+    /// `known`, and point the checkout's `refs/checkouts/<id>/in/heads/<name>` at the
+    /// projection for the checkout to fetch.
     ///
     /// The commits hidden are those of the branch the checkout follows
     /// ([`CheckoutInfo::branch`]), which refreshes bring as snapshots.
@@ -119,7 +119,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// What the checkout fetches, named as the server spells the branch
     /// ([`BranchInfo::name`]), or `Ok(Err(..))` with why the branch can't be
     /// shown: an invalid name, the branch the checkout follows (in any case), a
-    /// branch the server doesn't have, or the refusals of [`project`](Self::project).
+    /// branch the server doesn't have, or the projection's refusals.
     ///
     /// # Errors
     ///
@@ -139,7 +139,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// names, in any case, the branch the checkout was made from or the
     /// repository's current `target`; when its tip is not an object id or is not
     /// what the server has at [`out_ref`]; and when the graft fails
-    /// ([`graft`](Self::graft)).
+    /// (a graft).
     ///
     /// # Parameters
     ///
@@ -171,7 +171,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     }
 
     /// Whether `grafted` has every commit of `previous` that the target lacks,
-    /// matched by change key ([`change_keys`]): a rebase of it, perhaps with more
+    /// matched by change key: a rebase of it, perhaps with more
     /// on top.
     ///
     /// It holds when every commit of `previous --not grafted <targets>` has a
@@ -209,8 +209,8 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// from new work later.
     ///
     /// A commit without a `change-id` header is rewritten with the id
-    /// [`ChangeId::derived_from_commit_id`] gives its own commit id (what
-    /// [`resolved_change_id`] already reports for it, and what the server's graft
+    /// [`ChangeId::derived_from_commit_id`](crate::change_id::ChangeId::derived_from_commit_id) gives its own commit id (what
+    /// [`resolved_change_id`](crate::change_id::resolved_change_id) already reports for it, and what the server's graft
     /// would give it). A commit whose parent was rewritten is rewritten onto the
     /// new parent, keeping its id. Rewritten commits drop signatures, which no
     /// longer hold. Trees are unchanged, so the index and worktree stay as they
@@ -228,7 +228,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// checkout's worktrees (a rebase, merge, cherry-pick or revert, one paused
     /// between the commits of a sequence too, am or bisect), whose state names
     /// the commits as they are, or when `grit.changeIds` is off
-    /// ([`ChangeIdPolicy`]).
+    /// ([`ChangeIdPolicy`](crate::change_id::ChangeIdPolicy)).
     ///
     /// # Parameters
     ///
@@ -353,7 +353,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// server, and treating it as this one would drop the branch's commits from
     /// the next snapshot. A merge and an answer that the target already had the
     /// branch both mean the tip this integration checked in, `checked_in`, is in
-    /// the target, so it is recorded as landed ([`record_landed`]): later
+    /// the target, so it is recorded as landed: later
     /// refreshes never replay its commits. Otherwise nothing is recorded.
     ///
     /// # Parameters
@@ -401,15 +401,15 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     ///    ([`Repository::identity_now`]), as the rebase's commits and reflog
     ///    entries are.
     /// 1. Fetches the snapshot from the marker's URL into [`upstream_ref`] and
-    ///    records it in the marker ([`fetch_snapshot`]).
-    /// 2. With `HEAD` on a branch, integrates the snapshot as [`pull`] does with
+    ///    records it in the marker.
+    /// 2. With `HEAD` on a branch, integrates the snapshot as [`pull`](crate::porcelain::pull::pull) does with
     ///    `options` (a rebase unless `options.mode` says otherwise). A rebase that
     ///    conflicts stops in a resumable rebase session
     ///    ([`PullOptions::stop_on_conflict`]). Commits up to a tip that landed in
     ///    the target ([`CheckoutMarker::landed`]) are not replayed: a branch with
     ///    nothing above one moves to the snapshot keeping uncommitted changes
     ///    ([`crate::porcelain::pull::PullResult::Landed`]), and one with commits
-    ///    above it rebases only those ([`FetchedUpstream::landed`]). With `HEAD`
+    ///    above it rebases only those ([`FetchedUpstream::landed`](crate::porcelain::pull::FetchedUpstream::landed)). With `HEAD`
     ///    detached, nothing else moves.
     /// 3. Moves `refs/heads/<target>`, when it is not the current branch and has
     ///    no commits of its own, to the new snapshot, and every other branch but
@@ -425,12 +425,12 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// - `options`: how to integrate (mode, autostash, check) and the fetch's
     ///   environment and threads; its remote, branch, fetch refspecs and
     ///   upstream are replaced.
-    /// - `progress`, `cancel`, `http_factory`: as for [`pull`].
+    /// - `progress`, `cancel`, `http_factory`: as for [`pull`](crate::porcelain::pull::pull).
     ///
     /// # Errors
     ///
     /// [`CheckoutError::OperationInProgress`] before anything is fetched, the
-    /// errors of [`fetch_snapshot`], and [`CheckoutError::Pull`] when the branch
+    /// errors of fetching the snapshot, and [`CheckoutError::Pull`] when the branch
     /// could not be integrated (the new snapshot is fetched and recorded by then).
     pub fn refresh<P: Progress>(
         &self,
@@ -508,8 +508,8 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     ///
     /// - `marker`: its marker, which names the server and the checkout's id.
     /// - `branches`: the branches to push, by name (without `refs/heads/`) and tip.
-    /// - `progress`, `cancel`: as for [`Remote::push`].
-    /// - `http_factory`: builds the HTTP client, as for [`Remote::push`].
+    /// - `progress`, `cancel`: as for [`Remote::push`](crate::remote::Remote::push).
+    /// - `http_factory`: builds the HTTP client, as for [`Remote::push`](crate::remote::Remote::push).
     ///
     /// # Returns
     ///
@@ -552,7 +552,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// - `info`: the projection the server described.
     /// - `fetch`: environment and thread settings for the fetch; its refspecs,
     ///   tags, prune and dry-run settings are replaced.
-    /// - `progress`, `cancel`, `http_factory`: as for [`Remote::fetch`].
+    /// - `progress`, `cancel`, `http_factory`: as for [`Remote::fetch`](crate::remote::Remote::fetch).
     ///
     /// # Returns
     ///
