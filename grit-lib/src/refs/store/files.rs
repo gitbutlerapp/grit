@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::ops::ControlFlow;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -80,7 +81,9 @@ pub struct FilesRefStore {
     ignorecase: OnceLock<bool>,
     /// Objects `packed-refs` peel lines are computed from: the repository's store when a
     /// [`crate::repo::Repository`] installed one, else the files database under `common_dir`.
-    peel_source: Option<Arc<dyn ObjectStore>>,
+    /// Only read, so a panic mid-peel leaves nothing torn; the wrapper keeps the store
+    /// `UnwindSafe` and `RefUnwindSafe`, which it is part of the public API to be.
+    peel_source: Option<AssertUnwindSafe<Arc<dyn ObjectStore>>>,
 }
 
 /// What a cached `packed-refs` view was read from. Writers replace the file by rename, so the
@@ -171,7 +174,7 @@ impl FilesRefStore {
     /// under the common git directory, for a repository whose objects live elsewhere.
     #[must_use]
     pub(crate) fn with_peel_source(mut self, store: Option<Arc<dyn ObjectStore>>) -> Self {
-        self.peel_source = store;
+        self.peel_source = store.map(AssertUnwindSafe);
         self
     }
 
@@ -1226,7 +1229,7 @@ impl FilesRefStore {
         };
         let records = match &self.peel_source {
             Some(store) => records_with(&|oid| {
-                crate::odb::peel_stored_tag_target_in(store.as_ref(), oid)
+                crate::odb::peel_stored_tag_target_in(store.0.as_ref(), oid)
                     .ok()
                     .flatten()
             }),
