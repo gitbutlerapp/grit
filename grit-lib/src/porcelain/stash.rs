@@ -51,7 +51,10 @@ use crate::porcelain::add::restricted_index_paths_for_pathspecs;
 use crate::porcelain::branch_error::BranchError;
 use crate::porcelain::checkout::is_eligible_for_parallel_checkout;
 use crate::porcelain::checkout::smudge_bytes_for_worktree_path;
-use crate::porcelain::checkout::{checkout_between_trees_locked, CheckoutIndexWrite};
+use crate::porcelain::checkout::{
+    checkout_between_trees_locked, checkout_tree_changes_with_index_deferred, CheckoutIndexWrite,
+    CheckoutJournal,
+};
 use crate::porcelain::clean::{is_nested_git_worktree, path_in_nested_git_worktree};
 use crate::porcelain::commit::write_commit_object;
 use crate::porcelain::hunk_select::{
@@ -3102,6 +3105,8 @@ fn apply_stash_commit(
         }
     }
 
+    let mut deferred_checkout_journal: Option<CheckoutJournal> = None;
+
     // Bulk checkout stages each blob it writes. Without an index merge, `--index` must keep the
     // pre-apply entries at those paths, so a stash whose index matched its base stays unstaged.
     let mut index_before_checkout: Vec<(&[u8], Option<IndexEntry>)> = Vec::new();
@@ -3133,7 +3138,7 @@ fn apply_stash_commit(
                 }
             })
             .collect();
-        crate::porcelain::checkout::checkout_tree_changes_with_index_opts(
+        deferred_checkout_journal = Some(checkout_tree_changes_with_index_deferred(
             repo,
             &checkout_changes,
             &mut new_index,
@@ -3144,8 +3149,8 @@ fn apply_stash_commit(
                 ..crate::porcelain::checkout::CheckoutApplyOptions::default()
             },
             None,
-            CheckoutIndexWrite::Defer(&lock),
-        )?;
+            &lock,
+        )?);
     }
     drop(parallel_writes);
     // Update the index
@@ -3370,23 +3375,49 @@ fn apply_stash_commit(
     drop(base_tree_entries);
     drop(idx_tree_loaded);
     drop(current_head_loaded);
-    repo.write_index_with_lock(&mut lock, &mut new_index, false)
-        .map_err(|err| match err {
-            crate::index::IndexError::PathIo(source) => StashError::IndexWrite { source },
-            other => StashError::library(other.into()),
-        })?;
 
-    // Apply untracked files if present (3rd parent)
-    if stash_commit.parents.len() >= 3 {
-        let ut_oid = &stash_commit.parents[2];
-        let ut_tree = repo.odb().commit_tree(ut_oid)?;
-        let ut_entries = flatten_tree_full_raw_for_repo(repo, &ut_tree)?;
-        for entry in &ut_entries {
-            materialize_raw_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
+    let apply_result: StashResult<StashApplyOutcome> = (|| {
+        if stash_commit.parents.len() >= 3 {
+            let ut_oid = &stash_commit.parents[2];
+            let ut_tree = repo.odb().commit_tree(ut_oid)?;
+            let ut_entries = flatten_tree_full_raw_for_repo(repo, &ut_tree)?;
+            for entry in &ut_entries {
+                let stored = storage_string(&entry.path);
+                if let Some(journal) = deferred_checkout_journal.as_mut() {
+                    journal
+                        .preserve_before_write(&stored)
+                        .map_err(StashError::library)?;
+                }
+                materialize_raw_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
+            }
+        }
+        repo.write_index_with_lock(&mut lock, &mut new_index, false)
+            .map_err(|err| match err {
+                crate::index::IndexError::PathIo(source) => StashError::IndexWrite { source },
+                other => StashError::library(other.into()),
+            })?;
+        Ok(StashApplyOutcome { conflicts })
+    })();
+
+    match apply_result {
+        Ok(outcome) => {
+            if let Some(mut journal) = deferred_checkout_journal {
+                journal.commit();
+            }
+            Ok(outcome)
+        }
+        Err(err) => {
+            if let Some(journal) = deferred_checkout_journal {
+                let rollback_err = Error::from(err);
+                match journal.finish(repo, Err::<StashApplyOutcome, _>(rollback_err)) {
+                    Err(e) => Err(StashError::from(e)),
+                    Ok(_) => unreachable!(),
+                }
+            } else {
+                Err(err)
+            }
         }
     }
-
-    Ok(StashApplyOutcome { conflicts })
 }
 
 /// Refresh cached stat data for stage-0 entries whose worktree content matches their blob.

@@ -1991,6 +1991,8 @@ mod stash_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "stash_pathspec_git_compat.rs"]
 mod stash_pathspec_git_compat;
+#[path = "stash_pop_untracked_rollback.rs"]
+mod stash_pop_untracked_rollback;
 #[cfg(feature = "full-tests")]
 #[path = "stash_push_modes_git_compat.rs"]
 mod stash_push_modes_git_compat;
