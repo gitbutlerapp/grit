@@ -113,7 +113,7 @@ pub(crate) fn merge_base_for_diff_two_commits(
     }
 }
 
-/// Failure modes for [`merge_base_for_diff_index`] and [`merge_base_for_diff_two_commits`].
+/// Failure modes for [`RevWalk::merge_base_for_diff`](crate::revwalk::RevWalk::merge_base_for_diff).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MergeBaseForDiffError {
     /// No common ancestor between the commits.

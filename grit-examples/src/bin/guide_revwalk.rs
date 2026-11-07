@@ -1,4 +1,4 @@
-//! Walk commit history with [`grit_lib::revwalk::rev_list::rev_list`] and compute a merge base.
+//! Walk commit history with [`RevWalk::rev_list`](grit_lib::revwalk::RevWalk::rev_list) and compute a merge base.
 //!
 //! Source for the library guide "Revwalk" page (included in the docs site).
 

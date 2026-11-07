@@ -39,6 +39,7 @@ use crate::merge_trees::{
 };
 use crate::objects::ObjectId;
 use crate::patch_ids::{compute_patch_id, PatchIdMode};
+use crate::refs::store::RefName;
 use crate::repo::Repository;
 use crate::repo_relpath::StoredRelPath;
 use crate::revwalk::RevWalk;
@@ -2028,7 +2029,7 @@ pub(crate) fn missing_from(
         .collect())
 }
 
-/// Outcome of [`replay_onto`]: either a new tip commit or a conflict list with repository paths.
+/// Outcome of [`RevWalk::replay_onto`]: either a new tip commit or a conflict list with repository paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplayOntoOutcome {
     /// Replay finished; `tip` is the resulting commit.
@@ -2080,11 +2081,11 @@ pub(crate) fn replay_onto(
 }
 
 impl RevWalk<'_> {
-    /// The heads `refname` has held, newest first, from its reflog (empty when it has
+    /// The heads `ref_name` has held, newest first, from its reflog (empty when it has
     /// none).
     #[must_use]
-    pub fn heads_seen(&self, refname: &str) -> Vec<ObjectId> {
-        heads_seen(self.repository(), refname)
+    pub fn heads_seen(&self, ref_name: &RefName) -> Vec<ObjectId> {
+        heads_seen(self.repository(), ref_name.as_str())
     }
 
     /// The last head two diverged heads both had: the newest commit in both `ours_seen` and

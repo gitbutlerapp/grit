@@ -106,18 +106,18 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// ```
     /// # fn main() -> grit_lib::error::Result<()> {
-    /// use grit_lib::ident::Signature;
-    /// use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-    /// use grit_lib::progress::{CancelToken, NullProgress};
+    /// use grit_lib::objects::ObjectKind;
+    /// use grit_lib::refs::store::RefName;
     /// use grit_lib::repo::{InitOptions, Repository};
     /// use grit_lib::revwalk::{MergeBaseMode, ResolveOptions};
     /// let dir = tempfile::tempdir()?;
-    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-    /// let mut req = CommitRequest::new("doc");
-    /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
-    /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
-    /// req.allow_empty = true;
-    /// create_commit(&repo, &req, &mut NullProgress, &CancelToken::never())?;
+    /// let options = InitOptions::default().with_initial_branch("main");
+    /// let (repo, _) = Repository::init(dir.path(), &options)?;
+    /// let tree = repo.odb().write(ObjectKind::Tree, b"")?;
+    /// let body = format!("tree {tree}\nauthor A <a@example.com> 1700000000 +0000\ncommitter A <a@example.com> 1700000000 +0000\n\ndoc\n");
+    /// let commit = repo.odb().write(ObjectKind::Commit, body.as_bytes())?;
+    /// let main = RefName::try_from("refs/heads/main").expect("valid ref name");
+    /// repo.references().update(&main, &commit)?;
     /// let revwalk = repo.revwalk();
     /// let head = revwalk.resolve("HEAD", &ResolveOptions::default())?;
     /// assert_eq!(revwalk.merge_bases(&[head, head], MergeBaseMode::Best)?, vec![head]);

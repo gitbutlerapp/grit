@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use grit_lib::objects::{CommitData, ObjectId, OidHashMap};
-use grit_lib::porcelain::log::{CommitReuse, DecorationMap, LoadedCommit};
+use grit_lib::porcelain::log::{CommitReuse, DecorationMap, DecorationOptions, LoadedCommit};
 use grit_lib::repo::Repository;
 
 use crate::context::{self, subject_line, CommitSummary};
@@ -19,9 +19,7 @@ impl CommitJsonLoader {
     /// batches of rows.
     pub fn new(repo: &Repository) -> Result<Self> {
         Ok(Self {
-            decorations: Some(repo.revwalk().decorations(
-                &grit_lib::porcelain::log::DecorationOptions::default().with_full_ref_names(false),
-            )?),
+            decorations: Some(repo.revwalk().decorations(&DecorationOptions::default())?),
         })
     }
 
@@ -133,11 +131,9 @@ impl CommitJsonLoader {
         let decorations = match &self.decorations {
             Some(all) => all,
             None => {
-                listed = repo.revwalk().decorations(
-                    &grit_lib::porcelain::log::DecorationOptions::default()
-                        .with_full_ref_names(false)
-                        .with_commits(Some((oids).to_vec())),
-                )?;
+                listed = repo
+                    .revwalk()
+                    .decorations(&DecorationOptions::default().with_commits(Some(oids.to_vec())))?;
                 &listed
             }
         };

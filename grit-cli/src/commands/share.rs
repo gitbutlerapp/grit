@@ -23,6 +23,7 @@ use std::io::Write;
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::{short_hex, ObjectId};
+use grit_lib::refs::store::RefName;
 use grit_lib::remote::grit_server_auth::{ServerAuthError, ServerUrl};
 use grit_lib::remote::grit_server_share::{
     self as api, LinkOptions, LinkUses, ShareAcceptRequest, ShareAcceptStatus, ShareMode,
@@ -326,7 +327,11 @@ pub(crate) fn comparison(
             }
         }
     }
-    let seen = |name: &str| repo.revwalk().heads_seen(name);
+    let seen = |name: &str| {
+        RefName::try_from(name)
+            .map(|name| repo.revwalk().heads_seen(&name))
+            .unwrap_or_default()
+    };
     let ours_seen = seen(&format!("refs/heads/{branch}"));
     let theirs_seen = seen(&format!("refs/remotes/{remote}/shared/{branch}/{user}"));
     let base = repo
