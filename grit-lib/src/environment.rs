@@ -1250,6 +1250,33 @@ impl RepositoryOptions {
     /// match the repository's object format, or [`Repository::open`](crate::repo::Repository::open)
     /// fails with [`RepositoryError::ObjectFormatMismatch`](crate::repo::RepositoryError::ObjectFormatMismatch).
     ///
+    /// # Without a git directory
+    ///
+    /// A bare repository opened with this store, a [`Self::with_ref_store`] backend and its
+    /// config in the [`Environment`] (through [`Environment::push_config_override`], with
+    /// [`Environment::git_config_nosystem`] set to keep `/etc/gitconfig` out) needs nothing on
+    /// disk. The git directory may be a path that does not exist, and grit-lib does not create
+    /// it. `<git_dir>/config` is still read when it exists.
+    ///
+    /// | Area | Without a git directory |
+    /// | ---- | ----------------------- |
+    /// | Objects, trees and commits ([`Repository::objects`](crate::repo::Repository::objects)) | Work through the store. |
+    /// | Refs, reflogs, `HEAD` and ref transactions ([`Repository::references`](crate::repo::Repository::references)) | Work through the ref store. |
+    /// | Config ([`Repository::config`](crate::repo::Repository::config)) | Comes from the [`Environment`]. |
+    /// | Rev-parse, revwalk and log | Work. |
+    /// | Tree diff, [`write_merge_tree`](crate::porcelain::merge::write_merge_tree) and blame at a commit | Work. |
+    /// | Notes, and bundles written to any [`std::io::Write`] ([`RepositoryBundles::write_to`](crate::repo_handles::RepositoryBundles::write_to)) | Work. |
+    /// | History edits ([`reword`](crate::revwalk::history::reword), [`apply_rewrite`](crate::revwalk::history::apply_rewrite)) | Work. |
+    /// | Fetch from a path or URL | Works. The pack is spooled in the system temp directory and removed after ingest, and `FETCH_HEAD` is not written. |
+    /// | Hooks | A missing hooks directory means no hooks. |
+    /// | The index, staging and worktree commits | Out of scope: the index, `COMMIT_EDITMSG` and merge, revert and rebase state live in the git directory, which staging creates. |
+    /// | Work-tree operations (checkout, switch, status, reset, stash) | Out of scope: they need a work tree and an index. |
+    /// | Linked worktrees | Out of scope: their admin directories live under `worktrees/`. |
+    /// | rerere and sparse-checkout | Out of scope: their state is kept in files in the git directory. |
+    /// | Hooks that expect `GIT_DIR` on disk | Out of scope: objects and refs held by the stores are invisible to other programs, such as the system `git`. |
+    /// | gc and prune | Work when the store can delete objects ([`WritableObjectStore::as_prunable`](crate::odb::store::WritableObjectStore::as_prunable)), as described above. |
+    /// | Repack, commit-graph and multi-pack-index files | Refused with [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore). |
+    ///
     /// # Examples
     ///
     /// ```
@@ -1272,6 +1299,37 @@ impl RepositoryOptions {
     /// )?;
     /// let oid = repo.odb().write(ObjectKind::Blob, b"hello")?;
     /// assert!(store.contains(&oid)?);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// A bare repository with no git directory, its config held in the [`Environment`]:
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use grit_lib::config::environment::{ConfigOverride, Environment, RepositoryOptions};
+    /// use grit_lib::objects::odb::store::MemoryStore;
+    /// use grit_lib::objects::HashAlgo;
+    /// use grit_lib::refs::store::MemoryRefStore;
+    /// use grit_lib::repo::Repository;
+    ///
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// let mut env = Environment::empty();
+    /// env.git_config_nosystem = Some("1".to_owned());
+    /// env.push_config_override(&ConfigOverride::new("user.name", Some("Ada".to_owned()))?);
+    /// let dir = tempfile::tempdir()?;
+    /// let git_dir = dir.path().join("never-created.git");
+    /// let repo = Repository::open(
+    ///     &git_dir,
+    ///     &RepositoryOptions::with_environment(env)
+    ///         .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+    ///         .with_ref_store(Arc::new(MemoryRefStore::new()))
+    ///         .with_initial_branch("main"),
+    /// )?;
+    /// assert!(repo.is_bare());
+    /// assert_eq!(repo.config().snapshot()?.get("user.name")?.as_deref(), Some("Ada"));
+    /// assert!(!git_dir.exists());
     /// # Ok(())
     /// # }
     /// ```

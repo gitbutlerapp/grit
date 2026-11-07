@@ -94,20 +94,23 @@ cargo run -p grit-examples --bin memory_primary
 
 ## No git directory at all
 
-When both the object store and the ref store are injected, [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) reads nothing from the git directory's layout: it may be empty or missing. Repository config is still read from `<git_dir>/config` when that file exists. The index lives at `<git_dir>/index`: staging creates the git directory when it is missing, and a commit then writes `COMMIT_EDITMSG` and the index there. Seed `HEAD` with [`RepositoryOptions::with_initial_branch`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_initial_branch), or create the repository with `Repository::init` as above, which seeds it for you:
+When both the object store and the ref store are injected, [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) reads nothing from the git directory's layout: it may be empty or missing. Repository config is still read from `<git_dir>/config` when that file exists; to keep config in memory instead, set it on the [`Environment`](rustdoc:grit_lib::config::environment::Environment) with [`Environment::push_config_override`](rustdoc:grit_lib::config::environment::Environment::push_config_override) (the `-c key=value` mechanism) and set [`git_config_nosystem`](rustdoc:grit_lib::config::environment::Environment::git_config_nosystem) so `/etc/gitconfig` stays out. Seed `HEAD` with [`RepositoryOptions::with_initial_branch`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_initial_branch), or create the repository with `Repository::init` as above, which seeds it for you:
 
 ```rust
 use std::sync::Arc;
 
-use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::config::environment::{ConfigOverride, Environment, RepositoryOptions};
 use grit_lib::objects::HashAlgo;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::refs::store::MemoryRefStore;
 
+let mut env = Environment::empty();
+env.git_config_nosystem = Some("1".to_owned());
+env.push_config_override(&ConfigOverride::new("user.name", Some("Ada".to_owned()))?);
 let git_dir = std::path::Path::new("/nowhere/in-memory.git");
 let repo = Repository::open(
     git_dir,
-    &RepositoryOptions::empty()
+    &RepositoryOptions::with_environment(env)
         .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
         .with_ref_store(Arc::new(MemoryRefStore::new()))
         .with_initial_branch("main"),
@@ -115,7 +118,28 @@ let repo = Repository::open(
 # Ok::<(), grit_lib::error::Error>(())
 ```
 
-What still touches the git directory on disk with both stores injected: `<git_dir>/config` (read when present), the index and the files a commit leaves beside it (`COMMIT_EDITMSG`, operation state for merge, revert and rebase), hook scripts under `hooks/`, and linked-worktree admin directories. With only the object store injected, refs, reflogs and `HEAD` stay in the git directory as usual.
+A bare repository opened this way never creates its git directory. [`grit-lib/tests/repository_no_filesystem.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/repository_no_filesystem.rs) builds commits, moves refs, walks and diffs history, merges trees, blames, adds notes, writes a bundle into a `Vec`, rewrites history and fetches from a files repository, then checks that nothing was created on disk. What works and what still needs a `.git` directory on disk:
+
+| Area | Without a git directory |
+| ---- | ----------------------- |
+| Objects, trees and commits (`repo.objects()`) | Work through the store. |
+| Refs, reflogs, `HEAD` and ref transactions (`repo.references()`) | Work through the ref store. |
+| Config (`repo.config()`) | Comes from the `Environment`. |
+| Rev-parse, revwalk and log | Work. |
+| Tree diff, [`write_merge_tree`](rustdoc:grit_lib::porcelain::merge::write_merge_tree) and blame at a commit | Work. |
+| Notes, and bundles written to any `Write` ([`RepositoryBundles::write_to`](rustdoc:grit_lib::repo_handles::RepositoryBundles::write_to)) | Work. |
+| History edits ([`reword`](rustdoc:grit_lib::revwalk::history::reword), [`apply_rewrite`](rustdoc:grit_lib::revwalk::history::apply_rewrite)) | Work. |
+| Fetch from a path or URL | Works. The pack is spooled in the system temp directory and removed after ingest, and `FETCH_HEAD` is not written. |
+| Hooks | A missing hooks directory means no hooks. |
+| The index, staging and worktree commits | Need the git directory: the index, `COMMIT_EDITMSG` and merge, revert and rebase state live there, and staging creates it. |
+| Work-tree operations (checkout, switch, status, reset, stash) | Need a work tree and an index. |
+| Linked worktrees | Need their admin directories under `worktrees/`. |
+| rerere and sparse-checkout | Need their state files in the git directory. |
+| Hooks that expect `GIT_DIR` on disk | Not supported: objects and refs held by the stores are invisible to other programs. |
+| gc and prune | Work when the store implements `PrunableObjectStore` (see [Garbage collection on a custom store](#garbage-collection-on-a-custom-store)); refused with `UnsupportedObjectStore` otherwise. |
+| Repack, commit-graph and multi-pack-index files | Refused with `UnsupportedObjectStore` (see below). |
+
+The same table is on [`RepositoryOptions::with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store). With only the object store injected, refs, reflogs and `HEAD` stay in the git directory as usual.
 
 Hooks still run, but there is nothing on disk for another program to open. They start in the work tree (the git directory when there is none), and `GIT_DIR` is exported only when the [`Environment`](rustdoc:grit_lib::config::environment::Environment) you passed sets [`git_dir`](rustdoc:grit_lib::config::environment::Environment::git_dir); opening a path through [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) does not set it. Even when it is set, objects and refs held in memory are invisible to the system `git`, so a `pre-commit` hook that runs `git status` or `git rev-parse` fails with "not a git repository". Keep hooks for such repositories to work that only needs the work tree and the hook's arguments.
 
