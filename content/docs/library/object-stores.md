@@ -116,6 +116,22 @@ An operation that needs the on-disk `objects/` layout refuses a custom primary w
 
 Maintenance stays files-only by design: packs, `.idx`, multi-pack-index and commit-graph files are how the files backend stores objects, and a custom store owns its own layout. A custom store still gets a commit-graph, built in memory and kept in its own storage (see [Commit-graphs for a custom store](#commit-graphs-for-a-custom-store)). Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
 
+## Filesystem-only by design
+
+Some parts of grit-lib read or write `objects/` on disk directly, because what they work on is the files layout itself or a directory that only exists on disk. None of them runs against your store's objects:
+
+| Area | Why it needs `objects/` on disk |
+| ---- | ------------------------------- |
+| The files backend | The files primary inside `Odb`, the loose, pack and multi-pack-index stores, and the pack readers and writers they are built from. |
+| Maintenance | `gc`, repack, prune, offload, commit-graph, multi-pack-index and pack bitmap writing rewrite the files layout. On a custom primary they are refused (see the table above). |
+| Pack install | Installing a received pack as `objects/pack/pack-*.pack` (index-pack, bundle install, fetch's pack spool) and receive-pack's on-disk quarantine. A custom primary takes the ingest path instead. |
+| Repository layout | Opening a repository with the default files primary, discovering a repository from a directory, and creating the directories of a new repository. |
+| Submodules and alternates | A submodule's git dir and `objects/info/alternates` name directories on disk. Alternates are read only when `OdbBuilder::alternates` is on. |
+| Local-path transport | Fetch, push and clone from a peer repository given as a local path open that repository's own files store. |
+| Gated fast paths | Rev-list, merge-base, fsck and bitmap walks read packs directly only after checking that the primary is the files backend, or that a pack bitmap exists. A custom primary takes the general path through `ObjectStore`. |
+
+A source-scan test in grit-lib (`storage_backend_guard`) keeps this list honest: any new direct access to `objects/` outside these areas fails the build, and the places that still bypass a custom store are tracked there until they go through it.
+
 ## Fast history walks
 
 Rev-list, merge-base and path-limited log read every commit they cross through [`ObjectStore::read_into`](rustdoc:grit_lib::objects::odb::store::ObjectStore::read_into), into one buffer the walk reuses. Implement it to copy or decode your stored bytes straight into that buffer. The default goes through `read`, which allocates an owned `Object` per commit before copying it. Without a commit-graph, a store that implements `read_into` walks history about as fast as the files backend: on a 120,000-commit history, counting every commit takes the same time through a pass-through store as through the files backend.
