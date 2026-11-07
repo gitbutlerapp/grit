@@ -779,9 +779,12 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
         .unwrap();
     let client = || {
         http_client_arc(
-            UreqHttpClient::from_config(&config)
-                .expect("client from config")
-                .with_credential_provider(Box::new(HelperCredentialProvider::new(config.clone()))),
+            UreqHttpClient::from_config(
+                &config,
+                &grit_lib::config::environment::Environment::empty(),
+            )
+            .expect("client from config")
+            .with_credential_provider(Box::new(HelperCredentialProvider::new(config.clone()))),
         )
     };
 
@@ -1347,17 +1350,23 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
         fn create(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
             self.creates.fetch_add(1, Ordering::SeqCst);
             Ok(Box::new(
-                UreqHttpClient::from_config(config)
-                    .expect("client")
-                    .with_credential_provider(Box::new(self.provider.clone())),
+                UreqHttpClient::from_config(
+                    config,
+                    &grit_lib::config::environment::Environment::empty(),
+                )
+                .expect("client")
+                .with_credential_provider(Box::new(self.provider.clone())),
             ))
         }
         fn create_for_preflight(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
             self.probes.fetch_add(1, Ordering::SeqCst);
             Ok(Box::new(
-                UreqHttpClient::from_config(config)
-                    .expect("client")
-                    .with_credential_provider(Box::new(NoReject(self.provider.clone()))),
+                UreqHttpClient::from_config(
+                    config,
+                    &grit_lib::config::environment::Environment::empty(),
+                )
+                .expect("client")
+                .with_credential_provider(Box::new(NoReject(self.provider.clone()))),
             ))
         }
     }

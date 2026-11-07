@@ -151,22 +151,12 @@ pub trait HttpClient: Send + Sync {
     /// # Errors
     ///
     /// Returns an error on a transport failure or a non-success HTTP status.
-    fn get_with_final_url(
+    fn get_following_redirects(
         &self,
         url: &str,
         git_protocol: Option<&str>,
     ) -> RemoteResult<(Vec<u8>, Option<String>)> {
         Ok((self.get(url, git_protocol)?, None))
-    }
-
-    /// Like [`Self::get_with_final_url`], but does not merge [`Self::git_protocol_header`]
-    /// when `git_protocol` is `None` (used for forced v0/v1 `list_refs`).
-    fn get_with_final_url_exact(
-        &self,
-        url: &str,
-        git_protocol: Option<&str>,
-    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
-        self.get_with_final_url(url, git_protocol)
     }
 
     /// The default `Git-Protocol` request-header value to apply when the caller
@@ -389,20 +379,12 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         (**self).post_streaming(url, content_type, accept, body, git_protocol)
     }
 
-    fn get_with_final_url(
+    fn get_following_redirects(
         &self,
         url: &str,
         git_protocol: Option<&str>,
     ) -> RemoteResult<(Vec<u8>, Option<String>)> {
-        (**self).get_with_final_url(url, git_protocol)
-    }
-
-    fn get_with_final_url_exact(
-        &self,
-        url: &str,
-        git_protocol: Option<&str>,
-    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
-        (**self).get_with_final_url_exact(url, git_protocol)
+        (**self).get_following_redirects(url, git_protocol)
     }
 
     fn git_protocol_header(&self) -> Option<&str> {
@@ -464,20 +446,12 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         (**self).post_streaming(url, content_type, accept, body, git_protocol)
     }
 
-    fn get_with_final_url(
+    fn get_following_redirects(
         &self,
         url: &str,
         git_protocol: Option<&str>,
     ) -> RemoteResult<(Vec<u8>, Option<String>)> {
-        (**self).get_with_final_url(url, git_protocol)
-    }
-
-    fn get_with_final_url_exact(
-        &self,
-        url: &str,
-        git_protocol: Option<&str>,
-    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
-        (**self).get_with_final_url_exact(url, git_protocol)
+        (**self).get_following_redirects(url, git_protocol)
     }
 
     fn git_protocol_header(&self) -> Option<&str> {
@@ -859,7 +833,7 @@ pub(crate) fn discover_upload_pack_for_list_refs(
     git_protocol: Option<&str>,
 ) -> Result<UploadPackDiscovery> {
     let url = info_refs_url(repo_url);
-    let (body, _) = client.get_with_final_url_exact(&url, git_protocol)?;
+    let (body, _) = client.get_following_redirects(&url, git_protocol)?;
     discover_upload_pack_for_list_refs_from_body(&body)
 }
 
@@ -885,7 +859,7 @@ pub(crate) fn discover_upload_pack_exact(
     git_protocol: Option<&str>,
 ) -> Result<UploadPackDiscovery> {
     let url = info_refs_url(repo_url);
-    let (body, _) = client.get_with_final_url_exact(&url, git_protocol)?;
+    let (body, _) = client.get_following_redirects(&url, git_protocol)?;
     upload_pack_discovery_from_body(&body)
 }
 
@@ -1019,7 +993,7 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
     ) -> Result<(String, Discovery)> {
         let info_url = info_refs_url_for_service(repo_url, service);
         let gp = git_protocol.or_else(|| self.client.git_protocol_header());
-        let (body, final_url) = get_with_final_url_interruptible(
+        let (body, final_url) = get_following_redirects_interruptible(
             &self.client,
             &info_url,
             gp,
@@ -1054,12 +1028,12 @@ fn get_interruptible<C: HttpClient + Clone + 'static>(
     owner: &CancelToken,
     stack_watch: &std::sync::atomic::AtomicBool,
 ) -> crate::remote::RemoteResult<Vec<u8>> {
-    get_with_final_url_interruptible(client, url, git_protocol, cancel, owner, stack_watch)
+    get_following_redirects_interruptible(client, url, git_protocol, cancel, owner, stack_watch)
         .map(|(body, _)| body)
         .map_err(RemoteError::from)
 }
 
-fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
+fn get_following_redirects_interruptible<C: HttpClient + Clone + 'static>(
     client: &C,
     url: &str,
     git_protocol: Option<&str>,
@@ -1072,7 +1046,7 @@ fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
     let git_protocol = git_protocol.map(str::to_owned);
     PendingHttp::spawn("grit-http-get", move || {
         client
-            .get_with_final_url(&url, git_protocol.as_deref())
+            .get_following_redirects(&url, git_protocol.as_deref())
             .map_err(Error::Remote)
     })
     .map_err(Error::Io)?

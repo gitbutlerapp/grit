@@ -337,7 +337,10 @@ impl RecordingClient {
 
     /// Client built like grit-cli (`UreqHttpClient::from_config` on default config).
     fn from_default_config() -> GritResult<Self> {
-        let inner = UreqHttpClient::from_config(&ConfigSet::new())?;
+        let inner = UreqHttpClient::from_config(
+            &ConfigSet::new(),
+            &grit_lib::config::environment::Environment::empty(),
+        )?;
         Ok(Self::from_inner(inner))
     }
 
@@ -1046,7 +1049,11 @@ fn http_fetch_surfaces_io_error_from_upload_pack_read_failure() {
     git(&local, &["init", "-q", "-b", "main", "."]);
     let local_git = local.join(".git");
 
-    let inner = UreqHttpClient::from_config(&ConfigSet::new()).expect("from_config");
+    let inner = UreqHttpClient::from_config(
+        &ConfigSet::new(),
+        &grit_lib::config::environment::Environment::empty(),
+    )
+    .expect("from_config");
     let client = http_client_arc(IoFailUploadPackClient { inner });
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];

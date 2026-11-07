@@ -263,7 +263,11 @@ pub fn run() -> Result<AuthOutcome> {
         config = ensure_credential_helper()?;
     }
 
-    let http = UreqHttpClient::from_config(&config).context("could not set up HTTP client")?;
+    let http = UreqHttpClient::from_config(
+        &config,
+        &grit_lib::config::environment::Environment::empty(),
+    )
+    .context("could not set up HTTP client")?;
     let flow = DeviceFlow::new(&http, &client_id);
 
     let device = flow.request_device_code().map_err(device_flow_error)?;
@@ -315,8 +319,11 @@ pub fn grit_server(url: &str) -> Result<Option<ServerUrl>> {
 /// Fails when no credential helper can be set up, the server cannot be
 /// reached or is not a grit server, the user declines, or the code expires.
 pub fn run_server_login(server: &ServerUrl) -> Result<AuthOutcome> {
-    let http =
-        UreqHttpClient::from_config(&load_config()).context("could not set up HTTP client")?;
+    let http = UreqHttpClient::from_config(
+        &load_config(),
+        &grit_lib::config::environment::Environment::empty(),
+    )
+    .context("could not set up HTTP client")?;
     let flow = LoginFlow::new(&http, server);
     let login = flow.start().map_err(|e| server_error(server, e))?;
     let config = credential_config(server)?;
@@ -355,9 +362,12 @@ pub fn run_server_login(server: &ServerUrl) -> Result<AuthOutcome> {
 /// Fails when no credential helper can be set up, the server rejects the
 /// token or cannot be reached, or the helper cannot store it.
 pub fn run_server_token(server: &ServerUrl, token: &str) -> Result<AuthOutcome> {
-    let http = UreqHttpClient::from_config(&load_config())
-        .context("could not set up HTTP client")?
-        .with_credential_provider(Box::new(TokenCredentialProvider::new(token)));
+    let http = UreqHttpClient::from_config(
+        &load_config(),
+        &grit_lib::config::environment::Environment::empty(),
+    )
+    .context("could not set up HTTP client")?
+    .with_credential_provider(Box::new(TokenCredentialProvider::new(token)));
     let identity = fetch_identity(&http, server).map_err(|e| server_error(server, e))?;
 
     HelperCredentialProvider::new(credential_config(server)?)

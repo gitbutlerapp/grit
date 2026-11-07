@@ -187,15 +187,10 @@ impl UreqHttpClient {
     /// cannot honor (e.g. a SOCKS proxy, which `ureq`'s built-in SOCKS support is
     /// not compiled in for here), `protocol.version` is invalid, or the cookie
     /// file cannot be read.
-    pub fn from_config(config: &ConfigSet) -> Result<Self> {
-        Self::from_config_with_environment(config, &Environment::empty())
-    }
-
-    /// Like [`Self::from_config`], but reads `GIT_HTTP_LOW_SPEED_*` from `environment`.
-    pub fn from_config_with_environment(
-        config: &ConfigSet,
-        environment: &Environment,
-    ) -> Result<Self> {
+    ///
+    /// `GIT_HTTP_LOW_SPEED_LIMIT` / `GIT_HTTP_LOW_SPEED_TIME` are read from `environment`;
+    /// pass [`Environment::empty`] to use only the config.
+    pub fn from_config(config: &ConfigSet, environment: &Environment) -> Result<Self> {
         let proxy = build_proxy(config)?;
         let transport_timeouts = HttpTransportTimeouts::from_config(config, environment);
         let agent = agent_from_timeouts(proxy, &transport_timeouts);
@@ -1282,17 +1277,7 @@ impl HttpClient for UreqHttpClient {
         Ok(Box::new(reader))
     }
 
-    fn get_with_final_url(
-        &self,
-        url: &str,
-        git_protocol: Option<&str>,
-    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
-        self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
-            .map(|(body, final_url)| (body, Some(final_url)))
-            .map_err(RemoteError::from)
-    }
-
-    fn get_with_final_url_exact(
+    fn get_following_redirects(
         &self,
         url: &str,
         git_protocol: Option<&str>,
@@ -2040,7 +2025,7 @@ mod tests {
             .unwrap();
         cfg.add_command_override("http.https://example.com.extraHeader", "X-Scoped: s")
             .unwrap();
-        let client = UreqHttpClient::from_config(&cfg).expect("from_config");
+        let client = UreqHttpClient::from_config(&cfg, &Environment::empty()).expect("from_config");
         let scoped = client.extra_headers_for_url("https://example.com/repo.git/info/refs");
         assert!(
             scoped.iter().any(|(n, v)| n == "X-Global" && v == "g"),
@@ -2064,7 +2049,7 @@ mod tests {
         cfg.add_command_override("http.extraHeader", "").unwrap();
         cfg.add_command_override("http.extraHeader", "X-Two: 2")
             .unwrap();
-        let client = UreqHttpClient::from_config(&cfg).expect("from_config");
+        let client = UreqHttpClient::from_config(&cfg, &Environment::empty()).expect("from_config");
         let h = client.extra_headers_for_url("https://example.com/");
         assert!(
             !h.iter().any(|(n, _)| n == "X-One"),
@@ -2078,7 +2063,7 @@ mod tests {
         let mut cfg = ConfigSet::new();
         cfg.add_command_override("http.proxy", "socks5://localhost:1080")
             .unwrap();
-        match UreqHttpClient::from_config(&cfg) {
+        match UreqHttpClient::from_config(&cfg, &Environment::empty()) {
             Ok(_) => panic!("SOCKS proxy must be rejected, not silently accepted"),
             Err(e) => {
                 let msg = format!("{e}");
@@ -2094,7 +2079,7 @@ mod tests {
             .unwrap();
         // Building a client with an HTTP proxy must succeed (it just configures
         // the ureq agent; no connection is attempted here).
-        UreqHttpClient::from_config(&cfg).expect("http proxy config builds");
+        UreqHttpClient::from_config(&cfg, &Environment::empty()).expect("http proxy config builds");
     }
 
     #[test]
@@ -2182,7 +2167,7 @@ mod tests {
         let mut cfg = ConfigSet::new();
         cfg.add_command_override("protocol.version", "bogus")
             .expect("override");
-        match UreqHttpClient::from_config(&cfg) {
+        match UreqHttpClient::from_config(&cfg, &Environment::empty()) {
             Ok(_) => panic!("invalid protocol.version must be rejected"),
             Err(err) => assert!(
                 matches!(err, Error::Config(_)),
@@ -2196,7 +2181,7 @@ mod tests {
         let mut cfg = ConfigSet::new();
         cfg.add_command_override("protocol.version", "2")
             .expect("override");
-        let client = UreqHttpClient::from_config(&cfg).expect("from_config");
+        let client = UreqHttpClient::from_config(&cfg, &Environment::empty()).expect("from_config");
         assert_eq!(
             client.git_protocol.as_deref(),
             Some("version=2"),

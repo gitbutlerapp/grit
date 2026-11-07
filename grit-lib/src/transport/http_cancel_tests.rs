@@ -677,8 +677,7 @@ fn smart_http_discovery_completes_one_connection_with_slow_body_and_low_speed_en
             let env = Environment::empty()
                 .with_var("GIT_HTTP_LOW_SPEED_LIMIT", "1")
                 .with_var("GIT_HTTP_LOW_SPEED_TIME", "1");
-            let client = UreqHttpClient::from_config_with_environment(&ConfigSet::default(), &env)
-                .expect("client");
+            let client = UreqHttpClient::from_config(&ConfigSet::default(), &env).expect("client");
             let url = format!("http://127.0.0.1:{port}/x.git");
             let transport = SmartHttpTransport::new(http_client_arc(client));
             let cancel = CancelToken::new();
@@ -795,8 +794,7 @@ fn smart_http_connect_aborts_on_silent_stall_with_low_speed_env() {
         || {
             let (port, stop, _connections) = spawn_silent_stall_server(SilentStallMode::Silent);
             let env = low_speed_test_env();
-            let client = UreqHttpClient::from_config_with_environment(&ConfigSet::default(), &env)
-                .expect("client");
+            let client = UreqHttpClient::from_config(&ConfigSet::default(), &env).expect("client");
             let url = format!("http://127.0.0.1:{port}/x.git");
             let transport = SmartHttpTransport::new(http_client_arc(client));
             let started = Instant::now();
@@ -820,8 +818,7 @@ fn smart_http_connect_aborts_on_headers_stall_with_low_speed_env() {
             let (port, stop, _connections) =
                 spawn_silent_stall_server(SilentStallMode::HeadersContentLength);
             let env = low_speed_test_env();
-            let client = UreqHttpClient::from_config_with_environment(&ConfigSet::default(), &env)
-                .expect("client");
+            let client = UreqHttpClient::from_config(&ConfigSet::default(), &env).expect("client");
             let url = format!("http://127.0.0.1:{port}/x.git");
             let transport = SmartHttpTransport::new(http_client_arc(client));
             let started = Instant::now();

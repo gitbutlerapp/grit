@@ -193,7 +193,7 @@ impl HttpClient for MockHttp {
         Ok(Vec::new())
     }
 
-    fn get_with_final_url_exact(
+    fn get_following_redirects(
         &self,
         _url: &str,
         _git_protocol: Option<&str>,

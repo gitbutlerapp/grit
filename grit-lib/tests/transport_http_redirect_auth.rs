@@ -330,13 +330,14 @@ fn cross_authority_redirect_does_not_forward_host_only_cookies() {
     let mut cfg = ConfigSet::new();
     cfg.add_command_override("http.cookieFile", cookie_file.to_str().unwrap())
         .unwrap();
-    let client = UreqHttpClient::from_config(&cfg)
-        .expect("from_config")
-        .with_credential_provider(Box::new(StaticProvider {
-            username: USER.to_owned(),
-            password: PASS.to_owned(),
-        }))
-        .with_git_protocol("version=2");
+    let client =
+        UreqHttpClient::from_config(&cfg, &grit_lib::config::environment::Environment::empty())
+            .expect("from_config")
+            .with_credential_provider(Box::new(StaticProvider {
+                username: USER.to_owned(),
+                password: PASS.to_owned(),
+            }))
+            .with_git_protocol("version=2");
 
     let mut opts = fetch_opts();
     grit_lib::repo::Repository::open(

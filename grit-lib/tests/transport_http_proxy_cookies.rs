@@ -205,7 +205,10 @@ fn cookie_file_sends_cookie_header_to_server() {
     let mut cfg = ConfigSet::new();
     cfg.add_command_override("http.cookieFile", cookie_file.to_str().unwrap())
         .unwrap();
-    let client = http_client_arc(UreqHttpClient::from_config(&cfg).expect("from_config"));
+    let client = http_client_arc(
+        UreqHttpClient::from_config(&cfg, &grit_lib::config::environment::Environment::empty())
+            .expect("from_config"),
+    );
 
     let mut opts = fetch_opts();
     let outcome = grit_lib::repo::Repository::open(
@@ -264,7 +267,10 @@ fn save_cookies_persists_set_cookie_to_file() {
         .unwrap();
     cfg.add_command_override("http.saveCookies", "true")
         .unwrap();
-    let client = http_client_arc(UreqHttpClient::from_config(&cfg).expect("from_config"));
+    let client = http_client_arc(
+        UreqHttpClient::from_config(&cfg, &grit_lib::config::environment::Environment::empty())
+            .expect("from_config"),
+    );
 
     let mut opts = fetch_opts();
     grit_lib::repo::Repository::open(
@@ -306,7 +312,10 @@ fn extra_header_reaches_server() {
     let mut cfg = ConfigSet::new();
     cfg.add_command_override("http.extraHeader", "X-Grit-Test: wirevalue42")
         .unwrap();
-    let client = http_client_arc(UreqHttpClient::from_config(&cfg).expect("from_config"));
+    let client = http_client_arc(
+        UreqHttpClient::from_config(&cfg, &grit_lib::config::environment::Environment::empty())
+            .expect("from_config"),
+    );
 
     let mut opts = fetch_opts();
     grit_lib::repo::Repository::open(
@@ -424,8 +433,10 @@ fn http_proxy_routes_fetch_through_proxy() {
     let mut cfg = ConfigSet::new();
     cfg.add_command_override("http.proxy", &format!("http://127.0.0.1:{proxy_port}"))
         .unwrap();
-    let client =
-        http_client_arc(UreqHttpClient::from_config(&cfg).expect("from_config with proxy"));
+    let client = http_client_arc(
+        UreqHttpClient::from_config(&cfg, &grit_lib::config::environment::Environment::empty())
+            .expect("from_config with proxy"),
+    );
 
     let mut opts = fetch_opts();
     let outcome = match grit_lib::repo::Repository::open(

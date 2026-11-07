@@ -807,8 +807,13 @@ mod http {
     }
 
     fn grit_fetch_http(local: &Path, url: &str, refspecs: &[&str], configured: &[&str]) {
-        let client =
-            Arc::new(UreqHttpClient::from_config(&Default::default()).expect("ureq client"));
+        let client = Arc::new(
+            UreqHttpClient::from_config(
+                &Default::default(),
+                &grit_lib::config::environment::Environment::empty(),
+            )
+            .expect("ureq client"),
+        );
         let mut opts = FetchOptions::new();
         opts.refspecs = refspecs.iter().map(|s| (*s).to_owned()).collect();
         opts.configured_refspecs = configured.iter().map(|s| (*s).to_owned()).collect();
@@ -933,8 +938,13 @@ mod http {
         let server = start_http_server(remote.path());
         let grit_c = clone_consumer(tmp.path(), &remote, "grit-c");
         run_git(&grit_c, &["remote", "set-url", "origin", &server.url]);
-        let client =
-            Arc::new(UreqHttpClient::from_config(&Default::default()).expect("ureq client"));
+        let client = Arc::new(
+            UreqHttpClient::from_config(
+                &Default::default(),
+                &grit_lib::config::environment::Environment::empty(),
+            )
+            .expect("ureq client"),
+        );
         let mut opts = FetchOptions::new();
         opts.refspecs = vec!["no-such-branch".into()];
         opts.configured_refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];

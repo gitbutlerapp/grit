@@ -365,7 +365,7 @@ impl DefaultHttpClientFactory {
             Some(env) => env,
             None => &crate::environment::Environment::empty(),
         };
-        let client = UreqHttpClient::from_config_with_environment(config, environment)
+        let client = UreqHttpClient::from_config(config, environment)
             .map_err(|e| RemoteError::InvalidUrl(e.to_string()))?
             .with_credential_provider(provider);
         Ok(Box::new(client))
@@ -1099,7 +1099,7 @@ fn list_refs_http(
 
     let info_url = crate::transport::http::smart_info_refs_discovery_url(repo_url);
     let want_v2 = opts.protocol_version.unwrap_or(2) >= 2;
-    let (body, final_url) = client.get_with_final_url_exact(&info_url, git_protocol)?;
+    let (body, final_url) = client.get_following_redirects(&info_url, git_protocol)?;
     let effective_base =
         crate::transport::http::rebased_base_from_redirect(repo_url, final_url.as_deref())
             .unwrap_or_else(|| repo_url.to_owned());
