@@ -205,7 +205,7 @@ fn tree_sha256_with_chain(
     let digest_arr: [u8; 32] = digest_bytes
         .as_slice()
         .try_into()
-        .map_err(|_| Error::Message("sha256 digest length".into()))?;
+        .map_err(|_| Error::Verbatim("sha256 digest length".into()))?;
     let digest = TreeSha256(digest_arr);
     Ok(TreeSha256Report {
         digest,

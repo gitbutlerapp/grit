@@ -272,7 +272,7 @@ fn apply_remote_rename_config(
     let old_section = format!("remote.{old}");
     let new_section = format!("remote.{new}");
     if !file.rename_section(&old_section, &new_section)? {
-        return Err(RemoteError::from(crate::error::Error::Message(format!(
+        return Err(RemoteError::from(crate::error::Error::Verbatim(format!(
             "could not rename config section {old_section} to {new_section}"
         ))));
     }

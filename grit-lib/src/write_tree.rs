@@ -585,13 +585,13 @@ pub(crate) fn is_empty_tree_oid(odb: &Odb, oid: &ObjectId) -> bool {
     odb.is_empty_tree(oid)
 }
 
-fn ensure_empty_blob_for_intent_to_add(odb: &Odb, index: &Index) -> Result<()> {
+fn ensure_empty_blob_for_intent_to_add(odb: &Odb, index: &Index) -> IndexResult<()> {
     if index
         .entries
         .iter()
         .any(|e| e.stage() == 0 && e.intent_to_add())
     {
-        let _ = odb.write(ObjectKind::Blob, b"")?;
+        let _ = odb.write(ObjectKind::Blob, b"").map_err(IndexError::from)?;
     }
     Ok(())
 }
@@ -610,7 +610,7 @@ fn ensure_empty_blob_for_partial_index_write(
             && !odb.exists(&e.oid)
     });
     if needs_empty {
-        let _ = odb.write(ObjectKind::Blob, b"")?;
+        let _ = odb.write(ObjectKind::Blob, b"").map_err(IndexError::from)?;
     }
     Ok(())
 }
@@ -624,7 +624,7 @@ fn index_path_in_dir(path: &[u8], prefix: &str) -> bool {
     path.len() > pb.len() && path.starts_with(pb) && path[pb.len()] == b'/'
 }
 
-fn entry_relative_to_dir_prefix<'a>(path: &'a [u8], dir_prefix: &[u8]) -> Result<&'a [u8]> {
+fn entry_relative_to_dir_prefix<'a>(path: &'a [u8], dir_prefix: &[u8]) -> IndexResult<&'a [u8]> {
     if dir_prefix.is_empty() {
         return Ok(path);
     }
@@ -636,7 +636,6 @@ fn entry_relative_to_dir_prefix<'a>(path: &'a [u8], dir_prefix: &[u8]) -> Result
                     prefix: String::from_utf8_lossy(dir_prefix).into_owned(),
                 },
             ))
-            .into()
         })
 }
 
@@ -713,7 +712,7 @@ pub(crate) fn write_tree_from_index_subset(
     odb: &Odb,
     index: &Index,
     paths: &std::collections::HashSet<Vec<u8>>,
-) -> Result<ObjectId> {
+) -> IndexResult<ObjectId> {
     ensure_empty_blob_for_intent_to_add(odb, index)?;
 
     let mut entries: Vec<&IndexEntry> = index
@@ -747,7 +746,7 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> IndexRes
         }
     }
 
-    ensure_empty_blob_for_intent_to_add(odb, index).map_err(|e| IndexError::Nested(Box::new(e)))?;
+    ensure_empty_blob_for_intent_to_add(odb, index)?;
 
     let prefix_bytes = prefix.as_bytes();
     let mut entries: Vec<&IndexEntry> = index
@@ -761,7 +760,7 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> IndexRes
         })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
-    build_tree(odb, &entries, prefix_bytes).map_err(|e| IndexError::Nested(Box::new(e)))
+    build_tree(odb, &entries, prefix_bytes)
 }
 
 /// Build a valid cache-tree extension from the index and write any missing tree objects.
@@ -866,7 +865,7 @@ fn verify_cache_tree_one(
     Ok(())
 }
 
-fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<ObjectId> {
+fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> IndexResult<ObjectId> {
     let mut children: BTreeMap<Vec<u8>, ChildKind> = BTreeMap::new();
 
     for entry in entries {
@@ -919,7 +918,7 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<O
     });
 
     let data = serialize_tree(&tree_entries);
-    odb.write(ObjectKind::Tree, &data)
+    odb.write(ObjectKind::Tree, &data).map_err(IndexError::from)
 }
 
 fn build_cache_tree_node(

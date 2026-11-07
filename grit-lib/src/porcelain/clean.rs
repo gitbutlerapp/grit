@@ -88,7 +88,7 @@ pub fn clean_untracked_with_cancel(
 ) -> Result<CleanOutcome> {
     let work_tree = repo
         .work_tree()
-        .ok_or_else(|| Error::Message("clean requires a working tree".into()))?;
+        .ok_or_else(|| Error::Verbatim("clean requires a working tree".into()))?;
 
     let mut index = repo.load_index()?;
     let rules = WorktreeRules::from_repository(repo, &index)?;
@@ -198,7 +198,7 @@ pub fn clean_untracked_with_cancel(
                 path.trim_end_matches('/'),
                 repo.environment(),
             ) {
-                return Err(Error::Message(format!(
+                return Err(Error::Verbatim(format!(
                     "refusing to remove '{path}' because it contains the current directory"
                 )));
             }
@@ -237,7 +237,7 @@ fn empty_untracked_directories(
 ) -> Result<Vec<String>> {
     let work_tree = repo
         .work_tree()
-        .ok_or_else(|| Error::Message("clean requires a working tree".into()))?;
+        .ok_or_else(|| Error::Verbatim("clean requires a working tree".into()))?;
     let listed: BTreeSet<String> = already_listed
         .iter()
         .map(|p| p.trim_end_matches('/').to_owned())
@@ -540,7 +540,7 @@ fn expand_collapsed_dir_paths(
 ) -> Result<Vec<String>> {
     let work_tree = repo
         .work_tree()
-        .ok_or_else(|| Error::Message("clean requires a working tree".into()))?;
+        .ok_or_else(|| Error::Verbatim("clean requires a working tree".into()))?;
     let mut paths = Vec::new();
     walk_expand_collapsed_dir(
         repo,
@@ -748,7 +748,7 @@ fn remove_one_path(
     let stored = rel.trim_end_matches('/');
     let abs = crate::repo_relpath::worktree_abs(work_tree, stored);
     if !abs.exists() && abs.symlink_metadata().is_err() {
-        return Err(Error::Message(format!(
+        return Err(Error::Verbatim(format!(
             "failed to remove '{stored}': no such file or directory"
         )));
     }

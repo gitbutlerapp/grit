@@ -616,7 +616,7 @@ fn abort_failed_move_worktree(
             "restoring forced-destination backups failed: {err}"
         ));
     }
-    Error::Message(parts.join("; "))
+    Error::Verbatim(parts.join("; "))
 }
 
 struct SingleMovePlan {
@@ -676,7 +676,7 @@ fn plan_single_move(params: PlanSingleMoveParams<'_>) -> Result<SingleMovePlan> 
                 destination: final_dst,
             });
         }
-        return Err(Error::Message(format!(
+        return Err(Error::Verbatim(format!(
             "destination '{final_dst}' is not a directory"
         )));
     }
@@ -2428,7 +2428,7 @@ mod move_rollback_tests {
             },
         );
         assert!(
-            matches!(err, Error::Message(_)),
+            matches!(err, Error::Verbatim(_)),
             "expected aggregated incomplete rollback error, got {err:?}"
         );
         assert_eq!(
@@ -2473,7 +2473,7 @@ mod move_rollback_tests {
             },
         );
         assert!(
-            matches!(err, Error::Message(_)),
+            matches!(err, Error::Verbatim(_)),
             "unexpected error: {err:?}"
         );
         assert_eq!(

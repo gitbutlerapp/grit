@@ -578,7 +578,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
     } else {
         let worktree_rules = rules_arc
             .lock()
-            .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
+            .map_err(|e| Error::Verbatim(format!("worktree rules lock poisoned: {e}")))?;
         let (untracked, _, _) = collect_untracked_and_ignored_inner(
             repo,
             index,
@@ -2587,7 +2587,7 @@ pub fn status(
             (Vec::new(), Vec::new())
         } else {
             let rules_guard = worktree_rules.lock().map_err(|e| {
-                crate::error::Error::Message(format!("worktree rules lock poisoned: {e}"))
+                crate::error::Error::Verbatim(format!("worktree rules lock poisoned: {e}"))
             })?;
             let (mut untracked, ignored, collect_meta) =
                 collect_untracked_and_ignored_with_rules_and_cancel(

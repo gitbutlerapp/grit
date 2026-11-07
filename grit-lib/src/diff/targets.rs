@@ -1194,7 +1194,7 @@ fn parse_commit_range(
         let base = merge_base_for_diff_two_commits(repo, left, right).map_err(|e| match e {
             MergeBaseForDiffError::None => ResolveDiffArgumentsError::NoMergeBase,
             MergeBaseForDiffError::Multiple => ResolveDiffArgumentsError::MultipleMergeBases,
-            MergeBaseForDiffError::Other(msg) => Error::Message(msg).into(),
+            MergeBaseForDiffError::Other(msg) => Error::Verbatim(msg).into(),
         })?;
         return Ok(Some((base, right)));
     }

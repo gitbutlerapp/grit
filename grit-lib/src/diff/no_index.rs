@@ -44,7 +44,7 @@ pub enum NoIndexError {
 
 impl From<NoIndexError> for crate::error::Error {
     fn from(value: NoIndexError) -> Self {
-        Self::Message(value.to_string())
+        Self::Verbatim(value.to_string())
     }
 }
 

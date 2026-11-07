@@ -64,7 +64,7 @@ fn git_index_pack(dir: &Path, pack_path: &Path) -> Result<()> {
     }
     let out = cmd.output().map_err(grit_lib::error::Error::Io)?;
     if !out.status.success() {
-        return Err(grit_lib::error::Error::Message(format!(
+        return Err(grit_lib::error::Error::Verbatim(format!(
             "git index-pack failed: {}",
             String::from_utf8_lossy(&out.stderr)
         )));
@@ -96,7 +96,7 @@ pub fn git_repack_with_window(
     }
     let out = cmd.output().map_err(grit_lib::error::Error::Io)?;
     if !out.status.success() {
-        return Err(grit_lib::error::Error::Message(format!(
+        return Err(grit_lib::error::Error::Verbatim(format!(
             "git repack failed: {}",
             String::from_utf8_lossy(&out.stderr)
         )));
@@ -736,12 +736,12 @@ fn pack_only_hit_oid(repo_root: &Path, objects_dir: &Path) -> Result<ObjectId> {
         .output()
         .map_err(grit_lib::error::Error::Io)?;
     if !out.status.success() {
-        return Err(grit_lib::error::Error::Message(
+        return Err(grit_lib::error::Error::Verbatim(
             "rev-parse HEAD for pack-only hit".into(),
         ));
     }
     let hit = ObjectId::from_hex(std::str::from_utf8(&out.stdout).expect("utf8").trim())
-        .map_err(|_| grit_lib::error::Error::Message("HEAD oid hex".into()))?;
+        .map_err(|_| grit_lib::error::Error::Verbatim("HEAD oid hex".into()))?;
     if loose_object_path(objects_dir, &hit).is_file() {
         let pack_dir = objects_dir.join("pack");
         for entry in std::fs::read_dir(&pack_dir).map_err(grit_lib::error::Error::Io)? {
@@ -760,7 +760,7 @@ fn pack_only_hit_oid(repo_root: &Path, objects_dir: &Path) -> Result<ObjectId> {
                 }
             }
         }
-        return Err(grit_lib::error::Error::Message(
+        return Err(grit_lib::error::Error::Verbatim(
             "no pack-only oid after prune-packed".into(),
         ));
     }

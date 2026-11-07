@@ -1620,10 +1620,10 @@ pub fn materialize(
     let opened = repo
         .bundles()
         .open(bundle)
-        .map_err(|e| crate::error::Error::Message(format!("bundle: {e}")))?;
+        .map_err(|e| crate::error::Error::Verbatim(format!("bundle: {e}")))?;
     let unbundled = opened
         .unbundle_with_progress(&repo, progress, cancel)
-        .map_err(|e| crate::error::Error::Message(format!("bundle: {e}")))?;
+        .map_err(|e| crate::error::Error::Verbatim(format!("bundle: {e}")))?;
     let mismatch = |got: String| CheckoutError::Mismatch {
         expected: info.root.clone(),
         got,

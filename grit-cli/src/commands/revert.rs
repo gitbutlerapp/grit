@@ -409,7 +409,7 @@ fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Er
             anyhow::anyhow!("nothing to commit — the revert would not change the tree")
         }
         Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to revert onto"),
-        Error::Message(msg) => anyhow::anyhow!(msg),
+        Error::Verbatim(msg) => anyhow::anyhow!(msg),
         other => anyhow::Error::new(other),
     }
 }

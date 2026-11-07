@@ -1337,7 +1337,7 @@ fn combine_notes_concatenate(
     };
     if new_data.is_empty() {
         let Some(c) = cur else {
-            return Err(Error::Message(
+            return Err(Error::Verbatim(
                 "combine_notes_concatenate: empty new and no current".into(),
             ));
         };

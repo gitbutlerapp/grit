@@ -239,8 +239,8 @@ fn with_stream_missing_object_is_none_and_callback_errors_propagate() {
     let oid = odb.write(ObjectKind::Blob, b"small").expect("write");
     let err = odb
         .with_stream(&oid, |_| -> grit_lib::error::Result<()> {
-            Err(Error::Message("stop".to_owned()))
+            Err(Error::Verbatim("stop".to_owned()))
         })
         .expect_err("callback error propagates");
-    assert!(matches!(err, Error::Message(m) if m == "stop"));
+    assert!(matches!(err, Error::Verbatim(m) if m == "stop"));
 }

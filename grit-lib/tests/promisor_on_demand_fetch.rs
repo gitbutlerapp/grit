@@ -602,7 +602,7 @@ fn lazy_fetch_no_materialization_errors() {
     let oid = ObjectId::from_hex(blob_hex.trim()).expect("oid");
     let err = repo.odb().read(&oid).unwrap_err();
     assert!(
-        matches!(err, Error::Message(_)),
+        matches!(err, Error::Verbatim(_)),
         "expected materialization failure, got {err:?}"
     );
 }

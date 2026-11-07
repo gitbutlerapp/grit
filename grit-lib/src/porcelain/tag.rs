@@ -274,7 +274,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
         let tagger = req
             .tagger
             .as_ref()
-            .ok_or_else(|| Error::Message("annotated tag requires a tagger identity".into()))?;
+            .ok_or_else(|| Error::Verbatim("annotated tag requires a tagger identity".into()))?;
         let message = req
             .message
             .as_deref()
@@ -384,7 +384,7 @@ pub fn tag_ref_metadata(repo: &Repository, ref_oid: &ObjectId) -> (TagKind, Opti
 pub fn list_tags(repo: &Repository, query: &RefQuery) -> Result<Vec<TagSummary>> {
     let TagList::Summaries(tags) = list_tags_with_detail(repo, query, TagDetail::Annotation)?
     else {
-        return Err(Error::Message(
+        return Err(Error::Verbatim(
             "annotation detail returned tag names without summaries".into(),
         ));
     };
@@ -450,10 +450,10 @@ fn ref_query_to_error(err: RefQueryError) -> Error {
     match err {
         RefQueryError::Store(e) => e,
         RefQueryError::MissingObjectDatabase => {
-            Error::Message("ref query requires an object database".into())
+            Error::Verbatim("ref query requires an object database".into())
         }
-        RefQueryError::MissingObject(oid) => Error::Message(format!("object {oid} not found")),
-        RefQueryError::NotCommit(oid) => Error::Message(format!("object {oid} is not a commit")),
+        RefQueryError::MissingObject(oid) => Error::Verbatim(format!("object {oid} not found")),
+        RefQueryError::NotCommit(oid) => Error::Verbatim(format!("object {oid} is not a commit")),
     }
 }
 
@@ -797,7 +797,7 @@ pub fn strip_comments(s: &str) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when the body is empty after cleanup (same as
+/// Returns [`Error::Verbatim`] when the body is empty after cleanup (same as
 /// [`crate::porcelain::commit::normalize_commit_message`]).
 pub fn normalize_tag_message(raw: &str) -> Result<String> {
     let stripped = strip_comments(raw);

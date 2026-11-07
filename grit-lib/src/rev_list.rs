@@ -11682,7 +11682,7 @@ mod line_coverage_tests {
             Error::RevList(RevListError::UnexpandedSymmetricRange { ref spec }) if spec == "main...side"
         ));
         let _ = expand_object_filter_for_protocol("blob:limit=1k")
-            .map_err(|msg| Error::Message(msg))?;
+            .map_err(|msg| Error::Verbatim(msg))?;
         let _ = url_encode_object_filter_subspec("path:src/");
         let (pos, neg) = split_revision_token("main ^main~2 -- tracked.txt");
         assert!(!pos.is_empty());

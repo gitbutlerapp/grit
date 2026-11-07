@@ -277,7 +277,7 @@ pub fn resolve_create_branch(
 /// # Errors
 ///
 /// Returns [`Error::Branch`] for invalid local branch names, missing branches, and `@{-1}` with no
-/// previous branch; tag names that would attach `HEAD` to a tag return [`Error::Message`].
+/// previous branch; tag names that would attach `HEAD` to a tag return [`Error::Verbatim`].
 pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode> {
     let spec = normalize_switch_spec(spec);
     if is_at_minus_branch_spec(spec) {
@@ -390,7 +390,7 @@ fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<Sw
         }));
     }
     if refname.starts_with("refs/tags/") {
-        return Err(Error::Message(format!(
+        return Err(Error::Verbatim(format!(
             "cannot switch to tag '{spec}' on a branch — use `grit switch --detach {spec}`"
         )));
     }
@@ -650,10 +650,11 @@ fn switch_to_target(
             });
             (
                 target_res
-                    .map_err(|_| Error::Message("parallel commit tree read failed".into()))??,
+                    .map_err(|_| Error::Verbatim("parallel commit tree read failed".into()))??,
                 Some(
-                    head_res
-                        .map_err(|_| Error::Message("parallel commit tree read failed".into()))??,
+                    head_res.map_err(|_| {
+                        Error::Verbatim("parallel commit tree read failed".into())
+                    })??,
                 ),
             )
         }
@@ -1089,7 +1090,7 @@ pub(crate) fn keep_style_transition_would_block_paths_for_preview(
     .map_err(|err| match err {
         TreeTransitionPrepareError::Failed(err) => err,
         TreeTransitionPrepareError::OverwritePaths(_) => {
-            Error::Message("keep preview planning should not fail on local paths".into())
+            Error::Verbatim("keep preview planning should not fail on local paths".into())
         }
     })?;
     Ok(merge_keep_style_block_paths(&core))
@@ -2189,7 +2190,7 @@ mod tests {
         refs::write_ref(repo.git_dir(), "refs/tags/rel1", &tip).expect("tag");
 
         let err = resolve_switch_target(&repo, "rel1").expect_err("tag");
-        assert!(matches!(err, Error::Message(_)));
+        assert!(matches!(err, Error::Verbatim(_)));
         assert!(err.to_string().contains("--detach"));
     }
 

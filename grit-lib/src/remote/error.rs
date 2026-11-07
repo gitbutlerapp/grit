@@ -241,6 +241,15 @@ impl RemoteError {
         }
     }
 
+    /// Functional area for analytics and JSON (`area`), matching [`Error::area`](crate::error::Error::area) when wrapped.
+    #[must_use]
+    pub fn area(&self) -> &'static str {
+        match self {
+            Self::Nested(err) => err.area(),
+            _ => "remote",
+        }
+    }
+
     /// Build [`RemoteError::Unreadable`] for `url`.
     #[must_use]
     pub fn unreadable(url: impl Into<String>, reason: RemoteUnreadableReason) -> Self {

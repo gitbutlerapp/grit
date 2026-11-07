@@ -2980,7 +2980,7 @@ fn resolve_files_ref_cached(
 /// # Errors
 ///
 /// Returns [`Error::InvalidRef`] when `refname` is not safe for ref storage, on a namespace
-/// conflict, or [`Error::Io`] / [`Error::Message`] on filesystem errors.
+/// conflict, or [`Error::Io`] / [`Error::Verbatim`] on filesystem errors.
 pub fn write_ref_cached(
     git_dir: &Path,
     refname: impl AsRef<RefNameRef>,
@@ -4073,7 +4073,7 @@ fn test_inject_reflog_fail(refname: &str) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when `HEAD` does not point at `branch_ref`,
+/// Returns [`Error::Verbatim`] when `HEAD` does not point at `branch_ref`,
 /// [`store::RefStoreError::ExpectedMismatch`] (see [`verify_branch_commit_cas`]) when the
 /// CAS check fails, or an I/O error when ref/reflog writes fail.
 pub struct BranchCommitRefUpdate<'a> {
@@ -4355,7 +4355,7 @@ fn finish_branch_commit_ref_lock_files(
     let mut file_lock = lock
         .lock
         .take()
-        .ok_or_else(|| Error::Message("branch ref lock already released".into()))?;
+        .ok_or_else(|| Error::Verbatim("branch ref lock already released".into()))?;
     crate::git_dir::io_error::io_with_git_path(
         git_dir,
         &path,
@@ -4464,7 +4464,7 @@ impl DetachedHeadRefLock {
         let mut file_lock = self
             .lock
             .take()
-            .ok_or_else(|| Error::Message("HEAD ref lock already released".into()))?;
+            .ok_or_else(|| Error::Verbatim("HEAD ref lock already released".into()))?;
         crate::git_dir::io_error::io_with_git_path(
             git_dir,
             &path,
@@ -5413,7 +5413,7 @@ mod update_branch_for_commit_tests {
         )
         .unwrap_err();
         crate::reftable::inject::set_reftable_transaction_fail(false);
-        assert!(!matches!(err, Error::Message(_)));
+        assert!(!matches!(err, Error::Verbatim(_)));
 
         assert!(resolve_ref(&git_dir, "refs/heads/main").is_err());
         assert!(read_reflog(&git_dir, "refs/heads/main").unwrap().is_empty());

@@ -99,7 +99,7 @@ fn lazy_fetch_disabled_by_env(env: &Environment) -> bool {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when no promisor remote is configured,
+/// Returns [`Error::Verbatim`] when no promisor remote is configured,
 /// [`Error::PromisorFetchFailed`] (each failed remote with its first error) when
 /// objects are still missing and some remote failed, [`Error::PromisedObjectMissing`]
 /// when every remote answered but none had the object, and [`Error::Cancelled`] when a
@@ -121,7 +121,7 @@ pub fn fetch_promisor_objects(
     let config = repo.config().snapshot()?;
     let order = lazy_fetch_order(config.as_ref(), &[]);
     if order.is_empty() {
-        return Err(Error::Message(
+        return Err(Error::Verbatim(
             "no promisor remote configured for partial clone".into(),
         ));
     }
@@ -282,7 +282,7 @@ impl PromisorLazyNestGuard {
         PROMISOR_LAZY_NEST.with(|cell| {
             let prev = cell.get();
             if prev >= MAX_LAZY_FETCH_NEST {
-                return Err(Error::Message(format!(
+                return Err(Error::Verbatim(format!(
                     "too many nested promisor lazy fetches (limit {MAX_LAZY_FETCH_NEST})"
                 )));
             }
@@ -356,14 +356,14 @@ pub(crate) fn resolve_promisor_read_miss(
     lazy_retry_count: u32,
 ) -> Result<PromisorMissResolution> {
     if lazy_retry_count >= MAX_LAZY_READ_RETRIES {
-        return Err(Error::Message(format!(
+        return Err(Error::Verbatim(format!(
             "promisor lazy fetch did not materialize {} after {MAX_LAZY_READ_RETRIES} attempts",
             oid.to_hex()
         )));
     }
 
     let git_dir = odb.config_git_dir().ok_or_else(|| {
-        Error::Message("promisor lazy fetch requires a git directory on the ODB".into())
+        Error::Verbatim("promisor lazy fetch requires a git directory on the ODB".into())
     })?;
     let config = repo_caches.load_config(env, Some(git_dir), true)?;
     if !repo_treats_promisor_packs(git_dir, config.as_ref()) {
@@ -387,7 +387,7 @@ pub(crate) fn resolve_promisor_read_miss(
     odb.invalidate_packs();
 
     if !odb.try_exists_stored(oid)? {
-        return Err(Error::Message(format!(
+        return Err(Error::Verbatim(format!(
             "promisor fetch completed but {} is still missing locally",
             oid.to_hex()
         )));
@@ -442,7 +442,7 @@ mod tests {
     }
 
     fn failed(msg: &str) -> PromisorAttemptError {
-        PromisorAttemptError::RequestFailed(Error::Message(msg.to_owned()))
+        PromisorAttemptError::RequestFailed(Error::Verbatim(msg.to_owned()))
     }
 
     /// A remote holding `bodies`: like a server, it refuses the whole request when it
@@ -565,7 +565,7 @@ mod tests {
             &mut |name, w| {
                 if name == "lop" {
                     lop_asked += 1;
-                    return Err(PromisorAttemptError::RemoteUnusable(Error::Message(
+                    return Err(PromisorAttemptError::RemoteUnusable(Error::Verbatim(
                         "bad lop url".into(),
                     )));
                 }

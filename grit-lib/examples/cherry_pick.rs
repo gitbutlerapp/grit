@@ -163,7 +163,7 @@ fn main() -> grit_lib::error::Result<()> {
     )?;
 
     if grit_lib::operation::tree_merge_has_conflicts(&merged) {
-        return Err(grit_lib::error::Error::Message(format!(
+        return Err(grit_lib::error::Error::Verbatim(format!(
             "merge produced {} conflict(s); this example expects a clean pick",
             grit_lib::operation::conflicts_from_tree_merge(&merged).len()
         )));

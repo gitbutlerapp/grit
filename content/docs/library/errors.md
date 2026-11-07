@@ -5,10 +5,10 @@ Grit-lib returns **structured errors**, not strings. Each functional area gets i
 ## Rules
 
 - Match on **types and variants**, not message text. Human wording is for the CLI only.
-- No catch-all `Message(String)` on area enums; no `Result<_, String>` in the public API.
+- No catch-all string variant on area enums; no `Result<_, String>` in the public API. The umbrella still carries [`Error::Verbatim`](rustdoc:grit_lib::error::Error::Verbatim) during migration; it serializes with stable `kind` `"message"`.
 - Named fields only: `PathBuf`, object ids, ref names, reason enums. A bare `String` field is allowed only for **external data** (for example a remote's error line) and must be a **named** field, not a tuple variant.
 - Use [`PathIoError`](rustdoc:grit_lib::error::PathIoError) for path-related I/O; do not add bare `#[from] io::Error` on area enums.
-- Cross-area failures wrap the lower area's enum. Corrupt loose/packed reads use [`ObjectReadFailure`](rustdoc:grit_lib::error::ObjectReadFailure) (not a nested umbrella value) as the `source` of [`Error::CorruptLooseObject`](rustdoc:grit_lib::error::Error::CorruptLooseObject) / [`Error::CorruptPackedObject`](rustdoc:grit_lib::error::Error::CorruptPackedObject). Only the decode-related umbrella variants map into `ObjectReadFailure`; unrelated failures (for example [`Error::Cancelled`](rustdoc:grit_lib::error::Error::Cancelled)) are not coerced into object corruption.
+- Cross-area failures wrap the lower area's enum (for example [`Error::Repository`](rustdoc:grit_lib::error::Error::Repository)). Corrupt loose/packed reads use [`ObjectReadFailure`](rustdoc:grit_lib::error::ObjectReadFailure) (not a nested umbrella value) as the `source` of [`Error::CorruptLooseObject`](rustdoc:grit_lib::error::Error::CorruptLooseObject) / [`Error::CorruptPackedObject`](rustdoc:grit_lib::error::Error::CorruptPackedObject). Only the decode-related umbrella variants map into `ObjectReadFailure`; unrelated failures (for example [`Error::Cancelled`](rustdoc:grit_lib::error::Error::Cancelled)) are not coerced into object corruption.
 - Remote operations should surface [`RemoteError`](rustdoc:grit_lib::remote::RemoteError) only; library failures during fetch/push should migrate to typed remote or area errors rather than nesting the umbrella long term.
 - Public functions return `Result<T, AreaError>`, not per-area type aliases.
 
@@ -52,4 +52,4 @@ Fold tiny areas into a neighbour; do not add an enum for only one or two variant
 
 ## Ratchet
 
-Quality counts in [`api-ratchet.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/api-ratchet.toml) track umbrella variant count, catch-all variants, string tuples, missing `#[non_exhaustive]`, nested `Error` wraps, and `Error::Message(` construction sites under `grit-lib/src`. Run `make api-ratchet-check` in CI.
+Quality counts in [`api-ratchet.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/api-ratchet.toml) track umbrella variant count, catch-all variants, string tuples, missing `#[non_exhaustive]`, nested `Error` wraps, and `Error::Verbatim(` construction sites under `grit-lib/src`. Run `make api-ratchet-check` in CI.

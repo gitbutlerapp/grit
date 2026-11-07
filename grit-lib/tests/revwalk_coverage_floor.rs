@@ -90,9 +90,10 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
     let (merge, tip, side) = seed_merged_history(&repo, 1100)?;
     repo.odb().write_commit_graph()?;
 
-    let _ = expand_object_filter_for_protocol("tree:0").map_err(grit_lib::error::Error::Message)?;
     let _ =
-        expand_object_filter_for_protocol("blob:none").map_err(grit_lib::error::Error::Message)?;
+        expand_object_filter_for_protocol("tree:0").map_err(grit_lib::error::Error::Verbatim)?;
+    let _ =
+        expand_object_filter_for_protocol("blob:none").map_err(grit_lib::error::Error::Verbatim)?;
 
     let mut deco = HashSet::new();
     deco.insert(merge);

@@ -1471,7 +1471,7 @@ pub(crate) fn ref_matches_ls_remote_patterns(refname: &str, patterns: &[String])
 /// # Errors
 fn list_refs_from_bundle(path: &Path, opts: &ListRefsOptions) -> RemoteResult<Vec<RemoteRef>> {
     let bundle = crate::bundle::Bundle::open(path)
-        .map_err(|e| RemoteError::from(Error::Message(e.to_string())))?;
+        .map_err(|e| RemoteError::from(Error::Verbatim(e.to_string())))?;
     let mut out = Vec::new();
     for (name, oid) in &bundle.header().refs {
         if !ref_matches_list_opts(name, opts) {

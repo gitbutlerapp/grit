@@ -9,7 +9,7 @@
 //! ```rust
 //! use grit_lib::error::Error;
 //! # fn main() {
-//! let _ = Error::Message("example".into());
+//! let _ = Error::Verbatim("example".into());
 //! # }
 //! ```
 
@@ -1351,7 +1351,7 @@ impl ObjectReadFailure {
 /// ```
 /// use grit_lib::error::Error;
 ///
-/// let err = Error::Message("repository not found".into());
+/// let err = Error::Verbatim("repository not found".into());
 /// assert!(err.to_string().contains("repository not found"));
 /// ```
 #[derive(Debug, Error)]
@@ -1964,7 +1964,7 @@ pub enum Error {
     ///
     /// Used for revision errors that must match Git's `fatal:` lines exactly.
     #[error("{0}")]
-    Message(String),
+    Verbatim(String),
 
     /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
     #[error("HEAD is detached")]
@@ -2239,23 +2239,7 @@ impl Error {
     #[allow(deprecated)]
     pub fn kind_name(&self) -> &'static str {
         match self {
-            Self::Repository(RepositoryError::NotARepository(..)) => "not_a_repository",
-            Self::Repository(RepositoryError::ForbiddenBareRepository { .. }) => {
-                "forbidden_bare_repository"
-            }
-            Self::Repository(RepositoryError::DubiousOwnership { .. }) => "dubious_ownership",
-            Self::Repository(RepositoryError::UnsupportedRepositoryFormatVersion { .. }) => {
-                "unsupported_repository_format_version"
-            }
-            Self::Repository(RepositoryError::InvalidRefStorageFormat { .. }) => {
-                "invalid_ref_storage_format"
-            }
-            Self::Repository(RepositoryError::InitObjectFormatChange) => {
-                "init_object_format_change"
-            }
-            Self::Repository(RepositoryError::InitBareWithSeparateGitDir) => {
-                "init_bare_with_separate_git_dir"
-            }
+            Self::Repository(repo) => repo.kind_name(),
             Self::InvalidObjectId(..) => "invalid_object_id",
             Self::HashCollision { .. } => "hash_collision",
             Self::ObjectNotFound(..) => "object_not_found",
@@ -2282,7 +2266,6 @@ impl Error {
             Self::LooseHashMismatch { .. } => "loose_hash_mismatch",
             Self::LooseObjectWrite { .. } => "loose_object_write",
             Self::WorktreePathIo { .. } => "worktree_path_io",
-            Self::Repository(RepositoryError::GitDirPathIo(_)) => "git_dir_path_io",
             Self::ObjectStreamTruncated { .. } => "object_stream_truncated",
             Self::WorktreeFileChanged { .. } => "worktree_file_changed",
             Self::IndexError(..) => "index_error",
@@ -2327,7 +2310,6 @@ impl Error {
             Self::PathspecIgnored { .. } => "pathspec_ignored",
             Self::RemoveBlocked { .. } => "remove_blocked",
             Self::NotRemovingRecursively(..) => "not_removing_recursively",
-            Self::Repository(RepositoryError::RequiresWorkTree) => "requires_work_tree",
             Self::EmptyCommitMessage => "empty_commit_message",
             Self::RemovePathsRequired => "remove_paths_required",
             Self::MoveSourceNotTracked { .. } => "move_source_not_tracked",
@@ -2343,13 +2325,7 @@ impl Error {
             Self::DirtyWorktree { .. } => "dirty_worktree",
             Self::Cancelled => "cancelled",
             Self::Identity(..) => "identity",
-            Self::Message(..)
-            | Self::Repository(RepositoryError::PromisorFetcherMissing)
-            | Self::Repository(RepositoryError::UnknownRepositoryExtensions(_))
-            | Self::Repository(RepositoryError::V1OnlyExtensionsInFormatZero(_)) => "message",
-            Self::Repository(RepositoryError::ObjectFormatMismatch { .. }) => {
-                "object_format_mismatch"
-            }
+            Self::Verbatim(..) => "message",
             Self::CheckoutRollbackIncomplete { .. } => "checkout_rollback_incomplete",
             Self::DetachedHead => "detached_head",
             Self::UnbornHead => "unborn_head",
@@ -2379,16 +2355,7 @@ impl Error {
             Self::RevList(..) => "rev_list",
             Self::Hook(..) => "hook",
             Self::History(..) => "history",
-            Self::Repository(RepositoryError::UnsupportedObjectStore { .. }) => {
-                "unsupported_object_store"
-            }
             Self::NoPromisorRemote { .. } => "no_promisor_remote",
-            Self::Repository(RepositoryError::PreciousObjectsRepository { .. }) => {
-                "precious_objects_repository"
-            }
-            Self::Repository(RepositoryError::OdbObjectsDirMismatch { .. }) => {
-                "odb_objects_dir_mismatch"
-            }
             Self::TreeSha256InvalidHex => "tree_sha256_invalid_hex",
             Self::TreeSha256InvalidRevision { .. } => "tree_sha256_invalid_revision",
             Self::TreeSha256MissingSubmodules(..) => "tree_sha256_missing_submodules",
@@ -2400,6 +2367,140 @@ impl Error {
             Self::BlameIgnoreRevUnknown { .. } => "blame_ignore_rev_unknown",
             Self::BlameIgnoreRevsFileOpen { .. } => "blame_ignore_revs_file_open",
             Self::BlameIgnoreRevsFileInvalidRev { .. } => "blame_ignore_revs_file_invalid_rev",
+        }
+    }
+
+    /// Functional area for this error, for analytics and additive JSON (`area` in `serde-models`).
+    ///
+    /// This string is **not** a stability contract for scripts: match on [`enum@Error`] variants or
+    /// [`Self::kind_name`] for stable branching. Areas group related variants for dashboards.
+    #[must_use]
+    #[allow(deprecated)]
+    pub fn area(&self) -> &'static str {
+        match self {
+            Self::Repository(repo) => repo.area(),
+            Self::Remote(remote) => remote.area(),
+            Self::Index(index) => index.area(),
+            Self::IndexError(..)
+            | Self::IndexUnmerged
+            | Self::IndexPathPrefixConflict { .. }
+            | Self::IndexFsmonitorExtensionTruncated
+            | Self::IndexFsmonitorExtensionBadVersion(_)
+            | Self::IndexFsmonitorExtensionEwahInvalid
+            | Self::CacheTreeCorrupt
+            | Self::UnmergedConflictMarkers { .. } => "index",
+            Self::InvalidObjectId(..)
+            | Self::HashCollision { .. }
+            | Self::ObjectNotFound(..)
+            | Self::PromisedObjectMissing(..)
+            | Self::PromisorFetchFailed { .. }
+            | Self::CorruptObject(..)
+            | Self::PackIndexChecksumMismatch { .. }
+            | Self::UnresolvedDeltas { .. }
+            | Self::PackDeltaBaseNotWritten { .. }
+            | Self::InvalidObject { .. }
+            | Self::InvalidTreeEntry(..)
+            | Self::UnexpectedObjectKind { .. }
+            | Self::CommitGraphParentMissing { .. }
+            | Self::DeltaChainTooDeep { .. }
+            | Self::UnknownObjectType(..)
+            | Self::ObjectHeaderTooLong { .. }
+            | Self::Zlib(..)
+            | Self::CorruptLooseObject { .. }
+            | Self::CorruptPackedObject { .. }
+            | Self::LooseHashMismatch { .. }
+            | Self::LooseObjectWrite { .. }
+            | Self::ObjectStreamTruncated { .. }
+            | Self::NoPromisorRemote { .. }
+            | Self::Midx(..) => "object",
+            Self::RevisionNotFound(..) | Self::RevParse(..) | Self::RevList(..) => "revision",
+            Self::InvalidRef(..)
+            | Self::PackedRefsUnexpectedLine { .. }
+            | Self::RefLock(..)
+            | Self::RefStore(..)
+            | Self::Reftable(..)
+            | Self::ReflogUnknownRef { .. }
+            | Self::ReflogInvalidSelector { .. }
+            | Self::ReflogInvalidIndex { .. }
+            | Self::ReflogIndexOutOfRange { .. } => "ref",
+            Self::Config(..) => "config",
+            Self::Submodule(..) => "submodule",
+            Self::Branch(..)
+            | Self::BranchCheckedOutInWorktree { .. }
+            | Self::BranchNotFound { .. }
+            | Self::BranchListNamesDateSort => "branch",
+            Self::Tag(..)
+            | Self::TagVerifyNotTag { .. }
+            | Self::TagVerifyMissingObjectHeader
+            | Self::TagVerifyDuplicateTreeSha256Header => "tag",
+            Self::NoteAlreadyExists { .. }
+            | Self::InvalidNotesRef(..)
+            | Self::NotesRewriteMode(..)
+            | Self::NotesRefNotCommit { .. }
+            | Self::NotesObjectKind { .. }
+            | Self::NotesMergeBothEmpty { .. }
+            | Self::NotesMergeInProgress { .. } => "notes",
+            Self::Worktree(..) => "worktree",
+            Self::WorktreePathIo { .. }
+            | Self::WorktreeFileChanged { .. }
+            | Self::PathOutsideRepo(..)
+            | Self::WouldOverwrite { .. }
+            | Self::DirtyWorktree { .. }
+            | Self::PathspecIgnored { .. }
+            | Self::RemoveBlocked { .. }
+            | Self::NotRemovingRecursively(..)
+            | Self::RemovePathsRequired
+            | Self::MoveSourceNotTracked { .. }
+            | Self::MoveDestinationExists { .. }
+            | Self::MoveDestinationNotDirectory { .. }
+            | Self::MoveIntoSubdirectory { .. }
+            | Self::MoveIntoSelf { .. }
+            | Self::MoveNothingToMove { .. }
+            | Self::MoveDuplicateDestination { .. }
+            | Self::MoveBadSource { .. }
+            | Self::MoveMissingIndexEntry { .. }
+            | Self::EmbeddedRepoWithoutCommit { .. }
+            | Self::RestoreConflictWithStaged
+            | Self::RestoreConflictWithSource
+            | Self::RestoreConflictMissingTheirs { .. }
+            | Self::RestoreConflictMissingOurs { .. }
+            | Self::RestoreConflictNotUnmerged { .. }
+            | Self::RestorePathUnmerged { .. }
+            | Self::PathspecBeyondSymlink { .. }
+            | Self::PathspecNoMatch { .. }
+            | Self::InvalidAttrPathspec { .. }
+            | Self::CheckoutRollbackIncomplete { .. } => "worktree",
+            Self::MaintenanceRunning { .. } => "repository",
+            Self::PathError(..)
+            | Self::PathspecFromFile(..)
+            | Self::InvalidPath(..)
+            | Self::InvalidPathComponent { .. } => "path",
+            Self::Filter(..) | Self::Apply(..) | Self::HunkSelection(..) => "diff",
+            Self::Hook(..) => "hook",
+            Self::History(..) => "history",
+            Self::Io(..) => "io",
+            Self::LockHeld(..) => "lock",
+            Self::Signing(..) => "signing",
+            Self::InvalidSignature(..) | Self::Identity(..) => "identity",
+            Self::Commit(_)
+            | Self::Merge(_)
+            | Self::DetachedHead
+            | Self::UnbornHead
+            | Self::InvalidHead
+            | Self::EmptyCommitMessage
+            | Self::AmendUnborn => "merge",
+            Self::Cancelled => "cancelled",
+            Self::Verbatim(..) => "verbatim",
+            Self::Offload(..) => "maintenance",
+            Self::BlameWorktreeBareRepository
+            | Self::BlameIgnoreRevUnknown { .. }
+            | Self::BlameIgnoreRevsFileOpen { .. }
+            | Self::BlameIgnoreRevsFileInvalidRev { .. } => "blame",
+            Self::TreeSha256InvalidHex
+            | Self::TreeSha256InvalidRevision { .. }
+            | Self::TreeSha256MissingSubmodules(..)
+            | Self::TreeSha256RequiresSigning
+            | Self::TreeSha256Claim(..) => "tree_sha256",
         }
     }
 
@@ -2633,7 +2734,7 @@ impl Error {
             Error::Apply(ApplyError::CorruptPatch { .. }) => {
                 crate::diagnostics::error_line(&self.to_string())
             }
-            Error::Message(s) => s.clone(),
+            Error::Verbatim(s) => s.clone(),
             Error::WouldOverwrite { message, .. } => message.clone(),
             e if e.wants_fatal_prefix() => crate::diagnostics::fatal_line(&e.to_string()),
             other => other.to_string(),
@@ -2762,7 +2863,7 @@ pub(crate) fn promisor_fetch_failed_message(
     format!("could not fetch promised object {missing} ({causes})")
 }
 
-/// Serializes as `{"kind": <Error::kind_name>, "message": <Display text>}`.
+/// Serializes as `{"kind": <Error::kind_name>, "message": <Display text>, "area": <Error::area>}`.
 #[cfg(feature = "serde-models")]
 impl serde::Serialize for Error {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -2773,9 +2874,10 @@ impl serde::Serialize for Error {
 
         match self {
             Self::LockHeld(lock) => {
-                let mut out = serializer.serialize_struct("Error", 3)?;
+                let mut out = serializer.serialize_struct("Error", 4)?;
                 out.serialize_field("kind", self.kind_name())?;
                 out.serialize_field("message", &self.to_string())?;
+                out.serialize_field("area", self.area())?;
                 out.serialize_field(
                     "path",
                     &crate::git_path::user_display_path(lock.path.as_path()),
@@ -2815,9 +2917,10 @@ impl serde::Serialize for Error {
                 out.end()
             }
             _ => {
-                let mut out = serializer.serialize_struct("Error", 2)?;
+                let mut out = serializer.serialize_struct("Error", 3)?;
                 out.serialize_field("kind", self.kind_name())?;
                 out.serialize_field("message", &self.to_string())?;
+                out.serialize_field("area", self.area())?;
                 out.end()
             }
         }

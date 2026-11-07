@@ -951,7 +951,7 @@ pub(crate) fn parse_reflog_expire_spec(raw: &str, now: i64) -> Result<i64> {
         return Ok(i64::MAX);
     }
     crate::git_date::parse_date_cutoff(s, now)
-        .map_err(|_| Error::Message(format!("invalid reflog expiry: {raw:?}")))
+        .map_err(|_| Error::Verbatim(format!("invalid reflog expiry: {raw:?}")))
 }
 
 /// Default `gc.reflogExpire`: reachable reflog entries older than this are dropped.

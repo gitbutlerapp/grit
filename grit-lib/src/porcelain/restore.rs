@@ -120,7 +120,9 @@ pub fn restore_paths(
     let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     if opts.pathspecs.is_empty() {
-        return Err(Error::Message("you must specify path(s) to restore".into()));
+        return Err(Error::Verbatim(
+            "you must specify path(s) to restore".into(),
+        ));
     }
 
     if opts.stage.is_some() || opts.remerge.is_some() {
@@ -278,7 +280,7 @@ fn validate_conflict_restore_options(opts: &RestoreOptions) -> Result<()> {
         return Err(Error::RestoreConflictWithSource);
     }
     if opts.stage.is_some() && opts.remerge.is_some() {
-        return Err(Error::Message(
+        return Err(Error::Verbatim(
             "cannot combine --ours/--theirs with --merge".into(),
         ));
     }
@@ -449,7 +451,7 @@ fn restore_conflict_side(
 
 fn checkout_submodule_worktree_to_commit(sub_worktree: &Path, oid: ObjectId) -> Result<()> {
     let Some(git_dir) = submodule_embedded_git_dir(sub_worktree) else {
-        return Err(Error::Message(format!(
+        return Err(Error::Verbatim(format!(
             "submodule at '{}' is not checked out",
             sub_worktree.display()
         )));
@@ -1190,7 +1192,7 @@ fn restore_blob_to_worktree(
     dir_cache: &mut LeadingDirCache,
 ) -> Result<fs::Metadata> {
     write_blob_to_worktree(repo, rules, work_tree, path, oid, mode, dir_cache)?.ok_or_else(|| {
-        Error::Message(format!(
+        Error::Verbatim(format!(
             "filter delayed checkout for '{path}' is not supported by grit restore"
         ))
     })

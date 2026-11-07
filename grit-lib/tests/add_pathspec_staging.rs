@@ -88,7 +88,7 @@ fn add_attr_pathspec_stages_matching_modified_and_errors_when_nothing_matches() 
     fs::write(wt.join("b.txt"), b"again\n").unwrap();
     let err = stage_paths(&repo, &[":(attr:no-such)"]).expect_err("no match");
     assert!(
-        matches!(err, Error::Message(ref m) if m.contains("did not match any files")),
+        matches!(err, Error::Verbatim(ref m) if m.contains("did not match any files")),
         "{err:?}"
     );
 }

@@ -310,6 +310,22 @@ impl RepositoryError {
         }
     }
 
+    /// Functional area for analytics and JSON (`area`), matching [`crate::error::Error::area`] when wrapped.
+    #[must_use]
+    pub fn area(&self) -> &'static str {
+        match self {
+            Self::GitDirPathIo(io) => match io.operation {
+                crate::error::PathIoOperation::GitDir(_) => "repository",
+                crate::error::PathIoOperation::Worktree(_) => "worktree",
+            },
+            Self::RequiresWorkTree
+            | Self::PromisorFetcherMissing
+            | Self::UnknownRepositoryExtensions(_)
+            | Self::V1OnlyExtensionsInFormatZero(_) => "repository",
+            _ => "repository",
+        }
+    }
+
     /// Build [`Self::GitDirPathIo`] from git-dir path context (legacy call sites).
     #[must_use]
     pub fn git_dir_path_io(

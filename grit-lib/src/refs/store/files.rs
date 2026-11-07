@@ -1539,7 +1539,7 @@ impl FilesRefStore {
         ctx: CommitContext<'_>,
     ) -> Result<()> {
         let Some(value) = after.refs.get(rename.to.as_str()) else {
-            return Err(Error::Message(format!(
+            return Err(Error::Verbatim(format!(
                 "case-only rename missing destination ref '{}'",
                 rename.to
             )));
@@ -2491,7 +2491,7 @@ impl RefStore for FilesRefStore {
     }
 
     fn create_reflog(&self, name: &RefNameRef) -> Result<()> {
-        validate_storable_refname(name.as_str()).map_err(|e| Error::Message(e.to_string()))?;
+        validate_storable_refname(name.as_str()).map_err(|e| Error::Verbatim(e.to_string()))?;
         let path = self.reflog_path(name.as_str());
         if let Some(parent) = path.parent() {
             self.io_ref_store(

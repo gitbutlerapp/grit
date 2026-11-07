@@ -126,6 +126,10 @@ pub enum IndexCorruptReason {
     },
     /// write-tree: missing index entry during traversal.
     WriteTreeMissingIndexEntry,
+    /// write-tree: zlib/deflate failed while writing a tree object.
+    WriteTreeZlibCompression,
+    /// write-tree: object database returned an unexpected umbrella error.
+    WriteTreeUnexpectedUmbrella,
     /// Resolve-undo extension payload truncated (path).
     ResolveUndoTruncatedPath,
     /// Resolve-undo mode field truncated.
@@ -290,11 +294,6 @@ pub enum IndexError {
         /// Why the mode change was rejected.
         reason: IndexChmodReason,
     },
-
-    /// Failure from another subsystem while building or persisting the index (for example ODB I/O
-    /// during write-tree) that is not mapped to a dedicated [`IndexError`] leaf.
-    #[error("{0}")]
-    Nested(#[from] Box<crate::error::Error>),
 }
 
 impl IndexError {
@@ -312,7 +311,16 @@ impl IndexError {
             Self::LockHeld(_) => "lock_held",
             Self::PathIo(_) => "git_dir_path_io",
             Self::Chmod { .. } => "message",
-            Self::Nested(inner) => inner.kind_name(),
+        }
+    }
+
+    /// Functional area for analytics and JSON (`area`), matching [`Error::area`](crate::error::Error::area) when wrapped.
+    #[must_use]
+    pub fn area(&self) -> &'static str {
+        match self {
+            Self::LockHeld(_) => "lock",
+            Self::PathIo(_) => "repository",
+            _ => "index",
         }
     }
 
@@ -425,6 +433,12 @@ fn corrupt_detail(corrupt: &IndexCorrupt) -> String {
         IndexCorruptReason::WriteTreeMissingIndexEntry => {
             "missing index entry during tree walk".to_owned()
         }
+        IndexCorruptReason::WriteTreeZlibCompression => {
+            "write-tree: zlib compression failed".to_owned()
+        }
+        IndexCorruptReason::WriteTreeUnexpectedUmbrella => {
+            "write-tree: unexpected error".to_owned()
+        }
         IndexCorruptReason::ResolveUndoTruncatedPath => "truncated resolve-undo path".to_owned(),
         IndexCorruptReason::ResolveUndoTruncatedMode => "truncated resolve-undo mode".to_owned(),
         IndexCorruptReason::ResolveUndoInvalidModeUtf8 => {
@@ -505,7 +519,6 @@ impl From<IndexError> for crate::error::Error {
         match err {
             IndexError::LockHeld(h) => Self::LockHeld(h),
             IndexError::PathIo(p) => p.into(),
-            IndexError::Nested(inner) => *inner,
             IndexError::Unmerged { .. } => Self::Index(err),
             IndexError::PathPrefixConflict { .. } => Self::Index(err),
             IndexError::FsmonitorExtensionTruncated => Self::Index(err),
@@ -570,7 +583,14 @@ impl From<crate::error::Error> for IndexError {
                 path: Some(PathBuf::from(path)),
                 source,
             }),
-            other => IndexError::Nested(Box::new(other)),
+            crate::error::Error::Zlib(detail) => Self::Corrupt {
+                corrupt: IndexCorrupt::new(IndexCorruptReason::WriteTreeZlibCompression),
+                detail,
+            },
+            other => Self::Corrupt {
+                corrupt: IndexCorrupt::new(IndexCorruptReason::WriteTreeUnexpectedUmbrella),
+                detail: other.to_string(),
+            },
         }
     }
 }

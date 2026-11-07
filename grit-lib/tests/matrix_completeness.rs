@@ -481,7 +481,7 @@ impl HttpClient for FakeHttpClient {
         _git_protocol: Option<&str>,
     ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
         if let Some(e) = &self.get_err {
-            return Err(Error::Message(e.clone()));
+            return Err(Error::Verbatim(e.clone()));
         }
         Ok(self.get_body.clone())
     }
@@ -494,7 +494,7 @@ impl HttpClient for FakeHttpClient {
         _git_protocol: Option<&str>,
     ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
         if let Some(e) = &self.post_err {
-            return Err(Error::Message(e.clone()));
+            return Err(Error::Verbatim(e.clone()));
         }
         // No test reaches a successful POST; return an empty report-status.
         Ok(b"0000".to_vec())

@@ -251,7 +251,7 @@ fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntr
 ///     oid: blob,
 /// }])?;
 /// let when = OffsetDateTime::from_unix_timestamp(1_700_000_000).map_err(|e| {
-///     grit_lib::error::Error::Message(e.to_string())
+///     grit_lib::error::Error::Verbatim(e.to_string())
 /// })?;
 /// let ada = Signature::new("Ada Lovelace", "ada@example.com", when)?;
 /// let commit = repo

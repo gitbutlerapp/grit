@@ -296,7 +296,7 @@ pub(crate) fn validate_commit_staging_pathspecs(
 /// `index.lock` is released (blobs already hashed may remain as unreachable loose objects).
 /// Returns [`Error::LockHeld`] when another process
 /// still holds `index.lock` after the `core.filesRefLockTimeout` wait (nothing is staged;
-/// the caller may retry), [`Error::Message`] when an explicit pathspec matches nothing,
+/// the caller may retry), [`Error::Verbatim`] when an explicit pathspec matches nothing,
 /// [`Error::PathspecIgnored`] when a path exists but is excluded by ignore rules,
 /// or I/O / object-store failures while reading the work tree.
 pub fn stage(
@@ -425,7 +425,7 @@ pub(crate) fn blob_path_matches_restrict_pathspecs(
     }
     if pathspecs.iter().any(|s| pathspec_has_attr_magic(s)) {
         let matcher = attr_matcher.ok_or_else(|| {
-            Error::Message(
+            Error::Verbatim(
                 "internal error: attr pathspec matcher missing for tree path filter".into(),
             )
         })?;
@@ -1105,7 +1105,7 @@ fn stage_unmerged_paths_matching_pathspecs(
                 .iter()
                 .any(|e| e.path == *raw_path && e.mode == MODE_GITLINK)
             {
-                return Err(Error::Message(format!(
+                return Err(Error::Verbatim(format!(
                     "could not resolve submodule HEAD for '{rel}'"
                 )));
             }
@@ -1126,7 +1126,7 @@ fn stage_unmerged_paths_matching_pathspecs(
             None,
             Some(rules.filter_process()),
         )
-        .map_err(|e| Error::Message(format!("could not store {rel}: {e}")))?;
+        .map_err(|e| Error::Verbatim(format!("could not store {rel}: {e}")))?;
         let mut entry = entry_from_metadata(&meta, raw_path, oid, mode);
         entry.mode = mode;
         index.stage_file(entry);
@@ -1214,7 +1214,7 @@ fn lock_rules(
 ) -> Result<std::sync::MutexGuard<'_, WorktreeRules>> {
     rules
         .lock()
-        .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))
+        .map_err(|e| Error::Verbatim(format!("worktree rules lock poisoned: {e}")))
 }
 
 /// Merge unstaged diff rows into one staging action per path (unmerged paths may appear twice).
@@ -1311,7 +1311,7 @@ fn apply_tracked_stage_plan(
         })?;
         let oid = if plan.oid.is_zero() {
             read_submodule_head_oid(&abs).ok_or_else(|| {
-                Error::Message(format!("could not resolve submodule HEAD for '{rel_path}'"))
+                Error::Verbatim(format!("could not resolve submodule HEAD for '{rel_path}'"))
             })?
         } else {
             plan.oid
@@ -1676,7 +1676,7 @@ fn stage_untracked_path(
             None,
             Some(rules.filter_process()),
         )
-        .map_err(|e| Error::Message(format!("could not hash {index_relpath}: {e}")))?
+        .map_err(|e| Error::Verbatim(format!("could not hash {index_relpath}: {e}")))?
     } else {
         materialize_worktree_blob(
             repo.odb(),
@@ -1688,7 +1688,7 @@ fn stage_untracked_path(
             None,
             Some(rules.filter_process()),
         )
-        .map_err(|e| Error::Message(format!("could not store {index_relpath}: {e}")))?
+        .map_err(|e| Error::Verbatim(format!("could not store {index_relpath}: {e}")))?
     };
 
     let index_path = storage_bytes(&index_relpath);
@@ -2001,7 +2001,7 @@ fn walk_worktree_files_under(
 
 fn pathdiff_worktree(work_tree: &Path, abs: &Path) -> Result<String> {
     crate::repo_relpath::strip_worktree_prefix_stored(abs, work_tree)
-        .ok_or_else(|| Error::Message("path escaped the work tree during force-add walk".into()))
+        .ok_or_else(|| Error::Verbatim("path escaped the work tree during force-add walk".into()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2040,7 +2040,7 @@ fn stage_intent_to_add_paths(
     if !dry_run {
         repo.odb()
             .write(crate::objects::ObjectKind::Blob, b"")
-            .map_err(|e| Error::Message(format!("could not store empty blob: {e}")))?;
+            .map_err(|e| Error::Verbatim(format!("could not store empty blob: {e}")))?;
     }
     let precompose = rules.config().precompose_unicode();
 
@@ -3038,7 +3038,7 @@ mod tests {
         assert!(
             !matches!(
                 &result,
-                Err(Error::Message(msg)) if msg.contains("did not match any files")
+                Err(Error::Verbatim(msg)) if msg.contains("did not match any files")
             ),
             "pathspec validation must see unmerged index stages: {result:?}"
         );

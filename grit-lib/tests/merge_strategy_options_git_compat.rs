@@ -262,7 +262,7 @@ fn unrelated_refused_by_default() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("unrelated without flag");
-    assert!(matches!(err, Error::Message(_)));
+    assert!(matches!(err, Error::Verbatim(_)));
 }
 
 #[test]

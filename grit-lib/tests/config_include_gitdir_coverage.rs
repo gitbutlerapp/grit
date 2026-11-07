@@ -98,7 +98,7 @@ fn inline_section_key_parse_and_negotiation_errors() {
     );
     assert!(matches!(
         err,
-        Err(Error::Message(_)) | Err(Error::Config(_))
+        Err(Error::Verbatim(_)) | Err(Error::Config(_))
     ));
 
     let inline = ConfigFile::parse(

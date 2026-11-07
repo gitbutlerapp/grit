@@ -108,7 +108,6 @@ fn index_error_to_engine(err: crate::index::IndexError) -> HistoryEngineError {
         IndexError::CacheTreeCorrupt => HistoryEngineError::CacheTreeCorrupt,
         IndexError::LockHeld(err) => HistoryEngineError::LockHeld(err),
         IndexError::PathIo(err) => path_io_to_engine(err),
-        IndexError::Nested(err) => error_to_engine(*err),
         other => HistoryEngineError::UmbrellaMessage(other.to_string()),
     }
 }
@@ -362,7 +361,7 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
             HistoryEngineError::DirtyWorktree { operation, paths }
         }
         crate::error::Error::Cancelled => HistoryEngineError::Cancelled,
-        crate::error::Error::Message(v) => HistoryEngineError::UmbrellaMessage(v),
+        crate::error::Error::Verbatim(v) => HistoryEngineError::UmbrellaMessage(v),
         crate::error::Error::DetachedHead => HistoryEngineError::DetachedHead,
         crate::error::Error::UnbornHead => HistoryEngineError::UnbornHead,
         crate::error::Error::InvalidHead => HistoryEngineError::InvalidHead,
@@ -905,7 +904,7 @@ pub enum HistoryEngineError {
     /// usable username/password, the server demanded an unsupported auth scheme,
     /// or the supplied credentials were rejected.
     ///
-    /// Distinct from [`crate::error::Error::Message`] so embedders can detect an authentication
+    /// Distinct from [`crate::error::Error::Verbatim`] so embedders can detect an authentication
     /// failure (and e.g. fall back to an interactive/subprocess path) rather than
     /// string-matching, and so the failure surfaces typed instead of hanging.
     #[error("authentication failed for {url}: {reason}")]
@@ -939,7 +938,7 @@ pub enum HistoryEngineError {
     /// did not advertise the `push-options` capability, so the options cannot be
     /// transmitted.
     ///
-    /// Distinct from [`crate::error::Error::Message`] so embedders can detect this specific
+    /// Distinct from [`crate::error::Error::Verbatim`] so embedders can detect this specific
     /// negotiation failure (and e.g. fall back to a subprocess push) rather than
     /// string-matching. The message matches Git's
     /// `fatal: the receiving end does not support push options`.
@@ -1247,7 +1246,7 @@ pub enum HistoryEngineError {
     #[error(transparent)]
     RebaseSession(Box<super::RebaseSessionError>),
 
-    /// Catch-all text from the umbrella [`crate::error::Error::Message`] (no `Error::History` recursion).
+    /// Catch-all text from the umbrella [`crate::error::Error::Verbatim`] (no `Error::History` recursion).
     #[error("{0}")]
     UmbrellaMessage(String),
 

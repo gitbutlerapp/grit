@@ -438,7 +438,7 @@ fn parse_rejects_bad_lines_and_negotiation_algorithm() {
         ConfigScope::Local,
     )
     .expect_err("missing value");
-    assert!(matches!(err, Error::Message(_) | Error::Config(_)));
+    assert!(matches!(err, Error::Verbatim(_) | Error::Config(_)));
 
     let err = ConfigFile::parse(
         std::path::Path::new("c"),

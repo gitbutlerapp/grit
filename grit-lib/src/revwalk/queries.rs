@@ -359,7 +359,7 @@ pub(crate) fn rev_list_options_from_walk(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when the string cannot be parsed.
+/// Returns [`Error::Verbatim`] when the string cannot be parsed.
 pub fn committer_cutoff_from_date(
     date: &str,
     now_sec: i64,

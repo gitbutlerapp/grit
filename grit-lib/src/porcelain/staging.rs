@@ -72,7 +72,7 @@ pub fn stage_worktree_changes(
     )?;
     let mut worktree_rules = rules_arc
         .lock()
-        .map_err(|e| crate::error::Error::Message(format!("worktree rules lock poisoned: {e}")))?;
+        .map_err(|e| crate::error::Error::Verbatim(format!("worktree rules lock poisoned: {e}")))?;
     let conv = worktree_rules.conversion().clone();
 
     let mut embedded_gitlinks = Vec::new();
@@ -272,7 +272,7 @@ fn stage_new_worktree_path(
             filter_fp,
         )
         .map_err(|e| {
-            crate::error::Error::Message(format!("could not store {index_relpath}: {e}"))
+            crate::error::Error::Verbatim(format!("could not store {index_relpath}: {e}"))
         })?
     };
     let entry = crate::index::entry_from_stat(&abs, index_relpath.as_bytes(), oid, mode)?;

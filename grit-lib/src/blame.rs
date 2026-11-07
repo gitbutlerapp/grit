@@ -1906,12 +1906,12 @@ fn run_textconv_command(command: &str, input_data: &[u8]) -> Result<Vec<u8>> {
         CommandStdin::Null,
         CommandStdio::Inherit,
     )
-    .map_err(|e| LibError::Message(format!("running textconv command '{command}': {e}")))?;
+    .map_err(|e| LibError::Verbatim(format!("running textconv command '{command}': {e}")))?;
 
     let _ = std::fs::remove_file(&temp_path);
 
     if !output.status.success {
-        return Err(LibError::Message(format!(
+        return Err(LibError::Verbatim(format!(
             "textconv command exited with status {}",
             output.status.code.unwrap_or(-1)
         )));
@@ -1935,7 +1935,7 @@ fn create_temp_textconv_file(data: &[u8]) -> Result<std::path::PathBuf> {
             Err(err) => return Err(err.into()),
         }
     }
-    Err(LibError::Message(
+    Err(LibError::Verbatim(
         "failed to create temporary textconv input file".to_string(),
     ))
 }
@@ -1954,7 +1954,7 @@ fn read_blob_content_for_blame(
 ) -> Result<Vec<u8>> {
     let obj = read_object_for_blame(odb, oid, None)?;
     if obj.kind != ObjectKind::Blob {
-        return Err(LibError::Message("expected blob object".to_string()));
+        return Err(LibError::Verbatim("expected blob object".to_string()));
     }
 
     if !use_textconv || !is_regular_mode(mode) {
@@ -2287,7 +2287,7 @@ impl<'a> BlameSession<'a> {
         // a first-parent walk from re-inflating every chain from its base.
         let obj = self.pack.read(self.odb, &tree_oid)?;
         if obj.kind != ObjectKind::Tree {
-            return Err(LibError::Message("expected tree".to_string()));
+            return Err(LibError::Verbatim("expected tree".to_string()));
         }
         let oid_len = self.odb.hash_algo().len();
         Ok(
@@ -3272,12 +3272,12 @@ fn compute_blame_with_session(
 
                 let mut next_remaining: Vec<TrackedLine> = Vec::new();
                 let Some(map) = maps[i].as_ref() else {
-                    return Err(LibError::Message(
+                    return Err(LibError::Verbatim(
                         "internal: missing merge parent line map".to_string(),
                     ));
                 };
                 let Some(par_lines) = par_lines_vec[i].as_ref() else {
-                    return Err(LibError::Message(
+                    return Err(LibError::Verbatim(
                         "internal: missing merge parent lines".to_string(),
                     ));
                 };
@@ -4331,7 +4331,7 @@ fn collect_tree_file_entries(
 ) -> Result<()> {
     let obj = read_object_for_blame(odb, tree_oid, None)?;
     if obj.kind != ObjectKind::Tree {
-        return Err(LibError::Message("expected tree".to_string()));
+        return Err(LibError::Verbatim("expected tree".to_string()));
     }
     let entries = parse_tree(&obj.data)?;
     for entry in entries {
@@ -4694,14 +4694,14 @@ impl CopyDetection {
     ///
     /// # Errors
     ///
-    /// Returns [`LibError::Message`] when `count` is greater than three.
+    /// Returns [`LibError::Verbatim`] when `count` is greater than three.
     pub fn from_count(count: usize) -> Result<Self> {
         match count {
             0 => Ok(Self::Off),
             1 => Ok(Self::FromModifiedFiles),
             2 => Ok(Self::FromCreatingCommit),
             3 => Ok(Self::FromAnyCommit),
-            _ => Err(LibError::Message(
+            _ => Err(LibError::Verbatim(
                 "blame copy detection: at most three -C flags are supported".into(),
             )),
         }
@@ -5401,7 +5401,7 @@ fn resolve_blame_start(repo: &Repository, start: Option<ObjectId>) -> Result<Obj
     match resolve_head(repo.git_dir())? {
         HeadState::Detached { oid } => Ok(oid),
         HeadState::Branch { oid: Some(oid), .. } => Ok(oid),
-        HeadState::Branch { oid: None, .. } | HeadState::Invalid => Err(LibError::Message(
+        HeadState::Branch { oid: None, .. } | HeadState::Invalid => Err(LibError::Verbatim(
             "cannot blame: HEAD does not point to a commit".to_string(),
         )),
     }

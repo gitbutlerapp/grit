@@ -339,7 +339,7 @@ impl InProcessServer {
             &opts,
             &ReceivePolicy::from_config(&ConfigSet::new()),
         )
-        .map_err(|e| Error::Message(e.to_string()))?;
+        .map_err(|e| Error::Verbatim(e.to_string()))?;
         Ok(out)
     }
 }
@@ -362,7 +362,7 @@ impl HttpClient for InProcessServer {
             &opts,
             &ReceivePolicy::from_config(&ConfigSet::new()),
         )
-        .map_err(|e| Error::Message(e.to_string()))?;
+        .map_err(|e| Error::Verbatim(e.to_string()))?;
         Ok(out)
     }
 
@@ -408,7 +408,7 @@ impl HttpClient for InProcessServer {
             let _ = tx.send(end);
         }
         if failed {
-            return Err(RemoteError::Nested(Box::new(Error::Message(
+            return Err(RemoteError::Nested(Box::new(Error::Verbatim(
                 "request body did not finish".to_owned(),
             ))));
         }

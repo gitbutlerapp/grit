@@ -5506,7 +5506,6 @@ pub grit_lib::error::Error::LooseObjectWrite::source: core::io::error::Error
 pub grit_lib::error::Error::MaintenanceRunning
 pub grit_lib::error::Error::MaintenanceRunning::holder: grit_lib::maintenance::GcLockHolder
 pub grit_lib::error::Error::Merge(grit_lib::porcelain::MergeError)
-pub grit_lib::error::Error::Message(alloc::string::String)
 pub grit_lib::error::Error::Midx(grit_lib::prelude::MidxError)
 pub grit_lib::error::Error::MoveBadSource
 pub grit_lib::error::Error::MoveBadSource::destination: alloc::string::String
@@ -5632,6 +5631,7 @@ pub grit_lib::error::Error::UnmergedConflictMarkers
 pub grit_lib::error::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::UnresolvedDeltas
 pub grit_lib::error::Error::UnresolvedDeltas::count: u64
+pub grit_lib::error::Error::Verbatim(alloc::string::String)
 pub grit_lib::error::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::error::Error::WorktreeFileChanged
 pub grit_lib::error::Error::WorktreeFileChanged::path: alloc::string::String
@@ -5645,6 +5645,7 @@ pub grit_lib::error::Error::WouldOverwrite::paths: alloc::vec::Vec<alloc::string
 pub grit_lib::error::Error::WouldOverwrite::reason: grit_lib::error::OverwriteReason
 pub grit_lib::error::Error::Zlib(alloc::string::String)
 impl grit_lib::error::Error
+pub fn grit_lib::error::Error::area(&self) -> &'static str
 pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
@@ -5659,8 +5660,6 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
-impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
-pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::porcelain::pull::PullError
 pub fn grit_lib::porcelain::pull::PullError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::remote::RemoteError
@@ -6271,6 +6270,7 @@ pub grit_lib::error::RepositoryError::UnsupportedRepositoryFormatVersion
 pub grit_lib::error::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
 pub grit_lib::error::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)
 impl grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::area(&self) -> &'static str
 pub fn grit_lib::repo::error::RepositoryError::git_dir_path_io(impl core::convert::Into<alloc::string::String>, grit_lib::error::GitDirPathOperation, core::io::error::Error) -> Self
 pub fn grit_lib::repo::error::RepositoryError::kind_name(&self) -> &'static str
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::repo::error::RepositoryError
@@ -6891,6 +6891,8 @@ pub grit_lib::index::error::IndexCorruptReason::WriteTreeInvalidPrefix
 pub grit_lib::index::error::IndexCorruptReason::WriteTreeInvalidPrefix::prefix: alloc::string::String
 pub grit_lib::index::error::IndexCorruptReason::WriteTreeMissingCacheTree
 pub grit_lib::index::error::IndexCorruptReason::WriteTreeMissingIndexEntry
+pub grit_lib::index::error::IndexCorruptReason::WriteTreeUnexpectedUmbrella
+pub grit_lib::index::error::IndexCorruptReason::WriteTreeZlibCompression
 impl core::clone::Clone for grit_lib::index::error::IndexCorruptReason
 pub fn grit_lib::index::error::IndexCorruptReason::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::index::error::IndexCorruptReason
@@ -6920,7 +6922,6 @@ pub grit_lib::index::error::IndexError::FsmonitorExtensionBadVersion(u32)
 pub grit_lib::index::error::IndexError::FsmonitorExtensionEwahInvalid
 pub grit_lib::index::error::IndexError::FsmonitorExtensionTruncated
 pub grit_lib::index::error::IndexError::LockHeld(grit_lib::error::LockHeldError)
-pub grit_lib::index::error::IndexError::Nested(alloc::boxed::Box<grit_lib::error::Error>)
 pub grit_lib::index::error::IndexError::PathIo(grit_lib::error::PathIoError)
 pub grit_lib::index::error::IndexError::PathPrefixConflict
 pub grit_lib::index::error::IndexError::PathPrefixConflict::directory: std::path::PathBuf
@@ -6928,10 +6929,9 @@ pub grit_lib::index::error::IndexError::PathPrefixConflict::file: std::path::Pat
 pub grit_lib::index::error::IndexError::Unmerged
 pub grit_lib::index::error::IndexError::Unmerged::paths: alloc::vec::Vec<alloc::string::String>
 impl grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::area(&self) -> &'static str
 pub fn grit_lib::index::error::IndexError::kind_name(&self) -> &'static str
 pub fn grit_lib::index::error::IndexError::unmerged() -> Self
-impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
-pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::index::error::IndexError
@@ -7328,6 +7328,8 @@ pub grit_lib::index::IndexCorruptReason::WriteTreeInvalidPrefix
 pub grit_lib::index::IndexCorruptReason::WriteTreeInvalidPrefix::prefix: alloc::string::String
 pub grit_lib::index::IndexCorruptReason::WriteTreeMissingCacheTree
 pub grit_lib::index::IndexCorruptReason::WriteTreeMissingIndexEntry
+pub grit_lib::index::IndexCorruptReason::WriteTreeUnexpectedUmbrella
+pub grit_lib::index::IndexCorruptReason::WriteTreeZlibCompression
 impl core::clone::Clone for grit_lib::index::error::IndexCorruptReason
 pub fn grit_lib::index::error::IndexCorruptReason::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::index::error::IndexCorruptReason
@@ -7357,7 +7359,6 @@ pub grit_lib::index::IndexError::FsmonitorExtensionBadVersion(u32)
 pub grit_lib::index::IndexError::FsmonitorExtensionEwahInvalid
 pub grit_lib::index::IndexError::FsmonitorExtensionTruncated
 pub grit_lib::index::IndexError::LockHeld(grit_lib::error::LockHeldError)
-pub grit_lib::index::IndexError::Nested(alloc::boxed::Box<grit_lib::error::Error>)
 pub grit_lib::index::IndexError::PathIo(grit_lib::error::PathIoError)
 pub grit_lib::index::IndexError::PathPrefixConflict
 pub grit_lib::index::IndexError::PathPrefixConflict::directory: std::path::PathBuf
@@ -7365,10 +7366,9 @@ pub grit_lib::index::IndexError::PathPrefixConflict::file: std::path::PathBuf
 pub grit_lib::index::IndexError::Unmerged
 pub grit_lib::index::IndexError::Unmerged::paths: alloc::vec::Vec<alloc::string::String>
 impl grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::area(&self) -> &'static str
 pub fn grit_lib::index::error::IndexError::kind_name(&self) -> &'static str
 pub fn grit_lib::index::error::IndexError::unmerged() -> Self
-impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
-pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::index::error::IndexError
@@ -15030,7 +15030,6 @@ pub grit_lib::prelude::Error::LooseObjectWrite::source: core::io::error::Error
 pub grit_lib::prelude::Error::MaintenanceRunning
 pub grit_lib::prelude::Error::MaintenanceRunning::holder: grit_lib::maintenance::GcLockHolder
 pub grit_lib::prelude::Error::Merge(grit_lib::porcelain::MergeError)
-pub grit_lib::prelude::Error::Message(alloc::string::String)
 pub grit_lib::prelude::Error::Midx(grit_lib::prelude::MidxError)
 pub grit_lib::prelude::Error::MoveBadSource
 pub grit_lib::prelude::Error::MoveBadSource::destination: alloc::string::String
@@ -15156,6 +15155,7 @@ pub grit_lib::prelude::Error::UnmergedConflictMarkers
 pub grit_lib::prelude::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::UnresolvedDeltas
 pub grit_lib::prelude::Error::UnresolvedDeltas::count: u64
+pub grit_lib::prelude::Error::Verbatim(alloc::string::String)
 pub grit_lib::prelude::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::prelude::Error::WorktreeFileChanged
 pub grit_lib::prelude::Error::WorktreeFileChanged::path: alloc::string::String
@@ -15169,6 +15169,7 @@ pub grit_lib::prelude::Error::WouldOverwrite::paths: alloc::vec::Vec<alloc::stri
 pub grit_lib::prelude::Error::WouldOverwrite::reason: grit_lib::error::OverwriteReason
 pub grit_lib::prelude::Error::Zlib(alloc::string::String)
 impl grit_lib::error::Error
+pub fn grit_lib::error::Error::area(&self) -> &'static str
 pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
@@ -15183,8 +15184,6 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
-impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
-pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::porcelain::pull::PullError
 pub fn grit_lib::porcelain::pull::PullError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::remote::RemoteError
@@ -15469,6 +15468,55 @@ impl core::marker::Unpin for grit_lib::ownership_check::OwnershipStatus
 impl core::marker::UnsafeUnpin for grit_lib::ownership_check::OwnershipStatus
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::OwnershipStatus
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::OwnershipStatus
+#[non_exhaustive] pub enum grit_lib::prelude::RepositoryError
+pub grit_lib::prelude::RepositoryError::DubiousOwnership
+pub grit_lib::prelude::RepositoryError::DubiousOwnership::effective_uid: core::option::Option<u32>
+pub grit_lib::prelude::RepositoryError::DubiousOwnership::owner_uid: core::option::Option<u32>
+pub grit_lib::prelude::RepositoryError::DubiousOwnership::path: alloc::string::String
+pub grit_lib::prelude::RepositoryError::ForbiddenBareRepository
+pub grit_lib::prelude::RepositoryError::ForbiddenBareRepository::path: alloc::string::String
+pub grit_lib::prelude::RepositoryError::GitDirPathIo(grit_lib::error::PathIoError)
+pub grit_lib::prelude::RepositoryError::InitBareWithSeparateGitDir
+pub grit_lib::prelude::RepositoryError::InitObjectFormatChange
+pub grit_lib::prelude::RepositoryError::InvalidRefStorageFormat
+pub grit_lib::prelude::RepositoryError::InvalidRefStorageFormat::value: alloc::string::String
+pub grit_lib::prelude::RepositoryError::NotARepository(grit_lib::error::NotARepositoryReason)
+pub grit_lib::prelude::RepositoryError::ObjectFormatMismatch
+pub grit_lib::prelude::RepositoryError::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
+pub grit_lib::prelude::RepositoryError::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
+pub grit_lib::prelude::RepositoryError::OdbObjectsDirMismatch
+pub grit_lib::prelude::RepositoryError::OdbObjectsDirMismatch::builder: std::path::PathBuf
+pub grit_lib::prelude::RepositoryError::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::prelude::RepositoryError::PreciousObjectsRepository
+pub grit_lib::prelude::RepositoryError::PreciousObjectsRepository::operation: &'static str
+pub grit_lib::prelude::RepositoryError::PromisorFetcherMissing
+pub grit_lib::prelude::RepositoryError::RequiresWorkTree
+pub grit_lib::prelude::RepositoryError::UnknownRepositoryExtensions(grit_lib::repo::error::UnknownRepositoryExtensions)
+pub grit_lib::prelude::RepositoryError::UnsupportedObjectStore
+pub grit_lib::prelude::RepositoryError::UnsupportedObjectStore::operation: grit_lib::repo::error::FilesOnlyOperation
+pub grit_lib::prelude::RepositoryError::UnsupportedRepositoryFormatVersion
+pub grit_lib::prelude::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
+pub grit_lib::prelude::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)
+impl grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::area(&self) -> &'static str
+pub fn grit_lib::repo::error::RepositoryError::git_dir_path_io(impl core::convert::Into<alloc::string::String>, grit_lib::error::GitDirPathOperation, core::io::error::Error) -> Self
+pub fn grit_lib::repo::error::RepositoryError::kind_name(&self) -> &'static str
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::from(grit_lib::error::PathIoError) -> Self
+impl core::convert::From<grit_lib::repo::error::RepositoryError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::repo::error::RepositoryError) -> Self
+impl core::error::Error for grit_lib::repo::error::RepositoryError
+impl core::fmt::Debug for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::repo::error::RepositoryError
+impl core::marker::Send for grit_lib::repo::error::RepositoryError
+impl core::marker::Sync for grit_lib::repo::error::RepositoryError
+impl core::marker::Unpin for grit_lib::repo::error::RepositoryError
+impl core::marker::UnsafeUnpin for grit_lib::repo::error::RepositoryError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::error::RepositoryError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::error::RepositoryError
 #[non_exhaustive] pub enum grit_lib::prelude::Trace
 pub grit_lib::prelude::Trace::Network
 pub grit_lib::prelude::Trace::Network::message: alloc::string::String
@@ -23232,6 +23280,7 @@ pub grit_lib::remote::RemoteError::Unreadable::reason: grit_lib::error::RemoteUn
 pub grit_lib::remote::RemoteError::Unreadable::url: core::option::Option<alloc::string::String>
 pub grit_lib::remote::RemoteError::UnsupportedScheme
 impl grit_lib::remote::RemoteError
+pub fn grit_lib::remote::RemoteError::area(&self) -> &'static str
 pub fn grit_lib::remote::RemoteError::from_io(core::io::error::Error) -> Self
 pub fn grit_lib::remote::RemoteError::is_cancelled(&self) -> bool
 pub fn grit_lib::remote::RemoteError::is_remote_unreadable(&self) -> bool
@@ -23606,6 +23655,7 @@ pub grit_lib::repo::error::RepositoryError::UnsupportedRepositoryFormatVersion
 pub grit_lib::repo::error::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
 pub grit_lib::repo::error::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)
 impl grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::area(&self) -> &'static str
 pub fn grit_lib::repo::error::RepositoryError::git_dir_path_io(impl core::convert::Into<alloc::string::String>, grit_lib::error::GitDirPathOperation, core::io::error::Error) -> Self
 pub fn grit_lib::repo::error::RepositoryError::kind_name(&self) -> &'static str
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::repo::error::RepositoryError
@@ -23693,6 +23743,7 @@ pub grit_lib::repo::RepositoryError::UnsupportedRepositoryFormatVersion
 pub grit_lib::repo::RepositoryError::UnsupportedRepositoryFormatVersion::version: u32
 pub grit_lib::repo::RepositoryError::V1OnlyExtensionsInFormatZero(grit_lib::repo::error::V1OnlyExtensionsInFormatZero)
 impl grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::area(&self) -> &'static str
 pub fn grit_lib::repo::error::RepositoryError::git_dir_path_io(impl core::convert::Into<alloc::string::String>, grit_lib::error::GitDirPathOperation, core::io::error::Error) -> Self
 pub fn grit_lib::repo::error::RepositoryError::kind_name(&self) -> &'static str
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::repo::error::RepositoryError

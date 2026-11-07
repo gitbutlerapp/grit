@@ -611,7 +611,7 @@ fn reflog_commits_for_fork_point(
     upstream_tip: ObjectId,
 ) -> Result<Vec<ObjectId>> {
     let entries = read_reflog(repo.git_dir(), reflog_ref)
-        .map_err(|e| Error::Message(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
+        .map_err(|e| Error::Verbatim(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
     let mut commits = Vec::new();
     let mut seen = oid_hash_set();
     let mut initial = true;
@@ -761,7 +761,7 @@ pub fn fork_point(
     };
 
     let entries = read_reflog(repo.git_dir(), &reflog_ref)
-        .map_err(|e| Error::Message(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
+        .map_err(|e| Error::Verbatim(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
 
     let mut candidates = Vec::new();
     let mut seen = oid_hash_set();
@@ -786,7 +786,7 @@ pub fn fork_point(
 
     let mut bases = merge_bases_first_vs_rest(repo, upstream_tip, &[head])?;
     if bases.is_empty() {
-        return Err(Error::Message(
+        return Err(Error::Verbatim(
             "no merge base found between upstream and HEAD".to_owned(),
         ));
     }
@@ -1935,7 +1935,7 @@ impl RangeWalkHide {
         }
         if let Some(lazy) = &self.lazy {
             let cache = cache.as_mut().ok_or_else(|| {
-                Error::Message("lazy range hide requires a CommitGraphCache".into())
+                Error::Verbatim("lazy range hide requires a CommitGraphCache".into())
             })?;
             return lazy.borrow_mut().is_hidden(cache, &self.hide_tips, oid);
         }

@@ -191,7 +191,7 @@ pub fn integrate_branch(
 ) -> std::result::Result<IntegrateBranchReply, ServerAuthError> {
     let url = format!("{}{INTEGRATE_PATH}/{project}", server.root_url());
     let request = serde_json::to_vec(request)
-        .map_err(|e| ServerAuthError::Http(Error::Message(e.to_string())))?;
+        .map_err(|e| ServerAuthError::Http(Error::Verbatim(e.to_string())))?;
     let body = post_json(http, server, &url, &request)?;
     serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer(server.root_url()))
 }

@@ -1,4 +1,4 @@
-//! Pinning tests for the error contract (task 7099 step 1).
+//! Pinning tests for the error contract (task 7099 step 1; step 7110 repository area).
 
 #![allow(
     clippy::unwrap_used,
@@ -8,12 +8,20 @@
 
 use std::collections::HashSet;
 
-use grit_lib::error::Error;
+use std::path::PathBuf;
 
-/// Slugs emitted by [`Error::kind_name`], in source order, with [`Index`] delegated kinds
-/// expanded (duplicates from delegation appear once at their first occurrence).
+use grit_lib::error::{Error, LockHeldError, NotARepositoryReason, RepositoryError};
+use grit_lib::index::IndexError;
+use grit_lib::porcelain::CommitError;
+use grit_lib::remote::RemoteError;
+
+/// Slugs emitted by [`Error::kind_name`], in source order, with [`Index`], [`RepositoryError`],
+/// and [`RemoteError`] delegated kinds expanded (duplicates from delegation appear once at their
+/// first occurrence).
 ///
 /// [`Index`]: grit_lib::index::IndexError
+/// [`RepositoryError`]: grit_lib::error::RepositoryError
+/// [`RemoteError`]: grit_lib::remote::RemoteError
 const EXPECTED_KIND_NAMES: &[&str] = &[
     "not_a_repository",
     "forbidden_bare_repository",
@@ -22,6 +30,14 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "invalid_ref_storage_format",
     "init_object_format_change",
     "init_bare_with_separate_git_dir",
+    "requires_work_tree",
+    "message",
+    "git_dir_path_io",
+    "worktree_path_io",
+    "unsupported_object_store",
+    "precious_objects_repository",
+    "odb_objects_dir_mismatch",
+    "object_format_mismatch",
     "invalid_object_id",
     "hash_collision",
     "object_not_found",
@@ -47,8 +63,6 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "corrupt_packed_object",
     "loose_hash_mismatch",
     "loose_object_write",
-    "worktree_path_io",
-    "git_dir_path_io",
     "object_stream_truncated",
     "worktree_file_changed",
     "index_error",
@@ -58,7 +72,6 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "index_fsmonitor_extension_bad_version",
     "index_fsmonitor_extension_ewah_invalid",
     "cache_tree_corrupt",
-    "message",
     "maintenance_running",
     "unmerged_conflict_markers",
     "invalid_ref",
@@ -98,6 +111,40 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "reftable",
     "filter",
     "path_outside_repo",
+    "remote_no_url",
+    "unsupported_scheme",
+    "invalid_url",
+    "http_unavailable",
+    "unknown_remote",
+    "remote_exists",
+    "invalid_remote_name",
+    "auth",
+    "credentials_unavailable",
+    "push_atomic_unsupported",
+    "push_options_unsupported",
+    "fetch_unshallow_not_shallow",
+    "fetch_shallow_unsupported",
+    "fetch_deepen_relative_unsupported",
+    "received_pack_temp_missing",
+    "remote_unreadable",
+    "remote_fatal",
+    "local_upload_pack",
+    "local_upload_pack_panicked",
+    "resumable",
+    "fetch_refspec",
+    "fetch_into_checked_out_branch",
+    "cancelled",
+    "protocol",
+    "push_plan",
+    "partial_clone",
+    "malformed_transport_url",
+    "transport",
+    "http_status",
+    "ssh",
+    "http",
+    "http_worker_panicked",
+    "http_low_speed_stall",
+    "credential",
     "invalid_attr_pathspec",
     "pathspec_no_match",
     "restore_conflict_with_staged",
@@ -111,7 +158,6 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "pathspec_ignored",
     "remove_blocked",
     "not_removing_recursively",
-    "requires_work_tree",
     "remove_paths_required",
     "move_source_not_tracked",
     "move_destination_exists",
@@ -124,8 +170,6 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "move_missing_index_entry",
     "would_overwrite",
     "dirty_worktree",
-    "cancelled",
-    "object_format_mismatch",
     "checkout_rollback_incomplete",
     "detached_head",
     "unborn_head",
@@ -153,10 +197,7 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "rev_list",
     "hook",
     "history",
-    "unsupported_object_store",
     "no_promisor_remote",
-    "precious_objects_repository",
-    "odb_objects_dir_mismatch",
     "tree_sha256_invalid_hex",
     "tree_sha256_invalid_revision",
     "tree_sha256_missing_submodules",
@@ -239,11 +280,38 @@ fn expanded_kind_name_slugs() -> Vec<String> {
         include_str!("../src/porcelain/merge_error.rs"),
         "impl MergeError {",
     ));
+    let repository_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
+        include_str!("../src/repo/repository_error.rs"),
+        "impl RepositoryError {",
+    ));
+    let remote_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
+        include_str!("../src/remote/error.rs"),
+        "impl RemoteError {",
+    ));
 
     let mut expanded: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for line in umbrella.lines() {
         let trimmed = line.trim();
+        if !trimmed.contains("=>") {
+            continue;
+        }
+        if trimmed.contains("Self::Repository(") && trimmed.contains("kind_name()") {
+            for s in &repository_slugs {
+                if seen.insert(s.clone()) {
+                    expanded.push(s.clone());
+                }
+            }
+            continue;
+        }
+        if trimmed.contains("Self::Remote(") && trimmed.contains("kind_name()") {
+            for s in &remote_slugs {
+                if seen.insert(s.clone()) {
+                    expanded.push(s.clone());
+                }
+            }
+            continue;
+        }
         if trimmed.contains("Self::Index(") && trimmed.contains("kind_name()") {
             for s in &index_slugs {
                 if seen.insert(s.clone()) {
@@ -301,9 +369,63 @@ fn error_kind_names_are_stable() {
 }
 
 #[test]
+fn verbatim_kind_slug_is_legacy_message() {
+    assert_eq!(
+        Error::Verbatim("x".into()).kind_name(),
+        "message",
+        "serialized kind slug must stay `message` for this variant"
+    );
+}
+
+#[test]
+fn error_area_matches_umbrella_branch() {
+    assert_eq!(
+        Error::Repository(RepositoryError::NotARepository(
+            NotARepositoryReason::NoRepositoryAt {
+                path: "/tmp/nope".into(),
+            },
+        ))
+        .area(),
+        "repository"
+    );
+    assert_eq!(Error::Verbatim("e".into()).area(), "verbatim");
+    assert_eq!(Error::Commit(CommitError::NothingToCommit).area(), "merge");
+    assert_eq!(Error::Remote(RemoteError::Cancelled).area(), "remote");
+}
+
+#[test]
+fn umbrella_area_delegates_from_wrapped_area_enums() {
+    let repo_err = RepositoryError::ForbiddenBareRepository {
+        path: "/repo".into(),
+    };
+    assert_eq!(
+        Error::Repository(RepositoryError::ForbiddenBareRepository {
+            path: "/repo".into(),
+        })
+        .area(),
+        repo_err.area()
+    );
+
+    assert_eq!(
+        Error::Remote(RemoteError::Nested(Box::new(Error::Verbatim("x".into())))).area(),
+        "verbatim",
+        "Nested(remote) must use the wrapped Error::area"
+    );
+
+    assert_eq!(
+        Error::Index(IndexError::LockHeld(LockHeldError {
+            path: PathBuf::from("index.lock"),
+            holder: None,
+        }))
+        .area(),
+        "lock",
+        "IndexError::LockHeld area matches Error::LockHeld"
+    );
+}
+
+#[test]
 fn path_io_preserves_raw_os_error_identity() {
     use grit_lib::error::{Error, GitDirPathOperation};
-    use grit_lib::repo::RepositoryError;
 
     let source = std::io::Error::from_raw_os_error(libc::EBUSY as i32);
     let err = Error::Repository(RepositoryError::git_dir_path_io(

@@ -252,7 +252,7 @@ fn load_surfaces_invalid_system_config() {
         &crate::config::LoadConfigOptions::standard(&env, None),
     )
     .expect_err("bad system");
-    assert!(matches!(err, Error::Config(_) | Error::Message(_)));
+    assert!(matches!(err, Error::Config(_) | Error::Verbatim(_)));
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn load_errors_on_invalid_git_config_override_file() {
         &crate::config::LoadConfigOptions::standard(&env, None),
     )
     .expect_err("bad override");
-    assert!(matches!(err, Error::Config(_) | Error::Message(_)));
+    assert!(matches!(err, Error::Config(_) | Error::Verbatim(_)));
 }
 
 #[test]
@@ -456,7 +456,7 @@ fn config_parse_errors_cover_negotiation_and_parameters() {
     );
     assert!(matches!(
         err,
-        Err(Error::Message(_)) | Err(Error::Config(_))
+        Err(Error::Verbatim(_)) | Err(Error::Config(_))
     ));
 
     let bogus = ConfigFile::from_git_config_parameters(

@@ -187,7 +187,7 @@ impl StashError {
         match self {
             Self::Cancelled => crate::error::Error::Cancelled,
             Self::Library(boxed) => *boxed,
-            other => crate::error::Error::Message(other.to_string()),
+            other => crate::error::Error::Verbatim(other.to_string()),
         }
     }
 }

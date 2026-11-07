@@ -8,7 +8,7 @@ use anyhow::Error;
 use grit_lib::command_runner::hooks::{HookError, HookOutput};
 use grit_lib::error::{
     AuthFailure, ConfigError, Error as LibError, LockHeldError, NotARepositoryReason,
-    OverwriteReason,
+    OverwriteReason, RepositoryError,
 };
 use grit_lib::error::{RemoteUnreadableReason, WorktreeOperation};
 use grit_lib::objects::ObjectId;
@@ -18,7 +18,6 @@ use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::RemoteError;
 use grit_lib::repo::error::FilesOnlyOperation;
-use grit_lib::repo::RepositoryError;
 
 use crate::error_kind::ErrorKind;
 use crate::error_map::{
@@ -1012,7 +1011,7 @@ static CONTRACT: &[ContractRow] = &[
             Error::new(CloneError::CheckoutFailed {
                 path: "/tmp/r".into(),
                 commit: oid(),
-                source: Box::new(LibError::Message("checkout failed".into())),
+                source: Box::new(LibError::Verbatim("checkout failed".into())),
             })
         },
         kind: Some(ErrorKind::CloneCheckoutFailed),

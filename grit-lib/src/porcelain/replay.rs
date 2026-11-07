@@ -121,7 +121,7 @@ pub fn replay_commit(
         HeadState::Branch { .. } => return Err(Error::UnbornHead),
         HeadState::Detached { oid } => (CheckoutTip::Detached, oid),
         HeadState::Invalid => {
-            return Err(Error::Message("HEAD is in an unknown state".into()));
+            return Err(Error::Verbatim("HEAD is in an unknown state".into()));
         }
     };
 

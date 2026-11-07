@@ -429,7 +429,7 @@ fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Er
     match err {
         Error::Merge(merge_err) => map_merge_replay_error(repo, "pick", merge_err),
         Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to pick onto"),
-        Error::Message(msg) => anyhow::anyhow!(msg),
+        Error::Verbatim(msg) => anyhow::anyhow!(msg),
         other => anyhow::Error::new(other),
     }
 }

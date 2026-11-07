@@ -78,7 +78,7 @@ pub(crate) fn verify_new_tip(store: &dyn RefStore, refname: &str, new_oid: Objec
 ///
 /// # Errors
 ///
-/// - [`Error::Message`] when `HEAD` is not a symbolic ref to `update.branch_ref`.
+/// - [`Error::Verbatim`] when `HEAD` is not a symbolic ref to `update.branch_ref`.
 /// - [`Error::RefStore`] with [`crate::refs::store::RefStoreError::ExpectedMismatch`] when the branch no
 ///   longer has `update.expected_old`.
 /// - [`Error::RefStore`] with [`crate::refs::store::RefStoreError::MissingObject`] or
@@ -94,7 +94,7 @@ pub fn update_branch_for_commit_on_store(
     match store.read_raw(RefNameRef::from_trusted("HEAD"))? {
         Some(RawRef::Symbolic(target)) if target.as_str() == update.branch_ref.as_str() => {}
         _ => {
-            return Err(Error::Message(format!(
+            return Err(Error::Verbatim(format!(
                 "HEAD does not point at branch '{}'",
                 update.branch_ref
             )))
@@ -164,7 +164,7 @@ pub fn update_branch_for_commit_on_store(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when `HEAD` is symbolic,
+/// Returns [`Error::Verbatim`] when `HEAD` is symbolic,
 /// [`crate::refs::store::RefStoreError::ExpectedMismatch`] when `HEAD` moved, or a ref/reflog/I/O failure.
 pub(crate) fn update_detached_head_for_commit_on_store(
     store: &dyn RefStore,
@@ -178,7 +178,7 @@ pub(crate) fn update_detached_head_for_commit_on_store(
         store.read_raw(RefNameRef::from_trusted("HEAD"))?,
         Some(RawRef::Symbolic(_))
     ) {
-        return Err(Error::Message(
+        return Err(Error::Verbatim(
             "HEAD points at a branch; use update_branch_for_commit".into(),
         ));
     }
@@ -467,7 +467,7 @@ mod tests {
         let err =
             update_branch_for_commit_on_store(&store, &update(Some(oid(1)), oid(2)), &config(None))
                 .expect_err("HEAD elsewhere");
-        assert!(matches!(err, Error::Message(_)));
+        assert!(matches!(err, Error::Verbatim(_)));
         assert_eq!(
             store
                 .resolve(RefNameRef::from_trusted("refs/heads/main"))
@@ -647,7 +647,7 @@ mod tests {
                 "commit: d",
                 &config(None),
             ),
-            Err(Error::Message(_))
+            Err(Error::Verbatim(_))
         ));
     }
 

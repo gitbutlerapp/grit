@@ -424,7 +424,7 @@ pub fn share(
 ) -> std::result::Result<ShareReply, ServerAuthError> {
     let url = format!("{}{SHARED_PATH}/{project}", server.root_url());
     let request = serde_json::to_vec(request)
-        .map_err(|e| ServerAuthError::Http(Error::Message(e.to_string())))?;
+        .map_err(|e| ServerAuthError::Http(Error::Verbatim(e.to_string())))?;
     let body = post_json(http, server, &url, &request)?;
     serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer(server.root_url()))
 }
@@ -442,7 +442,7 @@ pub fn accept(
 ) -> std::result::Result<ShareAcceptReply, ServerAuthError> {
     let url = format!("{}{ACCEPT_PATH}", server.root_url());
     let request = serde_json::to_vec(request)
-        .map_err(|e| ServerAuthError::Http(Error::Message(e.to_string())))?;
+        .map_err(|e| ServerAuthError::Http(Error::Verbatim(e.to_string())))?;
     let body = post_json(http, server, &url, &request)?;
     serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer(server.root_url()))
 }

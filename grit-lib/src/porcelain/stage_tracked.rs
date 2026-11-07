@@ -1098,7 +1098,7 @@ fn restage_deferred_chunk(
     for job in jobs {
         let raw_path = job.raw_path.as_slice();
         let rel_path = std::str::from_utf8(raw_path)
-            .map_err(|_| Error::Message("deferred restage requires utf-8 index paths".into()))?;
+            .map_err(|_| Error::Verbatim("deferred restage requires utf-8 index paths".into()))?;
         let Some(idx_e) = index.get(raw_path, 0).cloned() else {
             continue;
         };
@@ -1472,7 +1472,7 @@ mod tests {
         impl crate::promisor_fetch::PromisorFetcher for FetchCounter {
             fn fetch_missing(&self, _: &Repository, _: &[ObjectId]) -> Result<()> {
                 self.0.fetch_add(1, Ordering::SeqCst);
-                Err(Error::Message("unexpected fetch".into()))
+                Err(Error::Verbatim("unexpected fetch".into()))
             }
         }
         let (_dir, repo) = init_repo();

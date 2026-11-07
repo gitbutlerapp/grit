@@ -661,7 +661,7 @@ pub(crate) fn read_grit_rebase_stopped_source(
     }
     let raw = fs::read_to_string(git_dir.join("rebase-merge/stopped-sha"))?;
     let oid =
-        ObjectId::from_hex(raw.trim()).map_err(|e| crate::error::Error::Message(e.to_string()))?;
+        ObjectId::from_hex(raw.trim()).map_err(|e| crate::error::Error::Verbatim(e.to_string()))?;
     Ok(Some(oid))
 }
 

@@ -818,7 +818,7 @@ pub fn atomic_replace_commit_graph(
         drop(file);
         #[cfg(test)]
         if test_inject::should_fail_rename() {
-            return Err(crate::error::Error::Message(
+            return Err(crate::error::Error::Verbatim(
                 "injected commit-graph rename failure".into(),
             ));
         }

@@ -6386,7 +6386,7 @@ fn diff_index_to_worktree_inner(
         .map(|shared| {
             shared
                 .lock()
-                .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))
+                .map_err(|e| Error::Verbatim(format!("worktree rules lock poisoned: {e}")))
         })
         .transpose()?;
     let config = if let Some(rules) = rules_lock.as_ref() {
@@ -7813,7 +7813,7 @@ pub(crate) fn refresh_index_stat_content_verified_with_rules(
         .map(|shared| {
             shared
                 .lock()
-                .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))
+                .map_err(|e| Error::Verbatim(format!("worktree rules lock poisoned: {e}")))
         })
         .transpose()?;
     let config = rules_lock

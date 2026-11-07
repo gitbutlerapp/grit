@@ -164,7 +164,7 @@ fn run_rebase(
         Ok(_) if !cancel_at_checkout => Ok(elapsed),
         Err(e) if cancel_at_checkout && e.is_cancelled() => Ok(elapsed),
         Ok(_) => Err(RebaseSessionError::Library(
-            grit_lib::error::Error::Message("expected cancelled rebase".into()),
+            grit_lib::error::Error::Verbatim("expected cancelled rebase".into()),
         )),
         Err(e) => Err(e),
     }

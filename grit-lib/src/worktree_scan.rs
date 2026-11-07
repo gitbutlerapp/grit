@@ -327,7 +327,7 @@ fn entry_rel_path(index: &Index, entry_index: usize) -> Result<&[u8]> {
         .entries
         .get(entry_index)
         .map(|ie| ie.path.as_slice())
-        .ok_or_else(|| Error::Message(format!("index entry {entry_index} out of range")))
+        .ok_or_else(|| Error::Verbatim(format!("index entry {entry_index} out of range")))
 }
 
 fn entry_file_name(index: &Index, entry_index: usize) -> Result<&[u8]> {
@@ -1363,7 +1363,7 @@ where
                 Err(RecvTimeoutError::Timeout) => cancel.poll()?,
                 Err(RecvTimeoutError::Disconnected) => {
                     if batches.len() < worker_count {
-                        return Err(Error::Message(
+                        return Err(Error::Verbatim(
                             "parallel blob stat worker exited before reporting".to_owned(),
                         ));
                     }
@@ -1371,7 +1371,7 @@ where
             }
         }
         if scanned_total != blob_count {
-            return Err(Error::Message(format!(
+            return Err(Error::Verbatim(format!(
                 "parallel blob stat preload expected {blob_count} scanned entries, got {scanned_total}"
             )));
         }
@@ -1408,7 +1408,7 @@ where
         &empty_cancel,
     )?;
     if scanned != plan.len() {
-        return Err(Error::Message(format!(
+        return Err(Error::Verbatim(format!(
             "blob scan expected {} entries, scanned {scanned}",
             plan.len()
         )));
@@ -1530,7 +1530,7 @@ where
             &cancel,
         )?;
         if scanned != blob_count {
-            return Err(Error::Message(format!(
+            return Err(Error::Verbatim(format!(
                 "blob scan expected {blob_count} scanned entries, got {scanned}"
             )));
         }

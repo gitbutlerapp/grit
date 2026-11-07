@@ -550,7 +550,7 @@ where
                 .fetch(repo, fetch_opts, progress, cancel, http_factory)
                 .map_err(PullError::Remote)?;
             if fetch_outcome.has_rejections() {
-                return Err(PullError::from(Error::Message(
+                return Err(PullError::from(Error::Verbatim(
                     "some ref updates from the remote were rejected".into(),
                 )));
             }

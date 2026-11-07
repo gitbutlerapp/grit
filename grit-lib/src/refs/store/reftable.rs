@@ -151,12 +151,12 @@ impl ReftableRefStore {
                     ..Default::default()
                 },
             })
-            .map_err(|e| Error::Message(e.to_string()))?;
+            .map_err(|e| Error::Verbatim(e.to_string()))?;
         store
             .prepare(txn)
-            .map_err(|e| Error::Message(e.to_string()))?
+            .map_err(|e| Error::Verbatim(e.to_string()))?
             .commit()
-            .map_err(|e| Error::Message(e.to_string()))?;
+            .map_err(|e| Error::Verbatim(e.to_string()))?;
         Ok(store)
     }
 

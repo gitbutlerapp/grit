@@ -214,10 +214,10 @@ pub(crate) fn verify_tag_data(
 
         let signature = sig_handle
             .join()
-            .map_err(|_| Error::Message("signature verification thread panicked".into()))??;
+            .map_err(|_| Error::Verbatim("signature verification thread panicked".into()))??;
         let hash_result = hash_handle
             .join()
-            .map_err(|_| Error::Message("tree-sha256 verification thread panicked".into()))?;
+            .map_err(|_| Error::Verbatim("tree-sha256 verification thread panicked".into()))?;
         match hash_result {
             Ok(tree_sha256) => Ok(TagVerification {
                 signature,

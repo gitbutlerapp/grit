@@ -620,7 +620,7 @@ mod tests {
             Err(ServerAuthError::TokenRejected)
         ));
 
-        let down = Canned::new(Err(Error::Message("HTTP 404".to_owned())));
+        let down = Canned::new(Err(Error::Verbatim("HTTP 404".to_owned())));
         assert!(matches!(
             fetch_identity(&down, &server),
             Err(ServerAuthError::Http(_))
@@ -778,7 +778,7 @@ mod tests {
             Err(ServerAuthError::NotGritServer(_))
         ));
 
-        let http = Scripted::new(vec![Err(Error::Message("HTTP 404".to_owned()))]);
+        let http = Scripted::new(vec![Err(Error::Verbatim("HTTP 404".to_owned()))]);
         assert!(matches!(
             LoginFlow::new(&http, &server).start(),
             Err(ServerAuthError::Http(_))

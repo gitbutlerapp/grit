@@ -1727,7 +1727,7 @@ fn hard_reset_apply_tree_diff_checkout(
         Some(paths) => paths,
         None => {
             let Some((sparse, stat_check)) = compute_unrecorded else {
-                return Err(Error::Message(
+                return Err(Error::Verbatim(
                     "hard reset tree-diff checkout needs unrecorded path plan".into(),
                 ));
             };
@@ -5713,7 +5713,7 @@ impl LeadingDirCache {
         {
             use std::path::Component;
             let parent_str = std::str::from_utf8(&parent)
-                .map_err(|_| Error::Message("non-UTF-8 parent path during checkout".into()))?;
+                .map_err(|_| Error::Verbatim("non-UTF-8 parent path during checkout".into()))?;
             let path = Path::new(parent_str);
             let mut cur = work_tree.to_path_buf();
             for comp in path.components() {

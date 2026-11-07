@@ -164,7 +164,7 @@ pub mod prelude {
         CollectingDiagnostics, DiagnosticSink, NullDiagnostics, Trace, Warning,
     };
     pub use crate::environment::{Environment, RepositoryOptions};
-    pub use crate::error::{Error, MidxError, Result};
+    pub use crate::error::{Error, MidxError, RepositoryError, Result};
     pub use crate::index::Index;
     pub use crate::objects::odb::Odb;
     pub use crate::objects::{Object, ObjectId, ObjectInfo, ObjectKind};

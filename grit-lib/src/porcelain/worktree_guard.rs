@@ -1678,7 +1678,7 @@ pub fn prepare_tree_switch(
 ///
 /// # Errors
 ///
-/// Returns [`Error::DirtyWorktree`] for local changes and [`Error::Message`] when an untracked
+/// Returns [`Error::DirtyWorktree`] for local changes and [`Error::Verbatim`] when an untracked
 /// file would be overwritten.
 pub(crate) fn ensure_safe_for_rebase_stop(
     repo: &Repository,

@@ -648,7 +648,7 @@ mod tests {
                 url: "https://github.com".to_owned(),
                 reason: crate::error::AuthFailure::Rejected,
             })),
-            Err(Error::Message("offline".to_owned())),
+            Err(Error::Verbatim("offline".to_owned())),
         ]);
         let flow = DeviceFlow::new(&http, "id");
         assert!(matches!(
@@ -662,7 +662,7 @@ mod tests {
             flow.poll(&device(5, 900), secs(5)),
             Err(DeviceFlowError::Http {
                 step: DeviceFlowStep::PollToken,
-                source: Error::Message(_) | Error::Remote(_),
+                source: Error::Verbatim(_) | Error::Remote(_),
             })
         ));
     }
