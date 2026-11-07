@@ -347,17 +347,22 @@ fn seed_commit(repo: &Repository) -> ObjectId {
         b"base\n",
     )
     .expect("write");
-repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage seed");
+    repo.index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage seed");
     let mut req = CommitRequest::new("base");
     req.author = Some(ident());
     req.committer = Some(ident());
     req.assume_worktree_synced = true;
-repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
+    repo.commits()
+        .create_staged(&req, &mut NullProgress, &CancelToken::never())
         .expect("commit")
         .oid
 }
@@ -502,12 +507,16 @@ fn stage_flushes_before_index_write() {
     seed_commit(&repo);
     fs::write(repo.work_tree().expect("wt").join("new.txt"), b"new\n").expect("write");
     store.clear_events();
-repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
 
     assert!(
         store.events().iter().any(|e| e == "obj.flush"),
@@ -608,17 +617,22 @@ fn ingest_flush_failure_rolls_back_staged() {
 
 fn commit_file(repo: &Repository, wt: &Path, name: &str, message: &str) -> ObjectId {
     fs::write(wt.join(name), format!("{name}\n")).expect("write");
-repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     let mut req = CommitRequest::new(message);
     req.author = Some(ident());
     req.committer = Some(ident());
     req.assume_worktree_synced = true;
-repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
+    repo.commits()
+        .create_staged(&req, &mut NullProgress, &CancelToken::never())
         .expect("commit")
         .oid
 }

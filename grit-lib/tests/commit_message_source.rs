@@ -98,9 +98,14 @@ fn auto_stage_commit_uses_request_message_when_editmsg_is_clobbered() {
     fs::write(root.join("a.txt"), b"2\n").expect("edit");
     clobber_commit_editmsg(root);
 
-    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("mine"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("mine"), CommitScope::AutoStage),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 
     assert!(outcome.hooks_run.is_empty());
     assert_eq!(head_subject(root), "mine");
@@ -169,9 +174,17 @@ fn commit_msg_hook_emptying_message_aborts_without_moving_branch() {
     fs::write(root.join("a.txt"), b"2\n").expect("edit");
     let before = git(root, &["rev-parse", "HEAD"]);
 
-    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("will be emptied"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("emptied message must abort");
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("will be emptied"),
+                CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("emptied message must abort");
 
     assert!(
         matches!(

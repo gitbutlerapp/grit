@@ -67,11 +67,14 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         let rel = format!("mix/{i:05}.txt");
         fs::write(root.join(&rel), format!("payload {i}\n")).expect("write");
     }
-    &repo.index().stage(&grit_lib::porcelain::add::StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
+    &repo
+        .index()
+        .stage(
+            &grit_lib::porcelain::add::StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     let req = {
         let mut req = grit_lib::porcelain::commit::CommitRequest::new("seed");
         req.author = Some("T <t@e.com> 1 +0000".parse().expect("signature"));
@@ -82,9 +85,9 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         req.assume_worktree_synced = false;
         req
     };
-    grit_lib::porcelain::commit::&repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create_staged(&req, &mut NullProgress, &CancelToken::never())
+        .expect("commit");
 
     // Content matches HEAD; mtimes differ so stat refresh runs (including racy re-verify).
     let now = filetime::FileTime::now();
@@ -102,7 +105,10 @@ fn run_status(
     opts.untracked = UntrackedMode::No;
     opts.ahead_behind = false;
     opts.stat_parallel_threads = Some(threads);
-    let model = repo.status().run(&opts, &mut NullProgress, &CancelToken::never()).expect("status");
+    let model = repo
+        .status()
+        .run(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("status");
     let index_bytes = fs::read(repo.index().path()).expect("index bytes");
     (model, index_bytes)
 }

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefName;
@@ -35,17 +35,29 @@ fn open_files(dir: &Path) -> Repository {
 fn commit_n(repo: &Repository, work_tree: &Path, n: usize) {
     for i in 0..n {
         fs::write(work_tree.join("a"), format!("{i}\n")).expect("write");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(&{
-                let mut req = CommitRequest::new(format!("c{i}"));
-                req.author = Some(IDENT_TS.parse().expect("signature"));
-                req.committer = Some(IDENT_TS.parse().expect("signature"));
-                req
-            }.clone(), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("commit");
+        repo.index()
+            .stage(
+                &StageOptions::default(),
+                &mut NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("stage");
+        repo.commits()
+            .create(
+                &grit_lib::commits::CommitOptions::new(
+                    &{
+                        let mut req = CommitRequest::new(format!("c{i}"));
+                        req.author = Some(IDENT_TS.parse().expect("signature"));
+                        req.committer = Some(IDENT_TS.parse().expect("signature"));
+                        req
+                    }
+                    .clone(),
+                    CommitScope::Staged,
+                ),
+                &mut NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("commit");
     }
 }
 

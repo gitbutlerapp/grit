@@ -9,7 +9,7 @@ use std::fs;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -148,9 +148,13 @@ fn incoming_directory_rename_does_not_duplicate_merged_index() {
     side_body.push_str("more\n");
     fs::write(root.join("side.txt"), &side_body).expect("write side.txt");
     git(root, &["add", "side.txt"]);
-repo.commits().create_staged(&commit_req("next"), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("follow-up commit");
+    repo.commits()
+        .create_staged(
+            &commit_req("next"),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("follow-up commit");
     assert_git_fsck_no_duplicate_entries(root);
     let ls_tree = git(root, &["ls-tree", "-r", "HEAD"]);
     let mut paths = Vec::new();

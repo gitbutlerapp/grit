@@ -19,7 +19,7 @@ use grit_lib::objects::parse_commit;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
@@ -146,12 +146,17 @@ fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
     write_non_utf8_path(&root, UNTRACKED_SUB_FILE, b"y\n");
 
     let repo = open_repo(&root);
-    let model = repo.status().run(&StatusOptions {
-            untracked: UntrackedMode::All, ..StatusOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions {
+                untracked: UntrackedMode::All,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model
             .untracked
@@ -171,7 +176,16 @@ fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
 
     let mut dry = CommitRequest::new("dry-run");
     dry.dry_run = true;
-    let preview = repo.commits().create(&grit_lib::commits::CommitOptions::new(dry.clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never())
+    let preview = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                dry.clone(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("commit dry-run before staging");
     assert!(
         preview
@@ -183,26 +197,42 @@ fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
     );
 
     let index_path = root.join(".git/index");
-    let _ = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("second status while paths remain untracked");
+    let _ = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("second status while paths remain untracked");
     if untracked_cache_enabled {
         assert!(
             !untr_extension_names_have_lossy_replacement(&index_path),
             "UNTR extension must not store U+FFFD replacement names after refresh"
         );
     }
-repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage all untracked");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(CommitRequest::new("add non-utf8 untracked"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit staged non-utf8 untracked");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage all untracked");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                CommitRequest::new("add non-utf8 untracked"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit staged non-utf8 untracked");
 
     let ls = git_ls_files_z(&root);
     assert!(
@@ -236,23 +266,32 @@ fn non_utf8_untracked_directory_component_with_untr() {
     write_non_utf8_path(&root, UNTRACKED_NON_UTF8_DIR_FILE, b"inside\n");
 
     let repo = open_repo(&root);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let collapsed = repo_relpath::directory_marker_stored(&repo_relpath::storage_string(b"\xfe"));
     assert!(
         model.untracked.iter().any(|p| p == &collapsed),
         "collapsed untracked dir must be reversible pathhex (fe2f), got {:?}",
         model.untracked
     );
-repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage must not fail on collapsed non-UTF-8 directory path");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage must not fail on collapsed non-UTF-8 directory path");
 
     let staged = repo
         .index()
@@ -269,9 +308,16 @@ repo.index().stage(&StageOptions {
             .any(|e| e.path == b"\xfe/" && e.mode != 0o040000),
         "must not stage collapsed marker as an empty blob at \\xfe/"
     );
-repo.commits().create(&grit_lib::commits::CommitOptions::new(CommitRequest::new("add non-utf8 dir file"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit staged non-UTF-8 path under directory");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                CommitRequest::new("add non-utf8 dir file"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit staged non-UTF-8 path under directory");
 
     let ls = git_ls_files_z(&root);
     assert!(
@@ -488,9 +534,14 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
     std::fs::remove_file(r1.join("ok.txt")).expect("rm ok");
 
     let repo = open_repo(&r1);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let unstaged_paths: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
     assert!(
         unstaged_paths.iter().any(|p| path_is_bad_name(p)),
@@ -583,14 +634,19 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
     std::fs::write(bad_path(&r1b), b"x\n").expect("bad");
     std::fs::write(r1b.join("good.txt"), b"y\n").expect("good");
     let r1b_repo = open_repo(&r1b);
-r1b_repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage all");
+    r1b_repo
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage all");
     let porcelain = git_porcelain(&r1b);
     assert!(
         porcelain.contains("good.txt"),
@@ -617,14 +673,19 @@ r1b_repo.index().stage(&StageOptions {
     );
 
     std::fs::write(r1b.join(RESERVED_LITERAL), b"z\n").expect("reserved name file");
-r1b_repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage file whose name looks like hex encoding");
+    r1b_repo
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage file whose name looks like hex encoding");
     assert!(
         r1b_repo
             .index()
@@ -800,9 +861,14 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
         git_ls_files_z(&root).contains(&ISSUE_2513_FILE.to_vec()),
         "git index must still track raw byte path"
     );
-    let grit_status = &open_repo(&root).status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("grit status after restore");
+    let grit_status = &open_repo(&root)
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit status after restore");
     assert!(
         grit_status.untracked.is_empty(),
         "restore must not leave a U+FFFD replacement as untracked: {:?}",

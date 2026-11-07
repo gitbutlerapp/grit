@@ -323,9 +323,13 @@ fn commit_after_pick_conflict_finishes_sequence_issue_2262() {
         req
     };
     let mut progress = NullProgress;
-repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut progress, &CancelToken::never(),
-    )
-    .expect("commit finishes pick");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage),
+            &mut progress,
+            &CancelToken::never(),
+        )
+        .expect("commit finishes pick");
 
     assert_eq!(
         git(root.path(), &["log", "-1", "--format=%an"]).trim(),

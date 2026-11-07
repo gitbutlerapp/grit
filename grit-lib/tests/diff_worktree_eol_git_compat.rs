@@ -228,9 +228,10 @@ fn assert_eol_only_rewrite_is_clean(
         ..StatusOptions::default()
     };
     for run in 0..2 {
-        let model = grit_repo.status().run(&options, &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("status");
+        let model = grit_repo
+            .status()
+            .run(&options, &mut NullProgress, &CancelToken::never())
+            .expect("status");
         assert!(model.is_clean(), "{case} run {run}: {:?}", model.unstaged);
     }
 
@@ -299,12 +300,17 @@ fn eol_crlf_real_size_change_is_still_modified() {
     fs::write(repo.join("n.txt"), "one\ntwo\nthree\n").expect("rewrite");
 
     let grit_repo = open(&repo);
-    let model = grit_repo.status().run(&StatusOptions {
-            untracked: UntrackedMode::No, ..StatusOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = grit_repo
+        .status()
+        .run(
+            &StatusOptions {
+                untracked: UntrackedMode::No,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let unstaged: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
     assert_eq!(unstaged, ["n.txt"]);
     let porcelain = git_ok(&repo, &["status", "--porcelain"]);

@@ -16,7 +16,7 @@ use std::process::Command;
 
 use grit_lib::blame::{blame_file, BlameOptions};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::repo::Repository;
 use grit_lib::repo_relpath::{storage_bytes, storage_string};
 use grit_test_support::git;
@@ -40,9 +40,14 @@ fn status_path_can_be_passed_to_blame() {
     assert_eq!(storage_bytes(&result.lines[0].original_path), raw);
 
     std::fs::write(&file, "hello\nmodified\n").unwrap();
-    let model = repo.status().run(&StatusOptions::default(), &mut grit_lib::progress::NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
     let reported = model
         .unstaged
         .iter()

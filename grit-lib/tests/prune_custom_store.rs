@@ -213,7 +213,9 @@ pub(crate) fn build_history(repo: &Repository, work_tree: &Path) -> History {
     set_ref(repo, "refs/tags/v1", tag, Expected::Missing, "tag");
 
     std::fs::write(work_tree.join("staged.txt"), b"staged only\n").expect("write file");
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     let staged = repo
         .index()
         .load(&grit_lib::index::IndexLoadOptions::default())

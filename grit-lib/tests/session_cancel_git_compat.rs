@@ -89,8 +89,8 @@ fn oid(root: &Path, spec: &str) -> ObjectId {
     ObjectId::from_hex(&rev(root, spec)).expect("oid")
 }
 
-fn root: &Path) -> String {
-    git(root.status().run(&["status", "--porcelain=v1"])
+fn status(root: &Path) -> String {
+    git(root, &["status", "--porcelain=v1"])
 }
 
 fn commit_req(message: &str) -> CommitRequest {
@@ -114,16 +114,25 @@ fn cancelled_auto_stage_commit_leaves_git_view_unchanged() {
     let repo = open_grit_repo(root);
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
     let cancel = sink.flag.clone();
-    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("change"), CommitScope::AutoStage), &mut sink, &cancel,
-    )
-    .expect_err("cancelled");
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("change"), CommitScope::AutoStage),
+            &mut sink,
+            &cancel,
+        )
+        .expect_err("cancelled");
     assert!(err.is_cancelled(), "got {err:?}");
     assert_eq!(rev(root, "HEAD"), head);
     assert_eq!(status(root), status_before, "nothing became staged");
     assert_git_fsck_strict(root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("change"), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("change"), CommitScope::AutoStage),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert_eq!(rev(root, "HEAD~1"), head);
     assert_eq!(status(root), "");
     assert_git_fsck_strict(root);

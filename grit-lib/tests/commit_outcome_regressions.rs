@@ -4,9 +4,9 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -61,10 +61,17 @@ fn create_commit_change_count_includes_pre_staged_paths() {
     fs::write(root.join("untracked.txt"), "new\n").expect("untracked");
 
     let repo = open_repo(root);
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage for commit");
-    let outcome = repo.commits().create_staged(&commit_req("third"), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage for commit");
+    let outcome = repo
+        .commits()
+        .create_staged(
+            &commit_req("third"),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert_eq!(
         outcome.changes, 3,
         "reported changes must include pre-staged, modified, and untracked paths"
@@ -97,7 +104,10 @@ fn stage_for_commit_stages_untracked_at_auto_cache_entry_threshold() {
     fs::write(root.join("brand-new.txt"), "fresh\n").expect("untracked");
 
     let repo = open_repo(root);
-    let outcome = repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    let outcome = repo
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     assert_eq!(outcome.modified.len(), 1, "one tracked edit");
     assert_eq!(
         outcome.added.len(),
@@ -121,10 +131,14 @@ fn allow_empty_still_stages_dirty_tracked_files() {
     fs::write(root.join("a.txt"), "dirty\n").expect("edit");
 
     let repo = open_repo(root);
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage like commit");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage like commit");
     let mut req = commit_skip_pre_commit_tree_match(commit_req("marker"), true);
     req.allow_empty = true;
-    let outcome = repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
+    let outcome = repo
+        .commits()
+        .create_staged(&req, &mut NullProgress, &CancelToken::never())
         .expect("allow-empty after stage");
     assert_eq!(
         outcome.changes, 1,
@@ -161,7 +175,16 @@ fn commit_worktree_allow_empty_stages_dirty_tracked() {
     let repo = open_repo(root);
     let mut req = commit_worktree_req("marker");
     req.allow_empty = true;
-    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never())
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                req.clone(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("commit_worktree allow-empty");
     assert_eq!(
         outcome.changes, 1,
@@ -191,7 +214,16 @@ fn commit_worktree_allow_empty_stages_new_untracked() {
     let repo = open_repo(root);
     let mut req = commit_worktree_req("with-untracked");
     req.allow_empty = true;
-    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never())
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                req.clone(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("commit_worktree allow-empty");
     assert_eq!(outcome.changes, 1, "untracked file must be staged");
 
@@ -219,7 +251,10 @@ fn stage_for_commit_stages_untracked_below_auto_cache_threshold() {
     fs::write(root.join("new.txt"), "n\n").expect("new");
 
     let repo = open_repo(root);
-    let outcome = repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    let outcome = repo
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     assert_eq!(outcome.added.len(), 1);
     assert_eq!(outcome.modified.len(), 1);
 
@@ -232,9 +267,14 @@ fn stage_for_commit_stages_untracked_below_auto_cache_threshold() {
     git(&repo2_root, &["commit", "-qm", "one"]);
     fs::write(repo2_root.join("b.txt"), "b\n").expect("new");
     let repo2 = open_repo(&repo2_root);
-    let out2 = repo2.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    let out2 = repo2
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     assert_eq!(out2.added.len(), 1);
 }
 
@@ -278,9 +318,16 @@ fn commit_worktree_stages_unrelated_untracked_cold_untr_cache() {
     apply_unrelated_tracked_and_untracked(root);
 
     let repo = open_repo(root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(&commit_worktree_req("both").clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                &commit_worktree_req("both").clone(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 
     let porcelain = git(root, &["status", "--porcelain"]);
     assert!(
@@ -301,13 +348,25 @@ fn commit_worktree_stages_unrelated_untracked_warm_untr_cache() {
     large_index_fixture(root);
 
     let repo = open_repo(root);
-    &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("warm UNTR via status");
+    &repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("warm UNTR via status");
     apply_unrelated_tracked_and_untracked(root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(&commit_worktree_req("both").clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                &commit_worktree_req("both").clone(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 
     let porcelain = git(root, &["status", "--porcelain"]);
     assert!(

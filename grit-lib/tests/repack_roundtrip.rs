@@ -11,7 +11,7 @@ use grit_lib::index::Index;
 use grit_lib::maintenance::RepackOptions;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::error::FilesOnlyOperation;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
@@ -56,21 +56,25 @@ fn many_commits(repo: &Repository, n: usize) {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     for i in 0..n {
         std::fs::write(wt.join(format!("f{i}.txt")), format!("body-{i}\n")).expect("write");
-repo.index().stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("stage");
-repo.commits().create_staged(&{
-                let mut req = CommitRequest::new(format!("c{i}"));
-                req.author = Some(ident.parse().expect("signature"));
-                req.committer = Some(ident.parse().expect("signature"));
-                req.allow_empty = false;
-                req.sign_override = None;
-                req.amend = false;
-                req.assume_worktree_synced = false;
-                req
-            }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("commit");
+        repo.index()
+            .stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never())
+            .expect("stage");
+        repo.commits()
+            .create_staged(
+                &{
+                    let mut req = CommitRequest::new(format!("c{i}"));
+                    req.author = Some(ident.parse().expect("signature"));
+                    req.committer = Some(ident.parse().expect("signature"));
+                    req.allow_empty = false;
+                    req.sign_override = None;
+                    req.amend = false;
+                    req.assume_worktree_synced = false;
+                    req
+                },
+                &mut NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("commit");
     }
 }
 
@@ -135,9 +139,9 @@ fn repack_keeps_reflog_index_and_worktree_head_objects() {
 
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("staged-only.txt"), b"staged\n").expect("write");
-repo.index().stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never())
+        .expect("stage");
     let index = Index::load(&repo.git_dir().join("index")).expect("index");
     let staged_oid = index
         .entries()

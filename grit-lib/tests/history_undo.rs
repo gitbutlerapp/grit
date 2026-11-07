@@ -811,11 +811,14 @@ fn index_entry_size(wt: &std::path::Path, path: &str) -> u64 {
 }
 
 fn grit_status_paths(grit: &Repository) -> (Vec<String>, Vec<String>) {
-    let model = grit.status().run(&grit_lib::porcelain::status::StatusOptions::default(),
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit status");
+    let model = grit
+        .status()
+        .run(
+            &grit_lib::porcelain::status::StatusOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit status");
     let paths = |entries: &[grit_lib::diff::DiffEntry]| {
         entries.iter().map(|e| e.path().to_owned()).collect()
     };

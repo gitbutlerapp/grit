@@ -137,9 +137,16 @@ fn paths_commit_matches_git_only() {
 
     let repo = open_grit(grit_root);
     let paths = Pathspec::scoped(["file"], PathspecGlobalFlags::default());
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("file only"), CommitScope::Paths(paths))), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit paths commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("file only"),
+                CommitScope::Paths(paths),
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit paths commit");
     git(
         git_root,
         &["commit", "-m", "file only", "--only", "--", "file"],
@@ -167,9 +174,16 @@ fn paths_commit_force_added_ignored_file_matches_git() {
 
     let repo = open_grit(grit_root);
     let paths = Pathspec::scoped(["build/x.o"], PathspecGlobalFlags::default());
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("one"), CommitScope::Paths(paths.clone()).clone(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit paths commit force-added ignored");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("one"),
+                CommitScope::Paths(paths.clone()),
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit paths commit force-added ignored");
     git(
         git_root,
         &["commit", "-m", "one", "--only", "--", "build/x.o"],
@@ -182,9 +196,13 @@ repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("one"), 
     for root in [grit_root, git_root] {
         std::fs::write(root.join("build/x.o"), b"o\nmore\n").expect("modify ignored tracked");
     }
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("two"), CommitScope::Paths(paths))), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit paths commit modified ignored tracked");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("two"), CommitScope::Paths(paths)),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit paths commit modified ignored tracked");
     git(
         git_root,
         &["commit", "-m", "two", "--only", "--", "build/x.o"],
@@ -217,9 +235,16 @@ fn paths_commit_tracked_ignored_after_initial_commit_matches_git() {
 
     let repo = open_grit(grit_root);
     let paths = Pathspec::scoped(["build/x.o"], PathspecGlobalFlags::default());
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("path only"), CommitScope::Paths(paths))), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit paths commit tracked ignored");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("path only"),
+                CommitScope::Paths(paths),
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit paths commit tracked ignored");
     git(
         git_root,
         &["commit", "-m", "path only", "--only", "--", "build/x.o"],
@@ -245,9 +270,13 @@ fn paths_commit_directory_pathspec_on_ignored_tree_matches_git() {
 
     let paths = Pathspec::scoped(["build"], PathspecGlobalFlags::default());
     let repo = open_grit(grit_root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("one"), CommitScope::Paths(paths))), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit commit with directory pathspec on ignored tree");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("one"), CommitScope::Paths(paths)),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit commit with directory pathspec on ignored tree");
     git(git_root, &["commit", "-m", "one", "--only", "--", "build"]);
 
     assert_eq!(tree_oid(grit_root), tree_oid(git_root));
@@ -280,9 +309,13 @@ fn paths_commit_exclude_pathspec_matches_git() {
     );
 
     let repo = open_grit(grit_root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("scoped"), CommitScope::Paths(paths))), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit paths commit with exclude");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("scoped"), CommitScope::Paths(paths)),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit paths commit with exclude");
     git(
         git_root,
         &[
@@ -318,9 +351,13 @@ fn staged_commit_matches_git_without_auto_stage() {
     }
 
     let repo = open_grit(grit_root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("staged"), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit staged");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("staged"), CommitScope::Staged),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit staged");
     git(git_root, &["commit", "-m", "staged"]);
 
     assert_eq!(tree_oid(grit_root), tree_oid(git_root));

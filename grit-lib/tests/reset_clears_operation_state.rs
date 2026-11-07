@@ -15,7 +15,7 @@ use grit_lib::error::Error;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::merge::{ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
@@ -184,9 +184,14 @@ fn hard_reset_to_head_after_conflicted_merge_clears_state() {
     reset_head(&repo, main, ResetMode::Hard);
     assert_no_operation_state(&repo);
 
-    let err = repo.commits().create_staged(&commit_req("oops"), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = repo
+        .commits()
+        .create_staged(
+            &commit_req("oops"),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(
             err,
@@ -216,9 +221,14 @@ fn hard_reset_to_head_after_conflicted_pick_clears_state() {
     reset_head(&repo, main, ResetMode::Hard);
     assert_no_operation_state(&repo);
 
-    let err = repo.commits().create_staged(&commit_req("oops"), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = repo
+        .commits()
+        .create_staged(
+            &commit_req("oops"),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(
             err,

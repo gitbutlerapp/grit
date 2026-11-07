@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::{
@@ -104,12 +104,22 @@ fn remove_linked_worktree_with_system_inherited_autocrlf_and_crlf_worktree_file(
 
     std::fs::write(linked.join("new.txt"), b"new\r\n").expect("CRLF new file");
     let linked_repo = open_grit_inherited_autocrlf(&linked, &system_cfg);
-linked_repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
-linked_repo.commits().create_staged(&commit_request("two"), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    linked_repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
+    linked_repo
+        .commits()
+        .create_staged(
+            &commit_request("two"),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 
     let porcelain = git_with_system_config(&linked, &system_cfg, &["status", "--porcelain"]);
     assert!(
@@ -162,8 +172,14 @@ fn remove_linked_worktree_windows_crlf_set_content() {
 
     std::fs::write(linked.join("new.txt"), b"new\r\n").expect("CRLF via bytes");
     let linked_repo = open_grit_inherited_autocrlf(&linked, &system_cfg);
-linked_repo.index().stage(&StageOptions::default(), &mut NullProgress).expect("stage");
-linked_repo.commits().create_staged(&commit_request("two"), &mut NullProgress).expect("commit");
+    linked_repo
+        .index()
+        .stage(&StageOptions::default(), &mut NullProgress)
+        .expect("stage");
+    linked_repo
+        .commits()
+        .create_staged(&commit_request("two"), &mut NullProgress)
+        .expect("commit");
 
     remove_linked_worktree(&main_repo, &linked, false).expect("remove on Windows CRLF path");
 }

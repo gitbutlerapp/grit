@@ -11,7 +11,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::{Odb, OdbBuilder};
 use grit_lib::objects::HashAlgo;
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::MemoryRefStore;
@@ -22,16 +22,24 @@ use grit_test_support::{git, git_packed_history, rev_parse};
 const IDENT: &str = "A U Thor <author@example.com> 1700000000 +0000";
 
 fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     let mut req = CommitRequest::new(message.to_owned());
     req.author = Some(IDENT.parse().expect("signature"));
     req.committer = Some(IDENT.parse().expect("signature"));
-repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit")
-    .oid
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit")
+        .oid
 }
 
 fn export(store: &MemoryStore, objects_dir: &Path) {

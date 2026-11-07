@@ -66,7 +66,10 @@ fn grit_untracked_and_ignored(
         ahead_behind: false,
         ..StatusOptions::default()
     };
-    let model = repo.status().run(&opts, &mut NullProgress, &CancelToken::never()).expect("status");
+    let model = repo
+        .status()
+        .run(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("status");
     let mut untracked_paths = model.untracked;
     let mut ignored_paths = model.ignored;
     untracked_paths.sort();

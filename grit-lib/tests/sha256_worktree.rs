@@ -11,8 +11,8 @@ use grit_lib::diff::patch_ids::compute_patch_id;
 use grit_lib::diff::rerere::rerere_conflict_id;
 use grit_lib::objects::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use grit_lib::objects::HashAlgo;
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -101,9 +101,14 @@ fn sha256_stat_refresh_staging_patch_id_and_prune_packed() {
     .expect("open grit repo");
     assert_eq!(grit_repo.odb().hash_algo(), HashAlgo::Sha256);
 
-    let model = grit_repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status after touch");
+    let model = grit_repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status after touch");
     assert!(
         model.unstaged.is_empty() && model.staged.is_empty(),
         "grit status must be clean after stat refresh, got {model:?}"
@@ -116,9 +121,14 @@ fn sha256_stat_refresh_staging_patch_id_and_prune_packed() {
     );
 
     fs::write(repo_root.join("tracked.txt"), "modified body\n").expect("modify");
-    let outcome = grit_repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    let outcome = grit_repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     assert!(
         outcome.modified.len() >= 1,
         "expected at least one staged modification"

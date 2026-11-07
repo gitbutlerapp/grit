@@ -542,12 +542,17 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
     fs::create_dir_all(dir.path().join("sub")).expect("mkdir");
     fs::write(dir.path().join("sub/deep.txt"), "deep\n").expect("write");
 
-    let outcome = repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage into custom primary");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage into custom primary");
     assert_eq!(outcome.added.len(), 2, "{outcome:?}");
     for content in [&b"fresh\n"[..], b"deep\n"] {
         let oid = grit_lib::objects::hash::hash_object(HashAlgo::Sha1, ObjectKind::Blob, content)
@@ -564,24 +569,33 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
         req.committer = Some("T <t@example.com> 1 +0000".parse().expect("signature"));
         req
     };
-    let first = repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit staged");
+    let first = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit staged");
 
     // Force the parallel tracked-restage batch path for one modification.
     fs::write(dir.path().join("sub/deep.txt"), "deeper\n").expect("write");
-repo.index().stage(&grit_lib::test_support::knobs::stage_options_staging_thresholds(
-            StageOptions {
-                mode: StageMode::Update, ..StageOptions::default()
-            }, IndexStagingThresholds {
-                large_index_restage: 0,
-                parallel_tracked_restage: 0,
-            },
-        ),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("parallel restage into custom primary");
+    repo.index()
+        .stage(
+            &grit_lib::test_support::knobs::stage_options_staging_thresholds(
+                StageOptions {
+                    mode: StageMode::Update,
+                    ..StageOptions::default()
+                },
+                IndexStagingThresholds {
+                    large_index_restage: 0,
+                    parallel_tracked_restage: 0,
+                },
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("parallel restage into custom primary");
     let deeper =
         grit_lib::objects::hash::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"deeper\n")
             .expect("hash");
@@ -592,9 +606,14 @@ repo.index().stage(&grit_lib::test_support::knobs::stage_options_staging_thresho
     let mut second_req = req;
     second_req.message = "second".into();
     let req = second_req;
-    let second = repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("auto-stage commit into custom primary");
+    let second = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("auto-stage commit into custom primary");
     assert_ne!(first.oid, second.oid);
     let changed =
         grit_lib::objects::hash::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"changed\n")

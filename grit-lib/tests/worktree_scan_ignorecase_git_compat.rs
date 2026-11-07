@@ -5,7 +5,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{DiffStatus, TreeDiffOptions};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::counters::{
@@ -109,9 +109,14 @@ fn clean_ignorecase_scan_resolves_paths_per_directory() {
     drop(probe);
 
     let _probe = reset_worktree_metadata_probe(root);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(model.unstaged.is_empty(), "clean status");
     assert!(model.untracked.is_empty(), "no untracked files");
     assert_resolutions_per_directory("status");

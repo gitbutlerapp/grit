@@ -14,7 +14,7 @@ use grit_lib::command_runner::{
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{CommitOutcome, CommitRequest};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
@@ -334,16 +334,23 @@ fn hooks_dir_has_no_verbatim_prefix() {
 
 fn commit_one_file(repo: &Repository, dir: &Path) -> grit_lib::error::Result<CommitOutcome> {
     std::fs::write(dir.join("f.txt"), b"data\n").expect("write");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
     let ident = "T <t@t> 1 +0000".to_string();
-repo.commits().create_staged(&{
+    repo.commits().create_staged(
+        &{
             let mut req = CommitRequest::new("msg");
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
             req
-        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
+        },
+        &mut NullProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
 }
 
@@ -573,16 +580,23 @@ fn commit_staged(
     message: &str,
 ) -> grit_lib::error::Result<CommitOutcome> {
     std::fs::write(dir.join("b.txt"), b"b\nc\n").expect("modify b");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
     let ident = "T <t@t> 1 +0000".to_string();
-repo.commits().create_staged(&{
+    repo.commits().create_staged(
+        &{
             let mut req = CommitRequest::new(message);
             req.author = Some(ident.parse().expect("signature"));
             req.committer = Some(ident.parse().expect("signature"));
             req
-        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
+        },
+        &mut NullProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
 }
 

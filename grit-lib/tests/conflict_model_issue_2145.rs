@@ -18,7 +18,7 @@ use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
 };
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -74,10 +74,14 @@ fn open(root: &Path) -> Repository {
 }
 
 fn status_conflicts(repo: &Repository) -> Vec<Conflict> {
-    repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status")
-    .conflict_details
+    repo.status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status")
+        .conflict_details
 }
 
 fn deleted_by_us() -> Vec<Conflict> {

@@ -525,10 +525,7 @@ fn gc_per_ref_overlapping_pattern_precedence_matches_git() {
 
         git_expire(git_copy.path(), &["reflog", "expire", "refs/heads/main"]);
 
-        assert_reflog_tree_matches(
-            git_copy.path().join(".git"),
-            &grit_copy.path().join(".git"),
-        );
+        assert_reflog_tree_matches(git_copy.path().join(".git"), &grit_copy.path().join(".git"));
         let _ = backend;
     });
 }
@@ -830,10 +827,7 @@ fn t0600_expire_on_symref_not_referent() {
     git_expire(git_copy.path(), &["reflog", "expire", "--expire=now", sym]);
     grit_expire_simple(&grit_copy.path().join(".git"), sym, None);
 
-    assert_reflog_tree_matches(
-        git_copy.path().join(".git"),
-        &grit_copy.path().join(".git"),
-    );
+    assert_reflog_tree_matches(git_copy.path().join(".git"), &grit_copy.path().join(".git"));
 
     let main_git =
         fs::read(reflog_file_path(&git_copy.path().join(".git"), refname)).expect("main");

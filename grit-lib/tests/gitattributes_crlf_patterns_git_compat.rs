@@ -62,12 +62,16 @@ fn grit_add_honours_gitattributes_with_autocrlf_like_git() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit add");
+    repo.index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit add");
 
     let expected = [
         ("top.raw", 6_usize),

@@ -6,7 +6,7 @@ use std::process::Command;
 
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
@@ -43,13 +43,14 @@ fn init_autocrlf_repo(root: &std::path::Path) -> Repository {
 }
 
 fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
-    let mut index = repo
-        .index()
-        .load(&grit_lib::index::IndexLoadOptions::default())
-        .expect("index");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
+    let mut index = repo.index().load().expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
     repo.index()

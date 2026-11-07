@@ -13,8 +13,8 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::fetch::NoProgress;
@@ -153,16 +153,28 @@ fn add_and_commit_write_into_env_object_directory() {
     fs::write(work.join("nb"), "new\n").unwrap();
 
     let repo = discover(environment(&work, objq.to_str().unwrap())).expect("discover");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     assert_eq!(loose_objects(&objq).len(), 1, "blob lands in the env dir");
     assert!(loose_objects(&dot_git_objects).is_empty());
 
     fs::write(work.join("second"), "two\n").unwrap();
-    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("x"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("x"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     // Two blobs, one tree, one commit.
     assert_eq!(loose_objects(&objq).len(), 4);
     assert!(
@@ -222,9 +234,17 @@ fn env_object_directory_with_alternate_main_store_keeps_history_readable() {
     env.git_alternate_object_directories = Some(dot_git_objects.to_str().unwrap().to_owned());
     let repo = discover(env).expect("discover");
     fs::write(work.join("base"), "changed\n").unwrap();
-    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("on top"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("on top"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert_eq!(outcome.parents, vec![base.parse::<ObjectId>().unwrap()]);
     assert_eq!(loose_objects(&dot_git_objects), main_store_before);
     assert_eq!(loose_objects(&objq).len(), 3, "blob, tree and commit");
@@ -513,9 +533,17 @@ fn commit_and_push_from_quarantine(root: &Path, url: &str) -> ObjectId {
     let work = root.join("r");
     let repo = discover(quarantined(root)).expect("discover");
     fs::write(work.join("local"), "local\n").unwrap();
-    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("local"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("local"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     let plain = git_with(&work, &[], &["cat-file", "-e", &outcome.oid.to_hex()]);
     assert!(!plain.status.success(), "the new commit lives only in objq");
 

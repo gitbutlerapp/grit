@@ -44,19 +44,15 @@ fn snapshot_fsck() {
 fn snapshot_fsck_missing_blob() {
     snapshot_fresh("fsck_missing_blob", &["fsck"], |fixture| {
         use grit_lib::index::Index;
-        use grit_lib::porcelain::add::stage_for_commit;
         use grit_lib::progress::NullProgress;
         use grit_lib::repo::{InitOptions, Repository};
         use std::fs;
 
         let (repo, _) = Repository::init(fixture.path(), &InitOptions::default()).expect("init");
         fs::write(repo.work_tree().unwrap().join("orphan.txt"), b"data\n").unwrap();
-        stage_for_commit(
-            &repo,
-            &mut NullProgress,
-            &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("stage");
+        repo.index()
+            .stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never())
+            .expect("stage");
         let index = Index::load(&repo.git_dir().join("index")).expect("index");
         let oid = index.entries()[0].oid;
         let loose = repo

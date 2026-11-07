@@ -138,9 +138,17 @@ fn paths_commit_pre_commit_failure_preserves_index() {
     let before_cached = cached_names(root);
 
     let repo = open_repo(root);
-    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("partial"), CommitScope::Paths(paths_only()).clone(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("pre-commit must fail");
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("partial"),
+                CommitScope::Paths(paths_only()),
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("pre-commit must fail");
     assert!(
         format!("{err}").contains("pre-commit") || format!("{err}").contains("hook"),
         "unexpected error: {err}"
@@ -165,9 +173,17 @@ fn paths_commit_commit_msg_failure_preserves_index() {
     let before_cached = cached_names(root);
 
     let repo = open_repo(root);
-    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("partial"), CommitScope::Paths(paths_only()).clone(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("commit-msg must fail");
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("partial"),
+                CommitScope::Paths(paths_only()),
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("commit-msg must fail");
     assert!(
         format!("{err}").contains("commit-msg") || format!("{err}").contains("hook"),
         "unexpected error: {err}"
@@ -202,9 +218,14 @@ fn auto_stage_pre_commit_failure_preserves_index() {
     let before_cached = cached_diff(root);
 
     let repo = open_repo(root);
-    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("try"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("pre-commit must fail");
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("try"), CommitScope::AutoStage),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("pre-commit must fail");
     assert!(
         format!("{err}").contains("pre-commit") || format!("{err}").contains("hook"),
         "unexpected error: {err}"
@@ -229,9 +250,14 @@ fn auto_stage_commit_msg_failure_preserves_index() {
     let before_cached = cached_diff(root);
 
     let repo = open_repo(root);
-    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("try"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("commit-msg must fail");
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("try"), CommitScope::AutoStage),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("commit-msg must fail");
     assert!(
         format!("{err}").contains("commit-msg") || format!("{err}").contains("hook"),
         "unexpected error: {err}"

@@ -64,9 +64,14 @@ fn repo_with_initial_commit() -> tempfile::TempDir {
 
 fn assert_nothing_to_commit(root: &Path, req: &CommitRequest) {
     let head_before = git_out(root, &["rev-parse", "HEAD"]);
-    let err = open_grit(root).commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("nothing to commit");
+    let err = open_grit(root)
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("nothing to commit");
     assert!(
         matches!(
             err,

@@ -11,8 +11,8 @@ use grit_lib::error::Error;
 use grit_lib::index::MODE_GITLINK;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::commit::{CommitRequest};
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::commit::CommitRequest;
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -139,9 +139,14 @@ fn stray_files_in_uninitialized_gitlink_match_git_status_and_commit() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.unstaged.is_empty() && model.untracked.is_empty(),
         "grit status should be clean: unstaged={:?} untracked={:?}",
@@ -149,12 +154,21 @@ fn stray_files_in_uninitialized_gitlink_match_git_status_and_commit() {
         model.untracked
     );
 
-    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(&{
-            let mut req = CommitRequest::new("touch");
-            req
-        }.clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                &{
+                    let mut req = CommitRequest::new("touch");
+                    req
+                }
+                .clone(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(
             err,

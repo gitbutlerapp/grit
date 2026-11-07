@@ -4,7 +4,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -62,12 +62,17 @@ fn add_dot_stages_resolved_and_unrelated_while_naming_marked_conflicts() {
     fs::write(root.join("a.txt"), "1\n2\n3\nok\n").expect("resolve a");
     fs::write(root.join("c.txt"), "unrelated\n").expect("edit c");
 
-    let err = repo.index().stage(&StageOptions {
-            pathspecs: vec![".".into()], ..StageOptions::default()
-        }, &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = repo
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec![".".into()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap_err();
     let Error::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) = err else {
         panic!("expected marker paths, got {err}");
     };
@@ -101,12 +106,17 @@ fn add_single_marked_unmerged_path_names_that_path() {
     )
     .expect("merge");
 
-    let err = repo.index().stage(&StageOptions {
-            pathspecs: vec!["b.txt".into()], ..StageOptions::default()
-        }, &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = repo
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["b.txt".into()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap_err();
     let Error::Worktree(WorktreeError::UnmergedConflictMarkers { paths }) = err else {
         panic!("expected marker paths, got {err}");
     };

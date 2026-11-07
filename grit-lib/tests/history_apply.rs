@@ -1001,21 +1001,27 @@ fn status_finishes_interrupted_rewrite_apply_and_reports_it() {
     let (repo, plan) = interrupted_partial_checkout();
     let wt = repo.worktree();
     let grit = open_grit(wt);
-    let model = grit.status().run(&grit_lib::porcelain::status::StatusOptions::default(),
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status must not fail on an interrupted rewrite");
+    let model = grit
+        .status()
+        .run(
+            &grit_lib::porcelain::status::StatusOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status must not fail on an interrupted rewrite");
     assert_eq!(
         model.interrupted_rewrite,
         Some(grit_lib::porcelain::status::InterruptedRewrite::FinishedCheckout)
     );
     assert_finished_partial_checkout(wt, &plan);
-    let again = grit.status().run(&grit_lib::porcelain::status::StatusOptions::default(),
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("second status");
+    let again = grit
+        .status()
+        .run(
+            &grit_lib::porcelain::status::StatusOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("second status");
     assert_eq!(again.interrupted_rewrite, None);
 }
 
@@ -1128,11 +1134,14 @@ fn interrupted_rewrite_apply_waits_for_index_lock_holder() {
         "a live holder's lock is never removed"
     );
 
-    let model = grit.status().run(&grit_lib::porcelain::status::StatusOptions::default(),
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status reads while another process holds the index lock");
+    let model = grit
+        .status()
+        .run(
+            &grit_lib::porcelain::status::StatusOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status reads while another process holds the index lock");
     assert_eq!(
         model.interrupted_rewrite,
         Some(grit_lib::porcelain::status::InterruptedRewrite::Pending)

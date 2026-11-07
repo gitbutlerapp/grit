@@ -21,9 +21,9 @@ use grit_lib::ident::Signature;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::notes::NotesTreeEntry;
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::{InitOptions, Repository};
@@ -190,25 +190,38 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
 
         let path = fx.root.join(format!("file-{i}.txt"));
         fs::write(&path, format!("content {i}\n")).expect("write");
-        &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("status");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("stage");
+        &repo
+            .status()
+            .run(
+                &StatusOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("status");
+        repo.index()
+            .stage(
+                &StageOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("stage");
         let ident = format!("{} <{}@example.com> 1 +0000", fx.author, fx.author);
-repo.commits().create_staged(&{
-                let mut req = CommitRequest::new(format!("commit {i}"));
-                req.author = Some(ident.parse().expect("signature"));
-                req.committer = Some(ident.parse().expect("signature"));
-                req.allow_empty = false;
-                req.sign_override = None;
-                req.amend = false;
-                req.assume_worktree_synced = false;
-                req
-            }, &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("commit");
+        repo.commits()
+            .create_staged(
+                &{
+                    let mut req = CommitRequest::new(format!("commit {i}"));
+                    req.author = Some(ident.parse().expect("signature"));
+                    req.committer = Some(ident.parse().expect("signature"));
+                    req.allow_empty = false;
+                    req.sign_override = None;
+                    req.amend = false;
+                    req.assume_worktree_synced = false;
+                    req
+                },
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("commit");
     }
     ack.send(()).expect("ack");
 }
@@ -392,25 +405,38 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             rerere_enabled,
         };
         let repo = open_with_env(&fx);
-        &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("status");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("stage");
+        &repo
+            .status()
+            .run(
+                &StatusOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("status");
+        repo.index()
+            .stage(
+                &StageOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("stage");
         let ident = Signature::new(name, email, repo.identity_now()).expect("signature");
-repo.commits().create_staged(&{
-                let mut req = CommitRequest::new("seed");
-                req.author = Some(ident.clone());
-                req.committer = Some(ident);
-                req.allow_empty = false;
-                req.sign_override = None;
-                req.amend = false;
-                req.assume_worktree_synced = false;
-                req
-            }, &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("seed commit");
+        repo.commits()
+            .create_staged(
+                &{
+                    let mut req = CommitRequest::new("seed");
+                    req.author = Some(ident.clone());
+                    req.committer = Some(ident);
+                    req.allow_empty = false;
+                    req.sign_override = None;
+                    req.amend = false;
+                    req.assume_worktree_synced = false;
+                    req
+                },
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("seed commit");
         RepoFixture {
             root,
             env,

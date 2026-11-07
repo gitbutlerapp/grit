@@ -50,14 +50,18 @@ fn add_stages_unregistered_embedded_repo_as_gitlink() {
     let inner = root.join("inner");
     fs::create_dir_all(&inner).expect("mkdir inner");
     init_nested_git_repo(&inner);
-repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit add all");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit add all");
 
     let index = repo
         .index()
@@ -99,14 +103,18 @@ fn add_skips_gitignored_embedded_repo() {
     let inner = root.join("inner");
     fs::create_dir_all(&inner).expect("mkdir inner");
     init_nested_git_repo(&inner);
-repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit add all");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit add all");
 
     let grit_ls = git(root, &["ls-files", "-s"]);
     assert!(
@@ -130,14 +138,18 @@ fn add_does_not_treat_placeholder_dot_git_as_embedded_repo() {
     let repo = init_grit_repo(root);
     fs::create_dir_all(root.join("inner/.git")).expect("placeholder .git");
     fs::write(root.join("inner/file"), b"data\n").expect("write file");
-repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit add all");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit add all");
 
     let index = repo
         .index()
@@ -202,14 +214,18 @@ fn add_stages_nested_linked_worktree_as_gitlink() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit add all");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit add all");
 
     let index = repo
         .index()

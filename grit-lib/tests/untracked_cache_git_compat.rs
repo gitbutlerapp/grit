@@ -16,7 +16,7 @@ use grit_lib::index::untracked_cache::{
     refresh_untracked_cache_for_status, try_untracked_from_valid_cache, untracked_cache_ident,
     UntrackedCache, UntrackedIgnoredMode, DIR_HIDE_EMPTY_DIRECTORIES, DIR_SHOW_OTHER_DIRECTORIES,
 };
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -40,7 +40,10 @@ fn grit_untracked_paths(repo: &Repository) -> Vec<String> {
         untracked: UntrackedMode::All,
         ..StatusOptions::default()
     };
-    let model = repo.status().run(&opts, &mut NullProgress, &CancelToken::never()).expect("status");
+    let model = repo
+        .status()
+        .run(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("status");
     model.untracked
 }
 
@@ -49,7 +52,10 @@ fn grit_untracked_paths_normal(repo: &Repository) -> Vec<String> {
         untracked: UntrackedMode::Normal,
         ..StatusOptions::default()
     };
-    let model = repo.status().run(&opts, &mut NullProgress, &CancelToken::never()).expect("status");
+    let model = repo
+        .status()
+        .run(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("status");
     model.untracked
 }
 
@@ -160,7 +166,9 @@ fn issue_1227_new_file_in_git_warmed_check_only_collapsed_dir() {
         BTreeSet::from_iter(git_paths),
         "normal untracked mode must match git for check_only collapsed UNTR"
     );
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage for commit");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage for commit");
     let staged: BTreeSet<String> = repo
         .index()
         .load(&grit_lib::index::IndexLoadOptions::default())
@@ -244,7 +252,9 @@ fn issue_1227_new_file_in_git_warmed_cached_dir() {
         "normal untracked mode must see new file under git-warmed UNTR dir"
     );
 
-    let outcome = repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never())
+    let outcome = repo
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
         .expect("stage for commit");
     assert!(
         outcome.added.len() >= 1,
@@ -292,10 +302,14 @@ fn grit_auto_untr_shell_accepted_by_git_status_without_warning() {
     }
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     let mut req = grit_test_support::commit_request("fill", "Test <t@example.com> 1 +0000");
     req = grit_lib::test_support::knobs::commit_skip_pre_commit_tree_match(req, true);
-repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never()).expect("commit");
+    repo.commits()
+        .create_staged(&req, &mut NullProgress, &CancelToken::never())
+        .expect("commit");
 
     let index_bytes = fs::read(root.join(".git/index")).expect("read index");
     assert!(

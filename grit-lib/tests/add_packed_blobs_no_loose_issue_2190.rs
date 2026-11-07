@@ -52,7 +52,9 @@ fn stage_with_grit(root: &Path, pathspecs: &[&str]) {
         mode: StageMode::All,
         ..StageOptions::default()
     };
-repo.index().stage(&opts, &mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("stage");
 }
 
 fn assert_index_matches_head_and_fsck(root: &Path) {

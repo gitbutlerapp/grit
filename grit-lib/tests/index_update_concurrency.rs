@@ -77,9 +77,14 @@ fn run_parallel_stage(dir: &Path, writers: usize) -> Vec<(String, Result<(), Err
                 let path = format!("n{i}.txt");
                 let repo = open_grit_repo(&dir);
                 start.wait();
-                let res = repo.index().stage(&stage_paths(&[&path]), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-                )
-                .map(|_| ());
+                let res = repo
+                    .index()
+                    .stage(
+                        &stage_paths(&[&path]),
+                        &mut NullProgress,
+                        &grit_lib::progress::CancelToken::never(),
+                    )
+                    .map(|_| ());
                 (path, res)
             })
         })
@@ -151,9 +156,13 @@ fn stage_reads_index_after_waiting_for_lock() {
     let racer_dir = dir.to_path_buf();
     let racer = thread::spawn(move || {
         let repo = open_grit_repo(&racer_dir);
-repo.index().stage(&stage_paths(&["b.txt"]), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-        )
-        .map(|o| o.added)
+        repo.index()
+            .stage(
+                &stage_paths(&["b.txt"]),
+                &mut NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .map(|o| o.added)
     });
     thread::sleep(HOLD_LOCK_FOR);
     write_entry_under_lock(dir, "a.txt", &mut lock);
@@ -256,9 +265,14 @@ fn stage_fails_without_writing_when_lock_stays_held() {
 
     let repo = open_grit_repo(dir);
     let lock = repo.index().begin_update().expect("hold index.lock");
-    let err = repo.index().stage(&stage_paths(&["a.txt"]), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("stage must not proceed while index.lock is held");
+    let err = repo
+        .index()
+        .stage(
+            &stage_paths(&["a.txt"]),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("stage must not proceed while index.lock is held");
     assert!(is_lock_contention(&err), "unexpected error {err}");
     drop(lock);
 

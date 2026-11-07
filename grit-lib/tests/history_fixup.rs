@@ -15,7 +15,7 @@ use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::hunk_select::{
     unstaged_file_diffs, HunkSelectError, HunkSelection, LineRange,
 };
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -298,9 +298,14 @@ fn fixup_preserves_unstaged_deletion_after_partial_staging() {
         !wt.join("file.txt").exists(),
         "worktree file must stay deleted"
     );
-    let st = grit.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let st = grit
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert_eq!(st.staged.len(), 0, "staging consumed by fixup");
     assert_eq!(st.unstaged.len(), 1);
     assert_eq!(st.unstaged[0].status, DiffStatus::Deleted);
@@ -365,9 +370,14 @@ fn fixup_preserves_unstaged_modification_after_partial_staging() {
         fs::read_to_string(wt.join("file.txt")).expect("read"),
         "one\nunstaged edit\nthree\n"
     );
-    let st = grit.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let st = grit
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert_eq!(st.staged.len(), 0);
     assert_eq!(st.unstaged.len(), 1);
 }
@@ -393,9 +403,14 @@ fn fixup_preserves_unstaged_insertion_on_partially_staged_path() {
         fs::read_to_string(wt.join("file.txt")).expect("read"),
         "one\nstaged B\nunstaged C\nthree\n"
     );
-    let st = grit.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let st = grit
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert_eq!(st.staged.len(), 0);
     assert_eq!(st.unstaged.len(), 1);
 }
@@ -445,9 +460,14 @@ fn fixup_preserves_unstaged_changes() {
         fs::read_to_string(wt.join("b")).expect("read"),
         "unstaged\n"
     );
-    let st = grit.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let st = grit
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert_eq!(st.staged.len(), 0);
     assert_eq!(st.unstaged.len(), 1);
 }

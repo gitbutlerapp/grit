@@ -45,7 +45,7 @@ use grit_lib::objects::pack_objects::{
 };
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::apply_index_file_mode;
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::status::expand_untracked_for_staging;
 use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
 use grit_lib::progress::{CancelToken, NullProgress};
@@ -79,25 +79,27 @@ fn init_repo(dir: &Path) -> Repository {
 
 fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {
     std::fs::write(dir.join("tracked.txt"), b"payload\n").expect("write");
-repo.index().stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never())
+        .expect("stage");
     let ident = "User <u@example.com> 1700000000 +0000".to_owned();
-repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("seed");
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req.allow_empty = false;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = false;
-            req
-        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
-    repo.references()
-        .resolve("refs/heads/main")
-        .expect("main oid")
+    repo.commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("seed");
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
+    grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("main oid")
 }
 
 fn git_fsck(dir: &Path) {

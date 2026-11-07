@@ -4,7 +4,7 @@
 mod unix {
     use grit_lib::porcelain::add::{StageMode, StageOptions};
     use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
-    use grit_lib::porcelain::status::{StatusOptions};
+    use grit_lib::porcelain::status::StatusOptions;
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::git;
@@ -23,9 +23,14 @@ mod unix {
 
     fn grit_untracked(root: &Path) -> Vec<String> {
         let repo = Repository::discover(Some(root), &Default::default()).expect("open");
-        let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("status");
+        let model = repo
+            .status()
+            .run(
+                &StatusOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("status");
         model.untracked.clone()
     }
 
@@ -109,12 +114,17 @@ mod unix {
         fs::write(root.join("new.txt"), "new\n").expect("write new");
 
         let repo = Repository::discover(Some(root), &Default::default()).expect("open");
-        let outcome = repo.index().stage(&StageOptions {
-                mode: StageMode::All, ..StageOptions::default()
-            }, &mut NullProgress,
-            &CancelToken::never(),
-        )
-        .expect("stage must not hang or fail on fifo");
+        let outcome = repo
+            .index()
+            .stage(
+                &StageOptions {
+                    mode: StageMode::All,
+                    ..StageOptions::default()
+                },
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("stage must not hang or fail on fifo");
         assert_eq!(
             outcome.added.len(),
             1,
@@ -146,9 +156,16 @@ mod unix {
         fs::write(root.join("new.txt"), "new\n").expect("write new");
 
         let repo = Repository::discover(Some(root), &Default::default()).expect("open");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("second"), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("auto-stage commit with socket present");
+        repo.commits()
+            .create(
+                &grit_lib::commits::CommitOptions::new(
+                    commit_req("second"),
+                    CommitScope::AutoStage,
+                ),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("auto-stage commit with socket present");
         git(root, &["fsck"]);
         let log = git(root, &["log", "--oneline", "-2"]);
         assert!(

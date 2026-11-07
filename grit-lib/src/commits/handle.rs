@@ -3,7 +3,7 @@
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::porcelain::commit::{
-    commit_with_scope, create_commit, default_commit_scope, pending_commit_message, plan_commit,
+    commit_with_scope, default_commit_scope, pending_commit_message, plan_commit,
     prepare_commit_bytes, write_commit_object, CommitOutcome, CommitPlan, CommitRequest,
     CommitScope,
 };
@@ -130,7 +130,11 @@ impl<'repo> Commits<'repo> {
         progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
     ) -> Result<CommitOutcome> {
-        create_commit(self.repo, request, progress, cancel)
+        self.create(
+            &CommitOptions::new(request.clone(), CommitScope::Staged),
+            progress,
+            cancel,
+        )
     }
 
     /// Serialize commit bytes from assembled [`crate::commit::CommitData`], honoring signing config.

@@ -18,8 +18,8 @@ use grit_lib::diff::{refresh_index_stat_content_verified_with_rules, stat_matche
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::IndexEntry;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefNameRef;
 use grit_lib::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
@@ -218,9 +218,14 @@ fn stale_index_stat_fixture() -> (tempfile::TempDir, PathBuf, Repository, Reposi
     let linked_repo =
         Repository::discover(Some(linked.as_path()), &RepositoryOptions::empty()).expect("linked");
     fs::write(linked.join("new.txt"), "new\n").expect("new file");
-linked_repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    linked_repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
     commit_staged_without_index_stat_refresh(&linked_repo, "no refresh");
 
     let entry = index_entry(&linked_repo, "new.txt");
@@ -276,16 +281,26 @@ fn create_commit_refreshes_index_stat_for_worktree_remove() {
     let linked_repo =
         Repository::discover(Some(linked.as_path()), &RepositoryOptions::empty()).expect("linked");
     fs::write(linked.join("new.txt"), "new\n").expect("new file");
-linked_repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    linked_repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
     // Bump mtime after staging so write-tree without stat refresh would persist stale stat.
     let new_path = linked.join("new.txt");
     let bumped = filetime::FileTime::from_unix_time(1_700_000_000, 0);
     filetime::set_file_mtime(&new_path, bumped).expect("touch new.txt");
-linked_repo.commits().create_staged(&commit_request("with refresh"), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("create_commit");
+    linked_repo
+        .commits()
+        .create_staged(
+            &commit_request("with refresh"),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("create_commit");
 
     let work_tree = linked_repo.work_tree().expect("work tree");
     let entry = index_entry(&linked_repo, "new.txt");
@@ -308,9 +323,14 @@ fn create_commit_in_linked_worktree_allows_remove_on_windows() {
     let linked_repo =
         Repository::discover(Some(linked.as_path()), &RepositoryOptions::empty()).expect("linked");
     fs::write(linked.join("new.txt"), "new\n").expect("new file");
-linked_repo.index().stage(&StageOptions::default(), &mut NullProgress).expect("stage");
-linked_repo.commits().create_staged(&commit_request("windows path"), &mut NullProgress,  )
-    .expect("create_commit");
+    linked_repo
+        .index()
+        .stage(&StageOptions::default(), &mut NullProgress)
+        .expect("stage");
+    linked_repo
+        .commits()
+        .create_staged(&commit_request("windows path"), &mut NullProgress)
+        .expect("create_commit");
     assert!(
         git_diff_files_quiet(&linked),
         "Windows repro: git diff-files must be clean without update-index --refresh"

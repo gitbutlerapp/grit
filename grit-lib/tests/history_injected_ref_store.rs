@@ -12,7 +12,7 @@ use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
@@ -103,18 +103,30 @@ fn open_disk_repo_with_memory_refs(root: &Path) -> (Repository, Arc<MemoryRefSto
 
 fn commit_file(repo: &Repository, wt: &Path, name: &str, message: &str) -> ObjectId {
     fs::write(wt.join(name), format!("{name}\n")).expect("write");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(&{
-            let mut req = CommitRequest::new(message);
-            req.author = Some(TS.parse().expect("signature"));
-            req.committer = Some(TS.parse().expect("signature"));
-            req
-        }.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit")
-    .oid
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                &{
+                    let mut req = CommitRequest::new(message);
+                    req.author = Some(TS.parse().expect("signature"));
+                    req.committer = Some(TS.parse().expect("signature"));
+                    req
+                }
+                .clone(),
+                CommitScope::Staged,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit")
+        .oid
 }
 
 fn three_commits(repo: &Repository, wt: &Path) -> Vec<ObjectId> {

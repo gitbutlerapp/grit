@@ -4,7 +4,7 @@ use std::fs;
 use std::thread;
 use std::time::Duration;
 
-use grit_lib::porcelain::commit::{CommitScope};
+use grit_lib::porcelain::commit::CommitScope;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -26,15 +26,16 @@ fn init_wide_repo() -> (tempfile::TempDir, Repository) {
     for i in 0..800 {
         std::fs::write(tmp.path().join(format!("f{i}.txt")), format!("{i}\n")).expect("write");
     }
-repo.commits().create(
-        &grit_lib::commits::CommitOptions::new(
-            grit_test_support::commit_request("wide", IDENT),
-            CommitScope::AutoStage,
-        ),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                grit_test_support::commit_request("wide", IDENT),
+                CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     (tmp, repo)
 }
 

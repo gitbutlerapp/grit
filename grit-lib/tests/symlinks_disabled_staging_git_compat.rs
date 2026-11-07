@@ -167,9 +167,13 @@ fn append(root: &Path, rel: &str, text: &str) {
 
 fn autostage_commit(root: &Path, message: &str) -> grit_lib::porcelain::commit::CommitOutcome {
     let repo = open(root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req(message), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("grit commit")
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req(message), CommitScope::AutoStage),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit commit")
 }
 
 /// `rewrite_link` rewrites the link file with identical content, so its stat cache no longer
@@ -284,7 +288,10 @@ fn unstaged_status(root: &Path, threads: usize) -> Vec<(String, DiffStatus, Stri
         stat_parallel_threads: Some(threads),
         ..StatusOptions::default()
     };
-    let model = repo.status().run(&options, &mut NullProgress, &CancelToken::never()).expect("status");
+    let model = repo
+        .status()
+        .run(&options, &mut NullProgress, &CancelToken::never())
+        .expect("status");
     model
         .unstaged
         .iter()
@@ -353,14 +360,18 @@ fn add_all_keeps_link_mode_and_matches_git_add() {
     let grit = clone_without_symlinks(&src, tmp.path(), "grit", true);
     fs::write(grit.join("link"), "b.txt").expect("write grit link");
     let repo = open(&grit);
-repo.index().stage(&StageOptions {
-            pathspecs: vec![".".to_owned()], pathspec_sources: vec![".".to_owned()], mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec![".".to_owned()],
+                pathspec_sources: vec![".".to_owned()],
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
 
     assert_eq!(ls_files_stage(&grit, "link"), ls_files_stage(&twin, "link"));
     assert!(ls_files_stage(&grit, "link").starts_with("120000 "));

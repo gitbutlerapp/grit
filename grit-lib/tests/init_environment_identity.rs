@@ -6,8 +6,8 @@ use std::process::Command;
 use grit_lib::config::environment::{ConfigOverride, Environment, RepositoryOptions};
 use grit_lib::config::ident_resolve::{IdentRole, IdentityError};
 use grit_lib::error::Error;
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
@@ -45,12 +45,23 @@ fn write_user_global_config(dir: &TempDir) {
 
 fn stage_all_and_commit_first(repo: &Repository, wt: &std::path::Path) {
     fs::write(wt.join("a.txt"), "hello\n").expect("write");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(CommitRequest::new("first"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                CommitRequest::new("first"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 }
 
 #[test]
@@ -77,12 +88,24 @@ fn init_default_hermetic_commit_reports_missing_identity() {
     let wt = TempDir::new().expect("tempdir");
     let (repo, _) = Repository::init(wt.path(), &InitOptions::default()).expect("init");
     fs::write(wt.path().join("a.txt"), "hello\n").expect("write");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
-    let err = repo.commits().create(&grit_lib::commits::CommitOptions::new(CommitRequest::new("first"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .unwrap_err();
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
+    let err = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                CommitRequest::new("first"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(matches!(
         err,
         CommitError::Identity(IdentityError::MissingConfiguredEmail {

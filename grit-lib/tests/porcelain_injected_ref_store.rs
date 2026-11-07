@@ -13,7 +13,7 @@ use std::sync::Arc;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::branch::{create_branch, delete_branch, CreateBranchOptions, DeleteMode};
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
@@ -64,18 +64,30 @@ fn init_repo_with(dir: &Path, format: RefStorageFormat) -> Repository {
 }
 
 fn commit_all(repo: &Repository, message: &str) -> ObjectId {
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(&{
-            let mut req = CommitRequest::new(message);
-            req.author = Some(IDENT_TS.parse().expect("signature"));
-            req.committer = Some(IDENT_TS.parse().expect("signature"));
-            req
-        }.clone(), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit")
-    .oid
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                &{
+                    let mut req = CommitRequest::new(message);
+                    req.author = Some(IDENT_TS.parse().expect("signature"));
+                    req.committer = Some(IDENT_TS.parse().expect("signature"));
+                    req
+                }
+                .clone(),
+                CommitScope::Staged,
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit")
+        .oid
 }
 
 fn switch_to(repo: &Repository, branch: &str) {
@@ -340,21 +352,25 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         detached
     );
     fs::remove_file(wt.join("d.txt")).expect("rm");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage rm");
-    repo.checkout()
-        .reset(
-            &ResetOptions::new(
-                detached,
-                ResetMode::Hard,
-                support::parse_reflog_signature(IDENT_TS),
-                "reset: moving to HEAD",
-            ),
-            &mut grit_lib::progress::NullProgress,
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
-        .expect("clean detached");
+        .expect("stage rm");
+    reset_to_commit(
+        repo,
+        &ResetOptions::new(
+            detached,
+            ResetMode::Hard,
+            support::parse_reflog_signature(IDENT_TS),
+            "reset: moving to HEAD",
+        ),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )
+    .expect("clean detached");
     switch_to(repo, "main");
 
     BatteryResult {

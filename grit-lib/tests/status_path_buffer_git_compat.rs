@@ -119,8 +119,10 @@ fn serial_and_parallel_status_preserve_mixed_raw_paths() {
             ..StatusOptions::default()
         };
         for _ in 0..2 {
-            let model =
-                repo.status().run(&options, &mut NullProgress, &CancelToken::never()).expect("status");
+            let model = repo
+                .status()
+                .run(&options, &mut NullProgress, &CancelToken::never())
+                .expect("status");
             assert!(model.staged.is_empty());
             let mut untracked: Vec<_> = model
                 .untracked

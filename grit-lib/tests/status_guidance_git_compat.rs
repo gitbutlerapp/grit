@@ -30,9 +30,14 @@ fn open(root: &Path) -> Repository {
 }
 
 fn model_and_standing(repo: &Repository) -> (StatusModel, BranchStanding) {
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let standing = BranchStanding::compute(
         repo,
         &model.head,

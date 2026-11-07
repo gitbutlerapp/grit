@@ -8,8 +8,8 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{StageMode, StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::commit::CommitRequest;
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -38,23 +38,33 @@ fn status_and_add_see_interior_untracked_on_indexed_chain() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.untracked.iter().any(|p| p == "a/b/untracked.txt"),
         "status must list interior untracked sibling, got {:?}",
         model.untracked
     );
 
-    let outcome = repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("add all");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("add all");
     assert!(outcome.total() >= 1, "add must stage untracked sibling");
 
     let index = repo
@@ -91,14 +101,18 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-repo.index().stage(&StageOptions {
-            pathspecs: Vec::new(), pathspec_sources: Vec::new(), mode: StageMode::All,
-            ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit add all");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: Vec::new(),
+                pathspec_sources: Vec::new(),
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit add all");
 
     let grit_staged_oid = repo
         .index()
@@ -121,18 +135,24 @@ repo.index().stage(&StageOptions {
         git_blob.data, grit_blob.data,
         "grit staged blob must match system git index for same worktree"
     );
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("grit commit staging");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("grit commit staging");
     let ident = "Test <t@example.com> 1 +0000".to_string();
-repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("edit");
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req.allow_empty = false;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = false;
-            req
-        }, &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("grit commit");
+    repo.commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("edit");
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit commit");
 }

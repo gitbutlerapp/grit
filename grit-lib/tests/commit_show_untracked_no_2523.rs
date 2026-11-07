@@ -113,9 +113,17 @@ fn autostage_commit_skips_hidden_untracked_no() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     init_repo_with_untracked_hidden(root, "no");
-open_grit(root).commits().create(&grit_lib::commits::CommitOptions::new(commit_req("tracked change"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    open_grit(root)
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("tracked change"),
+                CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 
     let stat = git_out(root, &["show", "--stat", "--format=%s", "HEAD"]);
     assert!(stat.contains("tracked change"), "subject missing: {stat}");
@@ -132,9 +140,17 @@ fn autostage_commit_skips_hidden_untracked_false_synonym() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     init_repo_with_untracked_hidden(root, "false");
-open_grit(root).commits().create(&grit_lib::commits::CommitOptions::new(commit_req("tracked change"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    open_grit(root)
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("tracked change"),
+                CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 
     let names = git_out(
         root,
@@ -148,9 +164,17 @@ fn autostage_commit_still_includes_untracked_when_show_normal() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     init_repo_with_untracked_hidden(root, "normal");
-open_grit(root).commits().create(&grit_lib::commits::CommitOptions::new(commit_req("everything"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    open_grit(root)
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("everything"),
+                CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 
     let names = git_out(
         root,
@@ -189,19 +213,27 @@ fn dotfiles_git_dir_worktree_does_not_sweep_home() {
     let repo = Repository::open(&bare, &RepositoryOptions::empty().with_work_tree(&home))
         .expect("open dotfiles repo");
 
-    &repo.index().stage(&grit_lib::porcelain::add::StageOptions {
-            pathspecs: vec![".bashrc".to_owned()],
-            pathspec_sources: vec![".bashrc".to_owned()],
-            ..Default::default()
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage bashrc");
+    &repo
+        .index()
+        .stage(
+            &grit_lib::porcelain::add::StageOptions {
+                pathspecs: vec![".bashrc".to_owned()],
+                pathspec_sources: vec![".bashrc".to_owned()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage bashrc");
 
-    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("dotfiles"), CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_req("dotfiles"), CommitScope::AutoStage),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 
     let names = Command::new("git")
         .current_dir(&home)

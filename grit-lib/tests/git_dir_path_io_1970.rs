@@ -4,8 +4,8 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, GitDirPathOperation};
-use grit_lib::maintenance::{gc, GcOptions};
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::maintenance::GcOptions;
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
@@ -99,23 +99,39 @@ fn init_repo(root: &Path) -> Repository {
 
 fn seed_commit(repo: &Repository, root: &Path, message: &str) {
     fs::write(root.join("a"), format!("{message}\n")).expect("write");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create_staged(&commit_request(message), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create_staged(
+            &commit_request(message),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 }
 
 fn commit_should_fail_with_git_dir_io(repo: &Repository, root: &Path) -> Error {
     fs::write(root.join("a"), "change\n").expect("write");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("next"), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("commit should fail")
-    .into()
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_request("next"), CommitScope::Staged),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("commit should fail")
+        .into()
 }
 
 #[test]
@@ -127,9 +143,14 @@ fn read_only_objects_on_commit_names_git_path() {
     let objects = repo.git_dir().join("objects");
     chmod_tree_readonly(&objects);
     fs::write(dir.path().join("a"), "change\n").expect("write");
-    let err = repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("stage");
+    let err = repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("stage");
     assert_git_dir_io(&err);
     restore_tree_write(&objects);
 }
@@ -287,9 +308,14 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
     let linked_repo = Repository::discover(Some(linked_wt.as_path()), &RepositoryOptions::empty())
         .expect("discover linked");
     fs::write(linked_wt.join("a"), "linked change\n").expect("write");
-linked_repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    linked_repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
 
     let admin = list_worktrees(&repo)
         .expect("list")
@@ -299,9 +325,14 @@ linked_repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib
         .admin_dir;
     chmod_dir_readonly(&admin);
 
-    let err = linked_repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("linked"), CommitScope::Staged), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("commit should fail");
+    let err = linked_repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_request("linked"), CommitScope::Staged),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("commit should fail");
     let err: Error = err.into();
     let path = assert_git_dir_path_io(&err);
     assert!(

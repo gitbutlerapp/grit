@@ -657,7 +657,7 @@ fn commit_graph_write_linked_worktree_includes_common_refs() {
 fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     use std::sync::Arc;
 
-    use grit_lib::porcelain::commit::{CommitRequest};
+    use grit_lib::porcelain::commit::CommitRequest;
     use grit_lib::progress::NullProgress;
     use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef};
     use grit_lib::repo::{InitOptions, Repository};
@@ -666,20 +666,26 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let wt = repo.work_tree().expect("worktree");
     fs::write(wt.join("a.txt"), b"a\n").unwrap();
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     let ident = "T <t@example.com> 1 +0000".to_string();
-repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("one");
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req.allow_empty = false;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = false;
-            req
-        }, &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("one");
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 
     let tip = repo.references().resolve("HEAD").expect("tip");
     let git_dir = repo.git_dir();

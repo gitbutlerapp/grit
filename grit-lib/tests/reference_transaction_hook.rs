@@ -186,19 +186,23 @@ fn sha256_initial_commit_hook_uses_wide_null_old_id() {
     install_reference_transaction_hook(&repo, &log, false);
 
     fs::write(&log, "").expect("clear log");
-repo.index().stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &grit_lib::progress::CancelToken::never())
+        .expect("stage");
     let ident = "T <t@e.x> 1700000000 +0000".to_string();
-repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("c1");
-            req.author = Some(ident.parse().expect("sig"));
-            req.committer = Some(ident.parse().expect("sig"));
-            req.allow_empty = false;
-            req
-        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("c1");
+                req.author = Some(ident.parse().expect("sig"));
+                req.committer = Some(ident.parse().expect("sig"));
+                req.allow_empty = false;
+                req
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
 
     let null = ObjectId::null(HashAlgo::Sha256).to_hex();
     assert_eq!(null.len(), 64, "sha256 null width");
@@ -389,9 +393,13 @@ fn memory_ref_store_second_commit_head_line_matches_branch_old_oid() {
         let mut req = CommitRequest::new(format!("c{i}"));
         req.author = Some(ident.clone());
         req.committer = Some(ident.clone());
-repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("commit");
+        repo.commits()
+            .create(
+                &grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("commit");
         if i == 0 {
             fs::write(&log, "").expect("clear after first commit");
             continue;

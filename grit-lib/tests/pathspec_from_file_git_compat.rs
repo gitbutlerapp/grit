@@ -74,14 +74,19 @@ fn nul_mode_literal_spaces_and_quotes_match_git_add() {
     let resolved = repo
         .pathspec(std::iter::empty::<&str>(), &options)
         .expect("resolve");
-    let outcome = repo.index().stage(&StageOptions {
-            pathspecs: resolved.specs().to_vec(), pathspec_sources: resolved.iter().map(str::to_owned).collect(), mode: StageMode::All,
-            ..Default::default()
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: resolved.specs().to_vec(),
+                pathspec_sources: resolved.iter().map(str::to_owned).collect(),
+                mode: StageMode::All,
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
 
     assert!(outcome.total() >= 2, "expected staged paths from NUL list");
 }

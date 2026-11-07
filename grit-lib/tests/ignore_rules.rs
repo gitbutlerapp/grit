@@ -855,12 +855,17 @@ fn negated_directory_reincluded_files_are_listed_and_staged_like_git() {
     let repo = open_at(&root);
 
     assert_status_untracked_matches_git(&home, &root);
-    let model = repo.status().run(&StatusOptions {
-            untracked: UntrackedMode::Normal, ..StatusOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions {
+                untracked: UntrackedMode::Normal,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let grit_untracked: std::collections::BTreeSet<String> = model.untracked.into_iter().collect();
     let git_untracked: std::collections::BTreeSet<String> =
         git_lines(&home, &root, &["status", "--porcelain", "-unormal"])
@@ -869,12 +874,16 @@ fn negated_directory_reincluded_files_are_listed_and_staged_like_git() {
             .collect();
     assert!(git_untracked.contains("tags/"), "{git_untracked:?}");
     assert_eq!(grit_untracked, git_untracked, "status -unormal vs git");
-repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage all");
+    repo.index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage all");
     let tracked = git_lines(&home, &root, &["ls-files"]);
     let expected: std::collections::BTreeSet<String> = [
         ".gitignore",
@@ -970,12 +979,17 @@ fn assert_status_untracked_matches_git(home: &Path, root: &Path) {
     use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
     use grit_lib::progress::NullProgress;
     let repo = open_at(root);
-    let model = repo.status().run(&StatusOptions {
-            untracked: UntrackedMode::All, ..StatusOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions {
+                untracked: UntrackedMode::All,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let grit: std::collections::BTreeSet<String> = model.untracked.into_iter().collect();
     let git = git_lines(home, root, &["ls-files", "-o", "--exclude-standard"]);
     assert_eq!(grit, git, "status untracked vs git ls-files -o");
@@ -1049,12 +1063,17 @@ fn ignorecase_stage_all_skips_ignored_and_git_agrees() {
     use grit_lib::progress::NullProgress;
     for ignore_case in [true, false] {
         let (home, root) = ignorecase_fixture(&format!("1912-stage-{ignore_case}"), ignore_case);
-&open_at(&root).index().stage(&StageOptions {
-                mode: StageMode::All, ..StageOptions::default()
-            }, &mut NullProgress,
-            &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("stage all");
+        &open_at(&root)
+            .index()
+            .stage(
+                &StageOptions {
+                    mode: StageMode::All,
+                    ..StageOptions::default()
+                },
+                &mut NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("stage all");
         let tracked = git_lines(&home, &root, &["ls-files"]);
         assert_eq!(tracked, issue_1912_expected_tracked(ignore_case));
         let git_untracked = git_lines(&home, &root, &["ls-files", "-o", "--exclude-standard"]);
@@ -1064,19 +1083,28 @@ fn ignorecase_stage_all_skips_ignored_and_git_agrees() {
 
 #[test]
 fn ignorecase_auto_stage_commit_skips_ignored_and_fscks() {
-    use grit_lib::porcelain::commit::{CommitRequest};
+    use grit_lib::porcelain::commit::CommitRequest;
     use grit_lib::progress::NullProgress;
     let ident = format!("{AUTHOR} <{EMAIL}> {DATE}");
     for ignore_case in [true, false] {
         let (home, root) = ignorecase_fixture(&format!("1912-commit-{ignore_case}"), ignore_case);
-&open_at(&root).commits().create(&grit_lib::commits::CommitOptions::new(&{
-                let mut req = CommitRequest::new("x\n");
-                req.author = Some(ident.parse().expect("signature"));
-                req.committer = Some(ident.parse().expect("signature"));
-                req
-            }.clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("commit");
+        &open_at(&root)
+            .commits()
+            .create(
+                &grit_lib::commits::CommitOptions::new(
+                    &{
+                        let mut req = CommitRequest::new("x\n");
+                        req.author = Some(ident.parse().expect("signature"));
+                        req.committer = Some(ident.parse().expect("signature"));
+                        req
+                    }
+                    .clone(),
+                    grit_lib::porcelain::commit::CommitScope::AutoStage,
+                ),
+                &mut NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("commit");
         let committed = git_lines(&home, &root, &["ls-tree", "-r", "--name-only", "HEAD"]);
         assert_eq!(committed, issue_1912_expected_tracked(ignore_case));
         assert!(hermetic_git(&home, &root, &["fsck", "--strict"])
@@ -1128,12 +1156,17 @@ fn ignorecase_case_renamed_tracked_paths_are_not_ignored_like_git() {
     let (home, root) = ignorecase_case_renamed_tracked_fixture("1912-tracked-case");
     let repo = open_at(&root);
 
-    let model = repo.status().run(&StatusOptions {
-            ignored: IgnoredMode::Traditional, ..StatusOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions {
+                ignored: IgnoredMode::Traditional,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let mut git_untracked = BTreeSet::new();
     let mut git_ignored = BTreeSet::new();
     for line in git_lines(&home, &root, &["status", "--porcelain", "--ignored"]) {
@@ -1169,25 +1202,34 @@ fn ignorecase_case_renamed_tracked_paths_are_not_ignored_like_git() {
     }
 
     // Explicitly staging the case-renamed tracked file succeeds, as with git.
-repo.index().stage(&StageOptions {
-            pathspecs: vec!["foo.log".to_owned()], mode: StageMode::All, ..StageOptions::default()
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage foo.log");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["foo.log".to_owned()],
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage foo.log");
     assert!(hermetic_git(&home, &root, &["add", "--dry-run", "foo.log"])
         .status
         .success());
 
     // A file under an ignored directory is still refused, naming the directory like git.
-    let err = &open_at(&root).index().stage(&StageOptions {
-            pathspecs: vec!["build/t".to_owned()], mode: StageMode::All, ..StageOptions::default()
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("build/t is under an ignored directory");
+    let err = &open_at(&root)
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["build/t".to_owned()],
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect_err("build/t is under an ignored directory");
     match err {
         grit_lib::error::Error::Worktree(WorktreeError::PathspecIgnored { paths }) => {
             assert_eq!(paths, ["build"])

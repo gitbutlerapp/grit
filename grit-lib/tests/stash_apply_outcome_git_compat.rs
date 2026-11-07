@@ -4,7 +4,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::operation::ConflictKind;
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashApplyOutcome};
@@ -116,9 +116,14 @@ fn apply_entry_reports_conflicts_git_also_sees() {
         .conflicts
         .iter()
         .all(|c| c.kind == ConflictKind::BothModified));
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert_eq!(model.conflict_details, outcome.conflicts);
 
     // git reads the index grit wrote and sees the same unmerged paths.

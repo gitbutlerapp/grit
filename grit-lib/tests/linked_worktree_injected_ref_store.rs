@@ -12,9 +12,9 @@ use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitScope};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitScope;
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
@@ -73,19 +73,24 @@ fn open_on(
 
 fn commit_change(repo: &Repository, file: &Path, message: &str) -> ObjectId {
     fs::write(file, message).expect("write");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create(
-        &grit_lib::commits::CommitOptions::new(
-            grit_test_support::commit_request(message, IDENT_TS),
-            CommitScope::Staged,
-        ),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("commit")
-    .oid
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                grit_test_support::commit_request(message, IDENT_TS),
+                CommitScope::Staged,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit")
+        .oid
 }
 
 /// Main worktree with one commit on `main` and a linked worktree on a new branch `feat`.

@@ -5,7 +5,7 @@ use grit_lib::error::Error;
 use grit_lib::merge::{FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::porcelain::commit::pending_commit_message;
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::merge::{
     abort_branch_merge, integrate_branch_with, FastForwardPolicy, IntegrateBranchOutcome,
     MergeCommitMode, MergeOptions,
@@ -476,9 +476,13 @@ fn squash_commit_clears_squash_msg() {
     )
     .expect("squash");
     assert!(tmp.path().join(".git/SQUASH_MSG").exists());
-repo.commits().create_staged(&empty_commit_req(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("squash commit");
+    repo.commits()
+        .create_staged(
+            &empty_commit_req(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("squash commit");
     assert!(!tmp.path().join(".git/SQUASH_MSG").exists());
     git(tmp.path(), &["fsck", "--strict"]);
 }
@@ -503,16 +507,25 @@ fn squash_commit_does_not_reuse_squash_msg_on_following_commit() {
     .expect("squash");
     let squash_msg =
         std::fs::read_to_string(tmp.path().join(".git/SQUASH_MSG")).expect("squash msg");
-repo.commits().create_staged(&empty_commit_req(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("squash commit");
+    repo.commits()
+        .create_staged(
+            &empty_commit_req(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("squash commit");
     assert!(!tmp.path().join(".git/SQUASH_MSG").exists());
 
     std::fs::write(tmp.path().join("follow.txt"), "next\n").expect("write");
     git(tmp.path(), &["add", "follow.txt"]);
-    let err = repo.commits().create_staged(&empty_commit_req(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("no msg");
+    let err = repo
+        .commits()
+        .create_staged(
+            &empty_commit_req(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("no msg");
     assert!(
         matches!(
             err,

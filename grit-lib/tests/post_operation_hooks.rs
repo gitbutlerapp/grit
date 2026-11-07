@@ -15,7 +15,7 @@ use grit_lib::command_runner::hooks::{HookName, PostOperationHooks};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::merge::{IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::merge::{
     integrate_branch_with, IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
 };
@@ -592,10 +592,14 @@ fn amend_runs_post_rewrite_amend_after_post_commit() {
     let old = fx.commit("f", "2\n", "c2");
     let repo = fx.repo();
 
-    let outcome = repo.commits().create_staged(&commit_request("amended", true), &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("amend");
+    let outcome = repo
+        .commits()
+        .create_staged(
+            &commit_request("amended", true),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("amend");
     assert_eq!(
         outcome.hooks_run,
         vec![HookName::PostCommit, HookName::PostRewrite]
@@ -609,10 +613,14 @@ fn amend_runs_post_rewrite_amend_after_post_commit() {
         ]
     );
 
-    let outcome = repo.commits().create_staged(&commit_request("next", false), &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("commit");
+    let outcome = repo
+        .commits()
+        .create_staged(
+            &commit_request("next", false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert_eq!(outcome.hooks_run, vec![HookName::PostCommit]);
     assert_eq!(fx.take_log(), vec!["post-commit "]);
 }
@@ -625,8 +633,10 @@ fn amend_without_post_rewrite_runs_only_post_commit() {
 
     let mut request = commit_request("amended", true);
     request.post_rewrite = PostOperationHooks::Skip;
-    let outcome =
-repo.commits().create_staged(&request, &mut NullProgress, &CancelToken::never()).expect("amend");
+    let outcome = repo
+        .commits()
+        .create_staged(&request, &mut NullProgress, &CancelToken::never())
+        .expect("amend");
     assert_eq!(outcome.hooks_run, vec![HookName::PostCommit]);
     assert_eq!(fx.take_log(), vec!["post-commit "]);
 }

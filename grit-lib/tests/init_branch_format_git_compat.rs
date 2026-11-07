@@ -142,11 +142,14 @@ fn init_sha256_then_commit_git_fsck_clean() {
     assert_eq!(String::from_utf8_lossy(&format.stdout).trim(), "sha256");
 
     fs::write(td.path().join("file.txt"), "hello\n").expect("write");
-    &repo.index().stage(&grit_lib::porcelain::add::StageOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    &repo
+        .index()
+        .stage(
+            &grit_lib::porcelain::add::StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
     let req = {
         let mut req = grit_lib::porcelain::commit::CommitRequest::new("test");
         req.author = Some("T <t@e.com> 1 +0000".parse().expect("signature"));
@@ -157,9 +160,13 @@ fn init_sha256_then_commit_git_fsck_clean() {
         req.assume_worktree_synced = false;
         req
     };
-    grit_lib::porcelain::commit::&repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create_staged(
+            &req,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit");
     git_fsck_ok(repo.git_dir());
 }
 

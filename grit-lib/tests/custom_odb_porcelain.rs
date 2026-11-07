@@ -17,8 +17,8 @@ use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
@@ -133,15 +133,26 @@ fn switch(repo: &Repository, mode: SwitchMode) {
 
 fn commit_path(repo: &Repository, path: &str, contents: &str, message: &str) {
     fs::write(work_tree(repo).join(path), contents).expect("write");
-repo.index().stage(&StageOptions {
-            pathspecs: vec![path.into()], ..Default::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request(message), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec![path.into()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request(message),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 }
 
 fn assert_merge_commit_in_store(repo: &Repository, store: &MemoryStore, merge_oid: ObjectId) {
@@ -207,12 +218,17 @@ fn stage_untracked_path_writes_blob_to_custom_primary() {
     let objects_before = files_under(repo.odb().objects_dir());
     fs::write(work_tree(&repo).join("a.txt"), "hello\n").expect("write");
 
-    let outcome = repo.index().stage(&StageOptions {
-            pathspecs: vec!["a.txt".into()], ..Default::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage untracked path");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["a.txt".into()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage untracked path");
 
     assert_eq!(outcome.added, vec!["a.txt".to_owned()]);
     let oid = blob_id(b"hello\n");
@@ -229,9 +245,14 @@ fn stage_defaults_stage_untracked_paths_into_custom_primary() {
     fs::create_dir(work_tree(&repo).join("dir")).expect("mkdir");
     fs::write(work_tree(&repo).join("dir/two.txt"), "two\n").expect("write");
 
-    let outcome = repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
 
     assert_eq!(outcome.added.len(), 2, "{outcome:?}");
     assert!(store.contains(&blob_id(b"one\n")).expect("contains"));
@@ -252,7 +273,9 @@ fn stage_many_untracked_paths_uses_parallel_batch_on_custom_primary() {
         .expect("write");
     }
 
-    let outcome = repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never())
+    let outcome = repo
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
         .expect("stage_for_commit");
 
     assert_eq!(outcome.added.len(), count);
@@ -271,17 +294,33 @@ fn commit_worktree_with_untracked_files_on_custom_primary() {
     let objects_before = files_under(repo.odb().objects_dir());
     fs::write(work_tree(&repo).join("a.txt"), "hello\n").expect("write");
 
-    let first = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("first"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    let first = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("first"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert!(store.contains(&first.oid).expect("commit in store"));
     assert!(store.contains(&blob_id(b"hello\n")).expect("blob in store"));
 
     fs::write(work_tree(&repo).join("a.txt"), "hello again\n").expect("modify");
     fs::write(work_tree(&repo).join("b.txt"), "new file\n").expect("write");
-    let second = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("second"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    let second = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("second"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert_eq!(second.parent, Some(first.oid));
     assert!(store
         .contains(&blob_id(b"hello again\n"))
@@ -316,17 +355,29 @@ fn stage_and_commit_create_a_missing_git_dir_when_every_store_is_injected() {
     assert!(!git_dir.exists());
 
     fs::write(root.join("a.txt"), "hello\n").expect("write");
-repo.index().stage(&StageOptions {
-            pathspecs: vec!["a.txt".into()], ..Default::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["a.txt".into()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     assert!(git_dir.join("index").is_file());
 
-    let commit = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("first"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    let commit = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("first"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert!(store.contains(&commit.oid).expect("commit in store"));
     assert_eq!(files_under(&git_dir), ["COMMIT_EDITMSG", "index"]);
 }
@@ -336,9 +387,16 @@ fn fsck_is_clean_on_healthy_custom_primary_repo() {
     let (_dir, repo, _store) = memory_repo();
     fs::write(work_tree(&repo).join("a.txt"), "hello\n").expect("write");
     fs::write(work_tree(&repo).join(".gitmodules"), "").expect("write");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("first"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("first"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 
     let options = FsckOptions::full_repository(true);
     let report = repo
@@ -517,16 +575,26 @@ fn integrate_branch_mixed_conflict_persists_clean_blob_on_custom_primary() {
     );
     commit_path(&repo, "shared.txt", "topic edit\n", "topic shared");
     fs::write(work_tree(&repo).join("topic-only.txt"), "only topic\n").expect("write");
-repo.index().stage(&StageOptions {
-            pathspecs: vec!["shared.txt".into(), "topic-only.txt".into()], ..Default::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("topic"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["shared.txt".into(), "topic-only.txt".into()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("topic"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     let topic = head_oid(&repo, "topic");
     switch(
         &repo,
@@ -569,12 +637,17 @@ fn stage_untracked_path_writes_blob_to_custom_primary() {
     let objects_before = files_under(repo.odb().objects_dir());
     fs::write(work_tree(&repo).join("a.txt"), "hello\n").expect("write");
 
-    let outcome = repo.index().stage(&StageOptions {
-            pathspecs: vec!["a.txt".into()], ..Default::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage untracked path");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["a.txt".into()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage untracked path");
 
     assert_eq!(outcome.added, vec!["a.txt".to_owned()]);
     let oid = blob_id(b"hello\n");
@@ -591,9 +664,14 @@ fn stage_defaults_stage_untracked_paths_into_custom_primary() {
     fs::create_dir(work_tree(&repo).join("dir")).expect("mkdir");
     fs::write(work_tree(&repo).join("dir/two.txt"), "two\n").expect("write");
 
-    let outcome = repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
 
     assert_eq!(outcome.added.len(), 2, "{outcome:?}");
     assert!(store.contains(&blob_id(b"one\n")).expect("contains"));
@@ -614,7 +692,9 @@ fn stage_many_untracked_paths_uses_parallel_batch_on_custom_primary() {
         .expect("write");
     }
 
-    let outcome = repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never())
+    let outcome = repo
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
         .expect("stage_for_commit");
 
     assert_eq!(outcome.added.len(), count);
@@ -633,17 +713,33 @@ fn commit_worktree_with_untracked_files_on_custom_primary() {
     let objects_before = files_under(repo.odb().objects_dir());
     fs::write(work_tree(&repo).join("a.txt"), "hello\n").expect("write");
 
-    let first = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("first"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    let first = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("first"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert!(store.contains(&first.oid).expect("commit in store"));
     assert!(store.contains(&blob_id(b"hello\n")).expect("blob in store"));
 
     fs::write(work_tree(&repo).join("a.txt"), "hello again\n").expect("modify");
     fs::write(work_tree(&repo).join("b.txt"), "new file\n").expect("write");
-    let second = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("second"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    let second = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("second"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert_eq!(second.parent, Some(first.oid));
     assert!(store
         .contains(&blob_id(b"hello again\n"))
@@ -678,17 +774,29 @@ fn stage_and_commit_create_a_missing_git_dir_when_every_store_is_injected() {
     assert!(!git_dir.exists());
 
     fs::write(root.join("a.txt"), "hello\n").expect("write");
-repo.index().stage(&StageOptions {
-            pathspecs: vec!["a.txt".into()], ..Default::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["a.txt".into()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     assert!(git_dir.join("index").is_file());
 
-    let commit = repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("first"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    let commit = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("first"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert!(store.contains(&commit.oid).expect("commit in store"));
     assert_eq!(files_under(&git_dir), ["COMMIT_EDITMSG", "index"]);
 }
@@ -698,9 +806,16 @@ fn fsck_is_clean_on_healthy_custom_primary_repo() {
     let (_dir, repo, _store) = memory_repo();
     fs::write(work_tree(&repo).join("a.txt"), "hello\n").expect("write");
     fs::write(work_tree(&repo).join(".gitmodules"), "").expect("write");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("first"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("first"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 
     let options = FsckOptions::full_repository(true);
     let report = repo
@@ -878,16 +993,26 @@ fn integrate_branch_mixed_conflict_persists_clean_blob_on_custom_primary() {
     );
     commit_path(&repo, "shared.txt", "topic edit\n", "topic shared");
     fs::write(work_tree(&repo).join("topic-only.txt"), "only topic\n").expect("write");
-repo.index().stage(&StageOptions {
-            pathspecs: vec!["shared.txt".into(), "topic-only.txt".into()], ..Default::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_request("topic"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec!["shared.txt".into(), "topic-only.txt".into()],
+                ..Default::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request("topic"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     let topic = head_oid(&repo, "topic");
     switch(
         &repo,

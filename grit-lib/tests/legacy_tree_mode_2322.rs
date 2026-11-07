@@ -14,10 +14,10 @@ use grit_lib::diff::{Diff, RenameDetection, UncommittedDiff};
 use grit_lib::error::{Error, OverwriteReason};
 use grit_lib::objects::{parse_tree, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::merge::integrate_detached_head;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -163,9 +163,14 @@ fn legacy_tree_modes_status_and_commit_clean_after_git_checkout() {
     let head_before = git(root.path(), &["rev-parse", "HEAD"]).trim().to_string();
 
     let repo = open_repo(root.path());
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.is_clean(),
         "expected clean status, got staged={:?} unstaged={:?}",
@@ -179,9 +184,14 @@ fn legacy_tree_modes_status_and_commit_clean_after_git_checkout() {
         req.committer = Some(IDENT.parse().expect("committer"));
         req
     };
-    let err = repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("commit");
+    let err = repo
+        .commits()
+        .create_staged(
+            &req,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("commit");
     assert!(
         matches!(
             err,
@@ -252,9 +262,14 @@ fn grit_checkout_writes_canonical_index_modes() {
 
     assert_index_modes_canonical(root.path());
 
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("status");
     assert!(model.is_clean(), "grit status must be clean");
 
     let obj = repo.odb().read(&tree).expect("read tree");
@@ -306,9 +321,14 @@ fn legacy_tree_modes_switch_and_merge_on_clean_tree() {
     assert_index_modes_canonical(root.path());
 
     let repo = open_repo(root.path());
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("status");
     assert!(model.is_clean(), "grit status must be clean before switch");
 
     repo.checkout()

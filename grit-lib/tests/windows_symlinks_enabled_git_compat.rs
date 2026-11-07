@@ -69,12 +69,17 @@ fn assert_git_fsck(root: &Path) {
 
 fn assert_grit_clean(root: &Path) {
     let repo = open_repo(root);
-    let model = repo.status().run(&StatusOptions {
-            untracked: UntrackedMode::No, ..StatusOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions {
+                untracked: UntrackedMode::No,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit status");
     assert!(
         model.unstaged.is_empty() && model.untracked.is_empty(),
         "grit status must be clean, unstaged={:?} untracked={:?}",

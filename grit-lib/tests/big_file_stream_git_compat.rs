@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{CommitRequest, HookPolicy};
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -84,9 +84,14 @@ fn add_streams_big_file_into_a_pack_that_git_reads() {
     let big = text(2 * 1024 * 1024 + 3, 1);
     fs::write(root.join("big.txt"), &big).unwrap();
     fs::write(root.join("small.txt"), b"small\n").unwrap();
-&open(root).index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    &open(root)
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
 
     let big_oid = index_oid(root, "big.txt");
     assert_eq!(
@@ -116,9 +121,16 @@ fn commit_auto_stage_streams_big_files_and_restages_changes() {
     fs::write(root.join("b.txt"), text(500_000, 2)).unwrap();
 
     let repo = open(root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("add big"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("add big"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert_eq!(
         pack_files(root).len(),
         1,
@@ -134,9 +146,16 @@ repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("add big
     let changed = text(700_000, 3);
     fs::write(root.join("a.txt"), &changed).unwrap();
     let repo = open(root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(commit_req("change big"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_req("change big"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert_eq!(pack_files(root).len(), 2);
     assert_eq!(
         git(root, &["cat-file", "-p", "HEAD:a.txt"]).as_bytes(),
@@ -156,9 +175,14 @@ fn big_file_with_a_clean_conversion_is_converted_like_git() {
         .flat_map(|line| line.iter().copied().chain(*b"\r\n"))
         .collect();
     fs::write(root.join("crlf.txt"), &crlf).unwrap();
-&open(root).index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    &open(root)
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
 
     let oid = index_oid(root, "crlf.txt");
     assert_eq!(
@@ -198,9 +222,14 @@ fn big_file_git_streamed_reads_back_clean_in_grit() {
     // through the stream path.
     std::thread::sleep(std::time::Duration::from_millis(10));
     fs::write(root.join("data.txt"), &big).unwrap();
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(model.unstaged.is_empty(), "{:?}", model.unstaged);
     assert!(model.staged.is_empty(), "{:?}", model.staged);
 }
@@ -214,8 +243,10 @@ fn dry_run_hashes_big_file_without_storing_it() {
         dry_run: true,
         ..StageOptions::default()
     };
-    let outcome =
-&open(root).index().stage(&opts, &mut NullProgress, &CancelToken::never()).expect("dry run");
+    let outcome = &open(root)
+        .index()
+        .stage(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("dry run");
     assert_eq!(outcome.added, vec!["big.txt".to_owned()]);
     assert!(pack_files(root).is_empty());
     assert_eq!(

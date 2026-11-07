@@ -10,7 +10,7 @@ use grit_lib::diff::{
     diff_index_to_worktree_with_options, diff_tree_to_worktree, DiffIndexToWorktreeOptions,
     RenameDetection, UncommittedDiff,
 };
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::StashPushOptions;
@@ -100,9 +100,14 @@ fn dirty_submodule_only_reported_without_ignore() {
     );
 
     let repo = grit_repo(&main);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.unstaged.iter().any(|e| e.path() == "vendor/lib"),
         "expected unstaged gitlink before ignore config"
@@ -116,9 +121,14 @@ fn dirty_submodule_only_reported_without_ignore() {
     );
 
     let repo = grit_repo(&main);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.unstaged.is_empty() && model.staged.is_empty(),
         "grit status should match git with diff.ignoreSubmodules=all"
@@ -194,9 +204,14 @@ fn moved_submodule_head_honors_ignore_dirty_not_all() {
         "git should report moved submodule HEAD with ignore=dirty: {git_dirty:?}"
     );
     let repo = grit_repo(&main);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.unstaged.iter().any(|e| e.path() == "vendor/lib"),
         "grit should report moved submodule HEAD with ignore=dirty"
@@ -209,9 +224,14 @@ fn moved_submodule_head_honors_ignore_dirty_not_all() {
         "git omits moved submodule HEAD from short status with ignore=all: {git_all:?}"
     );
     let repo = grit_repo(&main);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.unstaged.is_empty(),
         "grit should match git: no unstaged gitlink with ignore=all when only HEAD moved"
@@ -229,9 +249,14 @@ fn short_status_uses_lowercase_m_for_content_dirty_gitlink() {
     );
 
     let repo = grit_repo(&main);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let lines = grit_lib::porcelain::status::short_status_lines(&model);
     let line = lines
         .iter()
@@ -338,9 +363,14 @@ fn gitmodules_duplicate_ignore_last_value_wins() {
     );
 
     let repo = grit_repo(&main);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.unstaged.iter().any(|e| e.path() == "vendor/lib"),
         "grit should list dirty gitlink when last .gitmodules ignore is none"
@@ -377,9 +407,14 @@ fn gitmodules_logical_name_ignore_all_hides_dirty_submodule() {
     );
 
     let repo = grit_repo(&main);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.unstaged.is_empty(),
         "grit status should resolve logical submodule name from .gitmodules"
@@ -420,9 +455,14 @@ fn staged_gitlink_visible_in_status_hidden_in_diff_with_ignore_all() {
     );
 
     let repo = grit_repo(&main);
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.staged.iter().any(|e| e.path() == "vendor/lib"),
         "grit status staged gitlink with ignore=all"

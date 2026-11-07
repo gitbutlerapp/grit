@@ -14,7 +14,7 @@ use grit_lib::index::Index;
 use grit_lib::maintenance::repository_fsck::{self as fsck, FsckIssue, FsckOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
@@ -119,21 +119,27 @@ fn init_repo() -> (TempDir, Repository) {
 fn one_commit(repo: &Repository) -> ObjectId {
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("f.txt"), b"hello\n").expect("write");
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     let ident = "T <t@example.com> 1 +0000".to_string();
-repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("c1");
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req.allow_empty = false;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = false;
-            req
-        }, &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit")
-    .oid
+    repo.commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("c1");
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit")
+        .oid
 }
 
 fn grit_fsck(repo: &Repository, opts: &FsckOptions) -> fsck::FsckReport {
@@ -385,20 +391,26 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
     for i in 0..50 {
         let wt = repo.work_tree().expect("wt");
         std::fs::write(wt.join(format!("file-{i}.txt")), format!("payload {i}\n")).expect("write");
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+        repo.index()
+            .stage_for_commit(&mut NullProgress, &CancelToken::never())
+            .expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_string();
-repo.commits().create_staged(&{
-                let mut req = CommitRequest::new(format!("commit {i}"));
-                req.author = Some(ident.parse().expect("signature"));
-                req.committer = Some(ident.parse().expect("signature"));
-                req.allow_empty = false;
-                req.sign_override = None;
-                req.amend = false;
-                req.assume_worktree_synced = false;
-                req
-            }, &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("commit");
+        repo.commits()
+            .create_staged(
+                &{
+                    let mut req = CommitRequest::new(format!("commit {i}"));
+                    req.author = Some(ident.parse().expect("signature"));
+                    req.committer = Some(ident.parse().expect("signature"));
+                    req.allow_empty = false;
+                    req.sign_override = None;
+                    req.amend = false;
+                    req.assume_worktree_synced = false;
+                    req
+                },
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("commit");
     }
     git(dir.path(), &["repack", "-adf"]);
     let git_out = git_fsck(dir.path(), false);
@@ -433,20 +445,26 @@ fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
     for i in 0..50 {
         let wt = repo.work_tree().expect("wt");
         std::fs::write(wt.join(format!("file-{i}.txt")), format!("payload {i}\n")).expect("write");
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+        repo.index()
+            .stage_for_commit(&mut NullProgress, &CancelToken::never())
+            .expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_string();
-repo.commits().create_staged(&{
-                let mut req = CommitRequest::new(format!("commit {i}"));
-                req.author = Some(ident.parse().expect("signature"));
-                req.committer = Some(ident.parse().expect("signature"));
-                req.allow_empty = false;
-                req.sign_override = None;
-                req.amend = false;
-                req.assume_worktree_synced = false;
-                req
-            }, &mut NullProgress, &CancelToken::never(),
-        )
-        .expect("commit");
+        repo.commits()
+            .create_staged(
+                &{
+                    let mut req = CommitRequest::new(format!("commit {i}"));
+                    req.author = Some(ident.parse().expect("signature"));
+                    req.committer = Some(ident.parse().expect("signature"));
+                    req.allow_empty = false;
+                    req.sign_override = None;
+                    req.amend = false;
+                    req.assume_worktree_synced = false;
+                    req
+                },
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("commit");
     }
     git(dir.path(), &["repack", "-adf"]);
 
@@ -575,7 +593,9 @@ fn missing_blob_reported_as_missing_object() {
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("orphan.txt"), b"x").expect("write");
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     let index = Index::load(&repo.git_dir().join("index")).expect("index");
     let staged = index
         .entries()
@@ -1493,7 +1513,9 @@ fn reflog_and_index_roots_are_not_dangling() {
     git(dir.path(), &["commit", "--allow-empty", "-m", "e2"]);
     git(dir.path(), &["reset", "--hard", "HEAD~1"]);
     std::fs::write(repo.work_tree().expect("wt").join("idx-only"), b"z").expect("write");
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
 
     let git_set = git_dangling_set(dir.path());
     let report = grit_fsck(
@@ -1738,20 +1760,26 @@ fn fsck_commit_with_multibyte_name_at_byte_six() {
     let (dir, repo) = init_repo();
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("abcde日.txt"), b"x\n").expect("write");
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     let ident = "T <t@example.com> 1 +0000".to_string();
-repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("one");
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req.allow_empty = false;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = false;
-            req
-        }, &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("one");
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 
     let git_out = git_fsck(dir.path(), true);
     assert!(

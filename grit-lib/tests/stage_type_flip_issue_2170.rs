@@ -44,9 +44,10 @@ fn stage_all(root: &Path, thresholds: Option<IndexStagingThresholds>) -> StageOu
         Some(t) => stage_options_staging_thresholds(base, t),
         None => base,
     };
-&open_repo(root).index().stage(&opts, &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage")
+    &open_repo(root)
+        .index()
+        .stage(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("stage")
 }
 
 fn cached_name_status(root: &Path) -> String {
@@ -93,9 +94,17 @@ fn commit_request() -> CommitRequest {
 }
 
 fn commit_and_check(root: &Path, expected: &str) {
-&open_repo(root).commits().create(&grit_lib::commits::CommitOptions::new(commit_request(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    &open_repo(root)
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                commit_request(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
     assert_eq!(
         git(
             root,
@@ -188,17 +197,19 @@ fn stage_directory_replaced_by_file_with_later_sibling() {
 fn stage_for_commit_records_both_flips() {
     let tmp = tempfile::tempdir().expect("tempdir");
     file_became_dir_repo(tmp.path(), true);
-    let outcome = &open_repo(tmp.path()).index().stage_for_commit(&mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    let outcome = &open_repo(tmp.path())
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     assert_eq!(outcome.removed, ["f"]);
     assert_eq!(outcome.added, ["f/i"]);
 
     let tmp = tempfile::tempdir().expect("tempdir");
     dir_became_file_repo(tmp.path());
-    let outcome = &open_repo(tmp.path()).index().stage_for_commit(&mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    let outcome = &open_repo(tmp.path())
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     assert_eq!(outcome.removed, ["d/x"]);
     assert_eq!(outcome.added, ["d"]);
 }

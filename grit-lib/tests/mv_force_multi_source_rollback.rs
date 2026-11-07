@@ -4,8 +4,8 @@ use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::path::Path;
 
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::paths::{move_paths, MoveOptions};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::paths::MoveOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -27,9 +27,13 @@ fn multi_source_missing_later_source_rolls_back_earlier_forced_move() {
     fs::write(root.join("src/f0001"), b"SOURCE-1\n").expect("source 1");
     fs::write(root.join("dest/f0000"), b"OLDDEST-0\n").expect("old 0");
     fs::write(root.join("dest/f0001"), b"OLDDEST-1\n").expect("old 1");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
 
     fs::remove_file(root.join("src/f0001")).expect("drop later source");
 

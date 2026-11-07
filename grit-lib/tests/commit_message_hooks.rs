@@ -157,7 +157,8 @@ fn request(message: &str) -> CommitRequest {
 }
 
 fn commit(repo: &Repository, req: &CommitRequest) -> grit_lib::error::Result<CommitOutcome> {
-repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
+    repo.commits()
+        .create_staged(&req, &mut NullProgress, &CancelToken::never())
 }
 
 fn hook_failed(err: &Error) -> Option<&str> {

@@ -5,8 +5,8 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
@@ -73,10 +73,14 @@ fn grit_allow_empty_root_commit_git_fsck_clean() {
     let (repo, _) = Repository::init(root, &InitOptions::default()).expect("init");
     let git_dir = root.join(".git");
 
-    let outcome = repo.commits().create_staged(&commit_req("empty root", true), &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("allow-empty root commit");
+    let outcome = repo
+        .commits()
+        .create_staged(
+            &commit_req("empty root", true),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("allow-empty root commit");
 
     assert_empty_tree_materialized(&git_dir);
     git_fsck_strict(root);
@@ -99,13 +103,20 @@ fn grit_remove_everything_commit_git_fsck_clean() {
     let git_dir = root.join(".git");
 
     fs::write(root.join("a"), b"a\n").expect("write a");
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("stage");
-repo.commits().create_staged(&commit_req("one", false), &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("first");
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("stage");
+    repo.commits()
+        .create_staged(
+            &commit_req("one", false),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("first");
 
     remove_paths(
         &repo,
@@ -116,10 +127,14 @@ repo.commits().create_staged(&commit_req("one", false), &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("rm a");
-    let outcome = repo.commits().create_staged(&commit_req("remove everything", false), &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("empty tree commit");
+    let outcome = repo
+        .commits()
+        .create_staged(
+            &commit_req("remove everything", false),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("empty tree commit");
 
     assert_empty_tree_materialized(&git_dir);
     git_fsck_strict(root);

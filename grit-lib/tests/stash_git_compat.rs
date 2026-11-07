@@ -3,7 +3,7 @@
 use grit_lib::diff::DiffStatus;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::stash::{
     parse_stash_reference, StashApplyOptions, StashDiffOptions, StashError, StashPushOptions,
@@ -1354,9 +1354,14 @@ fn stash_branch_creates_branch_at_base_and_restores_index() {
         "staged\n"
     );
     let mut progress = NullProgress;
-    let model = repo.status().run(&StatusOptions::default(), &mut progress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut progress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.staged.iter().any(|e| e.path() == "staged.txt"),
         "index must restore staged.txt"

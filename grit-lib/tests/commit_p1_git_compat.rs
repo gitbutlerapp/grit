@@ -6,8 +6,8 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::add::{StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::add::StageOptions;
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -101,9 +101,13 @@ fn grit_commit_signoff_and_trailer_body_matches_git() {
     );
 
     let repo = init_repo(grit_root);
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
     let mut req = commit_req("subject\n");
     req.author = Some(
         "P1 <p1@example.com> 1700000000 +0000"
@@ -114,9 +118,13 @@ repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progr
     req.signoff = true;
     req.trailers = vec![("Acked-by".to_owned(), "Alice".to_owned())];
     req.hooks = grit_lib::porcelain::commit::HookPolicy::SkipVerify;
-repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    repo.commits()
+        .create_staged(
+            &req,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
 
     let grit_body = git_out(grit_root, &["log", "-1", "--format=%B"]);
     let git_body = git_out(git_root, &["log", "-1", "--format=%B"]);
@@ -177,17 +185,25 @@ fn grit_commit_amend_reuse_message_matches_git() {
         grit_lib::objects::ObjectId::from_hex(&git_out(grit_root, &["rev-parse", "HEAD~1"]))
             .expect("source oid");
     std::fs::write(grit_root.join("f"), b"3\n").unwrap();
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
     let mut req = commit_req("");
     req.amend = true;
     req.author = None;
     req.reuse_message_from = Some(source_oid);
     req.hooks = grit_lib::porcelain::commit::HookPolicy::SkipVerify;
-repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    repo.commits()
+        .create_staged(
+            &req,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
 
     let grit_meta = git_out(grit_root, &["log", "-1", "--format=%an|%ae|%at|%B"]);
     let git_meta = git_out(git_root, &["log", "-1", "--format=%an|%ae|%at|%B"]);
@@ -204,9 +220,13 @@ fn grit_commit_date_and_author_match_git_log() {
     let root = tmp.path();
     let repo = init_repo(root);
     std::fs::write(root.join("f"), b"x\n").unwrap();
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
     let mut req = commit_req("dated commit\n");
     req.author = Some(
         "Author Person <author@example.com> 1 +0000"
@@ -214,9 +234,13 @@ repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progr
             .expect("signature"),
     );
     req.author_date = Some("946684800 +0000".to_owned());
-repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    repo.commits()
+        .create_staged(
+            &req,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
 
     git_out(root, &["fsck", "--strict"]);
     let at = git_out(root, &["log", "-1", "--format=%at"]);
@@ -231,29 +255,46 @@ fn grit_commit_reuse_message_matches_git_c() {
     let root = tmp.path();
     let repo = init_repo(root);
     std::fs::write(root.join("f"), b"1\n").unwrap();
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
     let mut first = commit_req("original subject\n\nbody\n");
     first.author = Some(
         "Orig Author <orig@example.com> 123 +0000"
             .parse()
             .expect("signature"),
     );
-    let first_out = repo.commits().create_staged(&first, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    let first_out = repo
+        .commits()
+        .create_staged(
+            &first,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
 
     std::fs::write(root.join("f"), b"2\n").unwrap();
-repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    repo.index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
     let mut req = commit_req("");
     req.author = None;
     req.reuse_message_from = Some(first_out.oid);
-repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap();
+    repo.commits()
+        .create_staged(
+            &req,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
 
     git_out(root, &["fsck", "--strict"]);
     let line = git_out(root, &["log", "-1", "--format=%an|%B"]);

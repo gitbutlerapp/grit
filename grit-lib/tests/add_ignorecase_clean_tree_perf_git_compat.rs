@@ -83,9 +83,14 @@ fn open(root: &Path) -> Repository {
 fn stage_all(root: &Path) -> (StageOutcome, Duration) {
     let repo = open(root);
     let t0 = Instant::now();
-    let outcome = repo.index().stage(&StageOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("stage");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
     (outcome, t0.elapsed())
 }
 

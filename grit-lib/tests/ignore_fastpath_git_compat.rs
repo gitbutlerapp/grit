@@ -52,9 +52,14 @@ fn backslash_escaped_literal_matches_git_check_ignore_and_status() {
         .expect("ignore_check");
     assert!(check[0].ignored, "grit must ignore foo bar like git");
 
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         !model.untracked.iter().any(|p| p == "foo bar"),
         "status must not list ignored file, got {:?}",

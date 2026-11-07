@@ -32,7 +32,8 @@ fn stage_and_commit_worktree(repo: &Repository, message: &str, time: i64) -> Obj
     repo.index().stage_worktree_paths(&[]).expect("stage");
     let ident = format!("A <a@example.com> {time} +0000");
     let req = grit_test_support::commit_request(message, &ident);
-repo.commits().create_staged(&req, &mut NullProgress, &CancelToken::never())
+    repo.commits()
+        .create_staged(&req, &mut NullProgress, &CancelToken::never())
         .expect("commit")
         .oid
 }

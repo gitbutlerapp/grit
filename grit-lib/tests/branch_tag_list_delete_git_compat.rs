@@ -13,7 +13,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::{
     create_branch, delete_branch, list_branches, BranchError, CreateBranchOptions, DeleteMode,
 };
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::tag::{
     create_tag, delete_tag, list_tags, CreateTagRequest, TagError, TagKind,
 };
@@ -427,19 +427,24 @@ fn list_and_delete_on_reftable_backend() {
     )
     .unwrap();
     let ident = "T <t@example.com> 1700000000 +0000";
-    let tip = repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("one");
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req.allow_empty = true;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = false;
-            req
-        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap()
-    .oid;
+    let tip = repo
+        .commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("one");
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = true;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap()
+        .oid;
     assert_current_branch_deletion_refused(&repo, "main");
     repo.branches()
         .create(&BranchCreateOptions::at_head("topic"))

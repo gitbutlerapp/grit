@@ -7,7 +7,7 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
 use grit_lib::porcelain::add::{StageMode, StageOptions};
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -80,10 +80,19 @@ fn ignorecase_unrelated_commit_preserves_dual_case_dirs_on_sensitive_volume() {
 
     fs::write(root.join("unrelated.txt"), "edit\n").expect("unrelated");
     let repo = open(root);
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(CommitRequest::new("unrelated"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                CommitRequest::new("unrelated"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 
     let after = index_paths(root);
     for path in &before {
@@ -122,12 +131,16 @@ fn ignorecase_add_stages_hash_collision_dirs_independently() {
     fs::write(root.join("f0688b8.txt/y"), "two\n").expect("y");
 
     let repo = open(root);
-repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage must not ENOENT on hash-collision directory names");
+    repo.index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage must not ENOENT on hash-collision directory names");
 
     let mut paths = index_paths(root);
     paths.sort();
@@ -161,12 +174,16 @@ fn ignorecase_sensitive_volume_respells_after_uppercase_probe_decoy() {
     fs::rename(root.join("Dir"), root.join("dir")).expect("rename dir");
 
     let repo = open(root);
-repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
 
     let paths = index_paths(root);
     assert!(
@@ -201,12 +218,16 @@ fn ignorecase_add_folds_new_file_under_index_dir_on_sensitive_volume() {
     fs::write(root.join("dir/g.txt"), "g\n").expect("g");
 
     let repo = open(root);
-repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage");
+    repo.index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stage");
 
     let paths = index_paths(root);
     assert!(
@@ -240,10 +261,19 @@ fn ignorecase_commit_keeps_index_spelling_on_folding_volume() {
     fs::write(root.join("README.txt"), "n\n").expect("readme edit");
 
     let repo = open(root);
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
-repo.commits().create(&grit_lib::commits::CommitOptions::new(CommitRequest::new("two"), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                CommitRequest::new("two"),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit");
 
     let expected = ["Dir/f.txt", "Dir/g.txt", "readme.txt"];
     let tree = git(root, &["ls-tree", "-r", "--name-only", "HEAD"]);

@@ -6,7 +6,7 @@ use grit_lib::error::NotesError;
 use grit_lib::error::ObjectError;
 use grit_lib::notes::{resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{CommitRequest};
+use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::RefName;
@@ -475,19 +475,24 @@ fn notes_on_reftable_repository_use_the_ref_store() {
             .with_ref_storage(RefStorageFormat::Reftable),
     )
     .expect("init reftable");
-    let commit = repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("init");
-            req.author = Some(IDENT.parse().expect("signature"));
-            req.committer = Some(IDENT.parse().expect("signature"));
-            req.allow_empty = true;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = false;
-            req
-        }, &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("commit")
-    .oid;
+    let commit = repo
+        .commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("init");
+                req.author = Some(IDENT.parse().expect("signature"));
+                req.committer = Some(IDENT.parse().expect("signature"));
+                req.allow_empty = true;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = false;
+                req
+            },
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("commit")
+        .oid;
 
     let notes_ref = NotesRef::parse("review");
     let notes = repo.notes();

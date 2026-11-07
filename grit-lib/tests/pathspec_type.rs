@@ -178,14 +178,19 @@ fn status_literal_pathspec_matches_git_for_bracket_filename() {
             .expect("matches_change foo"),
         "literal pathspec must not match foo via matches_change"
     );
-    let model = repo.status().run(&StatusOptions {
-            pathspec: pathspec.clone(), untracked: UntrackedMode::No, write_index: false,
-            ..StatusOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions {
+                pathspec: pathspec.clone(),
+                untracked: UntrackedMode::No,
+                write_index: false,
+                ..StatusOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     let grit_unstaged: Vec<String> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
     let git_unstaged = git_status_short_literal(dir.path(), "f[o][o]");
     assert_eq!(git_unstaged, vec!["f[o][o]".to_owned()]);

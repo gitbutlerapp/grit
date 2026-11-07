@@ -8,7 +8,7 @@ use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::porcelain::commit::{
     commit_with_scope, commit_worktree, create_commit, CommitRequest, CommitScope, HookPolicy,
 };
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::porcelain::CommitError;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
@@ -64,13 +64,20 @@ fn stage_for_commit_stages_single_edit_on_deep_tree_without_new_untracked() {
     git(root, &["commit", "-qm", "base"]);
 
     let repo = open_repo(root);
-    &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("warm untracked cache");
+    &repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("warm untracked cache");
 
     fs::write(root.join(".gitattributes"), "*.txt text eol=lf\n# edit\n").expect("attrs");
 
-    let outcome = repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never())
+    let outcome = repo
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
         .expect("stage for commit");
     assert_eq!(outcome.modified.len(), 1, "expected one staged path");
     assert_eq!(
@@ -90,20 +97,27 @@ fn create_commit_nothing_to_commit_without_second_stat_refresh() {
     git(root, &["commit", "-qm", "base"]);
 
     let repo = open_repo(root);
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage clean tree");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage clean tree");
     let ident = "Test <t@example.com> 1 +0000".to_string();
-    let err = repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("noop");
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req.allow_empty = false;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = true;
-            req
-        }, &mut NullProgress, &CancelToken::never(),
-    )
-    .expect_err("clean tree");
+    let err = repo
+        .commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("noop");
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = true;
+                req
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect_err("clean tree");
     assert!(
         matches!(
             err,
@@ -129,12 +143,20 @@ fn stage_for_commit_untracked_cache_eligible_tree_stages_one_edit() {
     );
 
     let repo = open_repo(root);
-    &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("warm untracked cache");
+    &repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("warm untracked cache");
     fs::write(root.join(".gitattributes"), "*.txt text eol=lf\n# edit\n").expect("edit");
 
-    let outcome = repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    let outcome = repo
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     assert_eq!(outcome.modified.len(), 1);
     assert_eq!(outcome.added.len(), 0);
 }
@@ -155,20 +177,26 @@ fn grit_commit_on_deep_tree_leaves_clean_tree_for_git() {
     fs::write(root.join(".gitattributes"), "*.txt text eol=lf\n# x\n").expect("edit");
 
     let repo = open_repo(root);
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     let ident = "Test <t@example.com> 1 +0000".to_string();
-repo.commits().create_staged(&{
-            let mut req = CommitRequest::new("t");
-            req.author = Some(ident.parse().expect("signature"));
-            req.committer = Some(ident.parse().expect("signature"));
-            req.allow_empty = false;
-            req.sign_override = None;
-            req.amend = false;
-            req.assume_worktree_synced = true;
-            req
-        }, &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("grit commit");
+    repo.commits()
+        .create_staged(
+            &{
+                let mut req = CommitRequest::new("t");
+                req.author = Some(ident.parse().expect("signature"));
+                req.committer = Some(ident.parse().expect("signature"));
+                req.allow_empty = false;
+                req.sign_override = None;
+                req.amend = false;
+                req.assume_worktree_synced = true;
+                req
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit commit");
 
     let porcelain = git(root, &["status", "--porcelain"]);
     assert!(
@@ -199,13 +227,21 @@ fn stage_for_commit_ignorecase_autocrlf_uses_tracked_scan_on_deep_tree() {
     );
 
     let repo = open_repo(root);
-    &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("warm untracked cache");
+    &repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("warm untracked cache");
     fs::write(root.join("b00/d00/f0.txt"), "edited\n").expect("edit");
 
     let _probe = reset_worktree_metadata_probe(root);
-    let outcome = repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    let outcome = repo
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
     assert_eq!(outcome.modified.len(), 1);
     assert_eq!(outcome.added.len(), 0);
 
@@ -232,7 +268,9 @@ fn stage_for_commit_ignorecase_tracked_scan_updates_case_only_spelling() {
     fs::rename(&old, &new).expect("case-only rename");
 
     let repo = open_repo(root);
-    let outcome = repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never())
+    let outcome = repo
+        .index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
         .expect("stage case rename");
     assert_eq!(outcome.added.len(), 0);
     assert!(
@@ -265,12 +303,17 @@ fn add_update_mode_clean_tree_uses_tracked_scan_probe_budget() {
 
     let repo = open_repo(root);
     let _probe = reset_worktree_metadata_probe(root);
-    let outcome = repo.index().stage(&StageOptions {
-            mode: StageMode::Update, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("add -u noop");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::Update,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("add -u noop");
     assert_eq!(outcome.total(), 0);
 
     let tracked = git(root, &["ls-files"]).lines().count();
@@ -295,13 +338,18 @@ fn add_explicit_paths_limits_worktree_stat_probes() {
     let repo = open_repo(root);
 
     let _probe = reset_worktree_metadata_probe(root);
-    let outcome = repo.index().stage(&StageOptions {
-            pathspecs: vec![edited.to_owned()], pathspec_sources: vec![edited.to_owned()], ..StageOptions::default()
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("add one path");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions {
+                pathspecs: vec![edited.to_owned()],
+                pathspec_sources: vec![edited.to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("add one path");
     assert_eq!(outcome.modified.len(), 1);
 
     let meta_calls = worktree_metadata_probe_count();
@@ -322,7 +370,9 @@ fn commit_staged_after_single_edit_avoids_full_tree_stat_refresh() {
 
     fs::write(root.join("b00/d00/f0.txt"), "edited\n").expect("edit");
     let repo = open_repo(root);
-repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("stage");
+    repo.index()
+        .stage_for_commit(&mut NullProgress, &CancelToken::never())
+        .expect("stage");
 
     let tracked = git(root, &["ls-files"]).lines().count();
     let ident = "Test <t@example.com> 1 +0000".to_string();
@@ -335,9 +385,13 @@ repo.index().stage_for_commit(&mut NullProgress, &CancelToken::never()).expect("
     };
 
     let _probe = reset_worktree_metadata_probe(root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("commit staged");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::Staged),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("commit staged");
     let meta_calls = worktree_metadata_probe_count();
     assert!(
         meta_calls <= 500,
@@ -355,15 +409,24 @@ fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
     git(root, &["commit", "-qm", "base"]);
 
     let repo = open_repo(root);
-repo.index().stage(&StageOptions {
-            mode: StageMode::All, ..StageOptions::default()
-        }, &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit add");
-    &repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("warm UNTR");
+    repo.index()
+        .stage(
+            &StageOptions {
+                mode: StageMode::All,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit add");
+    &repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("warm UNTR");
 
     let ident = "Test <t@example.com> 1 +0000".to_string();
     let mut req = CommitRequest::new("empty");
@@ -375,7 +438,15 @@ repo.index().stage(&StageOptions {
     req = grit_lib::test_support::knobs::commit_skip_pre_commit_tree_match(req, true);
 
     let _probe = reset_worktree_metadata_probe(root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never())
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                req.clone(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("allow-empty commit");
 
     let tracked = git(root, &["ls-files"]).lines().count();
@@ -386,7 +457,15 @@ repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), grit_l
     );
 
     req.message = "second empty".into();
-repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), grit_lib::porcelain::commit::CommitScope::AutoStage), &mut NullProgress, &CancelToken::never())
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                req.clone(),
+                grit_lib::porcelain::commit::CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("second allow-empty");
 }
 
@@ -416,9 +495,17 @@ fn commit_auto_stage_default_request_stats_tracked_files_once() {
     let tracked = git(root, &["ls-files"]).lines().count();
 
     let probe = reset_worktree_metadata_probe(root);
-    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(&plain_commit_request("one edit").clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("auto-stage commit");
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                &plain_commit_request("one edit").clone(),
+                CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("auto-stage commit");
     let meta_calls = worktree_metadata_probe_count();
     drop(probe);
     assert_eq!(outcome.changes, 1);
@@ -431,9 +518,13 @@ fn commit_auto_stage_default_request_stats_tracked_files_once() {
     let _probe = reset_worktree_metadata_probe(root);
     let mut req = plain_commit_request("empty");
     req.allow_empty = true;
-repo.commits().create(&grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("allow-empty auto-stage commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(req.clone(), CommitScope::AutoStage),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("allow-empty auto-stage commit");
     let meta_calls = worktree_metadata_probe_count();
     assert!(
         meta_calls <= tracked + dir_budget,
@@ -460,9 +551,17 @@ fn commit_auto_stage_leaves_index_stat_clean_for_git() {
     fs::write(root.join("new.txt"), "new\n").expect("untracked");
 
     let repo = open_repo(root);
-    let outcome = repo.commits().create(&grit_lib::commits::CommitOptions::new(&plain_commit_request("auto-stage").clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("auto-stage commit");
+    let outcome = repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                &plain_commit_request("auto-stage").clone(),
+                CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("auto-stage commit");
     assert_eq!(outcome.changes, 2, "files: {:?}", outcome.files);
 
     let diff_files = Command::new("git")
@@ -509,9 +608,16 @@ fn commit_auto_stage_racy_edit_after_commit_is_seen_by_git() {
         .expect("set mtime");
 
     let repo = open_repo(root);
-repo.commits().create(&grit_lib::commits::CommitOptions::new(&plain_commit_request("racy").clone(), CommitScope::AutoStage), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("auto-stage commit");
+    repo.commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(
+                &plain_commit_request("racy").clone(),
+                CommitScope::AutoStage,
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("auto-stage commit");
 
     fs::write(&racy, "bbbb\n").expect("same-size edit");
     fs::File::options()

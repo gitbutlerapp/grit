@@ -10,7 +10,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::MODE_GITLINK;
-use grit_lib::porcelain::status::{StatusOptions};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -90,9 +90,14 @@ fn non_utf8_gitlink_path_is_not_untracked() {
         "system git must treat committed non-UTF-8 gitlink as tracked, not untracked"
     );
 
-    let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never(),
-    )
-    .expect("status");
+    let model = repo
+        .status()
+        .run(
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
     assert!(
         model.untracked.is_empty(),
         "non-UTF-8 gitlink directory must not be listed as untracked; got {:?}",

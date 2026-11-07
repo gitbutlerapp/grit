@@ -3,7 +3,7 @@
 //! `GRIT_WORKTREE_SCAN_50K=1 cargo test -p grit-lib --test worktree_scan_50k_probe_git_compat -- --test-threads=1`
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::add::{StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -90,9 +90,14 @@ fn noop_add_metadata_probe_budget_dense_leaf_50k() {
     let repo = open_repo(root);
 
     let _probe = reset_worktree_metadata_probe(root);
-    let outcome = repo.index().stage(&StageOptions::default(), &mut NullProgress, &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("add");
+    let outcome = repo
+        .index()
+        .stage(
+            &StageOptions::default(),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("add");
     assert_eq!(outcome.total(), 0);
     let meta = worktree_metadata_probe_count();
     assert!(
