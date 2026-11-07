@@ -76,6 +76,9 @@ mod simple_bins;
 #[cfg(feature = "full-tests")]
 #[path = "sqlite_odb.rs"]
 mod sqlite_odb;
+#[cfg(feature = "full-tests")]
+#[path = "sqlite_repository_conformance.rs"]
+mod sqlite_repository_conformance;
 
 /// Fails when a file in `tests/` is neither a module above nor a `[[test]]`
 /// target in Cargo.toml: with `autotests = false` cargo would never build it.
