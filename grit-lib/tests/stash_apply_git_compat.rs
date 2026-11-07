@@ -142,6 +142,118 @@ fn apply_stash_with_index_matches_git_staged_porcelain() {
     );
 }
 
+#[derive(Clone, Copy, Debug)]
+enum UnstagedRestore {
+    Apply,
+    Pop,
+    Branch,
+}
+
+/// Issue #2558: a stash whose index equals its base must bring tracked edits back unstaged
+/// under `--index`, whether git or grit wrote the stash, and leave unrelated staged changes.
+#[test]
+fn restore_index_keeps_unstaged_only_edits_unstaged_like_git() {
+    for stash_by_grit in [false, true] {
+        for op in [
+            UnstagedRestore::Apply,
+            UnstagedRestore::Pop,
+            UnstagedRestore::Branch,
+        ] {
+            let base = tempfile::tempdir().expect("base");
+            init_repo(base.path());
+            std::fs::write(base.path().join("n"), "1\n2\n3\n4\n5\n").expect("n");
+            std::fs::write(base.path().join("a"), "a\n").expect("a");
+            git_cmd(base.path(), &["add", "."]);
+            git_cmd(base.path(), &["commit", "-qm", "i"]);
+            std::fs::write(base.path().join("n"), "1\n2\n3\n4\n5\nmore\n").expect("edit");
+            if stash_by_grit {
+                let repo = Repository::open(
+                    &base.path().join(".git"),
+                    &RepositoryOptions::empty().with_work_tree(base.path()),
+                )
+                .expect("open");
+                repo.stash()
+                    .push(
+                        &grit_lib::stash::StashPushOptions::new(
+                            "T <a@b.c> 0 +0000".parse().expect("identity"),
+                        ),
+                        &mut grit_lib::progress::NullProgress,
+                        &grit_lib::progress::CancelToken::never(),
+                    )
+                    .expect("push")
+                    .expect("stash created");
+            } else {
+                git_cmd(base.path(), &["stash", "push", "-q"]);
+            }
+            assert_eq!(git_cmd(base.path(), &["status", "--porcelain"]), "");
+            if !matches!(op, UnstagedRestore::Branch) {
+                std::fs::write(base.path().join("a"), "staged local\n").expect("local");
+                git_cmd(base.path(), &["add", "a"]);
+            }
+
+            let grit_dir = tempfile::tempdir().expect("grit");
+            copy_repo(base.path(), grit_dir.path());
+            let git_dir = tempfile::tempdir().expect("git");
+            copy_repo(base.path(), git_dir.path());
+            let repo = Repository::open(
+                &grit_dir.path().join(".git"),
+                &RepositoryOptions::empty().with_work_tree(grit_dir.path()),
+            )
+            .expect("open");
+            let options = StashApplyOptions {
+                restore_index: true,
+                ..Default::default()
+            };
+            let progress = &mut grit_lib::progress::NullProgress;
+            let cancel = &grit_lib::progress::CancelToken::never();
+            match op {
+                UnstagedRestore::Apply => {
+                    repo.stash()
+                        .apply(0, &options, progress, cancel)
+                        .expect("apply");
+                    git_cmd(git_dir.path(), &["stash", "apply", "-q", "--index"]);
+                }
+                UnstagedRestore::Pop => {
+                    repo.stash()
+                        .pop(0, &options, progress, cancel)
+                        .expect("pop");
+                    git_cmd(git_dir.path(), &["stash", "pop", "-q", "--index"]);
+                }
+                UnstagedRestore::Branch => {
+                    repo.stash().branch("br", 0).expect("branch");
+                    git_cmd(git_dir.path(), &["stash", "branch", "br", "stash@{0}"]);
+                }
+            }
+
+            let context = format!("stash_by_grit={stash_by_grit} op={op:?}");
+            let expected_status = if matches!(op, UnstagedRestore::Branch) {
+                " M n\n"
+            } else {
+                "M  a\n M n\n"
+            };
+            assert_eq!(
+                git_cmd(grit_dir.path(), &["status", "--porcelain"]),
+                expected_status,
+                "{context}"
+            );
+            for args in [
+                &["status", "--porcelain"][..],
+                &["diff"],
+                &["diff", "--cached"],
+                &["stash", "list"],
+                &["symbolic-ref", "HEAD"],
+            ] {
+                assert_eq!(
+                    git_cmd(grit_dir.path(), args),
+                    git_cmd(git_dir.path(), args),
+                    "{context} {args:?}"
+                );
+            }
+            git_cmd(grit_dir.path(), &["fsck", "--strict"]);
+        }
+    }
+}
+
 /// Exercise sparse deltas over many identical subtrees, including index-only changes.
 #[test]
 fn wide_sparse_apply_preserves_index_and_untouched_changes_like_git() {

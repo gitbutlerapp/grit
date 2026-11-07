@@ -515,6 +515,9 @@ impl StashPushOptions {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StashApplyOptions {
     /// Restore the stashed index parent instead of keeping the current index at touched paths.
+    ///
+    /// Paths that were only modified in the work tree at stash time come back unstaged, even
+    /// when the stash's index parent equals its base commit's tree.
     pub restore_index: bool,
     /// When true, an existing untracked file blocks restore only if its on-disk bytes differ
     /// from the stashed untracked parent (Git still refuses in all cases).
@@ -3099,6 +3102,18 @@ fn apply_stash_commit(
         }
     }
 
+    // Bulk checkout stages each blob it writes. Without an index merge, `--index` must keep the
+    // pre-apply entries at those paths, so a stash whose index matched its base stays unstaged.
+    let mut index_before_checkout: Vec<(&[u8], Option<IndexEntry>)> = Vec::new();
+    if restore_index && merged_index_tree.is_none() {
+        index_before_checkout = parallel_writes
+            .iter()
+            .map(|job| {
+                let path = job.rel_path.as_bytes();
+                (path, new_index.get(path, 0).cloned())
+            })
+            .collect();
+    }
     if !parallel_writes.is_empty() {
         let checkout_changes: Vec<DiffEntry> = parallel_writes
             .iter()
@@ -3140,6 +3155,14 @@ fn apply_stash_commit(
             new_index = index_from_tree_with_worktree_stats(repo, &merged_tree)?;
         } else {
             // Stash index matched current index or HEAD at stash time; replay per-path index parent.
+            for (path, entry) in index_before_checkout {
+                match entry {
+                    Some(entry) => new_index.stage_file(entry),
+                    None => {
+                        new_index.remove(path);
+                    }
+                }
+            }
             for base_entry in &base_tree_entries {
                 if StashTreeEntry::lookup(idx_tree_entries, &base_entry.path).is_none() {
                     new_index.remove(&base_entry.path);
