@@ -6,11 +6,9 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::list_refs;
-use grit_lib::remote::push_plan::{
-    follow_tag_push_specs, resolve_push, PushPlanContext, PushRequest,
-};
+use grit_lib::remote::push_plan::{PushPlanContext, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::{push_local, PushOptions};
+use grit_lib::remote::transfer::PushOptions;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
 use std::collections::HashSet;
@@ -86,28 +84,37 @@ fn packed_annotated_tags_push_is_up_to_date_and_preserves_remote_tag() {
     let repo = open_repo(&local);
     let config = load_config(&repo);
     let ctx = ctx_from_bare(&bare);
-    let specs = resolve_push(
-        &repo,
-        &PushRequest {
-            tags: true,
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
-        &ctx,
-    )
-    .expect("plan")
-    .specs;
+    let specs = repo
+        .remotes()
+        .resolve_push(
+            &PushRequest {
+                tags: true,
+                remote: Some("origin".into()),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .expect("plan")
+        .specs;
     assert_eq!(specs.len(), 1);
     assert_eq!(specs[0].src, Some(tag_oid));
-    assert!(follow_tag_push_specs(&repo, &specs, &ctx)
+    assert!(repo
+        .remotes()
+        .follow_tag_push_specs(&specs, &ctx)
         .expect("follow")
         .is_empty());
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local.join(".git"),
-        &bare,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &specs,
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push --tags");

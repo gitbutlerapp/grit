@@ -372,7 +372,7 @@ fn require_objects_exist(odb: &Odb, oids: &[ObjectId], promised: &HashSet<Object
 /// target), e.g. `main` for a `HEAD` pointing at `refs/heads/main`.
 ///
 /// This is the `git remote show <remote>` default-branch lookup for a local /
-/// `file://` remote. It reuses [`crate::remote::list_refs_from_git_dir`]'s symref handling
+/// `file://` remote. It reuses `crate::remote::list_refs_from_git_dir`'s symref handling
 /// to read the remote `HEAD` and strips the `refs/heads/` prefix from its
 /// target. Returns `None` when the remote has no symbolic `HEAD` (e.g. a
 /// detached or absent `HEAD`).

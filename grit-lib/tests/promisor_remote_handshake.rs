@@ -14,7 +14,6 @@ use grit_lib::objects::promisor_remote::{PromisorField, PromisorRejection};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
-use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::serve::{ProtocolVersion, ServeOptions, UploadPack};
@@ -227,9 +226,16 @@ fn fetch_from(
     opts.remote_name = Some(remote.to_owned());
     opts.filter = filter;
     opts.auto_filter = auto_filter;
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         client,
-        &mut conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &mut opts,
         &mut NullProgress,
         &CancelToken::never(),
@@ -449,9 +455,16 @@ fn object_want_fetch_sends_no_reply() {
     );
     opts.remote_name = Some("origin".to_owned());
     opts.filter = Some(ObjectFilterSpec::BlobNone);
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         client.path(),
-        &mut conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &mut opts,
         &mut NullProgress,
         &CancelToken::never(),

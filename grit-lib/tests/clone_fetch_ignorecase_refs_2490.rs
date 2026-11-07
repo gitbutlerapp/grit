@@ -11,7 +11,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::clone::{clone, CloneOptions};
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
+use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
 fn commit_oid_in_bare(bare: &Path) -> ObjectId {
@@ -137,7 +137,21 @@ fn fetch_rejects_second_case_twin_and_keeps_first() {
     opts.remote_name = Some("origin".to_owned());
     opts.tags = TagMode::None;
 
-    let outcome = fetch_local(&git_dir, &bare, &opts).expect("fetch continues with rejections");
+    let outcome = grit_lib::repo::Repository::open(
+        &git_dir,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch continues with rejections");
     assert!(
         outcome.has_rejections(),
         "case twin must be reported as rejection"

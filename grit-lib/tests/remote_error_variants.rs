@@ -114,8 +114,8 @@ fn remote_error_variants() {
         use std::process::{Child, Command, Stdio};
         use std::time::{Duration, Instant};
 
+        use grit_lib::remote::transport::http::http_client_arc;
         use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
-        use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
 
         fn find_binary(name: &str) -> Option<PathBuf> {
             let exe = std::env::current_exe().ok()?;
@@ -176,14 +176,18 @@ fn remote_error_variants() {
                         let url = format!("http://127.0.0.1:{port}/repo.git");
                         let client =
                             http_client_arc(UreqHttpClient::new().with_git_protocol("version=2"));
-                        let err = http_fetch(
-                            client,
-                            local.git_dir(),
-                            &url,
-                            &mut FetchOptions::new(),
-                            &mut NoProgress,
-                        )
-                        .expect_err("401 without credentials");
+                        let err = local
+                            .remotes()
+                            .fetch_from(
+                                grit_lib::remote::transfer::TransferEndpoint::Http {
+                                    client: client,
+                                    url: &url,
+                                },
+                                &mut FetchOptions::new(),
+                                &mut NoProgress,
+                                grit_lib::progress::CancelToken::never_ref(),
+                            )
+                            .expect_err("401 without credentials");
                         assert!(matches!(
                             err,
                             grit_lib::error::Error::Remote(RemoteError::Auth { .. })

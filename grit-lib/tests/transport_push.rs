@@ -22,7 +22,6 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::push::push_remote;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
@@ -142,9 +141,14 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome = push_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec],
         &PushOptions {
             tracking_remote: Some("origin".to_owned()),
@@ -237,9 +241,14 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome2 = push_remote(
+    let outcome2 = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn2,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn2),
         &[nonff],
         &PushOptions::default(),
         &mut NoProgress,
@@ -284,9 +293,14 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome3 = push_remote(
+    let outcome3 = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn3,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn3),
         &[forced],
         &PushOptions::default(),
         &mut NoProgress,
@@ -346,9 +360,14 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
         ..Default::default()
     };
-    push_remote(
+    grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn_mk,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_mk),
         &[mk],
         &PushOptions::default(),
         &mut NoProgress,
@@ -375,9 +394,14 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome_del = push_remote(
+    let outcome_del = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn_del,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_del),
         &[del],
         &PushOptions::default(),
         &mut NoProgress,
@@ -499,9 +523,14 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     let mut conn_a = transport
         .connect(&url, Service::ReceivePack, &ConnectOptions::default())
         .expect("connect a");
-    let outcome_a = push_remote(
+    let outcome_a = grit_lib::repo::Repository::open(
         &clone_a.join(".git"),
-        &mut *conn_a,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_a),
         &[PushRefSpec {
             src: Some(advanced),
             src_ref: None,
@@ -543,9 +572,14 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     let mut conn_b = transport
         .connect(&url, Service::ReceivePack, &ConnectOptions::default())
         .expect("connect b");
-    let outcome = push_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &clone_b.join(".git"),
-        &mut *conn_b,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_b),
         &[PushRefSpec {
             src: Some(new_tip),
             src_ref: None,
@@ -586,9 +620,14 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
         !clone_b_odb.exists(&remote_main_after_a),
         "clone B still lacks the advertised main tip"
     );
-    let outcome_force = push_remote(
+    let outcome_force = grit_lib::repo::Repository::open(
         &clone_b.join(".git"),
-        &mut *conn_force,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_force),
         &[PushRefSpec {
             src: Some(new_tip),
             src_ref: None,

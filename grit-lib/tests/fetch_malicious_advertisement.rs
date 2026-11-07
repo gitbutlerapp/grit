@@ -9,7 +9,6 @@ use std::process::Command;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::{read_advertisement, Connection};
@@ -142,9 +141,16 @@ fn fetch_v0_malicious_advertisement_preserves_config() {
     opts.tags = TagMode::None;
 
     let mut conn = conn;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &git_dir,
-        &mut conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -178,9 +184,16 @@ fn fetch_v2_malicious_ls_refs_preserves_config() {
     opts.tags = TagMode::None;
 
     let mut conn = conn;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &git_dir,
-        &mut conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),

@@ -2122,14 +2122,15 @@ eval "$cmd"
                 .expect("init local");
             let mut fetch = crate::transfer::FetchOptions::new();
             fetch.refspecs = vec![format!("{missing}:refs/heads/missing")];
-            let err = crate::fetch::fetch_remote(
-                repo.git_dir(),
-                conn.as_mut(),
-                &mut fetch,
-                &mut crate::fetch::NoProgress,
-                &crate::progress::CancelToken::never(),
-            )
-            .expect_err("git refuses a want for an object it does not have");
+            let err = repo
+                .remotes()
+                .fetch_from(
+                    crate::transfer::TransferEndpoint::Connection(conn.as_mut()),
+                    &mut fetch,
+                    &mut crate::fetch::NoProgress,
+                    &crate::progress::CancelToken::never(),
+                )
+                .expect_err("git refuses a want for an object it does not have");
             match err {
                 Error::Remote(RemoteError::Fatal { message }) => assert!(
                     message.contains("not our ref") && message.contains(&missing),

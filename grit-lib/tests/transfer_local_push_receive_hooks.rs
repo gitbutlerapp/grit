@@ -14,11 +14,9 @@ use std::path::{Path, PathBuf};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::remote::fetch::NoProgress;
-use grit_lib::remote::push_plan::{
-    load_push_plan_context, open_push_destination, resolve_push, PushRequest,
-};
+use grit_lib::remote::push_plan::{open_push_destination, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::{push_local, PushOptions, PushOutcome, PushRefSpec};
+use grit_lib::remote::transfer::{PushOptions, PushOutcome, PushRefSpec};
 use grit_lib::remote::RemoteError;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
@@ -179,13 +177,19 @@ fn grit_push(
     opts: PushOptions,
 ) -> Result<PushOutcome, RemoteError> {
     let config = repo.config().snapshot().expect("config");
-    let ctx = load_push_plan_context(repo, Some(remote), None).expect("plan context");
+    let ctx = repo
+        .remotes()
+        .push_plan_context(Some(remote), None)
+        .expect("plan context");
     let request = PushRequest {
         remote: Some(remote.to_owned()),
         refspecs: refspecs.iter().map(|s| (*s).to_owned()).collect(),
         ..PushRequest::default()
     };
-    let plan = resolve_push(repo, &request, &ctx).expect("resolve push");
+    let plan = repo
+        .remotes()
+        .resolve_push(&request, &ctx)
+        .expect("resolve push");
     open_push_destination(&config, &plan.remote)?.push(
         repo,
         &plan.specs,
@@ -534,9 +538,14 @@ fn push_local_runs_receive_hooks() {
         "#!/bin/sh\nwhile read old new ref; do echo \"deny $ref\" >&2; done\nexit 1\n",
     );
     let head = grit_lib::objects::ObjectId::from_hex(&fx.head()).expect("oid");
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &fx.work.join(".git"),
-        &fx.bare,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&fx.bare),
         &[PushRefSpec {
             src: Some(head),
             src_ref: Some("refs/heads/main".to_owned()),
@@ -544,6 +553,7 @@ fn push_local_runs_receive_hooks() {
             ..PushRefSpec::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &CancelToken::never(),
     )
     .expect("push_local");

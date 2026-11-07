@@ -6,7 +6,7 @@ use std::process::Command;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
+use grit_lib::remote::transfer::{FetchOptions, TagMode};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -96,7 +96,21 @@ fn fetch_opts() -> FetchOptions {
 
 fn grit_fetch(repo: &Path, remote_git: &Path) {
     let local_git = repo.join(".git");
-    fetch_local(&local_git, remote_git, &fetch_opts()).expect("fetch_local");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&fetch_opts()).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
+        &mut fetch_opts().clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch_local");
 }
 
 fn grit_clone(tmp: &Path, remote_git: &Path, name: &str) -> PathBuf {
@@ -159,7 +173,21 @@ fn fetch_forced_update_reflog() {
     git(&remote.bare, &["update-ref", "refs/heads/main", &c1]);
     let mut opts = fetch_opts();
     opts.force = true;
-    fetch_local(&repo.join(".git"), &remote.bare, &opts).expect("force fetch");
+    grit_lib::repo::Repository::open(
+        &repo.join(".git"),
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote.bare),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("force fetch");
 
     let log = git(
         &repo,
@@ -223,7 +251,21 @@ fn fetch_tag_tracking_ref_has_no_reflog() {
     let repo = grit_clone(tmp.path(), &remote.bare, "local");
     let mut opts = fetch_opts();
     opts.tags = TagMode::All;
-    fetch_local(&repo.join(".git"), &remote.bare, &opts).expect("tags");
+    grit_lib::repo::Repository::open(
+        &repo.join(".git"),
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote.bare),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("tags");
     assert!(
         !repo.join(".git/logs/refs/tags/v1").exists(),
         "tags should not get fetch reflogs by default"
@@ -245,7 +287,21 @@ fn fetch_prune_removes_tracking_reflog() {
     git(&remote.work, &["push", "-q", "origin", "--delete", "gone"]);
     let mut opts = fetch_opts();
     opts.prune = true;
-    fetch_local(&repo.join(".git"), &remote.bare, &opts).expect("prune fetch");
+    grit_lib::repo::Repository::open(
+        &repo.join(".git"),
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote.bare),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("prune fetch");
     assert!(
         !repo.join(".git/logs/refs/remotes/origin/gone").exists(),
         "prune should remove reflog file"

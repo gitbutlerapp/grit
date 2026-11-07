@@ -24,9 +24,9 @@ pub use error::{RemoteError, RemoteResult};
 
 pub(crate) use core::is_valid_remote_name;
 pub use core::*;
+pub(crate) use inspect::inspect_remote;
 pub use inspect::{
-    inspect_remote, InspectOptions, RemoteBranchState, RemoteBranchStateKind, RemotePullBranch,
-    RemoteSummary,
+    InspectOptions, RemoteBranchState, RemoteBranchStateKind, RemotePullBranch, RemoteSummary,
 };
 
 pub mod fetch {
@@ -39,10 +39,6 @@ pub mod fetch_request {
         resolve_fetch_invocation, resolve_pull_invocation, resolve_remote_argument,
         FetchInvocation, FetchRefspecError,
     };
-}
-pub mod push {
-    //! push API (re-exported at this path).
-    pub use crate::push::*;
 }
 pub mod credentials {
     //! credentials API (re-exported at this path).
@@ -109,7 +105,7 @@ pub mod transfer {
 }
 pub mod transport {
     //! transport API (re-exported at this path).
-    pub use crate::transport::http::{http_client_arc, http_fetch};
+    pub use crate::transport::http::http_client_arc;
     pub use crate::transport::*;
 }
 pub mod transport_path {

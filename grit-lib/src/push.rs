@@ -1,6 +1,6 @@
 //! Wire-protocol push orchestration over a [`crate::transport::Connection`].
 //!
-//! [`push_remote`] is the wire counterpart to [`crate::transfer::push_local`]:
+//! [`push_remote_from`] is the wire counterpart to the local-path push in [`crate::transfer`]:
 //! instead of copying objects between two on-disk repositories, it drives a
 //! `git-receive-pack` exchange over a live [`crate::transport::Connection`] —
 //! reading the receive-pack advertisement (remote refs + `.have` lines +
@@ -26,10 +26,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, ErrorKind, Read, Write};
-use std::path::Path;
 
 use crate::branch_tracking;
-use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::fetch::Progress;
 use crate::objects::{HashAlgo, ObjectId};
@@ -144,7 +142,7 @@ const PUSH_CAPS_BASE: &str = "report-status report-status-v2 quiet";
 
 /// Push refs to a remote over a live [`Connection`] speaking `git-receive-pack`.
 ///
-/// The flow mirrors [`crate::transfer::push_local`], but the remote ref list and
+/// The flow mirrors the local-path push, but the remote ref list and
 /// `.have` hints come from the connection's advertisement, the objects are
 /// streamed over the wire as a single pack, and per-ref acceptance/rejection is
 /// learned from the server's `report-status` reply (a server may reject an update
@@ -181,21 +179,9 @@ const PUSH_CAPS_BASE: &str = "report-status report-status-v2 quiet";
 /// missing from the local odb, if the pack build fails, or on wire/parse I/O
 /// failure. An atomic push to a server without `atomic` support returns
 /// [`RemoteError::PushAtomicUnsupported`] before sending updates or objects.
-pub fn push_remote(
-    local_git_dir: &Path,
-    conn: &mut dyn Connection,
-    refs: &[PushRefSpec],
-    opts: &PushOptions,
-    progress: &mut dyn Progress,
-    cancel: &CancelToken,
-) -> Result<PushOutcome> {
-    let local = Repository::open(local_git_dir, &RepositoryOptions::empty())?;
-    push_remote_from(&local, conn, refs, opts, progress, cancel, None)
-}
-
-/// Like [`push_remote`], reading the objects to send through `local`'s object store and
-/// running `pre_push` after every update is decided against the advertisement and before
-/// any command or pack is sent.
+///
+/// Objects to send are read through `local`'s object store. `pre_push` runs after every
+/// update is decided against the advertisement and before any command or pack is sent.
 pub(crate) fn push_remote_from(
     local: &Repository,
     conn: &mut dyn Connection,
@@ -481,7 +467,7 @@ pub(crate) fn push_remote_with(
 /// Push refs to a remote over smart HTTP (`git-receive-pack`), returning a
 /// [`PushOutcome`].
 ///
-/// This is the stateless-RPC counterpart to [`push_remote`]: instead of a duplex
+/// This is the stateless-RPC counterpart to [`push_remote_from`]: instead of a duplex
 /// [`Connection`] it issues a `GET info/refs?service=git-receive-pack` discovery
 /// (the receive-pack advertisement: remote refs + `.have`s + capabilities), then
 /// a single `POST git-receive-pack` whose body is the ref-update commands
@@ -490,7 +476,7 @@ pub(crate) fn push_remote_with(
 ///
 /// The decision logic, command framing, pack building (thin + delta + advertised
 /// `.have` set + `ofs-delta` per caps), and report parsing are the *same* shared
-/// helpers used by [`push_remote`] — only the wire (discovery GET + one POST vs.
+/// helpers used by [`push_remote_from`] — only the wire (discovery GET + one POST vs.
 /// the duplex socket) differs.
 ///
 /// `client` is the embedder's [`crate::transport::http::HttpClient`]; `repo_url`
@@ -500,7 +486,7 @@ pub(crate) fn push_remote_with(
 ///
 /// Protocol v0/v1 only; a v2 receive-pack advertisement is rejected (a v2 push
 /// would require the `command=push` round and is deferred — matching
-/// [`push_remote`]).
+/// [`push_remote_from`]).
 ///
 /// # Errors
 ///
@@ -508,9 +494,9 @@ pub(crate) fn push_remote_with(
 /// source object is missing from the local odb, the pack build fails, or on
 /// wire/parse I/O failure. An atomic push to a server without `atomic` support
 /// returns [`RemoteError::PushAtomicUnsupported`] before sending updates or objects.
-pub fn push_http(
+pub(crate) fn push_http(
     client: std::sync::Arc<dyn crate::transport::http::HttpClient>,
-    local_git_dir: &Path,
+    local: &Repository,
     repo_url: &str,
     refs: &[PushRefSpec],
     opts: &PushOptions,
@@ -527,11 +513,11 @@ pub fn push_http(
     };
     let transport = SmartHttpTransport::new(client);
     let mut conn = transport.connect(repo_url, Service::ReceivePack, &connect)?;
-    push_remote(local_git_dir, &mut *conn, refs, opts, progress, cancel)
+    push_remote_from(local, &mut *conn, refs, opts, progress, cancel, None)
 }
 
 /// The remote ref map + `.have` hints + capability flags parsed from a
-/// receive-pack advertisement. Shared by the duplex ([`push_remote`]) and
+/// receive-pack advertisement. Shared by the duplex ([`push_remote_from`]) and
 /// stateless-HTTP ([`push_http`]) paths so the decision/command/pack logic is
 /// identical regardless of how the advertisement was obtained.
 struct AdvertisedState {
@@ -602,7 +588,7 @@ enum PlanOutcome {
 
 /// Decide every [`PushRefSpec`] client-side against the advertised remote refs,
 /// applying the atomic / dry-run / nothing-to-send gates. Shared by
-/// [`push_remote`] and [`push_http`] so both paths reach the wire with an
+/// [`push_remote_from`] and [`push_http`] so both paths reach the wire with an
 /// identical decision set.
 fn plan_push(
     refs: &[PushRefSpec],
@@ -1293,7 +1279,9 @@ fn demux_report_and_remote_messages(input: &[u8], progress: &mut dyn Progress) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::environment::RepositoryOptions;
     use crate::objects::ObjectKind;
+    use std::path::Path;
 
     fn make_decision(refname: &str, send: bool) -> PushDecision {
         PushDecision {
@@ -1448,15 +1436,16 @@ mod tests {
                         dry_run,
                         ..Default::default()
                     };
-                    let err = push_remote(
-                        repo.git_dir(),
-                        &mut conn,
-                        refs,
-                        &opts,
-                        &mut crate::fetch::NoProgress,
-                        &crate::progress::CancelToken::never(),
-                    )
-                    .unwrap_err();
+                    let err = repo
+                        .remotes()
+                        .push_to(
+                            crate::transfer::TransferEndpoint::Connection(&mut conn),
+                            refs,
+                            &opts,
+                            &mut crate::fetch::NoProgress,
+                            &crate::progress::CancelToken::never(),
+                        )
+                        .unwrap_err();
                     assert!(
                         matches!(err, Error::Remote(RemoteError::PushAtomicUnsupported)),
                         "{err:?}"

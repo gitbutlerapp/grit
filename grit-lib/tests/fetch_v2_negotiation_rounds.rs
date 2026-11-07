@@ -26,7 +26,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 use grit_lib::repo::Repository;
@@ -189,9 +188,16 @@ fn fetch_main(git_dir: &Path, srv: &Server) -> Result<(), grit_lib::error::Error
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
     opts.tags = TagMode::None;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         git_dir,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),

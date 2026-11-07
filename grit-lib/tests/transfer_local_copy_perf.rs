@@ -7,9 +7,7 @@ use std::time::Instant;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::{
-    build_pack, push_local, PackBuildOptions, PushOptions, PushRefSpec,
-};
+use grit_lib::remote::transfer::{build_pack, PackBuildOptions, PushOptions, PushRefSpec};
 
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -308,9 +306,14 @@ fn push_local_empty_bare_links_pack_within_budget() {
     let tip = ObjectId::from_hex(String::from_utf8_lossy(&rev_out.stdout).trim()).expect("tip");
 
     let t0 = Instant::now();
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &dest,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&dest),
         &[PushRefSpec {
             src: Some(tip),
             src_ref: None,
@@ -322,6 +325,7 @@ fn push_local_empty_bare_links_pack_within_budget() {
             ..Default::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");

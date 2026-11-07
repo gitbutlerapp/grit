@@ -10,9 +10,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::push_plan::{
-    resolve_push, ForceMode, LeaseExpectation, PushPlanContext, PushRequest,
-};
+use grit_lib::remote::push_plan::{ForceMode, LeaseExpectation, PushPlanContext, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushOutcome};
 use grit_lib::remote::Remote;
@@ -153,7 +151,7 @@ fn grit_push_request(work: &Path, bare: &Path, request: PushRequest) -> PushOutc
     let repo = open_repo(work);
     let config = load_config(&repo);
     let ctx = push_plan_context(bare);
-    let plan = resolve_push(&repo, &request, &ctx).expect("plan");
+    let plan = repo.remotes().resolve_push(&request, &ctx).expect("plan");
     Remote::from_config(&config, "origin")
         .expect("remote")
         .push(

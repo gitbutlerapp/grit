@@ -1,7 +1,7 @@
 //! Smart-HTTP [`Connection`] over stateless POST rounds (upload-pack) or a single
 //! POST body (receive-pack).
 //!
-//! Lets [`crate::fetch::fetch_remote`] and [`crate::push::push_remote`] drive
+//! Lets [`crate::fetch::fetch_remote_into`] and [`crate::push::push_remote_from`] drive
 //! smart HTTP without a separate negotiation implementation.
 
 use crate::error::{Error, Result};

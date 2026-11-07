@@ -26,6 +26,7 @@ use crate::remote::{
 };
 use crate::repo::Repository;
 use crate::repo_handles::has_remote_section;
+use crate::repo_handles::RepositoryRemotes;
 use crate::rev_parse::{resolve_push_full_ref_for_branch, resolve_revision_for_verify};
 use crate::state::{resolve_head, HeadState};
 use crate::transfer::{resolve_push_delete_ref, PushRefSpec};
@@ -126,8 +127,8 @@ pub struct PushPlanContext {
     ///
     /// Pass it on as [`PushOptions::remote_ref_tips`](crate::transfer::PushOptions) so a local
     /// push does not scan the remote's refs a second time. Only pass it to a push to the same
-    /// remote: [`load_push_plan_context`] and [`resolve_push`] select the same remote when given
-    /// the same override.
+    /// remote: [`RepositoryRemotes::push_plan_context`] and [`RepositoryRemotes::resolve_push`]
+    /// select the same remote when given the same override.
     pub remote_tips: Option<Vec<ObjectId>>,
 }
 
@@ -220,7 +221,7 @@ impl From<crate::error::Error> for PushPlanError {
 }
 
 /// Parse `--force` / `--force-with-lease[=<rev>]` into [`ForceMode`].
-pub fn parse_force_mode(
+pub(crate) fn parse_force_mode(
     repo: &Repository,
     force: bool,
     force_with_lease: Option<Option<String>>,
@@ -254,7 +255,7 @@ pub fn parse_force_mode(
 /// Besides remote and refspec resolution failures: [`PushPlanError::DeleteNotPlainName`] when a
 /// delete push is given a `src:dst` refspec, and [`PushPlanError::DeleteWithoutRefs`] when it
 /// names no ref. Both are reported before the remote is contacted.
-pub fn resolve_push(
+pub(crate) fn resolve_push(
     repo: &Repository,
     request: &PushRequest,
     ctx: &PushPlanContext,
@@ -618,7 +619,7 @@ pub fn push_follow_tags_config(config: &ConfigSet) -> bool {
 /// Matches `git push --follow-tags`: lightweight tags are skipped, tags already on the remote
 /// are skipped, and reachability uses commit-graph ancestor checks from pushed tips (any ref
 /// namespace). Tag refspecs and specs whose source is a tag object do not seed the walk.
-pub fn follow_tag_push_specs(
+pub(crate) fn follow_tag_push_specs(
     repo: &Repository,
     specs: &[PushRefSpec],
     ctx: &PushPlanContext,
@@ -656,24 +657,6 @@ pub fn follow_tag_push_specs(
         ));
     }
     Ok(out)
-}
-
-/// After a successful push, apply `-u` / `--set-upstream` when [`PushRequest::set_upstream`] was set.
-///
-/// Returns the short names of branches whose upstream config was written. No-op when `set_upstream`
-/// is false or `dry_run` is true.
-pub fn apply_set_upstream_after_push(
-    repo: &Repository,
-    remote: &str,
-    set_upstream: bool,
-    dry_run: bool,
-    specs: &[PushRefSpec],
-    results: &[PushRefResult],
-) -> Result<Vec<String>, crate::error::Error> {
-    if !set_upstream || dry_run {
-        return Ok(Vec::new());
-    }
-    apply_push_set_upstream(repo, remote, specs, results)
 }
 
 fn push_follow_tip_commits(repo: &Repository, specs: &[PushRefSpec]) -> PlanResult<Vec<ObjectId>> {
@@ -1075,7 +1058,7 @@ impl PushPlanContext {
 /// # Errors
 ///
 /// Only errors from [`configured_remote_for_push`].
-pub fn load_push_plan_context(
+pub(crate) fn load_push_plan_context(
     repo: &Repository,
     remote_override: Option<&str>,
     http_factory: Option<&dyn HttpClientFactory>,
@@ -1580,7 +1563,7 @@ fn apply_force_mode(
 /// Let `spec` replace the remote ref when it still holds what this clone's
 /// remote-tracking ref for it says (`--force-with-lease` for one ref), or
 /// is absent when there is none.
-pub fn apply_tracking_lease(repo: &Repository, remote: &str, spec: &mut PushRefSpec) {
+pub(crate) fn apply_tracking_lease(repo: &Repository, remote: &str, spec: &mut PushRefSpec) {
     spec.force = true;
     spec.expected_old = None;
     spec.expect_absent = false;
@@ -2472,5 +2455,109 @@ mod tests {
         assert_eq!(resolved.specs.len(), 1);
         assert_eq!(resolved.specs[0].dst, "refs/remotes/origin/main");
         assert_eq!(resolved.specs[0].src, Some(oid));
+    }
+}
+
+impl RepositoryRemotes<'_> {
+    /// Turn `--force` / `--force-with-lease[=<rev>]` into a [`ForceMode`]. `force` wins; an
+    /// explicit lease revision is resolved in this repository.
+    ///
+    /// # Errors
+    ///
+    /// [`PushPlanError::UnknownRevision`] when the lease revision does not resolve.
+    pub fn force_mode(
+        &self,
+        force: bool,
+        force_with_lease: Option<Option<String>>,
+    ) -> PlanResult<ForceMode> {
+        parse_force_mode(self.repository(), force, force_with_lease)
+    }
+
+    /// Load the [`PushPlanContext`] for the remote a push would select (`remote`, or the
+    /// configured push remote when `None`).
+    ///
+    /// The remote is chosen like [`Self::resolve_push`] chooses it, opened with
+    /// [`open_push_destination`] (so literal URLs and paths are listed like configured
+    /// remotes) and listed with [`Remote::list_push_refs`]. The context is best-effort: a
+    /// remote without a URL, or one whose refs cannot be listed, yields an empty context, and
+    /// the push itself reports any connection failure.
+    ///
+    /// The listing uses a [preflight client](HttpClientFactory::create_for_preflight), so
+    /// credentials the server refuses stay stored and the push reports them as rejected
+    /// ([`AuthFailure::Rejected`](crate::error::AuthFailure::Rejected)).
+    ///
+    /// # Errors
+    ///
+    /// Only errors selecting the remote (for example [`PushPlanError::NoRemote`]).
+    pub fn push_plan_context(
+        &self,
+        remote: Option<&str>,
+        http_factory: Option<&dyn HttpClientFactory>,
+    ) -> PlanResult<PushPlanContext> {
+        load_push_plan_context(self.repository(), remote, http_factory)
+    }
+
+    /// Resolve `request` into a remote name and [`PushRefSpec`] list, using `ctx` (from
+    /// [`Self::push_plan_context`]) for delete and destination DWIM.
+    ///
+    /// When `ctx.remote_ref_names` is empty, delete/ref DWIM still uses local refs and falls
+    /// back to Git's default `refs/heads/<name>` for deletes. A delete push
+    /// ([`PushRequest::delete_refs`] or a non-empty [`PushRequest::delete`]) plans one deletion
+    /// per name in `delete` and `refspecs`, and nothing else.
+    ///
+    /// # Errors
+    ///
+    /// Besides remote and refspec resolution failures: [`PushPlanError::DeleteNotPlainName`]
+    /// when a delete push is given a `src:dst` refspec, and [`PushPlanError::DeleteWithoutRefs`]
+    /// when it names no ref. Both are reported before the remote is contacted.
+    pub fn resolve_push(
+        &self,
+        request: &PushRequest,
+        ctx: &PushPlanContext,
+    ) -> PlanResult<ResolvedPush> {
+        resolve_push(self.repository(), request, ctx)
+    }
+
+    /// The annotated tag refspecs `git push --follow-tags` adds to `specs`.
+    ///
+    /// Lightweight tags are skipped, tags already on the remote (per `ctx`) are skipped, and
+    /// reachability uses commit-graph ancestor checks from the pushed tips (any ref
+    /// namespace). Tag refspecs and specs whose source is a tag object do not seed the walk.
+    ///
+    /// # Errors
+    ///
+    /// Repository failures while reading tags or walking history.
+    pub fn follow_tag_push_specs(
+        &self,
+        specs: &[PushRefSpec],
+        ctx: &PushPlanContext,
+    ) -> PlanResult<Vec<PushRefSpec>> {
+        follow_tag_push_specs(self.repository(), specs, ctx)
+    }
+
+    /// Let `spec` replace the remote ref when it still holds what this clone's
+    /// remote-tracking ref for it says (`--force-with-lease` for one ref), or is absent when
+    /// there is none. `remote` names the remote whose tracking refs are consulted.
+    pub fn apply_tracking_lease(&self, remote: &str, spec: &mut PushRefSpec) {
+        apply_tracking_lease(self.repository(), remote, spec);
+    }
+
+    /// After a successful push to `remote`, write `branch.<name>.remote` and
+    /// `branch.<name>.merge` for every branch update in `specs` that `results` reports as
+    /// pushed (`push -u` / [`PushRequest::set_upstream`]). Call it only for a push that was
+    /// not a dry run.
+    ///
+    /// Returns the short names of the branches whose upstream config was written.
+    ///
+    /// # Errors
+    ///
+    /// Config read or write failures.
+    pub fn set_upstream_after_push(
+        &self,
+        remote: &str,
+        specs: &[PushRefSpec],
+        results: &[PushRefResult],
+    ) -> Result<Vec<String>, crate::error::Error> {
+        apply_push_set_upstream(self.repository(), remote, specs, results)
     }
 }

@@ -775,8 +775,8 @@ mod http_401 {
     use grit_lib::progress::NullProgress;
     use grit_lib::refs::resolve_ref;
     use grit_lib::remote::transfer::{FetchOptions, TagMode};
+    use grit_lib::remote::transport::http::http_client_arc;
     use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
-    use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
 
     const USER: &str = "alice";
     const PASS: &str = "s3cr3t";
@@ -975,12 +975,22 @@ mod http_401 {
 
             let client =
                 UreqHttpClient::with_credentials(Box::new(provider)).with_git_protocol("version=2");
-            let err = http_fetch(
-                http_client_arc(client),
+            let err = grit_lib::repo::Repository::open(
                 &local_git,
-                &url,
+                &grit_lib::config::environment::RepositoryOptions::with_environment(
+                    (&mut opts).environment.clone(),
+                ),
+            )
+            .expect("open fetch target")
+            .remotes()
+            .fetch_from(
+                grit_lib::remote::transfer::TransferEndpoint::Http {
+                    client: http_client_arc(client),
+                    url: &url,
+                },
                 &mut opts,
                 &mut NullProgress,
+                grit_lib::progress::CancelToken::never_ref(),
             )
             .expect_err("wrong creds from helper must fail typed, not hang");
             assert!(
@@ -1016,12 +1026,22 @@ mod http_401 {
 
         let client =
             UreqHttpClient::with_credentials(Box::new(provider)).with_git_protocol("version=2");
-        http_fetch(
-            http_client_arc(client),
+        grit_lib::repo::Repository::open(
             &local_git,
-            &url,
+            &grit_lib::config::environment::RepositoryOptions::with_environment(
+                (&mut opts).environment.clone(),
+            ),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            grit_lib::remote::transfer::TransferEndpoint::Http {
+                client: http_client_arc(client),
+                url: &url,
+            },
             &mut opts,
             &mut NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
         )
         .expect("authed fetch via helper-filled Basic creds must succeed");
 

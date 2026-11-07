@@ -7,6 +7,7 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::fetch::Progress;
 use crate::fetch_request::FetchRefspecError;
+use crate::progress::CancelToken;
 use crate::refs::store::{Expected, RefName, RefNameRef, RefUpdate, RefUpdateFlags};
 use crate::refs::{commit_ref_updates_on_store, list_refs_for_repository};
 use crate::refspec::{fetch_specs_bind_local_ref, parse_fetch_refspec, RefspecItem};
@@ -16,7 +17,10 @@ use crate::remote::{
 };
 use crate::repo::Repository;
 use crate::transfer::tracking_refs_gone_in;
-use crate::transfer::{FetchOptions, FetchOutcome, PushOptions, PushOutcome, PushRefSpec};
+use crate::transfer::{
+    FetchAllOptions, FetchOptions, FetchOutcome, PushOptions, PushOutcome, PushRefSpec,
+    TransferEndpoint,
+};
 use crate::url_rewrite;
 
 /// Remote names and network operations for one open repository.
@@ -285,40 +289,141 @@ impl<'repo> RepositoryRemotes<'repo> {
         remote.fetch(self.repo, options, progress, cancel, http_factory)
     }
 
+    /// Fetch into this repository from an `endpoint` whose transport the caller supplies: a
+    /// repository path on this machine, an open [`Connection`](crate::transport::Connection),
+    /// or a smart-HTTP URL with an [`HttpClient`](crate::transport::http::HttpClient).
+    ///
+    /// Refspec matching, tag following, prune, shallow and filter options, and the outcome are
+    /// the same as [`Self::fetch`]. Objects land in this repository's object store. A local
+    /// endpoint copies or links the objects the wire protocol would send; a connection or
+    /// HTTP endpoint negotiates protocol v0, v1 or v2 as advertised. The engine may update
+    /// `options` while it runs (for example the filter chosen from accepted promisor remotes).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Cancelled`] when `cancel` fires, and propagates transport, negotiation,
+    /// pack ingest, refspec and ref-update failures.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use grit_lib::progress::CancelToken;
+    /// # use grit_lib::remote::fetch::NoProgress;
+    /// # use grit_lib::remote::transfer::{FetchOptions, TransferEndpoint};
+    /// # use grit_lib::repo::{InitOptions, Repository};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let dir = tempfile::tempdir()?;
+    /// let (upstream, _) = Repository::init(&dir.path().join("upstream"), &InitOptions::default())?;
+    /// let (repo, _) = Repository::init(&dir.path().join("clone"), &InitOptions::default())?;
+    /// let mut options = FetchOptions::default();
+    /// options.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+    /// let outcome = repo.remotes().fetch_from(
+    ///     TransferEndpoint::Local(upstream.git_dir()),
+    ///     &mut options,
+    ///     &mut NoProgress,
+    ///     &CancelToken::never(),
+    /// )?;
+    /// assert_eq!(outcome.transfer.objects, 0);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn fetch_from(
+        &self,
+        endpoint: TransferEndpoint<'_>,
+        options: &mut FetchOptions,
+        progress: &mut dyn Progress,
+        cancel: &CancelToken,
+    ) -> Result<FetchOutcome> {
+        match endpoint {
+            TransferEndpoint::Local(remote_git_dir) => crate::transfer::fetch_local_into(
+                self.repo,
+                remote_git_dir,
+                options,
+                progress,
+                cancel,
+            ),
+            TransferEndpoint::Connection(conn) => {
+                crate::fetch::fetch_remote_into(self.repo, conn, options, progress, cancel)
+            }
+            TransferEndpoint::Http { client, url } => crate::transport::http::http_fetch(
+                client, self.repo, url, options, progress, cancel,
+            ),
+        }
+    }
+
+    /// Push `refs` from this repository to an `endpoint` whose transport the caller supplies.
+    ///
+    /// The ref-update decisions, pack, and [`PushOutcome`] are the same as [`Self::push`], but
+    /// the client-side `pre-push` hook does not run. A local endpoint applies the remote
+    /// repository's receive policy and runs its receive hooks, as `git receive-pack` would;
+    /// connection and HTTP endpoints need a protocol v0/v1 receive-pack.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Cancelled`] when `cancel` fires, an error when a source object is
+    /// missing or the pack build fails, and transport and report-parsing failures.
+    /// An atomic push to a server without `atomic` support returns
+    /// [`RemoteError::PushAtomicUnsupported`] before anything is sent.
+    pub fn push_to(
+        &self,
+        endpoint: TransferEndpoint<'_>,
+        refs: &[PushRefSpec],
+        options: &PushOptions,
+        progress: &mut dyn Progress,
+        cancel: &CancelToken,
+    ) -> Result<PushOutcome> {
+        match endpoint {
+            TransferEndpoint::Local(remote_git_dir) => crate::transfer::push_local_from(
+                self.repo,
+                remote_git_dir,
+                refs,
+                options,
+                progress,
+                cancel,
+                None,
+            ),
+            TransferEndpoint::Connection(conn) => crate::push::push_remote_from(
+                self.repo, conn, refs, options, progress, cancel, None,
+            ),
+            TransferEndpoint::Http { client, url } => {
+                crate::push::push_http(client, self.repo, url, refs, options, progress, cancel)
+            }
+        }
+    }
+
     /// Fetch from every configured remote in config load order, skipping
     /// `remote.<name>.skipFetchAll=true` entries.
     ///
-    /// Each remote uses [`resolve_fetch_prune`](crate::remote::transfer::resolve_fetch_prune)
-    /// and [`resolve_fetch_tags`](crate::remote::transfer::resolve_fetch_tags) with
-    /// `cli_prune` / `cli_tags` when set; otherwise that remote's own config.
+    /// Each remote's refspecs, tag mode and prune come from its config, resolved with
+    /// [`resolve_fetch_prune`](crate::remote::transfer::resolve_fetch_prune) and
+    /// [`resolve_fetch_tags`](crate::remote::transfer::resolve_fetch_tags) against the
+    /// overrides in `options` ([`FetchAllOptions::prune`], [`FetchAllOptions::tags`]).
     /// Failures are recorded per remote and fetching continues.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::error::Error::Config`] when prune config is invalid for
-    /// a remote (same as
-    /// [`resolve_fetch_prune`](crate::remote::transfer::resolve_fetch_prune)).
-    #[allow(clippy::too_many_arguments)]
+    /// Returns [`crate::error::Error::Config`] when the config cannot be read or prune config
+    /// is invalid for a remote, and [`Error::Cancelled`] when `cancel` fires.
     pub fn fetch_all(
         &self,
-        config: &ConfigSet,
-        base: &FetchOptions,
-        cli_prune: Option<bool>,
-        cli_tags: Option<bool>,
+        options: &FetchAllOptions,
         progress: &mut dyn Progress,
-        cancel: &crate::progress::CancelToken,
+        cancel: &CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> Result<Vec<(String, std::result::Result<FetchOutcome, RemoteError>)>> {
         use crate::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags};
 
+        let config = self.repo.config().snapshot()?;
+        let config = config.as_ref();
+        let base = &options.fetch;
         let mut results = Vec::new();
         for name in configured_remote_names_in_config_order(config) {
             crate::progress::poll_cancel(progress, cancel)?;
             if remote_skip_fetch_all(config, &name) {
                 continue;
             }
-            let prune = resolve_fetch_prune(config, &name, cli_prune)?;
-            let tags = resolve_fetch_tags(config, &name, cli_tags);
+            let prune = resolve_fetch_prune(config, &name, options.prune)?;
+            let tags = resolve_fetch_tags(config, &name, options.tags);
             let mut opts = FetchOptions::new();
             opts.tags = tags;
             opts.prune = prune;

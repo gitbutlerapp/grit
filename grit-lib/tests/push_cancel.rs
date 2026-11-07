@@ -20,7 +20,6 @@ use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::pkt_line;
-use grit_lib::remote::push::push_http;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::serve::{ReceivePack, ReceivePolicy, ServeOptions};
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
@@ -430,10 +429,17 @@ fn push_over_http(
     tip: ObjectId,
     cancel: &CancelToken,
 ) -> Result<Vec<PushRefStatus>> {
-    push_http(
-        server,
+    grit_lib::repo::Repository::open(
         local_dir,
-        "http://in-process.invalid/remote.git",
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: server,
+            url: "http://in-process.invalid/remote.git",
+        },
         &[main_spec(tip)],
         &PushOptions::default(),
         &mut NoProgress,

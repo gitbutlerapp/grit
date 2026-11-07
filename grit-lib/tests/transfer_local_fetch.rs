@@ -16,9 +16,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectKind;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::transfer::{
-    build_pack, fetch_local, FetchOptions, PackBuildOptions, TagMode, UpdateMode,
-};
+use grit_lib::remote::transfer::{build_pack, FetchOptions, PackBuildOptions, TagMode, UpdateMode};
 use grit_test_support::{git, git_cmd};
 
 fn open_odb(git_dir: &Path) -> Odb {
@@ -61,7 +59,21 @@ fn fetch_local_copies_refs_and_objects_then_fast_forwards() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
-    let outcome = fetch_local(&local_git, &remote_git, &opts).expect("fetch_local");
+    let outcome = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch_local");
 
     // default_branch from remote HEAD symref.
     assert_eq!(outcome.default_branch.as_deref(), Some("main"));
@@ -122,7 +134,21 @@ fn fetch_local_copies_refs_and_objects_then_fast_forwards() {
     let c_blob = rev_parse(&remote, "HEAD:c.txt");
     assert_ne!(remote_main2, remote_main);
 
-    let outcome2 = fetch_local(&local_git, &remote_git, &opts).expect("second fetch");
+    let outcome2 = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("second fetch");
 
     let head_update2 = outcome2
         .updates
@@ -291,7 +317,21 @@ fn fetch_local_from_loose_remote_links_loose_objects() {
 
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
-    fetch_local(&local_git, &remote_git, &opts).expect("fetch_local");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch_local");
 
     assert!(
         pack_files(&local_git).is_empty(),
@@ -356,7 +396,21 @@ fn fetch_local_into_empty_repo_links_remote_pack() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
-    fetch_local(&local_git, &remote_git, &opts).expect("fetch_local");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch_local");
 
     let local_packs = pack_files(&local_git);
     assert_eq!(local_packs.len(), 1, "expected one linked pack");
@@ -413,7 +467,21 @@ fn fetch_into_repo_holding_the_empty_tree_still_links_the_source_pack() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::None;
-    fetch_local(&local_git, &remote_git, &opts).expect("fetch_local");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch_local");
 
     assert_eq!(pack_names(&local_git), pack_names(&remote_git));
     let fsck = git_cmd(&["fsck", "--strict"]).in_dir(&local_git).exec();

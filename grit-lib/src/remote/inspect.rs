@@ -107,7 +107,7 @@ impl FetchRefspecs {
 /// - [`RemoteError::UnknownRemote`] when no `remote.<name>.*` section exists.
 /// - [`RemoteError::NoUrl`] when the remote has no URL.
 /// - Propagates transport, config, and ref I/O failures as [`RemoteError::from`].
-pub fn inspect_remote(
+pub(crate) fn inspect_remote(
     repo: &Repository,
     name: &str,
     options: &InspectOptions,

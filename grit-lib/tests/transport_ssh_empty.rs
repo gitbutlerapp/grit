@@ -14,8 +14,6 @@ use std::process::Command;
 use grit_lib::error::{Error, RemoteUnreadableReason};
 use grit_lib::prelude::Environment;
 use grit_lib::remote::clone::{clone, CloneOptions};
-use grit_lib::remote::fetch::fetch_remote;
-use grit_lib::remote::push::push_remote;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, Connection, Service, SshTransport, Transport};
@@ -150,9 +148,16 @@ fn fetch_empty_bare_over_ssh_is_noop() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::None;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local.join(".git"),
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -236,9 +241,14 @@ fn push_to_empty_bare_over_ssh_without_hung_up_stderr() {
         dst: "refs/heads/x".to_owned(),
         ..Default::default()
     };
-    let outcome = push_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local.join(".git"),
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -429,9 +439,16 @@ fn fetch_empty_bare_over_ssh_flush_only_v0_is_noop() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::None;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local.join(".git"),
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &grit_lib::progress::CancelToken::never(),

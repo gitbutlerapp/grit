@@ -11,7 +11,7 @@ use grit_lib::objects::NewCommit;
 use grit_lib::refs;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::transport_path::resolve_local_remote_git_dir;
-use grit_lib::remote::{list_refs_from_git_dir, ListRefsOptions};
+use grit_lib::remote::{ListRefsOptions, Remote};
 use grit_lib::repo::Repository;
 use std::path::Path;
 
@@ -34,11 +34,10 @@ fn main() -> Result<()> {
 
     let remote_git_dir =
         resolve_local_remote_git_dir(&remote_info.url, &git_dir, work_tree.as_deref());
-    let remote_repo = Repository::open(&remote_git_dir, &RepositoryOptions::from_process())?;
-    let refs_on_remote = list_refs_from_git_dir(
-        &remote_git_dir,
-        Some(remote_repo.odb()),
+    let refs_on_remote = repo.remotes().ls_remote(
+        &Remote::from_url(&remote_git_dir.to_string_lossy())?,
         &ListRefsOptions::default(),
+        None,
     )?;
     eprintln!(
         "ls-remote: {} ref(s) on {}",

@@ -1,7 +1,7 @@
 //! Smoke test: fetch from a bare remote (regression for grit-examples fetch_push).
 
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::transfer::{fetch_local, FetchOptions};
+use grit_lib::remote::transfer::FetchOptions;
 
 #[test]
 fn fetch_local_from_bare_remote_with_loose_objects_only() {
@@ -27,6 +27,20 @@ fn fetch_local_from_bare_remote_with_loose_objects_only() {
     let local_git = consumer.join(".git");
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
-    fetch_local(&local_git, &bare, &opts).expect("fetch from bare remote");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch from bare remote");
     resolve_ref(&local_git, "refs/remotes/origin/main").expect("tracking ref");
 }

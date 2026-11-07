@@ -11,7 +11,7 @@
 //! * [`SmartHttpTransport`] — a [`Transport`] that performs the `info/refs`
 //!   discovery on [`Transport::connect`] and exposes the parsed advertisement
 //!   through a [`Connection`].
-//! * [`http_fetch`] — drives the stateless-RPC negotiation (`want`/`have`/`done`
+//! * `http_fetch` — drives the stateless-RPC negotiation (`want`/`have`/`done`
 //!   over repeated POSTs), demultiplexes the side-band pack, ingests it, and
 //!   returns a fetch outcome using the same refspec/tag/prune helpers as other
 //!   fetch paths.
@@ -23,14 +23,13 @@
 //! Both protocol v0/v1 (the classic stateless RPC) and protocol v2 (the
 //! stateless multi-POST flow) are implemented here. A v2 server is detected from
 //! the `version 2` capability advertisement returned by `info/refs` (requested
-//! with the `Git-Protocol: version=2` header); [`http_fetch`] then runs the v2
+//! with the `Git-Protocol: version=2` header); `http_fetch` then runs the v2
 //! `command=ls-refs` + `command=fetch` rounds as separate POSTs — each round
 //! resends the capability echo, all `want`s, and the accumulated `have`s —
 //! reusing the shared v2 request framing and side-band demuxer from the fetch module.
 
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
-use std::path::Path;
 
 use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::fetch::Progress;
@@ -985,8 +984,8 @@ pub(crate) fn http_origins_match(a: &str, b: &str) -> bool {
 ///
 /// [`Transport::connect`] performs the `info/refs?service=git-upload-pack`
 /// discovery GET and parses the advertisement; the returned [`Connection`]
-/// exposes the advertised refs/capabilities. Use [`http_fetch`] to drive the
-/// fetch negotiation over the same client.
+/// exposes the advertised refs/capabilities. Fetch over the same client with
+/// [`TransferEndpoint::Http`](crate::transfer::TransferEndpoint::Http).
 pub struct SmartHttpTransport<C: HttpClient> {
     client: C,
 }
@@ -1000,43 +999,6 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
     /// Borrow the underlying HTTP client.
     pub fn client(&self) -> &C {
         &self.client
-    }
-
-    /// Push `refs` to `repo_url` over smart HTTP (`git-receive-pack`), returning a
-    /// [`crate::transfer::PushOutcome`].
-    ///
-    /// This is the push counterpart to [`http_fetch`]: it discovers the
-    /// receive-pack advertisement, decides each update, builds the command block +
-    /// pack, POSTs `git-receive-pack`, and parses the `report-status` reply —
-    /// reusing the same decision/pack/report machinery as the duplex
-    /// [`crate::push::push_remote`]. Delegates to [`crate::push::push_http`].
-    ///
-    /// Protocol v0/v1 only (a v2 receive-pack advertisement is rejected).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if discovery fails, the advertisement is protocol v2, a
-    /// source object is missing locally, the pack build fails, or on wire/parse
-    /// I/O failure.
-    pub fn push(
-        &self,
-        local_git_dir: &Path,
-        repo_url: &str,
-        refs: &[crate::transfer::PushRefSpec],
-        opts: &crate::transfer::PushOptions,
-        progress: &mut dyn Progress,
-        cancel: &crate::progress::CancelToken,
-    ) -> Result<crate::transfer::PushOutcome> {
-        use crate::push::push_remote;
-        use crate::transport::{ConnectOptions, Transport};
-        let connect = ConnectOptions {
-            protocol_version: 0,
-            diagnostics: opts.diagnostics.clone(),
-            network_trace: opts.network_trace,
-            ..Default::default()
-        };
-        let mut conn = self.connect(repo_url, Service::ReceivePack, &connect)?;
-        push_remote(local_git_dir, &mut *conn, refs, opts, progress, cancel)
     }
 
     /// Perform the `info/refs` discovery for `repo_url` and `service`, returning
@@ -1205,13 +1167,14 @@ impl<C: HttpClient + Clone + 'static> Transport for SmartHttpTransport<C> {
     }
 }
 
-/// Wrap an owned HTTP client for [`http_fetch`] / [`SmartHttpTransport`].
+/// Wrap an owned HTTP client for [`SmartHttpTransport`] or
+/// [`TransferEndpoint::Http`](crate::transfer::TransferEndpoint::Http).
 pub fn http_client_arc(client: impl HttpClient + 'static) -> std::sync::Arc<dyn HttpClient> {
     let boxed: Box<dyn HttpClient> = Box::new(client);
     std::sync::Arc::from(boxed)
 }
 
-/// Fetch from a smart-HTTP remote via the shared [`crate::fetch::fetch_remote`] engine.
+/// Fetch from a smart-HTTP remote into `local` via the shared fetch engine.
 ///
 /// Performs `info/refs` discovery (with redirect re-basing) and drives stateless
 /// `git-upload-pack` POSTs through a [`crate::transport::stateless_http::StatelessHttpConnection`].
@@ -1219,14 +1182,14 @@ pub fn http_client_arc(client: impl HttpClient + 'static) -> std::sync::Arc<dyn 
 /// # Errors
 ///
 /// Returns an error if discovery, negotiation, pack ingest, or ref updates fail.
-pub fn http_fetch(
+pub(crate) fn http_fetch(
     client: std::sync::Arc<dyn HttpClient>,
-    local_git_dir: &Path,
+    local: &crate::repo::Repository,
     repo_url: &str,
     opts: &mut FetchOptions,
     progress: &mut dyn Progress,
+    cancel: &CancelToken,
 ) -> Result<FetchOutcome> {
-    use crate::fetch::fetch_remote;
     use crate::transport::Transport;
     let protocol_version = client
         .git_protocol_header()
@@ -1241,13 +1204,7 @@ pub fn http_fetch(
     };
     let transport = SmartHttpTransport::new(client);
     let mut conn = transport.connect(repo_url, Service::UploadPack, &connect)?;
-    fetch_remote(
-        local_git_dir,
-        &mut *conn,
-        opts,
-        progress,
-        &crate::progress::CancelToken::never(),
-    )
+    crate::fetch::fetch_remote_into(local, &mut *conn, opts, progress, cancel)
 }
 
 #[cfg(test)]

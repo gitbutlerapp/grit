@@ -14,7 +14,7 @@ use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::switch::{resolve_create_branch, switch_repository, SwitchOptions};
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::refs::{resolve_ref, RefnameUnavailable};
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
+use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
 
@@ -175,7 +175,21 @@ fn fetched_rel_children(tmp: &Path) -> (PathBuf, PathBuf, FetchOptions) {
 
 fn assert_fetch_rejects_rel_and_creates_other(clone: &Path, bare: &Path, opts: &FetchOptions) {
     let clone_git = clone.join(".git");
-    let outcome = fetch_local(&clone_git, bare, opts).expect("fetch without prune");
+    let outcome = grit_lib::repo::Repository::open(
+        &clone_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(bare),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch without prune");
     assert!(resolve_ref(&clone_git, "refs/remotes/origin/other").is_ok());
     assert!(resolve_ref(&clone_git, "refs/remotes/origin/rel").is_err());
     let rel = outcome
@@ -198,7 +212,21 @@ fn assert_fetch_rejects_rel_and_creates_other(clone: &Path, bare: &Path, opts: &
 
     let mut pruned = FetchOptions::new();
     pruned.prune = true;
-    let outcome = fetch_local(&clone_git, bare, &pruned).expect("fetch with prune");
+    let outcome = grit_lib::repo::Repository::open(
+        &clone_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&pruned).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(bare),
+        &mut pruned.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch with prune");
     assert!(!outcome.has_rejections(), "{:?}", outcome.updates);
     assert!(resolve_ref(&clone_git, "refs/remotes/origin/rel").is_ok());
     git(clone, &["fsck", "--no-progress"]);

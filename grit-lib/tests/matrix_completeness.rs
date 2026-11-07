@@ -51,9 +51,7 @@ use grit_lib::error::{Error, RemoteUnreadableReason, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::pkt_line;
-use grit_lib::remote::push::{push_http, push_remote};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::transport::http::HttpClient;
@@ -226,9 +224,16 @@ fn fetch_v0_sideband_band3_fatal_is_typed_error_not_hang() {
     let local_git_for_thread = local_git.clone();
     let err = with_watchdog(10, "fetch band-3", move || {
         let mut conn = conn;
-        fetch_remote(
+        grit_lib::repo::Repository::open(
             &local_git_for_thread,
-            &mut conn,
+            &grit_lib::config::environment::RepositoryOptions::with_environment(
+                (&mut opts).environment.clone(),
+            ),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
             &mut opts,
             &mut NoProgress,
             &CancelToken::never(),
@@ -272,9 +277,16 @@ fn fetch_v0_err_after_done_is_typed_remote_error() {
     let local_git_for_thread = local_git.clone();
     let err = with_watchdog(10, "fetch ERR-after-done", move || {
         let mut conn = conn;
-        fetch_remote(
+        grit_lib::repo::Repository::open(
             &local_git_for_thread,
-            &mut conn,
+            &grit_lib::config::environment::RepositoryOptions::with_environment(
+                (&mut opts).environment.clone(),
+            ),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
             &mut opts,
             &mut NoProgress,
             &CancelToken::never(),
@@ -362,9 +374,14 @@ fn push_remote_rejects_protocol_v2_typed_before_touching_refs() {
         expect_absent: false,
         ..Default::default()
     };
-    let err = push_remote(
+    let err = grit_lib::repo::Repository::open(
         &local_git,
-        &mut conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -426,9 +443,14 @@ fn push_remote_unpack_failure_report_demotes_all_sent_refs() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome = push_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -557,10 +579,17 @@ fn push_http_rejects_v2_receive_pack_advertisement_typed() {
         expect_absent: false,
         ..Default::default()
     };
-    let err = push_http(
-        client,
+    let err = grit_lib::repo::Repository::open(
         &local_git,
-        "http://example.invalid/repo.git",
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client,
+            url: "http://example.invalid/repo.git",
+        },
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -603,10 +632,17 @@ fn push_http_propagates_discovery_transport_error_typed() {
         expect_absent: false,
         ..Default::default()
     };
-    let err = push_http(
-        client,
+    let err = grit_lib::repo::Repository::open(
         &local_git,
-        "http://127.0.0.1:1/repo.git",
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client,
+            url: "http://127.0.0.1:1/repo.git",
+        },
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -843,9 +879,16 @@ fn shallow_depth1_with_all_tags_over_git_daemon() {
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
     opts.fetch_depth = FetchDepth::depth(1);
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),

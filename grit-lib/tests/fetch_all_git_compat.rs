@@ -84,10 +84,9 @@ fn fetch_all_remotes_matches_git_fetch_all() {
     let results = repo
         .remotes()
         .fetch_all(
-            &config,
-            &FetchOptions::default(),
-            None,
-            None,
+            &grit_lib::remote::transfer::FetchAllOptions::new((&FetchOptions::default()).clone())
+                .with_prune(None)
+                .with_tags(None),
             &mut progress,
             &CancelToken::never(),
             None,

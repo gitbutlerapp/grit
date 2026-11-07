@@ -22,8 +22,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::fetch_remote;
-use grit_lib::remote::push::push_remote;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 use grit_lib::repo::Repository;
@@ -161,9 +159,16 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -301,9 +306,16 @@ fn fetch_following_lightweight_tag_at_branch_tip_downloads_branch() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::Following;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -388,9 +400,16 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
     opts.tags = TagMode::Following;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -405,9 +424,16 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
     let mut conn = transport
         .connect(&url, Service::UploadPack, &ConnectOptions::default())
         .expect("reconnect");
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -487,9 +513,16 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
     fetch_opts.tags = TagMode::None;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut fetch_opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut fetch_opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -525,9 +558,14 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
     let mut conn = transport
         .connect(&url, Service::ReceivePack, &ConnectOptions::default())
         .expect("receive-pack connect");
-    push_remote(
+    grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[PushRefSpec {
             src: Some(tag_outcome.oid),
             src_ref: None,
@@ -616,9 +654,16 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
     let mut seed_opts = FetchOptions::new();
     seed_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     seed_opts.tags = TagMode::None;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut seed_opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut seed_opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -645,9 +690,16 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
     dry_run_opts.remote_name = Some("origin".to_owned());
     dry_run_opts.dry_run = true;
     dry_run_opts.tags = TagMode::None;
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut dry_run_opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut dry_run_opts,
         &mut NoProgress,
         &CancelToken::never(),

@@ -25,7 +25,7 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
+use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::TempDir;
 
@@ -485,7 +485,14 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
         let mut fetch_opts = FetchOptions::new();
         fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
         fetch_opts.tags = TagMode::None;
-        fetch_local(repo.git_dir(), upstream, &fetch_opts).expect("fetch");
+        repo.remotes()
+            .fetch_from(
+                grit_lib::remote::transfer::TransferEndpoint::Local(upstream),
+                &mut fetch_opts.clone(),
+                &mut grit_lib::remote::fetch::NoProgress,
+                grit_lib::progress::CancelToken::never_ref(),
+            )
+            .expect("fetch");
         let main_ref = format!("refs/remotes/origin/{default_branch}");
         let main_tip = grit_lib::refs::resolve_ref(repo.git_dir(), &main_ref).expect("main tip");
         let topic_tip = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/remotes/origin/topic")

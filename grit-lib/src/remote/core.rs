@@ -1509,7 +1509,7 @@ pub(crate) fn list_refs_from_git_dir_for_fetch(
 
 ///
 /// Returns [`RemoteError::from`] on I/O or ref resolution failures.
-pub fn list_refs_from_git_dir(
+pub(crate) fn list_refs_from_git_dir(
     git_dir: &Path,
     odb: Option<&Odb>,
     opts: &ListRefsOptions,

@@ -59,7 +59,6 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::push::{push_http, push_remote};
 use grit_lib::remote::push_report::{PushRefResult, PushRefStatus};
 use grit_lib::remote::transfer::{PushOptions, PushOutcome, PushRefSpec};
 use grit_lib::remote::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
@@ -555,9 +554,14 @@ fn run_unsupported_atomic_matrix(
             .connect(url, Service::ReceivePack, &ConnectOptions::default())
             .unwrap();
         assert!(!conn.capabilities().iter().any(|c| c == "atomic"));
-        let err = push_remote(
+        let err = grit_lib::repo::Repository::open(
             &local.join(".git"),
-            &mut *conn,
+            &grit_lib::config::environment::RepositoryOptions::empty(),
+        )
+        .expect("open push source")
+        .remotes()
+        .push_to(
+            grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &specs,
             &PushOptions {
                 atomic: true,
@@ -591,9 +595,14 @@ fn run_unsupported_atomic_matrix(
     let mut conn = transport
         .connect(url, Service::ReceivePack, &ConnectOptions::default())
         .unwrap();
-    let out = push_remote(
+    let out = grit_lib::repo::Repository::open(
         &local.join(".git"),
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &specs,
         &PushOptions::default(),
         &mut NoProgress,
@@ -906,9 +915,14 @@ fn push_matrix_over_git_daemon() {
         let mut conn = transport
             .connect(&url, Service::ReceivePack, &ConnectOptions::default())
             .expect("connect git daemon receive-pack");
-        push_remote(
+        grit_lib::repo::Repository::open(
             &local_git,
-            &mut *conn,
+            &grit_lib::config::environment::RepositoryOptions::empty(),
+        )
+        .expect("open push source")
+        .remotes()
+        .push_to(
+            grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             specs,
             opts,
             &mut NoProgress,
@@ -972,9 +986,14 @@ fn push_matrix_over_ssh() {
         let mut conn = transport
             .connect(&url, Service::ReceivePack, &ConnectOptions::default())
             .expect("connect ssh receive-pack");
-        push_remote(
+        grit_lib::repo::Repository::open(
             &local_git,
-            &mut *conn,
+            &grit_lib::config::environment::RepositoryOptions::empty(),
+        )
+        .expect("open push source")
+        .remotes()
+        .push_to(
+            grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             specs,
             opts,
             &mut NoProgress,
@@ -1047,10 +1066,17 @@ fn push_matrix_over_smart_http() {
 
     let push = |specs: &[PushRefSpec], opts: &PushOptions| -> PushOutcome {
         let client = http_client_arc(UreqHttpClient::new());
-        push_http(
-            client.clone(),
+        grit_lib::repo::Repository::open(
             &local_git,
-            &url,
+            &grit_lib::config::environment::RepositoryOptions::empty(),
+        )
+        .expect("open push source")
+        .remotes()
+        .push_to(
+            grit_lib::remote::transfer::TransferEndpoint::Http {
+                client: client.clone(),
+                url: &url,
+            },
             specs,
             opts,
             &mut NoProgress,
@@ -1143,9 +1169,14 @@ fn remote_rejection_surfaces_over_git_daemon() {
 
     // A clean new-ref create that the *server* (hook) declines: the client gate
     // accepts it (new ref), but the hook's non-zero exit yields an `ng` line.
-    let outcome = push_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec(Some(graph.c2), "refs/heads/main")],
         &PushOptions::default(),
         &mut NoProgress,
@@ -1201,9 +1232,14 @@ fn remote_rejection_surfaces_over_ssh() {
         }
     };
 
-    let outcome = push_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec(Some(graph.c2), "refs/heads/main")],
         &PushOptions::default(),
         &mut NoProgress,
@@ -1439,9 +1475,14 @@ fn report_status_v1_and_v2_both_parse_over_ssh() {
             "fake server should advertise main at c1, got {:?}",
             conn.advertised_refs()
         );
-        let out = push_remote(
+        let out = grit_lib::repo::Repository::open(
             &local_git,
-            &mut *conn,
+            &grit_lib::config::environment::RepositoryOptions::empty(),
+        )
+        .expect("open push source")
+        .remotes()
+        .push_to(
+            grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &push_specs,
             &PushOptions::default(),
             &mut NoProgress,
@@ -1483,9 +1524,14 @@ fn report_status_v1_and_v2_both_parse_over_ssh() {
         let mut conn = transport
             .connect(&url, Service::ReceivePack, &ConnectOptions::default())
             .expect("connect fake receive-pack (v2 ng)");
-        let out = push_remote(
+        let out = grit_lib::repo::Repository::open(
             &local_git,
-            &mut *conn,
+            &grit_lib::config::environment::RepositoryOptions::empty(),
+        )
+        .expect("open push source")
+        .remotes()
+        .push_to(
+            grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &push_specs,
             &PushOptions::default(),
             &mut NoProgress,
@@ -1549,9 +1595,14 @@ fn push_succeeds_when_fake_receive_pack_exits_immediately_after_report() {
     let mut conn = transport
         .connect(&url, Service::ReceivePack, &ConnectOptions::default())
         .expect("connect abrupt fake receive-pack");
-    let out = push_remote(
+    let out = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &push_specs,
         &PushOptions::default(),
         &mut NoProgress,

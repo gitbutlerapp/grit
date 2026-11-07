@@ -9,7 +9,7 @@ use grit_lib::refs::store::{Expected, RefUpdate};
 use grit_lib::refs::{
     commit_ref_store_batch, pack_remote_tracking_refs_for_clone, resolve_ref, write_symbolic_ref,
 };
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
+use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
 fn setup_clone_like_layout(tmp: &Path) -> (PathBuf, PathBuf, ObjectId) {
@@ -129,7 +129,21 @@ fn fetch_local_prune_slash_remote_name_no_phantom_head_delete() {
     opts.tags = TagMode::Following;
     opts.prune = true;
     for pass in 1..=2 {
-        let outcome = fetch_local(&local_git, &remote_git, &opts).expect("fetch");
+        let outcome = grit_lib::repo::Repository::open(
+            &local_git,
+            &grit_lib::config::environment::RepositoryOptions::with_environment(
+                (&opts).environment.clone(),
+            ),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+            &mut opts.clone(),
+            &mut grit_lib::remote::fetch::NoProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
+        .expect("fetch");
         let noisy: Vec<_> = outcome
             .updates
             .iter()
@@ -155,7 +169,21 @@ fn fetch_local_prune_twice_reports_no_updates_when_up_to_date() {
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::Following;
     opts.prune = true;
-    let first = fetch_local(&local_git, &remote_git, &opts).expect("first fetch");
+    let first = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("first fetch");
     let noisy: Vec<_> = first
         .updates
         .iter()
@@ -166,7 +194,21 @@ fn fetch_local_prune_twice_reports_no_updates_when_up_to_date() {
         "first prune fetch on up-to-date clone layout should report no changes: {noisy:?}"
     );
 
-    let second = fetch_local(&local_git, &remote_git, &opts).expect("second fetch");
+    let second = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("second fetch");
     let noisy: Vec<_> = second
         .updates
         .iter()

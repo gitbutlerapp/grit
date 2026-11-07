@@ -12,7 +12,7 @@ use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::redact_url_for_display;
 use grit_lib::remote::transfer::{
-    resolve_fetch_prune, resolve_fetch_tags, FetchDepth, FetchOptions,
+    resolve_fetch_prune, resolve_fetch_tags, FetchAllOptions, FetchDepth, FetchOptions,
     FetchOutcome as LibFetchOutcome, TagMode, TransferStats, UpdateKind, UpdateMode,
 };
 use grit_lib::remote::{DefaultHttpClientFactory, RemoteError};
@@ -429,15 +429,6 @@ fn shallow_json(
 fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
-    let config = ConfigSet::load(
-        &crate::context::environment(),
-        Some(repo.git_dir()),
-        &grit_lib::config::LoadConfigOptions::standard(
-            &crate::context::environment(),
-            Some(repo.git_dir()),
-        ),
-    )
-    .context("could not load config")?;
     let factory = crate::context::http_client_factory();
     let mut progress = args.quiet.progress(mode);
     let mut base = FetchOptions::new();
@@ -449,10 +440,9 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
     let raw = repo
         .remotes()
         .fetch_all(
-            &config,
-            &base,
-            args.prune_override(),
-            args.tag_mode_override(),
+            &FetchAllOptions::new(base)
+                .with_prune(args.prune_override())
+                .with_tags(args.tag_mode_override()),
             &mut progress,
             &crate::interrupt::process_cancel_token(),
             Some(&factory),

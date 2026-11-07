@@ -8,7 +8,7 @@ mod fixture;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
+use grit_lib::remote::transfer::{FetchOptions, TagMode};
 
 fn bench(c: &mut Criterion) {
     let tmp = tempfile::tempdir().unwrap();
@@ -27,8 +27,21 @@ fn bench(c: &mut Criterion) {
         opts.remote_name = Some("origin".into());
         group.bench_function(name, |b| {
             b.iter(|| {
-                let outcome =
-                    fetch_local(black_box(&local), black_box(&remote), black_box(&opts)).unwrap();
+                let outcome = grit_lib::repo::Repository::open(
+                    black_box(&local),
+                    &grit_lib::config::environment::RepositoryOptions::with_environment(
+                        (black_box(&opts)).environment.clone(),
+                    ),
+                )
+                .expect("open fetch target")
+                .remotes()
+                .fetch_from(
+                    grit_lib::remote::transfer::TransferEndpoint::Local(black_box(&remote)),
+                    &mut black_box(&opts).clone(),
+                    &mut grit_lib::remote::fetch::NoProgress,
+                    grit_lib::progress::CancelToken::never_ref(),
+                )
+                .unwrap();
                 assert_eq!(outcome.transfer.objects, 0);
                 black_box(outcome)
             })

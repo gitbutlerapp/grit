@@ -5,7 +5,7 @@ use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
+use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
 fn following_remote_heads() -> FetchOptions {
@@ -33,7 +33,21 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     let remote_git = remote.join(".git");
 
     let opts = following_remote_heads();
-    fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("initial fetch");
 
     let tag_before = resolve_ref(&local_git, "refs/tags/newtag").expect("tag after first fetch");
     assert_eq!(tag_before, rev_parse(&remote, "refs/tags/newtag"));
@@ -43,7 +57,21 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     git(&remote, &["commit", "-q", "-m", "b"]);
     git(&remote, &["tag", "-f", "newtag"]);
 
-    let outcome = fetch_local(&local_git, &remote_git, &opts).expect("fetch after tag move");
+    let outcome = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch after tag move");
     assert!(
         !outcome.has_rejections(),
         "Following must not reject a tag that already exists locally: {:?}",
@@ -63,7 +91,21 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
         "local tag must not move without --tags --force"
     );
 
-    let outcome2 = fetch_local(&local_git, &remote_git, &opts).expect("repeat fetch");
+    let outcome2 = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("repeat fetch");
     assert!(!outcome2.has_rejections());
     assert!(outcome2
         .updates
@@ -99,7 +141,21 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     let remote_git = remote.join(".git");
 
     let base = following_remote_heads();
-    fetch_local(&local_git, &remote_git, &base).expect("seed");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&base).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut base.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("seed");
 
     let tag_before = resolve_ref(&local_git, "refs/tags/newtag").unwrap();
     std::fs::write(remote.join("b.txt"), b"b\n").unwrap();
@@ -110,7 +166,21 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
 
     let mut all_tags = base.clone();
     all_tags.tags = TagMode::All;
-    let rejected = fetch_local(&local_git, &remote_git, &all_tags).expect("fetch --tags");
+    let rejected = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&all_tags).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut all_tags.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch --tags");
     assert!(rejected.has_rejections());
     let tag_update = rejected
         .updates
@@ -125,7 +195,21 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
 
     let mut forced = all_tags;
     forced.force = true;
-    let applied = fetch_local(&local_git, &remote_git, &forced).expect("fetch --tags --force");
+    let applied = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&forced).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut forced.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch --tags --force");
     assert!(!applied.has_rejections());
     assert_eq!(
         resolve_ref(&local_git, "refs/tags/newtag").unwrap(),

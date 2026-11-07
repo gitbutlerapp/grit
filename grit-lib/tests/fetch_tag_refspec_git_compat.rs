@@ -8,8 +8,7 @@ use std::path::{Path, PathBuf};
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::fetch_remote;
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, FetchOutcome, TagMode, UpdateMode};
+use grit_lib::remote::transfer::{FetchOptions, FetchOutcome, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, Service, SshTransport, Transport};
 use grit_test_support::git;
 
@@ -48,7 +47,21 @@ fn grit_fetch(local: &Path, up: &Path, spec: &str) -> FetchOutcome {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec![spec.to_owned()];
     opts.tags = TagMode::Following;
-    fetch_local(&local.join(".git"), &up.join(".git"), &opts).expect("grit fetch")
+    grit_lib::repo::Repository::open(
+        &local.join(".git"),
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&up.join(".git")),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("grit fetch")
 }
 
 fn git_fetch(local: &Path, up: &Path, spec: &str) {
@@ -192,9 +205,16 @@ fn ssh_fetch(
     let mut opts = FetchOptions::new();
     opts.refspecs = vec![spec.to_owned()];
     opts.tags = TagMode::Following;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local.join(".git"),
-        conn.as_mut(),
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(conn.as_mut()),
         &mut opts,
         &mut NoProgress,
         &grit_lib::progress::CancelToken::never(),

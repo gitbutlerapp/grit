@@ -40,7 +40,21 @@ fn fetch_updates_refs_in_one_transaction_reftable() {
         opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
         opts.tags = TagMode::None;
         opts.remote_name = Some("origin".to_owned());
-        grit_lib::remote::transfer::fetch_local(&local_git, &remote_git, &opts).expect("fetch");
+        grit_lib::repo::Repository::open(
+            &local_git,
+            &grit_lib::config::environment::RepositoryOptions::with_environment(
+                (&opts).environment.clone(),
+            ),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+            &mut opts.clone(),
+            &mut grit_lib::remote::fetch::NoProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
+        .expect("fetch");
 
         assert!(resolve_ref(&local_git, "refs/remotes/origin/branch-a").is_ok());
         assert!(resolve_ref(&local_git, "refs/remotes/origin/branch-b").is_ok());

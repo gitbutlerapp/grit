@@ -1,7 +1,7 @@
 //! Push `--delete` of a ref absent on the remote is rejected (issue #1616).
 
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
+use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_test_support::{git, git_cmd};
 use std::path::Path;
 
@@ -31,15 +31,21 @@ fn delete_missing_remote_branch_errors_like_git() {
     git(&local, &["push", "-u", "origin", "main"]);
 
     let local_git = local.join(".git");
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &remote,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &[PushRefSpec {
             dst: "refs/heads/no-such-branch".to_owned(),
             delete: true,
             ..Default::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -81,15 +87,21 @@ fn delete_resolves_local_tag_when_remote_tag_gone() {
 
     let local_git = local.join(".git");
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &remote,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &[PushRefSpec {
             dst: "refs/tags/v3.0.0".to_owned(),
             delete: true,
             ..Default::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");

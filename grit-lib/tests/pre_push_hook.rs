@@ -14,9 +14,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::fetch::NoProgress;
-use grit_lib::remote::push_plan::{
-    load_push_plan_context, open_push_destination, resolve_push, PushRequest,
-};
+use grit_lib::remote::push_plan::{open_push_destination, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushOutcome};
 use grit_lib::remote::RemoteError;
@@ -115,14 +113,20 @@ fn grit_push(
     opts: PushOptions,
 ) -> Result<PushOutcome, RemoteError> {
     let config = repo.config().snapshot().expect("config");
-    let ctx = load_push_plan_context(repo, Some(remote), None).expect("plan context");
+    let ctx = repo
+        .remotes()
+        .push_plan_context(Some(remote), None)
+        .expect("plan context");
     let request = PushRequest {
         remote: Some(remote.to_owned()),
         refspecs: refspecs.iter().map(|s| (*s).to_owned()).collect(),
         delete: delete.iter().map(|s| (*s).to_owned()).collect(),
         ..PushRequest::default()
     };
-    let plan = resolve_push(repo, &request, &ctx).expect("resolve push");
+    let plan = repo
+        .remotes()
+        .resolve_push(&request, &ctx)
+        .expect("resolve push");
     open_push_destination(&config, &plan.remote)?.push(
         repo,
         &plan.specs,
@@ -392,14 +396,18 @@ fn head_refspec_keeps_resolved_src_ref_and_names_head_for_the_hook() {
     let fx = Fixture::new();
     let repo = fx.open(&[]);
     let config = repo.config().snapshot().expect("config");
-    let ctx = load_push_plan_context(&repo, Some("origin"), None).expect("context");
+    let ctx = repo
+        .remotes()
+        .push_plan_context(Some("origin"), None)
+        .expect("context");
     let plan_for = |refspec: &str| {
         let request = PushRequest {
             remote: Some("origin".to_owned()),
             refspecs: vec![refspec.to_owned()],
             ..PushRequest::default()
         };
-        resolve_push(&repo, &request, &ctx)
+        repo.remotes()
+            .resolve_push(&request, &ctx)
             .expect("resolve push")
             .specs
             .remove(0)

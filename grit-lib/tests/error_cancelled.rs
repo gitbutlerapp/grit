@@ -10,7 +10,7 @@ use grit_lib::porcelain::pull::PullError;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
-use grit_lib::remote::transfer::{fetch_local_with_progress, FetchOptions, TagMode};
+use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::RemoteError;
 use grit_lib::revwalk::history::{HistoryEngineError, HistoryError, RebaseSessionError};
 use grit_test_support::git;
@@ -76,8 +76,21 @@ fn fetch_local_cancelled_at_start_is_classified() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::Following;
-    let err = fetch_local_with_progress(&local.join(".git"), &bare, &opts, &mut NoProgress, &flag)
-        .expect_err("cancelled before fetch");
+    let err = grit_lib::repo::Repository::open(
+        &local.join(".git"),
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
+        &mut opts.clone(),
+        &mut NoProgress,
+        &flag,
+    )
+    .expect_err("cancelled before fetch");
     assert!(err.is_cancelled(), "{err:?}");
 }
 

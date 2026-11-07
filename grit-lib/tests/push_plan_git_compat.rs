@@ -9,10 +9,9 @@ use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_plan::{
-    load_push_plan_context, open_push_destination, resolve_push, resolve_push_invocation,
-    PushPlanContext, PushPlanError, PushRequest,
+    open_push_destination, resolve_push_invocation, PushPlanContext, PushPlanError, PushRequest,
 };
-use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
+use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
 use std::collections::HashSet;
@@ -102,20 +101,27 @@ fn plan_specs(
     request: PushRequest,
     ctx: &PushPlanContext,
 ) -> Vec<PushRefSpec> {
-    resolve_push(repo, &request, ctx)
+    repo.remotes()
+        .resolve_push(&request, ctx)
         .expect("resolve_push")
         .specs
 }
 
 fn dry_run_push_local(local_git: &Path, bare: &Path, specs: &[PushRefSpec]) {
-    let _ = push_local(
+    let _ = grit_lib::repo::Repository::open(
         local_git,
-        bare,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(bare),
         specs,
         &PushOptions {
             dry_run: true,
             ..Default::default()
         },
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local dry-run");
@@ -155,7 +161,10 @@ fn literal_path_remote_context_guesses_short_dst_like_git() {
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
     let bare = fx.bare.to_str().expect("utf-8 path").to_owned();
-    let ctx = load_push_plan_context(&repo, Some(&bare), None).expect("context");
+    let ctx = repo
+        .remotes()
+        .push_plan_context(Some(&bare), None)
+        .expect("context");
     let mut advertised = ctx.remote_ref_names.clone();
     advertised.remove("HEAD");
     assert_eq!(advertised, push_plan_context(&fx.bare).remote_ref_names);
@@ -229,7 +238,10 @@ fn plan_context_lists_pushurl_not_fetch_url() {
     );
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let ctx = load_push_plan_context(&repo, Some("origin"), None).expect("context");
+    let ctx = repo
+        .remotes()
+        .push_plan_context(Some("origin"), None)
+        .expect("context");
     assert_eq!(
         ctx.remote_ref_names,
         push_plan_context(&push_bare).remote_ref_names
@@ -249,23 +261,27 @@ fn push_with_planning_tips_sends_missing_objects_to_literal_remote() {
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
     let bare = fx.bare.to_str().expect("utf-8 path").to_owned();
-    let ctx = load_push_plan_context(&repo, Some(&bare), None).expect("context");
+    let ctx = repo
+        .remotes()
+        .push_plan_context(Some(&bare), None)
+        .expect("context");
     let main_tip = git_cmd(&["rev-parse", "main"]).in_dir(&fx.local).exec();
     let main_tip = ObjectId::from_hex(main_tip.stdout.trim()).expect("main oid");
     assert!(ctx
         .remote_tips
         .as_ref()
         .is_some_and(|t| t.contains(&main_tip)));
-    let plan = resolve_push(
-        &repo,
-        &PushRequest {
-            remote: Some(bare.clone()),
-            refspecs: vec!["feature".into()],
-            ..Default::default()
-        },
-        &ctx,
-    )
-    .expect("plan");
+    let plan = repo
+        .remotes()
+        .resolve_push(
+            &PushRequest {
+                remote: Some(bare.clone()),
+                refspecs: vec!["feature".into()],
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .expect("plan");
     open_push_destination(&config, &plan.remote)
         .expect("remote")
         .push(
@@ -535,8 +551,10 @@ fn push_remote_precedence() {
     git(&fx.local, &["checkout", "-q", "feature"]);
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let resolved =
-        resolve_push(&repo, &PushRequest::default(), &PushPlanContext::default()).expect("plan");
+    let resolved = repo
+        .remotes()
+        .resolve_push(&PushRequest::default(), &PushPlanContext::default())
+        .expect("plan");
     assert_eq!(resolved.remote, "upstream");
 }
 
@@ -566,8 +584,10 @@ fn detached_head_without_refspec_errors() {
     git(&fx.local, &["checkout", "-q", "--detach", "HEAD"]);
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let err =
-        resolve_push(&repo, &PushRequest::default(), &PushPlanContext::default()).unwrap_err();
+    let err = repo
+        .remotes()
+        .resolve_push(&PushRequest::default(), &PushPlanContext::default())
+        .unwrap_err();
     assert!(err.to_string().contains("detached"));
 }
 
@@ -588,11 +608,17 @@ fn real_push_matches_git_file_remote() {
         },
         &PushPlanContext::default(),
     );
-    push_local(
+    grit_lib::repo::Repository::open(
         &fx.local_git,
-        &fx.bare,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&fx.bare),
         &specs,
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit push");
@@ -627,14 +653,20 @@ fn dry_run_leaves_bare_refs_unchanged() {
         },
         &PushPlanContext::default(),
     );
-    push_local(
+    grit_lib::repo::Repository::open(
         &fx.local_git,
-        &fx.bare,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&fx.bare),
         &specs,
         &PushOptions {
             dry_run: true,
             ..Default::default()
         },
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("dry-run");
@@ -652,7 +684,10 @@ fn loaded_plan_context_matches_git_for_each_ref() {
     );
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let mut ctx = load_push_plan_context(&repo, None, None).expect("context");
+    let mut ctx = repo
+        .remotes()
+        .push_plan_context(None, None)
+        .expect("context");
     ctx.remote_ref_names.remove("HEAD");
     let expected = push_plan_context(&fx.bare);
     assert_eq!(ctx.remote_ref_names, expected.remote_ref_names);
@@ -667,17 +702,21 @@ fn push_from_positionals_is_readable_by_git() {
     let positionals = vec!["origin".to_owned(), "feature".to_owned()];
     let invocation = resolve_push_invocation(&config, None, &positionals).expect("invocation");
     assert_eq!(invocation.remote.as_deref(), Some("origin"));
-    let ctx = load_push_plan_context(&repo, invocation.remote.as_deref(), None).expect("context");
-    let plan = resolve_push(
-        &repo,
-        &PushRequest {
-            remote: invocation.remote,
-            refspecs: invocation.refspecs,
-            ..Default::default()
-        },
-        &ctx,
-    )
-    .expect("plan");
+    let ctx = repo
+        .remotes()
+        .push_plan_context(invocation.remote.as_deref(), None)
+        .expect("context");
+    let plan = repo
+        .remotes()
+        .resolve_push(
+            &PushRequest {
+                remote: invocation.remote,
+                refspecs: invocation.refspecs,
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .expect("plan");
     open_push_destination(&config, &plan.remote)
         .expect("remote")
         .push(
@@ -714,16 +753,17 @@ fn push_to_literal_path_remote_is_readable_by_git() {
     assert_eq!(invocation.remote.as_deref(), Some(bare.as_str()));
     let remote = open_push_destination(&config, &bare).expect("literal remote");
     assert_eq!(remote.name, None);
-    let plan = resolve_push(
-        &repo,
-        &PushRequest {
-            remote: invocation.remote,
-            refspecs: invocation.refspecs,
-            ..Default::default()
-        },
-        &PushPlanContext::default(),
-    )
-    .expect("plan");
+    let plan = repo
+        .remotes()
+        .resolve_push(
+            &PushRequest {
+                remote: invocation.remote,
+                refspecs: invocation.refspecs,
+                ..Default::default()
+            },
+            &PushPlanContext::default(),
+        )
+        .expect("plan");
     remote
         .push(
             &repo,
@@ -761,16 +801,17 @@ fn push_to_relative_path_remote_is_readable_by_git() {
             .expect("invocation");
     assert_eq!(invocation.remote.as_deref(), Some(remote_path.as_str()));
     let remote = open_push_destination(&config, &remote_path).expect("literal remote");
-    let plan = resolve_push(
-        &repo,
-        &PushRequest {
-            remote: invocation.remote,
-            refspecs: invocation.refspecs,
-            ..Default::default()
-        },
-        &PushPlanContext::default(),
-    )
-    .expect("plan");
+    let plan = repo
+        .remotes()
+        .resolve_push(
+            &PushRequest {
+                remote: invocation.remote,
+                refspecs: invocation.refspecs,
+                ..Default::default()
+            },
+            &PushPlanContext::default(),
+        )
+        .expect("plan");
     remote
         .push(
             &repo,
@@ -903,16 +944,17 @@ fn wildcard_zero_match_errors() {
     let fx = setup_feature_and_main();
     let repo = open_repo(&fx.local);
     let config = load_config(&repo);
-    let err = resolve_push(
-        &repo,
-        &PushRequest {
-            refspecs: vec!["refs/heads/nope/*:refs/heads/nope/*".into()],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
-        &PushPlanContext::default(),
-    )
-    .unwrap_err();
+    let err = repo
+        .remotes()
+        .resolve_push(
+            &PushRequest {
+                refspecs: vec!["refs/heads/nope/*:refs/heads/nope/*".into()],
+                remote: Some("origin".into()),
+                ..Default::default()
+            },
+            &PushPlanContext::default(),
+        )
+        .unwrap_err();
     assert!(matches!(err, PushPlanError::SrcRefspecNoMatch { .. }));
 }
 
@@ -969,11 +1011,17 @@ fn glob_push_roundtrip_fsck_with_git() {
         },
         &PushPlanContext::default(),
     );
-    push_local(
+    grit_lib::repo::Repository::open(
         &fx.local_git,
-        &fx.bare,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&fx.bare),
         &specs,
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &CancelToken::never(),
     )
     .expect("push");

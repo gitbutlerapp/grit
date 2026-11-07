@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
@@ -154,9 +154,16 @@ fn shallow_depth1_over_daemon(protocol_version: u8) {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
     opts.fetch_depth = FetchDepth::depth(1);
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -327,9 +334,16 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
     let mut shallow_opts = FetchOptions::new();
     shallow_opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
     shallow_opts.fetch_depth = FetchDepth::depth(1);
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut shallow_opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut shallow_opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -360,9 +374,16 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
     let mut unshallow_opts = FetchOptions::new();
     unshallow_opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
     unshallow_opts.fetch_depth = Some(FetchDepth::Unshallow);
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut unshallow_opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut unshallow_opts,
         &mut NoProgress,
         &CancelToken::never(),

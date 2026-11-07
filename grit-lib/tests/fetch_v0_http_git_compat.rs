@@ -17,7 +17,7 @@ use grit_lib::error::Result as GritResult;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions, FetchOutcome, TagMode};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
-use grit_lib::remote::transport::http::{http_fetch, HttpClient};
+use grit_lib::remote::transport::http::HttpClient;
 use grit_test_support::git;
 use grit_test_support::git_http_backend::GitHttpBackend;
 
@@ -201,12 +201,22 @@ fn grit_fetch(
         opts.fetch_depth = fetch_depth;
         opts
     };
-    let outcome = http_fetch(
-        client,
+    let outcome = grit_lib::repo::Repository::open(
         &work.join(".git"),
-        url,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client,
+            url: url,
+        },
         &mut opts,
         &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap_or_else(|e| panic!("protocol v{protocol} fetch: {e}"));
     let bodies = recording.bodies.lock().unwrap().clone();

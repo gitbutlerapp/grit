@@ -5,8 +5,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::push_plan::{
-    apply_set_upstream_after_push, expand_repository_shorthand, load_push_plan_context,
-    open_push_destination, parse_force_mode, push_follow_tags_config, resolve_push,
+    expand_repository_shorthand, open_push_destination, push_follow_tags_config,
     resolve_push_invocation, PushPlanError, PushPlanKind, PushRequest,
 };
 use grit_lib::remote::push_report::PushRefStatus;
@@ -417,10 +416,15 @@ pub fn run(
         .map_err(plan_error)?;
 
     let factory = crate::context::http_client_factory();
-    let plan_ctx = load_push_plan_context(&repo, invocation.remote.as_deref(), Some(&factory))
+    let plan_ctx = repo
+        .remotes()
+        .push_plan_context(invocation.remote.as_deref(), Some(&factory))
         .map_err(plan_error)?;
 
-    let force_mode = parse_force_mode(&repo, force, force_with_lease).map_err(plan_error)?;
+    let force_mode = repo
+        .remotes()
+        .force_mode(force, force_with_lease)
+        .map_err(plan_error)?;
 
     let follow = follow_tags || push_follow_tags_config(&config);
 
@@ -438,7 +442,10 @@ pub fn run(
         prune,
     };
 
-    let mut plan = resolve_push(&repo, &push_request, &plan_ctx).map_err(plan_error)?;
+    let mut plan = repo
+        .remotes()
+        .resolve_push(&push_request, &plan_ctx)
+        .map_err(plan_error)?;
     // Your head of a shared branch is yours alone (grit share): replacing it
     // after an amend or rebase needs no --force, only that it still be the
     // head this clone last fetched.
@@ -460,7 +467,7 @@ pub fn run(
             } else {
                 plan.remote.as_str()
             };
-            grit_lib::remote::push_plan::apply_tracking_lease(&repo, tracking, spec);
+            repo.remotes().apply_tracking_lease(tracking, spec);
         }
     }
 
@@ -518,15 +525,13 @@ pub fn run(
         }
     };
 
-    let upstream_set = apply_set_upstream_after_push(
-        &repo,
-        &plan.remote,
-        push_request.set_upstream,
-        dry_run,
-        &plan.specs,
-        &report.results,
-    )
-    .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+    let upstream_set = if push_request.set_upstream && !dry_run {
+        repo.remotes()
+            .set_upstream_after_push(&plan.remote, &plan.specs, &report.results)
+            .map_err(|e| anyhow::Error::msg(e.to_string()))?
+    } else {
+        Vec::new()
+    };
 
     let origin_added = match shorthand_url {
         Some(url) if report.has_updates() && !dry_run => repo

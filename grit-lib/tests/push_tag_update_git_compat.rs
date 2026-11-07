@@ -2,7 +2,7 @@
 
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
+use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_test_support::git;
 
 fn tag_push_fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
@@ -32,9 +32,14 @@ fn push_local_rejects_moving_existing_lightweight_tag_without_force() {
     let local_wt = local_git.parent().unwrap();
     let moved = ObjectId::from_hex(git(local_wt, &["rev-parse", "refs/tags/v1"]).trim()).unwrap();
     let before = git(&remote, &["rev-parse", "--short", "refs/tags/v1"]);
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &remote,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &[PushRefSpec {
             src: Some(moved),
             dst: "refs/tags/v1".to_owned(),
@@ -42,6 +47,7 @@ fn push_local_rejects_moving_existing_lightweight_tag_without_force() {
             ..Default::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -66,9 +72,14 @@ fn push_local_force_moves_existing_tag_and_marks_forced() {
         git(&local_git.parent().unwrap(), &["rev-parse", "refs/tags/v1"]).trim(),
     )
     .unwrap();
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &remote,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &[PushRefSpec {
             src: Some(c2),
             dst: "refs/tags/v1".to_owned(),
@@ -76,6 +87,7 @@ fn push_local_force_moves_existing_tag_and_marks_forced() {
             ..Default::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -100,15 +112,21 @@ fn push_local_identical_tag_is_up_to_date() {
         ],
     );
     let oid = ObjectId::from_hex(git(&remote, &["rev-parse", "refs/tags/v1"]).trim()).unwrap();
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &remote,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &[PushRefSpec {
             src: Some(oid),
             dst: "refs/tags/v1".to_owned(),
             ..Default::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -139,15 +157,21 @@ fn push_local_rejects_annotated_to_lightweight_on_same_commit_without_force() {
     let lightweight =
         ObjectId::from_hex(git(&local, &["rev-parse", "refs/tags/v1"]).trim()).unwrap();
     assert_eq!(lightweight.to_hex(), c1);
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local.join(".git"),
-        &remote,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &[PushRefSpec {
             src: Some(lightweight),
             dst: "refs/tags/v1".to_owned(),
             ..Default::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -198,15 +222,21 @@ fn push_local_rejects_diverged_tag_as_already_exists_not_non_ff() {
     git(&local, &["commit", "-q", "-m", "side"]);
     let side_tip = git(&local, &["rev-parse", "HEAD"]).trim().to_string();
     git(&local, &["tag", "-f", "v1", &side_tip]);
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local.join(".git"),
-        &remote,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &[PushRefSpec {
             src: Some(ObjectId::from_hex(&side_tip).unwrap()),
             dst: "refs/tags/v1".to_owned(),
             ..Default::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -232,15 +262,21 @@ fn push_local_branch_fast_forward_unchanged() {
         .trim(),
     )
     .unwrap();
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &remote,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &[PushRefSpec {
             src: Some(tip),
             dst: "refs/heads/main".to_owned(),
             ..Default::default()
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");

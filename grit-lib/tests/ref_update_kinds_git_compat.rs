@@ -6,8 +6,7 @@
 use std::path::Path;
 
 use grit_lib::remote::transfer::{
-    fetch_local, push_local, FetchOptions, FetchOutcome, PushOptions, PushRefSpec, TagMode,
-    UpdateKind,
+    FetchOptions, FetchOutcome, PushOptions, PushRefSpec, TagMode, UpdateKind,
 };
 use grit_test_support::{git, rev_parse};
 
@@ -54,7 +53,21 @@ fn fetch_kinds_follow_what_happened_to_each_ref() {
     let local_git = local.join(".git");
     let remote_git = remote.join(".git");
 
-    let first = fetch_local(&local_git, &remote_git, &fetch_options(false)).expect("fetch");
+    let first = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&fetch_options(false)).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut fetch_options(false).clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch");
     for name in [
         "refs/heads/main",
         "refs/heads/topic",
@@ -75,7 +88,21 @@ fn fetch_kinds_follow_what_happened_to_each_ref() {
 
     let mut dry_run = fetch_options(true);
     dry_run.dry_run = true;
-    let dry = fetch_local(&local_git, &remote_git, &dry_run).expect("dry-run fetch");
+    let dry = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&dry_run).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut dry_run.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("dry-run fetch");
     assert!(dry.changed_ref_count() > 0);
     assert_eq!(
         rev_parse(&local, "refs/remotes/origin/main"),
@@ -83,7 +110,21 @@ fn fetch_kinds_follow_what_happened_to_each_ref() {
         "a dry run leaves the tracking ref alone"
     );
 
-    let second = fetch_local(&local_git, &remote_git, &fetch_options(true)).expect("fetch 2");
+    let second = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&fetch_options(true)).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut fetch_options(true).clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch 2");
     assert_eq!(
         kind_of(&second, "refs/heads/main"),
         Some(UpdateKind::FastForward)
@@ -136,11 +177,17 @@ fn push_outcome_summaries_match_the_remote_refs() {
         ..Default::default()
     };
     let push = |src| {
-        push_local(
+        grit_lib::repo::Repository::open(
             &local_git,
-            &remote,
+            &grit_lib::config::environment::RepositoryOptions::empty(),
+        )
+        .expect("open push source")
+        .remotes()
+        .push_to(
+            grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
             &[spec(src)],
             &PushOptions::default(),
+            &mut grit_lib::remote::fetch::NoProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")

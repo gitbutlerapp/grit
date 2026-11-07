@@ -31,7 +31,6 @@ use std::time::{Duration, Instant};
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
@@ -179,9 +178,16 @@ fn fetch_over_git_daemon_v2_lands_refs_and_objects() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -338,9 +344,16 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
         let mut opts = FetchOptions::new();
         opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
         opts.tags = TagMode::None;
-        fetch_remote(
+        grit_lib::repo::Repository::open(
             &local_git,
-            &mut *conn,
+            &grit_lib::config::environment::RepositoryOptions::with_environment(
+                (&mut opts).environment.clone(),
+            ),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &mut opts,
             &mut NoProgress,
             &CancelToken::never(),
@@ -374,9 +387,16 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::None;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),

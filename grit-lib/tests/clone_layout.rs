@@ -8,7 +8,7 @@ use std::process::Command;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::transfer::{fetch_local, CloneReflog, FetchOptions, TagMode};
+use grit_lib::remote::transfer::{CloneReflog, FetchOptions, TagMode};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::test_support::objects_pack::verify_pack_and_collect;
 
@@ -188,7 +188,21 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
         identity: "T <t@e.com> 1 +0000".parse().expect("identity"),
         message: "clone: from file://fixture".to_owned(),
     });
-    fetch_local(&clone_git, &upstream.path().join(".git"), &fetch_opts).expect("fetch");
+    grit_lib::repo::Repository::open(
+        &clone_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&fetch_opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&upstream.path().join(".git")),
+        &mut fetch_opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("fetch");
 
     let default_branch = "main";
     let tracking = format!("refs/remotes/origin/{default_branch}");

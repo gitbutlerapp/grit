@@ -32,7 +32,6 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::push::push_remote;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 #[cfg(unix)]
@@ -219,9 +218,14 @@ fn push_options_are_delivered_to_receive_pack_hook_over_git_daemon() {
         push_options: vec!["ci.skip".to_owned(), "reviewer=alice".to_owned()],
         ..PushOptions::default()
     };
-    let outcome = push_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec(main_oid, "refs/heads/main")],
         &opts,
         &mut NoProgress,
@@ -324,9 +328,14 @@ fn push_options_are_delivered_to_receive_pack_hook_over_ssh() {
         push_options: vec!["topic=feature".to_owned(), "notify".to_owned()],
         ..PushOptions::default()
     };
-    let outcome = push_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec(main_oid, "refs/heads/main")],
         &opts,
         &mut NoProgress,
@@ -405,9 +414,14 @@ fn pushing_options_to_server_without_capability_errors_typed() {
         push_options: vec!["ci.skip".to_owned()],
         ..PushOptions::default()
     };
-    let err = push_remote(
+    let err = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec(main_oid, "refs/heads/main")],
         &opts,
         &mut NoProgress,

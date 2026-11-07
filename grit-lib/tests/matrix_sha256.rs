@@ -43,12 +43,10 @@ use std::time::{Duration, Instant};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::fetch_remote;
-use grit_lib::remote::push::{push_http, push_remote};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
 use grit_lib::remote::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
-use grit_lib::remote::transport::http::{http_fetch, HttpClient, SmartHttpTransport};
+use grit_lib::remote::transport::http::{HttpClient, SmartHttpTransport};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
 // ---------------------------------------------------------------------------
@@ -370,9 +368,16 @@ fn sha256_fetch_over_git_daemon_v2() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
-    let outcome = fetch_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -543,12 +548,22 @@ fn sha256_fetch_over_smart_http() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
-    let outcome = http_fetch(
-        client.clone(),
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &mut opts,
         &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("sha256 http_fetch over grit-http-server");
 
@@ -672,9 +687,14 @@ fn sha256_push_over_git_daemon() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome = push_remote(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -748,9 +768,14 @@ fn sha256_push_over_git_daemon() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome2 = push_remote(
+    let outcome2 = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn2,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn2),
         &[nonff],
         &PushOptions::default(),
         &mut NoProgress,
@@ -783,9 +808,14 @@ fn sha256_push_over_git_daemon() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome3 = push_remote(
+    let outcome3 = grit_lib::repo::Repository::open(
         &local_git,
-        &mut *conn3,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn3),
         &[forced],
         &PushOptions::default(),
         &mut NoProgress,
@@ -907,10 +937,17 @@ fn sha256_push_over_smart_http() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome = push_http(
-        client.clone(),
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -974,10 +1011,17 @@ fn sha256_push_over_smart_http() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome_feature = push_http(
-        client.clone(),
+    let outcome_feature = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &[spec_feature],
         &PushOptions::default(),
         &mut NoProgress,

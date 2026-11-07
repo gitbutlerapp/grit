@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::Path;
 
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
+use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_test_support::{git, git_cmd};
 
 fn git_try(dir: &Path, args: &[&str]) -> (bool, String) {
@@ -51,9 +51,14 @@ fn push_local_honors_deny_non_fast_forwards() {
     let div = rev_parse(&local, "HEAD");
     let remote_c3 = rev_parse(&bare, "refs/heads/main");
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &bare,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &[PushRefSpec {
             src: Some(div),
             src_ref: None,
@@ -65,6 +70,7 @@ fn push_local_honors_deny_non_fast_forwards() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -108,9 +114,14 @@ fn push_local_honors_deny_deletes() {
     let local_git = local.join(".git");
     let feature_tip = rev_parse(&bare, "refs/heads/feature");
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &bare,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &[PushRefSpec {
             src: None,
             src_ref: None,
@@ -122,6 +133,7 @@ fn push_local_honors_deny_deletes() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -155,9 +167,14 @@ fn push_local_honors_deny_current_branch_on_non_bare() {
     let two = rev_parse(&local, "HEAD");
     let remote_one = rev_parse(&remote, "refs/heads/main");
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        remote.join(".git").as_path(),
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(remote.join(".git").as_path()),
         &[PushRefSpec {
             src: Some(two),
             src_ref: None,
@@ -169,6 +186,7 @@ fn push_local_honors_deny_current_branch_on_non_bare() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -211,9 +229,14 @@ fn push_local_update_instead_deploys_worktree() {
     let tip = rev_parse(&work, "HEAD");
     let srv_before = rev_parse(&srv, "refs/heads/main");
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &work_git,
-        srv.join(".git").as_path(),
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(srv.join(".git").as_path()),
         &[PushRefSpec {
             src: Some(tip),
             src_ref: None,
@@ -225,6 +248,7 @@ fn push_local_update_instead_deploys_worktree() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -266,9 +290,14 @@ fn push_local_update_instead_rejects_dirty_unstaged() {
         .write_all(b"dirty\n")
         .unwrap();
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &work_git,
-        srv.join(".git").as_path(),
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(srv.join(".git").as_path()),
         &[PushRefSpec {
             src: Some(tip),
             src_ref: None,
@@ -280,6 +309,7 @@ fn push_local_update_instead_rejects_dirty_unstaged() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -319,9 +349,14 @@ fn push_local_update_instead_rejects_dirty_staged() {
     std::fs::write(srv.join("a"), "staged\n").unwrap();
     git(&srv, &["add", "a"]);
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &work_git,
-        srv.join(".git").as_path(),
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(srv.join(".git").as_path()),
         &[PushRefSpec {
             src: Some(tip),
             src_ref: None,
@@ -333,6 +368,7 @@ fn push_local_update_instead_rejects_dirty_staged() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -368,9 +404,14 @@ fn push_local_update_instead_refuses_untracked_collision() {
     let srv_before = rev_parse(&srv, "refs/heads/main");
     std::fs::write(srv.join("collision"), "keep me\n").unwrap();
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &work_git,
-        srv.join(".git").as_path(),
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(srv.join(".git").as_path()),
         &[PushRefSpec {
             src: Some(tip),
             src_ref: None,
@@ -382,6 +423,7 @@ fn push_local_update_instead_refuses_untracked_collision() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -419,9 +461,14 @@ fn push_local_update_instead_ignore_advances_ref_without_checkout() {
     git(&work, &["commit", "-q", "-m", "b"]);
     let tip = rev_parse(&work, "HEAD");
 
-    let outcome = push_local(
+    let outcome = grit_lib::repo::Repository::open(
         &work_git,
-        srv.join(".git").as_path(),
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(srv.join(".git").as_path()),
         &[PushRefSpec {
             src: Some(tip),
             src_ref: None,
@@ -433,6 +480,7 @@ fn push_local_update_instead_ignore_advances_ref_without_checkout() {
             hook_src_ref: None,
         }],
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");

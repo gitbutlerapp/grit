@@ -1,6 +1,6 @@
 //! Wire-protocol fetch orchestration over a live transport connection.
 //!
-//! [`fetch_remote`] drives `git-upload-pack` negotiation: match refspecs against
+//! [`fetch_remote_into`] drives `git-upload-pack` negotiation: match refspecs against
 //! advertised refs, run `want`/`have`/`done`, demultiplex the side-band pack,
 //! ingest it, and classify ref updates into a shared fetch outcome. Protocol v2
 //! over streaming transports runs `ls-refs` before `fetch` when the connection
@@ -10,7 +10,6 @@ use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::Path;
 
-use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::fetch_negotiator::SkippingNegotiator;
 use crate::objects::ObjectId;
@@ -307,7 +306,7 @@ fn read_sideband_pack(
 }
 
 /// New shallow boundaries the server reported during a fetch, captured from the
-/// `shallow-info` section so [`fetch_remote`] (and the HTTP fetch paths) can
+/// `shallow-info` section so [`fetch_remote_into`] (and the HTTP fetch paths) can
 /// update the local `shallow` file and surface them in [`FetchOutcome`].
 #[derive(Default)]
 pub(crate) struct ShallowUpdate {
@@ -1562,54 +1561,15 @@ impl FetchDryRunIngest {
     }
 }
 
-/// Fetch from a remote over a live [`Connection`], driving the upload-pack
-/// negotiation and writing the resulting tracking-ref updates into
-/// `local_git_dir`.
-///
-/// The flow mirrors local fetch, but the remote ref list comes from the
-/// connection's advertisement, objects arrive over the wire as a negotiated pack,
-/// and the local repo is opened to classify ancestry. Reuses refspec matching,
-/// tag-mode, prune, and classification helpers shared with other fetch paths.
-///
-/// Handles protocol v0, v1, and v2. For a v2 connection the ref map is recovered
-/// via a `command=ls-refs` round (no refs are advertised on connect) and the
-/// pack is negotiated with `command=fetch`; v0/v1 use the connect-time
-/// advertisement and the classic `want`/`have`/`done` exchange.
-///
-/// # Errors
-///
-/// The local repository is opened with [`FetchOptions::environment`], so objects land in its
-/// `GIT_OBJECT_DIRECTORY` when that is set.
-///
-/// Returns an error if `local_git_dir` is not a repository, if a refspec is invalid, if the
-/// negotiation or pack ingest fails, or on ref/odb I/O failure.
-pub fn fetch_remote(
-    local_git_dir: &Path,
-    conn: &mut dyn Connection,
-    opts: &mut FetchOptions,
-    progress: &mut dyn Progress,
-    cancel: &CancelToken,
-) -> Result<FetchOutcome> {
-    let local = open_fetch_target(local_git_dir, opts)?;
-    fetch_remote_into(&local, conn, opts, progress, cancel)
-}
-
-/// Open the repository a git-dir based fetch writes into, honouring the fetch's environment.
-pub(crate) fn open_fetch_target(local_git_dir: &Path, opts: &FetchOptions) -> Result<Repository> {
-    Repository::open(
-        local_git_dir,
-        &RepositoryOptions::with_environment(opts.environment.clone()),
-    )
-}
-
-/// Like [`fetch_remote`], reading and writing objects through `local`'s object store.
+/// Fetch from a remote over a live [`Connection`] into `local`, reading and writing objects
+/// through `local`'s object store.
 ///
 /// Received packs are ingested into `local`'s primary backend, including a custom
 /// [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store) store. Set
 /// test_support fetch pack-spool-only knob (test-support feature) to keep the
 /// negotiated pack on disk and ingest it with [`crate::index_pack::ingest_received_pack_path`]
 /// or [`crate::unpack_objects::ingest_pack_into`].
-pub fn fetch_remote_into(
+pub(crate) fn fetch_remote_into(
     local: &Repository,
     conn: &mut dyn Connection,
     opts: &mut FetchOptions,
@@ -2880,6 +2840,7 @@ pub(crate) fn reachable_commits(
 #[cfg(test)]
 mod fetch_advertised_ref_tests {
     use super::*;
+    use crate::environment::RepositoryOptions;
     use crate::objects::ObjectId;
     use std::io::Cursor;
 
@@ -3885,14 +3846,14 @@ mod v2_negotiation_tests {
             ..FetchOptions::default()
         };
         let mut recorder = MilestoneRecorder::default();
-        fetch_remote_into(
-            &dst,
-            &mut *conn,
-            &mut opts,
-            &mut recorder,
-            &CancelToken::never(),
-        )
-        .unwrap();
+        dst.remotes()
+            .fetch_from(
+                crate::transfer::TransferEndpoint::Connection(&mut *conn),
+                &mut opts,
+                &mut recorder,
+                &CancelToken::never(),
+            )
+            .unwrap();
         conn.finish().unwrap();
         recorder.events
     }
@@ -4004,9 +3965,16 @@ mod remote_fatal_fetch_tests {
         let mut opts = FetchOptions::new();
         opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
         opts.tags = TagMode::None;
-        let err = fetch_remote(
+        let err = crate::repo::Repository::open(
             &local_git,
-            &mut conn,
+            &crate::environment::RepositoryOptions::with_environment(
+                (&mut opts).environment.clone(),
+            ),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            crate::transfer::TransferEndpoint::Connection(&mut conn),
             &mut opts,
             &mut NoProgress,
             &CancelToken::never(),

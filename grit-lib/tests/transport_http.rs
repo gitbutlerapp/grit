@@ -31,11 +31,10 @@ use grit_lib::error::{Error, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::push::push_http;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
 use grit_lib::remote::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
-use grit_lib::remote::transport::http::{http_fetch, HttpClient, SmartHttpTransport};
+use grit_lib::remote::transport::http::{HttpClient, SmartHttpTransport};
 use grit_lib::remote::transport::{ConnectOptions, Service, Transport};
 
 fn open_odb(git_dir: &Path) -> Odb {
@@ -209,12 +208,22 @@ fn fetch_over_smart_http_lands_refs_and_objects() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
-    let outcome = http_fetch(
-        client.clone(),
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &mut opts,
         &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("http_fetch over grit-http-server");
 
@@ -652,12 +661,22 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
-    let outcome = http_fetch(
-        recording.clone(),
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: recording.clone(),
+            url: &url,
+        },
         &mut opts,
         &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("v2 http_fetch over grit-http-server");
 
@@ -770,12 +789,22 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
     assert_ne!(new_main_oid, main_oid, "source main should have advanced");
 
     let recording2 = Arc::new(RecordingClient::new("version=2"));
-    let outcome2 = http_fetch(
-        recording2.clone(),
+    let outcome2 = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: recording2.clone(),
+            url: &url,
+        },
         &mut opts,
         &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("incremental v2 http_fetch");
     let commands2 = recording2.post_commands.lock().unwrap().clone();
@@ -915,12 +944,22 @@ fn fetch_from_config_client_v2_many_refs_and_large_pack() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::All;
-    let outcome = http_fetch(
-        recording.clone(),
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: recording.clone(),
+            url: &url,
+        },
         &mut opts,
         &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("from_config v2 http_fetch over many-ref repo");
 
@@ -1012,7 +1051,24 @@ fn http_fetch_surfaces_io_error_from_upload_pack_read_failure() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::None;
-    let err = http_fetch(client, &local_git, &url, &mut opts, &mut NullProgress).expect_err("I/O");
+    let err = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client,
+            url: &url,
+        },
+        &mut opts,
+        &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect_err("I/O");
     assert!(
         matches!(err, Error::Io(_)),
         "truncated upload-pack read must surface as Io error, got {err:?}"
@@ -1118,10 +1174,17 @@ fn push_over_smart_http_initial_pack_is_delta_compressed() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome = push_http(
-        client,
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client,
+            url: &url,
+        },
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -1205,10 +1268,17 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome = push_http(
-        client.clone(),
+    let outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &[spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -1286,10 +1356,17 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome_topic = push_http(
-        client.clone(),
+    let outcome_topic = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &[spec_topic],
         &PushOptions::default(),
         &mut NoProgress,
@@ -1331,10 +1408,17 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome2 = push_http(
-        client.clone(),
+    let outcome2 = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &[nonff],
         &PushOptions::default(),
         &mut NoProgress,
@@ -1378,10 +1462,17 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
         ..Default::default()
     };
-    let outcome3 = push_http(
-        client.clone(),
+    let outcome3 = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &[forced],
         &PushOptions::default(),
         &mut NoProgress,
@@ -1497,10 +1588,17 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
             ..Default::default()
         },
     ];
-    let push_outcome = push_http(
-        client.clone(),
+    let push_outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &specs,
         &PushOptions::default(),
         &mut NoProgress,
@@ -1538,12 +1636,22 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
     fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     fetch_opts.tags = TagMode::None;
     let client2 = http_client_arc(UreqHttpClient::new());
-    let fetch_outcome = http_fetch(
-        client2.clone(),
+    let fetch_outcome = grit_lib::repo::Repository::open(
         &back_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut fetch_opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client2.clone(),
+            url: &url,
+        },
         &mut fetch_opts,
         &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("http_fetch back the just-pushed repo");
 
@@ -1623,10 +1731,17 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
         expect_absent: false,
         ..Default::default()
     };
-    let reject_outcome = push_http(
-        client.clone(),
+    let reject_outcome = grit_lib::repo::Repository::open(
         &local_git,
-        &url,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
         &[forced_spec],
         &PushOptions::default(),
         &mut NoProgress,
@@ -1671,7 +1786,24 @@ fn http_fetch_rss_child_process() {
     opts.remote_name = Some("origin".to_owned());
     opts.index_pack_threads = index_threads.or(Some(1));
     let client = http_client_arc(UreqHttpClient::new());
-    http_fetch(client, &git_dir, &url, &mut opts, &mut NullProgress).expect("http_fetch");
+    grit_lib::repo::Repository::open(
+        &git_dir,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client,
+            url: &url,
+        },
+        &mut opts,
+        &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("http_fetch");
 }
 
 /// Streaming HTTP fetch must not hold the full pack in memory (peak RSS well below pack size).
@@ -1889,8 +2021,24 @@ fn fetch_over_git_http_backend_cgi() {
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
     fetch_opts.tags = TagMode::Following;
-    http_fetch(client.clone(), &local, &url, &mut fetch_opts, &mut progress)
-        .expect("http_fetch over git http-backend CGI wrapper");
+    grit_lib::repo::Repository::open(
+        &local,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut fetch_opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &url,
+        },
+        &mut fetch_opts,
+        &mut progress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("http_fetch over git http-backend CGI wrapper");
 
     assert_eq!(
         resolve_ref(&local, "refs/remotes/origin/main").unwrap(),

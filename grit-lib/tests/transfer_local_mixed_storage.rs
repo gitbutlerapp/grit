@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
+use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_test_support::{git, git_cmd};
 
 fn commit_file(dir: &Path, name: &str, body: &str, msg: &str) {
@@ -215,11 +215,17 @@ fn push_to_empty_bare_packs_only_loose_objects_beside_linked_pack() {
             ..Default::default()
         })
         .collect();
-    push_local(
+    grit_lib::repo::Repository::open(
         &src.join(".git"),
-        &remote,
+        &grit_lib::config::environment::RepositoryOptions::empty(),
+    )
+    .expect("open push source")
+    .remotes()
+    .push_to(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &specs,
         &PushOptions::default(),
+        &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");

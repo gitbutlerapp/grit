@@ -55,10 +55,9 @@ fn fetch_all_aborts_when_cancelled_on_only_remote() {
     let err = repo
         .remotes()
         .fetch_all(
-            &config,
-            &FetchOptions::default(),
-            None,
-            None,
+            &grit_lib::remote::transfer::FetchAllOptions::new((&FetchOptions::default()).clone())
+                .with_prune(None)
+                .with_tags(None),
             &mut progress,
             &cancel,
             None,
@@ -97,10 +96,9 @@ fn fetch_all_aborts_when_only_remote_returns_cancelled() {
     let err = repo
         .remotes()
         .fetch_all(
-            &config,
-            &FetchOptions::default(),
-            None,
-            None,
+            &grit_lib::remote::transfer::FetchAllOptions::new((&FetchOptions::default()).clone())
+                .with_prune(None)
+                .with_tags(None),
             &mut progress,
             &cancel,
             None,

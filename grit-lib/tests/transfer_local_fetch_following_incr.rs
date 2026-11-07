@@ -4,7 +4,7 @@ use grit_test_support::rev_parse;
 use std::process::Command;
 
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
+use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
 #[test]
@@ -26,14 +26,42 @@ fn fetch_local_incremental_following_imports_reachable_tag() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::Following;
-    fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("initial fetch");
 
     std::fs::write(remote.join("next.txt"), b"second\n").unwrap();
     git(&remote, &["add", "next.txt"]);
     git(&remote, &["commit", "-q", "-m", "second"]);
     git(&remote, &["tag", "-a", "v2", "-m", "after second"]);
 
-    let outcome = fetch_local(&local_git, &remote_git, &opts).expect("incremental fetch");
+    let outcome = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("incremental fetch");
 
     let tag_update = outcome
         .updates
@@ -97,7 +125,21 @@ fn fetch_local_incremental_following_with_existing_tags_matches_git() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec![refspec.to_owned()];
     opts.tags = TagMode::Following;
-    fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("initial fetch");
     git(&reference, &["fetch", "-q", remote_url, refspec]);
     let moving_before = rev_parse(&local, "refs/tags/moving");
 
@@ -105,7 +147,21 @@ fn fetch_local_incremental_following_with_existing_tags_matches_git() {
     git(&remote, &["tag", "-a", "v3", "-m", "release three"]);
     git(&remote, &["tag", "-f", "moving"]);
 
-    let outcome = fetch_local(&local_git, &remote_git, &opts).expect("incremental fetch");
+    let outcome = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("incremental fetch");
     git(&reference, &["fetch", "-q", remote_url, refspec]);
 
     let v3 = outcome
@@ -169,11 +225,39 @@ fn fetch_local_incremental_following_imports_lightweight_tag_on_existing_tip() {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
     opts.tags = TagMode::Following;
-    fetch_local(&local_git, &remote_git, &opts).expect("initial fetch");
+    grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("initial fetch");
 
     git(&remote, &["tag", "lightweight-on-existing-tip"]);
 
-    let outcome = fetch_local(&local_git, &remote_git, &opts).expect("noop-object fetch");
+    let outcome = grit_lib::repo::Repository::open(
+        &local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
+        &mut opts.clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("noop-object fetch");
 
     let tag_update = outcome
         .updates

@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
 use grit_lib::progress::CancelToken;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
-use grit_lib::remote::transfer::{fetch_local, FetchDepth, FetchOptions, FetchOutcome, TagMode};
+use grit_lib::remote::fetch::NoProgress;
+use grit_lib::remote::transfer::{FetchDepth, FetchOptions, FetchOutcome, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
 fn git_out(dir: &Path, args: &[&str]) -> String {
@@ -109,13 +109,35 @@ fn grit_fetch_local(
     fetch_depth: Option<FetchDepth>,
 ) -> grit_lib::error::Result<()> {
     let git_dir = work.join(".git");
-    fetch_local(&git_dir, bare, &{
-        let mut opts = FetchOptions::new();
-        opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
-        opts.tags = TagMode::Following;
-        opts.fetch_depth = fetch_depth;
-        opts
-    })
+    grit_lib::repo::Repository::open(
+        &git_dir,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&{
+                let mut opts = FetchOptions::new();
+                opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+                opts.tags = TagMode::Following;
+                opts.fetch_depth = fetch_depth;
+                opts
+            })
+                .environment
+                .clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(bare),
+        &mut {
+            let mut opts = FetchOptions::new();
+            opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+            opts.tags = TagMode::Following;
+            opts.fetch_depth = fetch_depth;
+            opts
+        }
+        .clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
     .map(|_| ())
 }
 
@@ -195,12 +217,33 @@ fn unshallow_on_complete_repo_errors_typed() {
             wt.to_str().unwrap(),
         ],
     );
-    let err = fetch_local(&wt.join(".git"), &bare, &{
-        let mut opts = FetchOptions::new();
-        opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
-        opts.fetch_depth = Some(FetchDepth::Unshallow);
-        opts
-    })
+    let err = grit_lib::repo::Repository::open(
+        &wt.join(".git"),
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&{
+                let mut opts = FetchOptions::new();
+                opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+                opts.fetch_depth = Some(FetchDepth::Unshallow);
+                opts
+            })
+                .environment
+                .clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
+        &mut {
+            let mut opts = FetchOptions::new();
+            opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
+            opts.fetch_depth = Some(FetchDepth::Unshallow);
+            opts
+        }
+        .clone(),
+        &mut grit_lib::remote::fetch::NoProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
     .expect_err("unshallow on full repo");
     assert!(matches!(
         err,
@@ -286,9 +329,16 @@ fn grit_fetch_daemon_refspec(
         opts.fetch_depth = fetch_depth;
         opts
     };
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &git_dir,
-        &mut *conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
         &mut NoProgress,
         &CancelToken::never(),
@@ -459,8 +509,8 @@ fn deepen_unshallow_over_system_git_daemon_v2_matches_git() {
 #[cfg(feature = "http-ureq")]
 mod http {
     use super::*;
+    use grit_lib::remote::transport::http::http_client_arc;
     use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
-    use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
 
     fn free_port() -> Option<u16> {
         TcpListener::bind(("127.0.0.1", 0))
@@ -558,12 +608,22 @@ mod http {
             opts.fetch_depth = FetchDepth::deepen(3);
             opts
         };
-        http_fetch(
-            client,
+        grit_lib::repo::Repository::open(
             &grit_client.join(".git"),
-            &url,
+            &grit_lib::config::environment::RepositoryOptions::with_environment(
+                (&mut opts).environment.clone(),
+            ),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            grit_lib::remote::transfer::TransferEndpoint::Http {
+                client: client,
+                url: &url,
+            },
             &mut opts,
             &mut NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
         )
         .expect("http deepen");
         assert_twin_matches(&git_client, &grit_client);
@@ -633,12 +693,22 @@ mod http {
                 opts.fetch_depth = FetchDepth::depth(depth);
                 opts
             };
-            http_fetch(
-                client.clone(),
+            grit_lib::repo::Repository::open(
                 &grit_client.join(".git"),
-                &url,
+                &grit_lib::config::environment::RepositoryOptions::with_environment(
+                    (&mut opts).environment.clone(),
+                ),
+            )
+            .expect("open fetch target")
+            .remotes()
+            .fetch_from(
+                grit_lib::remote::transfer::TransferEndpoint::Http {
+                    client: client.clone(),
+                    url: &url,
+                },
                 &mut opts,
                 &mut NullProgress,
+                grit_lib::progress::CancelToken::never_ref(),
             )
             .expect("http absolute depth fetch");
             assert_twin_matches(&git_client, &grit_client);

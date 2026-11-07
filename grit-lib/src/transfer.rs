@@ -23,7 +23,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, RemoteUnreadableReason, Result};
-use crate::fetch::{NoProgress, Progress};
+use crate::fetch::Progress;
 use crate::fetch_request::FetchRefspecError;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -247,6 +247,88 @@ impl FetchDepth {
     #[must_use]
     pub fn deepen(n: u32) -> Option<Self> {
         NonZeroU32::new(n).map(Self::Deepen)
+    }
+}
+
+/// The other side of a fetch or push whose transport the caller supplies, for
+/// [`RepositoryRemotes::fetch_from`](crate::repo_handles::RepositoryRemotes::fetch_from) and
+/// [`RepositoryRemotes::push_to`](crate::repo_handles::RepositoryRemotes::push_to).
+///
+/// [`RepositoryRemotes::fetch`](crate::repo_handles::RepositoryRemotes::fetch) and
+/// [`RepositoryRemotes::push`](crate::repo_handles::RepositoryRemotes::push) pick the transport
+/// from a [`Remote`](crate::remote::Remote)'s URL instead; use an endpoint when you already
+/// have the repository path, an open connection, or a configured HTTP client.
+#[non_exhaustive]
+pub enum TransferEndpoint<'a> {
+    /// A repository on this machine, named by its git directory (a bare repository or a
+    /// work tree's `.git`). Objects are copied or linked directly, without the wire protocol.
+    Local(&'a Path),
+    /// An open wire connection: ssh, `git://`, an in-process upload-pack or receive-pack, or
+    /// any [`Transport`](crate::transport::Transport). Pushes need protocol v0/v1.
+    Connection(&'a mut dyn crate::transport::Connection),
+    /// A smart-HTTP repository URL reached through `client`; `info/refs` discovery follows
+    /// redirects and the stateless RPC exchange runs over the same client.
+    Http {
+        /// The HTTP client to send requests with.
+        client: std::sync::Arc<dyn crate::transport::http::HttpClient>,
+        /// The remote repository URL (`https://host/repo.git`).
+        url: &'a str,
+    },
+}
+
+impl std::fmt::Debug for TransferEndpoint<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Local(path) => f.debug_tuple("Local").field(path).finish(),
+            Self::Connection(_) => f.write_str("Connection(..)"),
+            Self::Http { url, .. } => f
+                .debug_struct("Http")
+                .field("url", url)
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
+/// Options for [`RepositoryRemotes::fetch_all`](crate::repo_handles::RepositoryRemotes::fetch_all):
+/// the shared settings for every remote, and command-line overrides of each remote's
+/// prune and tag config.
+#[derive(Clone, Default)]
+#[non_exhaustive]
+pub struct FetchAllOptions {
+    /// Settings every remote's fetch starts from: dry run, depth, shallow options, index-pack
+    /// threads, environment, pack spooling, HTTP protocol version and remote progress. Each
+    /// remote's refspecs, tag mode and prune come from its own config.
+    pub fetch: FetchOptions,
+    /// `--prune` / `--no-prune`; `None` uses each remote's `remote.<name>.prune` and
+    /// `fetch.prune`.
+    pub prune: Option<bool>,
+    /// `--tags` / `--no-tags`; `None` uses each remote's `remote.<name>.tagOpt`.
+    pub tags: Option<bool>,
+}
+
+impl FetchAllOptions {
+    /// Fetch every remote starting from `fetch`, with each remote's own prune and tag config.
+    #[must_use]
+    pub fn new(fetch: FetchOptions) -> Self {
+        Self {
+            fetch,
+            prune: None,
+            tags: None,
+        }
+    }
+
+    /// Override every remote's prune config (`--prune` / `--no-prune`).
+    #[must_use]
+    pub fn with_prune(mut self, prune: Option<bool>) -> Self {
+        self.prune = prune;
+        self
+    }
+
+    /// Override every remote's tag config (`--tags` / `--no-tags`).
+    #[must_use]
+    pub fn with_tags(mut self, tags: Option<bool>) -> Self {
+        self.tags = tags;
+        self
     }
 }
 
@@ -932,7 +1014,7 @@ pub struct PushOptions {
     /// If this is non-empty but the remote `git-receive-pack` does not advertise
     /// the `push-options` capability, the push fails with
     /// [`crate::remote::RemoteError::PushOptionsUnsupported`] (matching Git). A local-path or
-    /// `file://` push ([`push_local`]) accepts them only when the destination repository
+    /// `file://` push accepts them only when the destination repository
     /// sets `receive.advertisePushOptions`, and passes them to its `pre-receive` and
     /// `post-receive` hooks. Either check runs before anything is written, dry runs included.
     pub push_options: Vec<String>,
@@ -958,8 +1040,8 @@ pub struct PushOptions {
     /// [`crate::remote::Remote::push`] runs the hook (see
     /// [`crate::hooks::run_pre_push_hook`]) after reading the remote's refs and before sending
     /// anything, dry runs included, and fails with [`Error::Hook`] when it exits non-zero. The
-    /// lower-level [`push_local`] and [`crate::push::push_remote`] have no repository or
-    /// remote name to give the hook and never run it.
+    /// lower-level [`RepositoryRemotes::push_to`](crate::repo_handles::RepositoryRemotes::push_to)
+    /// has no remote name to give the hook and never runs it.
     pub no_verify: bool,
 }
 
@@ -1875,21 +1957,6 @@ fn bitmap_send_set(
     }))
 }
 
-/// `fetch_local` function.
-pub fn fetch_local(
-    local_git_dir: &Path,
-    remote_git_dir: &Path,
-    opts: &FetchOptions,
-) -> Result<FetchOutcome> {
-    fetch_local_with_progress(
-        local_git_dir,
-        remote_git_dir,
-        opts,
-        &mut NoProgress,
-        crate::progress::CancelToken::never_ref(),
-    )
-}
-
 /// Result of matching remote refs to fetch refspecs.
 pub(crate) struct FetchMatchSet {
     pub(crate) matched: Vec<MatchedRef>,
@@ -2030,24 +2097,8 @@ pub(crate) fn ensure_local_remote_repository(remote_git_dir: &Path) -> Result<()
     ))
 }
 
-/// Like [`fetch_local`], reporting object copy progress through `progress`.
-///
-/// The local repository is opened with [`FetchOptions::environment`], so objects land in its
-/// `GIT_OBJECT_DIRECTORY` when that is set.
-pub fn fetch_local_with_progress(
-    local_git_dir: &Path,
-    remote_git_dir: &Path,
-    opts: &FetchOptions,
-    progress: &mut dyn Progress,
-    cancel: &crate::progress::CancelToken,
-) -> Result<FetchOutcome> {
-    crate::progress::poll_cancel(progress, cancel)?;
-    ensure_local_remote_repository(remote_git_dir)?;
-    let local = crate::fetch::open_fetch_target(local_git_dir, opts)?;
-    fetch_local_into(&local, remote_git_dir, opts, progress, cancel)
-}
-
-/// Like [`fetch_local_with_progress`], copying objects into `local`'s object store.
+/// Fetch from the repository at `remote_git_dir` into `local`, copying objects into
+/// `local`'s object store (the local / `file://` fetch).
 pub(crate) fn fetch_local_into(
     local: &crate::repo::Repository,
     remote_git_dir: &Path,
@@ -2487,7 +2538,7 @@ pub(crate) fn fetch_local_into(
 /// in-process (no subprocess, no wire protocol).
 ///
 /// This is the local / `file://` push (send-pack) counterpart to
-/// [`fetch_local`]. For each [`PushRefSpec`] it:
+/// [`fetch_local_into`]. For each [`PushRefSpec`] it:
 ///
 /// 1. Resolves the source oid from the LOCAL repo (for a non-delete update) and
 ///    reads the remote's current value of `dst`.
@@ -2525,10 +2576,8 @@ pub(crate) fn fetch_local_into(
 /// Objects are copied into a quarantine directory first and move into the remote's
 /// object store only when some update is going ahead. With `opts.dry_run` nothing is
 /// copied or written and no receive hook runs, as with `git push --dry-run`. Hook
-/// output is returned in [`PushOutcome::remote_messages`]. Through
-/// [`crate::remote::Remote::push`], hooks run with the pushing repository's environment
-/// minus the variables that locate it; `push_local` opens the local repository with
-/// [`RepositoryOptions::empty`], so the hooks it runs get an empty environment (no `PATH`).
+/// output is returned in [`PushOutcome::remote_messages`]. Hooks run with the pushing
+/// repository's environment minus the variables that locate it.
 ///
 /// When `opts.atomic` is set and any ref is rejected (by the update rules, the
 /// remote's policy or a hook), no ref is written and every otherwise-accepted ref is
@@ -2549,27 +2598,8 @@ pub(crate) fn fetch_local_into(
 // TODO(phase: remote transports): `git://`, `http(s)`, and `ssh` push
 // (receive-pack handshake + report-status parsing + credential helpers) are out
 // of scope here and live in a later phase.
-pub fn push_local(
-    local_git_dir: &Path,
-    remote_git_dir: &Path,
-    refs: &[PushRefSpec],
-    opts: &PushOptions,
-    cancel: &crate::progress::CancelToken,
-) -> Result<PushOutcome> {
-    let local = crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty())?;
-    push_local_from(
-        &local,
-        remote_git_dir,
-        refs,
-        opts,
-        &mut crate::fetch::NoProgress,
-        cancel,
-        None,
-    )
-}
-
-/// Like [`push_local`], reading the objects to send through `local`'s object store,
-/// running `pre_push` after every update is decided and before anything is written to the
+///
+/// Objects to send are read through `local`'s object store; `pre_push` runs after every update is decided and before anything is written to the
 /// remote, and relaying the remote's hook output to [`crate::fetch::Progress::message`] as a
 /// wire push relays side-band output.
 pub(crate) fn push_local_from(
@@ -4631,9 +4661,14 @@ mod tests {
                     &["update-ref", "refs/heads/shared", &other.to_hex(), ""]
                 ));
             });
-            let outcome = push_local(
+            let outcome = crate::repo::Repository::open(
                 &local_git,
-                &remote,
+                &crate::environment::RepositoryOptions::empty(),
+            )
+            .expect("open push source")
+            .remotes()
+            .push_to(
+                crate::transfer::TransferEndpoint::Local(&remote),
                 &[PushRefSpec {
                     src: Some(tip),
                     dst: "refs/heads/shared".to_owned(),
@@ -4644,6 +4679,7 @@ mod tests {
                     atomic,
                     ..Default::default()
                 },
+                &mut crate::fetch::NoProgress,
                 crate::progress::CancelToken::never_ref(),
             )
             .expect("push call");
@@ -4690,15 +4726,21 @@ mod tests {
                     &["update-ref", "refs/heads/main", &other.to_hex()]
                 ));
             });
-            let outcome = push_local(
+            let outcome = crate::repo::Repository::open(
                 &local_git,
-                &remote,
+                &crate::environment::RepositoryOptions::empty(),
+            )
+            .expect("open push source")
+            .remotes()
+            .push_to(
+                crate::transfer::TransferEndpoint::Local(&remote),
                 &[PushRefSpec {
                     src: Some(tip),
                     dst: "refs/heads/main".to_owned(),
                     ..Default::default()
                 }],
                 &PushOptions::default(),
+                &mut crate::fetch::NoProgress,
                 crate::progress::CancelToken::never_ref(),
             )
             .expect("push call");
@@ -4879,10 +4921,15 @@ mod tests {
             want_received: true,
             ..Default::default()
         };
-        let outcome = fetch_local_with_progress(
+        let outcome = crate::repo::Repository::open(
             &local.path().join(".git"),
-            remote.path(),
-            &opts,
+            &crate::environment::RepositoryOptions::with_environment((&opts).environment.clone()),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            crate::transfer::TransferEndpoint::Local(remote.path()),
+            &mut opts.clone(),
             &mut rec,
             crate::progress::CancelToken::never_ref(),
         )
@@ -4944,10 +4991,15 @@ mod tests {
             want_received: true,
             ..Default::default()
         };
-        let outcome = fetch_local_with_progress(
+        let outcome = crate::repo::Repository::open(
             &local.path().join(".git"),
-            remote.path(),
-            &opts,
+            &crate::environment::RepositoryOptions::with_environment((&opts).environment.clone()),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            crate::transfer::TransferEndpoint::Local(remote.path()),
+            &mut opts.clone(),
             &mut rec,
             crate::progress::CancelToken::never_ref(),
         )
@@ -5038,10 +5090,17 @@ mod tests {
                 want_received,
                 ..Default::default()
             };
-            let outcome = fetch_local_with_progress(
+            let outcome = crate::repo::Repository::open(
                 &local.path().join(".git"),
-                remote.path(),
-                &opts,
+                &crate::environment::RepositoryOptions::with_environment(
+                    (&opts).environment.clone(),
+                ),
+            )
+            .expect("open fetch target")
+            .remotes()
+            .fetch_from(
+                crate::transfer::TransferEndpoint::Local(remote.path()),
+                &mut opts.clone(),
                 &mut rec,
                 crate::progress::CancelToken::never_ref(),
             )
@@ -5100,10 +5159,15 @@ mod tests {
             opts
         };
         let mut rec = PhaseRecorder::default();
-        fetch_local_with_progress(
+        crate::repo::Repository::open(
             &local.path().join(".git"),
-            remote.path(),
-            &opts,
+            &crate::environment::RepositoryOptions::with_environment((&opts).environment.clone()),
+        )
+        .expect("open fetch target")
+        .remotes()
+        .fetch_from(
+            crate::transfer::TransferEndpoint::Local(remote.path()),
+            &mut opts.clone(),
             &mut rec,
             crate::progress::CancelToken::never_ref(),
         )

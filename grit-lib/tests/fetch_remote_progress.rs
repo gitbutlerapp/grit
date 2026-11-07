@@ -15,7 +15,6 @@ use std::rc::Rc;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::ProgressSink;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, Connection, Service, SshTransport, Transport};
 
@@ -181,9 +180,16 @@ fn run_case(protocol_v2: bool, remote_progress: bool) -> (Vec<u8>, Vec<u8>) {
     let mut opts = FetchOptions::new();
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.tags = TagMode::Following;
-    fetch_remote(
+    grit_lib::repo::Repository::open(
         &local_git,
-        &mut conn,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &mut opts,
         &mut cap,
         &grit_lib::progress::CancelToken::never(),

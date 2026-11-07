@@ -422,10 +422,9 @@ fn fetch_all_succeeds_with_custom_primary() {
     let results = repo
         .remotes()
         .fetch_all(
-            &config,
-            &FetchOptions::default(),
-            None,
-            None,
+            &grit_lib::remote::transfer::FetchAllOptions::new((&FetchOptions::default()).clone())
+                .with_prune(None)
+                .with_tags(None),
             &mut NoProgress,
             &CancelToken::never(),
             None,

@@ -2769,7 +2769,7 @@ Criterion mean library times (20 samples, one-second warmup, three-second measur
 | None | 203.20 | 20.73 |
 | All | 354.65 | 47.79 |
 
-The Criterion suite exercises the public `fetch_local` API with `Following`, `None`, and `All` tags on a system-Git-created 5,000-ref fixture. Compatibility tests also cover changed remote tips, loose overrides, symbolic refs, pruning followed by a no-op fetch, linked worktrees, reftable, and explicit `FETCH_HEAD` maintenance. CI checks behavior rather than elapsed-time thresholds.
+The Criterion suite exercises the public local fetch (`repo.remotes().fetch_from(TransferEndpoint::Local(..))`, reopening the repository each iteration) with `Following`, `None`, and `All` tags on a system-Git-created 5,000-ref fixture. Compatibility tests also cover changed remote tips, loose overrides, symbolic refs, pruning followed by a no-op fetch, linked worktrees, reftable, and explicit `FETCH_HEAD` maintenance. CI checks behavior rather than elapsed-time thresholds.
 
 ## Clone and fetch of 200,000 branches (2026-10-28, #2189)
 
