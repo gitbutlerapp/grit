@@ -4566,3 +4566,62 @@ Factory VM: Intel Xeon, 4 vCPUs, Rust 1.99.0, `release` profile, system Git 2.43
 | `config/get-origin@small` | 1.16 | 2.03 | 1.90 | 6.2 | 13.0 | 12.1 |
 
 About 0.7 ms of the set improvement is the dropped fsync, and the rest is the skipped object database, ref store and config-session stamping. `grit config --file .git/config`, which needs no discovery, went from 2.3 to 1.6 ms in a separate hyperfine run. The remaining gap to Git is process startup: `grit --version` alone takes about 1.4 ms on this VM, against 0.9 ms for a complete `git config` set ([PIE startup relocation probe](#pie-startup-relocation-probe)).
+
+## Primary store dispatch (task 7286, 2026-11-07)
+
+An `Odb` used to keep its primary store in two fields: an optional custom store and a lazily opened files source. Every object read asked for the primary twice. It cloned one `Arc` to get the store as a `dyn WritableObjectStore`, cloned the files source again for the corrupt-loose-file check, and then read through the trait object. The primary is now one internal enum with a files arm and a custom arm. A read borrows the opened store, calls the files source directly (no `dyn` call, no reference counting) and reaches a custom store through its trait object as before. The public API is unchanged.
+
+Factory VM: Intel Xeon, 4 vCPUs, Rust 1.99.0, system Git 2.43.0. The baseline is `97fd8dac8`. CLI rows used `dist` builds of both, with `GIT_CONFIG_NOSYSTEM=1` and an empty global config. After five warmups, system Git, baseline grit and changed grit ran interleaved, rotating the order each round, with no builds or tests running. Wall time is the median from spawn to exit. The change column is the median of per-round after/before ratios, with a bootstrap 95% interval. Raw samples, instruction counts and page faults are in `grit-utils/baselines/primary-store-7286.json`. Two `grit-bench daily` runs, one per binary, are in `daily-primary-store-7286-before.json` and `daily-primary-store-7286-after.json`. Those runs are not interleaved, so they move with the machine: Git itself differed by up to 11% between them.
+
+| Scenario | Rounds | Git ms | Grit before ms | Grit after ms | Change |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `log/oneline-100@git-git` | 600 | 3.22 | 3.90 | 3.90 | +0.2% (−0.5 to +0.5) |
+| `show/head@git-git` | 600 | 2.22 | 2.70 | 2.70 | −0.5% (−1.1 to +0.6) |
+| `status/dirty@synth-10k` | 400 | 7.38 | 7.17 | 7.23 | +1.4% (+0.7 to +2.1) |
+| `diff/worktree@synth-10k` | 400 | 6.85 | 6.56 | 6.66 | +1.4% (+0.5 to +2.5) |
+| `blame/file@git-git` | 60 | 292.8 | 253.3 | 251.6 | −0.7% (−1.3 to +0.3) |
+| `revs/count@git-git` | 45 | 525.8 | 388.4 | 381.8 | −2.0% (−3.2 to −1.3) |
+| `revs/count@synth-120k` | 45 | 385.3 | 265.8 | 256.0 | −3.4% (−4.1 to −2.8) |
+
+`synth-120k` is a 120,000-commit linear history built with `git fast-import` and repacked without a commit-graph, so `grit revs --count HEAD` reads every commit through the primary store. It gains the most, at about 10 ms. `status` and `diff` do no more work than before. Callgrind counts the same instructions or fewer for every CLI row (`diff` 41.96M → 41.94M, `status` 47.94M → 47.93M, `log --limit 100` 11.844M both, `show` 3.636M both, `status` on a 100k-file worktree 341.18M → 340.94M). Minor page faults drop by two for each (`diff` 810 → 808, `status` 794 → 792). An earlier interleaved run of the same two rows with the first build of the change measured +0.7% for both. Moves of this size come from code placement in the fat-LTO binary, not from the change.
+
+Per-operation instruction counts for `Odb` calls on a files primary were measured as the difference between 2,000 and 4,000 repeated calls over 64 blobs in a `release` build, under callgrind. "In context" means inside `Odb::with_pack_read_context`.
+
+| Operation | Packed before | Packed after | Packed in context before | Packed in context after | Loose before | Loose after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `read` (session cache hit) | 493 | 493 | — | — | 494 | 494 |
+| `read` (pack batch path) | — | — | 10,235 | 10,229 | — | — |
+| `read_into` | 11,127 | 11,065 | 9,999 | 9,994 | 24,675 | 24,613 |
+| `read_info` | 5,913 | 5,849 | 5,130 | 5,127 | 18,895 | 18,821 |
+| `contains` | 6,039 | 6,024 | 5,669 | 5,654 | 2,063 | 2,048 |
+| `exists_local` | 2,180 | 2,180 | 1,749 | 1,749 | 3,699 | 3,700 |
+
+The first build of the change made the session-cache hit in `read` 11 instructions dearer (493 → 504). Callgrind traced this to `SessionLooseReads::get` no longer being inlined into the cache lookup. In `release` and `bench` builds (16 codegen units, no LTO), whether that small function is inlined depends on how the crate is split into codegen units, and adding a module had moved it. It now carries `#[inline]`, which brings the hit back to 493. The shipped `dist` build uses one codegen unit and was not affected. The same partitioning explains why benchmarks of functions this change does not touch moved by several percent: `odb_read/delta_apply` measured +6.9% while running exactly the same 515 instructions per call.
+
+The Criterion suites `odb_read`, `odb_backend`, `odb_backend_pack`, `odb_read_parallel` and `hot_paths` ran six times each, alternating base and change. The table gives the median of the three runs per side.
+
+| Benchmark | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| `odb_backend/read/pack_100k` | 32.2 ns | 32.5 ns | +1.0% |
+| `odb_backend/read_info/pack_100k` | 663 ns | 663 ns | −0.1% |
+| `odb_backend/exists_hit/pack_100k` | 855 ns | 834 ns | −2.5% |
+| `odb_backend/read/loose_10k` | 30.5 ns | 30.9 ns | +1.3% |
+| `odb_backend/read_info/loose_10k` | 3.42 µs | 3.39 µs | −0.9% |
+| `odb_backend/read_info/midx_8` | 522 ns | 505 ns | −3.2% |
+| `odb_backend/read_info/alternate_only` | 5.33 µs | 5.32 µs | −0.2% |
+| `odb_backend/read_info_packed` | 472 ns | 473 ns | +0.2% |
+| `odb_read/packed_read/deep_delta_chain` | 43.0 µs | 42.9 µs | −0.4% |
+| `odb_read/deep_repack_read_one` | 33.2 µs | 33.1 µs | −0.3% |
+| `checkout_between_trees/H_0.01` | 41.7 ms | 40.1 ms | −3.7% |
+| `checkout/switch_wide_100k/H_10pct_switch` | 428 ms | 426 ms | −0.6% |
+| `diff/worktree_clean_10k/grit_lib` | 3.63 ms | 3.67 ms | +1.0% |
+| `index_mutate_batch_10pct/H` | 6.87 ms | 6.78 ms | −1.3% |
+| `staging_scan_5_modified/H` | 60.6 ms | 57.8 ms | −4.7% |
+
+Some rows are left out of the table:
+
+- The `write/*` rows grow the object database on every iteration and swung by up to ±70% between runs of the same binary.
+- `odb_read_parallel` swung by ±20% between runs of the same binary.
+- `checkout_between_trees/H_0.1` (+4.3%) and `status/clean_100k` (+3.2%) each had one disturbed run. An eight-run rerun of just those two gave +0.2% for the checkout. The status benchmark stats 100,000 files and stayed within its own spread: its four baseline runs alone ranged from 26.3 to 30.9 ms. Callgrind counts 341.18M instructions before and 340.94M after for `grit status` on that tree.
+
+The `hot_paths` suite stops at its stash benchmark on this baseline too (`apply_stash` reports `WouldOverwriteLocalChanges`), so its last five benchmarks were not measured. A new test, `grit-lib/tests/odb_primary_read_allocations.rs` (`full-tests`), holds warm reads to the heap allocations both builds make: 1 per packed `read_into`, 2 per packed `read_info`, 10 per packed `contains`, none inside a pack read context, and 15, 14 and 3 for the loose equivalents.
