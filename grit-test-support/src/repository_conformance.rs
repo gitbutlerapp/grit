@@ -42,6 +42,7 @@ use grit_lib::change_id::{
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::{ConfigEditor, ConfigScope, ConfigWriteOptions};
 use grit_lib::diff::hunk_ids;
+use grit_lib::diff::structured::{StructuredHunk, StructuredLineKind};
 use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffOptions, DiffSide, DiffTarget};
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::notes::NotesRef;
@@ -49,7 +50,7 @@ use grit_lib::objects::HashAlgo;
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{conflict_kind_from_stagemask, conflicts_from_index, ConflictKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
+use grit_lib::porcelain::commit::{commit_worktree, CommitOutcome, CommitRequest};
 use grit_lib::porcelain::hunk_select::unstaged_file_diffs;
 use grit_lib::porcelain::log::DecorationOptions;
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
@@ -176,7 +177,13 @@ fn switch(repo: &Repository, mode: SwitchMode) {
     .expect("switch");
 }
 
-fn commit_path(repo: &Repository, path: &str, contents: &str, message: &str, epoch: i64) {
+fn commit_path(
+    repo: &Repository,
+    path: &str,
+    contents: &str,
+    message: &str,
+    epoch: i64,
+) -> CommitOutcome {
     fs::write(work_tree(repo).join(path), contents).expect("write");
     stage(
         repo,
@@ -194,7 +201,23 @@ fn commit_path(repo: &Repository, path: &str, contents: &str, message: &str, epo
         &mut NullProgress,
         &CancelToken::never(),
     )
-    .expect("commit");
+    .expect("commit")
+}
+
+fn commit_history_row(out: &CommitOutcome) -> (ObjectId, String, ChangeId) {
+    let subject = out
+        .message
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .to_owned();
+    (
+        out.oid,
+        subject,
+        out.change_id
+            .clone()
+            .expect("conformance commit records change-id"),
+    )
 }
 
 fn log_main(repo: &Repository) -> Vec<(ObjectId, String, ChangeId)> {
@@ -237,7 +260,7 @@ fn unstaged_hunk_hex_ids(repo: &Repository, path: &str) -> Vec<String> {
         .collect()
 }
 
-fn commit_file_hunk_hex_ids(repo: &Repository, commit: ObjectId, path: &str) -> Vec<String> {
+fn commit_file_hunks(repo: &Repository, commit: ObjectId, path: &str) -> Vec<StructuredHunk> {
     let files = repo
         .diff()
         .files(
@@ -246,12 +269,59 @@ fn commit_file_hunk_hex_ids(repo: &Repository, commit: ObjectId, path: &str) -> 
             &DiffOptions::default(),
         )
         .expect("commit file diff");
-    if files.is_empty() {
-        return Vec::new();
-    }
-    hunk_ids(DiffSide::Other, &files[0].path, &files[0].hunks)
+    files
+        .iter()
+        .find(|file| file.path == path)
+        .map(|file| file.hunks.clone())
+        .unwrap_or_default()
+}
+
+fn commit_file_hunk_hex_ids(repo: &Repository, commit: ObjectId, path: &str) -> Vec<String> {
+    let hunks = commit_file_hunks(repo, commit, path);
+    hunk_ids(DiffSide::Other, path, &hunks)
         .into_iter()
         .map(|id| id.as_str().to_owned())
+        .collect()
+}
+
+/// Line-level summary retained for parity (not just stable hunk ids).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConformanceHunkSummary {
+    pub old_start: usize,
+    pub new_start: usize,
+    pub old_lines: usize,
+    pub new_lines: usize,
+    pub removed: Vec<String>,
+    pub added: Vec<String>,
+}
+
+fn hunk_summaries(hunks: &[StructuredHunk]) -> Vec<ConformanceHunkSummary> {
+    hunks
+        .iter()
+        .map(|hunk| {
+            let mut removed = Vec::new();
+            let mut added = Vec::new();
+            for line in &hunk.lines {
+                let text: String = line
+                    .segments
+                    .iter()
+                    .map(|segment| segment.text.as_str())
+                    .collect();
+                match line.kind {
+                    StructuredLineKind::Del => removed.push(text),
+                    StructuredLineKind::Add => added.push(text),
+                    StructuredLineKind::Context => {}
+                }
+            }
+            ConformanceHunkSummary {
+                old_start: hunk.old_start,
+                new_start: hunk.new_start,
+                old_lines: hunk.old_lines,
+                new_lines: hunk.new_lines,
+                removed,
+                added,
+            }
+        })
         .collect()
 }
 
@@ -303,14 +373,6 @@ fn remote_tracking_refs(map: &BTreeMap<String, String>) -> BTreeMap<String, Stri
         .filter(|(name, _)| name.starts_with("refs/remotes/origin/"))
         .map(|(name, oid)| (name.clone(), oid.clone()))
         .collect()
-}
-
-fn canonical_fetch_remote_refs(map: &BTreeMap<String, String>) -> BTreeMap<String, String> {
-    let mut out = remote_tracking_refs(map);
-    if let Some(main) = out.get("refs/remotes/origin/main").cloned() {
-        out.entry("refs/remotes/origin/HEAD".into()).or_insert(main);
-    }
-    out
 }
 
 fn path_tracked_in_index(repo: &Repository, path: &str) -> bool {
@@ -397,6 +459,8 @@ pub struct RepositorySnapshot {
     pub main_history: Vec<(ObjectId, String, ChangeId)>,
     /// The three `story.txt` commits recorded right after `c3` (must match [`Self::main_history`]).
     pub story_lineage: Vec<(ObjectId, String, ChangeId)>,
+    /// Same three commits from [`commit_path`] outcomes (newest-first), for log cross-check.
+    pub story_commits_from_outcomes: Vec<(ObjectId, String, ChangeId)>,
     /// Tip of `feature` after its single commit.
     pub feature_tip: ObjectId,
     /// Stable hunk ids for unstaged `story.txt` (worktree vs index).
@@ -407,6 +471,8 @@ pub struct RepositorySnapshot {
     pub committed_merge_paths: Vec<String>,
     /// Typed hunk ids for `feature.txt` in the clean merge commit diff.
     pub committed_merge_hunk_ids: Vec<String>,
+    /// Structured hunk summaries for `feature.txt` in the clean merge commit diff.
+    pub committed_feature_hunks: Vec<ConformanceHunkSummary>,
     pub staged_paths: Vec<String>,
     pub unstaged_paths: Vec<String>,
     pub untracked_paths: Vec<String>,
@@ -477,9 +543,9 @@ fn run_snapshot_on_repo(
     fixture: &impl BackendFixture,
     root: &Path,
 ) -> RepositorySnapshot {
-    commit_path(repo, "story.txt", "line1\n", "c1", 1_700_000_000);
-    commit_path(repo, "story.txt", "line1\nline2\n", "c2", 1_700_000_001);
-    commit_path(
+    let c1_out = commit_path(repo, "story.txt", "line1\n", "c1", 1_700_000_000);
+    let c2_out = commit_path(repo, "story.txt", "line1\nline2\n", "c2", 1_700_000_001);
+    let c3_out = commit_path(
         repo,
         "story.txt",
         "line1\nline2\nline3\n",
@@ -488,6 +554,12 @@ fn run_snapshot_on_repo(
     );
     let c3 = head_oid(repo, "main");
     let story_lineage = log_main(repo);
+    let mut story_commits_from_outcomes = vec![
+        commit_history_row(&c1_out),
+        commit_history_row(&c2_out),
+        commit_history_row(&c3_out),
+    ];
+    story_commits_from_outcomes.reverse();
 
     switch(
         repo,
@@ -714,6 +786,8 @@ fn run_snapshot_on_repo(
         .iter()
         .map(|entry| entry.path().to_owned())
         .collect();
+    let committed_feature_hunks =
+        hunk_summaries(&commit_file_hunks(repo, clean_merge_tip, "feature.txt"));
     let committed_merge_hunk_ids = commit_file_hunk_hex_ids(repo, clean_merge_tip, "feature.txt");
 
     let blame =
@@ -783,13 +857,6 @@ fn run_snapshot_on_repo(
     let staged_paths: Vec<_> = model.staged.iter().map(|e| e.path().to_owned()).collect();
     let unstaged_paths: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
     let untracked_paths_before_stash = model.untracked.clone();
-    stage(
-        repo,
-        &StageOptions::default(),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("stage for stash");
     let mut stash_push_opts =
         StashPushOptions::new(signature_at(1_700_000_060).parse().expect("sig"));
     stash_push_opts.include_untracked = true;
@@ -875,13 +942,6 @@ fn run_snapshot_on_repo(
 
     let bare_repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open bare");
     let bare_object_set = object_hex_set(&bare_repo);
-    let mut expected_fetch_remote_refs = expected_remote_refs_from_bare(&bare_repo);
-    if let Some(main) = expected_fetch_remote_refs
-        .get("refs/remotes/origin/main")
-        .cloned()
-    {
-        expected_fetch_remote_refs.insert("refs/remotes/origin/HEAD".into(), main);
-    }
 
     let bare_url = bare.to_str().expect("utf8");
     let origin = Remote::from_url(bare_url).expect("origin url");
@@ -933,6 +993,14 @@ fn run_snapshot_on_repo(
     let files_fetch_object_set = object_hex_set(&files_fetch);
     let files_fetch_refs = ref_map(&files_fetch);
 
+    let mut expected_fetch_remote_refs = expected_remote_refs_from_bare(&bare_repo);
+    if let Some(head_oid) = remote_tracking_refs(&backend_fetch_refs)
+        .get("refs/remotes/origin/HEAD")
+        .cloned()
+    {
+        expected_fetch_remote_refs.insert("refs/remotes/origin/HEAD".into(), head_oid);
+    }
+
     let fsck = repo
         .fsck(
             &FsckOptions::full_repository(true),
@@ -945,11 +1013,13 @@ fn run_snapshot_on_repo(
     RepositorySnapshot {
         main_history,
         story_lineage,
+        story_commits_from_outcomes,
         feature_tip,
         unstaged_hunk_ids,
         staged_hunk_ids,
         committed_merge_paths,
         committed_merge_hunk_ids,
+        committed_feature_hunks,
         staged_paths,
         unstaged_paths,
         untracked_paths: model.untracked,
@@ -1037,7 +1107,7 @@ fn case_init_non_bare(fixture: &impl BackendFixture) {
 
 fn case_history_and_log(fixture: &impl BackendFixture) {
     let snap = build_snapshot(fixture);
-    assert_eq!(snap.main_history, snap.story_lineage);
+    assert_eq!(snap.story_lineage, snap.story_commits_from_outcomes);
     assert_eq!(snap.story_lineage.len(), 3);
     let expected_subjects = ["c3", "c2", "c1"];
     for (i, subject) in expected_subjects.iter().enumerate() {
@@ -1045,7 +1115,20 @@ fn case_history_and_log(fixture: &impl BackendFixture) {
         assert_eq!(subj.as_str(), *subject);
         assert_ne!(*oid, ObjectId::null(HashAlgo::Sha1));
         assert!(!change_id.as_str().is_empty());
+        let (out_oid, out_subj, out_change_id) = &snap.story_commits_from_outcomes[i];
+        assert_eq!(*oid, *out_oid);
+        assert_eq!(subj, out_subj);
+        assert_eq!(change_id, out_change_id);
     }
+    let story_tip = snap.story_lineage[0].0;
+    let main_pos = snap
+        .main_history
+        .iter()
+        .position(|(oid, _, _)| *oid == story_tip)
+        .expect("main log includes story tip");
+    assert_eq!(snap.main_history[main_pos], snap.story_lineage[0]);
+    assert_eq!(snap.main_history[main_pos + 1], snap.story_lineage[1]);
+    assert_eq!(snap.main_history[main_pos + 2], snap.story_lineage[2]);
     let change_ids: BTreeSet<_> = snap
         .story_lineage
         .iter()
@@ -1060,6 +1143,17 @@ fn case_diff_and_status(fixture: &impl BackendFixture) {
     assert!(!snap.unstaged_hunk_ids.is_empty());
     assert!(!snap.staged_hunk_ids.is_empty());
     assert!(!snap.committed_merge_hunk_ids.is_empty());
+    assert_eq!(
+        snap.committed_feature_hunks,
+        vec![ConformanceHunkSummary {
+            old_start: 0,
+            new_start: 1,
+            old_lines: 0,
+            new_lines: 1,
+            removed: vec![],
+            added: vec!["feature".into()],
+        }]
+    );
     assert!(snap
         .committed_merge_paths
         .iter()
@@ -1082,30 +1176,18 @@ fn case_merge_conflict_abort(fixture: &impl BackendFixture) {
         .merge_conflicts_before_abort
         .iter()
         .any(|p| p == "shared.txt"));
-    assert!(!snap.shared_unmerged_stages_before_abort.is_empty());
-    assert!(snap
-        .shared_unmerged_stages_before_abort
-        .iter()
-        .all(|stage| (1..=3).contains(stage)));
-    assert!(snap
-        .index_conflicts_before_abort
-        .iter()
-        .any(|(path, _)| path == "shared.txt"));
-    assert!(snap
-        .index_conflicts_before_abort
-        .iter()
-        .any(|(path, kind)| {
-            path == "shared.txt"
-                && (kind == ConflictKind::BothModified.as_str()
-                    || kind == ConflictKind::BothAdded.as_str())
-        }));
+    assert_eq!(snap.shared_unmerged_stages_before_abort, vec![2, 3]);
     assert_eq!(
         snap.shared_conflict_kind_before_abort,
-        snap.index_conflicts_before_abort
-            .iter()
-            .find(|(path, _)| path == "shared.txt")
-            .map(|(_, kind)| kind.as_str())
-            .unwrap_or_default()
+        ConflictKind::BothAdded.as_str()
+    );
+    assert_eq!(
+        snap.conflict_details_before_abort,
+        vec![("shared.txt".into(), ConflictKind::BothAdded.as_str().into())]
+    );
+    assert_eq!(
+        snap.index_conflicts_before_abort,
+        vec![("shared.txt".into(), ConflictKind::BothAdded.as_str().into())]
     );
     assert!(snap.shared_has_conflict_markers);
     assert!(snap.merge_conflicts_after_abort.is_empty());
@@ -1162,26 +1244,31 @@ fn case_stash(fixture: &impl BackendFixture) {
         .iter()
         .any(|p| p == "untracked.txt"));
     assert!(snap.untracked_file_after_stash_pop);
-    if snap.untracked_tracked_in_index_after_stash_pop {
-        assert!(snap
-            .staged_paths_after_stash_pop
-            .iter()
-            .any(|p| p == "untracked.txt"));
-    } else {
-        assert_eq!(
-            snap.untracked_paths_after_stash_pop,
-            snap.untracked_paths_before_stash
-        );
-    }
+    assert!(!snap.untracked_tracked_in_index_after_stash_pop);
+    assert_eq!(
+        snap.untracked_paths_after_stash_pop,
+        snap.untracked_paths_before_stash
+    );
+    assert_eq!(
+        snap.staged_paths_after_stash_pop,
+        ["staged-only.txt".to_owned()]
+    );
+    assert_eq!(
+        snap.unstaged_paths_after_stash_pop,
+        ["story.txt".to_owned()]
+    );
     assert_eq!(snap.staged_only_content_after_stash_pop, "staged\n");
     assert_eq!(snap.untracked_content_after_stash_pop, "new\n");
-    assert!(snap.story_content_after_stash_pop.contains("wip"));
+    assert_eq!(
+        snap.story_content_after_stash_pop,
+        "line1\nline2\nline3\nwip\n"
+    );
 }
 
 fn case_fetch(fixture: &impl BackendFixture) {
     let snap = build_snapshot(fixture);
-    let backend_remotes = canonical_fetch_remote_refs(&snap.backend_fetch_refs);
-    let files_remotes = canonical_fetch_remote_refs(&snap.files_fetch_refs);
+    let backend_remotes = remote_tracking_refs(&snap.backend_fetch_refs);
+    let files_remotes = remote_tracking_refs(&snap.files_fetch_refs);
     assert_eq!(backend_remotes, snap.expected_fetch_remote_refs);
     assert_eq!(files_remotes, snap.expected_fetch_remote_refs);
     assert_eq!(backend_remotes, files_remotes);
