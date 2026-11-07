@@ -34,7 +34,7 @@ describe("resolveRustdocPath associated items", () => {
   });
 
   it("follows re-exports of items that are public elsewhere", () => {
-    expect(resolveRustdocPath("grit_lib::config::ConfigHandle")).toBe("config/struct.ConfigHandle.html");
+    expect(resolveRustdocPath("grit_lib::config::Config")).toBe("config/struct.Config.html");
     expect(resolveRustdocPath("grit_lib::porcelain::branch::DeleteMode::Safe")).toBe(
       "porcelain/branch/enum.DeleteMode.html#variant.Safe",
     );
@@ -84,7 +84,7 @@ describe("unresolvedGritLibPaths", () => {
       "Serve with `grit_lib::remote::serve::upload_pack` and [`Odb`](rustdoc:grit_lib::objects::odb::Odb).",
       "```rust",
       "use grit_lib::objects::{HashAlgo, ObjectKind as Kind, hash::hash_object};",
-      "use grit_lib::config::ConfigHandle;",
+      "use grit_lib::config::Config;",
       "```",
       "[docs](https://docs.rs/grit-lib/latest/grit_lib/remote/serve/struct.ServeOptions.html#method.default)",
     ].join("\n");
