@@ -141,9 +141,20 @@ pub struct InitOptions {
     /// [`RepositoryOptions::open_for_serving`] are ignored, and the initial branch comes from
     /// [`Self::initial_branch`], not [`RepositoryOptions::initial_branch`].
     pub repository: RepositoryOptions,
+    /// Environment that, when set, replaces [`RepositoryOptions::environment`] in
+    /// [`Self::repository`].
+    #[deprecated(
+        note = "use `InitOptions::with_repository_options(RepositoryOptions::with_environment(env))`"
+    )]
+    pub environment: Option<Environment>,
     /// Init-time filesystem probes (`InitFilesystemConfigOptions`).
     pub init_filesystem: InitFilesystemConfigOptions,
 }
+
+// `InitOptions` is a plain description of what to create; the trait objects inside
+// `RepositoryOptions` are only called after init has started, never across an unwind.
+impl std::panic::UnwindSafe for InitOptions {}
+impl std::panic::RefUnwindSafe for InitOptions {}
 
 impl Default for InitOptions {
     fn default() -> Self {
@@ -156,6 +167,8 @@ impl Default for InitOptions {
             bare_with_worktree_at_path: false,
             object_format: None,
             repository: RepositoryOptions::default(),
+            #[allow(deprecated)]
+            environment: None,
             init_filesystem: InitFilesystemConfigOptions::default(),
         }
     }
@@ -247,6 +260,16 @@ impl InitOptions {
     #[must_use]
     pub fn with_repository_options(mut self, repository: RepositoryOptions) -> Self {
         self.repository = repository;
+        self
+    }
+
+    /// Set the environment of [`Self::repository`].
+    #[deprecated(
+        note = "use `InitOptions::with_repository_options(RepositoryOptions::with_environment(env))`"
+    )]
+    #[must_use]
+    pub fn with_environment(mut self, environment: Environment) -> Self {
+        self.repository.environment = environment;
         self
     }
 
@@ -1591,7 +1614,18 @@ impl Repository {
         if options.bare && options.separate_git_dir.is_some() {
             return Err(RepositoryError::InitBareWithSeparateGitDir.into());
         }
-        let repository = &options.repository;
+        #[allow(deprecated)]
+        let legacy_environment = options.environment.as_ref();
+        let with_legacy_environment;
+        let repository = match legacy_environment {
+            Some(environment) => {
+                let mut repository = options.repository.clone();
+                repository.environment = environment.clone();
+                with_legacy_environment = repository;
+                &with_legacy_environment
+            }
+            None => &options.repository,
+        };
         let injected_refs = repository.ref_store.as_deref();
         if injected_refs.is_some() && options.ref_storage.is_reftable() {
             return Err(RepositoryError::InitRefStorageWithInjectedRefStore {
