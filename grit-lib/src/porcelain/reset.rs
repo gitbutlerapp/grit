@@ -71,8 +71,6 @@ pub struct ResetOptions {
     pub dry_run: bool,
     /// Maximum orphaned commits to return; defaults to [`DEFAULT_ORPHAN_LIMIT`].
     pub orphan_limit: usize,
-    /// When `HEAD` is on a branch, also mirror the branch tip move in `HEAD`'s reflog.
-    pub(crate) mirror_head_reflog: bool,
 }
 
 impl ResetOptions {
@@ -91,7 +89,6 @@ impl ResetOptions {
             message: message.into(),
             dry_run: false,
             orphan_limit: DEFAULT_ORPHAN_LIMIT,
-            mirror_head_reflog: true,
         }
     }
 
@@ -189,6 +186,18 @@ pub fn reset_to_commit(
     progress: &mut dyn crate::progress::ProgressSink,
     cancel: &crate::progress::CancelToken,
 ) -> Result<ResetOutcome> {
+    reset_to_commit_with_head_reflog_mirror(repo, opts, progress, cancel, true)
+}
+
+/// Like [`reset_to_commit`], but callers inside `grit-lib` can skip mirroring branch tip
+/// moves on `HEAD` when the branch reflog already records the operation.
+pub(crate) fn reset_to_commit_with_head_reflog_mirror(
+    repo: &Repository,
+    opts: &ResetOptions,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &crate::progress::CancelToken,
+    mirror_head_reflog: bool,
+) -> Result<ResetOutcome> {
     let (previous, head, preview) = plan_reset(repo, opts, opts.dry_run)?;
     let ref_label = ref_label_for_head(&head);
 
@@ -212,7 +221,7 @@ pub fn reset_to_commit(
     clear_merge_state(repo.git_dir())?;
     clear_replay_state(repo.git_dir())?;
     let ref_updated = if previous != opts.target {
-        move_head_tip(repo, &head, previous, opts)?
+        move_head_tip(repo, &head, previous, opts, mirror_head_reflog)?
     } else {
         ref_label
     };
@@ -422,11 +431,12 @@ fn move_head_tip(
     head: &HeadState,
     previous: ObjectId,
     opts: &ResetOptions,
+    mirror_head_reflog: bool,
 ) -> Result<String> {
     let (moved, logged): (&str, Vec<&str>) = match head {
         HeadState::Branch { refname, .. } => {
             let mut names = vec![refname.as_str()];
-            if opts.mirror_head_reflog {
+            if mirror_head_reflog {
                 names.push("HEAD");
             }
             (refname, names)

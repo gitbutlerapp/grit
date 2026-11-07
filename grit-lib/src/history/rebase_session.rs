@@ -15,7 +15,7 @@ use crate::objects::ObjectId;
 use crate::operation::conflicts_from_tree_merge;
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::merge::apply_conflict_merge_worktree;
-use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use crate::porcelain::reset::{reset_to_commit_with_head_reflog_mirror, ResetMode, ResetOptions};
 use crate::porcelain::worktree_guard::{
     ensure_safe_for_rebase_stop, ensure_worktree_clean_for_rebase_exec,
 };
@@ -1785,13 +1785,13 @@ fn hard_reset_head(
     identity: &crate::ident::Signature,
     suppress_head_mirror: bool,
 ) -> crate::error::Result<()> {
-    let mut opts = ResetOptions::new(target, ResetMode::Hard, identity.clone(), "rebase (abort)");
-    opts.mirror_head_reflog = !suppress_head_mirror;
-    reset_to_commit(
+    let opts = ResetOptions::new(target, ResetMode::Hard, identity.clone(), "rebase (abort)");
+    reset_to_commit_with_head_reflog_mirror(
         repo,
         &opts,
         &mut crate::progress::NullProgress,
         &crate::progress::CancelToken::never(),
+        !suppress_head_mirror,
     )
     .map_err(map_lib)?;
     Ok(())
