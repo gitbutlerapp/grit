@@ -102,6 +102,10 @@ name = "environment"
 harness = false
 
 [[bench]]
+name = "repository_open"
+harness = false
+
+[[bench]]
 name = "config_parse"
 harness = false
 
