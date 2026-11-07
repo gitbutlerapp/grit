@@ -185,7 +185,7 @@ mod tests {
     use crate::ident::Signature;
     use crate::maintenance::repository_fsck::{fsck, FsckOptions};
     use crate::maintenance::{prune_loose_objects, PruneOptions};
-    use crate::objects::odb::{store::MemoryStore, OdbBuilder};
+    use crate::objects::odb::store::MemoryStore;
     use crate::objects::{HashAlgo, NewCommit, ObjectKind};
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
@@ -480,11 +480,7 @@ mod tests {
         let repo = Repository::open(
             &git_dir,
             &(RepositoryOptions::empty()
-                .with_odb_builder(
-                    OdbBuilder::files(git_dir.join("objects"))
-                        .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                        .alternates(false),
-                )
+                .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
                 .with_ref_store(Arc::new(MemoryRefStore::new()))
                 .with_initial_branch("main")),
         )

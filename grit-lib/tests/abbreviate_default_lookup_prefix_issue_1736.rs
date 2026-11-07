@@ -12,7 +12,7 @@ use std::sync::{Arc, RwLock};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, Result};
 use grit_lib::objects::odb::store::{ObjectStore, WritableObjectStore};
-use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
+use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse::{abbreviate_object_id, resolve_revision};
@@ -93,11 +93,7 @@ fn repo_over(store: Arc<MinimalStore>) -> (tempfile::TempDir, Repository) {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store)
-                    .alternates(false),
-            )
+            .with_object_store(store)
             .with_work_tree(dir.path())),
     )
     .expect("open over minimal store");

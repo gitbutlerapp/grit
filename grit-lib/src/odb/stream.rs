@@ -605,10 +605,7 @@ mod tests {
         let objects = dir.path().join("objects");
         fs::create_dir_all(&objects).unwrap();
         let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-        let odb = OdbBuilder::files(&objects)
-            .primary(store.clone())
-            .alternates(false)
-            .build();
+        let odb = OdbBuilder::new().build(&objects, Some(store.clone()));
         let data = generated(20_000);
         let oid = odb
             .write_stream(

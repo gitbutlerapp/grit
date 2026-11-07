@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
-use grit_lib::objects::odb::{store::MemoryStore, OdbBuilder};
+use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
@@ -40,11 +40,7 @@ fn open_injected(root: &Path) -> (Repository, Arc<MemoryRefStore>) {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::with_environment(environment())
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(store.clone())
             .with_initial_branch("main")
             .with_work_tree(&work_tree)),

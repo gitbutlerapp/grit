@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -19,11 +18,7 @@ fn main() -> grit_lib::error::Result<()> {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_work_tree(dir.path())),
     )?;
 

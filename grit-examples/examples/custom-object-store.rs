@@ -1,4 +1,4 @@
-//! Custom append-only object store wired through [`OdbBuilder::primary`].
+//! Custom append-only object store wired through [`RepositoryOptions::with_object_store`](grit_lib::config::environment::RepositoryOptions::with_object_store).
 //!
 //! Writes a small commit graph in the KV store, walks history with [`rev_list`],
 //! then exports objects as loose files for interoperability with system Git.

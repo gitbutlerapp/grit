@@ -13,7 +13,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{commit_with_scope, create_commit, CommitRequest, CommitScope};
@@ -386,11 +385,7 @@ fn memory_ref_store_second_commit_head_line_matches_branch_old_oid() {
         &git_dir,
         &(RepositoryOptions::empty()
             .with_initial_branch("main")
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_work_tree(&root)),
     )

@@ -1,6 +1,6 @@
 //! Replacing a gitlink (submodule) with a regular file, then staging and committing it,
 //! records a blob in the new commit, whether the repository was opened through an absolute
-//! path, a relative path, or `Repository::open` with a relative `OdbBuilder` path.
+//! path, a relative path, or `Repository::open` with an `OdbBuilder`.
 //!
 //! This binary holds a single test because it changes the process working directory.
 
@@ -135,10 +135,10 @@ fn gitlink_to_file_typechange_stages_and_commits_through_every_open_path() {
     let repo = Repository::open(
         Path::new("built/.git"),
         &(options
-            .with_odb_builder(OdbBuilder::files("built/.git/objects"))
+            .with_odb_builder(OdbBuilder::new())
             .with_work_tree(Path::new("built"))),
     )
-    .expect("open with relative ODB paths");
+    .expect("open with an ODB builder");
     stage_and_commit(&repo);
     assert_committed_as_blob(&built);
 }

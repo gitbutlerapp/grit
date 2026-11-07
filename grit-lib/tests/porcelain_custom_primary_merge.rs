@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{parse_commit, parse_tree};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
@@ -37,11 +36,7 @@ fn memory_primary_repo(
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_ref_store(ref_store.clone())
             .with_initial_branch("main")
             .with_work_tree(&wt)),

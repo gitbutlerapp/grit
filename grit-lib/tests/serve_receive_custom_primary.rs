@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::serve::{
@@ -80,11 +79,7 @@ fn memory_serve_repo(root: &Path) -> (Repository, Arc<MemoryStore>, Arc<MemoryRe
         root,
         &(RepositoryOptions::empty()
             .for_serving()
-            .with_odb_builder(
-                OdbBuilder::files(root.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_ref_store(refs.clone())
             .with_initial_branch("main")),
     )

@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::porcelain::merge::{resolve_merge_source, MergeSourceKind};
 use grit_lib::refs::list_refs_for_repository;
@@ -23,11 +22,7 @@ fn open_memory_ref_repo(git_dir: &Path) -> Repository {
     Repository::open(
         git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")),
     )

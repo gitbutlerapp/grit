@@ -32,11 +32,7 @@ fn open_with_primary(git_dir: &Path, primary: &Arc<MemoryStore>) -> Result<Repos
     Repository::open(
         git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(primary.clone())
-                    .alternates(false),
-            )
+            .with_object_store(primary.clone())
             .with_work_tree(
                 git_dir
                     .parent()
@@ -115,11 +111,7 @@ fn custom_primary_without_config_follows_the_sha1_default() {
         Repository::open(
             &git_dir,
             &(RepositoryOptions::empty()
-                .with_odb_builder(
-                    OdbBuilder::files(git_dir.join("objects"))
-                        .primary(Arc::new(MemoryStore::new(format)))
-                        .alternates(false),
-                )
+                .with_object_store(Arc::new(MemoryStore::new(format)))
                 .with_ref_store(Arc::new(MemoryRefStore::new()))
                 .with_initial_branch("main")),
         )
@@ -139,7 +131,7 @@ fn read_source_with_a_different_hash_algorithm_is_rejected() {
                 &git_dir,
                 &(RepositoryOptions::empty()
                     .with_odb_builder(
-                        OdbBuilder::files(git_dir.join("objects"))
+                        OdbBuilder::new()
                             .push_read_source(Arc::new(MemoryStore::new(repo_format)))
                             .push_read_source(Arc::new(MemoryStore::new(source))),
                     )
@@ -159,7 +151,7 @@ fn files_primary_opens_a_sha256_repository() {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(OdbBuilder::files(git_dir.join("objects")))
+            .with_odb_builder(OdbBuilder::new())
             .with_work_tree(tmp.path())),
     )
     .expect("files primary");

@@ -16,7 +16,7 @@ use grit_lib::error::Error;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::index_pack::{ingest_received_pack, IngestPackOptions};
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, ObjectStream, WritableObjectStore};
-use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
+use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
 use grit_lib::objects::unpack_objects::{ingest_pack_into, UnpackOptions};
 use grit_lib::objects::CommitData;
@@ -329,11 +329,7 @@ fn open_repo(gd: &Path, wt: &Path) -> (Repository, Arc<TransactionalStore>) {
     let repo = Repository::open(
         gd,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(gd.join("objects"))
-                    .primary(primary)
-                    .alternates(false),
-            )
+            .with_object_store(primary)
             .with_ref_store(Arc::new(LoggingRefStore::new(log)))
             .with_initial_branch("main")
             .with_work_tree(wt)),
@@ -587,11 +583,7 @@ fn ingest_flush_failure_rolls_back_staged() {
     let repo = Repository::open(
         &gd,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(gd.join("objects"))
-                    .primary(primary)
-                    .alternates(false),
-            )
+            .with_object_store(primary)
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")),
     )

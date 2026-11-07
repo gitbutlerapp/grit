@@ -1555,11 +1555,9 @@ impl FetchDryRunIngest {
                 objects_dir,
                 pack,
                 read,
-            } => crate::odb::OdbBuilder::files(objects_dir)
-                .primary(pack.clone())
+            } => crate::odb::OdbBuilder::new()
                 .push_read_source(read.clone())
-                .alternates(false)
-                .build(),
+                .build(objects_dir, Some(pack.clone())),
         }
     }
 }
@@ -1607,7 +1605,7 @@ pub(crate) fn open_fetch_target(local_git_dir: &Path, opts: &FetchOptions) -> Re
 /// Like [`fetch_remote`], reading and writing objects through `local`'s object store.
 ///
 /// Received packs are ingested into `local`'s primary backend, including a custom
-/// [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) store. Set
+/// [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store) store. Set
 /// test_support fetch pack-spool-only knob (test-support feature) to keep the
 /// negotiated pack on disk and ingest it with [`crate::index_pack::ingest_received_pack_path`]
 /// or [`crate::unpack_objects::ingest_pack_into`].

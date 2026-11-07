@@ -450,101 +450,6 @@ impl Repository {
         }
     }
 
-    fn from_canonical_git_dir(
-        options: &RepositoryOptions,
-        git_dir: PathBuf,
-        work_tree: Option<&Path>,
-        injected_refs: Option<Arc<dyn crate::refs::store::RefStore>>,
-    ) -> Result<Self> {
-        let environment = Arc::new(options.environment.clone());
-        let command_runner = Arc::clone(&options.command_runner);
-        let change_id_generator = Arc::clone(&options.change_id_generator);
-        // An injected ref store holds HEAD itself; otherwise HEAD must exist or be a symlink
-        // (linked worktrees have a symlink HEAD).
-        if injected_refs.is_none() && !head_file_present(&git_dir) {
-            return Err(not_a_repository_at(&git_dir));
-        }
-
-        let common_git_dir = resolve_common_dir(&git_dir).unwrap_or_else(|| git_dir.clone());
-        let objects_dir = resolve_objects_dir(&environment, &git_dir, &common_git_dir)
-            .filter(|dir| dir.exists())
-            .ok_or_else(|| not_a_repository_at(&git_dir))?;
-
-        let work_tree = match work_tree {
-            Some(p) => {
-                let cwd = environment.discovery_cwd();
-                let mut resolved = if p.is_absolute() {
-                    p.to_path_buf()
-                } else {
-                    cwd.join(p)
-                };
-                if resolved.exists() {
-                    resolved = resolved
-                        .canonicalize_simplified()
-                        .map_err(|_| Error::PathError(p.display().to_string()))?;
-                }
-                Some(resolved)
-            }
-            None => None,
-        };
-
-        let caches = RepoCaches::with_diagnostics(
-            Arc::clone(&command_runner),
-            Arc::clone(&options.diagnostics),
-            options.reftable_write,
-        );
-        caches.set_promisor_fetcher(options.promisor_fetcher.clone());
-        let odb = if let Some(ref wt) = work_tree {
-            Odb::with_work_tree(&objects_dir, wt)
-                .with_config_git_dir(git_dir.clone())
-                .with_shared_config_state(caches.clone(), environment.clone())
-        } else {
-            Odb::new(&objects_dir)
-                .with_config_git_dir(git_dir.clone())
-                .with_shared_config_state(caches.clone(), environment.clone())
-        };
-
-        let git_prefix = work_tree
-            .as_ref()
-            .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
-
-        let refs_backend = checked_ref_store_with_hooks(
-            open_or_install_ref_store(&caches, &git_dir, &environment, injected_refs)?,
-            odb.clone(),
-            &git_dir,
-            work_tree.as_deref(),
-            &environment,
-            &command_runner,
-            options.hook_stdio,
-            &options.diagnostics,
-        );
-        caches.configure_filter_subprocess(&environment, &git_dir, work_tree.as_deref());
-
-        Ok(Self {
-            git_dir,
-            common_git_dir,
-            work_tree,
-            odb,
-            explicit_git_dir: false,
-            discovery_root: None,
-            work_tree_from_env: false,
-            discovery_via_gitfile: false,
-            config_session: Mutex::new(None),
-            caches,
-            refs_backend,
-            environment,
-            git_prefix,
-            command_runner,
-            change_id_generator,
-            diagnostics: Arc::clone(&options.diagnostics),
-            network_trace: options.network_trace,
-            reference_unix_time: options.reference_unix_time,
-            ownership_check: options.ownership_check(),
-            thread_policy: options.thread_policy,
-            hook_stdio: options.hook_stdio,
-        })
-    }
-
     /// Explicit parallel worker overrides for this handle (`--threads` / embedder policy).
     #[must_use]
     pub fn thread_policy(&self) -> crate::parallel::ThreadPolicy {
@@ -695,6 +600,7 @@ impl Repository {
             reference_unix_time: self.reference_unix_time,
             thread_policy: self.thread_policy,
             work_tree: None,
+            object_store: None,
             odb_builder: None,
             ref_store: None,
             initial_branch: None,
@@ -1699,37 +1605,10 @@ impl Repository {
     }
 
     fn open_internal(options: &RepositoryOptions, git_dir: &Path) -> Result<Self> {
-        let injected_refs = options.ref_store.clone();
-        let repo = if let Some(builder) = options.odb_builder.clone() {
-            Self::open_with_odb_internal(options, git_dir, builder, injected_refs)?
-        } else {
-            Self::open_internal_with_refs(options, git_dir, injected_refs)?
-        };
+        let repo = Self::open_git_dir(options, git_dir)?;
         if let Some(branch) = options.initial_branch.as_deref() {
             seed_unborn_head(repo.ref_store(), branch)?;
         }
-        Ok(repo)
-    }
-
-    fn open_internal_with_refs(
-        options: &RepositoryOptions,
-        git_dir: &Path,
-        injected_refs: Option<Arc<dyn crate::refs::store::RefStore>>,
-    ) -> Result<Self> {
-        crate::trace::trace_span!("grit.repository.open");
-        let work_tree = options.work_tree.as_deref();
-        let git_dir = git_dir
-            .canonicalize_simplified()
-            .map_err(|_| not_a_repository_at(git_dir))?;
-
-        let repo = Self::from_canonical_git_dir(options, git_dir, work_tree, injected_refs)?;
-        repo.refresh_config_session()?;
-        read_core_bare_and_worktree_from_config(repo.config().snapshot()?.as_ref())?;
-        if options.validate_repository_format {
-            repo.validate_repository_format_cached()?;
-        }
-        repo.install_config_snapshot();
-        warn_core_bare_worktree_conflict(options, &repo);
         Ok(repo)
     }
 
@@ -1753,28 +1632,36 @@ impl Repository {
         Err(not_a_repository_at(path))
     }
 
-    fn open_with_odb_internal(
-        options: &RepositoryOptions,
-        git_dir: &Path,
-        mut builder: crate::odb::OdbBuilder,
-        injected_refs: Option<Arc<dyn crate::refs::store::RefStore>>,
-    ) -> Result<Self> {
-        let work_tree = options.work_tree.as_deref();
+    /// Open the git directory `git_dir` (relative paths resolve against
+    /// [`Environment::discovery_cwd`]) with the stores and layers in `options`.
+    fn open_git_dir(options: &RepositoryOptions, git_dir: &Path) -> Result<Self> {
+        crate::trace::trace_span!("grit.repository.open");
         let environment = Arc::new(options.environment.clone());
-        let cwd = environment.discovery_cwd();
+        let absolute = |path: &Path| {
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                environment.discovery_cwd().join(path)
+            }
+        };
         let command_runner = Arc::clone(&options.command_runner);
         let change_id_generator = Arc::clone(&options.change_id_generator);
+        let injected_refs = options.ref_store.clone();
+        let custom_primary = options.object_store.clone();
+        let layers = options.odb_builder.clone().unwrap_or_default();
 
         // With both stores injected nothing is read from the git directory's layout, so it
         // may be empty or missing; config and the index are still looked up there.
-        let fully_injected = injected_refs.is_some() && builder.has_custom_primary();
-        let requested_git_dir = cwd.join(git_dir);
+        let fully_injected = injected_refs.is_some() && custom_primary.is_some();
+        let requested_git_dir = absolute(git_dir);
         let git_dir = match requested_git_dir.canonicalize_simplified() {
             Ok(dir) => dir,
             Err(_) if fully_injected => canonicalize_existing_prefix(&requested_git_dir)?,
             Err(_) => return Err(not_a_repository_at(git_dir)),
         };
 
+        // An injected ref store holds HEAD itself; otherwise HEAD must exist or be a symlink
+        // (linked worktrees have a symlink HEAD).
         if injected_refs.is_none() && !head_file_present(&git_dir) {
             return Err(not_a_repository_at(&git_dir));
         }
@@ -1782,26 +1669,24 @@ impl Repository {
         let common_git_dir = resolve_common_dir(&git_dir).unwrap_or_else(|| git_dir.clone());
         let objects_dir = resolve_objects_dir(&environment, &git_dir, &common_git_dir)
             .ok_or_else(|| not_a_repository_at(&git_dir))?;
-
-        // A custom primary does not need objects/ to exist, but the builder must still name it.
-        if !builder.has_custom_primary() && !objects_dir.exists() {
+        // A custom primary never touches objects/, so the directory need not exist.
+        let objects_dir = if custom_primary.is_some() {
+            canonicalize_existing_prefix(&objects_dir)?
+        } else if objects_dir.exists() {
+            objects_dir
+        } else {
             return Err(not_a_repository_at(&git_dir));
-        }
-        let objects_dir = canonicalize_existing_prefix(&objects_dir)?;
-        let builder_objects = canonicalize_existing_prefix(&cwd.join(builder.objects_dir()))?;
-        if builder_objects != objects_dir {
-            return Err(RepositoryError::OdbObjectsDirMismatch {
-                builder: builder_objects,
-                repository: objects_dir,
-            }
-            .into());
-        }
-        builder.set_objects_dir(objects_dir);
-        let injected_algos: Vec<HashAlgo> = builder.injected_hash_algos().collect();
+        };
 
-        let work_tree = match work_tree {
+        let injected_algos: Vec<HashAlgo> = custom_primary
+            .iter()
+            .map(|store| store.hash_algo())
+            .chain(layers.injected_hash_algos())
+            .collect();
+
+        let work_tree = match options.work_tree.as_deref() {
             Some(p) => {
-                let mut resolved = cwd.join(p);
+                let mut resolved = absolute(p);
                 if resolved.exists() {
                     resolved = resolved
                         .canonicalize_simplified()
@@ -1817,11 +1702,12 @@ impl Repository {
             Arc::clone(&options.diagnostics),
             options.reftable_write,
         );
-        let odb = builder
-            .build()
+        caches.set_promisor_fetcher(options.promisor_fetcher.clone());
+        let odb = layers
+            .build(&objects_dir, custom_primary)
+            .with_resolved_work_tree(work_tree.clone())
             .with_config_git_dir(git_dir.clone())
-            .with_shared_config_state(caches.clone(), environment.clone())
-            .with_resolved_work_tree(work_tree.clone());
+            .with_shared_config_state(caches.clone(), environment.clone());
 
         let git_prefix = work_tree
             .as_ref()
@@ -1863,16 +1749,19 @@ impl Repository {
             hook_stdio: options.hook_stdio,
         };
         repo.refresh_config_session()?;
+        read_core_bare_and_worktree_from_config(repo.config().snapshot()?.as_ref())?;
         if options.validate_repository_format {
             repo.validate_repository_format_cached()?;
         }
         repo.check_injected_object_format(&injected_algos)?;
+        repo.install_config_snapshot();
         warn_core_bare_worktree_conflict(options, &repo);
         Ok(repo)
     }
 
     /// Fail with [`RepositoryError::ObjectFormatMismatch`] when one of `injected` (the hash algorithms
-    /// of the stores and commit-graph passed to [`RepositoryOptions::with_odb_builder`]) differs from
+    /// of the stores and commit-graph passed to [`RepositoryOptions::with_object_store`] and
+    /// [`RepositoryOptions::with_odb_builder`]) differs from
     /// `extensions.objectformat`, SHA-1 when unset.
     ///
     /// Reads the config snapshot the open already loaded. Files-backed primaries and

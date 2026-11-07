@@ -8414,9 +8414,10 @@ mod tests {
             .expect("overlay read");
         assert_eq!(buf, b"overlay\n");
 
-        let custom = OdbBuilder::files(tmp.path().join("custom/objects"))
-            .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-            .build();
+        let custom = OdbBuilder::new().build(
+            &tmp.path().join("custom/objects"),
+            Some(Arc::new(MemoryStore::new(HashAlgo::Sha1))),
+        );
         let custom_oid = custom
             .write(ObjectKind::Blob, b"custom\n")
             .expect("custom object");

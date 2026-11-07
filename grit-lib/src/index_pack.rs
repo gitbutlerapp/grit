@@ -117,7 +117,7 @@ pub struct IngestedPack {
     /// Absolute path to the published `pack-*.pack` file.
     ///
     /// `None` when nothing was published: the pack was empty, or the object database
-    /// has a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) store and
+    /// has a custom [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store) store and
     /// the objects were written into it one by one.
     pub pack_path: Option<PathBuf>,
     /// How many objects of each type the pack holds.
@@ -247,7 +247,7 @@ impl IngestPackOptions {
 ///
 /// Returns the installed pack identity and indexed object ids.
 ///
-/// When `odb` has a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
+/// When `odb` has a custom [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store)
 /// store, the pack is not installed: its objects are resolved and written into that
 /// store (see [`ingest_pack_into`](crate::unpack_objects::ingest_pack_into)), thin-pack
 /// bases are read through `odb`, and [`IngestedPack::pack_path`] is `None`. Only

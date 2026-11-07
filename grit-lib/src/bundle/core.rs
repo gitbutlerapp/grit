@@ -362,7 +362,7 @@ impl Bundle {
     /// Stream the embedded pack into `repo`'s ODB (does not update refs).
     ///
     /// With a files-backed primary the pack is installed under `objects/pack/`. With a
-    /// custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) store the pack is
+    /// custom [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store) store the pack is
     /// read straight from the bundle file and every object is written into that store;
     /// no temporary file is created. A filtered (v3 `filter`) bundle is then not marked
     /// as a promisor pack, since there is no pack to mark.

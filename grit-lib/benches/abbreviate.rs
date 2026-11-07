@@ -17,7 +17,7 @@ use std::sync::{Arc, RwLock};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::error::Result;
-use grit_lib::objects::odb::builder::OdbBuilder;
+
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
 use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
@@ -108,11 +108,7 @@ fn repo_over_store(store: Arc<dyn WritableObjectStore>) -> (TempDir, Repository,
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store)
-                    .alternates(false),
-            )
+            .with_object_store(store)
             .with_work_tree(dir.path())),
     )
     .expect("open repo over custom store");

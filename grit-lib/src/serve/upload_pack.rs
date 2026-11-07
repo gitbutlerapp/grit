@@ -1802,11 +1802,7 @@ mod tests {
         let repo = crate::repo::Repository::open(
             &git_dir,
             &(RepositoryOptions::empty()
-                .with_odb_builder(
-                    crate::odb::OdbBuilder::files(git_dir.join("objects"))
-                        .primary(store.clone())
-                        .alternates(false),
-                )
+                .with_object_store(store.clone())
                 .with_ref_store(std::sync::Arc::new(
                     crate::refs::store::MemoryRefStore::new(),
                 ))),

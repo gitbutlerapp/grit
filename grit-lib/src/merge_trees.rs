@@ -3036,10 +3036,7 @@ mod tests {
         let objects = dir.path().join("objects");
         fs::create_dir_all(&objects).expect("mkdir objects");
         let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-        let odb = OdbBuilder::files(&objects)
-            .primary(store.clone())
-            .alternates(false)
-            .build();
+        let odb = OdbBuilder::new().build(&objects, Some(store.clone()));
         odb.enable_mem_overlay();
         let stage0_blob = odb
             .write(ObjectKind::Blob, b"auto-merged")

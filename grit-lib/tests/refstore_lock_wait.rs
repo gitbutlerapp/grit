@@ -20,7 +20,6 @@ use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::lockfile::LockWait;
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions, TrackMode};
@@ -314,11 +313,7 @@ fn repository_injected_store_uses_core_files_ref_lock_timeout_from_git_dir() {
     let repo = Repository::open(
         &git_dir,
         &(options()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")
             .with_work_tree(&work_tree)),
@@ -349,11 +344,7 @@ fn concurrent_create_branch_on_injected_store_never_lock_held() {
         Repository::open(
             &git_dir,
             &(options()
-                .with_odb_builder(
-                    OdbBuilder::files(git_dir.join("objects"))
-                        .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                        .alternates(false),
-                )
+                .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
                 .with_ref_store(Arc::new(MemoryRefStore::new()))
                 .with_initial_branch("main")
                 .with_work_tree(&work_tree)),
@@ -416,11 +407,7 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
     let main = Repository::open(
         &git_dir,
         &(options()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(odb.clone())
-                    .alternates(false),
-            )
+            .with_object_store(odb.clone())
             .with_ref_store(refs.clone())
             .with_initial_branch("main")
             .with_work_tree(&main_wt)),
@@ -446,11 +433,7 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
             let repo = Repository::open(
                 &entry.admin_dir,
                 &(options()
-                    .with_odb_builder(
-                        OdbBuilder::files(git_dir.join("objects"))
-                            .primary(odb.clone())
-                            .alternates(false),
-                    )
+                    .with_object_store(odb.clone())
                     .with_ref_store(refs.clone())
                     .with_initial_branch("main")
                     .with_work_tree(&path)),

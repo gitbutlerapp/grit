@@ -302,22 +302,19 @@ fn empty_env_object_directory_is_not_a_repository() {
     assert!(!out.status.success(), "git rejects an empty value too");
 }
 
+/// `Repository::open` resolves the env directory itself; read layers from an `OdbBuilder`
+/// sit on top of it rather than replacing it.
 #[test]
-fn odb_builder_must_name_env_object_directory() {
+fn odb_builder_layers_over_env_object_directory() {
     let (_tmp, work, objq) = layout();
     let git_dir = work.join(".git");
-    let options = || {
-        RepositoryOptions::with_environment(environment(&work, objq.to_str().unwrap()))
-            .with_work_tree(&work)
-    };
-
     let repo = Repository::open(
         &git_dir,
-        &(options()
-            .with_odb_builder(OdbBuilder::files(&objq))
-            .with_work_tree(&work)),
+        &RepositoryOptions::with_environment(environment(&work, objq.to_str().unwrap()))
+            .with_odb_builder(OdbBuilder::new())
+            .with_work_tree(&work),
     )
-    .expect("builder rooted at the env dir");
+    .expect("builder over the env dir");
     assert_eq!(repo.odb().objects_dir(), objq.as_path());
     let oid = repo.odb().write(ObjectKind::Blob, b"builder\n").unwrap();
     assert_eq!(loose_objects(&objq).len(), 1);
@@ -328,23 +325,6 @@ fn odb_builder_must_name_env_object_directory() {
     .unwrap()
     .odb()
     .exists(&oid));
-
-    let mismatch = Repository::open(
-        &git_dir,
-        &(options()
-            .with_odb_builder(OdbBuilder::files(git_dir.join("objects")))
-            .with_work_tree(&work)),
-    );
-    assert!(
-        matches!(
-            mismatch,
-            Err(Error::Repository(RepositoryError::OdbObjectsDirMismatch {
-                ref repository,
-                ..
-            })) if repository == &objq
-        ),
-        "{mismatch:?}"
-    );
 }
 
 /// `up/` (work tree), `remote.git` (bare, from `up`) and the client `r/` cloned from it by

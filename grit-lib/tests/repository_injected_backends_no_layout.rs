@@ -24,11 +24,7 @@ fn open_injected(git_dir: &Path) -> grit_lib::error::Result<(Repository, Arc<Mem
     let repo = Repository::open(
         git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(odb)
-                    .alternates(false),
-            )
+            .with_object_store(odb)
             .with_ref_store(refs.clone())
             .with_initial_branch("main")),
     )?;
@@ -131,11 +127,7 @@ fn initial_branch_keeps_an_existing_head() {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(refs.clone())
             .with_initial_branch("main")),
     )
@@ -155,11 +147,7 @@ fn initial_branch_rejects_invalid_names() {
     let result = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("bad..name")),
     );
@@ -174,7 +162,7 @@ fn a_files_object_store_still_needs_its_objects_directory() {
     let result = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(OdbBuilder::files(git_dir.join("objects")))
+            .with_odb_builder(OdbBuilder::new())
             .with_ref_store(Arc::new(MemoryRefStore::new()))),
     );
     assert!(

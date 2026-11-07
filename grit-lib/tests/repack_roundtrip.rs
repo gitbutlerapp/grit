@@ -10,7 +10,6 @@ use grit_lib::error::Error;
 use grit_lib::index::Index;
 use grit_lib::maintenance::{repack, repack_all, RepackOptions};
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -466,11 +465,7 @@ fn custom_backend_unsupported_error() {
     let custom = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store)
-                    .alternates(false),
-            )
+            .with_object_store(store)
             .with_work_tree(dir.path())),
     )
     .expect("open");

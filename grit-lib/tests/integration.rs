@@ -1682,6 +1682,11 @@ mod repository_refstore_git_namespace;
 #[cfg(feature = "full-tests")]
 #[path = "repository_with_memory_ref_store.rs"]
 mod repository_with_memory_ref_store;
+#[path = "repository_with_object_store.rs"]
+mod repository_with_object_store;
+#[cfg(feature = "full-tests")]
+#[path = "repository_with_object_store_git_compat.rs"]
+mod repository_with_object_store_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "rerere_git_compat.rs"]
 mod rerere_git_compat;

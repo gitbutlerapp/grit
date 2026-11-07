@@ -182,15 +182,14 @@ fn open_custom(
     graph: Option<Arc<CommitGraphChain>>,
 ) -> Result<Repository> {
     let git_dir = dir.join(".git");
-    let mut builder = OdbBuilder::files(git_dir.join("objects"))
-        .primary(store)
-        .alternates(false);
+    let mut builder = OdbBuilder::new();
     if let Some(graph) = graph {
         builder = builder.commit_graph(graph);
     }
     Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
+            .with_object_store(store)
             .with_odb_builder(builder)
             .with_work_tree(dir)),
     )

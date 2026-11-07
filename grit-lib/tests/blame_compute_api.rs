@@ -318,6 +318,7 @@ fn compute_blame_final_newline_changes_preserve_bodies_and_ranges() {
 fn ranged_blame_preserves_custom_primary_and_read_source_fallback() {
     use grit_lib::objects::odb::{MemoryStore, OdbBuilder, WritableObjectStore};
     use grit_lib::objects::{serialize_tree, HashAlgo, ObjectKind, TreeEntry};
+    use grit_lib::refs::store::MemoryRefStore;
     use std::sync::Arc;
 
     for primary in [false, true] {
@@ -342,14 +343,17 @@ fn ranged_blame_preserves_custom_primary_and_read_source_fallback() {
         let commit = store
             .write(ObjectKind::Commit, commit.as_bytes(), Default::default())
             .expect("commit");
-        let builder = OdbBuilder::files(root.path()).alternates(false);
-        let odb = if primary {
-            builder.primary(store).build()
+        let git_dir = root.path().join("g.git");
+        std::fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
+        let options = RepositoryOptions::empty().with_ref_store(Arc::new(MemoryRefStore::new()));
+        let options = if primary {
+            options.with_object_store(store)
         } else {
-            builder.push_read_source(store).build()
+            options.with_odb_builder(OdbBuilder::new().push_read_source(store).alternates(false))
         };
+        let repo = Repository::open(&git_dir, &options).expect("open");
         let lines = compute_blame(
-            &odb,
+            repo.odb(),
             commit,
             "target.txt",
             &HashSet::new(),

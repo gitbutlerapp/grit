@@ -13,7 +13,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::{ConfigEditor, ConfigScope, ConfigWriteOptions};
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
-use grit_lib::objects::odb::{Odb, OdbBuilder};
+use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
@@ -57,11 +57,7 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_work_tree(&root)),
     )
     .expect("open");
@@ -331,11 +327,7 @@ fn stage_and_commit_create_a_missing_git_dir_when_every_store_is_injected() {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")
             .with_work_tree(&root)),
@@ -731,11 +723,7 @@ fn stage_and_commit_create_a_missing_git_dir_when_every_store_is_injected() {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")
             .with_work_tree(&root)),

@@ -168,11 +168,7 @@ fn custom_primary_repo(git_dir: &Path, store: Arc<MemoryStore>) -> Repository {
     Repository::open(
         git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store)
-                    .alternates(false),
-            )
+            .with_object_store(store)
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")),
     )
@@ -716,12 +712,8 @@ fn custom_primary_ingest_and_write_skip_read_source_contains_probes() {
     let repo = Repository::open(
         &gd,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(gd.join("objects"))
-                    .primary(primary.clone())
-                    .push_read_source(read_source.clone())
-                    .alternates(false),
-            )
+            .with_object_store(primary.clone())
+            .with_odb_builder(OdbBuilder::new().push_read_source(read_source.clone()))
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")),
     )
@@ -797,11 +789,7 @@ fn custom_primary_ingest_rollback_on_failure() {
     let repo = Repository::open(
         gd.path(),
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(gd.path().join("objects"))
-                    .primary(primary.clone())
-                    .alternates(false),
-            )
+            .with_object_store(primary.clone())
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")),
     )

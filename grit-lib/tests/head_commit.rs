@@ -10,7 +10,6 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
@@ -127,11 +126,7 @@ fn injected_ref_store_is_the_source_of_head() {
     let repo = Repository::open(
         dir.path(),
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(dir.path().join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(refs.clone())
             .with_initial_branch("main")),
     )

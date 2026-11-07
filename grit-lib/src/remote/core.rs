@@ -472,7 +472,7 @@ impl Remote {
     /// # Errors
     ///
     /// Returns [`RemoteError`] or transport errors on failure. Received pack bytes are written
-    /// into the repository's [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) store
+    /// into the repository's [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store) store
     /// (including custom backends) via [`ingest_received_pack`](crate::index_pack::ingest_received_pack).
     pub fn fetch(
         &self,

@@ -1,21 +1,45 @@
-//! Build an [`Odb`] with a custom primary store and optional read overlays.
+//! Layer read-only stores, a commit-graph and alternates over a repository's object database.
+//!
+//! An [`OdbBuilder`] describes everything consulted *besides* the primary store. Pass it to
+//! [`RepositoryOptions::with_odb_builder`](crate::environment::RepositoryOptions::with_odb_builder);
+//! [`Repository::open`](crate::repo::Repository::open) resolves the `objects/` directory itself
+//! and picks the primary store: the files layout under that directory, or the store given to
+//! [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store).
 //!
 //! # Example
 //!
 //! ```
+//! use std::path::Path;
 //! use std::sync::Arc;
 //!
+//! use grit_lib::config::environment::RepositoryOptions;
+//! use grit_lib::objects::odb::store::MemoryStore;
+//! use grit_lib::objects::odb::OdbBuilder;
 //! use grit_lib::objects::{HashAlgo, ObjectKind};
-//! use grit_lib::objects::odb::store::{MemoryStore, WritableObjectStore};
-//! use grit_lib::objects::odb::{Odb, OdbBuilder, WriteOptions};
+//! use grit_lib::refs::store::MemoryRefStore;
+//! use grit_lib::repo::Repository;
 //!
-//! let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-//! let odb = OdbBuilder::files("/tmp/repo/.git/objects")
-//!     .primary(store.clone())
-//!     .alternates(false)
-//!     .build();
-//! let oid = WritableObjectStore::write(odb.primary_writable().unwrap().as_ref(), ObjectKind::Blob, b"hi", WriteOptions::default()).unwrap();
-//! assert_eq!(oid.to_hex().len(), 40);
+//! # fn main() -> grit_lib::error::Result<()> {
+//! // A shared store the repository reads from but never writes to.
+//! let shared = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+//! let upstream = Repository::open(
+//!     Path::new("/nowhere/upstream.git"),
+//!     &RepositoryOptions::empty()
+//!         .with_object_store(shared.clone())
+//!         .with_ref_store(Arc::new(MemoryRefStore::new())),
+//! )?;
+//! let oid = upstream.odb().write(ObjectKind::Blob, b"shared")?;
+//!
+//! let mirror = Repository::open(
+//!     Path::new("/nowhere/mirror.git"),
+//!     &RepositoryOptions::empty()
+//!         .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+//!         .with_odb_builder(OdbBuilder::new().push_read_source(shared))
+//!         .with_ref_store(Arc::new(MemoryRefStore::new())),
+//! )?;
+//! assert!(mirror.odb().contains(&oid)?);
+//! # Ok(())
+//! # }
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -35,71 +59,33 @@ use crate::repo::RepositoryError;
 
 use super::Odb;
 
-/// Configure and construct an [`Odb`] with a pluggable primary backend.
-#[derive(Debug, Clone)]
+/// Read layers, an attached commit-graph and the alternates switch for a repository's
+/// object database.
+///
+/// The builder holds no path and no primary store. [`Repository::open`](crate::repo::Repository::open)
+/// resolves the `objects/` directory (including `GIT_OBJECT_DIRECTORY`) and takes the primary
+/// from [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store),
+/// or the files layout when none is set. Lookups go primary, then each
+/// [`Self::push_read_source`] store in order, then alternates.
+#[derive(Debug, Clone, Default)]
 pub struct OdbBuilder {
-    objects_dir: PathBuf,
-    custom_primary: Option<Arc<dyn WritableObjectStore>>,
     read_sources: Vec<Arc<dyn ObjectStore>>,
-    alternates: bool,
+    alternates: Option<bool>,
     commit_graph: Option<Arc<CommitGraphChain>>,
 }
 
 impl OdbBuilder {
-    /// Default files-backed layout rooted at `objects_dir` (the repository's `objects/` tree).
-    ///
-    /// When passed to [`RepositoryOptions::with_odb_builder`](crate::environment::RepositoryOptions::with_odb_builder),
-    /// any spelling of the repository's `objects/` directory is accepted: a path through
-    /// symlinks, or a relative path (resolved against the environment's current directory).
-    /// With a custom [`Self::primary`] the directory need not exist, but it must still name
-    /// the repository's `objects/` directory.
+    /// A builder with no read layers, no attached commit-graph, and the default alternates
+    /// policy (see [`Self::alternates`]).
     #[must_use]
-    pub fn files(objects_dir: impl AsRef<Path>) -> Self {
-        Self {
-            objects_dir: objects_dir.as_ref().to_path_buf(),
-            custom_primary: None,
-            read_sources: Vec::new(),
-            alternates: true,
-            commit_graph: None,
-        }
-    }
-
-    /// Replace the default [`super::store::FilesSource`] primary with a custom store.
-    ///
-    /// Writes and primary reads go through this backend, including commits, staging
-    /// ([`crate::porcelain::add::stage`]), merges, stash, notes, and bundle creation.
-    /// [`Repository::fsck`](crate::repo::Repository::fsck) validates the objects this
-    /// store lists. Received packs are written into it object by object:
-    /// [`ingest_received_pack`](crate::index_pack::ingest_received_pack) and
-    /// [`Bundle::unbundle`](crate::bundle::Bundle::unbundle) resolve every delta and call
-    /// [`WritableObjectStore::write`] instead of installing a pack under `objects/pack/`.
-    ///
-    /// [`Remote::fetch`](crate::remote::Remote::fetch), [`Remote::push`](crate::remote::Remote::push),
-    /// pull, bundles, and [`clone_into`](crate::clone::clone_into) read and write objects through
-    /// the custom primary. Partial-clone filters ([`FilesOnlyOperation::PartialFetch`]) and filesystem
-    /// maintenance still refuse when they need on-disk pack layout:
-    ///
-    /// - maintenance: [`Odb::gc`], [`Odb::write_commit_graph`], repack, MIDX, and pack helpers
-    ///
-    /// History walks never read commit-graph files from `objects/` for a custom primary: such
-    /// a file describes the files layout, not this store. To give walks a commit-graph, build
-    /// one with [`crate::maintenance::build_commit_graph`], persist its bytes in the store, and
-    /// attach it with [`Self::commit_graph`] when opening the repository.
-    ///
-    /// The store's [`ObjectStore::hash_algo`] must match the repository's object format:
-    /// [`Repository::open`](crate::repo::Repository::open) fails with
-    /// [`RepositoryError::ObjectFormatMismatch`] otherwise. [`Self::build`] does not check, since it
-    /// has no repository config to compare against.
-    #[must_use]
-    pub fn primary(mut self, store: Arc<dyn WritableObjectStore>) -> Self {
-        self.custom_primary = Some(store);
-        self
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Append a read-only store consulted after the primary and before alternates.
     ///
-    /// Like [`Self::primary`], its hash algorithm must match the repository's object format
-    /// or [`Repository::open`](crate::repo::Repository::open) fails with
+    /// Its hash algorithm must match the repository's object format or
+    /// [`Repository::open`](crate::repo::Repository::open) fails with
     /// [`RepositoryError::ObjectFormatMismatch`].
     #[must_use]
     pub fn push_read_source(mut self, store: Arc<dyn ObjectStore>) -> Self {
@@ -114,6 +100,11 @@ impl OdbBuilder {
     /// changed-path Bloom filters when it has them, instead of reading commit objects. Commits
     /// missing from the graph (written after it was built) are read from the store as usual,
     /// so a graph that covers only older history stays correct.
+    ///
+    /// History walks never read commit-graph files from `objects/` for a custom primary store:
+    /// such a file describes the files layout, not that store. Build one with
+    /// [`crate::maintenance::build_commit_graph`], persist its bytes in the store, and attach
+    /// it here when opening the repository.
     ///
     /// An attached graph replaces any graph file under `objects/info/`. It is trusted, not
     /// checked against the store: every commit it lists must be in this database with exactly
@@ -130,57 +121,42 @@ impl OdbBuilder {
         self
     }
 
-    /// When `false`, skip `info/alternates`, environment alternates, and submodule object dirs.
+    /// Whether to consult `info/alternates`, environment alternates, and submodule object dirs.
+    ///
+    /// Without this call alternates are off when the repository has a custom primary store
+    /// ([`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store))
+    /// and on for the files layout.
     #[must_use]
     pub fn alternates(mut self, enabled: bool) -> Self {
-        self.alternates = enabled;
+        self.alternates = Some(enabled);
         self
     }
 
-    /// `objects/` directory this builder targets.
-    #[must_use]
-    pub fn objects_dir(&self) -> &Path {
-        &self.objects_dir
-    }
-
-    pub(crate) fn set_objects_dir(&mut self, objects_dir: PathBuf) {
-        self.objects_dir = objects_dir;
-    }
-
-    /// Whether [`Self::primary`] replaced the files-backed primary store.
-    pub(crate) fn has_custom_primary(&self) -> bool {
-        self.custom_primary.is_some()
-    }
-
-    /// Hash algorithms of the injected stores: the custom primary, then each read source,
-    /// then the attached commit-graph.
+    /// Hash algorithms of the injected read sources, then the attached commit-graph.
     pub(crate) fn injected_hash_algos(&self) -> impl Iterator<Item = HashAlgo> + '_ {
-        self.custom_primary
+        self.read_sources
             .iter()
             .map(|store| store.hash_algo())
-            .chain(self.read_sources.iter().map(|store| store.hash_algo()))
             .chain(self.commit_graph.iter().map(|chain| chain.hash_algo()))
     }
 
-    /// Construct an [`Odb`] handle (attach [`Odb::with_config_git_dir`] when opening a repository).
-    #[must_use]
-    pub fn build(self) -> Odb {
-        Odb::from_builder(self)
+    /// An [`Odb`] rooted at `objects_dir` whose primary is `primary`, or the files layout
+    /// under `objects_dir` when `None`, with this builder's layers applied.
+    pub(crate) fn build(
+        self,
+        objects_dir: &Path,
+        primary: Option<Arc<dyn WritableObjectStore>>,
+    ) -> Odb {
+        let mut odb = Odb::new(objects_dir);
+        odb.alternates_enabled = self.alternates.unwrap_or(primary.is_none());
+        odb.custom_primary = primary;
+        odb.extra_read_sources = self.read_sources;
+        odb.attached_commit_graph = self.commit_graph;
+        odb
     }
 }
 
 impl Odb {
-    /// Build from [`OdbBuilder`] (used by [`RepositoryOptions`](crate::repo::RepositoryOptions)).
-    #[must_use]
-    pub(crate) fn from_builder(builder: OdbBuilder) -> Self {
-        let mut odb = Self::new(&builder.objects_dir);
-        odb.custom_primary = builder.custom_primary;
-        odb.extra_read_sources = builder.read_sources;
-        odb.alternates_enabled = builder.alternates;
-        odb.attached_commit_graph = builder.commit_graph;
-        odb
-    }
-
     /// Whether the primary backend is the default on-disk [`super::store::FilesSource`].
     #[must_use]
     pub fn uses_files_primary(&self) -> bool {
@@ -312,7 +288,7 @@ impl Odb {
         Ok(())
     }
 
-    /// Attach a resolved work tree after [`OdbBuilder::build`].
+    /// Attach a resolved work tree to this handle, for resolving relative alternate paths.
     #[must_use]
     pub fn with_resolved_work_tree(mut self, work_tree: Option<PathBuf>) -> Self {
         self.work_tree = work_tree;

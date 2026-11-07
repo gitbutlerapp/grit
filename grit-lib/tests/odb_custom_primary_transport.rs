@@ -1,5 +1,5 @@
 //! Transport, fsck, unbundle, and staging behavior for repositories whose object database
-//! uses a custom [`OdbBuilder::primary`] store (issues #1735, #1892, #2288).
+//! uses a custom `RepositoryOptions::with_object_store` store (issues #1735, #1892, #2288).
 //!
 //! Fetch and push read and write through the custom primary. Unbundling writes every object
 //! of the bundle's pack into the custom primary. Staging writes go through the custom primary,
@@ -15,7 +15,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
@@ -66,11 +65,7 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_work_tree(dir.path())),
     )
     .expect("open");

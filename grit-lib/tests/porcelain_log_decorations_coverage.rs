@@ -263,7 +263,7 @@ fn targeted_decorations_match_full_for_every_packed_refs_header() -> grit_lib::e
 fn targeted_tag_decorations_keep_injected_backends_and_broken_tags_working(
 ) -> grit_lib::error::Result<()> {
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::objects::odb::{store::MemoryStore, OdbBuilder};
+    use grit_lib::objects::odb::store::MemoryStore;
     use grit_lib::objects::HashAlgo;
     use grit_lib::refs::store::{
         Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
@@ -276,11 +276,7 @@ fn targeted_tag_decorations_keep_injected_backends_and_broken_tags_working(
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(refs.clone())
             .with_initial_branch("main")),
     )?;

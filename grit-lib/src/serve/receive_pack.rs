@@ -74,11 +74,9 @@ impl ReceivePackIngest {
                 git_dir,
                 ..
             } => {
-                let mut odb = OdbBuilder::files(objects_dir)
-                    .primary(overlay.clone())
+                let mut odb = OdbBuilder::new()
                     .push_read_source(read.clone())
-                    .alternates(false)
-                    .build();
+                    .build(objects_dir, Some(overlay.clone()));
                 odb = odb.with_config_git_dir(git_dir.clone());
                 odb
             }

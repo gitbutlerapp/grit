@@ -1,4 +1,4 @@
-//! `Repository::open` with an `OdbBuilder` accepts relative paths.
+//! `Repository::open` with an `OdbBuilder` or a custom object store accepts a relative git dir.
 //!
 //! This binary holds a single test because it changes the process working directory.
 
@@ -6,26 +6,30 @@ use std::path::Path;
 use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::error::Error;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectKind};
-use grit_lib::repo::{InitOptions, Repository, RepositoryError};
+use grit_lib::repo::{InitOptions, Repository};
 
 #[test]
-fn odb_builder_relative_objects_dir_matches_relative_git_dir() {
+fn odb_builder_and_custom_store_resolve_objects_dir_from_relative_git_dir() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().join("repo");
     Repository::init(&root, &InitOptions::default()).expect("init");
     std::env::set_current_dir(dir.path()).expect("chdir");
+    let canonical_objects = root
+        .join(".git/objects")
+        .canonicalize()
+        .expect("canonical objects");
 
     let repo = Repository::open(
         Path::new("repo/.git"),
         &(RepositoryOptions::empty()
-            .with_odb_builder(OdbBuilder::files("repo/.git/objects"))
+            .with_odb_builder(OdbBuilder::new())
             .with_work_tree(Path::new("repo"))),
     )
-    .expect("relative objects dir and git dir name the same repository");
+    .expect("relative git dir with read layers");
+    assert_eq!(repo.odb().objects_dir(), canonical_objects);
     let blob = repo
         .odb()
         .write(ObjectKind::Blob, b"relative\n")
@@ -36,54 +40,15 @@ fn odb_builder_relative_objects_dir_matches_relative_git_dir() {
         .join(&blob.to_hex()[2..])
         .is_file());
 
-    let mismatch = Repository::open(
-        Path::new("repo/.git"),
-        &(RepositoryOptions::empty()
-            .with_odb_builder(OdbBuilder::files("elsewhere/objects"))
-            .with_work_tree(Path::new("repo"))),
-    );
-    assert!(
-        matches!(
-            mismatch,
-            Err(Error::Repository(
-                RepositoryError::OdbObjectsDirMismatch { .. }
-            ))
-        ),
-        "{mismatch:?}"
-    );
-
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-    let wrong_custom = Repository::open(
-        Path::new("repo/.git"),
-        &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files("not/a/real/objects")
-                    .primary(store.clone())
-                    .alternates(false),
-            )
-            .with_work_tree(Path::new("repo"))),
-    );
-    assert!(
-        matches!(
-            wrong_custom,
-            Err(Error::Repository(
-                RepositoryError::OdbObjectsDirMismatch { .. }
-            ))
-        ),
-        "a custom primary must still name the repository's objects dir: {wrong_custom:?}"
-    );
-
     let custom = Repository::open(
         Path::new("repo/.git"),
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files("repo/.git/objects")
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_work_tree(Path::new("repo"))),
     )
-    .expect("a custom primary with a relative objects dir");
+    .expect("a custom primary with a relative git dir");
+    assert_eq!(custom.odb().objects_dir(), canonical_objects);
     let oid = custom
         .odb()
         .write(ObjectKind::Blob, b"in memory\n")

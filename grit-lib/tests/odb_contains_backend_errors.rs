@@ -16,7 +16,7 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStor
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::refs::refs_fsck::refs_fsck;
-use grit_lib::refs::store::RefName;
+use grit_lib::refs::store::{MemoryRefStore, RefName};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse::abbreviate_object_id;
 
@@ -97,11 +97,7 @@ fn flaky_repo(dir: &Path) -> (Repository, Arc<Flaky>, ObjectId) {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(flaky.clone())
-                    .alternates(false),
-            )
+            .with_object_store(flaky.clone())
             .with_work_tree(dir)),
     )
     .expect("open");
@@ -157,11 +153,15 @@ fn contains_reports_primary_failure_even_when_extra_source_has_object() {
     let oid = extra
         .write(ObjectKind::Blob, b"only here", WriteOptions::default())
         .unwrap();
-    let odb = OdbBuilder::files(dir.path().join("objects"))
-        .primary(flaky)
-        .push_read_source(extra)
-        .alternates(false)
-        .build();
+    let repo = Repository::open(
+        &dir.path().join("g.git"),
+        &(RepositoryOptions::empty()
+            .with_object_store(flaky)
+            .with_odb_builder(OdbBuilder::new().push_read_source(extra))
+            .with_ref_store(Arc::new(MemoryRefStore::new()))),
+    )
+    .expect("open");
+    let odb = repo.odb();
     assert!(is_backend_down(&odb.read(&oid).unwrap_err()));
     assert!(is_backend_down(&odb.contains(&oid).unwrap_err()));
 }

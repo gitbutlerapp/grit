@@ -493,16 +493,11 @@ impl grit_lib::objects::odb::store::WritableObjectStore for CountingObjects {
 
 fn counted_repo(root: &std::path::Path, objects: std::sync::Arc<CountingObjects>) -> Repository {
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::objects::odb::OdbBuilder;
     init_repo(root, Backend::Files);
     Repository::open(
         &root.join(".git"),
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(root.join(".git/objects"))
-                    .primary(objects)
-                    .alternates(false),
-            )
+            .with_object_store(objects)
             .with_work_tree(root)),
     )
     .unwrap()

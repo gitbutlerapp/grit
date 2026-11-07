@@ -1,7 +1,5 @@
 //! Repository layout, discovery, init, and embedding failures.
 
-use std::path::PathBuf;
-
 use thiserror::Error;
 
 use std::fmt;
@@ -253,19 +251,6 @@ pub enum RepositoryError {
         operation: &'static str,
     },
 
-    /// [`super::Repository::open`] was given an [`OdbBuilder`](crate::odb::OdbBuilder) rooted outside `objects/`.
-    #[error(
-        "object database {} is not the repository's objects directory {}",
-        builder.display(),
-        repository.display()
-    )]
-    OdbObjectsDirMismatch {
-        /// The builder's objects directory, canonicalized when it exists.
-        builder: PathBuf,
-        /// The repository's canonical objects directory.
-        repository: PathBuf,
-    },
-
     /// Injected object store hash algorithm differs from the repository's `extensions.objectformat`.
     #[error(
         "object store hashes with {} but the repository's object format is {}",
@@ -305,7 +290,6 @@ impl RepositoryError {
             },
             Self::UnsupportedObjectStore { .. } => "unsupported_object_store",
             Self::PreciousObjectsRepository { .. } => "precious_objects_repository",
-            Self::OdbObjectsDirMismatch { .. } => "odb_objects_dir_mismatch",
             Self::ObjectFormatMismatch { .. } => "object_format_mismatch",
         }
     }

@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
@@ -141,11 +140,7 @@ fn run_concurrent(threads: usize, per_thread: usize, delay_ms: u64) -> Concurren
     let repo = Repository::open(
         dir.path(),
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(dir.path().join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(Arc::new(Slow {
                 inner: MemoryRefStore::new(),
                 delay: Duration::from_millis(delay_ms),

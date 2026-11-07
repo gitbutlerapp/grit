@@ -10,7 +10,7 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, ObjectStream, WritableObjectStore};
-use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
+use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::store::MemoryRefStore;
@@ -163,11 +163,7 @@ fn memory_repo(store: Arc<CountingStore>) -> (tempfile::TempDir, Repository) {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store)
-                    .alternates(false),
-            )
+            .with_object_store(store)
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_work_tree(dir.path())),
     )

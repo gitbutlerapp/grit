@@ -4654,7 +4654,6 @@ mod tests {
     #[test]
     fn bulk_stage_and_parallel_restage_write_through_custom_primary() {
         use crate::odb::store::{MemoryStore, ObjectStore};
-        use crate::odb::OdbBuilder;
         use std::sync::Arc;
 
         let tmp = TempDir::new().unwrap();
@@ -4665,11 +4664,7 @@ mod tests {
         let repo = crate::repo::Repository::open(
             &git,
             &(RepositoryOptions::empty()
-                .with_odb_builder(
-                    OdbBuilder::files(git.join("objects"))
-                        .primary(store.clone())
-                        .alternates(false),
-                )
+                .with_object_store(store.clone())
                 .with_work_tree(root)),
         )
         .unwrap();

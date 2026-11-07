@@ -525,7 +525,6 @@ pub fn run_sqlite_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
     use std::sync::Arc;
 
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::objects::odb::OdbBuilder;
     use grit_lib::objects::{serialize_tree, TreeEntry};
     use grit_lib::refs::store::RefName;
     use grit_lib::repo::{InitOptions, Repository};
@@ -545,11 +544,7 @@ pub fn run_sqlite_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(&objects_dir)
-                    .primary(sqlite.clone())
-                    .alternates(false),
-            )
+            .with_object_store(sqlite.clone())
             .with_work_tree(repo_root)),
     )?;
 

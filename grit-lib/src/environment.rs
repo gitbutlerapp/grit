@@ -1056,30 +1056,32 @@ fn subprocess_push_os(out: &mut Vec<(OsString, OsString)>, key: &str, val: Optio
 ///
 /// # Injected ref store and custom object store
 ///
+/// With both stores injected the git directory may be missing: nothing is read from its
+/// layout, though config and the index are still looked up there.
+///
 /// ```
 /// use std::sync::Arc;
 ///
 /// use grit_lib::config::environment::RepositoryOptions;
 /// use grit_lib::objects::odb::store::MemoryStore;
-/// use grit_lib::objects::odb::OdbBuilder;
-/// use grit_lib::objects::HashAlgo;
+/// use grit_lib::objects::{HashAlgo, ObjectKind};
 /// use grit_lib::refs::store::MemoryRefStore;
 /// use grit_lib::repo::Repository;
 ///
 /// # fn main() -> grit_lib::error::Result<()> {
 /// let dir = tempfile::tempdir()?;
 /// let git_dir = dir.path().join("in-memory.git");
-/// let _repo = Repository::open(
+/// let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+/// let repo = Repository::open(
 ///     &git_dir,
 ///     &RepositoryOptions::empty()
-///         .with_odb_builder(
-///             OdbBuilder::files(git_dir.join("objects"))
-///                 .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-///                 .alternates(false),
-///         )
+///         .with_object_store(store.clone())
 ///         .with_ref_store(Arc::new(MemoryRefStore::new()))
 ///         .with_initial_branch("main"),
 /// )?;
+/// let oid = repo.odb().write(ObjectKind::Blob, b"hello")?;
+/// assert!(grit_lib::objects::odb::store::ObjectStore::contains(store.as_ref(), &oid)?);
+/// assert!(!git_dir.exists());
 /// # Ok(())
 /// # }
 /// ```
@@ -1104,7 +1106,10 @@ pub struct RepositoryOptions {
     pub thread_policy: crate::parallel::ThreadPolicy,
     /// Work tree path for [`crate::repo::Repository::open`] (non-bare repos).
     pub work_tree: Option<std::path::PathBuf>,
-    /// Custom object store wiring (see [`crate::odb::OdbBuilder`]).
+    /// Primary object store to use instead of the files layout under `objects/`
+    /// (see [`Self::with_object_store`]).
+    pub object_store: Option<Arc<dyn crate::odb::store::WritableObjectStore>>,
+    /// Read layers, attached commit-graph and alternates policy (see [`crate::odb::OdbBuilder`]).
     pub odb_builder: Option<crate::odb::OdbBuilder>,
     /// Ref backend to use instead of opening one from the git directory.
     pub ref_store: Option<std::sync::Arc<dyn crate::refs::store::RefStore>>,
@@ -1144,6 +1149,7 @@ impl Default for RepositoryOptions {
             reference_unix_time: None,
             thread_policy: crate::parallel::ThreadPolicy::default(),
             work_tree: None,
+            object_store: None,
             odb_builder: None,
             ref_store: None,
             initial_branch: None,
@@ -1214,7 +1220,67 @@ impl RepositoryOptions {
         self
     }
 
-    /// Use a preconfigured [`crate::odb::OdbBuilder`] for the object store.
+    /// Use `store` as the repository's primary object store instead of the files layout
+    /// under `objects/`.
+    ///
+    /// Writes and primary reads go through this backend, including commits, staging
+    /// ([`crate::porcelain::add::stage`]), merges, stash, notes, and bundle creation.
+    /// [`Repository::fsck`](crate::repo::Repository::fsck) validates the objects this store
+    /// lists. Received packs are written into it object by object:
+    /// [`ingest_received_pack`](crate::index_pack::ingest_received_pack) and
+    /// [`Bundle::unbundle`](crate::bundle::Bundle::unbundle) resolve every delta and call
+    /// [`WritableObjectStore::write`](crate::odb::store::WritableObjectStore::write) instead
+    /// of installing a pack under `objects/pack/`. Fetch, push, pull, bundles and
+    /// [`clone_into`](crate::clone::clone_into) read and write objects through it.
+    ///
+    /// [`Repository::open`](crate::repo::Repository::open) still resolves the `objects/`
+    /// directory (honoring `GIT_OBJECT_DIRECTORY`), but never reads or writes objects there,
+    /// and the directory need not exist. Alternates are off unless
+    /// [`OdbBuilder::alternates`](crate::odb::OdbBuilder::alternates) turns them on. Partial
+    /// clone filters and filesystem maintenance ([`crate::odb::Odb::gc`],
+    /// [`crate::odb::Odb::write_commit_graph`], repack, multi-pack-index) refuse with
+    /// [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore).
+    ///
+    /// The store's [`ObjectStore::hash_algo`](crate::odb::store::ObjectStore::hash_algo) must
+    /// match the repository's object format, or [`Repository::open`](crate::repo::Repository::open)
+    /// fails with [`RepositoryError::ObjectFormatMismatch`](crate::repo::RepositoryError::ObjectFormatMismatch).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use grit_lib::config::environment::RepositoryOptions;
+    /// use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
+    /// use grit_lib::objects::{HashAlgo, ObjectKind};
+    /// use grit_lib::repo::{InitOptions, Repository};
+    ///
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// let dir = tempfile::tempdir()?;
+    /// Repository::init(dir.path(), &InitOptions::default())?;
+    /// let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+    /// let repo = Repository::open(
+    ///     &dir.path().join(".git"),
+    ///     &RepositoryOptions::empty()
+    ///         .with_object_store(store.clone())
+    ///         .with_work_tree(dir.path()),
+    /// )?;
+    /// let oid = repo.odb().write(ObjectKind::Blob, b"hello")?;
+    /// assert!(store.contains(&oid)?);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn with_object_store(
+        mut self,
+        store: Arc<dyn crate::odb::store::WritableObjectStore>,
+    ) -> Self {
+        self.object_store = Some(store);
+        self
+    }
+
+    /// Layer read-only stores, a commit-graph, or an alternates override over the primary
+    /// object store (see [`crate::odb::OdbBuilder`]).
     #[must_use]
     pub fn with_odb_builder(mut self, builder: crate::odb::OdbBuilder) -> Self {
         self.odb_builder = Some(builder);

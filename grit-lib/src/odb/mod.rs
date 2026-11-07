@@ -19,7 +19,8 @@
 //! let odb = Odb::new(Path::new(".git/objects"));
 //! ```
 //!
-//! Custom primary store — see [`OdbBuilder`] and [`RepositoryOptions::with_odb_builder`](crate::environment::RepositoryOptions::with_odb_builder).
+//! Custom primary store — see [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store);
+//! read layers and alternates — see [`OdbBuilder`] and [`RepositoryOptions::with_odb_builder`](crate::environment::RepositoryOptions::with_odb_builder).
 
 pub mod builder;
 mod commit;
@@ -277,7 +278,8 @@ pub struct Odb {
     alternate_pack_stores: Arc<Mutex<HashMap<PathBuf, Arc<PackStore>>>>,
     /// Bumps when [`Self::register_submodule_object_directories_from_index`] repopulates submodule sources.
     submodule_sources_generation: Arc<AtomicU64>,
-    /// When set, replaces the lazy [`FilesSource`] primary ([`OdbBuilder::primary`]).
+    /// When set, replaces the lazy [`FilesSource`] primary
+    /// ([`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store)).
     custom_primary: Option<Arc<dyn WritableObjectStore>>,
     /// Read-only layers from [`OdbBuilder::push_read_source`], after primary, before alternates.
     extra_read_sources: Vec<Arc<dyn ObjectStore>>,
@@ -1256,7 +1258,8 @@ impl Odb {
     /// # Errors
     ///
     /// - [`RepositoryError::UnsupportedObjectStore`] (`operation:` [`FilesOnlyOperation::FilesSource`](crate::repo::error::FilesOnlyOperation::FilesSource)) when
-    ///   [`OdbBuilder::primary`] replaced the files-backed primary.
+    ///   [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store)
+    ///   replaced the files-backed primary.
     /// - Failures while opening pack, MIDX, or loose backends.
     pub fn primary(&self) -> Result<Arc<FilesSource>> {
         self.require_files_primary(FilesOnlyOperation::FilesSource)?;
@@ -1431,10 +1434,11 @@ impl Odb {
     /// otherwise inferred as the parent of the `objects/` directory. Defaults
     /// to [`HashAlgo::Sha1`] when no config can be read.
     ///
-    /// With a custom [`OdbBuilder::primary`] this is the store's own algorithm. A
-    /// successful [`Repository::open`](crate::repo::Repository::open) has
-    /// already checked that it equals the repository's object format; a standalone
-    /// [`OdbBuilder::build`] reports the store's algorithm unchecked.
+    /// With a custom primary store
+    /// ([`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store))
+    /// this is the store's own algorithm, which a successful
+    /// [`Repository::open`](crate::repo::Repository::open) has already checked against the
+    /// repository's object format.
     #[must_use]
     pub fn hash_algo(&self) -> HashAlgo {
         if let Some(primary) = &self.custom_primary {
@@ -4887,10 +4891,7 @@ mod tests {
         let objects = dir.path().join("objects");
         fs::create_dir_all(&objects).unwrap();
         let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-        let odb = OdbBuilder::files(&objects)
-            .primary(store.clone())
-            .alternates(false)
-            .build();
+        let odb = OdbBuilder::new().build(&objects, Some(store.clone()));
         let data = b"staged through a custom primary";
         let oid = hash::hash_object(HashAlgo::Sha1, ObjectKind::Blob, data).unwrap();
         let zlib = super::zlib_compress_blob_loose(data, Compression::fast()).unwrap();
@@ -4980,11 +4981,9 @@ mod tests {
             .0
             .write(ObjectKind::Blob, b"only upstream", WriteOptions::default())
             .unwrap();
-        let odb = OdbBuilder::files(&objects)
-            .primary(primary.clone())
+        let odb = OdbBuilder::new()
             .push_read_source(read_source.clone())
-            .alternates(false)
-            .build();
+            .build(&objects, Some(primary.clone()));
 
         odb.write(ObjectKind::Blob, b"new local").unwrap();
         assert_eq!(primary.1.load(Ordering::Relaxed), 0);
@@ -5212,10 +5211,7 @@ mod tests {
         let objects = dir.path().join("objects");
         fs::create_dir_all(&objects).unwrap();
         let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-        let odb = OdbBuilder::files(&objects)
-            .primary(store.clone())
-            .alternates(false)
-            .build();
+        let odb = OdbBuilder::new().build(&objects, Some(store.clone()));
         odb.enable_mem_overlay();
         let payload = b"overlay blob";
         let oid = odb.write(ObjectKind::Blob, payload).unwrap();
@@ -5284,10 +5280,7 @@ mod tests {
         let objects = dir.path().join("objects");
         fs::create_dir_all(&objects).unwrap();
         let store = Arc::new(MemoryStore::new(HashAlgo::Sha256));
-        let odb = OdbBuilder::files(&objects)
-            .primary(store)
-            .alternates(false)
-            .build();
+        let odb = OdbBuilder::new().build(&objects, Some(store));
         let empty = odb.empty_tree_oid().expect("hash empty tree");
         assert!(!odb.exists_materialized_local(&empty));
         assert!(odb.exists_local(&empty));
@@ -5379,10 +5372,7 @@ mod tests {
 
     fn flaky_odb(objects: &Path) -> (Odb, Arc<store::flaky::FlakyStore>) {
         let flaky = store::flaky::FlakyStore::new();
-        let odb = OdbBuilder::files(objects)
-            .primary(flaky.clone())
-            .alternates(false)
-            .build();
+        let odb = OdbBuilder::new().build(objects, Some(flaky.clone()));
         (odb, flaky)
     }
 
@@ -5414,10 +5404,10 @@ mod tests {
     fn contains_reports_extra_read_source_failure() {
         let dir = TempDir::new().unwrap();
         let flaky = store::flaky::FlakyStore::new();
-        let odb = OdbBuilder::files(dir.path())
+        let odb = OdbBuilder::new()
             .push_read_source(flaky.clone())
             .alternates(false)
-            .build();
+            .build(dir.path(), None);
         let local = odb.write(ObjectKind::Blob, b"in primary").unwrap();
         let absent = HashAlgo::Sha1
             .hash_object(ObjectKind::Blob, b"nowhere")
@@ -5440,11 +5430,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let extra = Arc::new(store::MemoryStore::new(HashAlgo::Sha1));
         let flaky = store::flaky::FlakyStore::new();
-        let odb = OdbBuilder::files(dir.path())
-            .primary(flaky.clone())
+        let odb = OdbBuilder::new()
             .push_read_source(extra.clone())
-            .alternates(false)
-            .build();
+            .build(dir.path(), Some(flaky.clone()));
         let oid = extra
             .write(ObjectKind::Blob, b"extra", WriteOptions::default())
             .unwrap();

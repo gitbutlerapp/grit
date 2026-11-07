@@ -66,7 +66,7 @@ impl Odb {
     /// Everything this database can read, as one [`ObjectStore`].
     ///
     /// The store walks the same lookup order as [`Self::read`]: the in-memory overlay, the
-    /// primary (files-backed or a custom [`OdbBuilder::primary`](super::OdbBuilder::primary)),
+    /// primary (files-backed or a custom [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store)),
     /// each [`OdbBuilder::push_read_source`](super::OdbBuilder::push_read_source) layer, then
     /// alternate object directories when [`OdbBuilder::alternates`](super::OdbBuilder::alternates)
     /// is on. Pass it to another repository's `push_read_source` to layer this one under it
@@ -85,24 +85,29 @@ impl Odb {
     /// # Examples
     ///
     /// ```
+    /// use std::path::Path;
     /// use std::sync::Arc;
     ///
+    /// use grit_lib::config::environment::RepositoryOptions;
     /// use grit_lib::objects::odb::store::MemoryStore;
     /// use grit_lib::objects::odb::OdbBuilder;
     /// use grit_lib::objects::{HashAlgo, ObjectKind};
+    /// use grit_lib::refs::store::MemoryRefStore;
+    /// use grit_lib::repo::Repository;
     ///
     /// # fn main() -> grit_lib::error::Result<()> {
-    /// let upstream = OdbBuilder::files("/nowhere/upstream/objects")
-    ///     .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-    ///     .alternates(false)
-    ///     .build();
-    /// let mirror = OdbBuilder::files("/nowhere/mirror/objects")
-    ///     .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-    ///     .push_read_source(upstream.read_store())
-    ///     .alternates(false)
-    ///     .build();
-    /// let oid = upstream.write(ObjectKind::Blob, b"shared")?;
-    /// assert!(mirror.contains(&oid)?);
+    /// let in_memory = || {
+    ///     RepositoryOptions::empty()
+    ///         .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+    ///         .with_ref_store(Arc::new(MemoryRefStore::new()))
+    /// };
+    /// let upstream = Repository::open(Path::new("/nowhere/upstream.git"), &in_memory())?;
+    /// let mirror = Repository::open(
+    ///     Path::new("/nowhere/mirror.git"),
+    ///     &in_memory().with_odb_builder(OdbBuilder::new().push_read_source(upstream.odb().read_store())),
+    /// )?;
+    /// let oid = upstream.odb().write(ObjectKind::Blob, b"shared")?;
+    /// assert!(mirror.odb().contains(&oid)?);
     /// # Ok(())
     /// # }
     /// ```

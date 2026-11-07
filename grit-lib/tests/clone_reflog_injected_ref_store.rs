@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
@@ -42,11 +41,7 @@ fn empty_injected_repo(
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_ref_store(ref_store.clone())
             .with_initial_branch("main")
             .with_work_tree(wt)),
@@ -109,11 +104,7 @@ fn clone_into_injected_ref_store_keeps_clone_reflogs_in_store() {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store)
-                    .alternates(false),
-            )
+            .with_object_store(store)
             .with_ref_store(ref_store.clone())
             .with_initial_branch("main")
             .with_work_tree(wt.path())),

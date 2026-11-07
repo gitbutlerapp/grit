@@ -15,7 +15,7 @@ use std::sync::{Arc, RwLock};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Result;
 use grit_lib::objects::odb::store::{ObjectStore, WritableObjectStore};
-use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
+use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::serve::{
@@ -150,11 +150,8 @@ fn many_ref_repo(n: usize) -> (tempfile::TempDir, Repository, Arc<CountingStore>
     .expect("init");
     let repo = Repository::open(
         dir.path(),
-        &(RepositoryOptions::empty().with_odb_builder(
-            OdbBuilder::files(dir.path().join("objects"))
-                .primary(Arc::clone(&store) as Arc<dyn WritableObjectStore>)
-                .alternates(false),
-        )),
+        &(RepositoryOptions::empty()
+            .with_object_store(Arc::clone(&store) as Arc<dyn WritableObjectStore>)),
     )
     .expect("open over counting store");
     let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");

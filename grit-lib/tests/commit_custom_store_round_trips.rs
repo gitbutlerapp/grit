@@ -168,11 +168,7 @@ fn one_file_commit(dirs: usize, batched: bool) -> OneFileCommit {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_work_tree(&root)),
     )
     .expect("open");
@@ -294,16 +290,17 @@ fn layered_repo(dirs: usize) -> Layered {
     .expect("init");
     let git_dir = root.join(".git");
     let remote = Arc::new(CountingStore::new(true));
-    let open = |builder: OdbBuilder| {
+    let open = |store: Arc<dyn WritableObjectStore>, builder: OdbBuilder| {
         Repository::open(
             &git_dir,
             &(RepositoryOptions::empty()
-                .with_odb_builder(builder.alternates(false))
+                .with_object_store(store)
+                .with_odb_builder(builder)
                 .with_work_tree(&root)),
         )
         .expect("open")
     };
-    let history = open(OdbBuilder::files(git_dir.join("objects")).primary(remote.clone()));
+    let history = open(remote.clone(), OdbBuilder::new());
     for d in 0..dirs {
         fs::create_dir_all(root.join(format!("d{d}"))).expect("mkdir");
     }
@@ -314,9 +311,8 @@ fn layered_repo(dirs: usize) -> Layered {
     drop(history);
     let primary = Arc::new(MemoryStore::new(HashAlgo::Sha1));
     let repo = open(
-        OdbBuilder::files(git_dir.join("objects"))
-            .primary(primary.clone())
-            .push_read_source(remote.clone()),
+        primary.clone(),
+        OdbBuilder::new().push_read_source(remote.clone()),
     );
     Layered {
         dir,

@@ -11,7 +11,7 @@ use grit_lib::ident::Signature;
 use grit_lib::index::Index;
 use grit_lib::maintenance::repository_fsck::reachability_roots;
 use grit_lib::maintenance::repository_fsck::{self as fsck, FsckIssue, FsckOptions};
-use grit_lib::objects::odb::{store::MemoryStore, OdbBuilder};
+use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -1660,11 +1660,7 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
     let mem_repo = Repository::open(
         &gd,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(gd.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
+            .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")),
     )
@@ -2243,11 +2239,7 @@ fn connectivity_only_does_not_inflate_reachable_blob_bodies() {
     let repo = Repository::open(
         &gd,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(gd.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")),
     )

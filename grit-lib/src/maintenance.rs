@@ -598,7 +598,7 @@ pub enum CommitGraphBuild {
 ///
 /// Reachable commits are discovered from [`Repository::ref_store`](crate::repo::Repository::ref_store)
 /// and read through [`Repository::odb`](crate::repo::Repository::odb), so this works for a
-/// custom primary ([`crate::odb::OdbBuilder::primary`]) as well as the files backend. Nothing is
+/// custom primary ([`crate::environment::RepositoryOptions::with_object_store`]) as well as the files backend. Nothing is
 /// written: a custom store persists [`BuiltCommitGraph::bytes`] in its own storage and attaches
 /// the graph when it next opens the repository, with
 /// [`OdbBuilder::commit_graph`](crate::odb::OdbBuilder::commit_graph) and

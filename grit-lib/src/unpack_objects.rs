@@ -386,7 +386,7 @@ impl UnpackSink for StoreSink<'_> {
 ///
 /// With a files-backed primary every object is written as a loose object in this
 /// object directory, even when an alternate already has it. With a custom
-/// [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) objects go to that store
+/// [`RepositoryOptions::with_object_store`](crate::environment::RepositoryOptions::with_object_store) objects go to that store
 /// through [`Odb::write`].
 ///
 /// Returns the total number of objects processed.
@@ -455,20 +455,24 @@ pub(crate) fn unpack_objects_with_promises(
 /// use std::io::Cursor;
 /// use std::sync::Arc;
 ///
+/// use grit_lib::config::environment::RepositoryOptions;
 /// use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
-/// use grit_lib::objects::odb::OdbBuilder;
 /// use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
 /// use grit_lib::objects::unpack_objects::{ingest_pack_into, UnpackOptions};
 /// use grit_lib::objects::{HashAlgo, ObjectKind};
+/// use grit_lib::refs::store::MemoryRefStore;
+/// use grit_lib::repo::Repository;
 ///
 /// # fn main() -> grit_lib::error::Result<()> {
-/// // Any object database can produce the pack; here another in-memory store.
-/// let source = OdbBuilder::files("/nonexistent/objects")
-///     .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-///     .alternates(false)
-///     .build();
-/// let blob = source.write(ObjectKind::Blob, b"hello\n")?;
-/// let pack = build_pack(&source, &[blob], &[], &PackBuildOptions::default())?;
+/// // Any object database can produce the pack; here an in-memory repository.
+/// let source = Repository::open(
+///     std::path::Path::new("/nonexistent/source.git"),
+///     &RepositoryOptions::empty()
+///         .with_object_store(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+///         .with_ref_store(Arc::new(MemoryRefStore::new())),
+/// )?;
+/// let blob = source.odb().write(ObjectKind::Blob, b"hello\n")?;
+/// let pack = build_pack(source.odb(), &[blob], &[], &PackBuildOptions::default())?;
 ///
 /// let target = MemoryStore::new(HashAlgo::Sha1);
 /// let ingested = ingest_pack_into(

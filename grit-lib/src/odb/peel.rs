@@ -355,10 +355,7 @@ mod tests {
             store.insert_object(from, ObjectKind::Tag, Arc::from(body.into_bytes()));
         }
         let dir = TempDir::new().unwrap();
-        let odb = OdbBuilder::files(dir.path())
-            .primary(store)
-            .alternates(false)
-            .build();
+        let odb = OdbBuilder::new().build(dir.path(), Some(store));
         assert!(matches!(
             odb.peel_tag_target(a),
             Err(Error::CorruptObject(_))
@@ -409,10 +406,7 @@ mod tests {
             store.insert_object(from, ObjectKind::Tag, Arc::from(body.into_bytes()));
         }
         let dir = TempDir::new().unwrap();
-        let odb = OdbBuilder::files(dir.path())
-            .primary(store)
-            .alternates(false)
-            .build();
+        let odb = OdbBuilder::new().build(dir.path(), Some(store));
         assert!(matches!(odb.peel_tags(a), Err(Error::CorruptObject(_))));
     }
 }

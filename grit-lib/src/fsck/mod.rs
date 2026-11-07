@@ -947,7 +947,7 @@ fn verify_loose_objects(
     Ok((checked, validated, links, referenced))
 }
 
-/// Store validation for a custom primary ([`crate::odb::OdbBuilder::primary`]): every object
+/// Store validation for a custom primary ([`crate::environment::RepositoryOptions::with_object_store`]): every object
 /// the store lists is read back, re-hashed against its id and checked like a loose object.
 ///
 /// Custom stores have no file paths, so read and hash failures surface as

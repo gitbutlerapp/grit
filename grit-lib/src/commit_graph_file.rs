@@ -1994,15 +1994,14 @@ mod tests {
                 .expect("copy");
         }
         let git_dir = dir.path().join(".git");
-        let mut builder = crate::odb::OdbBuilder::files(git_dir.join("objects"))
-            .primary(store)
-            .alternates(false);
+        let mut builder = crate::odb::OdbBuilder::new();
         if let Some(graph) = graph {
             builder = builder.commit_graph(graph);
         }
         crate::repo::Repository::open(
             &git_dir,
             &(crate::environment::RepositoryOptions::empty()
+                .with_object_store(store)
                 .with_odb_builder(builder)
                 .with_work_tree(dir.path())),
         )

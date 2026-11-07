@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
@@ -46,11 +45,7 @@ fn memory_primary_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_work_tree(dir.path())),
     )
     .expect("open");
@@ -71,11 +66,7 @@ fn memory_primary_and_ref_repo() -> (
     let repo = Repository::open(
         &git_dir,
         &(RepositoryOptions::empty()
-            .with_odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
+            .with_object_store(store.clone())
             .with_ref_store(ref_store.clone())
             .with_work_tree(dir.path())),
     )

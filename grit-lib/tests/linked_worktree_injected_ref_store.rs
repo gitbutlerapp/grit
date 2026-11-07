@@ -11,7 +11,6 @@ use std::sync::Arc;
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::store::MemoryStore;
-use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
@@ -64,11 +63,7 @@ fn open_on(
     Repository::open(
         git_dir,
         &(options()
-            .with_odb_builder(
-                OdbBuilder::files(common.join("objects"))
-                    .primary(odb.clone())
-                    .alternates(false),
-            )
+            .with_object_store(odb.clone())
             .with_ref_store(refs.clone())
             .with_initial_branch("main")
             .with_work_tree(work_tree)),
