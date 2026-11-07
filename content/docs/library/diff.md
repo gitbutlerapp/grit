@@ -80,7 +80,38 @@ To go straight from a resolved [`DiffTarget`](rustdoc:grit_lib::diff::DiffTarget
 
 ## Blob diffs
 
-For a single modified file, read old and new bytes from [`Odb`](rustdoc:grit_lib::objects::odb::Odb) and pass them to [`unified_diff`](rustdoc:grit_lib::diff::unified_diff) or the structured helpers in [`structured`](rustdoc:grit_lib::diff::structured). For tree diffs meant for `git apply`, stream [`write_patch`](rustdoc:grit_lib::diff::write_patch) over a `DiffEntry` slice with [`PatchTextOptions`](rustdoc:grit_lib::diff::PatchTextOptions) (same headers and `GIT binary patch` bodies as `git diff --binary`). For index and work-tree diffs, [`write_patch_resolved`](rustdoc:grit_lib::diff::write_patch_resolved) takes [`PatchResolvedSide`](rustdoc:grit_lib::diff::PatchResolvedSide) values whose sides are a [`PatchSide`](rustdoc:grit_lib::diff::PatchSide): bytes you already hold, a blob in the object database, or the work-tree file (read through clean filters and line-ending rules). Binary files get full ids of the written content on their `index` line, which `git apply` requires. Line-level hunks honor one shared [`DiffOptions`](rustdoc:grit_lib::diff::DiffOptions) value (algorithm, context, indent heuristic, renames, optional word-level inline emphasis) whether you emit unified patch text or structured hunks for the CLI. Defaults match Git (`Myers`, `-U3`, indent heuristic on, rename similarity 50). The CLI builds human, `--json`, and `--markdown` views from `DiffEntry` lists plus structured or unified bodies; [`grit diff --patch-text`](../../commands/diff.md) calls `write_patch` for revisions and `write_patch_resolved` for staged and work-tree changes.
+For a single modified file, read old and new bytes from [`Odb`](rustdoc:grit_lib::objects::odb::Odb) and pass them to [`unified_diff`](rustdoc:grit_lib::diff::unified_diff) (see [Text diffs](#text-diffs)) or the structured helpers in [`structured`](rustdoc:grit_lib::diff::structured). For tree diffs meant for `git apply`, stream [`write_patch`](rustdoc:grit_lib::diff::write_patch) over a `DiffEntry` slice with [`PatchTextOptions`](rustdoc:grit_lib::diff::PatchTextOptions) (same headers and `GIT binary patch` bodies as `git diff --binary`). For index and work-tree diffs, [`write_patch_resolved`](rustdoc:grit_lib::diff::write_patch_resolved) takes [`PatchResolvedSide`](rustdoc:grit_lib::diff::PatchResolvedSide) values whose sides are a [`PatchSide`](rustdoc:grit_lib::diff::PatchSide): bytes you already hold, a blob in the object database, or the work-tree file (read through clean filters and line-ending rules). Binary files get full ids of the written content on their `index` line, which `git apply` requires. Line-level hunks honor one shared [`DiffOptions`](rustdoc:grit_lib::diff::DiffOptions) value (algorithm, context, indent heuristic, renames, optional word-level inline emphasis) whether you emit unified patch text or structured hunks for the CLI. Defaults match Git (`Myers`, `-U3`, indent heuristic on, rename similarity 50). The CLI builds human, `--json`, and `--markdown` views from `DiffEntry` lists plus structured or unified bodies; [`grit diff --patch-text`](../../commands/diff.md) calls `write_patch` for revisions and `write_patch_resolved` for staged and work-tree changes.
+
+## Text diffs
+
+[`unified_diff`](rustdoc:grit_lib::diff::unified_diff) turns two strings into a unified patch, and [`line_change_counts`](rustdoc:grit_lib::diff::line_change_counts) counts the `+` and `-` lines of that same patch without building it. Both take one [`UnifiedDiffOptions`](rustdoc:grit_lib::diff::UnifiedDiffOptions), whose defaults are Git's: Myers alignment, three context lines, the indent heuristic, Git's default function-name rule and `\ No newline at end of file` markers. The output matches `git diff --no-index` with the same options byte for byte, from the `---` line on. `grit-lib/tests/text_diff_options.rs` checks this against the system `git` for every option.
+
+```rust
+use grit_lib::diff::{unified_diff, DiffAlgorithm, UnifiedDiffOptions, WhitespaceMode};
+
+let options = UnifiedDiffOptions::new()
+    .with_paths("src/lib.rs", "src/lib.rs")
+    .with_algorithm(DiffAlgorithm::Histogram)
+    .with_whitespace(WhitespaceMode::ignore_space_change());
+let patch = unified_diff(&old_text, &new_text, &options);
+```
+
+| Option | Git | Field |
+| --- | --- | --- |
+| `---` / `+++` labels | `--src-prefix`, `--dst-prefix`, `--no-prefix` | [`old_label`](rustdoc:grit_lib::diff::UnifiedDiffOptions::old_label), [`new_label`](rustdoc:grit_lib::diff::UnifiedDiffOptions::new_label) ([`DiffLabel`](rustdoc:grit_lib::diff::DiffLabel)); unset means hunks only |
+| Path quoting | `core.quotePath` | [`path_quoting`](rustdoc:grit_lib::diff::UnifiedDiffOptions::path_quoting) ([`PathQuoting`](rustdoc:grit_lib::diff::PathQuoting)) |
+| Context | `-U<n>`, `--inter-hunk-context` | [`context_lines`](rustdoc:grit_lib::diff::UnifiedDiffOptions::context_lines), [`inter_hunk_context`](rustdoc:grit_lib::diff::UnifiedDiffOptions::inter_hunk_context) |
+| Function context | `-W` | [`extent`](rustdoc:grit_lib::diff::UnifiedDiffOptions::extent) ([`HunkExtent::Function`](rustdoc:grit_lib::diff::HunkExtent::Function)) |
+| Hunk-header function names | `diff.<driver>.xfuncname` | [`funcname`](rustdoc:grit_lib::diff::UnifiedDiffOptions::funcname), a matcher from [`userdiff`](rustdoc:grit_lib::diff::userdiff) |
+| Algorithm | `--diff-algorithm` | [`algorithm`](rustdoc:grit_lib::diff::UnifiedDiffOptions::algorithm) ([`DiffAlgorithm`](rustdoc:grit_lib::diff::DiffAlgorithm)) |
+| Indent heuristic | `--[no-]indent-heuristic` | [`indent_heuristic`](rustdoc:grit_lib::diff::UnifiedDiffOptions::indent_heuristic) ([`IndentHeuristic`](rustdoc:grit_lib::diff::IndentHeuristic)) |
+| Anchors | `--anchored=<text>` | [`anchors`](rustdoc:grit_lib::diff::UnifiedDiffOptions::anchors); non-empty anchors use patience alignment, as in Git |
+| Whitespace | `-w`, `-b`, `--ignore-space-at-eol`, `--ignore-blank-lines` | [`whitespace`](rustdoc:grit_lib::diff::UnifiedDiffOptions::whitespace) ([`WhitespaceMode`](rustdoc:grit_lib::diff::WhitespaceMode)) |
+| No-newline markers | always on | [`no_newline_marker`](rustdoc:grit_lib::diff::UnifiedDiffOptions::no_newline_marker) ([`NoNewlineMarker`](rustdoc:grit_lib::diff::NoNewlineMarker)) |
+
+When equal sides, or a whitespace rule, leave no hunk, `unified_diff` returns an empty string, labels included, as Git prints nothing. `UnifiedDiffOptions::from(&diff_options)` carries the line settings of a repository [`DiffOptions`](rustdoc:grit_lib::diff::DiffOptions) over to a text diff. Under whitespace rules the patch compares normalized lines but shows the original text, with context lines from the new side. Anchors pin a line that starts with one of the given prefixes and occurs exactly once on each side, so it stays as context instead of showing up as removed and re-added.
+
+For combined (`--cc`) patches of a merge path, [`format_combined_textconv_patch`](rustdoc:grit_lib::merge::merge_diff::format_combined_textconv_patch) takes a [`CombinedPatchOptions`](rustdoc:grit_lib::merge::merge_diff::CombinedPatchOptions), and [`format_worktree_conflict_combined`](rustdoc:grit_lib::merge::merge_diff::format_worktree_conflict_combined) takes the three index stages of a conflicted path as [`ConflictStages`](rustdoc:grit_lib::merge::merge_diff::ConflictStages).
 
 ## Diffstat
 
