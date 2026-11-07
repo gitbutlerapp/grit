@@ -1,5 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { resolveRustdocPath, rustdocAvailable, unresolvedGritLibPaths, unresolvedRustdocLinks } from "../lib/rustdoc";
+import {
+  enumVariantRows,
+  expandVariantTables,
+  resolveRustdocPath,
+  rustdocAvailable,
+  unresolvedGritLibPaths,
+  unresolvedRustdocLinks,
+} from "../lib/rustdoc";
 
 beforeAll(() => {
   if (!rustdocAvailable()) {
@@ -47,6 +54,27 @@ describe("resolveRustdocPath associated items", () => {
     );
     expect(bad.length).toBe(1);
     expect(bad[0]).toMatch(/definitely_missing/);
+  });
+});
+
+describe("variant tables", () => {
+  it("lists every variant with its snake_case name and rustdoc", () => {
+    const rows = enumVariantRows("grit_lib::repo::error::FilesOnlyOperation");
+    const gc = rows.find((r) => r.variant === "Gc")!;
+    expect(gc.name).toBe("gc");
+    expect(gc.url).toMatch(/repo\/error\/enum\.FilesOnlyOperation\.html#variant\.Gc$/);
+    expect(gc.doc).toContain("[`Odb::gc`](https://docs.rs/grit-lib/latest/grit_lib/objects/odb/struct.Odb.html#method.gc)");
+    expect(rows.find((r) => r.variant === "CommitGraphWrite")!.name).toBe("commit_graph_write");
+  });
+
+  it("expands the marker into a Markdown table", () => {
+    const table = expandVariantTables("<!-- grit:variant-table grit_lib::repo::error::FilesOnlyOperation -->");
+    expect(table.split("\n")[0]).toBe("| Name | Variant | Description |");
+    expect(table).toContain("| `partial_fetch` | [`PartialFetch`](");
+  });
+
+  it("rejects paths that are not enums", () => {
+    expect(() => enumVariantRows("grit_lib::objects::odb::Odb")).toThrow(/not an enum/);
   });
 });
 

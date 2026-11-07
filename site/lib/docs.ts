@@ -21,7 +21,7 @@ import {
 } from "./bench";
 import { docsContentDir, readRepoFile, SITE_URL } from "./repo";
 import { parseDoc, type TocItem } from "./markdown";
-import { apiMapMarkdown, expandRustdocLinks } from "./rustdoc";
+import { apiMapMarkdown, expandRustdocLinks, expandVariantTables } from "./rustdoc";
 import { composeMarkdownTwin, isExternal, parseFrontMatter, rewriteMarkdownLinks } from "./text";
 
 export const LIBRARY_SLUG = "library";
@@ -231,7 +231,7 @@ function loadPage(source: string, spec: PageSpec, commandGroups: string[], basel
   if (isCommand && !commandGroups.includes(group)) {
     throw new Error(`${spec.file}: group ${JSON.stringify(group)} must be one of ${commandGroups.join(", ")}`);
   }
-  const generated = spliceGenerated(spec.slug, body, baselines);
+  const generated = expandVariantTables(spliceGenerated(spec.slug, body, baselines));
   const markdown = expandRustdocLinks(expandIncludes(generated, { tag: true }));
   const twinBody = rewriteMarkdownLinks(expandRustdocLinks(expandIncludes(generated, { tag: false })), (target) =>
     isExternal(target) || target.startsWith("#") ? null : twinUrl(linkTargetSlug(spec.slug, target)),

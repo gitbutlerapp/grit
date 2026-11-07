@@ -292,6 +292,76 @@ export function apiMapRows(): ApiRow[] {
   return rows;
 }
 
+/** `<!-- grit:variant-table grit_lib::path::Enum -->`: a table of that enum's variants. */
+export const VARIANT_TABLE = /<!--\s*grit:variant-table\s+(\S+)\s*-->/g;
+
+export interface VariantRow {
+  /** Rust variant name (`CommitGraphWrite`). */
+  variant: string;
+  /** The variant name in snake_case (`commit_graph_write`), the usual serialized form. */
+  name: string;
+  /** The variant's rustdoc as one line of Markdown, links pointing at docs.rs. */
+  doc: string;
+  /** docs.rs URL of the variant. */
+  url: string;
+}
+
+const VARIANT_SECTION =
+  /<section id="variant\.([A-Za-z0-9_]+)" class="variant">[\s\S]*?<\/section>(?:<div class="docblock">([\s\S]*?)<\/div>)?/g;
+
+function snakeCase(camel: string): string {
+  return camel.replace(/(?<!^)([A-Z])/g, "_$1").toLowerCase();
+}
+
+/** Rustdoc docblock HTML to single-line Markdown; relative links resolve against `pageRel`. */
+function docblockMarkdown(html: string, pageRel: string): string {
+  const withLinks = html.replace(/<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g, (_whole, href: string, inner: string) => {
+    const url = /^https?:/.test(href) ? href : docsRsUrl(path.posix.normalize(path.posix.join(path.posix.dirname(pageRel), href)));
+    return `[${docblockMarkdown(inner, pageRel)}](${url})`;
+  });
+  const text = withLinks
+    .replace(/<code>([\s\S]*?)<\/code>/g, "`$1`")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&#x27;/g, "'")
+    .replace(/&amp;/g, "&");
+  return text.split(/\s+/).join(" ").trim().replace(/\|/g, "\\|");
+}
+
+/** Every variant of the enum at `qualified`, in declaration order, with its rustdoc. */
+export function enumVariantRows(qualified: string): VariantRow[] {
+  const rel = resolveRustdocPath(qualified.trim());
+  if (!/(^|\/)enum\.[A-Za-z0-9_]+\.html$/.test(rel)) throw new Error(`not an enum: ${qualified}`);
+  const html = fs.readFileSync(path.join(crateDir(), rel), "utf8");
+  const rows = [...html.matchAll(VARIANT_SECTION)].map((m) => ({
+    variant: m[1]!,
+    name: snakeCase(m[1]!),
+    doc: m[2] ? docblockMarkdown(m[2], rel) : "",
+    url: docsRsUrl(`${rel}#variant.${m[1]}`),
+  }));
+  if (!rows.length) throw new Error(`enum has no documented variants: ${qualified}`);
+  const undocumented = rows.filter((r) => !r.doc).map((r) => r.variant);
+  if (undocumented.length) throw new Error(`${qualified}: variants without docs: ${undocumented.join(", ")}`);
+  return rows;
+}
+
+/** Replace each variant-table marker with a Markdown table built from rustdoc. */
+export function expandVariantTables(markdown: string): string {
+  return markdown.replace(VARIANT_TABLE, (_whole, qualified: string) => {
+    requireRustdoc();
+    if (!rustdocAvailable()) {
+      return `> This table of \`${qualified}\` variants is generated from local rustdoc. Run \`cargo doc -p grit-lib --no-deps\` and reload to see it.\n`;
+    }
+    const lines = ["| Name | Variant | Description |", "| --- | --- | --- |"];
+    for (const row of enumVariantRows(qualified)) {
+      lines.push(`| \`${row.name}\` | [\`${row.variant}\`](${row.url}) | ${row.doc} |`);
+    }
+    return lines.join("\n") + "\n";
+  });
+}
+
 /** The API map as a Markdown table (spliced into `library/api-map.md`). */
 export function apiMapMarkdown(): string {
   requireRustdoc();

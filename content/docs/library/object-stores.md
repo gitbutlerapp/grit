@@ -25,7 +25,7 @@ For a given [`Odb`](rustdoc:grit_lib::objects::odb::Odb) handle:
 
 [`Odb::read_store`](rustdoc:grit_lib::objects::odb::Odb::read_store) returns that whole chain as one `Arc<dyn ObjectStore>`, whatever the primary is. Hand it to another repository's `push_read_source` to layer one repository under another (a read-through cache or a mirror), or pass it as the `bases` of `ingest_pack_into`. A missing object is `Ok(None)` and never starts a promisor fetch. Its `open_stream` buffers the payload; for a large blob call [`Odb::with_stream`](rustdoc:grit_lib::objects::odb::Odb::with_stream) on the `Odb` itself.
 
-The narrower accessors keep their meaning: [`Odb::sources`](rustdoc:grit_lib::objects::odb::Odb::sources) is the alternates alone (step 4), and [`Odb::primary`](rustdoc:grit_lib::objects::odb::Odb::primary) returns the files-backed primary and fails with `UnsupportedObjectStore` on a custom one. Use [`Odb::primary_writable`](rustdoc:grit_lib::objects::odb::Odb::primary_writable) for the primary of any kind.
+The narrower accessors keep their meaning: [`Odb::sources`](rustdoc:grit_lib::objects::odb::Odb::sources) is the alternates alone (step 4), and [`Odb::primary`](rustdoc:grit_lib::objects::odb::Odb::primary) returns the files-backed primary and fails with `UnsupportedObjectStore` (`files_source`) on a custom one. Use [`Odb::primary_writable`](rustdoc:grit_lib::objects::odb::Odb::primary_writable) for the primary of any kind.
 
 ```rust
 use std::sync::Arc;
@@ -108,12 +108,11 @@ Object reads and writes go through your store, so commits, staging (`porcelain::
 
 [`Repository::fsck`](rustdoc:grit_lib::repo::Repository::fsck) works too: it lists the store's objects with `ObjectStore::for_each_object`, re-hashes each one against its id and runs the usual object and connectivity checks. Read or hash failures are reported as `FsckIssue::BadObject`, since there is no loose file path to name.
 
-[`Remote::fetch`](rustdoc:grit_lib::remote::Remote::fetch), [`Remote::push`](rustdoc:grit_lib::remote::Remote::push), pull, bundle fetch, [`clone_into`](rustdoc:grit_lib::remote::clone::clone_into), and smart HTTP serving ([`upload_pack`](rustdoc:grit_lib::remote::serve::upload_pack) / [`receive_pack`](rustdoc:grit_lib::remote::serve::receive_pack)) read and write objects through the custom primary (pack bytes are resolved into the store with [`ingest_received_pack`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack) or the receive-pack overlay described below). Partial-clone filters are not supported yet (`operation: "partial fetch"`). Some operations still install or verify packs under the on-disk `objects/` directory:
+[`Remote::fetch`](rustdoc:grit_lib::remote::Remote::fetch), [`Remote::push`](rustdoc:grit_lib::remote::Remote::push), pull, bundle fetch, [`clone_into`](rustdoc:grit_lib::remote::clone::clone_into), and smart HTTP serving ([`upload_pack`](rustdoc:grit_lib::remote::serve::upload_pack) / [`receive_pack`](rustdoc:grit_lib::remote::serve::receive_pack)) read and write objects through the custom primary (pack bytes are resolved into the store with [`ingest_received_pack`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack) or the receive-pack overlay described below). Partial-clone filters are not supported yet.
 
-| `operation` | Refused API |
-| ----------- | ----------- |
-| `partial fetch` | Fetch or clone with an object filter on a custom primary |
-| `gc`, `commit-graph write`, `repack`, `midx write`, `prune` | Filesystem maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install with `index_pack::install_pack_*`, MIDX write) |
+An operation that needs the on-disk `objects/` layout refuses a custom primary with [`RepositoryError::UnsupportedObjectStore`](rustdoc:grit_lib::repo::RepositoryError::UnsupportedObjectStore). Its `operation` field is a [`FilesOnlyOperation`](rustdoc:grit_lib::repo::error::FilesOnlyOperation), so match the variant rather than the message; `FilesOnlyOperation::as_str` gives the name below, which `grit --json` reports as `operation` with `kind` `unsupported_object_store` (see [Exit codes](../../exit-codes/)). The table is generated from the enum's rustdoc:
+
+<!-- grit:variant-table grit_lib::repo::error::FilesOnlyOperation -->
 
 Maintenance stays files-only by design: packs, `.idx`, multi-pack-index and commit-graph files are how the files backend stores objects, and a custom store owns its own layout. A custom store still gets a commit-graph, built in memory and kept in its own storage (see [Commit-graphs for a custom store](#commit-graphs-for-a-custom-store)). Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
 
