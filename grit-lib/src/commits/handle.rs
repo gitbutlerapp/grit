@@ -11,6 +11,9 @@ use crate::progress::{CancelToken, ProgressSink};
 use crate::repo::Repository;
 
 /// Request plus scope for [`Commits::create`] and [`Commits::plan`].
+///
+/// Build with [`Self::new`] after staging (for [`crate::porcelain::commit::CommitScope::Staged`])
+/// or to preview auto-staging behavior via [`CommitScope::AutoStage`](crate::porcelain::commit::CommitScope::AutoStage).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct CommitOptions {
@@ -124,6 +127,10 @@ impl<'repo> Commits<'repo> {
     /// Record a commit from the current index without auto-staging the worktree.
     ///
     /// Equivalent to [`Self::create`] with [`CommitScope::Staged`].
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::create`].
     pub fn create_staged(
         &self,
         request: &CommitRequest,
@@ -137,7 +144,7 @@ impl<'repo> Commits<'repo> {
         )
     }
 
-    /// Serialize commit bytes from assembled [`crate::commit::CommitData`], honoring signing config.
+    /// Serialize commit bytes from assembled [`CommitData`](crate::objects::CommitData), honoring signing config.
     ///
     /// # Errors
     ///
@@ -150,7 +157,7 @@ impl<'repo> Commits<'repo> {
         prepare_commit_bytes(self.repo, data, sign_override)
     }
 
-    /// Hash and store a commit object from [`crate::commit::CommitData`].
+    /// Hash and store a commit object from [`CommitData`](crate::objects::CommitData).
     ///
     /// # Errors
     ///

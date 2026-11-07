@@ -104,7 +104,7 @@ impl<'repo> References<'repo> {
     /// use grit_lib::refs::store::{RefName, RefNameRef};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// use grit_lib::ident::Signature;
-    /// use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+    /// use grit_lib::porcelain::commit::CommitRequest;
     /// use grit_lib::progress::NullProgress;
     /// let dir = std::env::temp_dir().join("grit-refs-resolve-doc");
     /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
@@ -112,7 +112,7 @@ impl<'repo> References<'repo> {
     /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.allow_empty = true;
-    /// let _ = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?;
+    /// let _ = repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?;
     /// let main = RefName::try_from("refs/heads/main").expect("valid ref");
     /// let head = repo.references().resolve(&main)?;
     /// assert!(!head.to_hex().is_empty());
@@ -360,7 +360,7 @@ impl<'repo> References<'repo> {
     /// use grit_lib::refs::store::{RefName, RefNameRef};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// use grit_lib::ident::Signature;
-    /// use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+    /// use grit_lib::porcelain::commit::CommitRequest;
     /// use grit_lib::progress::NullProgress;
     /// let dir = std::env::temp_dir().join("grit-refs-write-doc");
     /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
@@ -368,7 +368,7 @@ impl<'repo> References<'repo> {
     /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.allow_empty = true;
-    /// let commit = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?.oid;
+    /// let commit = repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?.oid;
     /// let name = RefName::try_from("refs/heads/handle-demo").expect("valid ref");
     /// repo.references().update(&name, &commit)?;
     /// assert_eq!(repo.references().resolve(&name)?, commit);

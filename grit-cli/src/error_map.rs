@@ -486,7 +486,7 @@ pub fn committer_reflog_signature(
     }
 }
 
-/// Map library errors from [`grit_lib::porcelain::add::stage`] (via `grit add`) to structured CLI errors.
+/// Map library errors from [`grit_lib::index::IndexFile::stage`] (via `grit add`) to structured CLI errors.
 #[must_use]
 pub fn map_stage_lib_error(err: LibError) -> Error {
     match err {

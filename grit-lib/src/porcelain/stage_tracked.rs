@@ -98,6 +98,10 @@ impl StageTrackedSummary {
 /// [`Error::LockHeld`] when another process holds `index.lock` past the
 /// `core.filesRefLockTimeout` wait, I/O failures, object write failures, or a missing index
 /// when one is required.
+#[expect(
+    dead_code,
+    reason = "retained for in-crate callers; IndexFile uses the _with_thresholds entry"
+)]
 pub(crate) fn stage_tracked_modifications(
     repo: &Repository,
     work_tree: &Path,
@@ -166,6 +170,10 @@ pub(crate) fn stage_tracked_modifications_with_thresholds(
 ///
 /// # Errors
 /// I/O failures or object write failures while reading the worktree.
+#[expect(
+    dead_code,
+    reason = "retained for in-crate callers; IndexFile uses the _with_thresholds entry"
+)]
 pub(crate) fn stage_tracked_modifications_in_index(
     repo: &Repository,
     work_tree: &Path,

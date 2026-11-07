@@ -6,7 +6,7 @@ use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::merge::{ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;

@@ -227,7 +227,12 @@ impl<'repo> IndexFile<'repo> {
         self.repo.try_write_index(index)
     }
 
-    /// Stage paths matching [`StageOptions`] into the index.
+    /// Stage paths matching [`StageOptions`](crate::porcelain::add::StageOptions) into the index.
+    ///
+    /// # Errors
+    ///
+    /// Propagates index, worktree, and pathspec failures; returns [`crate::error::Error::Cancelled`]
+    /// when `cancel` is set.
     pub fn stage(
         &self,
         options: &crate::porcelain::add::StageOptions,
@@ -238,6 +243,10 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Stage worktree changes for commit auto-staging.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::stage`] for the implicit all-paths staging pass.
     pub fn stage_for_commit(
         &self,
         progress: &mut dyn crate::progress::ProgressSink,
@@ -247,6 +256,10 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Stage paths into a caller-owned index without writing it to disk.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::stage`], without persisting `index`.
     pub fn stage_on(
         &self,
         index: &mut Index,
@@ -258,6 +271,10 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Stage paths matching `pathspecs` without a full status pass.
+    ///
+    /// # Errors
+    ///
+    /// Propagates index refresh and worktree scan failures.
     pub fn stage_worktree_paths(
         &self,
         pathspecs: &[String],
@@ -266,6 +283,10 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Refresh tracked modifications from the worktree into the index.
+    ///
+    /// # Errors
+    ///
+    /// Propagates index load, stat refresh, and worktree scan failures.
     pub fn stage_tracked_modifications(
         &self,
         work_tree: &Path,
@@ -278,6 +299,10 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Like [`Self::stage_tracked_modifications`], updating a caller-owned index only.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::stage_tracked_modifications`].
     pub fn stage_tracked_modifications_on(
         &self,
         work_tree: &Path,
@@ -306,6 +331,10 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Stage structured diff hunks by stable id.
+    ///
+    /// # Errors
+    ///
+    /// Propagates diff, index, and hunk-resolution failures.
     pub fn stage_hunks(
         &self,
         side: crate::diff::DiffSide,
@@ -327,6 +356,10 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Discard or unstage hunks in `selection`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates diff and index update failures.
     pub fn restore_hunks(
         &self,
         selection: &crate::porcelain::hunk_select::HunkSelection,
@@ -346,11 +379,19 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Diff options for hunk id resolution (same boundaries as `grit diff --json`).
+    ///
+    /// # Errors
+    ///
+    /// Propagates config and diff-option construction failures.
     pub fn hunk_diff_options(&self) -> crate::error::Result<crate::diff::DiffOptions> {
-        crate::porcelain::hunk_select::diff_options_for_hunk_select(self.repo).map_err(Into::into)
+        crate::porcelain::hunk_select::diff_options_for_hunk_select(self.repo)
     }
 
     /// Unstaged file diffs with staged peer hunks on the same path.
+    ///
+    /// # Errors
+    ///
+    /// Propagates index load and diff failures.
     pub fn unstaged_file_diffs(
         &self,
         pathspecs: &[String],
@@ -364,6 +405,10 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Unstaged hunk ids per path (same rules as `grit diff --json` on `--unstaged`).
+    ///
+    /// # Errors
+    ///
+    /// Propagates diff failures for the given pathspecs.
     pub fn list_unstaged_hunk_ids(
         &self,
         pathspecs: &[String],
@@ -373,6 +418,10 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Resolve a hunk selection to index-ready patches.
+    ///
+    /// # Errors
+    ///
+    /// Propagates diff and selection validation failures.
     pub fn resolve_hunk_selection(
         &self,
         side: crate::diff::DiffSide,
@@ -390,11 +439,19 @@ impl<'repo> IndexFile<'repo> {
     }
 
     /// Whether `resolved` matches a known path in this repository.
+    ///
+    /// # Errors
+    ///
+    /// Propagates index and ref resolution failures.
     pub fn pathspec_matches_known(&self, resolved: &str) -> crate::error::Result<bool> {
         crate::porcelain::pathspec_match::pathspec_matches_known_in_repository(self.repo, resolved)
     }
 
     /// Require that `resolved` matches a known path, else return a pathspec error.
+    ///
+    /// # Errors
+    ///
+    /// Returns a pathspec error when the path is unknown.
     pub fn ensure_pathspec_matches_known(
         &self,
         display_spec: &str,

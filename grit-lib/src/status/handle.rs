@@ -14,6 +14,8 @@ use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
 
 /// Whether untracked collection may refresh and read the index UNTR extension.
+///
+/// Used by [`UntrackedOptions::cache`](UntrackedOptions::cache) for [`Status::untracked`] walks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum UntrackedCachePolicy {
@@ -25,6 +27,8 @@ pub enum UntrackedCachePolicy {
 }
 
 /// Options for [`Status::untracked`] and related untracked walks.
+///
+/// Defaults match a normal `git status` untracked scan (no ignored files, collapsed directories).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct UntrackedOptions {
@@ -137,9 +141,12 @@ impl<'repo> Status<'repo> {
 
     /// Walk the work tree and collect untracked and ignored paths into sorted lists.
     ///
+    /// Honors [`UntrackedOptions`] (ignored mode, `show_all`, pathspec limit, UNTR cache policy).
+    ///
     /// # Errors
     ///
-    /// Propagates ignore-rule load, index, and walk failures.
+    /// Propagates ignore-rule load, index, and walk failures. Returns
+    /// [`crate::error::Error::Cancelled`] when `cancel` is set.
     pub fn untracked(
         &self,
         index: &mut Index,
@@ -156,6 +163,10 @@ impl<'repo> Status<'repo> {
     ///
     /// When `rules` is `Some`, ignore and attribute files already loaded for this operation are
     /// reused instead of reading them again.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::untracked`].
     pub fn untracked_with_meta(
         &self,
         index: &mut Index,
@@ -195,7 +206,7 @@ impl<'repo> Status<'repo> {
                 cache_miss: Default::default(),
                 clean_unit_dirs: None,
             },
-            &rules,
+            rules,
             Some(cancel.clone()),
         )
     }

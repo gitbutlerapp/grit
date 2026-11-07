@@ -1,6 +1,6 @@
 //! `grit add` — stage changes. With no paths, stages everything.
 //!
-//! Staging is delegated to [`grit_lib::porcelain::add::stage`] so the CLI stays
+//! Staging is delegated to [`grit_lib::index::IndexFile::stage`] so the CLI stays
 //! a thin wrapper over the library.
 
 use crate::pathspec_args::PathspecArgs;
