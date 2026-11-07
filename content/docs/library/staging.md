@@ -52,7 +52,7 @@ Index load, write, extension parsing, and write-tree failures return [`IndexErro
 | `Chmod` | Mode change rejected (unmerged path, non-regular file, invalid mode). |
 | `WriteTree` | Structured write-tree / cache-tree rebuild failure. |
 
-Stable JSON `kind` slugs (`index_error`, `index_unmerged`, `cache_tree_corrupt`, …) come from [`IndexError::kind_name`](rustdoc:grit_lib::index::IndexError::kind_name). See the [errors](errors/) overview for the cross-area map.
+Stable JSON `kind` slugs (`index_error`, `index_unmerged`, `cache_tree_corrupt`, …) come from [`IndexError::kind_name`](rustdoc:grit_lib::index::IndexError::kind_name). See the [errors](../errors/) overview for the cross-area map.
 
 ## Example
 
