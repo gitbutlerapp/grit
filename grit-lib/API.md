@@ -85,8 +85,9 @@ An operation on a repository is a method on the handle that owns its area. Exten
 | Area | Accessor | Handle type | Owns |
 | --- | --- | --- | --- |
 | Objects and maintenance | `repo.objects()` | `objects::Objects` | Object read/write, packs, MIDX, commit-graph, gc, repack, fsck, promisor fetches |
-| References | `repo.references()` | `refs::References` | Resolve, list and update refs; `HEAD`; branches and tags; ref transactions |
+| References | `repo.references()` | `refs::References` | Resolve, list and update refs; `HEAD` and symbolic refs; short-name expansion; branches and tags; ref transactions |
 | Reflogs | `repo.reflogs()` | `repo_handles::RepositoryReflogs` | Reflog read, append, expire |
+| Operation state | `repo.operation()` | `operation::Operations` | Paused merge, rebase, pick, revert and bisect state (`MERGE_HEAD`, `ORIG_HEAD`, sequencer), what blocks a switch, forgetting paused state |
 | Index and staging | `repo.index()` | `index::IndexFile` | Index read/write; add, rm and mv; sparse checkout |
 | Config | `repo.config()` | `config::Config` | Config cascade reads, edits and typed values |
 | Revisions | `repo.revwalk()` | `revwalk::RevWalk` | Rev-parse, rev-list, merge-base, log walks, ahead/behind |
@@ -99,7 +100,7 @@ An operation on a repository is a method on the handle that owns its area. Exten
 | Linked worktrees | `repo.worktrees()` | `repo_handles::RepositoryWorktrees` | Add, list, lock, move, remove and prune linked worktrees |
 | Workspace snapshots | `repo.workspace_snapshot()` | `repo_handles::RepositoryWorkspaceSnapshot` | GitButler workspace snapshots |
 | Current checkout (new) | `repo.checkout()` | *to be added* | Status, switch, checkout, reset, restore, clean |
-| Merge family (new) | `repo.merge()` | *to be added* | Merge, pick, revert, replay, `--check` predictions, operation state (`--continue`, `--abort`, `--skip`) |
+| Merge family (new) | `repo.merge()` | *to be added* | Merge, pick, revert, replay, `--check` predictions, `--continue`, `--abort` and `--skip` (reading paused state stays on `operation()`) |
 | History | `repo.history()` | `revwalk::history::History` | Commit creation and amend, history edits (reword, drop, move, fixup, squash, split, absorb), undo, rebase sessions |
 
 The remaining new accessors are added by the first step that needs each one. `repo.work_tree()` already returns the work-tree path, so the current-checkout handle is `checkout()`. Linked-worktree administration stays on `worktrees()`.

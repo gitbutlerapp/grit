@@ -79,14 +79,14 @@ grit-lib = { version = "0.5", features = ["http-ureq"] }
 ### Open a repository and read HEAD
 
 ```rust
-use grit_lib::repo::{init_repository, Repository};
-use grit_lib::state::resolve_head;
-use grit_lib::refs::ref_storage::RefStorageFormat;
+use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::repo::{InitOptions, Repository};
 
 let dir = tempfile::tempdir()?;
-let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)?;
-let head = resolve_head(&repo.git_dir)?;
-let _again = Repository::open(&repo.git_dir, repo.work_tree.as_deref())?;
+let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+let head = repo.references().head()?;
+assert!(head.is_unborn());
+let _again = Repository::discover(Some(dir.path()), &RepositoryOptions::default())?;
 # Ok::<(), grit_lib::error::Error>(())
 ```
 

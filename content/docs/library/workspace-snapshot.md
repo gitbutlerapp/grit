@@ -21,7 +21,7 @@ Before refs move, restore builds a tree from paths in the pre-restore index (all
 
 ## Clearing operation state
 
-[`state::clear_in_progress`](rustdoc:grit_lib::state::clear_in_progress) removes merge/rebase/cherry-pick sentinels without moving `HEAD` or the worktree (unlike [`abort_branch_merge`](rustdoc:grit_lib::porcelain::merge::abort_branch_merge)).
+[`Operations::clear`](rustdoc:grit_lib::operation::Operations::clear) (`repo.operation().clear()`) removes merge/rebase/cherry-pick sentinels without moving `HEAD` or the worktree (unlike [`abort_branch_merge`](rustdoc:grit_lib::porcelain::merge::abort_branch_merge)).
 
 ## Stash apply helper
 
