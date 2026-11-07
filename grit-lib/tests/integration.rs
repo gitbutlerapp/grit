@@ -2145,6 +2145,8 @@ mod transport_git_daemon;
 #[cfg(feature = "full-tests")]
 #[path = "transport_git_daemon_v2.rs"]
 mod transport_git_daemon_v2;
+#[path = "transport_handles.rs"]
+mod transport_handles;
 #[cfg(feature = "full-tests")]
 #[path = "transport_http.rs"]
 mod transport_http;

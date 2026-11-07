@@ -270,3 +270,212 @@ impl From<UnbundledRef> for BundleHead {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::environment::RepositoryOptions;
+    use crate::fetch::NoProgress;
+    use crate::progress::NullProgress;
+    use crate::transfer::TagMode;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .output()
+            .expect("run git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    fn oid(hex: &str) -> ObjectId {
+        ObjectId::from_hex(hex).expect("oid")
+    }
+
+    /// A git repository with two commits on `main` and an annotated tag on the first.
+    fn history(dir: &Path) -> (ObjectId, ObjectId) {
+        git(dir, &["init", "-q", "-b", "main", "."]);
+        std::fs::write(dir.join("a.txt"), "one\n").expect("write");
+        git(dir, &["add", "a.txt"]);
+        git(dir, &["commit", "-q", "-m", "one"]);
+        git(dir, &["tag", "-a", "v1", "-m", "v1"]);
+        std::fs::write(dir.join("b.txt"), "two\n").expect("write");
+        git(dir, &["add", "b.txt"]);
+        git(dir, &["commit", "-q", "-m", "two"]);
+        (
+            oid(&git(dir, &["rev-parse", "main~1"])),
+            oid(&git(dir, &["rev-parse", "main"])),
+        )
+    }
+
+    fn open(dir: &Path) -> Repository {
+        Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open")
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn bundles_grit_writes_verify_and_fetch_with_git() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src = tmp.path().join("src");
+        std::fs::create_dir(&src).expect("mkdir");
+        let (c1, c2) = history(&src);
+        let repo = open(&src);
+        let tag = oid(&git(&src, &["rev-parse", "v1"]));
+
+        let full = tmp.path().join("full.bundle");
+        let spec = BundleSpec {
+            include: vec![
+                (c2, "refs/heads/main".to_owned()),
+                (tag, "refs/tags/v1".to_owned()),
+            ],
+            ..Default::default()
+        };
+        repo.bundles()
+            .write(&spec, &full, &mut NullProgress, &CancelToken::never())
+            .expect("write full");
+        let incremental = tmp.path().join("incremental.bundle");
+        repo.bundles()
+            .write_from_revs(
+                &BundleCreateOptions::from_rev_tokens(vec!["main~1..main".to_owned()]),
+                &incremental,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("write incremental");
+
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir(&dest).expect("mkdir");
+        git(&dest, &["init", "-q", "--bare", "."]);
+        git(&dest, &["bundle", "verify", full.to_str().expect("utf-8")]);
+        git(
+            &dest,
+            &[
+                "fetch",
+                "-q",
+                full.to_str().expect("utf-8"),
+                "refs/heads/main:refs/heads/one",
+                "refs/tags/v1:refs/tags/v1",
+            ],
+        );
+        assert_eq!(oid(&git(&dest, &["rev-parse", "one"])), c2);
+        assert_eq!(oid(&git(&dest, &["rev-parse", "v1^{commit}"])), c1);
+        git(&dest, &["fsck", "--strict"]);
+
+        let fresh = tmp.path().join("fresh");
+        std::fs::create_dir(&fresh).expect("mkdir");
+        git(&fresh, &["init", "-q", "--bare", "."]);
+        let refused = Command::new("git")
+            .current_dir(&fresh)
+            .args(["bundle", "verify", incremental.to_str().expect("utf-8")])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("run git");
+        assert!(!refused.status.success(), "the prerequisite is missing");
+        git(
+            &dest,
+            &["bundle", "verify", incremental.to_str().expect("utf-8")],
+        );
+        git(
+            &dest,
+            &[
+                "fetch",
+                "-q",
+                incremental.to_str().expect("utf-8"),
+                "refs/heads/main:refs/heads/two",
+            ],
+        );
+        assert_eq!(oid(&git(&dest, &["rev-parse", "two"])), c2);
+        git(&dest, &["fsck", "--strict"]);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn bundles_git_writes_and_grit_fetches() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src = tmp.path().join("src");
+        std::fs::create_dir(&src).expect("mkdir");
+        let (c1, c2) = history(&src);
+        let full = tmp.path().join("full.bundle");
+        git(&src, &["branch", "first", "main~1"]);
+        git(
+            &src,
+            &[
+                "bundle",
+                "create",
+                full.to_str().expect("utf-8"),
+                "first",
+                "--tags",
+            ],
+        );
+        let incremental = tmp.path().join("incremental.bundle");
+        git(
+            &src,
+            &[
+                "bundle",
+                "create",
+                incremental.to_str().expect("utf-8"),
+                "main~1..main",
+            ],
+        );
+
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir(&dest).expect("mkdir");
+        git(&dest, &["init", "-q", "--bare", "."]);
+        let repo = open(&dest);
+        let mut options = FetchOptions::default();
+        options.refspecs = vec!["+refs/heads/*:refs/remotes/bundle/*".to_owned()];
+        options.tags = TagMode::Following;
+
+        let incomplete = repo.bundles().fetch(
+            &incremental,
+            &options,
+            &mut NoProgress,
+            &CancelToken::never(),
+        );
+        assert!(incomplete.is_err(), "the prerequisite is missing");
+
+        let fetched = repo
+            .bundles()
+            .fetch(&full, &options, &mut NoProgress, &CancelToken::never())
+            .expect("fetch full");
+        assert!(fetched.changed_ref_count() >= 1);
+        assert_eq!(
+            git(&dest, &["rev-parse", "refs/remotes/bundle/first"]),
+            c1.to_hex()
+        );
+        assert_eq!(git(&dest, &["rev-parse", "v1^{commit}"]), c1.to_hex());
+
+        repo.bundles()
+            .fetch(
+                &incremental,
+                &options,
+                &mut NoProgress,
+                &CancelToken::never(),
+            )
+            .expect("fetch incremental");
+        assert_eq!(
+            git(&dest, &["rev-parse", "refs/remotes/bundle/main"]),
+            c2.to_hex()
+        );
+        git(&dest, &["fsck", "--strict"]);
+    }
+}
