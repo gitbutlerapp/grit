@@ -212,6 +212,65 @@ class ErrorRatchetMetricTests(unittest.TestCase):
         snap = ar.compute_metrics(public_api_text="", payload=payload)
         self.assertEqual(snap.metrics["pub_area_error_wraps_umbrella"].count, 1)
 
+    def _area_enum_with_field_types(self, *field_types: dict) -> dict:
+        """Synthetic ``AreaError`` whose struct variants each hold one field of ``field_types``."""
+        variant_ids = list(range(2, 2 + 2 * len(field_types), 2))
+        items: list[dict] = [
+            {
+                "name": "AreaError",
+                "attrs": ["#[non_exhaustive]"],
+                "inner": {"enum": {"variants": variant_ids, "has_stripped_fields": False}},
+            }
+        ]
+        for n, fty in enumerate(field_types):
+            vid = variant_ids[n]
+            items.append(
+                {
+                    "id": vid,
+                    "name": f"V{n}",
+                    "inner": {
+                        "variant": {
+                            "kind": {"struct": {"fields": [vid + 1], "has_stripped_fields": False}}
+                        }
+                    },
+                }
+            )
+            items.append({"id": vid + 1, "name": "source", "inner": {"struct_field": fty}})
+        payload = _minimal_rustdoc(*items)
+        payload["paths"]["99"] = {
+            "crate_id": 0,
+            "path": ["grit_lib", "error", "Error"],
+            "kind": "enum",
+        }
+        payload["paths"]["98"] = {"crate_id": 1, "path": ["std", "io", "error", "Error"], "kind": "struct"}
+        payload["paths"]["97"] = {"crate_id": 0, "path": ["grit_lib", "index", "IndexError"], "kind": "enum"}
+        return payload
+
+    @staticmethod
+    def _path(path: str, rid: int, *args: dict) -> dict:
+        return {
+            "resolved_path": {
+                "path": path,
+                "id": rid,
+                "args": {"angle_bracketed": {"args": [{"type": a} for a in args], "constraints": []}},
+            }
+        }
+
+    def test_umbrella_wraps_ignores_io_and_other_area_errors(self) -> None:
+        io_error = self._path("std::io::Error", 98)
+        boxed_area = self._path("Box", 500, self._path("IndexError", 97))
+        payload = self._area_enum_with_field_types(io_error, boxed_area)
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_area_error_wraps_umbrella"].count, 0)
+
+    def test_umbrella_wraps_finds_umbrella_in_struct_fields_and_generics(self) -> None:
+        umbrella = self._path("Error", 99)
+        boxed = self._path("Box", 500, umbrella)
+        listed = self._path("Vec", 501, {"tuple": [self._path("String", 502), umbrella]})
+        payload = self._area_enum_with_field_types(boxed, listed)
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_area_error_wraps_umbrella"].count, 2)
+
     def test_error_message_construction_sites_synthetic_tree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

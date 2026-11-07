@@ -1027,8 +1027,11 @@ def variant_field_types(variant: dict[str, Any], index: dict[str, Any]) -> list[
         for field in vinner.get("fields") or []:
             if isinstance(field, dict) and "type" in field:
                 types.append(field["type"])
-    elif isinstance(kind, dict) and "tuple" in kind:
-        for fid in kind["tuple"]:
+    elif isinstance(kind, dict) and ("tuple" in kind or "struct" in kind):
+        field_ids = kind["tuple"] if "tuple" in kind else (kind["struct"] or {}).get("fields", [])
+        for fid in field_ids:
+            if fid is None:
+                continue
             field = index_entry(index, fid)
             if not field:
                 continue
@@ -1037,10 +1040,10 @@ def variant_field_types(variant: dict[str, Any], index: dict[str, Any]) -> list[
                 types.append(finner["type"])
             elif "struct_field" in finner:
                 sf = finner["struct_field"]
-                if "type" in sf:
+                if isinstance(sf, dict) and "type" in sf:
                     types.append(sf["type"])
-                elif "resolved_path" in sf:
-                    types.append({"resolved_path": sf["resolved_path"]})
+                else:
+                    types.append(sf)
     return types
 
 
@@ -1076,23 +1079,41 @@ def variant_carries_catch_all_string(
     return any(type_display(ty) in STRING_RUST_TYPES for ty in field_types)
 
 
-def field_type_is_umbrella_error(type_node: Any) -> bool:
-    text = type_display(type_node)
-    if text == UMBRELLA_ERROR_PATH or text.endswith("::error::Error"):
-        return True
-    if "Box" in text and "Error" in text:
-        return True
-    if isinstance(type_node, dict) and "resolved_path" in type_node:
-        rp = type_node["resolved_path"]
-        path = rp.get("path", "")
-        if path in {"Box", "alloc::boxed::Box"} or path.endswith("::Box"):
-            inner = _format_generic_args(rp.get("args"))
-            if "Error" in inner or "error::Error" in inner:
-                return True
-        if path.endswith("::Error") or path == "Error":
+UMBRELLA_ERROR_SOURCE_PATHS = frozenset(
+    {UMBRELLA_ERROR_PATH, "crate::error::Error", "crate::Error", "error::Error"}
+)
+
+
+def resolved_path_is_umbrella(rp: dict[str, Any], paths_map: dict[str, Any]) -> bool:
+    """True when a rustdoc ``resolved_path`` names ``grit_lib::error::Error`` itself.
+
+    The item id is authoritative when the ``paths`` table knows it; the written path is
+    only consulted for ids rustdoc did not record. Other types that happen to be called
+    ``Error`` (``std::io::Error``, ``regex::Error``) or merely end in ``Error`` are not
+    the umbrella.
+    """
+    rid = rp.get("id")
+    if rid is not None:
+        meta = paths_map.get(str(rid))
+        if meta is not None:
+            return meta.get("crate_id") == 0 and "::".join(meta.get("path", [])) == UMBRELLA_ERROR_PATH
+    return rp.get("path", "") in UMBRELLA_ERROR_SOURCE_PATHS
+
+
+def field_type_is_umbrella_error(type_node: Any, paths_map: dict[str, Any] | None = None) -> bool:
+    """True when ``type_node`` holds the umbrella error anywhere in its type tree.
+
+    Covers the umbrella directly and inside generic arguments, tuples, slices, arrays and
+    references (``Box<Error>``, ``Vec<(String, Error)>``, ``Option<Box<Error>>``).
+    """
+    paths_map = paths_map or {}
+    if isinstance(type_node, dict):
+        rp = type_node.get("resolved_path")
+        if isinstance(rp, dict) and resolved_path_is_umbrella(rp, paths_map):
             return True
-    if isinstance(type_node, dict) and "type" in type_node:
-        return field_type_is_umbrella_error(type_node["type"])
+        return any(field_type_is_umbrella_error(v, paths_map) for v in type_node.values())
+    if isinstance(type_node, list):
+        return any(field_type_is_umbrella_error(v, paths_map) for v in type_node)
     return False
 
 
@@ -1126,18 +1147,21 @@ def collect_error_ratchet_metrics(
                 catch_all.append(vpath)
             if variant_is_string_tuple_payload(variant, index):
                 string_tuple.append(vpath)
-            for fty in variant_field_types(variant, index):
-                if field_type_is_umbrella_error(fty):
-                    wraps_umbrella.append(f"{vpath} :: tuple")
+            if any(
+                field_type_is_umbrella_error(fty, paths_map)
+                for fty in variant_field_types(variant, index)
+            ):
+                wraps_umbrella.append(vpath)
+                continue
             vinner = variant.get("inner") or {}
             if "variant" in vinner:
                 for field in vinner["variant"].get("fields") or []:
                     if not isinstance(field, dict):
                         continue
                     fty = field.get("type")
-                    if fty and field_type_is_umbrella_error(fty):
-                        fname = field.get("name") or "?"
-                        wraps_umbrella.append(f"{vpath} :: field {fname}")
+                    if fty and field_type_is_umbrella_error(fty, paths_map):
+                        wraps_umbrella.append(vpath)
+                        break
 
     msg_sites = count_error_message_construction_sites()
     return {
