@@ -2603,6 +2603,11 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
         filter: cli.filter.clone(),
     };
     context::set_thread_policy(cli.threads);
+    // Automatic pool sizes assume the machine is ours; share them with other grit processes
+    // so many at once (agents, say) do not each run a full pool. `--threads N` is kept as asked.
+    if cli.threads.is_none_or(|n| n == 0) {
+        grit_lib::parallel::share_worker_budget_across_processes(true);
+    }
     // Humans see hook output live; `--json` / `--markdown` capture it into the result instead.
     context::set_hook_stdio(if opts.mode == OutputMode::Human {
         HookStdio::Inherit

@@ -13,6 +13,7 @@
 //! # }
 //! ```
 
+mod budget;
 mod map;
 mod policy;
 mod pool;
@@ -20,6 +21,8 @@ mod pool;
 pub(crate) use map::pool_worthwhile;
 pub(crate) use pool::{run_ordered_batches, run_ordered_pool};
 
+pub use budget::share_worker_budget_across_processes;
+pub(crate) use budget::FilesystemWork;
 pub use map::{
     par_map, parallel_worthwhile, try_par_map, try_par_map_force, try_par_map_with_local,
 };

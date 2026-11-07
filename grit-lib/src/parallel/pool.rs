@@ -133,8 +133,9 @@ where
             }
         };
 
+    let lease = super::budget::lease_workers(n_workers);
     std::thread::scope(|scope| {
-        for _ in 1..n_workers {
+        for _ in 1..lease.workers() {
             let slots = Arc::clone(&slots);
             let first_error = Arc::clone(&first_error);
             let panic_payload = Arc::clone(&panic_payload);
@@ -146,6 +147,7 @@ where
             Arc::clone(&panic_payload),
         );
     });
+    drop(lease);
 
     if let Ok(mut guard) = panic_payload.lock() {
         if let Some(payload) = guard.take() {
@@ -241,8 +243,9 @@ where
             }
         };
 
+    let lease = super::budget::lease_workers(n_workers);
     std::thread::scope(|scope| {
-        for _ in 1..n_workers {
+        for _ in 1..lease.workers() {
             let slots = Arc::clone(&slots);
             let first_error = Arc::clone(&first_error);
             let panic_payload = Arc::clone(&panic_payload);
@@ -254,6 +257,7 @@ where
             Arc::clone(&panic_payload),
         );
     });
+    drop(lease);
 
     if let Ok(mut guard) = panic_payload.lock() {
         if let Some(payload) = guard.take() {
@@ -333,7 +337,9 @@ where
 {
     let batch = batch.max(1);
     let n_batches = items.len().div_ceil(batch);
-    let ahead = 2 * n_workers.max(1);
+    let lease = super::budget::lease_workers(n_workers);
+    let n_workers = lease.workers();
+    let ahead = 2 * n_workers;
     let batch_items = |k: usize| &items[k * batch..((k + 1) * batch).min(items.len())];
     let next = AtomicUsize::new(0);
     let gate = Mutex::new(BatchGate {
@@ -344,7 +350,7 @@ where
     let (tx, rx) = mpsc::channel::<(usize, Result<Vec<R>, E>)>();
 
     std::thread::scope(|scope| {
-        for _ in 0..n_workers.max(1) {
+        for _ in 0..n_workers {
             let tx = tx.clone();
             let (next, gate, wake, init, f) = (&next, &gate, &wake, &init, &f);
             scope.spawn(move || {
