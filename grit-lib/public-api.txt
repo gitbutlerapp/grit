@@ -3487,17 +3487,10 @@ impl core::marker::Unpin for grit_lib::diff::rerere::RerereEvent
 impl core::marker::UnsafeUnpin for grit_lib::diff::rerere::RerereEvent
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::rerere::RerereEvent
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::rerere::RerereEvent
-pub fn grit_lib::diff::rerere::finish_merge_rerere(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>>
-pub fn grit_lib::diff::rerere::repo_rerere(&grit_lib::repo::Repository, grit_lib::diff::rerere::RerereAutoupdate) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>>
 pub fn grit_lib::diff::rerere::rerere_clear(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::diff::rerere::rerere_conflict_id(grit_lib::objects::HashAlgo, &str, usize) -> core::option::Option<grit_lib::objects::ObjectId>
-pub fn grit_lib::diff::rerere::rerere_diff_for_path(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
 pub fn grit_lib::diff::rerere::rerere_enabled(&grit_lib::config::ConfigSet, &std::path::Path) -> bool
-pub fn grit_lib::diff::rerere::rerere_forget_path(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>>
 pub fn grit_lib::diff::rerere::rerere_gc(&grit_lib::config::environment::Environment, &std::path::Path, i64) -> grit_lib::error::Result<()>
-pub fn grit_lib::diff::rerere::rerere_post_commit(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>>
-pub fn grit_lib::diff::rerere::rerere_remaining_lines(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
-pub fn grit_lib::diff::rerere::rerere_status_lines(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub mod grit_lib::diff::structured
 pub enum grit_lib::diff::structured::StructuredLineKind
 pub grit_lib::diff::structured::StructuredLineKind::Add
@@ -9287,6 +9280,1006 @@ pub const grit_lib::maintenance::DROP_LARGE_BLOBS_TASK: &str
 pub const grit_lib::maintenance::LOP_GIT_DIR_KEY: &str
 pub const grit_lib::maintenance::LOP_KEEP_MESSAGE: &str
 pub fn grit_lib::maintenance::drop_large_blobs_enabled(&grit_lib::config::ConfigSet) -> grit_lib::error::Result<bool>
+pub mod grit_lib::merge
+pub mod grit_lib::merge::merge_diff
+pub fn grit_lib::merge::merge_diff::all_blob_paths_in_tree_order(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::merge::merge_diff::blob_oid_at_path(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId, &str) -> core::option::Option<grit_lib::objects::ObjectId>
+pub fn grit_lib::merge::merge_diff::blob_text_for_diff(&std::path::Path, &grit_lib::config::ConfigSet, &str, &[u8], bool) -> alloc::string::String
+pub fn grit_lib::merge::merge_diff::blob_text_for_diff_with_oid(&grit_lib::prelude::Odb, &std::path::Path, &grit_lib::config::ConfigSet, &str, &[u8], &grit_lib::objects::ObjectId, bool) -> alloc::string::String
+pub fn grit_lib::merge::merge_diff::combined_diff_paths(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId]) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::merge::merge_diff::combined_merge_parent_blob_paths(&grit_lib::prelude::Odb, &str, &[grit_lib::objects::ObjectId], &grit_lib::objects::ObjectId, u32) -> core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub fn grit_lib::merge::merge_diff::convert_blob_to_worktree_for_path(&std::path::Path, &std::path::Path, core::option::Option<&grit_lib::index::Index>, &grit_lib::prelude::Odb, &str, &[u8], core::option::Option<&str>, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> core::io::error::Result<alloc::vec::Vec<u8>>
+pub fn grit_lib::merge::merge_diff::diff_attr_external_driver(&std::path::Path, &grit_lib::config::ConfigSet, &str) -> core::option::Option<(alloc::string::String, bool)>
+pub fn grit_lib::merge::merge_diff::diff_attr_forces_binary(&std::path::Path, &str) -> bool
+pub fn grit_lib::merge::merge_diff::diff_attr_forces_text(&std::path::Path, &str) -> bool
+pub fn grit_lib::merge::merge_diff::diff_cachetextconv_enabled(&grit_lib::config::ConfigSet, &str) -> bool
+pub fn grit_lib::merge::merge_diff::diff_driver_forces_text(&std::path::Path, &grit_lib::config::ConfigSet, &str) -> bool
+pub fn grit_lib::merge::merge_diff::diff_forced_binary_by_driver(&std::path::Path, &grit_lib::config::ConfigSet, &str, &str, &str) -> bool
+pub fn grit_lib::merge::merge_diff::diff_textconv_active(&std::path::Path, &grit_lib::config::ConfigSet, &str) -> bool
+pub fn grit_lib::merge::merge_diff::diff_textconv_cmd_line(&grit_lib::config::ConfigSet, &str) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::merge::merge_diff::enrich_combined_path_renames(&grit_lib::prelude::Odb, &mut grit_lib::diff::combined_tree_diff::CombinedDiffPath, &[grit_lib::objects::ObjectId], &grit_lib::objects::ObjectId, u32)
+pub fn grit_lib::merge::merge_diff::format_combined_binary(&str, &[grit_lib::objects::ObjectId], &grit_lib::objects::ObjectId, usize, bool) -> alloc::string::String
+pub fn grit_lib::merge::merge_diff::format_combined_binary_header(&str, &[grit_lib::objects::ObjectId], &grit_lib::objects::ObjectId, usize, bool) -> alloc::string::String
+pub fn grit_lib::merge::merge_diff::format_combined_binary_header_n(&str, &[grit_lib::objects::ObjectId], &grit_lib::objects::ObjectId, usize, bool) -> alloc::string::String
+pub fn grit_lib::merge::merge_diff::format_combined_textconv_patch(&std::path::Path, &grit_lib::config::ConfigSet, &grit_lib::prelude::Odb, &str, &[grit_lib::objects::ObjectId], &grit_lib::objects::ObjectId, usize, usize, bool, bool, grit_lib::diff::combined_diff_patch::CombinedDiffWsOptions, bool, core::option::Option<&[alloc::string::String]>, &[grit_lib::diff::combined_tree_diff::CombinedParentSide], bool) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::merge::merge_diff::format_worktree_conflict_combined(&std::path::Path, &grit_lib::config::ConfigSet, &grit_lib::prelude::Odb, &str, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &[u8], usize) -> alloc::string::String
+pub fn grit_lib::merge::merge_diff::is_binary_for_diff(&std::path::Path, &str, &[u8]) -> bool
+pub fn grit_lib::merge::merge_diff::read_blob_at_path(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId, &str) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn grit_lib::merge::merge_diff::run_textconv(&std::path::Path, &grit_lib::config::ConfigSet, &str, &[u8]) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::merge::merge_diff::run_textconv_raw(&std::path::Path, &grit_lib::config::ConfigSet, &str, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub mod grit_lib::merge::merge_file
+pub enum grit_lib::merge::merge_file::ConflictStyle
+pub grit_lib::merge::merge_file::ConflictStyle::Diff3
+pub grit_lib::merge::merge_file::ConflictStyle::Merge
+pub grit_lib::merge::merge_file::ConflictStyle::ZealousDiff3
+impl core::clone::Clone for grit_lib::diff::merge_file::ConflictStyle
+pub fn grit_lib::diff::merge_file::ConflictStyle::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::merge_file::ConflictStyle
+impl core::cmp::PartialEq for grit_lib::diff::merge_file::ConflictStyle
+pub fn grit_lib::diff::merge_file::ConflictStyle::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::merge_file::ConflictStyle
+pub fn grit_lib::diff::merge_file::ConflictStyle::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::merge_file::ConflictStyle
+pub fn grit_lib::diff::merge_file::ConflictStyle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::merge_file::ConflictStyle
+impl core::marker::StructuralPartialEq for grit_lib::diff::merge_file::ConflictStyle
+impl core::marker::Freeze for grit_lib::diff::merge_file::ConflictStyle
+impl core::marker::Send for grit_lib::diff::merge_file::ConflictStyle
+impl core::marker::Sync for grit_lib::diff::merge_file::ConflictStyle
+impl core::marker::Unpin for grit_lib::diff::merge_file::ConflictStyle
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_file::ConflictStyle
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_file::ConflictStyle
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_file::ConflictStyle
+pub enum grit_lib::merge::merge_file::MergeFavor
+pub grit_lib::merge::merge_file::MergeFavor::None
+pub grit_lib::merge::merge_file::MergeFavor::Ours
+pub grit_lib::merge::merge_file::MergeFavor::Theirs
+pub grit_lib::merge::merge_file::MergeFavor::Union
+impl core::clone::Clone for grit_lib::diff::merge_file::MergeFavor
+pub fn grit_lib::diff::merge_file::MergeFavor::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::merge_file::MergeFavor
+impl core::cmp::PartialEq for grit_lib::diff::merge_file::MergeFavor
+pub fn grit_lib::diff::merge_file::MergeFavor::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::merge_file::MergeFavor
+pub fn grit_lib::diff::merge_file::MergeFavor::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::merge_file::MergeFavor
+pub fn grit_lib::diff::merge_file::MergeFavor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::merge_file::MergeFavor
+impl core::marker::StructuralPartialEq for grit_lib::diff::merge_file::MergeFavor
+impl serde_core::ser::Serialize for grit_lib::diff::merge_file::MergeFavor
+pub fn grit_lib::diff::merge_file::MergeFavor::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::diff::merge_file::MergeFavor
+pub fn grit_lib::diff::merge_file::MergeFavor::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::diff::merge_file::MergeFavor
+impl core::marker::Send for grit_lib::diff::merge_file::MergeFavor
+impl core::marker::Sync for grit_lib::diff::merge_file::MergeFavor
+impl core::marker::Unpin for grit_lib::diff::merge_file::MergeFavor
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_file::MergeFavor
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_file::MergeFavor
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_file::MergeFavor
+pub struct grit_lib::merge::merge_file::MergeInput<'a>
+pub grit_lib::merge::merge_file::MergeInput::base: &'a [u8]
+pub grit_lib::merge::merge_file::MergeInput::diff_algorithm: core::option::Option<alloc::string::String>
+pub grit_lib::merge::merge_file::MergeInput::favor: grit_lib::diff::merge_file::MergeFavor
+pub grit_lib::merge::merge_file::MergeInput::ignore_all_space: bool
+pub grit_lib::merge::merge_file::MergeInput::ignore_cr_at_eol: bool
+pub grit_lib::merge::merge_file::MergeInput::ignore_space_at_eol: bool
+pub grit_lib::merge::merge_file::MergeInput::ignore_space_change: bool
+pub grit_lib::merge::merge_file::MergeInput::label_base: &'a str
+pub grit_lib::merge::merge_file::MergeInput::label_ours: &'a str
+pub grit_lib::merge::merge_file::MergeInput::label_theirs: &'a str
+pub grit_lib::merge::merge_file::MergeInput::marker_size: usize
+pub grit_lib::merge::merge_file::MergeInput::ours: &'a [u8]
+pub grit_lib::merge::merge_file::MergeInput::style: grit_lib::diff::merge_file::ConflictStyle
+pub grit_lib::merge::merge_file::MergeInput::theirs: &'a [u8]
+impl<'a> core::marker::Freeze for grit_lib::diff::merge_file::MergeInput<'a>
+impl<'a> core::marker::Send for grit_lib::diff::merge_file::MergeInput<'a>
+impl<'a> core::marker::Sync for grit_lib::diff::merge_file::MergeInput<'a>
+impl<'a> core::marker::Unpin for grit_lib::diff::merge_file::MergeInput<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::diff::merge_file::MergeInput<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_file::MergeInput<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_file::MergeInput<'a>
+pub struct grit_lib::merge::merge_file::MergeOutput
+pub grit_lib::merge::merge_file::MergeOutput::conflicts: usize
+pub grit_lib::merge::merge_file::MergeOutput::content: alloc::vec::Vec<u8>
+impl core::marker::Freeze for grit_lib::diff::merge_file::MergeOutput
+impl core::marker::Send for grit_lib::diff::merge_file::MergeOutput
+impl core::marker::Sync for grit_lib::diff::merge_file::MergeOutput
+impl core::marker::Unpin for grit_lib::diff::merge_file::MergeOutput
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_file::MergeOutput
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_file::MergeOutput
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_file::MergeOutput
+pub fn grit_lib::merge::merge_file::is_binary(&[u8]) -> bool
+pub fn grit_lib::merge::merge_file::merge(&grit_lib::diff::merge_file::MergeInput<'_>) -> grit_lib::error::Result<grit_lib::diff::merge_file::MergeOutput>
+pub mod grit_lib::merge::merge_trees
+pub enum grit_lib::merge::merge_trees::DirectoryRenameConflict
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Blocked
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Blocked::existing: bool
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Blocked::path: alloc::vec::Vec<u8>
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Blocked::sources: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Moved
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Moved::added_by: grit_lib::diff::merge_trees::MergeSide
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Moved::from: alloc::vec::Vec<u8>
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Moved::to: alloc::vec::Vec<u8>
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Split
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Split::dir: alloc::vec::Vec<u8>
+pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Split::renamed_by: grit_lib::diff::merge_trees::MergeSide
+impl grit_lib::diff::merge_trees::DirectoryRenameConflict
+pub fn grit_lib::diff::merge_trees::DirectoryRenameConflict::path(&self) -> &[u8]
+impl core::clone::Clone for grit_lib::diff::merge_trees::DirectoryRenameConflict
+pub fn grit_lib::diff::merge_trees::DirectoryRenameConflict::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::merge_trees::DirectoryRenameConflict
+impl core::cmp::PartialEq for grit_lib::diff::merge_trees::DirectoryRenameConflict
+pub fn grit_lib::diff::merge_trees::DirectoryRenameConflict::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::merge_trees::DirectoryRenameConflict
+pub fn grit_lib::diff::merge_trees::DirectoryRenameConflict::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::merge_trees::DirectoryRenameConflict
+impl core::marker::Freeze for grit_lib::diff::merge_trees::DirectoryRenameConflict
+impl core::marker::Send for grit_lib::diff::merge_trees::DirectoryRenameConflict
+impl core::marker::Sync for grit_lib::diff::merge_trees::DirectoryRenameConflict
+impl core::marker::Unpin for grit_lib::diff::merge_trees::DirectoryRenameConflict
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::DirectoryRenameConflict
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::DirectoryRenameConflict
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::DirectoryRenameConflict
+pub enum grit_lib::merge::merge_trees::DirectoryRenameMode
+pub grit_lib::merge::merge_trees::DirectoryRenameMode::Apply
+pub grit_lib::merge::merge_trees::DirectoryRenameMode::Conflict
+pub grit_lib::merge::merge_trees::DirectoryRenameMode::Off
+impl grit_lib::diff::merge_trees::DirectoryRenameMode
+pub const grit_lib::diff::merge_trees::DirectoryRenameMode::CONFIG_KEY: &'static str
+pub fn grit_lib::diff::merge_trees::DirectoryRenameMode::from_config(&grit_lib::config::ConfigSet) -> core::result::Result<Self, grit_lib::error::ConfigError>
+pub fn grit_lib::diff::merge_trees::DirectoryRenameMode::from_config_value(&str) -> core::result::Result<Self, grit_lib::error::ConfigError>
+pub fn grit_lib::diff::merge_trees::DirectoryRenameMode::from_repo(&grit_lib::repo::Repository) -> grit_lib::error::Result<Self>
+impl core::clone::Clone for grit_lib::diff::merge_trees::DirectoryRenameMode
+pub fn grit_lib::diff::merge_trees::DirectoryRenameMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::merge_trees::DirectoryRenameMode
+impl core::cmp::PartialEq for grit_lib::diff::merge_trees::DirectoryRenameMode
+pub fn grit_lib::diff::merge_trees::DirectoryRenameMode::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::merge_trees::DirectoryRenameMode
+pub fn grit_lib::diff::merge_trees::DirectoryRenameMode::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::merge_trees::DirectoryRenameMode
+pub fn grit_lib::diff::merge_trees::DirectoryRenameMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::diff::merge_trees::DirectoryRenameMode
+pub fn grit_lib::diff::merge_trees::DirectoryRenameMode::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::diff::merge_trees::DirectoryRenameMode
+impl core::marker::StructuralPartialEq for grit_lib::diff::merge_trees::DirectoryRenameMode
+impl core::marker::Freeze for grit_lib::diff::merge_trees::DirectoryRenameMode
+impl core::marker::Send for grit_lib::diff::merge_trees::DirectoryRenameMode
+impl core::marker::Sync for grit_lib::diff::merge_trees::DirectoryRenameMode
+impl core::marker::Unpin for grit_lib::diff::merge_trees::DirectoryRenameMode
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::DirectoryRenameMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::DirectoryRenameMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::DirectoryRenameMode
+pub enum grit_lib::merge::merge_trees::MergeSide
+pub grit_lib::merge::merge_trees::MergeSide::Ours
+pub grit_lib::merge::merge_trees::MergeSide::Theirs
+impl grit_lib::diff::merge_trees::MergeSide
+pub fn grit_lib::diff::merge_trees::MergeSide::index_stage(self) -> u8
+impl core::clone::Clone for grit_lib::diff::merge_trees::MergeSide
+pub fn grit_lib::diff::merge_trees::MergeSide::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::merge_trees::MergeSide
+impl core::cmp::PartialEq for grit_lib::diff::merge_trees::MergeSide
+pub fn grit_lib::diff::merge_trees::MergeSide::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::merge_trees::MergeSide
+pub fn grit_lib::diff::merge_trees::MergeSide::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::diff::merge_trees::MergeSide
+pub fn grit_lib::diff::merge_trees::MergeSide::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::diff::merge_trees::MergeSide
+impl core::marker::StructuralPartialEq for grit_lib::diff::merge_trees::MergeSide
+impl core::marker::Freeze for grit_lib::diff::merge_trees::MergeSide
+impl core::marker::Send for grit_lib::diff::merge_trees::MergeSide
+impl core::marker::Sync for grit_lib::diff::merge_trees::MergeSide
+impl core::marker::Unpin for grit_lib::diff::merge_trees::MergeSide
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::MergeSide
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::MergeSide
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::MergeSide
+pub enum grit_lib::merge::merge_trees::TheirsConflictLabel<'a>
+pub grit_lib::merge::merge_trees::TheirsConflictLabel::Fixed(&'a str)
+pub grit_lib::merge::merge_trees::TheirsConflictLabel::PathUtf8
+impl<'a> core::clone::Clone for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+pub fn grit_lib::diff::merge_trees::TheirsConflictLabel<'a>::clone(&self) -> Self
+impl<'a> core::fmt::Debug for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+pub fn grit_lib::diff::merge_trees::TheirsConflictLabel<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+impl<'a> core::marker::Freeze for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+impl<'a> core::marker::Send for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+impl<'a> core::marker::Sync for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+impl<'a> core::marker::Unpin for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+pub struct grit_lib::merge::merge_trees::RenameRenameConflict
+pub grit_lib::merge::merge_trees::RenameRenameConflict::base_path: alloc::vec::Vec<u8>
+pub grit_lib::merge::merge_trees::RenameRenameConflict::ours_path: alloc::vec::Vec<u8>
+pub grit_lib::merge::merge_trees::RenameRenameConflict::theirs_path: alloc::vec::Vec<u8>
+impl core::clone::Clone for grit_lib::diff::merge_trees::RenameRenameConflict
+pub fn grit_lib::diff::merge_trees::RenameRenameConflict::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::cmp::PartialEq for grit_lib::diff::merge_trees::RenameRenameConflict
+pub fn grit_lib::diff::merge_trees::RenameRenameConflict::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::merge_trees::RenameRenameConflict
+pub fn grit_lib::diff::merge_trees::RenameRenameConflict::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::Freeze for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::Send for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::Sync for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::Unpin for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::RenameRenameConflict
+pub struct grit_lib::merge::merge_trees::TreeMergeConflictPresentation<'a>
+pub grit_lib::merge::merge_trees::TreeMergeConflictPresentation::checkout_merge: bool
+pub grit_lib::merge::merge_trees::TreeMergeConflictPresentation::df_directory_ours_commit: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::merge::merge_trees::TreeMergeConflictPresentation::df_directory_theirs_commit: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::merge::merge_trees::TreeMergeConflictPresentation::label_base: &'a str
+pub grit_lib::merge::merge_trees::TreeMergeConflictPresentation::label_ours: &'a str
+pub grit_lib::merge::merge_trees::TreeMergeConflictPresentation::label_theirs: grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+pub grit_lib::merge::merge_trees::TreeMergeConflictPresentation::style: grit_lib::diff::merge_file::ConflictStyle
+impl core::default::Default for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'_>
+pub fn grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'_>::default() -> Self
+impl<'a> core::clone::Clone for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+pub fn grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>::clone(&self) -> Self
+impl<'a> core::fmt::Debug for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+pub fn grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+impl<'a> core::marker::Freeze for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+impl<'a> core::marker::Send for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+impl<'a> core::marker::Sync for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+impl<'a> core::marker::Unpin for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
+pub struct grit_lib::merge::merge_trees::TreeMergeOutput
+pub grit_lib::merge::merge_trees::TreeMergeOutput::conflict_content: alloc::collections::btree::map::BTreeMap<alloc::vec::Vec<u8>, grit_lib::objects::ObjectId>
+pub grit_lib::merge::merge_trees::TreeMergeOutput::directory_rename_conflicts: alloc::vec::Vec<grit_lib::diff::merge_trees::DirectoryRenameConflict>
+pub grit_lib::merge::merge_trees::TreeMergeOutput::index: grit_lib::index::Index
+pub grit_lib::merge::merge_trees::TreeMergeOutput::rename_conflicts: alloc::vec::Vec<grit_lib::diff::merge_trees::RenameRenameConflict>
+pub grit_lib::merge::merge_trees::TreeMergeOutput::result_tree: grit_lib::objects::ObjectId
+pub grit_lib::merge::merge_trees::TreeMergeOutput::touched_paths: std::collections::hash::set::HashSet<alloc::vec::Vec<u8>>
+impl core::fmt::Debug for grit_lib::diff::merge_trees::TreeMergeOutput
+pub fn grit_lib::diff::merge_trees::TreeMergeOutput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::diff::merge_trees::TreeMergeOutput
+impl core::marker::Send for grit_lib::diff::merge_trees::TreeMergeOutput
+impl core::marker::Sync for grit_lib::diff::merge_trees::TreeMergeOutput
+impl core::marker::Unpin for grit_lib::diff::merge_trees::TreeMergeOutput
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::TreeMergeOutput
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::TreeMergeOutput
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::TreeMergeOutput
+pub struct grit_lib::merge::merge_trees::WhitespaceMergeOptions
+pub grit_lib::merge::merge_trees::WhitespaceMergeOptions::ignore_all_space: bool
+pub grit_lib::merge::merge_trees::WhitespaceMergeOptions::ignore_cr_at_eol: bool
+pub grit_lib::merge::merge_trees::WhitespaceMergeOptions::ignore_space_at_eol: bool
+pub grit_lib::merge::merge_trees::WhitespaceMergeOptions::ignore_space_change: bool
+impl core::clone::Clone for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+pub fn grit_lib::diff::merge_trees::WhitespaceMergeOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+pub fn grit_lib::diff::merge_trees::WhitespaceMergeOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+pub fn grit_lib::diff::merge_trees::WhitespaceMergeOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+impl core::marker::Freeze for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+impl core::marker::Send for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+impl core::marker::Sync for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+impl core::marker::Unpin for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::WhitespaceMergeOptions
+pub fn grit_lib::merge::merge_trees::apply_tree_merge_output_to_index(&mut grit_lib::index::Index, &grit_lib::diff::merge_trees::TreeMergeOutput)
+pub fn grit_lib::merge::merge_trees::apply_tree_merge_output_to_worktree_index(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &grit_lib::diff::merge_trees::TreeMergeOutput) -> grit_lib::error::Result<()>
+pub fn grit_lib::merge::merge_trees::index_tree_oid_matches_head(&grit_lib::prelude::Odb, &grit_lib::index::Index, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+pub fn grit_lib::merge::merge_trees::materialized_merge_result_tree(&grit_lib::prelude::Odb, &grit_lib::diff::merge_trees::TreeMergeOutput) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::merge::merge_trees::merge_trees_three_way(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, grit_lib::diff::merge_file::MergeFavor, grit_lib::diff::merge_trees::WhitespaceMergeOptions, core::option::Option<&str>, grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'_>, grit_lib::diff::merge_trees::DirectoryRenameMode) -> grit_lib::error::Result<grit_lib::diff::merge_trees::TreeMergeOutput>
+pub fn grit_lib::merge::merge_trees::refresh_tree_merge_index_stat_cache(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &grit_lib::diff::merge_trees::TreeMergeOutput) -> grit_lib::error::Result<()>
+pub enum grit_lib::merge::FastForwardPolicy
+pub grit_lib::merge::FastForwardPolicy::Allow
+pub grit_lib::merge::FastForwardPolicy::Never
+pub grit_lib::merge::FastForwardPolicy::Only
+impl core::clone::Clone for grit_lib::porcelain::merge::FastForwardPolicy
+pub fn grit_lib::porcelain::merge::FastForwardPolicy::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::FastForwardPolicy
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::FastForwardPolicy
+pub fn grit_lib::porcelain::merge::FastForwardPolicy::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::merge::FastForwardPolicy
+pub fn grit_lib::porcelain::merge::FastForwardPolicy::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::merge::FastForwardPolicy
+pub fn grit_lib::porcelain::merge::FastForwardPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::merge::FastForwardPolicy
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::FastForwardPolicy
+impl core::marker::Freeze for grit_lib::porcelain::merge::FastForwardPolicy
+impl core::marker::Send for grit_lib::porcelain::merge::FastForwardPolicy
+impl core::marker::Sync for grit_lib::porcelain::merge::FastForwardPolicy
+impl core::marker::Unpin for grit_lib::porcelain::merge::FastForwardPolicy
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::FastForwardPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::FastForwardPolicy
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::FastForwardPolicy
+pub enum grit_lib::merge::IntegrateBranchOutcome
+pub grit_lib::merge::IntegrateBranchOutcome::Conflicts
+pub grit_lib::merge::IntegrateBranchOutcome::Conflicts::details: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::merge::IntegrateBranchOutcome::Conflicts::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::merge::IntegrateBranchOutcome::Conflicts::rerere: alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>
+pub grit_lib::merge::IntegrateBranchOutcome::FastForward
+pub grit_lib::merge::IntegrateBranchOutcome::FastForward::change_id: core::option::Option<grit_lib::change_id::ChangeId>
+pub grit_lib::merge::IntegrateBranchOutcome::FastForward::oid: grit_lib::objects::ObjectId
+pub grit_lib::merge::IntegrateBranchOutcome::Merged
+pub grit_lib::merge::IntegrateBranchOutcome::Merged::change_id: core::option::Option<grit_lib::change_id::ChangeId>
+pub grit_lib::merge::IntegrateBranchOutcome::Merged::oid: grit_lib::objects::ObjectId
+pub grit_lib::merge::IntegrateBranchOutcome::Squashed
+pub grit_lib::merge::IntegrateBranchOutcome::Stopped
+pub grit_lib::merge::IntegrateBranchOutcome::UpToDate
+impl core::clone::Clone for grit_lib::porcelain::merge::IntegrateBranchOutcome
+pub fn grit_lib::porcelain::merge::IntegrateBranchOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::IntegrateBranchOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::IntegrateBranchOutcome
+pub fn grit_lib::porcelain::merge::IntegrateBranchOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::IntegrateBranchOutcome
+pub fn grit_lib::porcelain::merge::IntegrateBranchOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::IntegrateBranchOutcome
+impl core::marker::Freeze for grit_lib::porcelain::merge::IntegrateBranchOutcome
+impl core::marker::Send for grit_lib::porcelain::merge::IntegrateBranchOutcome
+impl core::marker::Sync for grit_lib::porcelain::merge::IntegrateBranchOutcome
+impl core::marker::Unpin for grit_lib::porcelain::merge::IntegrateBranchOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::IntegrateBranchOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOutcome
+pub enum grit_lib::merge::MergeCommitMode
+pub grit_lib::merge::MergeCommitMode::Commit
+pub grit_lib::merge::MergeCommitMode::NoCommit
+pub grit_lib::merge::MergeCommitMode::Squash
+impl core::clone::Clone for grit_lib::porcelain::merge::MergeCommitMode
+pub fn grit_lib::porcelain::merge::MergeCommitMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::MergeCommitMode
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergeCommitMode
+pub fn grit_lib::porcelain::merge::MergeCommitMode::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::merge::MergeCommitMode
+pub fn grit_lib::porcelain::merge::MergeCommitMode::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::merge::MergeCommitMode
+pub fn grit_lib::porcelain::merge::MergeCommitMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::merge::MergeCommitMode
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergeCommitMode
+impl core::marker::Freeze for grit_lib::porcelain::merge::MergeCommitMode
+impl core::marker::Send for grit_lib::porcelain::merge::MergeCommitMode
+impl core::marker::Sync for grit_lib::porcelain::merge::MergeCommitMode
+impl core::marker::Unpin for grit_lib::porcelain::merge::MergeCommitMode
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeCommitMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeCommitMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeCommitMode
+pub enum grit_lib::merge::MergeDryRunPlan
+pub grit_lib::merge::MergeDryRunPlan::Conflicts
+pub grit_lib::merge::MergeDryRunPlan::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::merge::MergeDryRunPlan::FastForward
+pub grit_lib::merge::MergeDryRunPlan::FastForward::change_id: core::option::Option<grit_lib::change_id::ChangeId>
+pub grit_lib::merge::MergeDryRunPlan::FastForward::tip: grit_lib::objects::ObjectId
+pub grit_lib::merge::MergeDryRunPlan::MergeCommit
+pub grit_lib::merge::MergeDryRunPlan::MergeCommit::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::merge::MergeDryRunPlan::RefusedNotFf
+pub grit_lib::merge::MergeDryRunPlan::UpToDate
+impl core::clone::Clone for grit_lib::porcelain::merge::MergeDryRunPlan
+pub fn grit_lib::porcelain::merge::MergeDryRunPlan::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::MergeDryRunPlan
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergeDryRunPlan
+pub fn grit_lib::porcelain::merge::MergeDryRunPlan::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::MergeDryRunPlan
+pub fn grit_lib::porcelain::merge::MergeDryRunPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergeDryRunPlan
+impl core::marker::Freeze for grit_lib::porcelain::merge::MergeDryRunPlan
+impl core::marker::Send for grit_lib::porcelain::merge::MergeDryRunPlan
+impl core::marker::Sync for grit_lib::porcelain::merge::MergeDryRunPlan
+impl core::marker::Unpin for grit_lib::porcelain::merge::MergeDryRunPlan
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeDryRunPlan
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeDryRunPlan
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeDryRunPlan
+#[non_exhaustive] pub enum grit_lib::merge::MergeError
+pub grit_lib::merge::MergeError::ContinueEmptyMessage
+pub grit_lib::merge::MergeError::ContinueResolvedNotStaged
+pub grit_lib::merge::MergeError::ContinueResolvedNotStaged::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::merge::MergeError::ContinueUnmergedPaths
+pub grit_lib::merge::MergeError::ContinueUnmergedPaths::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::merge::MergeError::MergeCommit
+pub grit_lib::merge::MergeError::MergeCommit::oid: grit_lib::objects::ObjectId
+pub grit_lib::merge::MergeError::MergeStateIncomplete
+pub grit_lib::merge::MergeError::MergeStateIncomplete::missing: &'static str
+pub grit_lib::merge::MergeError::MessageOverrideNotForMultiCommit
+pub grit_lib::merge::MergeError::NoMergeInProgress
+pub grit_lib::merge::MergeError::NoReplayInProgress
+pub grit_lib::merge::MergeError::NotFastForward
+pub grit_lib::merge::MergeError::OperationInProgress(grit_lib::state::InProgressOperation)
+pub grit_lib::merge::MergeError::Pull(grit_lib::porcelain::pull::PullError)
+pub grit_lib::merge::MergeError::ReplayAlreadyInProgress
+pub grit_lib::merge::MergeError::ReplayContinueDirtyIndex
+pub grit_lib::merge::MergeError::ReplayContinueUnmerged
+pub grit_lib::merge::MergeError::ReplaySkipAlreadyCommitted
+pub grit_lib::merge::MergeError::ReplaySourceAtHead
+pub grit_lib::merge::MergeError::SequencerCreatedParse
+pub grit_lib::merge::MergeError::SequencerCreatedParse::detail: &'static str
+pub grit_lib::merge::MergeError::SequencerUnknownCommand
+pub grit_lib::merge::MergeError::SequencerUnknownCommand::command: alloc::string::String
+pub grit_lib::merge::MergeError::UnrelatedHistories
+pub grit_lib::merge::MergeError::UnrelatedHistories::ours: grit_lib::objects::ObjectId
+pub grit_lib::merge::MergeError::UnrelatedHistories::theirs: grit_lib::objects::ObjectId
+impl grit_lib::porcelain::MergeError
+pub fn grit_lib::porcelain::MergeError::kind_name(&self) -> &'static str
+impl core::convert::From<grit_lib::porcelain::MergeError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::porcelain::MergeError) -> Self
+impl core::convert::From<grit_lib::porcelain::pull::PullError> for grit_lib::porcelain::MergeError
+pub fn grit_lib::porcelain::MergeError::from(grit_lib::porcelain::pull::PullError) -> Self
+impl core::error::Error for grit_lib::porcelain::MergeError
+pub fn grit_lib::porcelain::MergeError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::porcelain::MergeError
+pub fn grit_lib::porcelain::MergeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::porcelain::MergeError
+pub fn grit_lib::porcelain::MergeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::MergeError
+impl core::marker::Send for grit_lib::porcelain::MergeError
+impl core::marker::Sync for grit_lib::porcelain::MergeError
+impl core::marker::Unpin for grit_lib::porcelain::MergeError
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::MergeError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::MergeError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::MergeError
+pub enum grit_lib::merge::MergePrediction
+pub grit_lib::merge::MergePrediction::Clean
+pub grit_lib::merge::MergePrediction::Clean::tree: grit_lib::objects::ObjectId
+pub grit_lib::merge::MergePrediction::Conflicts
+pub grit_lib::merge::MergePrediction::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::merge::MergePrediction::FastForward
+pub grit_lib::merge::MergePrediction::Unrelated
+pub grit_lib::merge::MergePrediction::UpToDate
+impl core::clone::Clone for grit_lib::porcelain::merge::MergePrediction
+pub fn grit_lib::porcelain::merge::MergePrediction::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::MergePrediction
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergePrediction
+pub fn grit_lib::porcelain::merge::MergePrediction::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::MergePrediction
+pub fn grit_lib::porcelain::merge::MergePrediction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergePrediction
+impl core::marker::Freeze for grit_lib::porcelain::merge::MergePrediction
+impl core::marker::Send for grit_lib::porcelain::merge::MergePrediction
+impl core::marker::Sync for grit_lib::porcelain::merge::MergePrediction
+impl core::marker::Unpin for grit_lib::porcelain::merge::MergePrediction
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergePrediction
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergePrediction
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergePrediction
+pub enum grit_lib::merge::MergeSourceKind
+pub grit_lib::merge::MergeSourceKind::Commit
+pub grit_lib::merge::MergeSourceKind::LocalBranch
+pub grit_lib::merge::MergeSourceKind::RemoteBranch
+pub grit_lib::merge::MergeSourceKind::Tag
+impl core::clone::Clone for grit_lib::porcelain::merge::MergeSourceKind
+pub fn grit_lib::porcelain::merge::MergeSourceKind::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::MergeSourceKind
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergeSourceKind
+pub fn grit_lib::porcelain::merge::MergeSourceKind::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::MergeSourceKind
+pub fn grit_lib::porcelain::merge::MergeSourceKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::merge::MergeSourceKind
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergeSourceKind
+impl core::marker::Freeze for grit_lib::porcelain::merge::MergeSourceKind
+impl core::marker::Send for grit_lib::porcelain::merge::MergeSourceKind
+impl core::marker::Sync for grit_lib::porcelain::merge::MergeSourceKind
+impl core::marker::Unpin for grit_lib::porcelain::merge::MergeSourceKind
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeSourceKind
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeSourceKind
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeSourceKind
+pub enum grit_lib::merge::ReplayAbortOutcome
+pub grit_lib::merge::ReplayAbortOutcome::ClearedInPlace
+pub grit_lib::merge::ReplayAbortOutcome::Rewound
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+pub fn grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+pub fn grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+pub fn grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+pub enum grit_lib::merge::ReplayDirection
+pub grit_lib::merge::ReplayDirection::Pick
+pub grit_lib::merge::ReplayDirection::Revert
+impl core::clone::Clone for grit_lib::porcelain::replay::ReplayDirection
+pub fn grit_lib::porcelain::replay::ReplayDirection::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay::ReplayDirection
+impl core::cmp::PartialEq for grit_lib::porcelain::replay::ReplayDirection
+pub fn grit_lib::porcelain::replay::ReplayDirection::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay::ReplayDirection
+pub fn grit_lib::porcelain::replay::ReplayDirection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::replay::ReplayDirection
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay::ReplayDirection
+impl core::marker::Freeze for grit_lib::porcelain::replay::ReplayDirection
+impl core::marker::Send for grit_lib::porcelain::replay::ReplayDirection
+impl core::marker::Sync for grit_lib::porcelain::replay::ReplayDirection
+impl core::marker::Unpin for grit_lib::porcelain::replay::ReplayDirection
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay::ReplayDirection
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::ReplayDirection
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayDirection
+pub enum grit_lib::merge::ReplayEmptyPolicy
+pub grit_lib::merge::ReplayEmptyPolicy::Drop
+pub grit_lib::merge::ReplayEmptyPolicy::Keep
+pub grit_lib::merge::ReplayEmptyPolicy::Stop
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub fn grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub fn grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub fn grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub fn grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub enum grit_lib::merge::ReplayOutcome
+pub grit_lib::merge::ReplayOutcome::AlreadyApplied
+pub grit_lib::merge::ReplayOutcome::Committed
+pub grit_lib::merge::ReplayOutcome::Committed::change_id: core::option::Option<grit_lib::change_id::ChangeId>
+pub grit_lib::merge::ReplayOutcome::Committed::oid: grit_lib::objects::ObjectId
+pub grit_lib::merge::ReplayOutcome::Committed::tree: grit_lib::objects::ObjectId
+pub grit_lib::merge::ReplayOutcome::Conflicts
+pub grit_lib::merge::ReplayOutcome::Conflicts::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::merge::ReplayOutcome::Empty
+impl core::clone::Clone for grit_lib::porcelain::replay::ReplayOutcome
+pub fn grit_lib::porcelain::replay::ReplayOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay::ReplayOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::replay::ReplayOutcome
+pub fn grit_lib::porcelain::replay::ReplayOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay::ReplayOutcome
+pub fn grit_lib::porcelain::replay::ReplayOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay::ReplayOutcome
+impl core::marker::Freeze for grit_lib::porcelain::replay::ReplayOutcome
+impl core::marker::Send for grit_lib::porcelain::replay::ReplayOutcome
+impl core::marker::Sync for grit_lib::porcelain::replay::ReplayOutcome
+impl core::marker::Unpin for grit_lib::porcelain::replay::ReplayOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay::ReplayOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::ReplayOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayOutcome
+pub enum grit_lib::merge::RerereAutoupdate
+pub grit_lib::merge::RerereAutoupdate::FromConfig
+pub grit_lib::merge::RerereAutoupdate::No
+pub grit_lib::merge::RerereAutoupdate::Yes
+impl core::clone::Clone for grit_lib::diff::rerere::RerereAutoupdate
+pub fn grit_lib::diff::rerere::RerereAutoupdate::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::rerere::RerereAutoupdate
+impl core::cmp::PartialEq for grit_lib::diff::rerere::RerereAutoupdate
+pub fn grit_lib::diff::rerere::RerereAutoupdate::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::rerere::RerereAutoupdate
+pub fn grit_lib::diff::rerere::RerereAutoupdate::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::rerere::RerereAutoupdate
+pub fn grit_lib::diff::rerere::RerereAutoupdate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::rerere::RerereAutoupdate
+impl core::marker::StructuralPartialEq for grit_lib::diff::rerere::RerereAutoupdate
+impl core::marker::Freeze for grit_lib::diff::rerere::RerereAutoupdate
+impl core::marker::Send for grit_lib::diff::rerere::RerereAutoupdate
+impl core::marker::Sync for grit_lib::diff::rerere::RerereAutoupdate
+impl core::marker::Unpin for grit_lib::diff::rerere::RerereAutoupdate
+impl core::marker::UnsafeUnpin for grit_lib::diff::rerere::RerereAutoupdate
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::rerere::RerereAutoupdate
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::rerere::RerereAutoupdate
+pub enum grit_lib::merge::RerereEventKind
+pub grit_lib::merge::RerereEventKind::Forgot
+pub grit_lib::merge::RerereEventKind::NoRemembered
+pub grit_lib::merge::RerereEventKind::RecordedPreimage
+pub grit_lib::merge::RerereEventKind::RecordedResolution
+pub grit_lib::merge::RerereEventKind::ResolvedFromPrevious
+pub grit_lib::merge::RerereEventKind::StagedFromPrevious
+pub grit_lib::merge::RerereEventKind::UpdatedPreimage
+impl core::clone::Clone for grit_lib::diff::rerere::RerereEventKind
+pub fn grit_lib::diff::rerere::RerereEventKind::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::rerere::RerereEventKind
+impl core::cmp::PartialEq for grit_lib::diff::rerere::RerereEventKind
+pub fn grit_lib::diff::rerere::RerereEventKind::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::rerere::RerereEventKind
+pub fn grit_lib::diff::rerere::RerereEventKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::rerere::RerereEventKind
+impl core::marker::StructuralPartialEq for grit_lib::diff::rerere::RerereEventKind
+impl core::marker::Freeze for grit_lib::diff::rerere::RerereEventKind
+impl core::marker::Send for grit_lib::diff::rerere::RerereEventKind
+impl core::marker::Sync for grit_lib::diff::rerere::RerereEventKind
+impl core::marker::Unpin for grit_lib::diff::rerere::RerereEventKind
+impl core::marker::UnsafeUnpin for grit_lib::diff::rerere::RerereEventKind
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::rerere::RerereEventKind
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::rerere::RerereEventKind
+pub enum grit_lib::merge::SequenceOutcome
+pub grit_lib::merge::SequenceOutcome::Completed
+pub grit_lib::merge::SequenceOutcome::Completed::created: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
+pub grit_lib::merge::SequenceOutcome::Completed::dropped: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::merge::SequenceOutcome::Completed::rerere: alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>
+pub grit_lib::merge::SequenceOutcome::Conflicts
+pub grit_lib::merge::SequenceOutcome::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::merge::SequenceOutcome::Conflicts::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
+pub grit_lib::merge::SequenceOutcome::Conflicts::current: grit_lib::objects::ObjectId
+pub grit_lib::merge::SequenceOutcome::Conflicts::current_subject: alloc::string::String
+pub grit_lib::merge::SequenceOutcome::Conflicts::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::merge::SequenceOutcome::Conflicts::rerere: alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>
+pub grit_lib::merge::SequenceOutcome::Empty
+pub grit_lib::merge::SequenceOutcome::Empty::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
+pub grit_lib::merge::SequenceOutcome::Empty::current: grit_lib::objects::ObjectId
+pub grit_lib::merge::SequenceOutcome::Empty::current_subject: alloc::string::String
+pub grit_lib::merge::SequenceOutcome::Empty::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub fn grit_lib::porcelain::replay_sequence::SequenceOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub fn grit_lib::porcelain::replay_sequence::SequenceOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub fn grit_lib::porcelain::replay_sequence::SequenceOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub enum grit_lib::merge::SequencePrediction
+pub grit_lib::merge::SequencePrediction::Clean
+pub grit_lib::merge::SequencePrediction::Clean::dropped: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::merge::SequencePrediction::Clean::tree: grit_lib::objects::ObjectId
+pub grit_lib::merge::SequencePrediction::Conflicts
+pub grit_lib::merge::SequencePrediction::Conflicts::commit: grit_lib::objects::ObjectId
+pub grit_lib::merge::SequencePrediction::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::merge::SequencePrediction::Conflicts::subject: alloc::string::String
+pub grit_lib::merge::SequencePrediction::Empty
+pub grit_lib::merge::SequencePrediction::Empty::commit: grit_lib::objects::ObjectId
+pub grit_lib::merge::SequencePrediction::Empty::subject: alloc::string::String
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::SequencePrediction
+pub fn grit_lib::porcelain::replay_sequence::SequencePrediction::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::SequencePrediction
+pub fn grit_lib::porcelain::replay_sequence::SequencePrediction::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::SequencePrediction
+pub fn grit_lib::porcelain::replay_sequence::SequencePrediction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::SequencePrediction
+pub struct grit_lib::merge::BranchIntegrateRequest<'a>
+pub grit_lib::merge::BranchIntegrateRequest::into_oid: grit_lib::objects::ObjectId
+pub grit_lib::merge::BranchIntegrateRequest::into_ref: &'a str
+pub grit_lib::merge::BranchIntegrateRequest::label: &'a str
+pub grit_lib::merge::BranchIntegrateRequest::source: &'a grit_lib::porcelain::merge::MergeSource
+impl<'a> core::clone::Clone for grit_lib::merge::BranchIntegrateRequest<'a>
+pub fn grit_lib::merge::BranchIntegrateRequest<'a>::clone(&self) -> Self
+impl<'a> core::fmt::Debug for grit_lib::merge::BranchIntegrateRequest<'a>
+pub fn grit_lib::merge::BranchIntegrateRequest<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for grit_lib::merge::BranchIntegrateRequest<'a>
+impl<'a> core::marker::Freeze for grit_lib::merge::BranchIntegrateRequest<'a>
+impl<'a> core::marker::Send for grit_lib::merge::BranchIntegrateRequest<'a>
+impl<'a> core::marker::Sync for grit_lib::merge::BranchIntegrateRequest<'a>
+impl<'a> core::marker::Unpin for grit_lib::merge::BranchIntegrateRequest<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::merge::BranchIntegrateRequest<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::merge::BranchIntegrateRequest<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::merge::BranchIntegrateRequest<'a>
+pub struct grit_lib::merge::ContinueOptions
+pub grit_lib::merge::ContinueOptions::author: core::option::Option<grit_lib::ident::Signature>
+pub grit_lib::merge::ContinueOptions::committer: core::option::Option<grit_lib::ident::Signature>
+pub grit_lib::merge::ContinueOptions::message: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::porcelain::merge::ContinueOptions
+pub fn grit_lib::porcelain::merge::ContinueOptions::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::porcelain::merge::ContinueOptions
+pub fn grit_lib::porcelain::merge::ContinueOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::merge::ContinueOptions
+impl core::marker::Send for grit_lib::porcelain::merge::ContinueOptions
+impl core::marker::Sync for grit_lib::porcelain::merge::ContinueOptions
+impl core::marker::Unpin for grit_lib::porcelain::merge::ContinueOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::ContinueOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::ContinueOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::ContinueOptions
+pub struct grit_lib::merge::ContinueOutcome
+pub grit_lib::merge::ContinueOutcome::change_id: core::option::Option<grit_lib::change_id::ChangeId>
+pub grit_lib::merge::ContinueOutcome::oid: grit_lib::objects::ObjectId
+pub grit_lib::merge::ContinueOutcome::rerere: alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>
+impl core::clone::Clone for grit_lib::porcelain::merge::ContinueOutcome
+pub fn grit_lib::porcelain::merge::ContinueOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::ContinueOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::ContinueOutcome
+pub fn grit_lib::porcelain::merge::ContinueOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::ContinueOutcome
+pub fn grit_lib::porcelain::merge::ContinueOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::ContinueOutcome
+impl core::marker::Freeze for grit_lib::porcelain::merge::ContinueOutcome
+impl core::marker::Send for grit_lib::porcelain::merge::ContinueOutcome
+impl core::marker::Sync for grit_lib::porcelain::merge::ContinueOutcome
+impl core::marker::Unpin for grit_lib::porcelain::merge::ContinueOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::ContinueOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::ContinueOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::ContinueOutcome
+pub struct grit_lib::merge::IntegrateBranchOptions
+pub grit_lib::merge::IntegrateBranchOptions::allow_fast_forward: bool
+impl core::clone::Clone for grit_lib::porcelain::merge::IntegrateBranchOptions
+pub fn grit_lib::porcelain::merge::IntegrateBranchOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::IntegrateBranchOptions
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::IntegrateBranchOptions
+pub fn grit_lib::porcelain::merge::IntegrateBranchOptions::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::porcelain::merge::IntegrateBranchOptions> for grit_lib::porcelain::merge::MergeOptions
+pub fn grit_lib::porcelain::merge::MergeOptions::from(grit_lib::porcelain::merge::IntegrateBranchOptions) -> Self
+impl core::default::Default for grit_lib::porcelain::merge::IntegrateBranchOptions
+pub fn grit_lib::porcelain::merge::IntegrateBranchOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::merge::IntegrateBranchOptions
+pub fn grit_lib::porcelain::merge::IntegrateBranchOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::merge::IntegrateBranchOptions
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::IntegrateBranchOptions
+impl core::marker::Freeze for grit_lib::porcelain::merge::IntegrateBranchOptions
+impl core::marker::Send for grit_lib::porcelain::merge::IntegrateBranchOptions
+impl core::marker::Sync for grit_lib::porcelain::merge::IntegrateBranchOptions
+impl core::marker::Unpin for grit_lib::porcelain::merge::IntegrateBranchOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::IntegrateBranchOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOptions
+pub struct grit_lib::merge::Merge<'repo>
+impl<'repo> grit_lib::merge::Merge<'repo>
+pub fn grit_lib::merge::Merge<'repo>::abort(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::merge::Merge<'repo>::abort_sequence(&self) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::ReplayAbortOutcome>
+pub fn grit_lib::merge::Merge<'repo>::commits_to_pick(&self, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+pub fn grit_lib::merge::Merge<'repo>::commits_to_revert(&self, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+pub fn grit_lib::merge::Merge<'repo>::continue_merge(&self, &grit_lib::porcelain::merge::ContinueOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::ContinueOutcome>
+pub fn grit_lib::merge::Merge<'repo>::continue_sequence(&self, &grit_lib::ident::Signature, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
+pub fn grit_lib::merge::Merge<'repo>::integrate(&self, &grit_lib::porcelain::merge::MergeSource, &str, &grit_lib::porcelain::merge::MergeOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
+pub fn grit_lib::merge::Merge<'repo>::integrate_into_branch(&self, &grit_lib::merge::BranchIntegrateRequest<'_>, &grit_lib::porcelain::merge::MergeOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
+pub fn grit_lib::merge::Merge<'repo>::pick(&self, grit_lib::porcelain::replay::ReplayRequest, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay::ReplayOutcome>
+pub fn grit_lib::merge::Merge<'repo>::plan_integration(&self, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::porcelain::merge::MergeOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergeDryRunPlan>
+pub fn grit_lib::merge::Merge<'repo>::predict(&self, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::porcelain::merge::MergePredictionOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergePrediction>
+pub fn grit_lib::merge::Merge<'repo>::predict_sequence(&self, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequencePrediction>
+pub fn grit_lib::merge::Merge<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
+pub fn grit_lib::merge::Merge<'repo>::rerere(&self) -> grit_lib::merge::MergeRerere<'repo>
+pub fn grit_lib::merge::Merge<'repo>::resolve_conflict_style(&self, core::option::Option<grit_lib::diff::merge_file::ConflictStyle>) -> grit_lib::diff::merge_file::ConflictStyle
+pub fn grit_lib::merge::Merge<'repo>::resolve_source(&self, &str) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergeSource>
+pub fn grit_lib::merge::Merge<'repo>::revert_commit(&self, grit_lib::porcelain::replay::ReplayRequest, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay::ReplayOutcome>
+pub fn grit_lib::merge::Merge<'repo>::skip_sequence_step(&self, &grit_lib::ident::Signature, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
+pub fn grit_lib::merge::Merge<'repo>::start_sequence(&self, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
+pub fn grit_lib::merge::Merge<'repo>::write_tree(&self, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::porcelain::merge::MergePredictionOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::WrittenMergeTree>
+impl<'repo> core::clone::Clone for grit_lib::merge::Merge<'repo>
+pub fn grit_lib::merge::Merge<'repo>::clone(&self) -> Self
+impl<'repo> core::fmt::Debug for grit_lib::merge::Merge<'repo>
+pub fn grit_lib::merge::Merge<'repo>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'repo> core::marker::Copy for grit_lib::merge::Merge<'repo>
+impl<'repo> core::marker::Freeze for grit_lib::merge::Merge<'repo>
+impl<'repo> core::marker::Send for grit_lib::merge::Merge<'repo>
+impl<'repo> core::marker::Sync for grit_lib::merge::Merge<'repo>
+impl<'repo> core::marker::Unpin for grit_lib::merge::Merge<'repo>
+impl<'repo> core::marker::UnsafeUnpin for grit_lib::merge::Merge<'repo>
+impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::merge::Merge<'repo>
+impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::merge::Merge<'repo>
+pub struct grit_lib::merge::MergeOptions
+pub grit_lib::merge::MergeOptions::allow_unrelated: bool
+pub grit_lib::merge::MergeOptions::commit: grit_lib::porcelain::merge::MergeCommitMode
+pub grit_lib::merge::MergeOptions::conflict_style: core::option::Option<grit_lib::diff::merge_file::ConflictStyle>
+pub grit_lib::merge::MergeOptions::directory_renames: core::option::Option<grit_lib::diff::merge_trees::DirectoryRenameMode>
+pub grit_lib::merge::MergeOptions::fast_forward: grit_lib::porcelain::merge::FastForwardPolicy
+pub grit_lib::merge::MergeOptions::favor: grit_lib::diff::merge_file::MergeFavor
+pub grit_lib::merge::MergeOptions::hooks: grit_lib::command_runner::hooks::PostOperationHooks
+pub grit_lib::merge::MergeOptions::message: core::option::Option<alloc::string::String>
+pub grit_lib::merge::MergeOptions::verify: grit_lib::porcelain::commit::HookPolicy
+impl core::clone::Clone for grit_lib::porcelain::merge::MergeOptions
+pub fn grit_lib::porcelain::merge::MergeOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::MergeOptions
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergeOptions
+pub fn grit_lib::porcelain::merge::MergeOptions::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::porcelain::merge::IntegrateBranchOptions> for grit_lib::porcelain::merge::MergeOptions
+pub fn grit_lib::porcelain::merge::MergeOptions::from(grit_lib::porcelain::merge::IntegrateBranchOptions) -> Self
+impl core::default::Default for grit_lib::porcelain::merge::MergeOptions
+pub fn grit_lib::porcelain::merge::MergeOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::merge::MergeOptions
+pub fn grit_lib::porcelain::merge::MergeOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergeOptions
+impl core::marker::Freeze for grit_lib::porcelain::merge::MergeOptions
+impl core::marker::Send for grit_lib::porcelain::merge::MergeOptions
+impl core::marker::Sync for grit_lib::porcelain::merge::MergeOptions
+impl core::marker::Unpin for grit_lib::porcelain::merge::MergeOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeOptions
+pub struct grit_lib::merge::MergePredictionOptions
+pub grit_lib::merge::MergePredictionOptions::allow_fast_forward: bool
+pub grit_lib::merge::MergePredictionOptions::allow_unrelated_histories: bool
+pub grit_lib::merge::MergePredictionOptions::directory_renames: core::option::Option<grit_lib::diff::merge_trees::DirectoryRenameMode>
+pub grit_lib::merge::MergePredictionOptions::favor: grit_lib::diff::merge_file::MergeFavor
+pub grit_lib::merge::MergePredictionOptions::ours_label: alloc::string::String
+pub grit_lib::merge::MergePredictionOptions::theirs_label: alloc::string::String
+pub grit_lib::merge::MergePredictionOptions::whitespace: grit_lib::diff::merge_trees::WhitespaceMergeOptions
+impl core::clone::Clone for grit_lib::porcelain::merge::MergePredictionOptions
+pub fn grit_lib::porcelain::merge::MergePredictionOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::porcelain::merge::MergePredictionOptions
+pub fn grit_lib::porcelain::merge::MergePredictionOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::merge::MergePredictionOptions
+pub fn grit_lib::porcelain::merge::MergePredictionOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::merge::MergePredictionOptions
+impl core::marker::Send for grit_lib::porcelain::merge::MergePredictionOptions
+impl core::marker::Sync for grit_lib::porcelain::merge::MergePredictionOptions
+impl core::marker::Unpin for grit_lib::porcelain::merge::MergePredictionOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergePredictionOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergePredictionOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergePredictionOptions
+pub struct grit_lib::merge::MergeRerere<'repo>
+impl<'repo> grit_lib::merge::MergeRerere<'repo>
+pub fn grit_lib::merge::MergeRerere<'repo>::apply(&self, grit_lib::diff::rerere::RerereAutoupdate) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>>
+pub fn grit_lib::merge::MergeRerere<'repo>::clear(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::merge::MergeRerere<'repo>::diff_for_path(&self, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
+pub fn grit_lib::merge::MergeRerere<'repo>::enabled(&self, &grit_lib::config::ConfigSet) -> bool
+pub fn grit_lib::merge::MergeRerere<'repo>::finish_merge(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>>
+pub fn grit_lib::merge::MergeRerere<'repo>::forget_path(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>>
+pub fn grit_lib::merge::MergeRerere<'repo>::gc(&self, &grit_lib::config::environment::Environment, i64) -> grit_lib::error::Result<()>
+pub fn grit_lib::merge::MergeRerere<'repo>::post_commit(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>>
+pub fn grit_lib::merge::MergeRerere<'repo>::remaining_lines(&self) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
+pub fn grit_lib::merge::MergeRerere<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
+pub fn grit_lib::merge::MergeRerere<'repo>::status_lines(&self) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
+impl<'repo> core::clone::Clone for grit_lib::merge::MergeRerere<'repo>
+pub fn grit_lib::merge::MergeRerere<'repo>::clone(&self) -> Self
+impl<'repo> core::fmt::Debug for grit_lib::merge::MergeRerere<'repo>
+pub fn grit_lib::merge::MergeRerere<'repo>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'repo> core::marker::Copy for grit_lib::merge::MergeRerere<'repo>
+impl<'repo> core::marker::Freeze for grit_lib::merge::MergeRerere<'repo>
+impl<'repo> core::marker::Send for grit_lib::merge::MergeRerere<'repo>
+impl<'repo> core::marker::Sync for grit_lib::merge::MergeRerere<'repo>
+impl<'repo> core::marker::Unpin for grit_lib::merge::MergeRerere<'repo>
+impl<'repo> core::marker::UnsafeUnpin for grit_lib::merge::MergeRerere<'repo>
+impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::merge::MergeRerere<'repo>
+impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::merge::MergeRerere<'repo>
+pub struct grit_lib::merge::MergeSource
+pub grit_lib::merge::MergeSource::kind: grit_lib::porcelain::merge::MergeSourceKind
+pub grit_lib::merge::MergeSource::oid: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::porcelain::merge::MergeSource
+pub fn grit_lib::porcelain::merge::MergeSource::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::MergeSource
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergeSource
+pub fn grit_lib::porcelain::merge::MergeSource::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::MergeSource
+pub fn grit_lib::porcelain::merge::MergeSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::merge::MergeSource
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergeSource
+impl core::marker::Freeze for grit_lib::porcelain::merge::MergeSource
+impl core::marker::Send for grit_lib::porcelain::merge::MergeSource
+impl core::marker::Sync for grit_lib::porcelain::merge::MergeSource
+impl core::marker::Unpin for grit_lib::porcelain::merge::MergeSource
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeSource
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeSource
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeSource
+pub struct grit_lib::merge::MergeTreeStage
+pub grit_lib::merge::MergeTreeStage::mode: u32
+pub grit_lib::merge::MergeTreeStage::oid: grit_lib::objects::ObjectId
+pub grit_lib::merge::MergeTreeStage::path: alloc::vec::Vec<u8>
+pub grit_lib::merge::MergeTreeStage::stage: u8
+impl core::clone::Clone for grit_lib::porcelain::merge::MergeTreeStage
+pub fn grit_lib::porcelain::merge::MergeTreeStage::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::MergeTreeStage
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::MergeTreeStage
+pub fn grit_lib::porcelain::merge::MergeTreeStage::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::MergeTreeStage
+pub fn grit_lib::porcelain::merge::MergeTreeStage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::Freeze for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::Send for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::Sync for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::Unpin for grit_lib::porcelain::merge::MergeTreeStage
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeTreeStage
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeTreeStage
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeTreeStage
+pub struct grit_lib::merge::ReplayCreated
+pub grit_lib::merge::ReplayCreated::change_id: core::option::Option<grit_lib::change_id::ChangeId>
+pub grit_lib::merge::ReplayCreated::new_oid: grit_lib::objects::ObjectId
+pub grit_lib::merge::ReplayCreated::source: grit_lib::objects::ObjectId
+pub grit_lib::merge::ReplayCreated::subject: alloc::string::String
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayCreated
+pub fn grit_lib::porcelain::replay_sequence::ReplayCreated::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::ReplayCreated
+pub fn grit_lib::porcelain::replay_sequence::ReplayCreated::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplayCreated
+pub fn grit_lib::porcelain::replay_sequence::ReplayCreated::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayCreated
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayCreated
+pub struct grit_lib::merge::ReplayOptions
+pub grit_lib::merge::ReplayOptions::conflict_style: grit_lib::diff::merge_file::ConflictStyle
+pub grit_lib::merge::ReplayOptions::empty: grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+pub grit_lib::merge::ReplayOptions::favor: grit_lib::diff::merge_file::MergeFavor
+pub grit_lib::merge::ReplayOptions::mainline: core::option::Option<core::num::nonzero::NonZeroU32>
+pub grit_lib::merge::ReplayOptions::message_override: core::option::Option<alloc::string::String>
+pub grit_lib::merge::ReplayOptions::no_commit: bool
+pub grit_lib::merge::ReplayOptions::record_origin: bool
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayOptions
+pub fn grit_lib::porcelain::replay_sequence::ReplayOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::porcelain::replay_sequence::ReplayOptions
+pub fn grit_lib::porcelain::replay_sequence::ReplayOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplayOptions
+pub fn grit_lib::porcelain::replay_sequence::ReplayOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayOptions
+pub struct grit_lib::merge::ReplayRequest
+pub grit_lib::merge::ReplayRequest::commit: grit_lib::objects::ObjectId
+pub grit_lib::merge::ReplayRequest::committer: grit_lib::ident::Signature
+pub grit_lib::merge::ReplayRequest::direction: grit_lib::porcelain::replay::ReplayDirection
+pub grit_lib::merge::ReplayRequest::message_override: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::porcelain::replay::ReplayRequest
+pub fn grit_lib::porcelain::replay::ReplayRequest::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::porcelain::replay::ReplayRequest
+pub fn grit_lib::porcelain::replay::ReplayRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::replay::ReplayRequest
+impl core::marker::Send for grit_lib::porcelain::replay::ReplayRequest
+impl core::marker::Sync for grit_lib::porcelain::replay::ReplayRequest
+impl core::marker::Unpin for grit_lib::porcelain::replay::ReplayRequest
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay::ReplayRequest
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::ReplayRequest
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayRequest
+pub struct grit_lib::merge::ReplaySequenceRequest
+pub grit_lib::merge::ReplaySequenceRequest::commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::merge::ReplaySequenceRequest::committer: grit_lib::ident::Signature
+pub grit_lib::merge::ReplaySequenceRequest::direction: grit_lib::porcelain::replay::ReplayDirection
+pub grit_lib::merge::ReplaySequenceRequest::options: grit_lib::porcelain::replay_sequence::ReplayOptions
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+pub fn grit_lib::porcelain::replay_sequence::ReplaySequenceRequest::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+pub fn grit_lib::porcelain::replay_sequence::ReplaySequenceRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
+pub struct grit_lib::merge::RerereEvent
+pub grit_lib::merge::RerereEvent::kind: grit_lib::diff::rerere::RerereEventKind
+pub grit_lib::merge::RerereEvent::path: alloc::string::String
+impl core::clone::Clone for grit_lib::diff::rerere::RerereEvent
+pub fn grit_lib::diff::rerere::RerereEvent::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::rerere::RerereEvent
+impl core::cmp::PartialEq for grit_lib::diff::rerere::RerereEvent
+pub fn grit_lib::diff::rerere::RerereEvent::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::rerere::RerereEvent
+pub fn grit_lib::diff::rerere::RerereEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::rerere::RerereEvent
+impl core::marker::Freeze for grit_lib::diff::rerere::RerereEvent
+impl core::marker::Send for grit_lib::diff::rerere::RerereEvent
+impl core::marker::Sync for grit_lib::diff::rerere::RerereEvent
+impl core::marker::Unpin for grit_lib::diff::rerere::RerereEvent
+impl core::marker::UnsafeUnpin for grit_lib::diff::rerere::RerereEvent
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::rerere::RerereEvent
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::rerere::RerereEvent
+pub struct grit_lib::merge::WrittenMergeTree
+pub grit_lib::merge::WrittenMergeTree::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::merge::WrittenMergeTree::stages: alloc::vec::Vec<grit_lib::porcelain::merge::MergeTreeStage>
+pub grit_lib::merge::WrittenMergeTree::tree: grit_lib::objects::ObjectId
+impl grit_lib::porcelain::merge::WrittenMergeTree
+pub fn grit_lib::porcelain::merge::WrittenMergeTree::is_clean(&self) -> bool
+impl core::clone::Clone for grit_lib::porcelain::merge::WrittenMergeTree
+pub fn grit_lib::porcelain::merge::WrittenMergeTree::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::cmp::PartialEq for grit_lib::porcelain::merge::WrittenMergeTree
+pub fn grit_lib::porcelain::merge::WrittenMergeTree::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::merge::WrittenMergeTree
+pub fn grit_lib::porcelain::merge::WrittenMergeTree::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::Freeze for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::Send for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::Sync for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::Unpin for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
 pub mod grit_lib::notes
 pub enum grit_lib::notes::NotesMergeStrategy
 pub grit_lib::notes::NotesMergeStrategy::CatSortUniq
@@ -13670,22 +14663,7 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::WrittenMergeTree
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::WrittenMergeTree
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
-pub fn grit_lib::porcelain::merge::abort_branch_merge(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::merge::compose_fast_forward_index(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::index::Index) -> grit_lib::error::Result<grit_lib::index::Index>
-pub fn grit_lib::porcelain::merge::continue_merge(&grit_lib::repo::Repository, &grit_lib::porcelain::merge::ContinueOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::ContinueOutcome>
-pub fn grit_lib::porcelain::merge::integrate_branch(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
-pub fn grit_lib::porcelain::merge::integrate_branch_with(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::porcelain::merge::MergeOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
-pub fn grit_lib::porcelain::merge::integrate_branch_with_options(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, grit_lib::porcelain::merge::IntegrateBranchOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
-pub fn grit_lib::porcelain::merge::integrate_detached_head(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
-pub fn grit_lib::porcelain::merge::integrate_detached_head_with(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::porcelain::merge::MergeOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
-pub fn grit_lib::porcelain::merge::plan_branch_merge(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::porcelain::merge::MergeOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergeDryRunPlan>
-pub fn grit_lib::porcelain::merge::predict_merge(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::porcelain::merge::MergePredictionOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergePrediction>
-pub fn grit_lib::porcelain::merge::resolve_merge_conflict_style(&grit_lib::repo::Repository, core::option::Option<grit_lib::diff::merge_file::ConflictStyle>) -> grit_lib::diff::merge_file::ConflictStyle
-pub fn grit_lib::porcelain::merge::resolve_merge_source(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergeSource>
 pub fn grit_lib::porcelain::merge::squash_conflict_merge_in_progress(&std::path::Path) -> bool
-pub fn grit_lib::porcelain::merge::tree_to_index_entries(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::index::IndexEntry>>
-pub fn grit_lib::porcelain::merge::tree_to_map(alloc::vec::Vec<grit_lib::index::IndexEntry>) -> std::collections::hash::map::HashMap<alloc::vec::Vec<u8>, grit_lib::index::IndexEntry>
-pub fn grit_lib::porcelain::merge::write_merge_tree(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::porcelain::merge::MergePredictionOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::WrittenMergeTree>
 pub mod grit_lib::porcelain::paths
 pub enum grit_lib::porcelain::paths::RemoveBlockReason
 pub grit_lib::porcelain::paths::RemoveBlockReason::LocalModifications
@@ -14064,7 +15042,6 @@ impl core::marker::Unpin for grit_lib::porcelain::replay::ReplayRequest
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay::ReplayRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::ReplayRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayRequest
-pub fn grit_lib::porcelain::replay::replay_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::replay::ReplayRequest, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay::ReplayOutcome>
 pub mod grit_lib::porcelain::replay_sequence
 pub enum grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
 pub grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::ClearedInPlace
@@ -14222,12 +15199,6 @@ impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplaySequenc
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
-pub fn grit_lib::porcelain::replay_sequence::abort_replay_sequence(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::ReplayAbortOutcome>
-pub fn grit_lib::porcelain::replay_sequence::commits_to_replay(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
-pub fn grit_lib::porcelain::replay_sequence::continue_replay_sequence(&grit_lib::repo::Repository, &grit_lib::ident::Signature, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
-pub fn grit_lib::porcelain::replay_sequence::predict_replay_sequence(&grit_lib::repo::Repository, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequencePrediction>
-pub fn grit_lib::porcelain::replay_sequence::skip_replay_step(&grit_lib::repo::Repository, &grit_lib::ident::Signature, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
-pub fn grit_lib::porcelain::replay_sequence::start_replay_sequence(&grit_lib::repo::Repository, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
 pub mod grit_lib::porcelain::reset
 pub enum grit_lib::porcelain::reset::ResetMode
 pub grit_lib::porcelain::reset::ResetMode::Hard
@@ -14425,10 +15396,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::restore::Rest
 pub fn grit_lib::porcelain::restore::conflict_style_from_config(&grit_lib::repo::Repository) -> grit_lib::diff::merge_file::ConflictStyle
 pub fn grit_lib::porcelain::restore::restore_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::restore::RestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::restore::RestoreOutcome>
 pub mod grit_lib::porcelain::revert
-pub fn grit_lib::porcelain::revert::commits_to_revert(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::porcelain::revert::merge_commit_message_for_revert(&grit_lib::objects::CommitData, grit_lib::objects::ObjectId, bool, char, core::option::Option<grit_lib::objects::ObjectId>) -> (alloc::string::String, alloc::string::String)
 pub fn grit_lib::porcelain::revert::revert_mainline_extra_body(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> alloc::string::String
-pub fn grit_lib::porcelain::revert::revision_range_apply_order(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub mod grit_lib::porcelain::stage_tracked
 pub struct grit_lib::porcelain::stage_tracked::IndexStagingThresholds
 pub grit_lib::porcelain::stage_tracked::IndexStagingThresholds::large_index_restage: usize
@@ -15187,14 +16156,6 @@ impl core::marker::Unpin for grit_lib::porcelain::worktree_guard::WorktreeSnapsh
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::worktree_guard::WorktreeSnapshot
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::worktree_guard::WorktreeSnapshot
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::worktree_guard::WorktreeSnapshot
-pub fn grit_lib::porcelain::worktree_guard::ensure_no_untracked_overwrite(&[alloc::string::String], &[grit_lib::diff::DiffEntry]) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::worktree_guard::ensure_worktree_clean_for_merge(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::worktree_guard::ensure_worktree_clean_for_pick(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::worktree_guard::ensure_worktree_clean_for_rebase_exec(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::worktree_guard::load_worktree_snapshot(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::porcelain::worktree_guard::WorktreeSnapshot>
-pub fn grit_lib::porcelain::worktree_guard::prepare_tree_checkout(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::worktree_guard::prepare_tree_switch(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::porcelain::worktree_guard::TreeSwitchPlan>
-pub fn grit_lib::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes(&[alloc::string::String], &[grit_lib::diff::DiffEntry]) -> alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub enum grit_lib::porcelain::CommitError
 pub grit_lib::porcelain::CommitError::AmendUnborn
 pub grit_lib::porcelain::CommitError::ChangeId(grit_lib::change_id::ChangeIdError)
@@ -16284,6 +17245,7 @@ pub fn grit_lib::repo::Repository::index(&self) -> grit_lib::index::IndexFile<'_
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
 pub fn grit_lib::repo::Repository::maintenance(&self) -> grit_lib::maintenance::Maintenance<'_>
+pub fn grit_lib::repo::Repository::merge(&self) -> grit_lib::merge::Merge<'_>
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
 pub fn grit_lib::repo::Repository::notes(&self) -> grit_lib::repo_handles::RepositoryNotes<'_>
 pub fn grit_lib::repo::Repository::objects(&self) -> grit_lib::objects::Objects<'_>
@@ -23954,6 +24916,7 @@ pub fn grit_lib::repo::Repository::index(&self) -> grit_lib::index::IndexFile<'_
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
 pub fn grit_lib::repo::Repository::maintenance(&self) -> grit_lib::maintenance::Maintenance<'_>
+pub fn grit_lib::repo::Repository::merge(&self) -> grit_lib::merge::Merge<'_>
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
 pub fn grit_lib::repo::Repository::notes(&self) -> grit_lib::repo_handles::RepositoryNotes<'_>
 pub fn grit_lib::repo::Repository::objects(&self) -> grit_lib::objects::Objects<'_>
