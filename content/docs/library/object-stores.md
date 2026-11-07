@@ -67,9 +67,23 @@ A damaged copy ([`Error::Zlib`](rustdoc:grit_lib::error::Error::Zlib) or [`Error
 
 ## Building a custom repository
 
-Pass your store to [`RepositoryOptions::with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store) when calling [`Repository::open`](rustdoc:grit_lib::repo::Repository::open). That is the only way to replace the files primary. The repository still resolves its `objects/` directory (`GIT_OBJECT_DIRECTORY` included) and the opened [`Odb`](rustdoc:grit_lib::objects::odb::Odb) reports its canonical path, but no object is read from or written to it and it need not exist. With `GIT_OBJECT_DIRECTORY` set, the custom store still wins and the environment's directory is left untouched. Add read sources, a commit-graph or an alternates override with an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) through [`RepositoryOptions::with_odb_builder`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_odb_builder); it works with the files primary as well.
+Pass your store to [`RepositoryOptions::with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store) when calling [`Repository::open`](rustdoc:grit_lib::repo::Repository::open), or when creating the repository with [`Repository::init`](rustdoc:grit_lib::repo::Repository::init) (see [Creating a repository on your stores](#creating-a-repository-on-your-stores)). That is the only way to replace the files primary. The repository still resolves its `objects/` directory (`GIT_OBJECT_DIRECTORY` included) and the opened [`Odb`](rustdoc:grit_lib::objects::odb::Odb) reports its canonical path, but no object is read from or written to it and it need not exist. With `GIT_OBJECT_DIRECTORY` set, the custom store still wins and the environment's directory is left untouched. Add read sources, a commit-graph or an alternates override with an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) through [`RepositoryOptions::with_odb_builder`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_odb_builder); it works with the files primary as well.
 
 The custom primary and every read source must hash with the repository's object format: the `extensions.objectformat` value in `<git_dir>/config`, or SHA-1 when that key or the config file is missing. Create the store with the same [`HashAlgo`](rustdoc:grit_lib::objects::HashAlgo) the repository was initialized with (`MemoryStore::new(HashAlgo::Sha256)` for a SHA-256 repository). A store that reports another algorithm through `ObjectStore::hash_algo` fails to open with [`RepositoryError::ObjectFormatMismatch`](rustdoc:grit_lib::error::RepositoryError::ObjectFormatMismatch), whose `repository` and `store` fields name the two algorithms, instead of writing object ids the repository's refs, index and config disagree with.
+
+## Creating a repository on your stores
+
+[`Repository::init`](rustdoc:grit_lib::repo::Repository::init) takes the same [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions) through [`InitOptions::with_repository_options`](rustdoc:grit_lib::repo::InitOptions::with_repository_options) and creates only what your stores do not own:
+
+| Injected | What init writes in the git directory |
+| -------- | ------------------------------------- |
+| Object store only | Everything except `objects/` (no `objects/info/`, no `objects/pack/`). |
+| Ref store only | Everything except `HEAD` and `refs/`. `HEAD` is seeded in your store at the initial branch. |
+| Both | Only `config` (and, for a non-bare repository, the work tree beside it). |
+
+The config holds `core.repositoryformatversion`, `core.bare` and, for a SHA-256 store, `extensions.objectformat`. You need not set [`InitOptions::object_format`](rustdoc:grit_lib::repo::InitOptions::object_format): init takes it from the store's `ObjectStore::hash_algo`. When you do set it, or when you reinitialize an existing repository, the formats must agree; otherwise init fails with [`RepositoryError::ObjectFormatMismatch`](rustdoc:grit_lib::error::RepositoryError::ObjectFormatMismatch) before anything is written. Asking for reftable together with an injected ref store fails with [`RepositoryError::InitRefStorageWithInjectedRefStore`](rustdoc:grit_lib::error::RepositoryError::InitRefStorageWithInjectedRefStore): the ref store you pass is the ref backend.
+
+The returned [`Repository`](rustdoc:grit_lib::repo::Repository) is already wired to your stores; there is no need to open it again.
 
 <!-- include: grit-examples/src/bin/memory_primary.rs -->
 
@@ -79,7 +93,7 @@ cargo run -p grit-examples --bin memory_primary
 
 ## No git directory at all
 
-When both the object store and the ref store are injected, [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) reads nothing from the git directory's layout: it may be empty or missing. Repository config is still read from `<git_dir>/config` when that file exists. The index lives at `<git_dir>/index`: staging creates the git directory when it is missing, and a commit then writes `COMMIT_EDITMSG` and the index there. Seed `HEAD` with [`RepositoryOptions::with_initial_branch`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_initial_branch):
+When both the object store and the ref store are injected, [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) reads nothing from the git directory's layout: it may be empty or missing. Repository config is still read from `<git_dir>/config` when that file exists. The index lives at `<git_dir>/index`: staging creates the git directory when it is missing, and a commit then writes `COMMIT_EDITMSG` and the index there. Seed `HEAD` with [`RepositoryOptions::with_initial_branch`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_initial_branch), or create the repository with `Repository::init` as above, which seeds it for you:
 
 ```rust
 use std::sync::Arc;
