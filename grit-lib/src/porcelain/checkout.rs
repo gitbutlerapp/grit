@@ -2611,15 +2611,15 @@ pub(crate) fn checkout_tree_changes_with_index_deferred(
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
     let mut journal = CheckoutJournal::new(work_tree)?;
-    let result = apply_tree_changes_in_chunks(
+    let result = checkout_tree_changes_into_deferred_journal(
         repo,
         changes,
+        index,
         progress,
         cancel,
-        index,
         apply,
         attribute_changes,
-        CheckoutIndexWrite::Defer(lock),
+        lock,
         &mut journal,
     );
     match result {
@@ -2628,6 +2628,32 @@ pub(crate) fn checkout_tree_changes_with_index_deferred(
             .finish(repo, Err::<(), _>(err))
             .map(|_| unreachable!()),
     }
+}
+
+/// Apply tree diff work to `journal` without committing it; the caller rolls back or commits.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn checkout_tree_changes_into_deferred_journal(
+    repo: &Repository,
+    changes: &[DiffEntry],
+    index: &mut Index,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+    apply: CheckoutApplyOptions,
+    attribute_changes: Option<&[DiffEntry]>,
+    lock: &IndexLock,
+    journal: &mut CheckoutJournal,
+) -> Result<()> {
+    apply_tree_changes_in_chunks(
+        repo,
+        changes,
+        progress,
+        cancel,
+        index,
+        apply,
+        attribute_changes,
+        CheckoutIndexWrite::Defer(lock),
+        journal,
+    )
 }
 
 /// Paths touched by a coalesced tree diff (whole subtrees as one entry each).
