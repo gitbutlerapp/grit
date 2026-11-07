@@ -1,9 +1,9 @@
-//! Merge, pick, revert, replay and rerere for one [`Repository`].
+//! Merge, pick, revert, replay and rerere for one [`Repository`](crate::repo::Repository).
 //!
 //! Obtain [`Merge`] from [`Repository::merge`](crate::repo::Repository::merge). Branch
 //! integration, conflict prediction, merge `--continue` / `--abort`, cherry-pick and revert
 //! sequences, and rerere all live on that handle rather than as free functions taking
-//! [`Repository`].
+//! [`Repository`](crate::repo::Repository).
 //!
 //! Library guide: [embedding](https://grit-scm.com/docs/library/embedding)
 //!

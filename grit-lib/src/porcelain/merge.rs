@@ -287,7 +287,8 @@ fn resolve_directory_renames(
     override_mode.map_or_else(|| DirectoryRenameMode::from_repo(repo), Ok)
 }
 
-/// Options for [`integrate_branch_with_options`] (pull fast-forward toggle).
+/// Fast-forward toggle for pull-style integration via [`Merge::integrate_into_branch`](crate::merge::Merge::integrate_into_branch)
+/// (convert with [`From<IntegrateBranchOptions>`] into [`MergeOptions`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IntegrateBranchOptions {
     /// When `false`, a fast-forward is not performed even when `other_oid` is a
