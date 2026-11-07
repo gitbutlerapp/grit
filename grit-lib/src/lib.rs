@@ -419,3 +419,5 @@ mod repository_config_snapshot_tests;
 mod rustdoc_placeholder_guard;
 #[cfg(test)]
 mod status_clean_tree_regression;
+#[cfg(test)]
+mod storage_backend_guard;
