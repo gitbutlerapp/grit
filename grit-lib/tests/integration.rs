@@ -195,6 +195,9 @@ mod canonical_paths;
 #[path = "change_id_custom_store.rs"]
 mod change_id_custom_store;
 #[cfg(feature = "full-tests")]
+#[path = "change_id_custom_store_git_compat.rs"]
+mod change_id_custom_store_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "change_id_git_compat.rs"]
 mod change_id_git_compat;
 #[cfg(feature = "full-tests")]
