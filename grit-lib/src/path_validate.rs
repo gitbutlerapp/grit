@@ -115,6 +115,9 @@ pub enum PathComponentError {
     /// A `/` appears inside one component (tree entries must be single segments).
     #[error("path component contains a slash")]
     ContainsSlash,
+    /// A `\` appears inside the component (rejected on Windows with `core.protectNTFS`).
+    #[error("path component contains a backslash")]
+    ContainsBackslash,
     /// A NUL byte appears in the component.
     #[error("path component contains a NUL byte")]
     ContainsNul,
@@ -215,6 +218,12 @@ pub fn validate_component(
             if scan_ntfs_backslash_dot_special(name_str, ntfs_backslash_dotdot_tail) {
                 return Err(PathComponentError::NtfsBackslash);
             }
+            if scan_ntfs_backslash_dotgit(name_str) {
+                return Err(PathComponentError::NtfsBackslash);
+            }
+        }
+        if name.contains(&b'\\') {
+            return Err(PathComponentError::ContainsBackslash);
         }
     }
     let audit = audit_tree_entry_name(name, opts);
@@ -454,10 +463,10 @@ fn has_dos_drive_prefix_bytes(name: &[u8]) -> bool {
     name.len() >= 2 && name[0].is_ascii_alphabetic() && name[1] == b':'
 }
 
-/// Windows `core.protectNTFS` rules for one tree/index component.
+/// Win32 forbidden-name rules for each `\`-delimited piece of a tree/index component.
 ///
-/// Tree entry names may embed `\` segment separators on NTFS; each piece is
-/// validated the same way Git does for `verify_path` on Windows.
+/// Used only to detect reserved devices and illegal characters inside backslash
+/// spellings; any remaining `\` in the full component is rejected separately.
 fn validate_win32_path_segment(path: &[u8]) -> Result<(), PathComponentError> {
     if path.is_empty() {
         return Ok(());
@@ -716,6 +725,33 @@ mod tests {
             assert!(validate_component(br"a\..\x", BLOB, FSCK, FSCK_KIND).is_ok());
         }
         assert!(validate_component(br"a\..\x", BLOB, OFF, FSCK_KIND).is_ok());
+    }
+
+    #[test]
+    fn ntfs_backslash_in_plain_filename() {
+        let name = br"back\slash.txt";
+        if cfg!(windows) {
+            assert_eq!(
+                validate_component(name, BLOB, FSCK, FSCK_KIND).unwrap_err(),
+                PathComponentError::ContainsBackslash
+            );
+            assert_eq!(
+                validate_component(name, BLOB, FSCK, WT_KIND).unwrap_err(),
+                PathComponentError::ContainsBackslash
+            );
+        } else {
+            assert!(validate_component(name, BLOB, FSCK, FSCK_KIND).is_ok());
+        }
+        assert!(validate_component(name, BLOB, OFF, FSCK_KIND).is_ok());
+        let nested = br"dir\sub.txt";
+        if cfg!(windows) {
+            assert_eq!(
+                validate_component(nested, BLOB, FSCK, FSCK_KIND).unwrap_err(),
+                PathComponentError::ContainsBackslash
+            );
+        } else {
+            assert!(validate_component(nested, BLOB, FSCK, FSCK_KIND).is_ok());
+        }
     }
 
     #[test]

@@ -14093,6 +14093,7 @@ pub fn grit_lib::parallel::try_par_map_with_local<T, R, E, S, Init, F>(&[T], gri
 pub mod grit_lib::path_validate
 #[non_exhaustive] pub enum grit_lib::path_validate::PathComponentError
 pub grit_lib::path_validate::PathComponentError::ContainsNul
+pub grit_lib::path_validate::PathComponentError::ContainsBackslash
 pub grit_lib::path_validate::PathComponentError::ContainsSlash
 pub grit_lib::path_validate::PathComponentError::Dot
 pub grit_lib::path_validate::PathComponentError::DotDot

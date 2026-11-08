@@ -22,7 +22,7 @@ Object fsck always enables both flags via [`ProtectOptions::fsck`](rustdoc:grit_
 
 ## Validating components and paths
 
-[`validate_component`](rustdoc:grit_lib::path_validate::validate_component) checks a single tree/index segment (no `/` inside). Pass the Git mode and a [`PathValidationKind`](rustdoc:grit_lib::path_validate::PathValidationKind). Worktree population and checkout use **`Worktree`**. On Windows with `core.protectNTFS` (default), each segment is checked with Git’s `is_valid_win32_path` rules: forbidden characters (`:*?"<>|` and controls), trailing spaces or periods (except `.` and `..`), DOS device names (`CON`, `AUX`, `COM1`, …), plus NTFS drive prefixes and backslash-`.git` spellings. Symlink names reject **`.gitmodules`** on worktree; object fsck uses **`Fsck`** (all four symlink dot-files):
+[`validate_component`](rustdoc:grit_lib::path_validate::validate_component) checks a single tree/index segment (no `/` inside). Pass the Git mode and a [`PathValidationKind`](rustdoc:grit_lib::path_validate::PathValidationKind). Worktree population and checkout use **`Worktree`**. On Windows with `core.protectNTFS` (default), each segment is checked with Git’s `is_valid_win32_path` rules: forbidden characters (`:*?"<>|` and controls), trailing spaces or periods (except `.` and `..`), DOS device names (`CON`, `AUX`, `COM1`, …), plus NTFS drive prefixes, literal backslashes in the name, and backslash-`.git` spellings. Symlink names reject **`.gitmodules`** on worktree; object fsck uses **`Fsck`** (all four symlink dot-files):
 
 ```rust
 use grit_lib::path_validate::{validate_component, EntryMode, PathValidationKind, ProtectOptions};
@@ -53,7 +53,7 @@ With `core.protectNTFS` on, every platform rejects the NTFS spellings of `.git` 
 
 ## Errors
 
-[`PathComponentError`](rustdoc:grit_lib::path_validate::PathComponentError) is a typed, non-exhaustive enum (empty, `.`, `..`, slash/NUL, ASCII and platform `.git` aliases, NTFS backslash/drive/stream spellings, NTFS illegal characters, trailing space/period, reserved DOS device names, and symlinked dot-files). Checkout and index population return [`WorktreeError::InvalidPathComponent`](rustdoc:grit_lib::worktree::WorktreeError::InvalidPathComponent) with the full path and reason. User-facing `add`/`mv` path arguments use the same typed error; legacy [`Error::InvalidPath`](rustdoc:grit_lib::error::Error) remains for empty or escaping paths.
+[`PathComponentError`](rustdoc:grit_lib::path_validate::PathComponentError) is a typed, non-exhaustive enum (empty, `.`, `..`, slash/backslash/NUL, ASCII and platform `.git` aliases, NTFS backslash-`.git`/drive/stream spellings, NTFS illegal characters, trailing space/period, reserved DOS device names, and symlinked dot-files). Checkout and index population return [`WorktreeError::InvalidPathComponent`](rustdoc:grit_lib::worktree::WorktreeError::InvalidPathComponent) with the full path and reason. User-facing `add`/`mv` path arguments use the same typed error; legacy [`Error::InvalidPath`](rustdoc:grit_lib::error::Error) remains for empty or escaping paths.
 
 ## Related
 
