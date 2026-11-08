@@ -2194,6 +2194,114 @@ pub fn apply_delta_into(out: &mut Vec<u8>, base: &[u8], delta: &[u8]) -> Result<
     Ok(())
 }
 
+/// Destination byte length declared in a delta instruction stream against a base of `base_len`.
+pub(crate) fn delta_result_size(base_len: usize, delta: &[u8]) -> Result<usize> {
+    let mut pos = 0usize;
+    let src_size = read_delta_varint(delta, &mut pos)?;
+    if src_size != base_len {
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("delta source size {src_size} != base size {base_len}"),
+        }));
+    }
+    read_delta_varint(delta, &mut pos)
+}
+
+/// Apply `delta` onto `base`, streaming every output byte to `hasher` without retaining the result.
+///
+/// # Errors
+///
+/// Same as [`apply_delta_into`].
+pub(crate) fn apply_delta_hash(
+    base: &[u8],
+    delta: &[u8],
+    hasher: &mut ObjectPayloadHasher,
+) -> Result<()> {
+    let mut pos = 0usize;
+
+    let src_size = read_delta_varint(delta, &mut pos)?;
+    if src_size != base.len() {
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("delta source size {src_size} != base size {}", base.len()),
+        }));
+    }
+    let dest_size = read_delta_varint(delta, &mut pos)?;
+    let mut result_len = 0usize;
+
+    while pos < delta.len() {
+        let cmd = delta[pos];
+        pos += 1;
+        if cmd == 0 {
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: "reserved opcode 0 in delta stream".to_owned(),
+            }));
+        }
+        if cmd & 0x80 != 0 {
+            let mut offset = 0usize;
+            let mut size = 0usize;
+
+            macro_rules! maybe_read_byte {
+                ($flag:expr, $shift:expr, $target:expr) => {
+                    if cmd & $flag != 0 {
+                        let b = *delta.get(pos).ok_or_else(|| {
+                            Error::Object(ObjectError::Corrupt {
+                                detail: "truncated delta COPY operand".to_owned(),
+                            })
+                        })?;
+                        pos += 1;
+                        $target |= (b as usize) << $shift;
+                    }
+                };
+            }
+
+            maybe_read_byte!(0x01, 0, offset);
+            maybe_read_byte!(0x02, 8, offset);
+            maybe_read_byte!(0x04, 16, offset);
+            maybe_read_byte!(0x08, 24, offset);
+            maybe_read_byte!(0x10, 0, size);
+            maybe_read_byte!(0x20, 8, size);
+            maybe_read_byte!(0x40, 16, size);
+
+            if size == 0 {
+                size = 0x10000;
+            }
+
+            let end = offset.checked_add(size).ok_or_else(|| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "delta COPY range overflows usize".to_owned(),
+                })
+            })?;
+            let chunk = base.get(offset..end).ok_or_else(|| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: format!(
+                        "delta COPY [{offset},{end}) out of range (base is {} bytes)",
+                        base.len()
+                    ),
+                })
+            })?;
+            hasher.update(chunk);
+            result_len += chunk.len();
+        } else {
+            let n = cmd as usize;
+            let chunk = delta.get(pos..pos + n).ok_or_else(|| {
+                Error::Object(ObjectError::Corrupt {
+                    detail: "truncated delta INSERT data".to_owned(),
+                })
+            })?;
+            hasher.update(chunk);
+            pos += n;
+            result_len += n;
+        }
+    }
+
+    if result_len != dest_size {
+        return Err(Error::Object(ObjectError::Corrupt {
+            detail: format!("delta produced {result_len} bytes but expected {dest_size}"),
+        }));
+    }
+
+    Ok(())
+}
+
 /// Apply `delta` onto `base`, materializing at most `max_out` bytes in `out`.
 ///
 /// The full delta stream is validated against `dest_size`; COPY/INSERT bytes beyond what is

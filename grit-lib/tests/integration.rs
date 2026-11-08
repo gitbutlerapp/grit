@@ -779,6 +779,9 @@ mod fsck_api_coverage;
 #[path = "fsck_memory.rs"]
 mod fsck_memory;
 #[cfg(feature = "full-tests")]
+#[path = "fsck_large_blob_memory.rs"]
+mod fsck_large_blob_memory;
+#[cfg(feature = "full-tests")]
 #[path = "fsck_objects.rs"]
 mod fsck_objects;
 #[cfg(feature = "full-tests")]

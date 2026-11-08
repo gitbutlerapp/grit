@@ -826,6 +826,7 @@ impl DeltaVisitor for IndexRecordVisitor<'_> {
         _root: &DeltaRoot,
         _kind: ObjectKind,
         _data: &[u8],
+        _hash_verified: bool,
         _out: &mut Self::Out,
     ) -> Result<bool> {
         Ok(true)
@@ -836,6 +837,7 @@ impl DeltaVisitor for IndexRecordVisitor<'_> {
         index: u32,
         kind: ObjectKind,
         data: &[u8],
+        _hash_verified: bool,
         out: &mut Self::Out,
     ) -> Result<Option<ObjectId>> {
         let oid = hash_object(self.algo, kind, data)?;

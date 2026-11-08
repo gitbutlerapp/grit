@@ -15,9 +15,12 @@
 
 use crate::error::ObjectError;
 use crate::error::{Error, Result};
-use crate::objects::{ObjectId, ObjectKind};
+use crate::hash::ObjectPayloadHasher;
+use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
-use crate::unpack_objects::{apply_delta_into, type_code_to_kind, PackReader};
+use crate::unpack_objects::{
+    apply_delta_hash, apply_delta_into, delta_result_size, type_code_to_kind, PackReader,
+};
 use crate::zlib_inflate::ZlibInflateScratch;
 use std::borrow::Cow;
 use std::num::NonZeroUsize;
@@ -185,6 +188,7 @@ pub(crate) trait DeltaVisitor: Sync {
         root: &DeltaRoot,
         kind: ObjectKind,
         data: &[u8],
+        hash_verified: bool,
         out: &mut Self::Out,
     ) -> Result<bool>;
 
@@ -201,6 +205,7 @@ pub(crate) trait DeltaVisitor: Sync {
         index: u32,
         kind: ObjectKind,
         data: &[u8],
+        hash_verified: bool,
         out: &mut Self::Out,
     ) -> Result<Option<ObjectId>>;
 
@@ -324,6 +329,11 @@ pub(crate) struct DeltaWalk<'a, V> {
     failed: AtomicBool,
     chain_limit: usize,
     visitor: &'a V,
+    /// When set, whole blobs at least this large are hash-checked without retaining payload bytes.
+    stream_blobs_from: Option<u64>,
+    pack_algo: HashAlgo,
+    /// Pack-index object ids for pending deltas, used when streaming hash checks delta results.
+    delta_oids: Option<&'a [ObjectId]>,
 }
 
 impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
@@ -340,6 +350,30 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
         chain_limit: usize,
         visitor: &'a V,
     ) -> Self {
+        Self::new_with_streaming(
+            source,
+            odb,
+            pending,
+            children,
+            chain_limit,
+            visitor,
+            None,
+            None,
+        )
+    }
+
+    /// Like [`Self::new`], with optional streaming hash for large blobs during fsck.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_streaming(
+        source: PackBytes<'a>,
+        odb: &'a Odb,
+        pending: &'a [PendingDelta],
+        children: &'a DeltaChildren,
+        chain_limit: usize,
+        visitor: &'a V,
+        stream_blobs_from: Option<u64>,
+        delta_oids: Option<&'a [ObjectId]>,
+    ) -> Self {
         Self {
             source,
             odb,
@@ -350,7 +384,24 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
             failed: AtomicBool::new(false),
             chain_limit,
             visitor,
+            stream_blobs_from,
+            pack_algo: odb.hash_algo(),
+            delta_oids,
         }
+    }
+
+    fn stream_large_blob(
+        &self,
+        kind: ObjectKind,
+        size: u64,
+        offset: usize,
+        oid: &ObjectId,
+    ) -> bool {
+        kind == ObjectKind::Blob
+            && self
+                .stream_blobs_from
+                .is_some_and(|threshold| size >= threshold)
+            && !self.children.has_children(offset, oid)
     }
 
     /// Number of deltas resolved so far (the visitor accepted the result).
@@ -461,12 +512,13 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
         scratch: &mut DeltaScratch,
         out: &mut V::Out,
     ) -> Result<()> {
-        let (kind, data) = match self.load_root(root, &mut scratch.zlib, &mut scratch.packed) {
-            Ok(Some(loaded)) => loaded,
-            Ok(None) => return Ok(()),
-            Err(err) => return self.visitor.root_failed(root, err, out),
-        };
-        if !self.visitor.root(root, kind, &data, out)? {
+        let (kind, data, hash_verified) =
+            match self.load_root(root, &mut scratch.zlib, &mut scratch.packed) {
+                Ok(Some(loaded)) => loaded,
+                Ok(None) => return Ok(()),
+                Err(err) => return self.visitor.root_failed(root, err, out),
+            };
+        if !self.visitor.root(root, kind, &data, hash_verified, out)? {
             return Ok(());
         }
         let (ofs_children, ref_children) = match root {
@@ -523,19 +575,39 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
                 Vec::new()
             };
             let base = stack[top].data.as_deref().unwrap_or_default();
-            let applied = self.apply(
-                delta,
-                base,
-                &mut scratch.zlib,
-                &mut scratch.packed,
-                &mut scratch.delta,
-                &mut result,
-            );
-            let next = match applied {
-                Ok(()) => self.visitor.delta(child, kind, &result, out)?,
-                Err(err) => {
-                    self.visitor.delta_failed(child, err, out)?;
-                    None
+            let bytes =
+                self.source
+                    .read(delta.zlib_offset(), delta.pack_end, &mut scratch.packed)?;
+            let insn_size = u64::try_from(delta.uncompressed_size).unwrap_or(u64::MAX);
+            scratch
+                .zlib
+                .decompress_fixed_into(bytes, &mut 0, insn_size, &mut scratch.delta)?;
+            let dest_size = delta_result_size(base.len(), &scratch.delta)?;
+            let delta_oid = self
+                .delta_oids
+                .and_then(|ids| ids.get(child as usize).copied());
+            let stream_result = delta_oid.is_some_and(|oid| {
+                self.stream_large_blob(kind, dest_size as u64, delta.offset, &oid)
+            });
+            let next = if stream_result {
+                let Some(oid) = delta_oid else {
+                    continue;
+                };
+                match self.apply_delta_hash_only(base, kind, dest_size as u64, &scratch.delta, &oid)
+                {
+                    Ok(()) => self.visitor.delta(child, kind, &result, true, out)?,
+                    Err(err) => {
+                        self.visitor.delta_failed(child, err, out)?;
+                        None
+                    }
+                }
+            } else {
+                match apply_delta_into(&mut result, base, &scratch.delta) {
+                    Ok(()) => self.visitor.delta(child, kind, &result, false, out)?,
+                    Err(err) => {
+                        self.visitor.delta_failed(child, err, out)?;
+                        None
+                    }
                 }
             };
             let Some(oid) = next else {
@@ -582,19 +654,41 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
         root: &DeltaRoot,
         zlib: &mut ZlibInflateScratch,
         packed: &mut Vec<u8>,
-    ) -> Result<Option<(ObjectKind, Vec<u8>)>> {
+    ) -> Result<Option<(ObjectKind, Vec<u8>, bool)>> {
         match root {
-            DeltaRoot::Pack { offset, end, .. } => {
+            DeltaRoot::Pack { offset, end, oid } => {
                 let bytes = self.source.read(*offset, *end, packed)?;
                 let mut rd = PackReader::new(bytes);
                 let (type_code, size) = rd.read_type_size()?;
                 let kind = type_code_to_kind(type_code)?;
-                let mut data = Vec::new();
                 let size = u64::try_from(size).unwrap_or(u64::MAX);
+                if self.stream_large_blob(kind, size, *offset, oid) {
+                    let mut hasher = ObjectPayloadHasher::new(self.pack_algo, kind, size);
+                    zlib.decompress_fixed_update(bytes, &mut rd.pos, size, |chunk| {
+                        hasher.update(chunk);
+                        Ok(())
+                    })?;
+                    let actual = hasher.finish()?;
+                    if actual != *oid {
+                        return Err(Error::Object(ObjectError::Corrupt {
+                            detail: format!(
+                                "packed object {} hashes to {}",
+                                oid.to_hex(),
+                                actual.to_hex()
+                            ),
+                        }));
+                    }
+                    return Ok(Some((kind, Vec::new(), true)));
+                }
+                let mut data = Vec::new();
                 zlib.decompress_fixed_into(bytes, &mut rd.pos, size, &mut data)?;
-                Ok(Some((kind, data)))
+                Ok(Some((kind, data, false)))
             }
-            DeltaRoot::Odb(oid) => Ok(self.odb.read(oid).ok().map(|obj| (obj.kind, obj.data))),
+            DeltaRoot::Odb(oid) => Ok(self
+                .odb
+                .read(oid)
+                .ok()
+                .map(|obj| (obj.kind, obj.data, false))),
         }
     }
 
@@ -609,7 +703,7 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
         let frame = &stack[index];
         let mut current: Cow<'_, [u8]> = match frame.anchor {
             Anchor::Root => match self.load_root(root, &mut scratch.zlib, &mut scratch.packed)? {
-                Some((_, data)) => Cow::Owned(data),
+                Some((_, data, _)) => Cow::Owned(data),
                 None => {
                     return Err(Error::Object(ObjectError::Corrupt {
                         detail: "delta base not available".to_owned(),
@@ -651,6 +745,29 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
         let size = u64::try_from(delta.uncompressed_size).unwrap_or(u64::MAX);
         zlib.decompress_fixed_into(bytes, &mut 0, size, delta_buf)?;
         apply_delta_into(out, base, delta_buf)
+    }
+
+    fn apply_delta_hash_only(
+        &self,
+        base: &[u8],
+        kind: ObjectKind,
+        dest_size: u64,
+        delta_buf: &[u8],
+        expected_oid: &ObjectId,
+    ) -> Result<()> {
+        let mut hasher = ObjectPayloadHasher::new(self.pack_algo, kind, dest_size);
+        apply_delta_hash(base, delta_buf, &mut hasher)?;
+        let actual = hasher.finish()?;
+        if actual != *expected_oid {
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!(
+                    "packed object {} hashes to {}",
+                    expected_oid.to_hex(),
+                    actual.to_hex()
+                ),
+            }));
+        }
+        Ok(())
     }
 }
 
@@ -710,10 +827,13 @@ mod tests {
             root: &DeltaRoot,
             kind: ObjectKind,
             data: &[u8],
+            hash_verified: bool,
             out: &mut Seen,
         ) -> Result<bool> {
             if let DeltaRoot::Pack { .. } = root {
-                out.roots.push(hash_object(HashAlgo::Sha1, kind, data)?);
+                if !hash_verified {
+                    out.roots.push(hash_object(HashAlgo::Sha1, kind, data)?);
+                }
             }
             Ok(true)
         }
@@ -727,12 +847,16 @@ mod tests {
             index: u32,
             kind: ObjectKind,
             data: &[u8],
+            hash_verified: bool,
             out: &mut Seen,
         ) -> Result<Option<ObjectId>> {
             if self.prune == Some(index) {
                 return Ok(None);
             }
             out.resolved.insert(index);
+            if hash_verified {
+                return Ok(None);
+            }
             Ok(Some(hash_object(HashAlgo::Sha1, kind, data)?))
         }
 

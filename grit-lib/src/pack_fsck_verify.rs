@@ -66,27 +66,35 @@ where
         oid: ObjectId,
         kind: ObjectKind,
         data: &[u8],
+        hash_verified: bool,
         out: &mut Outcomes<T>,
     ) -> Result<bool> {
         if self.cancel.load(Ordering::Relaxed) {
             return Err(Error::Cancelled);
         }
-        let outcome = match hash_object(self.algo, kind, data) {
-            Ok(actual) if actual == oid => PackFsckObjectOutcome::Clean {
+        let outcome = if hash_verified {
+            PackFsckObjectOutcome::Clean {
                 oid,
                 facts: (self.check)(oid, kind, data),
-            },
-            Ok(actual) => PackFsckObjectOutcome::Failed {
-                oid,
-                err: Error::Object(ObjectError::Corrupt {
-                    detail: format!(
-                        "packed object {} hashes to {}",
-                        oid.to_hex(),
-                        actual.to_hex()
-                    ),
-                }),
-            },
-            Err(err) => PackFsckObjectOutcome::Failed { oid, err },
+            }
+        } else {
+            match hash_object(self.algo, kind, data) {
+                Ok(actual) if actual == oid => PackFsckObjectOutcome::Clean {
+                    oid,
+                    facts: (self.check)(oid, kind, data),
+                },
+                Ok(actual) => PackFsckObjectOutcome::Failed {
+                    oid,
+                    err: Error::Object(ObjectError::Corrupt {
+                        detail: format!(
+                            "packed object {} hashes to {}",
+                            oid.to_hex(),
+                            actual.to_hex()
+                        ),
+                    }),
+                },
+                Err(err) => PackFsckObjectOutcome::Failed { oid, err },
+            }
         };
         let clean = matches!(outcome, PackFsckObjectOutcome::Clean { .. });
         out.push((offset, outcome));
@@ -106,10 +114,13 @@ where
         root: &DeltaRoot,
         kind: ObjectKind,
         data: &[u8],
+        hash_verified: bool,
         out: &mut Self::Out,
     ) -> Result<bool> {
         match *root {
-            DeltaRoot::Pack { offset, oid, .. } => self.visit(offset, oid, kind, data, out),
+            DeltaRoot::Pack { offset, oid, .. } => {
+                self.visit(offset, oid, kind, data, hash_verified, out)
+            }
             // Bases from other packs or loose objects are checked where they live.
             DeltaRoot::Odb(_) => Ok(true),
         }
@@ -127,11 +138,14 @@ where
         index: u32,
         kind: ObjectKind,
         data: &[u8],
+        hash_verified: bool,
         out: &mut Self::Out,
     ) -> Result<Option<ObjectId>> {
         let oid = self.delta_oids[index as usize];
         let offset = self.pending[index as usize].offset;
-        Ok(self.visit(offset, oid, kind, data, out)?.then_some(oid))
+        Ok(self
+            .visit(offset, oid, kind, data, hash_verified, out)?
+            .then_some(oid))
     }
 
     fn delta_failed(&self, index: u32, err: Error, out: &mut Self::Out) -> Result<()> {
@@ -259,13 +273,16 @@ where
         check: &check,
         cancel,
     };
-    let walk = DeltaWalk::new(
+    let stream_from = odb.big_file_threshold().ok();
+    let walk = DeltaWalk::new_with_streaming(
         PackBytes::Slice(&pack_bytes),
         odb,
         &pending,
         &children,
         DELTA_CHAIN_BYTES_PER_WORKER,
         &visitor,
+        stream_from,
+        Some(&delta_oids),
     );
     let mut outcomes = Outcomes::with_capacity(roots.len() + pending.len());
     walk.run(&roots, threads, &mut outcomes, &mut |_| {})?;
