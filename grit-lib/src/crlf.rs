@@ -1715,26 +1715,54 @@ pub(crate) fn text_stat_from_reader(mut reader: impl std::io::Read) -> std::io::
     Ok(stats)
 }
 
+fn append_smudge_lf_to_crlf(out: &mut Vec<u8>, bytes: &[u8]) {
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c == b'\n' && (i == 0 || bytes[i - 1] != b'\r') {
+            out.extend_from_slice(b"\r\n");
+        } else {
+            out.push(c);
+        }
+        i += 1;
+    }
+}
+
 /// Stream `reader` into `writer`, expanding lone LFs to CRLF.
 pub(crate) fn stream_lf_to_crlf(
     mut reader: impl std::io::Read,
     mut writer: impl std::io::Write,
 ) -> std::io::Result<()> {
-    let mut buf = [0u8; 8192];
-    let mut prev = b' ';
+    const IN_CHUNK: usize = 256 * 1024;
+    const OUT_FLUSH: usize = 256 * 1024;
+
+    let mut in_buf = vec![0u8; IN_CHUNK];
+    let mut out_buf = Vec::with_capacity(OUT_FLUSH + IN_CHUNK / 8);
+    let mut carry = Vec::new();
     loop {
-        let n = std::io::Read::read(&mut reader, &mut buf)?;
-        if n == 0 {
+        let n = std::io::Read::read(&mut reader, &mut in_buf)?;
+        if n == 0 && carry.is_empty() {
             break;
         }
-        for &c in &buf[..n] {
-            if c == b'\n' && prev != b'\r' {
-                std::io::Write::write_all(&mut writer, b"\r\n")?;
-            } else {
-                std::io::Write::write_all(&mut writer, &[c])?;
-            }
-            prev = c;
+        let mut chunk = std::mem::take(&mut carry);
+        chunk.extend_from_slice(&in_buf[..n]);
+        if n == 0 {
+            append_smudge_lf_to_crlf(&mut out_buf, &chunk);
+            break;
         }
+        if chunk.len() > 1 {
+            append_smudge_lf_to_crlf(&mut out_buf, &chunk[..chunk.len() - 1]);
+            carry.push(chunk[chunk.len() - 1]);
+        } else {
+            carry = chunk;
+        }
+        if out_buf.len() >= OUT_FLUSH {
+            std::io::Write::write_all(&mut writer, &out_buf)?;
+            out_buf.clear();
+        }
+    }
+    if !out_buf.is_empty() {
+        std::io::Write::write_all(&mut writer, &out_buf)?;
     }
     Ok(())
 }
@@ -2517,7 +2545,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn worktree_checkout_may_stream_content_dependent_crlf() {
         let mut conv = ConversionConfig::from_config(&ConfigSet::new());
         conv.autocrlf = AutoCrlf::True;
@@ -2537,6 +2564,32 @@ mod tests {
         let mut out = Vec::new();
         stream_lf_to_crlf(Cursor::new(data), &mut out).expect("stream");
         assert_eq!(out, lf_to_crlf(data));
+    }
+
+    #[test]
+    fn stream_lf_to_crlf_16mib_text_keeps_throughput() {
+        use std::io::{Cursor, Seek, Write};
+        use std::time::{Duration, Instant};
+
+        const MIB: usize = 16 * 1024 * 1024;
+        let mut data = Vec::with_capacity(MIB);
+        for i in 0..MIB {
+            data.push(if i % 80 == 79 { b'\n' } else { b'x' });
+        }
+        let expect = lf_to_crlf(&data);
+        let mut sink = tempfile::NamedTempFile::new().expect("temp");
+        let start = Instant::now();
+        stream_lf_to_crlf(Cursor::new(&data), sink.as_file_mut()).expect("stream");
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(750),
+            "16 MiB LF smudge took {elapsed:?}; per-byte writes previously regressed to multiple seconds"
+        );
+        sink.as_file_mut().rewind().expect("rewind");
+        let mut got = Vec::new();
+        std::io::copy(sink.as_file_mut(), &mut got).expect("read back");
+        assert_eq!(got.len(), expect.len());
+        assert_eq!(got, expect);
     }
 
     #[test]
