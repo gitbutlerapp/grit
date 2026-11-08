@@ -202,16 +202,18 @@ fn prepare_argv(prepare_bin: &Path, git: &Path, prepare: &DailyPrepare) -> Optio
     }
 }
 
+/// Timed samples for the older `--baseline-grit` binary. Uses the same run count as the
+/// current grit series so peak RSS is a max over equally many process lifetimes.
 fn run_baseline_samples(
     cwd: &Path,
     cmd: &BenchArgv,
     prepare: Option<&BenchArgv>,
-    policy: &RunPolicy,
     limits: &RunLimits,
     helper: &Path,
+    runs: u32,
 ) -> Result<DailyToolRun> {
     let mut samples = Vec::new();
-    for _ in 0..policy.min_runs_per_tool.max(1) {
+    for _ in 0..runs.max(1) {
         run_prepare(cwd, prepare)?;
         let sample = run_timed_via_helper(cwd, cmd, limits, helper)?;
         if sample.termination != TerminationKind::Success {
@@ -370,9 +372,9 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
                     &repo,
                     &base_cmd,
                     prepare.as_ref(),
-                    &policy,
                     &limits,
                     &opts.measure_helper,
+                    grit_run.runs.unwrap_or(policy.min_runs_per_tool).max(1),
                 )?;
                 let base_ratio = ratio(base_run.median_wall_ms, git_run.median_wall_ms);
                 (Some(base_run), Some(base_ratio))

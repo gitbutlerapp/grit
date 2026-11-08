@@ -133,8 +133,23 @@ impl Drop for CheckoutDeleteSpool {
     }
 }
 
+type CheckoutDeleteSpoolSlot = Arc<Mutex<Option<CheckoutDeleteSpool>>>;
+
+fn ensure_checkout_delete_spool(
+    slot: &mut Option<CheckoutDeleteSpool>,
+) -> Result<&mut CheckoutDeleteSpool> {
+    if slot.is_none() {
+        *slot = Some(CheckoutDeleteSpool::new()?);
+    }
+    slot.as_mut().ok_or_else(|| {
+        Error::Io(std::io::Error::other(
+            "checkout delete spool missing after lazy initialization",
+        ))
+    })
+}
+
 /// Shared handle to a journal's delete spool, for parallel checkout deletes.
-pub(crate) struct SharedCheckoutDeleteRollback(Arc<Mutex<CheckoutDeleteSpool>>);
+pub(crate) struct SharedCheckoutDeleteRollback(CheckoutDeleteSpoolSlot);
 
 impl SharedCheckoutDeleteRollback {
     pub(crate) fn clone_handle(&self) -> Self {
@@ -143,10 +158,8 @@ impl SharedCheckoutDeleteRollback {
 
     /// Move `rel_path` into the spool so rollback can restore it; no-op when absent.
     pub(crate) fn spool_remove(&self, work_tree: &Path, rel_path: &str) -> Result<()> {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .spool_remove(work_tree, rel_path)
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        ensure_checkout_delete_spool(&mut guard)?.spool_remove(work_tree, rel_path)
     }
 }
 
@@ -186,7 +199,7 @@ struct ReplacedPath {
 /// the repository state and nothing is undone. [`Self::finish`] rolls an uncommitted pass back.
 pub(crate) struct CheckoutJournal {
     work_tree: PathBuf,
-    spool: Arc<Mutex<CheckoutDeleteSpool>>,
+    spool: CheckoutDeleteSpoolSlot,
     /// Paths that did not exist before the checkout wrote them.
     created: PathList,
     /// Paths whose tracked content the checkout overwrote.
@@ -207,7 +220,7 @@ impl CheckoutJournal {
     pub fn new(work_tree: &Path) -> Result<Self> {
         Ok(Self {
             work_tree: work_tree.to_path_buf(),
-            spool: Arc::new(Mutex::new(CheckoutDeleteSpool::new()?)),
+            spool: Arc::new(Mutex::new(None)),
             created: PathList::default(),
             replaced: Vec::new(),
             removed_dirs: BTreeSet::new(),
@@ -225,10 +238,8 @@ impl CheckoutJournal {
 
     /// Move `rel_path` into the spool so rollback can restore it; no-op when absent.
     pub(crate) fn spool_remove(&self, rel_path: &str) -> Result<()> {
-        self.spool
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .spool_remove(&self.work_tree, rel_path)
+        let mut guard = self.spool.lock().unwrap_or_else(|e| e.into_inner());
+        ensure_checkout_delete_spool(&mut guard)?.spool_remove(&self.work_tree, rel_path)
     }
 
     /// Record that the checkout is about to write `change`'s destination path.
@@ -294,10 +305,8 @@ impl CheckoutJournal {
 
     /// Move the directory at `rel_path` into the delete spool so rollback can put it back.
     fn spool_directory_at_path(&mut self, rel_path: &str) -> Result<()> {
-        let stash = self
-            .spool
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        let mut guard = self.spool.lock().unwrap_or_else(|e| e.into_inner());
+        let stash = ensure_checkout_delete_spool(&mut guard)?
             .spool_directory_tree(&self.work_tree, rel_path)?;
         self.spooled_directories.push(SpooledDirectoryReplace {
             rel: rel_path.to_owned(),
@@ -317,11 +326,14 @@ impl CheckoutJournal {
         for entry in self.spooled_directories.drain(..) {
             let _ = fs::remove_dir_all(&entry.stash);
         }
-        self.spool
+        if let Some(spool) = self
+            .spool
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .entries
-            .clear();
+            .as_mut()
+        {
+            spool.entries.clear();
+        }
     }
 
     /// End the pass with `result`: commit on success, roll back an uncommitted failure.
@@ -370,14 +382,18 @@ impl CheckoutJournal {
         // Spooled bytes are what the path held before the checkout; the index must not
         // overwrite them again below.
         let spooled: HashSet<String> = {
-            let mut spool = self.spool.lock().unwrap_or_else(|e| e.into_inner());
-            let spooled = spool
-                .entries
-                .iter()
-                .map(|entry| entry.rel.clone())
-                .collect();
-            unrestored.extend(spool.restore_all(&self.work_tree));
-            spooled
+            let mut guard = self.spool.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(spool) = guard.as_mut() {
+                let spooled = spool
+                    .entries
+                    .iter()
+                    .map(|entry| entry.rel.clone())
+                    .collect();
+                unrestored.extend(spool.restore_all(&self.work_tree));
+                spooled
+            } else {
+                HashSet::new()
+            }
         };
 
         for entry in self.spooled_directories.drain(..).rev() {
@@ -487,11 +503,14 @@ fn index_entry_or_fallback(
 impl Drop for CheckoutJournal {
     fn drop(&mut self) {
         if !self.committed {
-            let _ = self
+            if let Some(spool) = self
                 .spool
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .restore_all(&self.work_tree);
+                .as_mut()
+            {
+                let _ = spool.restore_all(&self.work_tree);
+            }
         }
     }
 }
