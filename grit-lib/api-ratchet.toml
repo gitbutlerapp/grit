@@ -8,7 +8,7 @@ semver_baseline = "3bfa5bee185a62b160c8ee9e63cca6632df4f698"
 [counts]
 pub_repo_constructors = 3
 pub_repo_constructor_offenders = 4
-public_api_lines = 31978
+public_api_lines = 32054
 pub_fn_impl_suffix = 0
 pub_fn_with_in_name = 32
 pub_fn_too_many_arguments_allow = 2

@@ -170,6 +170,98 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
         super::checkin::graft_checkin_branch(self.repo, checkout, target, branch, known, targets)
     }
 
+    /// `tree` cut down to `paths`: each path's entry where it is, and the files
+    /// directly in every directory above one, the top level included, as Git's
+    /// cone-mode sparse checkout has them. No paths is the whole tree.
+    ///
+    /// # Errors
+    ///
+    /// [`CheckoutError::MissingPath`] when `tree` has no entry at one of `paths`,
+    /// and object read or write failures.
+    pub fn filtered_tree(&self, tree: ObjectId, paths: &[String]) -> Result<ObjectId> {
+        super::filtered_tree(self.repo.odb(), tree, paths)
+    }
+
+    /// Replay `tip` and the commits under it, down to the checkout's snapshot
+    /// commits (`roots`) and the commits `known` records, onto the real history:
+    /// [`graft_checkin_branch`](Self::graft_checkin_branch) for a caller that
+    /// keeps its own record of a checkout, such as a server's snapshot shares.
+    ///
+    /// A commit `known` records stands for the real commit it records there and
+    /// is not replayed. The walk stops at the snapshot commits and at `hide`, so
+    /// a tip on the real history is refused without walking all of it.
+    ///
+    /// # Parameters
+    ///
+    /// - `roots`: the checkout's snapshot commits and the real commits they stand for.
+    /// - `paths`: the checkout's paths (empty: the whole tree), which decide
+    ///   what a merge commit's tree is the answer for.
+    /// - `known`: the repository's graft log, or `None` to graft from the
+    ///   snapshot commits alone.
+    /// - `hide`: tips of real history to stop at (the target branch's).
+    /// - `tip`: the branch tip the checkout pushed.
+    ///
+    /// # Returns
+    ///
+    /// The graft, with the commits replayed (not those `known` answered); the
+    /// caller records those once it has set a branch to it. `Ok(Err(..))` when
+    /// the branch cannot be grafted (see [`GraftError`]).
+    ///
+    /// # Errors
+    ///
+    /// Object read and write failures, and graft log read failures.
+    pub fn graft(
+        &self,
+        roots: &[SnapshotRoot],
+        paths: &[String],
+        known: Option<&GraftLog>,
+        hide: &[ObjectId],
+        tip: ObjectId,
+    ) -> Result<std::result::Result<Grafted, GraftError>> {
+        super::graft::graft(self.repo, roots, paths, known, hide, tip)
+    }
+
+    /// Show the branch at `tip` to a checkout, the reverse of
+    /// [`graft`](Self::graft): [`project_branch`](Self::project_branch) for a
+    /// caller that keeps its own record of a checkout.
+    ///
+    /// The commits projected are those of `tip` that neither `targets` nor any
+    /// snapshot's real commit has; a branch at the real commit a snapshot stands
+    /// for projects to that snapshot.
+    ///
+    /// # Parameters
+    ///
+    /// - `roots`: the checkout's snapshot commits and the real commits they
+    ///   stand for, oldest first.
+    /// - `paths`: the checkout's paths (empty: the whole tree).
+    /// - `known`: the repository's graft log, whose commits are reused where
+    ///   they fit; `None` to make every commit afresh. Nothing is recorded in it.
+    /// - `own`: the tips the checkout pushed its branches to. A logged commit
+    ///   they reach is the checkout's own and is shown as it is.
+    /// - `targets`: the tips of the target branch the checkout follows.
+    /// - `tip`: the branch's tip.
+    ///
+    /// # Returns
+    ///
+    /// The projection, whose new pairs ([`Projection::made`]) the caller
+    /// records; `Ok(Err(..))` with [`ProjectError::OnTarget`] or
+    /// [`ProjectError::BeforeFirstSnapshot`].
+    ///
+    /// # Errors
+    ///
+    /// Walk, object and graft log failures.
+    pub fn project(
+        &self,
+        roots: &[SnapshotRoot],
+        paths: &[String],
+        known: Option<&GraftLog>,
+        own: &[ObjectId],
+        targets: &[ObjectId],
+        tip: ObjectId,
+    ) -> Result<std::result::Result<Projection, ProjectError>> {
+        super::project::project(self.repo, roots, paths, known, own, targets, tip)
+    }
+
     /// Whether `grafted` has every commit of `previous` that the target lacks,
     /// matched by change key: a rebase of it, perhaps with more
     /// on top.
