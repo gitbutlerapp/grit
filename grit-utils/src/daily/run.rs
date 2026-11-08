@@ -14,8 +14,7 @@ use super::plan::{DailyHeadlinePlan, DailyPrepare, DailySetup};
 use super::registry::{Area, ScenarioSpec};
 use super::remote_fixture::{post_timed_for, pre_timed_for, refresh_grit_http_server};
 use super::runner::{
-    run_ab_bench, run_prepare, run_timed_via_helper, timing_stats_from_samples, AbBenchRequest,
-    BenchArgv, PostTimedCheck, PreTimedCheck, RunLimits, RunPolicy,
+    run_ab_bench, AbBenchRequest, BenchArgv, PostTimedCheck, PreTimedCheck, RunLimits, RunPolicy,
 };
 use super::schema::{
     DailyBenchReport, DailyCommands, DailyScenarioDetail, DailyScenarioResult, DailyToolRun,
@@ -23,7 +22,6 @@ use super::schema::{
 };
 use super::trace::{display_argv, trace_phases};
 use crate::binary::{report_grit_commit, tool_version};
-use crate::capped_run::TerminationKind;
 use crate::machine::{collect_machine_info, format_timestamp};
 
 /// Options for [`run_daily`].
@@ -207,33 +205,6 @@ fn prepare_argv(prepare_bin: &Path, git: &Path, prepare: &DailyPrepare) -> Optio
     }
 }
 
-/// Timed samples for the older `--baseline-grit` binary. Uses the same run count as the
-/// current grit series so peak RSS is a max over equally many process lifetimes.
-fn run_baseline_samples(
-    cwd: &Path,
-    cmd: &BenchArgv,
-    prepare: Option<&BenchArgv>,
-    limits: &RunLimits,
-    helper: &Path,
-    runs: u32,
-) -> Result<DailyToolRun> {
-    let mut samples = Vec::new();
-    for _ in 0..runs.max(1) {
-        run_prepare(cwd, prepare)?;
-        let sample = run_timed_via_helper(cwd, cmd, limits, helper)?;
-        if sample.termination != TerminationKind::Success {
-            anyhow::bail!("baseline grit timed run failed: {:?}", sample.termination);
-        }
-        samples.push(sample);
-    }
-    let stats = timing_stats_from_samples(&samples);
-    let run = tool_run(&stats, samples.len() as u32);
-    if run.peak_rss_bytes == 0 {
-        anyhow::bail!("baseline grit missing peak_rss_bytes");
-    }
-    Ok(run)
-}
-
 /// Which checks guard a scenario, in words for the report.
 fn correctness_note(once: bool, before_each: bool, after_each: bool) -> Option<String> {
     let mut parts = Vec::new();
@@ -313,10 +284,17 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
             verify,
         });
 
+        let base_cmd = opts
+            .baseline_grit
+            .as_ref()
+            .filter(|_| plan.spec.headline)
+            .map(|base_bin| baseline_grit_argv(&grit_cmd, &opts.grit, base_bin));
+
         let outcome = run_ab_bench(&AbBenchRequest {
             cwd: &repo,
             git: &git_cmd,
             grit: &grit_cmd,
+            baseline_grit: base_cmd.as_ref(),
             prepare: prepare.as_ref(),
             policy: &policy,
             limits: &limits,
@@ -371,16 +349,13 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
         let row_ratio = ratio(grit_run.median_wall_ms, git_run.median_wall_ms);
 
         let (baseline_grit, baseline_grit_ratio) =
-            if let Some(base_bin) = opts.baseline_grit.as_ref().filter(|_| plan.spec.headline) {
-                let base_cmd = baseline_grit_argv(&grit_cmd, &opts.grit, base_bin);
-                let base_run = run_baseline_samples(
-                    &repo,
-                    &base_cmd,
-                    prepare.as_ref(),
-                    &limits,
-                    &opts.measure_helper,
-                    grit_run.runs.unwrap_or(policy.min_runs_per_tool).max(1),
-                )?;
+            if let Some(base_series) = outcome.baseline_grit.as_ref() {
+                let base_run = tool_run(&base_series.stats, base_series.samples.len() as u32);
+                anyhow::ensure!(
+                    base_run.peak_rss_bytes > 0,
+                    "scenario {} missing baseline grit peak_rss_bytes",
+                    plan.spec.id
+                );
                 let base_ratio = ratio(base_run.median_wall_ms, git_run.median_wall_ms);
                 (Some(base_run), Some(base_ratio))
             } else {

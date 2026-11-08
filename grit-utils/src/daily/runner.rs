@@ -83,11 +83,12 @@ pub struct ToolSeries {
     pub samples: Vec<TimedRunSample>,
 }
 
-/// Result of an ABAB git/grit benchmark session.
+/// Result of a timed git/grit benchmark session (optionally git/grit/baseline grit).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AbBenchOutcome {
     pub git: ToolSeries,
     pub grit: ToolSeries,
+    pub baseline_grit: Option<ToolSeries>,
 }
 
 /// Post-timed ref/object check for one daily scenario (see [`super::remote_fixture::post_timed_for`]).
@@ -120,6 +121,8 @@ pub struct AbBenchRequest<'a> {
     pub cwd: &'a Path,
     pub git: &'a BenchArgv,
     pub grit: &'a BenchArgv,
+    /// When set, timed samples rotate git → grit → baseline grit in one sitting.
+    pub baseline_grit: Option<&'a BenchArgv>,
     pub prepare: Option<&'a BenchArgv>,
     pub policy: &'a RunPolicy,
     pub limits: &'a RunLimits,
@@ -171,6 +174,55 @@ pub fn needs_more_timed_runs(
         return git_runs < policy.max_runs_per_tool || grit_runs < policy.max_runs_per_tool;
     }
     false
+}
+
+/// Same stopping rule as [`needs_more_timed_runs`], for git + grit + baseline grit.
+#[must_use]
+pub fn needs_more_timed_runs_triplet(
+    policy: &RunPolicy,
+    git_runs: u32,
+    grit_runs: u32,
+    baseline_runs: u32,
+    total_timed_ms: f64,
+    scenario_elapsed: Duration,
+) -> bool {
+    if scenario_elapsed >= policy.scenario_time_budget {
+        return false;
+    }
+    let min_runs = policy.min_runs_per_tool;
+    let min_total_ms = policy.min_total_timed_duration.as_secs_f64() * 1000.0;
+    let counts = [git_runs, grit_runs, baseline_runs];
+    for count in counts {
+        if count < min_runs && count < policy.max_runs_per_tool {
+            return true;
+        }
+    }
+    let max = counts.into_iter().max().unwrap_or(0);
+    let min = counts.into_iter().min().unwrap_or(0);
+    if max != min && max < policy.max_runs_per_tool {
+        return true;
+    }
+    if total_timed_ms < min_total_ms {
+        return counts.iter().any(|&c| c < policy.max_runs_per_tool);
+    }
+    false
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimedPhase {
+    Git,
+    Grit,
+    Baseline,
+}
+
+fn advance_phase(phase: TimedPhase, include_baseline: bool) -> TimedPhase {
+    match (phase, include_baseline) {
+        (TimedPhase::Git, true) => TimedPhase::Grit,
+        (TimedPhase::Grit, true) => TimedPhase::Baseline,
+        (TimedPhase::Baseline, _) => TimedPhase::Git,
+        (TimedPhase::Git, false) => TimedPhase::Grit,
+        (TimedPhase::Grit, false) => TimedPhase::Git,
+    }
 }
 
 fn sample_succeeded(sample: &TimedRunSample) -> bool {
@@ -227,12 +279,13 @@ pub fn timing_stats_from_samples(samples: &[TimedRunSample]) -> TimingStats {
     }
 }
 
-/// Run warmups, optional correctness check, then ABAB timed git/grit runs.
+/// Run warmups, optional correctness check, then timed git/grit (and optional baseline) runs.
 pub fn run_ab_bench(request: &AbBenchRequest<'_>) -> Result<AbBenchOutcome> {
     let AbBenchRequest {
         cwd,
         git,
         grit,
+        baseline_grit,
         prepare,
         policy,
         limits,
@@ -241,6 +294,8 @@ pub fn run_ab_bench(request: &AbBenchRequest<'_>) -> Result<AbBenchOutcome> {
         post_timed,
         pre_timed,
     } = request;
+
+    let baseline = baseline_grit.filter(|base| *base != *grit);
 
     if let Some(check) = correctness {
         check(cwd).context("correctness hook before timing")?;
@@ -271,49 +326,86 @@ pub fn run_ab_bench(request: &AbBenchRequest<'_>) -> Result<AbBenchOutcome> {
         let sample = run_timed_via_helper(cwd, grit, limits, measure_helper)?;
         ensure_sample_success("grit", &sample)?;
         post_run(false)?;
+        if let Some(base) = baseline {
+            run_prepare(cwd, *prepare)?;
+            pre_run()?;
+            let sample = run_timed_via_helper(cwd, base, limits, measure_helper)?;
+            ensure_sample_success("baseline grit", &sample)?;
+            post_run(false)?;
+        }
     }
 
     let mut git_samples = Vec::new();
     let mut grit_samples = Vec::new();
+    let mut baseline_samples = Vec::new();
     let scenario_start = Instant::now();
     let mut total_timed_ms = 0.0;
     let mut git_count = 0u32;
     let mut grit_count = 0u32;
-    let mut next_git = true;
+    let mut baseline_count = 0u32;
+    let mut phase = TimedPhase::Git;
 
-    while needs_more_timed_runs(
-        policy,
-        git_count,
-        grit_count,
-        total_timed_ms,
-        scenario_start.elapsed(),
-    ) {
+    while if baseline.is_some() {
+        needs_more_timed_runs_triplet(
+            policy,
+            git_count,
+            grit_count,
+            baseline_count,
+            total_timed_ms,
+            scenario_start.elapsed(),
+        )
+    } else {
+        needs_more_timed_runs(
+            policy,
+            git_count,
+            grit_count,
+            total_timed_ms,
+            scenario_start.elapsed(),
+        )
+    } {
         run_prepare(cwd, *prepare)?;
         pre_run()?;
-        if next_git {
-            let sample = run_timed_via_helper(cwd, git, limits, measure_helper)?;
-            ensure_sample_success("git", &sample)?;
-            if sample_succeeded(&sample) {
-                total_timed_ms += sample.wall_ms;
+        match phase {
+            TimedPhase::Git => {
+                let sample = run_timed_via_helper(cwd, git, limits, measure_helper)?;
+                ensure_sample_success("git", &sample)?;
+                if sample_succeeded(&sample) {
+                    total_timed_ms += sample.wall_ms;
+                }
+                post_run(true)?;
+                git_samples.push(sample);
+                git_count += 1;
             }
-            post_run(true)?;
-            git_samples.push(sample);
-            git_count += 1;
-        } else {
-            let sample = run_timed_via_helper(cwd, grit, limits, measure_helper)?;
-            ensure_sample_success("grit", &sample)?;
-            if sample_succeeded(&sample) {
-                total_timed_ms += sample.wall_ms;
+            TimedPhase::Grit => {
+                let sample = run_timed_via_helper(cwd, grit, limits, measure_helper)?;
+                ensure_sample_success("grit", &sample)?;
+                if sample_succeeded(&sample) {
+                    total_timed_ms += sample.wall_ms;
+                }
+                post_run(false)?;
+                grit_samples.push(sample);
+                grit_count += 1;
             }
-            post_run(false)?;
-            grit_samples.push(sample);
-            grit_count += 1;
+            TimedPhase::Baseline => {
+                let base = baseline.context("baseline phase without baseline argv")?;
+                let sample = run_timed_via_helper(cwd, base, limits, measure_helper)?;
+                ensure_sample_success("baseline grit", &sample)?;
+                if sample_succeeded(&sample) {
+                    total_timed_ms += sample.wall_ms;
+                }
+                post_run(false)?;
+                baseline_samples.push(sample);
+                baseline_count += 1;
+            }
         }
-        next_git = !next_git;
+        phase = advance_phase(phase, baseline.is_some());
     }
 
     ensure_timed_series_success("git", &git_samples)?;
     ensure_timed_series_success("grit", &grit_samples)?;
+    if baseline.is_some() {
+        ensure_timed_series_success("baseline grit", &baseline_samples)?;
+    }
 
     Ok(AbBenchOutcome {
         git: ToolSeries {
@@ -324,6 +416,10 @@ pub fn run_ab_bench(request: &AbBenchRequest<'_>) -> Result<AbBenchOutcome> {
             stats: timing_stats_from_samples(&grit_samples),
             samples: grit_samples,
         },
+        baseline_grit: baseline.is_some().then(|| ToolSeries {
+            stats: timing_stats_from_samples(&baseline_samples),
+            samples: baseline_samples,
+        }),
     })
 }
 
@@ -526,6 +622,33 @@ mod tests {
         assert_eq!(stats.runs_ms, vec![10.0, 20.0]);
         assert!((stats.median_ms - 15.0).abs() < f64::EPSILON);
         assert!((stats.mean_ms - 15.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn needs_more_triplet_balances_unequal_counts_after_min_runs() {
+        let policy = RunPolicy {
+            min_runs_per_tool: 2,
+            max_runs_per_tool: 10,
+            min_total_timed_duration: Duration::from_millis(100),
+            scenario_time_budget: Duration::from_secs(60),
+            ..Default::default()
+        };
+        assert!(needs_more_timed_runs_triplet(
+            &policy,
+            3,
+            2,
+            2,
+            500.0,
+            Duration::from_millis(1)
+        ));
+        assert!(!needs_more_timed_runs_triplet(
+            &policy,
+            2,
+            2,
+            2,
+            500.0,
+            Duration::from_millis(1)
+        ));
     }
 
     #[test]
