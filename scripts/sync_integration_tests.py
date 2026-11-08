@@ -62,6 +62,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "clean_dir_mode_clean_tree_perf_git_compat"),
     ("grit-lib", "commit_show_untracked_no_2523"),
     ("grit-cli", "clone_url_redaction"),
+    ("grit-lib", "clone_stored_origin_url_2562"),
     ("grit-lib", "refname_policy"),
     ("grit-lib", "revwalk_resolve_options_git_compat"),
     ("grit-lib", "repository_conformance_files"),

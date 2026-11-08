@@ -812,7 +812,7 @@ fn clone_after_claim(
     let preserve_injected_store = !repo.odb().uses_files_primary();
 
     add_local_config(&repo, &opts.config)?;
-    let origin_url = stored_clone_remote_url(&opts.url);
+    let origin_url = stored_clone_remote_url(&opts.url, &opts.environment);
     set_local_config(
         &repo,
         &[(
@@ -1442,9 +1442,9 @@ fn pick_default_branch_from_remote_refs(refs: &[crate::remote::RemoteRef]) -> Op
         .find_map(|r| r.name.strip_prefix("refs/heads/").map(str::to_owned))
 }
 
-fn stored_clone_remote_url(url: &str) -> String {
+fn stored_clone_remote_url(url: &str, environment: &Environment) -> String {
     if should_store_absolute_local_clone_url(url) {
-        absolute_local_clone_source_url(Path::new(url.trim()))
+        absolute_local_clone_source_url(Path::new(url.trim()), environment)
     } else {
         url.to_owned()
     }
@@ -1577,7 +1577,13 @@ fn ensure_local_clone_source_readable(
     }
     let probe_git = discovery_cwd.join(".git");
     let remote_git = resolve_local_remote_git_dir(url, &probe_git, Some(&discovery_cwd));
-    crate::transfer::ensure_local_remote_repository(&remote_git)
+    if crate::submodule_gitdir::is_valid_git_dir(&remote_git) {
+        return Ok(());
+    }
+    Err(Error::remote_unreadable(
+        stored_clone_remote_url(url, environment),
+        crate::error::RemoteUnreadableReason::RepositoryNotFound,
+    ))
 }
 
 /// When cloning from a local path, match the source repository's object hash up front.

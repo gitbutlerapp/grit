@@ -336,6 +336,8 @@ mod clone_shallow_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "clone_single_branch_tags_git_compat.rs"]
 mod clone_single_branch_tags_git_compat;
+#[path = "clone_stored_origin_url_2562.rs"]
+mod clone_stored_origin_url_2562;
 #[cfg(feature = "full-tests")]
 #[path = "clone_thread_policy.rs"]
 mod clone_thread_policy;

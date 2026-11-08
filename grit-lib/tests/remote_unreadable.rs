@@ -349,6 +349,26 @@ fn clone_env_in(cwd: &Path) -> Environment {
 }
 
 #[test]
+fn clone_missing_relative_parent_path_uses_logical_absolute_url_in_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("w");
+    let sub = work.join("sub");
+    std::fs::create_dir_all(&sub).expect("mkdir sub");
+    let mut env = clone_env_in(&sub);
+    env.pwd = Some(sub.to_string_lossy().into_owned());
+    let mut opts = CloneOptions::new("../nonexist2".into(), sub.join("dest"));
+    opts.environment = env;
+    let err = clone(opts, &mut grit_lib::remote::fetch::NoProgress, &CancelToken::never(), None)
+        .expect_err("clone of missing relative path");
+    let msg = err.to_string();
+    let expected = format!("'{}/../nonexist2'", sub.display());
+    assert!(
+        msg.contains(&expected),
+        "error should quote logical absolute path, got: {msg}"
+    );
+}
+
+#[test]
 fn clone_missing_relative_source_with_dest_basename_is_remote_unreadable() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let work = tmp.path().join("work");

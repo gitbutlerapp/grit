@@ -1,6 +1,8 @@
 //! Safety checks and path resolution for local transport URLs (matches Git `connect.c` / `path.c`).
 
+use crate::environment::Environment;
 use crate::git_path::CanonicalizeExt;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -144,26 +146,61 @@ pub(crate) fn normalize_local_path_for_config(path: &Path) -> String {
     }
 }
 
-/// Absolute form of a local clone source path, matching Git's `absolute_pathdup`: prepend the
-/// current directory when relative, but leave `.`/`..`/`./` components untouched (no
-/// normalization). The parent of `source_path` is canonicalized when possible (Git resolves
-/// the cwd via `getcwd`).
+/// Absolute form of a local clone source path, matching Git's `absolute_pathdup` /
+/// `strbuf_add_absolute_path`: prepend the logical cwd when relative, but leave `.`/`..`
+/// components untouched (no lexical collapse, no realpath of the source).
 #[must_use]
-pub(crate) fn absolute_local_clone_source_url(source_path: &Path) -> String {
-    absolute_local_clone_source_url_from(source_path, &crate::environment::Environment::empty().cwd)
-}
-
-/// [`absolute_local_clone_source_url`] with a relative `source_path` taken from `cwd`.
-fn absolute_local_clone_source_url_from(source_path: &Path, cwd: &Path) -> String {
+pub(crate) fn absolute_local_clone_source_url(source_path: &Path, env: &Environment) -> String {
     let absolute = if source_path.is_absolute() {
         source_path.to_path_buf()
     } else {
-        let cwd = cwd
-            .canonicalize_simplified()
-            .unwrap_or_else(|_| cwd.to_path_buf());
-        cwd.join(source_path)
+        clone_absolute_path_prefix(env).join(source_path)
     };
     normalize_local_path_for_config(&absolute)
+}
+
+/// Working-directory prefix for [`absolute_local_clone_source_url`] (Git `strbuf_add_absolute_path`).
+fn clone_absolute_path_prefix(env: &Environment) -> PathBuf {
+    let getcwd = std::env::current_dir().unwrap_or_else(|_| env.cwd.clone());
+    let cwd = if env.cwd.as_os_str() != OsStr::new(".") && env.cwd.is_absolute() {
+        env.cwd.clone()
+    } else {
+        getcwd
+    };
+    if let Some(pwd) = env.pwd.as_deref() {
+        let pwd_path = Path::new(pwd);
+        if pwd_path.is_absolute()
+            && paths_differ(&cwd, pwd_path)
+            && paths_refer_to_same_directory(&cwd, pwd_path)
+        {
+            return pwd_path.to_path_buf();
+        }
+    }
+    cwd
+}
+
+fn paths_differ(a: &Path, b: &Path) -> bool {
+    a.as_os_str() != b.as_os_str()
+}
+
+#[cfg(unix)]
+fn paths_refer_to_same_directory(cwd: &Path, pwd: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(cwd_meta) = cwd.metadata() else {
+        return false;
+    };
+    let Ok(pwd_meta) = pwd.metadata() else {
+        return false;
+    };
+    (cwd_meta.dev() != 0 || cwd_meta.ino() != 0)
+        && cwd_meta.dev() == pwd_meta.dev()
+        && cwd_meta.ino() == pwd_meta.ino()
+}
+
+#[cfg(not(unix))]
+fn paths_refer_to_same_directory(cwd: &Path, pwd: &Path) -> bool {
+    let _ = (cwd, pwd);
+    false
 }
 
 /// Decode a `file://` remote URL into a local filesystem path (percent-decoding and `/C:/` → `C:/`).
@@ -657,13 +694,101 @@ mod tests {
         let base = std::env::temp_dir().join(format!("grit-abs-clone-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("temp base");
-        // Not `set_current_dir`: that would move every test running in this process.
-        let stored = absolute_local_clone_source_url_from(Path::new("./nested/../peer"), &base);
+        let mut env = crate::environment::Environment::empty();
+        env.cwd = base.clone();
+        let stored = absolute_local_clone_source_url(Path::new("./nested/../peer"), &env);
         let _ = std::fs::remove_dir_all(&base);
         assert!(
-            stored.contains("nested/../peer") || stored.ends_with("peer"),
+            stored.contains("nested/../peer"),
             "expected dot components preserved, got {stored}"
         );
+    }
+
+    #[test]
+    fn absolute_local_clone_source_url_matches_git_prefix_for_relative_source() {
+        let base = std::env::temp_dir().join(format!("grit-abs-git-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let src = base.join("t/src");
+        let sub = base.join("t/sub");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::create_dir_all(&sub).expect("mkdir sub");
+        std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(&src)
+            .status()
+            .expect("git init src");
+        std::process::Command::new("git")
+            .current_dir(&src)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "seed",
+            ])
+            .status()
+            .expect("git commit");
+        let mut env = crate::environment::Environment::empty();
+        env.cwd = sub.clone();
+        let grit_stored = absolute_local_clone_source_url(Path::new("../src"), &env);
+        let git_stored = std::process::Command::new("git")
+            .current_dir(&sub)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t.test", "clone"])
+            .arg("../src")
+            .arg(base.join("git-clone"))
+            .output()
+            .expect("git clone");
+        assert!(
+            git_stored.status.success(),
+            "git clone failed: {}",
+            String::from_utf8_lossy(&git_stored.stderr)
+        );
+        let git_url = std::process::Command::new("git")
+            .args([
+                "-C",
+                base.join("git-clone").to_str().expect("utf8"),
+                "config",
+                "--get",
+                "remote.origin.url",
+            ])
+            .output()
+            .expect("git config");
+        assert!(git_url.status.success());
+        let git_url = String::from_utf8_lossy(&git_url.stdout).trim().to_owned();
+        assert_eq!(grit_stored, git_url, "stored URL should match git clone");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn absolute_local_clone_source_url_prefers_pwd_when_same_directory() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!("grit-abs-pwd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let physical = base.join("physical");
+        let logical = base.join("logical");
+        std::fs::create_dir_all(&physical).expect("physical");
+        symlink(&physical, &logical).expect("symlink");
+        let sub = physical.join("t/sub");
+        std::fs::create_dir_all(&sub).expect("subdir");
+        let logical_sub = logical.join("t/sub");
+        let mut env = crate::environment::Environment::empty();
+        env.cwd = sub.canonicalize_simplified().unwrap_or(sub.clone());
+        env.pwd = Some(logical_sub.to_string_lossy().into_owned());
+        let stored = absolute_local_clone_source_url(Path::new("../src"), &env);
+        assert!(
+            stored.starts_with(logical_sub.to_str().expect("utf8")),
+            "PWD prefix should be logical path, got {stored}"
+        );
+        assert!(
+            stored.contains("/../src"),
+            "relative tail should be preserved, got {stored}"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[cfg(unix)]
@@ -679,7 +804,9 @@ mod tests {
         let link = base.join("link-src");
         symlink(&real, &link).expect("symlink");
 
-        let stored = absolute_local_clone_source_url(&link);
+        let mut env = crate::environment::Environment::empty();
+        env.cwd = base.clone();
+        let stored = absolute_local_clone_source_url(&link, &env);
         let _ = std::fs::remove_dir_all(&base);
 
         assert_eq!(stored, normalize_local_path_for_config(&link));
