@@ -1715,16 +1715,14 @@ pub(crate) fn text_stat_from_reader(mut reader: impl std::io::Read) -> std::io::
     Ok(stats)
 }
 
-fn append_smudge_lf_to_crlf(out: &mut Vec<u8>, bytes: &[u8]) {
-    let mut i = 0usize;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c == b'\n' && (i == 0 || bytes[i - 1] != b'\r') {
+fn append_smudge_lf_to_crlf(out: &mut Vec<u8>, bytes: &[u8], prev: &mut u8) {
+    for &c in bytes {
+        if c == b'\n' && *prev != b'\r' {
             out.extend_from_slice(b"\r\n");
         } else {
             out.push(c);
         }
-        i += 1;
+        *prev = c;
     }
 }
 
@@ -1738,24 +1736,13 @@ pub(crate) fn stream_lf_to_crlf(
 
     let mut in_buf = vec![0u8; IN_CHUNK];
     let mut out_buf = Vec::with_capacity(OUT_FLUSH + IN_CHUNK / 8);
-    let mut carry = Vec::new();
+    let mut prev = b' ';
     loop {
         let n = std::io::Read::read(&mut reader, &mut in_buf)?;
-        if n == 0 && carry.is_empty() {
-            break;
-        }
-        let mut chunk = std::mem::take(&mut carry);
-        chunk.extend_from_slice(&in_buf[..n]);
         if n == 0 {
-            append_smudge_lf_to_crlf(&mut out_buf, &chunk);
             break;
         }
-        if chunk.len() > 1 {
-            append_smudge_lf_to_crlf(&mut out_buf, &chunk[..chunk.len() - 1]);
-            carry.push(chunk[chunk.len() - 1]);
-        } else {
-            carry = chunk;
-        }
+        append_smudge_lf_to_crlf(&mut out_buf, &in_buf[..n], &mut prev);
         if out_buf.len() >= OUT_FLUSH {
             std::io::Write::write_all(&mut writer, &out_buf)?;
             out_buf.clear();
@@ -2564,6 +2551,24 @@ mod tests {
         let mut out = Vec::new();
         stream_lf_to_crlf(Cursor::new(data), &mut out).expect("stream");
         assert_eq!(out, lf_to_crlf(data));
+    }
+
+    #[test]
+    fn stream_lf_to_crlf_split_crlf_at_input_chunk_boundary() {
+        use std::io::Cursor;
+
+        const IN_CHUNK: usize = 256 * 1024;
+        let mut data = vec![b'x'; IN_CHUNK];
+        data[IN_CHUNK - 2] = b'\r';
+        data[IN_CHUNK - 1] = b'\n';
+        data.extend_from_slice(b"tail\n");
+        let mut out = Vec::new();
+        stream_lf_to_crlf(Cursor::new(&data), &mut out).expect("stream");
+        assert_eq!(
+            out,
+            lf_to_crlf(&data),
+            "CRLF split across a 256 KiB read must not become CRCRLF"
+        );
     }
 
     #[test]
