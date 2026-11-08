@@ -96,3 +96,7 @@ required-features = ["full-tests"]
 name = "worktree_scenario_e2e"
 path = "tests/worktree_scenario_e2e.rs"
 required-features = ["full-tests"]
+
+[[test]]
+name = "vm_hygiene_live"
+path = "tests/vm_hygiene_live.rs"

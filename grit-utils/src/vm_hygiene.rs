@@ -79,12 +79,17 @@ fn write_drop_caches_direct() -> Result<()> {
 
 fn verify_drop(cached_before_kib: u64, method: &str) -> Result<()> {
     let cached_after_kib = meminfo_cached_kib().context("read Cached after drop_caches")?;
-    if cached_after_kib < cached_before_kib || cached_before_kib == 0 {
+    verify_cached_shrank(cached_before_kib, cached_after_kib, method)
+}
+
+/// Returns `Ok(())` when `after_kib` is below `before_kib`, or `before_kib` is zero.
+pub(crate) fn verify_cached_shrank(before_kib: u64, after_kib: u64, method: &str) -> Result<()> {
+    if after_kib < before_kib || before_kib == 0 {
         return Ok(());
     }
     bail!(
         "drop_caches via {method} did not shrink the page cache \
-         (Cached {cached_before_kib} KiB -> {cached_after_kib} KiB); \
+         (Cached {before_kib} KiB -> {after_kib} KiB); \
          refusing to continue with GRIT_BENCH_DROP_CACHES"
     );
 }
@@ -135,17 +140,32 @@ mod tests {
     }
 
     #[test]
+    fn verify_cached_shrank_accepts_drop() {
+        verify_cached_shrank(900_000, 400_000, "test").expect("smaller after");
+        verify_cached_shrank(0, 100, "test").expect("zero before");
+    }
+
+    #[test]
+    fn verify_cached_shrank_rejects_unchanged_cache() {
+        let err = verify_cached_shrank(500_000, 500_000, "test").unwrap_err();
+        assert!(err.to_string().contains("did not shrink"));
+    }
+
+    #[test]
+    fn verify_cached_shrank_rejects_growth() {
+        let err = verify_cached_shrank(100, 200, "test").unwrap_err();
+        assert!(err.to_string().contains("100 KiB -> 200 KiB"));
+    }
+
+    #[test]
     fn drop_caches_env_noop_when_unset() {
+        let _guard = env_test_lock();
         std::env::remove_var(DROP_CACHES_ENV);
         drop_page_caches_if_requested().expect("unset env is a no-op");
     }
 
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn drop_caches_verified_when_env_set() {
-        std::env::set_var(DROP_CACHES_ENV, "1");
-        let result = drop_page_caches_if_requested();
-        std::env::remove_var(DROP_CACHES_ENV);
-        result.expect("factory VM should drop caches via sudo -n");
+    fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 }

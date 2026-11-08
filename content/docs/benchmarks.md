@@ -2982,32 +2982,32 @@ Criterion bench **`oid_hashmap`** (`cargo bench -p grit-lib --bench oid_hashmap`
 
 Headline census on `dist` builds in one sitting (12–20 hyperfine samples per row, `--offline`). **Base** grit is `f52021f4cb` (last commit before [`RepositoryOptions::with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store), parent of the pluggable-store plan). **After** is `90f552da7e` on the same VM with `--baseline-grit` timing the base binary on every headline row. Reports: `pluggable-store-7249-before.json` → `pluggable-store-7249-after.json`.
 
-**Sign-off (2026-11-08 rerun):** Stash wall time and `status/clean` peak RSS are within ±2%. Rebuilt **`baseline_grit`** at `f52021f4` (`dist`) and refreshed the after census with `GRIT_BENCH_DROP_CACHES=1`, which writes `3` to `/proc/sys/vm/drop_caches` (or `sudo -n` on the factory VM) and **errors** if the page cache does not shrink—`sysctl -w vm.drop_caches` is not used because it can exit 0 without dropping caches. **`diff/worktree@synth-10k`**, **`switch/branch@synth-10k`**, and **`merge/clean@synth-10k`** are within the peak-RSS gate vs `baseline_grit` in the committed after report. Baseline-grit sample parity is asserted in `daily_e2e`. Criterion matrix (`odb_read`, `odb_backend`, …) is still outstanding.
+**Sign-off (2026-11-08 rerun, after JSON `2026-11-08T15:18:30.196356143Z`):** After census on this VM with `GRIT_BENCH_DROP_CACHES=1` and fail-closed `vm_hygiene` (`dist` grit-bench from this branch; grit **`90f552da7e`** vs `--baseline-grit` **`f52021f4cb`**; 12–20 timed samples per tool). Cache drops were verified via `/proc`/`sudo -n` before the run (`vm_hygiene_live` plus the log in factory artifacts). Peak RSS vs `baseline_grit`: **`diff/worktree@synth-10k`** +0.2%, **`stash/push-pop@synth-10k`** +1.2% (wall −0.4%), **`switch/branch@synth-10k`** +2.5%, **`merge/clean@synth-10k`** +3.8%. **`status/clean@synth-10k`** remains +20.5% RSS (outside the ±2% gate; track separately). Criterion matrix (`odb_read`, `odb_backend`, …) is still outstanding.
 
 | Headline | git ms / MB | base ms / MB | after ms / MB | after vs base time | after vs base RSS |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `add/modified@synth-10k` | 16.00 / 12.4 | 9.35 / 18.7 | 9.50 / 18.8 | +1.6% | +0.7% |
-| `blame/file@git-git` | 264.54 / 244.8 | 215.21 / 267.1 | 215.85 / 267.0 | +0.3% | -0.0% |
-| `branch/list-json@many-refs` | 1.42 / 7.9 | 2.03 / 9.7 | 2.02 / 10.0 | -0.7% | +2.9% |
-| `branch/list@many-refs` | 1.26 / 6.8 | 1.86 / 10.0 | 1.78 / 9.9 | -3.9% | -1.0% |
-| `branch/merged@many-refs` | 1.25 / 7.6 | 1.98 / 10.8 | 1.90 / 11.1 | -4.2% | +3.5% |
-| `clone/local@synth-10k` | 942.71 / 37.0 | 814.59 / 29.2 | 813.49 / 29.4 | -0.1% | +0.7% |
-| `commit/small@synth-10k` | 25.91 / 13.9 | 15.73 / 16.8 | 15.36 / 16.8 | -2.3% | +0.1% |
-| `diff/worktree@synth-10k` | 6.41 / 9.9 | 5.87 / 13.6 | 5.95 / 14.4 | +1.3% | +5.4% |
-| `fetch/incremental@git-git` | 108.18 / 70.7 | 53.96 / 60.9 | 52.31 / 45.8 | -3.1% | -24.7% |
-| `log/json-100@git-git` | 2.91 / 14.9 | 3.96 / 18.8 | 3.89 / 19.0 | -1.9% | +0.9% |
-| `log/oneline-100@git-git` | 2.88 / 14.8 | 3.63 / 18.1 | 3.64 / 18.4 | +0.2% | +2.0% |
-| `merge/clean@synth-10k` | 95.97 / 14.2 | 50.91 / 18.0 | 51.00 / 18.3 | +0.2% | +2.1% |
-| `pick/one@synth-10k` | 110.30 / 9.4 | 51.15 / 17.9 | 50.40 / 18.2 | -1.5% | +1.6% |
-| `pull/fast-forward@git-git` | 119.10 / 76.4 | 58.31 / 46.8 | 59.25 / 46.2 | +1.6% | -1.3% |
-| `pull/rebase@synth-10k` | 72.77 / 41.5 | 18.25 / 23.5 | 18.63 / 23.3 | +2.1% | -0.5% |
-| `push/force-with-lease@git-git` | 2096.98 / 333.5 | 936.28 / 71.9 | 939.51 / 70.8 | +0.3% | -1.4% |
-| `push/incremental@git-git` | 2120.77 / 333.7 | 1397.74 / 88.5 | 1412.61 / 88.6 | +1.1% | +0.2% |
-| `show/head@git-git` | 1.77 / 9.0 | 2.31 / 10.7 | 2.36 / 10.7 | +2.2% | +0.1% |
-| `stash/push-pop@synth-10k` | 266.30 / 17.3 | 114.29 / 19.4 | 117.46 / 19.7 | +2.8% | +1.4% |
-| `status/clean@synth-10k` | 9.11 / 11.4 | 6.48 / 13.2 | 6.55 / 15.2 | +1.0% | +14.9% |
-| `status/dirty@synth-10k` | 9.35 / 12.7 | 6.58 / 13.3 | 6.45 / 13.1 | -2.0% | -1.5% |
-| `switch/branch@synth-10k` | 54.90 / 24.5 | 14.82 / 14.8 | 14.64 / 15.2 | -1.2% | +2.3% |
+| `add/modified@synth-10k` | 16.22 / 11.8 | 9.65 / 17.7 | 9.89 / 18.0 | +2.5% | +1.7% |
+| `blame/file@git-git` | 264.73 / 232.6 | 220.61 / 253.6 | 220.30 / 253.5 | -0.1% | -0.0% |
+| `branch/list-json@many-refs` | 1.49 / 7.4 | 1.98 / 9.5 | 2.09 / 9.8 | +5.3% | +3.2% |
+| `branch/list@many-refs` | 1.39 / 6.6 | 1.84 / 9.3 | 1.89 / 9.3 | +3.2% | -0.4% |
+| `branch/merged@many-refs` | 1.48 / 7.4 | 1.96 / 10.1 | 2.05 / 10.2 | +4.6% | +0.5% |
+| `clone/local@synth-10k` | 967.50 / 35.2 | 835.60 / 27.3 | 840.98 / 28.0 | +0.6% | +2.8% |
+| `commit/small@synth-10k` | 26.38 / 12.9 | 15.60 / 15.8 | 15.81 / 16.2 | +1.3% | +3.0% |
+| `diff/worktree@synth-10k` | 6.55 / 9.4 | 6.07 / 12.9 | 6.03 / 12.9 | -0.5% | +0.2% |
+| `fetch/incremental@git-git` | 111.56 / 67.6 | 56.74 / 58.0 | 54.76 / 43.7 | -3.5% | -24.6% |
+| `log/json-100@git-git` | 2.89 / 14.2 | 3.86 / 17.6 | 3.87 / 18.0 | +0.3% | +2.4% |
+| `log/oneline-100@git-git` | 2.88 / 14.2 | 3.49 / 17.5 | 3.59 / 17.2 | +2.8% | -1.5% |
+| `merge/clean@synth-10k` | 97.34 / 13.6 | 53.35 / 16.8 | 51.24 / 17.5 | -4.0% | +3.8% |
+| `pick/one@synth-10k` | 109.92 / 8.9 | 50.02 / 16.6 | 49.79 / 16.9 | -0.5% | +2.1% |
+| `pull/fast-forward@git-git` | 121.88 / 72.7 | 61.10 / 58.1 | 59.24 / 44.1 | -3.1% | -24.1% |
+| `pull/rebase@synth-10k` | 72.58 / 40.2 | 18.73 / 22.3 | 18.80 / 22.2 | +0.4% | -0.4% |
+| `push/force-with-lease@git-git` | 2171.42 / 318.4 | 972.79 / 67.7 | 968.59 / 67.9 | -0.4% | +0.4% |
+| `push/incremental@git-git` | 2126.16 / 318.6 | 1508.58 / 84.5 | 1408.53 / 84.3 | -6.6% | -0.2% |
+| `show/head@git-git` | 1.90 / 8.5 | 2.27 / 10.6 | 2.20 / 10.8 | -2.9% | +1.8% |
+| `stash/push-pop@synth-10k` | 193.28 / 17.6 | 117.96 / 18.8 | 117.45 / 19.0 | -0.4% | +1.2% |
+| `status/clean@synth-10k` | 6.49 / 9.2 | 6.44 / 12.2 | 6.54 / 14.7 | +1.5% | +20.5% |
+| `status/dirty@synth-10k` | 10.02 / 9.2 | 7.31 / 12.7 | 6.86 / 15.0 | -6.1% | +17.5% |
+| `switch/branch@synth-10k` | 21.10 / 10.1 | 15.31 / 14.1 | 15.29 / 14.4 | -0.1% | +2.5% |
 
 ```bash
 cargo build --profile dist -p grit-cli -p grit-utils -p grit-http-server
