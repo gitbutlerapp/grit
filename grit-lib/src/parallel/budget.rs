@@ -196,7 +196,7 @@ mod unix {
                 if got.len() == want {
                     break;
                 }
-                if !held[slot] && self.set_lock(slots.base + slot, i32::from(libc::F_WRLCK)) {
+                if !held[slot] && self.set_lock(slots.base + slot, libc::F_WRLCK) {
                     held[slot] = true;
                     got.push(slot);
                 }
@@ -207,7 +207,7 @@ mod unix {
         pub(super) fn release(&self, slots: &Slots, indices: &[usize]) {
             let mut held = slots.held.lock().unwrap_or_else(|e| e.into_inner());
             for &slot in indices {
-                self.set_lock(slots.base + slot, i32::from(libc::F_UNLCK));
+                self.set_lock(slots.base + slot, libc::F_UNLCK);
                 held[slot] = false;
             }
         }
