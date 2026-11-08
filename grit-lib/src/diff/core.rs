@@ -5500,6 +5500,8 @@ pub(crate) struct DiffIndexToWorktreeOptions {
     /// from the diff (not reported as deleted). Used by content diffs and stash; status sets
     /// [`Self::for_status`] instead.
     pub skip_inaccessible_paths: bool,
+    /// Shared Windows directory listings for one status pass (issue #2566).
+    pub listing_cache: Option<std::sync::Arc<crate::windows_dir_listing::WorktreeListingCache>>,
 }
 
 impl Default for DiffIndexToWorktreeOptions {
@@ -5526,6 +5528,7 @@ impl Default for DiffIndexToWorktreeOptions {
             cancel: None,
             diagnostics: None,
             skip_inaccessible_paths: false,
+            listing_cache: None,
         }
     }
 }
@@ -6602,6 +6605,7 @@ fn diff_index_to_worktree_inner(
     let blob_scan = WorktreeBlobScanOptions {
         preload_index,
         stat_parallel_threads: options.stat_parallel_threads,
+        listing_cache: options.listing_cache.clone(),
         ..WorktreeBlobScanOptions::default()
     };
     let blob_dirs = if let Some(limit) = options.restrict_to_paths.as_ref() {
@@ -6669,7 +6673,7 @@ fn diff_index_to_worktree_inner(
     };
     let blob_count = blob_dirs.len();
     let thread_policy = options.thread_policy.unwrap_or_default();
-    let hash_threads = stat_scan_thread_count(&thread_policy, &config, blob_scan, blob_count);
+    let hash_threads = stat_scan_thread_count(&thread_policy, &config, &blob_scan, blob_count);
     let parallel_blob_work = blob_count >= PARALLEL_STAT_MIN_ENTRIES && hash_threads > 1;
     let mut staging_hash_jobs: Vec<StagingHashJob> = Vec::new();
     // Entries the stat refresh just hashed and found matching their recorded blob.

@@ -111,6 +111,7 @@ fn normal_refresh_check_only_subtree_records_nested_files() {
         false,
         UntrackedIgnoredMode::No,
         None,
+        None,
     )
     .expect("refresh normal");
 
@@ -211,6 +212,7 @@ fn try_untracked_from_valid_cache_rejects_invalid_root() {
         &mut uc,
         false,
         UntrackedIgnoredMode::No,
+        None,
         None,
     )
     .expect("refresh");
@@ -361,6 +363,7 @@ fn t7063_untracked_cache_reused_by_git_status() {
         &mut uc,
         false,
         UntrackedIgnoredMode::No,
+        None,
         None,
     )
     .expect("refresh cache");
@@ -530,6 +533,7 @@ fn t7063_dir_flags_from_config_modes() {
         true,
         UntrackedIgnoredMode::No,
         None,
+        None,
     )
     .expect("refresh all mode");
     let from_cache = collect_untracked_from_cache(&uc);
@@ -624,6 +628,7 @@ fn t7063_collect_untracked_matches_git_deep_tree() {
         &mut uc,
         true,
         UntrackedIgnoredMode::No,
+        None,
         None,
     )
     .expect("refresh for collect");

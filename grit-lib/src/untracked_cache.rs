@@ -1115,6 +1115,13 @@ enum DirSource {
         child_dirs: Vec<UntrackedCacheDir>,
         child_files: Vec<String>,
     },
+    #[cfg(windows)]
+    WinListing {
+        listing: std::sync::Arc<crate::windows_dir_listing::WindowsDirListing>,
+        names: Vec<Vec<u8>>,
+        idx: usize,
+        abs_parent: PathBuf,
+    },
 }
 
 /// When the UNTR root still matches the work tree, return cached untracked paths without rescanning.
@@ -1158,6 +1165,7 @@ pub(crate) fn refresh_untracked_cache_for_status(
     show_all_untracked: bool,
     ignored_mode: UntrackedIgnoredMode,
     cancel: Option<&crate::progress::CancelToken>,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
 ) -> Result<()> {
     uc.reset_stats();
     let requested_flags = if show_all_untracked {
@@ -1218,6 +1226,7 @@ pub(crate) fn refresh_untracked_cache_for_status(
         work_tree,
         uc,
         cancel,
+        listing_cache,
     )?;
 
     collapse_tracked_only_untr_subtree(&mut root);
@@ -1309,6 +1318,7 @@ fn read_directory_recursive(
     abs: &Path,
     uc: &mut UntrackedCache,
     cancel: Option<&crate::progress::CancelToken>,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
 ) -> Result<()> {
     let parent_exclude_rel = if rel.is_empty() {
         ".gitignore".to_string()
@@ -1345,7 +1355,28 @@ fn read_directory_recursive(
         } else {
             abs.to_path_buf()
         };
-        DirSource::Disk(fs::read_dir(&p).map_err(Error::Io)?)
+        #[cfg(windows)]
+        if let Some(cache) = listing_cache {
+            if let Ok(listing) = cache.listing(&p, 0) {
+                let mut names: Vec<_> = listing.by_name.keys().cloned().collect();
+                names.sort();
+                DirSource::WinListing {
+                    listing,
+                    names,
+                    idx: 0,
+                    abs_parent: p,
+                }
+            } else {
+                DirSource::Disk(fs::read_dir(&p).map_err(Error::Io)?)
+            }
+        } else {
+            DirSource::Disk(fs::read_dir(&p).map_err(Error::Io)?)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = listing_cache;
+            DirSource::Disk(fs::read_dir(&p).map_err(Error::Io)?)
+        }
     } else {
         let mut child_dirs: Vec<_> = ucd
             .dirs
@@ -1385,6 +1416,29 @@ fn read_directory_recursive(
                 if !is_dir && crate::read_dir_kind::entry_is_git_ignored_special(&entry)? {
                     continue;
                 }
+                Some((stored_name, name_bytes, path, is_dir))
+            }
+            #[cfg(windows)]
+            DirSource::WinListing {
+                listing,
+                names,
+                idx,
+                abs_parent,
+            } => {
+                if *idx >= names.len() {
+                    break;
+                }
+                let name_bytes = names[*idx].clone();
+                *idx += 1;
+                if name_bytes == b".git" {
+                    continue;
+                }
+                let Some(entry) = listing.by_name.get(&name_bytes) else {
+                    continue;
+                };
+                let stored_name = storage_string(&name_bytes);
+                let path = abs_parent.join(String::from_utf8_lossy(&name_bytes));
+                let is_dir = entry.stat.is_dir;
                 Some((stored_name, name_bytes, path, is_dir))
             }
             DirSource::Cache {
@@ -1463,6 +1517,7 @@ fn read_directory_recursive(
                 &path,
                 uc,
                 cancel,
+                listing_cache,
             )?;
         } else {
             let is_ign = matcher.is_path_ignored(repo, Some(index), &child_rel, false)?;
@@ -1512,6 +1567,7 @@ fn visit_untracked_directory_uc(
     abs: &Path,
     uc: &mut UntrackedCache,
     cancel: Option<&crate::progress::CancelToken>,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
 ) -> Result<()> {
     if let Some(token) = cancel {
         token.poll_result()?;
@@ -1536,6 +1592,7 @@ fn visit_untracked_directory_uc(
             abs,
             uc,
             cancel,
+            listing_cache,
         );
     }
 
@@ -1584,6 +1641,7 @@ fn visit_untracked_directory_uc(
             abs,
             uc,
             cancel,
+            listing_cache,
         );
     }
 
@@ -1648,6 +1706,7 @@ fn visit_untracked_directory_uc(
             abs,
             uc,
             cancel,
+            listing_cache,
         );
     }
 

@@ -87,7 +87,7 @@ pub const PARALLEL_STAT_MIN_ENTRIES: usize = 1000;
 const PARALLEL_STAT_MIN_SLICE_ENTRIES: usize = 8;
 
 /// Parallelism controls for directory-grouped blob scans (honors `core.preloadIndex`).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct WorktreeBlobScanOptions {
     /// When false, parallel stat workers are off unless
     /// [`Self::parallel_stat_without_preload`] is set (honors `core.preloadIndex` when true).
@@ -98,6 +98,8 @@ pub(crate) struct WorktreeBlobScanOptions {
     /// Parallel directory stat scans without treating the scan as index preload (no
     /// `core.preloadIndex` gate); used when callers must keep RSS down but still stat widely.
     pub parallel_stat_without_preload: bool,
+    /// When set, directory listings are shared across the scan (Windows status fscache).
+    pub listing_cache: Option<std::sync::Arc<crate::windows_dir_listing::WorktreeListingCache>>,
 }
 
 /// Returns how many threads a blob scan should use for `blob_count` entries.
@@ -105,7 +107,7 @@ pub(crate) struct WorktreeBlobScanOptions {
 pub(crate) fn stat_scan_thread_count(
     policy: &crate::parallel::ThreadPolicy,
     config: &crate::config::ConfigSet,
-    options: WorktreeBlobScanOptions,
+    options: &WorktreeBlobScanOptions,
     blob_count: usize,
 ) -> usize {
     if blob_count < PARALLEL_STAT_MIN_ENTRIES {
@@ -209,11 +211,13 @@ fn align_lookup_stat_with_index_path_windows(
     if crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy) {
         return BlobDiskLookup::Present(stat);
     }
-    // NTFS read_dir metadata can disagree with the index on ctime/inode while mtime+size still
-    // match; avoid a second path stat in that case (#1622). A disagreement in the sub-second
-    // fractions compared under `core.usenanosec` still takes the path probe, or every such
-    // entry would be re-hashed.
+    // NTFS directory enumeration can disagree with the index on ctime/inode while mtime+size still
+    // match; avoid a second path stat in that case (#1622, #2566). Only size, write time, creation
+    // time (under `trust_ctime`), or reparse points take the path probe.
     if stat.fields.size_and_times_match_index(ie, stat_policy) {
+        return BlobDiskLookup::Present(stat);
+    }
+    if !align_lookup_needs_path_probe(ie, &stat, stat_policy) {
         return BlobDiskLookup::Present(stat);
     }
     match symlink_metadata_path(&target_abs()) {
@@ -228,6 +232,36 @@ fn align_lookup_stat_with_index_path_windows(
         // `read_dir` already found the file; keep the scan stat when the path probe fails.
         Err(_) => BlobDiskLookup::Present(stat),
     }
+}
+
+#[cfg(windows)]
+fn align_lookup_needs_path_probe(
+    ie: &crate::index::IndexEntry,
+    stat: &BlobDiskStat,
+    stat_policy: crate::index::StatMatchPolicy,
+) -> bool {
+    if stat.reparse_point {
+        return true;
+    }
+    if stat.fields.size != ie.size {
+        return true;
+    }
+    if stat.fields.mtime_sec != ie.mtime_sec {
+        return true;
+    }
+    if stat_policy.use_nanosec && stat_policy.check_stat && stat.fields.mtime_nsec != ie.mtime_nsec
+    {
+        return true;
+    }
+    if stat_policy.trust_ctime && stat_policy.check_stat {
+        if stat.fields.ctime_sec != ie.ctime_sec {
+            return true;
+        }
+        if stat_policy.use_nanosec && stat.fields.ctime_nsec != ie.ctime_nsec {
+            return true;
+        }
+    }
+    false
 }
 
 use std::collections::BTreeSet;
@@ -445,6 +479,9 @@ pub(crate) struct BlobDiskStat {
     pub(crate) is_dir: bool,
     /// Worktree byte length before index munging (`st_size` / `metadata.len()`).
     pub(crate) raw_size: u64,
+    /// Set when stat came from a `WIN32_FIND_DATA` reparse-point entry (Windows only).
+    #[cfg(windows)]
+    pub(crate) reparse_point: bool,
 }
 
 impl BlobDiskStat {
@@ -462,6 +499,8 @@ impl BlobDiskStat {
             },
             is_dir: kind == libc::S_IFDIR,
             raw_size: stat.st_size as u64,
+            #[cfg(windows)]
+            reparse_point: kind == libc::S_IFLNK,
         }
     }
 
@@ -472,6 +511,8 @@ impl BlobDiskStat {
             git_mode: crate::diff::mode_from_metadata(meta),
             is_dir: meta.is_dir() && !meta.file_type().is_symlink(),
             raw_size: meta.len(),
+            #[cfg(windows)]
+            reparse_point: meta.file_type().is_symlink(),
         }
     }
 
@@ -719,6 +760,7 @@ fn collect_blob_lookups_in_directory(
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
     literal_paths: bool,
     under_symlink: bool,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
     out: &mut Vec<(usize, BlobDiskLookup)>,
     sparse: BlobScanSparseMode,
     scanned: &mut usize,
@@ -738,6 +780,7 @@ fn collect_blob_lookups_in_directory(
         file_abs,
         literal_paths,
         under_symlink,
+        listing_cache,
         boundary,
         cancel_stride,
         &mut |entry_index, rel_path, lookup| {
@@ -783,6 +826,7 @@ fn for_each_blob_in_one_directory<F>(
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
     literal_paths: bool,
     under_symlink: bool,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
     boundary: StatBoundaryPoll<'_>,
     cancel_stride: &mut usize,
     visit: &mut F,
@@ -851,12 +895,25 @@ where
         let entry_index = entry_indices[0];
         let rel_path = entry_rel_path(index, entry_index)?;
         let file_name = entry_file_name(index, entry_index)?;
-        let lookup = lookup_lone_blob_in_directory(&abs_dir, file_name, || file_abs(rel_path));
+        let lookup = lookup_lone_blob_in_directory(listing_cache, &abs_dir, file_name, || {
+            file_abs(rel_path)
+        });
         visit(entry_index, rel_path, lookup)?;
         return Ok(());
     }
 
-    match read_directory_map(&abs_dir, entry_indices.len())? {
+    match read_directory_map(listing_cache, &abs_dir, entry_indices.len())? {
+        #[cfg(windows)]
+        DirectoryReadOutcome::Listed(on_disk) => {
+            for &entry_index in entry_indices {
+                boundary.poll_stride(cancel_stride)?;
+                let rel_path = entry_rel_path(index, entry_index)?;
+                let file_name = entry_file_name(index, entry_index)?;
+                let lookup = lookup_blob_in_directory(&on_disk, file_name, || file_abs(rel_path));
+                visit(entry_index, rel_path, lookup)?;
+            }
+        }
+        #[cfg(not(windows))]
         DirectoryReadOutcome::Listed(on_disk) => {
             for &entry_index in entry_indices {
                 boundary.poll_stride(cancel_stride)?;
@@ -1050,6 +1107,7 @@ fn collect_blob_lookups_serial(
     dir_abs: &dyn Fn(&[u8]) -> PathBuf,
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
     literal_paths: bool,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
     sparse: BlobScanSparseMode,
     cancel: &StatScanCancel,
 ) -> Result<(Vec<(usize, BlobDiskLookup)>, usize)> {
@@ -1075,6 +1133,7 @@ fn collect_blob_lookups_serial(
             file_abs,
             literal_paths,
             under_symlink,
+            listing_cache,
             &mut out,
             sparse,
             &mut scanned,
@@ -1101,35 +1160,31 @@ where
     Ok(())
 }
 
-/// One indexed file under `abs_dir`: a single `read_dir` without building a map (Windows leaf dirs).
+/// One indexed file under `abs_dir`: one `FindFirstFileEx` without building a full map (leaf dirs).
 #[cfg(windows)]
 fn lookup_lone_blob_in_directory(
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
     abs_dir: &Path,
     index_file_name: &[u8],
     target_abs: impl FnOnce() -> PathBuf,
 ) -> BlobDiskLookup {
-    crate::test_probe_hooks::hooks::worktree_read_dir(abs_dir);
-    let rd = match fs::read_dir(abs_dir) {
-        Ok(rd) => rd,
-        Err(e)
+    match crate::windows_dir_listing::read_listing_cached(listing_cache, abs_dir, 1) {
+        Ok(listing) => {
+            if let Some(entry) = matching_listed_entry(&listing, index_file_name) {
+                BlobDiskLookup::Present(entry.stat)
+            } else {
+                symlink_metadata_blob_lookup(&target_abs())
+            }
+        }
+        Err(Error::Io(e))
             if e.kind() == io::ErrorKind::NotFound || e.kind() == io::ErrorKind::NotADirectory =>
         {
-            return BlobDiskLookup::Missing;
+            BlobDiskLookup::Missing
         }
-        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return BlobDiskLookup::Io(e),
-        Err(e) => return BlobDiskLookup::Io(e),
-    };
-    for item in rd {
-        let Ok(entry) = item else { continue };
-        let name = entry.file_name();
-        if name == ".git" {
-            continue;
-        }
-        if dir_entry_name_matches(index_file_name, &entry) {
-            return blob_lookup_from_dir_entry_or_path(Some(&entry), target_abs);
-        }
+        Err(Error::Io(e)) if e.kind() == io::ErrorKind::PermissionDenied => BlobDiskLookup::Io(e),
+        Err(Error::Io(e)) => BlobDiskLookup::Io(e),
+        Err(e) => BlobDiskLookup::Io(io::Error::other(e.to_string())),
     }
-    symlink_metadata_blob_lookup(&target_abs())
 }
 
 #[cfg(not(windows))]
@@ -1249,6 +1304,7 @@ fn collect_blob_lookups_for_index_slice<S, P>(
     dir_abs: &DirAbsFn,
     file_abs: &DirAbsFn,
     literal_paths: bool,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
     sparse: BlobScanSparseMode,
     local: &mut Vec<(usize, BlobDiskLookup)>,
     scanned: &mut usize,
@@ -1289,6 +1345,7 @@ where
                 file_abs,
                 literal_paths,
                 under_symlink,
+                listing_cache,
                 local,
                 sparse,
                 scanned,
@@ -1310,6 +1367,7 @@ fn preload_blob_lookups_parallel<S, P>(
     dir_abs: Arc<DirAbsFn>,
     file_abs: Arc<DirAbsFn>,
     literal_paths: bool,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
     sparse: BlobScanSparseMode,
     cancel: StatScanCancel,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>>
@@ -1345,6 +1403,7 @@ where
                         dir_abs.as_ref(),
                         file_abs.as_ref(),
                         literal_paths,
+                        listing_cache,
                         sparse,
                         &mut local,
                         &mut scanned,
@@ -1405,6 +1464,7 @@ where
         &dir_abs,
         &file_abs,
         false,
+        None,
         BlobScanSparseMode::Dense,
         &empty_cancel,
     )?;
@@ -1503,7 +1563,8 @@ where
     // Keep small scans on the existing metadata path: setting up descriptor-relative
     // probes pays off on the larger indexes that also justify stat preload.
     let literal_paths = literal_paths && blob_count >= PARALLEL_STAT_MIN_ENTRIES;
-    let threads = stat_scan_thread_count(thread_policy, config, scan_options, blob_count);
+    let listing_cache = crate::windows_dir_listing::listing_cache_ref(&scan_options.listing_cache);
+    let threads = stat_scan_thread_count(thread_policy, config, &scan_options, blob_count);
     let dir_abs_arc: Arc<DirAbsFn> = Arc::new(dir_abs);
     let file_abs_arc: Arc<DirAbsFn> = Arc::new(file_abs);
     let batches = if threads > 1 {
@@ -1515,6 +1576,7 @@ where
             Arc::clone(&dir_abs_arc),
             Arc::clone(&file_abs_arc),
             literal_paths,
+            listing_cache,
             sparse,
             cancel,
         )?
@@ -1526,6 +1588,7 @@ where
             dir_abs_arc.as_ref(),
             file_abs_arc.as_ref(),
             literal_paths,
+            listing_cache,
             sparse,
             &cancel,
         )?;
@@ -1598,18 +1661,34 @@ fn dir_entry_name_matches(index_file_name: &[u8], entry: &fs::DirEntry) -> bool 
     false
 }
 
+#[cfg(windows)]
+fn listed_name_matches(index_file_name: &[u8], disk_name: &[u8]) -> bool {
+    if disk_name == index_file_name {
+        return true;
+    }
+    if let (Ok(index), Ok(disk)) = (
+        std::str::from_utf8(index_file_name),
+        std::str::from_utf8(disk_name),
+    ) {
+        return index.eq_ignore_ascii_case(disk);
+    }
+    false
+}
+
 /// Resolve a directory listing entry for `index_file_name`, including case-insensitive matches.
 #[cfg(windows)]
-fn matching_dir_entry<'a>(
-    on_disk: &'a DirectoryMap,
+fn matching_listed_entry<'a>(
+    on_disk: &'a crate::windows_dir_listing::WindowsDirListing,
     index_file_name: &[u8],
-) -> Option<&'a fs::DirEntry> {
-    if let Some(entry) = on_disk.get(index_file_name) {
+) -> Option<&'a crate::windows_dir_listing::WindowsListedEntry> {
+    if let Some(entry) = on_disk.by_name.get(index_file_name) {
         return Some(entry);
     }
     on_disk
-        .values()
-        .find(|entry| dir_entry_name_matches(index_file_name, entry))
+        .by_name
+        .iter()
+        .find(|(name, _)| listed_name_matches(index_file_name, name))
+        .map(|(_, entry)| entry)
 }
 
 fn symlink_metadata_blob_lookup(target_abs: &Path) -> BlobDiskLookup {
@@ -1628,38 +1707,28 @@ fn symlink_metadata_blob_lookup(target_abs: &Path) -> BlobDiskLookup {
 /// fall back to path `symlink_metadata` when the name was not listed or dir-entry stat fails
 /// (#1518, #1622). Index disagreements with the scan stat are corrected later by
 /// [`align_lookup_stat_with_index_path_windows`].
+/// `target_abs` builds the indexed absolute path for a fallback stat when the name is absent
+/// from the directory listing.
 #[cfg(windows)]
-fn blob_lookup_from_dir_entry_or_path(
-    dir_entry: Option<&fs::DirEntry>,
+fn lookup_blob_in_directory(
+    on_disk: &crate::windows_dir_listing::WindowsDirListing,
+    index_file_name: &[u8],
     target_abs: impl FnOnce() -> PathBuf,
 ) -> BlobDiskLookup {
-    if let Some(entry) = dir_entry {
-        match dir_entry_metadata(entry) {
-            Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
-            Err(e)
-                if e.kind() == io::ErrorKind::NotFound
-                    || e.kind() == io::ErrorKind::NotADirectory =>
-            {
-                symlink_metadata_blob_lookup(&target_abs())
-            }
-            Err(e) => BlobDiskLookup::Io(e),
-        }
-    } else {
-        symlink_metadata_blob_lookup(&target_abs())
+    if let Some(entry) = matching_listed_entry(on_disk, index_file_name) {
+        return BlobDiskLookup::Present(entry.stat);
     }
+    symlink_metadata_blob_lookup(&target_abs())
 }
 
 /// `target_abs` builds the indexed absolute path for a fallback stat when the name is absent
 /// from the directory listing.
+#[cfg(not(windows))]
 fn lookup_blob_in_directory(
     on_disk: &DirectoryMap,
     index_file_name: &[u8],
     target_abs: impl FnOnce() -> PathBuf,
 ) -> BlobDiskLookup {
-    #[cfg(windows)]
-    if let Some(entry) = matching_dir_entry(on_disk, index_file_name) {
-        return blob_lookup_from_dir_entry_or_path(Some(entry), target_abs);
-    }
     if let Some(entry) = on_disk.get(index_file_name) {
         return match dir_entry_metadata(entry) {
             Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
@@ -1678,39 +1747,68 @@ fn lookup_blob_in_directory(
 }
 
 /// One directory listing keyed by raw file name (`.git` excluded).
+#[cfg(not(windows))]
 type DirectoryMap = hashbrown::HashMap<Vec<u8>, fs::DirEntry>;
 
 enum DirectoryReadOutcome {
+    #[cfg(not(windows))]
     Listed(DirectoryMap),
+    #[cfg(windows)]
+    Listed(std::sync::Arc<crate::windows_dir_listing::WindowsDirListing>),
     Missing,
     Inaccessible(io::Error),
 }
 
 /// `expected` sizes the map up front (the tracked entries in this directory).
-fn read_directory_map(abs_dir: &Path, expected: usize) -> Result<DirectoryReadOutcome> {
-    crate::test_probe_hooks::hooks::worktree_read_dir(abs_dir);
-    match fs::read_dir(abs_dir) {
-        Ok(rd) => {
-            let mut on_disk = DirectoryMap::with_capacity(expected);
-            for item in rd {
-                let Ok(entry) = item else { continue };
-                let name = dir_entry_key(&entry);
-                if name.as_slice() == b".git" {
-                    continue;
-                }
-                on_disk.insert(name, entry);
+fn read_directory_map(
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
+    abs_dir: &Path,
+    expected: usize,
+) -> Result<DirectoryReadOutcome> {
+    #[cfg(windows)]
+    {
+        match crate::windows_dir_listing::read_listing_cached(listing_cache, abs_dir, expected) {
+            Ok(listing) => Ok(DirectoryReadOutcome::Listed(listing)),
+            Err(Error::Io(e))
+                if e.kind() == io::ErrorKind::NotFound
+                    || e.kind() == io::ErrorKind::NotADirectory =>
+            {
+                Ok(DirectoryReadOutcome::Missing)
             }
-            Ok(DirectoryReadOutcome::Listed(on_disk))
+            Err(Error::Io(e)) if e.kind() == io::ErrorKind::PermissionDenied => {
+                Ok(DirectoryReadOutcome::Inaccessible(e))
+            }
+            Err(e) => Err(e),
         }
-        Err(e)
-            if e.kind() == io::ErrorKind::NotFound || e.kind() == io::ErrorKind::NotADirectory =>
-        {
-            Ok(DirectoryReadOutcome::Missing)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = listing_cache;
+        crate::test_probe_hooks::hooks::worktree_read_dir(abs_dir);
+        match fs::read_dir(abs_dir) {
+            Ok(rd) => {
+                let mut on_disk = DirectoryMap::with_capacity(expected);
+                for item in rd {
+                    let Ok(entry) = item else { continue };
+                    let name = dir_entry_key(&entry);
+                    if name.as_slice() == b".git" {
+                        continue;
+                    }
+                    on_disk.insert(name, entry);
+                }
+                Ok(DirectoryReadOutcome::Listed(on_disk))
+            }
+            Err(e)
+                if e.kind() == io::ErrorKind::NotFound
+                    || e.kind() == io::ErrorKind::NotADirectory =>
+            {
+                Ok(DirectoryReadOutcome::Missing)
+            }
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                Ok(DirectoryReadOutcome::Inaccessible(e))
+            }
+            Err(e) => Err(Error::Io(e)),
         }
-        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-            Ok(DirectoryReadOutcome::Inaccessible(e))
-        }
-        Err(e) => Err(Error::Io(e)),
     }
 }
 
@@ -2068,7 +2166,7 @@ mod tests {
         let dir = tmp.path().join("leaf");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("tracked.txt"), b"payload\n").unwrap();
-        let DirectoryReadOutcome::Listed(map) = read_directory_map(&dir, 1).unwrap() else {
+        let DirectoryReadOutcome::Listed(map) = read_directory_map(None, &dir, 1).unwrap() else {
             panic!("expected readable directory listing");
         };
         let lookup = lookup_blob_in_directory(&map, b"tracked.txt", || {
@@ -2299,14 +2397,15 @@ mod tests {
 
     #[test]
     fn core_preload_index_false_uses_single_thread() {
+        let opts = WorktreeBlobScanOptions {
+            preload_index: false,
+            stat_parallel_threads: Some(4),
+            ..WorktreeBlobScanOptions::default()
+        };
         let threads = stat_scan_thread_count(
             &crate::parallel::ThreadPolicy::default(),
             &crate::config::ConfigSet::new(),
-            WorktreeBlobScanOptions {
-                preload_index: false,
-                stat_parallel_threads: Some(4),
-                ..WorktreeBlobScanOptions::default()
-            },
+            &opts,
             PARALLEL_STAT_MIN_ENTRIES,
         );
         assert_eq!(threads, 1);
@@ -2314,14 +2413,15 @@ mod tests {
 
     #[test]
     fn parallel_stat_without_preload_uses_multiple_workers() {
+        let opts = WorktreeBlobScanOptions {
+            preload_index: false,
+            parallel_stat_without_preload: true,
+            ..WorktreeBlobScanOptions::default()
+        };
         let threads = stat_scan_thread_count(
             &crate::parallel::ThreadPolicy::default(),
             &crate::config::ConfigSet::new(),
-            WorktreeBlobScanOptions {
-                preload_index: false,
-                parallel_stat_without_preload: true,
-                ..WorktreeBlobScanOptions::default()
-            },
+            &opts,
             PARALLEL_STAT_MIN_ENTRIES + 500,
         );
         assert!(

@@ -425,14 +425,15 @@ fn stage_tracked_modifications_in_index_body(
     let preload_index = rules_config.preload_index();
     let blob_count = blob_dirs.len();
     let thread_policy = repo.thread_policy();
+    let stat_scan_opts = WorktreeBlobScanOptions {
+        preload_index,
+        stat_parallel_threads: None,
+        ..WorktreeBlobScanOptions::default()
+    };
     let stat_threads = stat_scan_thread_count(
         &thread_policy,
         rules_config.as_ref(),
-        WorktreeBlobScanOptions {
-            preload_index,
-            stat_parallel_threads: None,
-            ..WorktreeBlobScanOptions::default()
-        },
+        &stat_scan_opts,
         blob_count,
     );
     let blob_scan_opts = WorktreeBlobScanOptions {

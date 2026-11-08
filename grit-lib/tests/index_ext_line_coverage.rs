@@ -49,7 +49,7 @@ fn refresh_normal(
 ) {
     let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
-    refresh_untracked_cache_for_status(repo, idx, wt, cfg.as_ref(), uc, false, ignored, None)
+    refresh_untracked_cache_for_status(repo, idx, wt, cfg.as_ref(), uc, false, ignored, None, None)
         .expect("refresh");
 }
 
@@ -170,6 +170,7 @@ fn untracked_cache_all_mode_and_mode_switch() {
         true,
         UntrackedIgnoredMode::No,
         None,
+        None,
     )
     .expect("all mode refresh");
     let all_paths: BTreeSet<_> = collect_untracked_from_cache(&uc).into_iter().collect();
@@ -183,6 +184,7 @@ fn untracked_cache_all_mode_and_mode_switch() {
         &mut uc,
         false,
         UntrackedIgnoredMode::No,
+        None,
         None,
     )
     .expect("normal mode refresh");
@@ -700,6 +702,7 @@ fn untracked_cache_many_loose_files_normal_and_all() {
         true,
         UntrackedIgnoredMode::No,
         None,
+        None,
     )
     .expect("all");
     assert_eq!(collect_untracked_from_cache(&uc).len(), 55);
@@ -712,6 +715,7 @@ fn untracked_cache_many_loose_files_normal_and_all() {
         &mut uc,
         false,
         UntrackedIgnoredMode::Traditional,
+        None,
         None,
     )
     .expect("normal");
@@ -799,6 +803,7 @@ fn untracked_matching_all_mode_skips_excluded_directories() {
         &mut uc,
         true,
         UntrackedIgnoredMode::Matching,
+        None,
         None,
     )
     .expect("matching all");
