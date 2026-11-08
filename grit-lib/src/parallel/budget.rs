@@ -196,7 +196,7 @@ mod unix {
                 if got.len() == want {
                     break;
                 }
-                if !held[slot] && self.set_lock(slots.base + slot, libc::F_WRLCK) {
+                if !held[slot] && self.set_lock(slots.base + slot, libc::F_WRLCK as libc::c_short) {
                     held[slot] = true;
                     got.push(slot);
                 }
@@ -207,16 +207,16 @@ mod unix {
         pub(super) fn release(&self, slots: &Slots, indices: &[usize]) {
             let mut held = slots.held.lock().unwrap_or_else(|e| e.into_inner());
             for &slot in indices {
-                self.set_lock(slots.base + slot, libc::F_UNLCK);
+                self.set_lock(slots.base + slot, libc::F_UNLCK as libc::c_short);
                 held[slot] = false;
             }
         }
 
         /// Take or drop the one-byte lock at `offset` without waiting.
-        fn set_lock(&self, offset: usize, kind: i32) -> bool {
+        fn set_lock(&self, offset: usize, kind: libc::c_short) -> bool {
             // SAFETY: an all-zero `flock` is a valid value; the fields that matter are set below.
             let mut lock: libc::flock = unsafe { std::mem::zeroed() };
-            lock.l_type = kind as libc::c_short;
+            lock.l_type = kind;
             lock.l_whence = libc::SEEK_SET as libc::c_short;
             lock.l_start = offset as libc::off_t;
             lock.l_len = 1;
