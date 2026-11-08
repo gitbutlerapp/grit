@@ -104,11 +104,8 @@ fn fsck_staged_packed_large_blob_index_check_peak_memory_stays_bounded() {
             &CancelToken::never(),
         )
         .expect("repack");
-    prune_packed_objects(
-        repo.odb().objects_dir(),
-        PrunePackedOptions::default(),
-    )
-    .expect("prune packed loose");
+    prune_packed_objects(repo.odb().objects_dir(), PrunePackedOptions::default())
+        .expect("prune packed loose");
     let _ = std::fs::write("/proc/self/clear_refs", "5");
     let before = peak_rss_bytes();
     let report = repo
@@ -133,6 +130,7 @@ fn fsck_staged_packed_large_blob_index_check_peak_memory_stays_bounded() {
 fn fsck_streaming_loose_blob_hash_mismatch() {
     const SIZE: usize = THRESHOLD * 4;
     let dir = TempDir::new().expect("tempdir");
+    let (_, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     write_config_threshold(&dir);
     let objects = dir.path().join(".git/objects");
     let oid_hex = write_loose_object(&objects, FixtureAlgo::Sha1, "blob", &vec![1u8; SIZE])
