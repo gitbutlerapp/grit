@@ -17,7 +17,7 @@ use crate::worktree::WorktreeError;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -1537,8 +1537,17 @@ fn checkout_hard_to_tree_journaled(
             true,
         )?
         else {
-            index.entries[pos] =
-                stream_checkout_entry(repo, work_tree, &rel, mode, &change, &mut dir_cache, oid)?;
+            index.entries[pos] = stream_checkout_entry(
+                repo,
+                work_tree,
+                &rel,
+                mode,
+                &change,
+                &mut dir_cache,
+                oid,
+                rules.conversion(),
+                &rules.file_attrs(&rel, false),
+            )?;
             continue;
         };
         let worktree_bytes = worktree_bytes_from_index_blob(
@@ -5390,18 +5399,71 @@ const STREAMED_CHECKOUT_COPY_BUF: usize = 256 * 1024;
 pub(crate) enum WorktreeFileContent<'a> {
     /// Bytes already in memory, after any checkout conversion.
     Bytes(&'a [u8]),
-    /// A blob payload copied verbatim from an object-database stream (regular files only).
+    /// A blob payload streamed from the object database (regular files only).
     ///
     /// The stream is spooled to a temporary file next to the destination, which is renamed
     /// into place only once the reader has reached its validated end: a corrupt or truncated
     /// object fails the checkout without leaving a partial file or disturbing the old one.
-    Stream(&'a mut dyn Read),
+    Stream {
+        reader: &'a mut dyn Read,
+        smudge: Option<(&'a crlf::ConversionConfig, &'a crlf::FileAttrs)>,
+    },
 }
 
 /// Copy `reader` into a new temporary file in `dir`, created with the checkout mode for `mode`.
 ///
 /// The temporary file is removed again when reading or writing fails, including when the
 /// reader reports a corrupt or truncated object at its end.
+#[allow(clippy::too_many_arguments)]
+fn spool_checkout_blob_with_smudge(
+    dir: &Path,
+    rel_path: &str,
+    reader: &mut dyn Read,
+    mode: u32,
+    conv: &crlf::ConversionConfig,
+    attrs: &crlf::FileAttrs,
+) -> Result<tempfile::NamedTempFile> {
+    const PROBE_MAX: usize = 8000;
+    let mut tmp = spool_stream_to_temp(dir, rel_path, reader, mode)?;
+    let mut probe = Vec::new();
+    {
+        use std::io::Read;
+        let file = tmp.as_file_mut();
+        file.rewind().map_err(Error::Io)?;
+        let mut buf = vec![0u8; PROBE_MAX.min(STREAMED_CHECKOUT_COPY_BUF)];
+        let n = file.read(&mut buf).map_err(Error::Io)?;
+        probe.extend_from_slice(&buf[..n]);
+        file.rewind().map_err(Error::Io)?;
+    }
+    if crlf::probe_is_binary_prefix(&probe) {
+        return Ok(tmp);
+    }
+    if !crlf::checkout_needs_lf_to_crlf_smudge(tmp.as_file_mut(), conv, attrs).map_err(Error::Io)? {
+        tmp.as_file_mut().rewind().map_err(Error::Io)?;
+        return Ok(tmp);
+    }
+    let raw = tmp.as_file_mut();
+    raw.rewind().map_err(Error::Io)?;
+    let write_error = |e: std::io::Error| {
+        crate::worktree::map_worktree_io(rel_path, WorktreePathOperation::Replace, e)
+    };
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".grit-checkout-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(git_create_mode_for_index_mode(
+            mode,
+        )));
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    let mut out = builder.tempfile_in(dir).map_err(write_error)?;
+    crlf::stream_lf_to_crlf(raw, out.as_file_mut()).map_err(Error::Io)?;
+    drop(tmp);
+    Ok(out)
+}
+
 fn spool_stream_to_temp(
     dir: &Path,
     rel_path: &str,
@@ -5440,8 +5502,9 @@ fn spool_stream_to_temp(
 /// Read blob `oid` for checkout, or return `None` when it should be streamed instead.
 ///
 /// A regular file whose checkout conversion is the identity
-/// ([`crlf::worktree_conversion_is_identity`]) and whose blob is larger than
-/// [`STREAMED_CHECKOUT_LIMIT`] is left for [`stream_checkout_entry`]; everything else is read
+/// ([`crlf::worktree_conversion_is_identity`]) or only needs content-dependent CRLF smudge
+/// ([`crlf::worktree_checkout_may_stream_crlf`]), and whose blob is larger than
+/// [`STREAMED_CHECKOUT_LIMIT`], is left for [`stream_checkout_entry`]; everything else is read
 /// whole. Objects within the limit are read in that one lookup; a streamed object is opened
 /// again by [`stream_checkout_entry`]. Bulk callers enable `cache_small` to reuse
 /// small loose objects between planning and materialization; direct writes bypass it.
@@ -5453,7 +5516,12 @@ pub(crate) fn read_blob_unless_streamed(
     oid: &ObjectId,
     cache_small: bool,
 ) -> Result<Option<Object>> {
-    if !is_regular_git_mode(mode) || !crlf::worktree_conversion_is_identity(conv, attrs) {
+    if !is_regular_git_mode(mode) {
+        return repo.odb().read(oid).map(Some);
+    }
+    let may_stream = crlf::worktree_conversion_is_identity(conv, attrs)
+        || crlf::worktree_checkout_may_stream_crlf(conv, attrs);
+    if !may_stream {
         return repo.odb().read(oid).map(Some);
     }
     match repo
@@ -5473,6 +5541,7 @@ pub(crate) fn read_blob_unless_streamed(
 ///
 /// [`crate::error::ObjectError::NotFound`] when the object is missing, [`Error::Io`] when its stream is
 /// corrupt, and the usual work-tree write errors.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn stream_checkout_entry(
     repo: &Repository,
     work_tree: &Path,
@@ -5481,6 +5550,8 @@ pub(crate) fn stream_checkout_entry(
     change: &DiffEntry,
     dir_cache: &mut LeadingDirCache,
     oid: ObjectId,
+    conv: &crlf::ConversionConfig,
+    attrs: &crlf::FileAttrs,
 ) -> Result<IndexEntry> {
     repo.odb()
         .with_stream(&oid, |stream| {
@@ -5488,7 +5559,11 @@ pub(crate) fn stream_checkout_entry(
             write_checkout_entry(
                 work_tree,
                 rel_path,
-                WorktreeFileContent::Stream(&mut *reader),
+                WorktreeFileContent::Stream {
+                    reader: &mut *reader,
+                    smudge: crlf::worktree_checkout_may_stream_crlf(conv, attrs)
+                        .then_some((conv, attrs)),
+                },
                 mode,
                 change,
                 dir_cache,
@@ -5523,7 +5598,11 @@ pub(crate) fn write_blob_to_worktree(
                 write_worktree_content(
                     work_tree,
                     rel_path,
-                    WorktreeFileContent::Stream(&mut *reader),
+                    WorktreeFileContent::Stream {
+                        reader: &mut *reader,
+                        smudge: crlf::worktree_checkout_may_stream_crlf(rules.conversion(), &attrs)
+                            .then_some((rules.conversion(), &attrs)),
+                    },
                     mode,
                     dir_cache,
                     has_symlinks,
@@ -5582,7 +5661,7 @@ fn write_checkout_entry(
 
     let symlink_target_len = (mode == MODE_SYMLINK).then_some(match &content {
         WorktreeFileContent::Bytes(data) => data.len(),
-        WorktreeFileContent::Stream(_) => 0,
+        WorktreeFileContent::Stream { .. } => 0,
     });
     let has_symlinks = dir_cache.has_symlinks();
     let meta = write_worktree_content(work_tree, rel_path, content, mode, dir_cache, has_symlinks)?;
@@ -5941,14 +6020,18 @@ fn write_worktree_content(
     }
     let ready = match content {
         WorktreeFileContent::Bytes(data) => Ready::Bytes(data),
-        WorktreeFileContent::Stream(_) if mode == MODE_SYMLINK => {
+        WorktreeFileContent::Stream { .. } if mode == MODE_SYMLINK => {
             return Err(Error::Worktree(WorktreeError::Path {
                 detail: format!("symlink target for '{rel_path}' must be in memory"),
             }));
         }
-        WorktreeFileContent::Stream(reader) => {
+        WorktreeFileContent::Stream { reader, smudge } => {
             let dir = abs_path.parent().unwrap_or(work_tree);
-            Ready::Spooled(spool_stream_to_temp(dir, rel_path, reader, mode)?)
+            Ready::Spooled(if let Some((conv, attrs)) = smudge {
+                spool_checkout_blob_with_smudge(dir, rel_path, reader, mode, conv, attrs)?
+            } else {
+                spool_stream_to_temp(dir, rel_path, reader, mode)?
+            })
         }
     };
 

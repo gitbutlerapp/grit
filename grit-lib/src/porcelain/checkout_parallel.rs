@@ -376,6 +376,7 @@ fn prepare_write_job(
 
 fn write_prepared_job(
     repo: &Repository,
+    conv: &ConversionConfig,
     work_tree: &Path,
     job: &CheckoutWriteJob<'_>,
     bytes: Option<&[u8]>,
@@ -384,7 +385,15 @@ fn write_prepared_job(
     job.mark_touched();
     let Some(bytes) = bytes else {
         return stream_checkout_entry(
-            repo, work_tree, &job.path, job.mode, job.change, dir_cache, job.oid,
+            repo,
+            work_tree,
+            &job.path,
+            job.mode,
+            job.change,
+            dir_cache,
+            job.oid,
+            conv,
+            &job.file_attrs,
         );
     };
     write_checkout_entry(
@@ -401,6 +410,7 @@ fn write_prepared_job(
 #[allow(clippy::too_many_arguments)]
 fn flush_prepared_writes_serial(
     repo: &Repository,
+    conv: &ConversionConfig,
     work_tree: &Path,
     jobs: &[CheckoutWriteJob<'_>],
     prepared: &[PreparedWrite],
@@ -413,6 +423,7 @@ fn flush_prepared_writes_serial(
         crate::progress::poll_cancel(progress, cancel)?;
         let entry = write_prepared_job(
             repo,
+            conv,
             work_tree,
             &jobs[item.idx],
             item.bytes.as_deref(),
@@ -423,8 +434,10 @@ fn flush_prepared_writes_serial(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn flush_prepared_writes_parallel(
     repo: &Repository,
+    conv: &ConversionConfig,
     options: ParallelOptions,
     work_tree: &Path,
     jobs: &[CheckoutWriteJob<'_>],
@@ -445,6 +458,7 @@ fn flush_prepared_writes_parallel(
         |worker, item| {
             write_prepared_job(
                 repo,
+                conv,
                 &worker.work_tree,
                 &jobs[item.idx],
                 item.bytes.as_deref(),
@@ -480,7 +494,15 @@ fn materialize_write_job_serial(
     )?
     else {
         return stream_checkout_entry(
-            repo, work_tree, &job.path, job.mode, job.change, dir_cache, job.oid,
+            repo,
+            work_tree,
+            &job.path,
+            job.mode,
+            job.change,
+            dir_cache,
+            job.oid,
+            rules.conversion(),
+            &job.file_attrs,
         )
         .map(WriteJobOutcome::Index);
     };
@@ -560,7 +582,7 @@ fn flush_parallel_batch(
                         prepared.push(item);
                         if prepared_bytes >= PREPARED_WRITE_BYTES {
                             flush_prepared_batch(
-                                repo, pool, work_tree, jobs, &prepared, dir_cache, outcomes,
+                                repo, conv, pool, work_tree, jobs, &prepared, dir_cache, outcomes,
                                 progress, cancel,
                             )?;
                             prepared.clear();
@@ -579,8 +601,8 @@ fn flush_parallel_batch(
                         Ok(bytes) => bytes,
                         Err(err) => {
                             flush_prepared_writes_serial(
-                                repo, work_tree, jobs, &prepared, dir_cache, outcomes, progress,
-                                cancel,
+                                repo, conv, work_tree, jobs, &prepared, dir_cache, outcomes,
+                                progress, cancel,
                             )?;
                             return Err(err);
                         }
@@ -590,8 +612,8 @@ fn flush_parallel_batch(
                     prepared.push(item);
                     if prepared_bytes >= PREPARED_WRITE_BYTES {
                         flush_prepared_batch(
-                            repo, pool, work_tree, jobs, &prepared, dir_cache, outcomes, progress,
-                            cancel,
+                            repo, conv, pool, work_tree, jobs, &prepared, dir_cache, outcomes,
+                            progress, cancel,
                         )?;
                         prepared.clear();
                         prepared_bytes = 0;
@@ -602,13 +624,14 @@ fn flush_parallel_batch(
         }
     }
     flush_prepared_batch(
-        repo, pool, work_tree, jobs, &prepared, dir_cache, outcomes, progress, cancel,
+        repo, conv, pool, work_tree, jobs, &prepared, dir_cache, outcomes, progress, cancel,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn flush_prepared_batch(
     repo: &Repository,
+    conv: &ConversionConfig,
     pool: Option<ParallelOptions>,
     work_tree: &Path,
     jobs: &[CheckoutWriteJob],
@@ -625,6 +648,7 @@ fn flush_prepared_batch(
         let parent_snapshot = LeadingDirCache::with_ready_from(&*dir_cache);
         flush_prepared_writes_parallel(
             repo,
+            conv,
             options,
             work_tree,
             jobs,
@@ -634,7 +658,7 @@ fn flush_prepared_batch(
         )?;
     } else {
         flush_prepared_writes_serial(
-            repo, work_tree, jobs, prepared, dir_cache, outcomes, progress, cancel,
+            repo, conv, work_tree, jobs, prepared, dir_cache, outcomes, progress, cancel,
         )?;
     }
     for _ in prepared {

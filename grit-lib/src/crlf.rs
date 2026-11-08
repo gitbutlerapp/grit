@@ -662,7 +662,7 @@ const CONVERT_STAT_BITS_TXT_CRLF: u32 = 0x2;
 const CONVERT_STAT_BITS_BIN: u32 = 0x4;
 
 #[derive(Default, Clone)]
-struct TextStat {
+pub(crate) struct TextStat {
     nul: u32,
     lonecr: u32,
     lonelf: u32,
@@ -1673,6 +1673,88 @@ pub fn crlf_to_lf(data: &[u8]) -> Vec<u8> {
     out
 }
 
+fn merge_text_stat(into: &mut TextStat, from: &TextStat) {
+    into.nul += from.nul;
+    into.lonecr += from.lonecr;
+    into.lonelf += from.lonelf;
+    into.crlf += from.crlf;
+    into.printable += from.printable;
+    into.nonprintable += from.nonprintable;
+}
+
+/// Line-ending stats over a reader without loading it whole into memory.
+pub(crate) fn text_stat_from_reader(mut reader: impl std::io::Read) -> std::io::Result<TextStat> {
+    const CHUNK: usize = 256 * 1024;
+    let mut stats = TextStat::default();
+    let mut carry = Vec::new();
+    let mut buf = vec![0u8; CHUNK];
+    loop {
+        let n = std::io::Read::read(&mut reader, &mut buf)?;
+        if n == 0 && carry.is_empty() {
+            break;
+        }
+        let mut chunk = std::mem::take(&mut carry);
+        chunk.extend_from_slice(&buf[..n]);
+        if n == 0 {
+            let mut tail_stats = gather_text_stat(&chunk);
+            if chunk.last() == Some(&0x1a) {
+                tail_stats.nonprintable = tail_stats.nonprintable.saturating_sub(1);
+            }
+            merge_text_stat(&mut stats, &tail_stats);
+            break;
+        }
+        if chunk.len() > 1 {
+            merge_text_stat(&mut stats, &gather_text_stat(&chunk[..chunk.len() - 1]));
+            if let Some(&last) = chunk.last() {
+                carry.push(last);
+            }
+        } else {
+            carry = chunk;
+        }
+    }
+    Ok(stats)
+}
+
+/// Stream `reader` into `writer`, expanding lone LFs to CRLF.
+pub(crate) fn stream_lf_to_crlf(
+    mut reader: impl std::io::Read,
+    mut writer: impl std::io::Write,
+) -> std::io::Result<()> {
+    let mut buf = [0u8; 8192];
+    let mut prev = b' ';
+    loop {
+        let n = std::io::Read::read(&mut reader, &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        for &c in &buf[..n] {
+            if c == b'\n' && prev != b'\r' {
+                std::io::Write::write_all(&mut writer, b"\r\n")?;
+            } else {
+                std::io::Write::write_all(&mut writer, &[c])?;
+            }
+            prev = c;
+        }
+    }
+    Ok(())
+}
+
+/// Probe bytes already streamed from a blob (at most 8000).
+#[must_use]
+pub(crate) fn probe_is_binary_prefix(probe: &[u8]) -> bool {
+    is_binary(probe)
+}
+
+/// After a verbatim spool, decide whether checkout still needs LF→CRLF smudge.
+pub(crate) fn checkout_needs_lf_to_crlf_smudge(
+    reader: impl std::io::Read,
+    conv: &ConversionConfig,
+    attrs: &FileAttrs,
+) -> std::io::Result<bool> {
+    let stats = text_stat_from_reader(reader)?;
+    Ok(will_convert_lf_to_crlf_from_stats(&stats, conv, attrs))
+}
+
 /// Replace lone LF with CRLF.
 pub fn lf_to_crlf(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len() + data.len() / 10);
@@ -1906,6 +1988,41 @@ pub(crate) fn worktree_conversion_is_identity(conv: &ConversionConfig, attrs: &F
         && attrs.filter_process.is_none()
         && !attrs.filter_smudge_required
         && !crlf_output_possible(conv, attrs)
+}
+
+/// Whether checkout may stream a large blob and apply LF→CRLF only when the content requires it.
+///
+/// Used for `core.autocrlf`, `text=auto`, and `eol=crlf` with `text=auto`. Paths that always
+/// smudge to CRLF (explicit `text`, legacy `crlf`, filters, `ident`, encodings) must stay on
+/// the buffered path.
+#[must_use]
+pub(crate) fn worktree_checkout_may_stream_crlf(
+    conv: &ConversionConfig,
+    attrs: &FileAttrs,
+) -> bool {
+    if attrs.ident
+        || attrs.working_tree_encoding.is_some()
+        || attrs.filter_smudge.is_some()
+        || attrs.filter_process.is_some()
+        || attrs.filter_smudge_required
+    {
+        return false;
+    }
+    if !crlf_output_possible(conv, attrs) {
+        return false;
+    }
+    match attrs.crlf_legacy {
+        CrlfLegacyAttr::Unset | CrlfLegacyAttr::Input | CrlfLegacyAttr::Crlf => return false,
+        CrlfLegacyAttr::Unspecified => {}
+    }
+    if attrs.text == TextAttr::Set {
+        return false;
+    }
+    if attrs.eol != EolAttr::Unspecified && attrs.text != TextAttr::Auto {
+        return false;
+    }
+    attrs.text == TextAttr::Auto
+        || (attrs.text == TextAttr::Unspecified && conv.autocrlf == AutoCrlf::True)
 }
 
 /// Whether some content at this path could be converted LF→CRLF on output.
@@ -2397,6 +2514,29 @@ mod tests {
             }
         }
         assert!(identities > 0);
+    }
+
+    #[test]
+    #[test]
+    fn worktree_checkout_may_stream_content_dependent_crlf() {
+        let mut conv = ConversionConfig::from_config(&ConfigSet::new());
+        conv.autocrlf = AutoCrlf::True;
+        assert!(worktree_checkout_may_stream_crlf(
+            &conv,
+            &FileAttrs::default()
+        ));
+        let mut explicit = FileAttrs::default();
+        explicit.text = TextAttr::Set;
+        assert!(!worktree_checkout_may_stream_crlf(&conv, &explicit));
+    }
+
+    #[test]
+    fn stream_lf_to_crlf_matches_lf_to_crlf() {
+        use std::io::Cursor;
+        let data = b"line one\nline two\n";
+        let mut out = Vec::new();
+        stream_lf_to_crlf(Cursor::new(data), &mut out).expect("stream");
+        assert_eq!(out, lf_to_crlf(data));
     }
 
     #[test]
