@@ -3,13 +3,12 @@
 use std::path::Path;
 
 use crate::support::{git, git_ls_files_stage, open_grit_repo};
+use grit_lib::commits::CommitScope;
 use grit_lib::error::Error;
 use grit_lib::index::IndexError;
-use grit_lib::commits::{CommitOptions, CommitScope};
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::progress::{CancelToken, NullProgress};
 use grit_test_support::{abort_branch_merge, integrate_branch};
 
 fn build_issue_2359_fixture(root: &Path) -> (ObjectId, ObjectId) {

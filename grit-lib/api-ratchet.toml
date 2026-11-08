@@ -3,12 +3,12 @@
 
 [meta]
 updated = "2026-11-08"
-semver_baseline = "951b33fb7b9e65a1a2578732031760f035afe3ac"
+semver_baseline = "a20a56665d543ee3eb32283d7ddbb6e2c1c620a4"
 
 [counts]
 pub_repo_constructors = 3
 pub_repo_constructor_offenders = 4
-public_api_lines = 30950
+public_api_lines = 31488
 pub_fn_impl_suffix = 0
 pub_fn_with_in_name = 28
 pub_fn_too_many_arguments_allow = 7
@@ -32,4 +32,4 @@ pub_error_string_tuple_variants = 0
 pub_error_enum_not_non_exhaustive = 0
 pub_area_error_wraps_umbrella = 0
 error_message_construction_sites = 0
-doc_example_free_fn_calls = 1
+doc_example_free_fn_calls = 0

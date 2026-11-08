@@ -14,6 +14,7 @@ use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 
 fn git_porcelain(repo: &std::path::Path) -> String {
     git(repo, &["status", "--porcelain"])
@@ -2229,7 +2230,7 @@ fn switch_create_advances_index_gitlink_when_submodule_ahead() {
 fn merge_fast_forward_advances_index_gitlink_when_submodule_ahead() {
     let fixture = GitlinkAhead::new(1, false);
     let repo = fixture.repo();
-    let outcome = grit_lib::porcelain::merge::integrate_branch(
+    let outcome = integrate_branch(
         &repo,
         "refs/heads/main",
         fixture.rev("HEAD"),
@@ -2242,7 +2243,7 @@ fn merge_fast_forward_advances_index_gitlink_when_submodule_ahead() {
     assert!(
         matches!(
             outcome,
-            grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward { .. }
+            grit_lib::merge::IntegrateBranchOutcome::FastForward { .. }
         ),
         "expected a fast-forward"
     );
@@ -2292,7 +2293,7 @@ fn merge_fast_forward_with_drifted_gitlink_matches_git() {
 
         let fixture = GitlinkAhead::new(sub_at, dirty);
         let repo = fixture.repo();
-        grit_lib::porcelain::merge::integrate_branch(
+        integrate_branch(
             &repo,
             "refs/heads/main",
             fixture.rev("HEAD"),
@@ -2573,7 +2574,7 @@ fn merge_fast_forward_keeps_files_in_uninitialized_gitlink_dir_like_git() {
 
     let fixture = gitlink_uninitialized_with_local_file();
     let repo = fixture.repo();
-    grit_lib::porcelain::merge::integrate_branch(
+    integrate_branch(
         &repo,
         "refs/heads/main",
         fixture.rev("HEAD"),

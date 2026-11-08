@@ -15,13 +15,12 @@ use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::integrate_branch;
-use grit_test_support::{git, git_cmd};
+use grit_test_support::{git, git_cmd, integrate_branch};
 
 /// Operation files that must survive a refused restore or commit.
 const STATE_FILES: [&str; 6] = [

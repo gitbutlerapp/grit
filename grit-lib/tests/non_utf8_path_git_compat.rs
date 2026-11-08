@@ -20,7 +20,6 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
@@ -30,6 +29,7 @@ use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::repo::Repository;
 use grit_lib::repo_relpath;
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 use grit_test_support::integrate_branch;
 
 const BAD_NAME: &[u8] = b"bad\xffname.txt";

@@ -15,13 +15,14 @@ use grit_lib::error::{Error, OverwriteReason};
 use grit_lib::objects::{parse_tree, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::merge::integrate_detached_head;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_test_support::{git_hash_object_literally, HashAlgo as FixtureAlgo};
+use grit_test_support::{
+    git_hash_object_literally, integrate_detached_head, HashAlgo as FixtureAlgo,
+};
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
 

@@ -7,10 +7,10 @@ use std::path::PathBuf;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::integrate_branch;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 
 fn index_bytes(root: &std::path::Path) -> Vec<u8> {
     fs::read(root.join(".git/index")).expect("read index")

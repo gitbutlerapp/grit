@@ -5,10 +5,6 @@ use grit_lib::error::Error;
 use grit_lib::merge::{FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::merge::{
-    abort_branch_merge, integrate_branch_with, FastForwardPolicy, IntegrateBranchOutcome,
-    MergeCommitMode, MergeOptions,
-};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;

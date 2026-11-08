@@ -37,7 +37,10 @@ fn status_run_and_untracked_cache_parity() {
         .expect("status");
     assert_eq!(model.untracked, vec!["new.txt".to_owned()]);
 
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let with_cache = UntrackedOptions::default().with_cache(UntrackedCachePolicy::Refresh);
     let without_cache = UntrackedOptions::default().with_cache(UntrackedCachePolicy::Skip);
     let (u1, _) = repo

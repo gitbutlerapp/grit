@@ -9,7 +9,6 @@ use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::repo::Repository;
 use grit_test_support::git;

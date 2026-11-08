@@ -2,15 +2,15 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::merge::{
-    integrate_detached_head_with, ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome,
-    MergeCommitMode, MergeOptions,
+    ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
+    MergeSource, MergeSourceKind,
 };
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::abort_branch_merge;
 use grit_test_support::git;
-use grit_test_support::{continue_merge, integrate_detached_head};
+use grit_test_support::{continue_merge, integrate_detached_head, integrate_detached_head_with};
 use std::process::Command;
 
 fn grit_repo(tmp: &tempfile::TempDir) -> Repository {

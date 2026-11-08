@@ -16,7 +16,6 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::branch::{create_branch, delete_branch, CreateBranchOptions, DeleteMode};
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::porcelain::tag::CreateTagRequest;
@@ -29,6 +28,7 @@ use grit_lib::refs::store::{
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_test_support::integrate_branch;
 use grit_test_support::integrate_branch;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";

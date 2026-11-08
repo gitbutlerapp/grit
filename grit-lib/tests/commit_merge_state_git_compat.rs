@@ -11,10 +11,10 @@ use grit_lib::index::IndexError;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 use grit_test_support::integrate_branch;
 
 fn ident() -> String {

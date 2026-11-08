@@ -12,10 +12,6 @@ use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::merge::{FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
-use grit_lib::porcelain::merge::{
-    integrate_branch_with, plan_branch_merge, FastForwardPolicy, IntegrateBranchOutcome,
-    MergeCommitMode, MergeOptions,
-};
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::MergeError;
 use grit_lib::progress::CancelToken;
@@ -27,7 +23,7 @@ use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, ExecSpec, HistoryError, PreRebase, RebaseOntoOptions, RebaseOutcome,
     RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
-use grit_test_support::{git, git_cmd};
+use grit_test_support::{abort_branch_merge, git, git_cmd};
 use grit_test_support::{integrate_branch_with, plan_branch_merge};
 use tempfile::TempDir;
 
@@ -298,7 +294,7 @@ fn conflicted_merge_records_orig_head_and_abort_keeps_it() {
         "{outcome:?}"
     );
     assert_eq!(git_orig_head(dir), Some(main));
-    grit_lib::porcelain::merge::abort_branch_merge(&repo).expect("abort");
+    abort_branch_merge(&repo).expect("abort");
     assert_eq!(git_orig_head(dir), Some(main));
     assert_eq!(rev(dir, "HEAD"), main);
 }

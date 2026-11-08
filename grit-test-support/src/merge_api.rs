@@ -88,6 +88,39 @@ pub fn integrate_detached_head(
     )
 }
 
+/// Integrate into detached `HEAD` with explicit [`MergeOptions`].
+#[allow(clippy::too_many_arguments)]
+pub fn integrate_detached_head_with(
+    repo: &Repository,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    label: &str,
+    options: &MergeOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> grit_lib::error::Result<IntegrateBranchOutcome> {
+    let _ = into_oid;
+    repo.merge().integrate(
+        &MergeSource {
+            oid: other_oid,
+            kind: MergeSourceKind::Commit,
+        },
+        label,
+        options,
+        progress,
+        cancel,
+    )
+}
+
+/// Test-only access to tree flattening (hostile path validation).
+pub fn tree_to_index_entries(
+    repo: &Repository,
+    oid: &ObjectId,
+    prefix: &str,
+) -> grit_lib::error::Result<Vec<grit_lib::index::IndexEntry>> {
+    grit_lib::test_support::merge::tree_to_index_entries(repo, oid, prefix)
+}
+
 pub fn abort_branch_merge(repo: &Repository) -> grit_lib::error::Result<()> {
     repo.merge().abort()
 }

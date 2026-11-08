@@ -103,7 +103,10 @@ fn populated_checkout_reports_collisions_and_auto_stage_skips_losers() {
     repo.index()
         .stage_tracked_modifications(&dest)
         .expect("stage tracked");
-    let mid = repo.index().load().expect("mid index");
+    let mid = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("mid index");
     assert!(
         mid.get(b"File.txt", 0).is_some(),
         "auto-stage scan must keep collision loser File.txt in the index"

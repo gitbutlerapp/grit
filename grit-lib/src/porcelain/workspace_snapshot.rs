@@ -597,7 +597,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use crate::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+    use crate::merge::IntegrateBranchOutcome;
+    use crate::porcelain::merge::integrate_branch;
     use crate::porcelain::switch::{resolve_switch_target, switch_repository, SwitchOptions};
     use crate::progress::NullProgress;
     use grit_test_support::{git, git_cmd};

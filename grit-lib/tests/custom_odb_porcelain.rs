@@ -19,7 +19,6 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
@@ -28,6 +27,7 @@ use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RefName};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_test_support::integrate_branch;
 use grit_test_support::integrate_branch;
 use grit_test_support::start_replay_sequence;
 

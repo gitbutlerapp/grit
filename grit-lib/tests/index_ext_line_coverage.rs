@@ -660,7 +660,10 @@ fn split_index_remove_entries_emits_delete_bitmaps() {
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("grit rm --cached through locked split write");
-    let idx = repo.index().load().expect("load");
+    let idx = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load");
     let bytes = fs::read(repo.index().path()).expect("read index");
     let parsed =
         Index::parse(&bytes, &grit_lib::index::IndexParseOptions::default()).expect("parse");

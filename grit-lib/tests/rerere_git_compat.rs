@@ -8,10 +8,6 @@ use grit_lib::merge::{ContinueOptions, IntegrateBranchOutcome, MergeCommitMode, 
 use grit_lib::merge::{ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::merge::{
-    continue_merge, integrate_branch, integrate_branch_with, ContinueOptions,
-    IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
-};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;

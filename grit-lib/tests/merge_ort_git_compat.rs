@@ -8,6 +8,7 @@ use std::os::unix::fs::symlink;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 
 use support::git as hist_git;
 use support::{
@@ -849,7 +850,7 @@ fn criss_cross_conflicting_resolutions_integrate_matches_git_merge() {
         let repo = open_grit_repo(root);
         let ours_oid: ObjectId = git(root, &["rev-parse", ours]).trim().parse().unwrap();
         let theirs_oid: ObjectId = git(root, &["rev-parse", theirs]).trim().parse().unwrap();
-        grit_lib::porcelain::merge::integrate_branch(
+        integrate_branch(
             &repo,
             &format!("refs/heads/{ours}"),
             ours_oid,

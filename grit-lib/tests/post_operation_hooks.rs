@@ -16,9 +16,6 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::merge::{IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::merge::{
-    integrate_branch_with, IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
-};
 use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;

@@ -46,6 +46,9 @@ pub mod knobs;
 
 pub mod git_date;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod merge;
+
 /// Git-directory-level ref, reflog and reftable helpers for backend tests.
 #[cfg(any(test, feature = "test-support"))]
 pub mod refs;

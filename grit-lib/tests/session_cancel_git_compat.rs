@@ -12,7 +12,6 @@ use crate::support::{assert_git_fsck_strict, git, open_grit_repo};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::integrate_branch;
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions,

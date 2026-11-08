@@ -16,7 +16,6 @@ use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::merge::{ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
@@ -25,6 +24,7 @@ use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::{primary_in_progress_operation, resolve_head_for_repository};
+use grit_test_support::integrate_branch;
 use grit_test_support::integrate_branch;
 use grit_test_support::start_replay_sequence;
 

@@ -10,10 +10,10 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::CommitRequest;
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+use grit_test_support::integrate_branch;
 use grit_test_support::integrate_branch;
 
 use support::{assert_grit_index_matches_git_ls_files, git_ls_files_stage};

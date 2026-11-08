@@ -12,7 +12,6 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::replay::{ReplayDirection, ReplayRequest};
-use grit_test_support::{integrate_branch, replay_commit};
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
@@ -23,6 +22,7 @@ use grit_lib::revwalk::history::{
     RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::stash::{StashApplyOptions, StashError, StashMode, StashPushOptions};
+use grit_test_support::{integrate_branch, replay_commit};
 
 const IDENT: &str = "Cancel Test <cancel@example.com> 1700000000 +0000";
 const FILES: usize = 300;

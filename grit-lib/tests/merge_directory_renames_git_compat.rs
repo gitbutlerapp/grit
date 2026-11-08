@@ -27,7 +27,7 @@ use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome,
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 use grit_test_support::{
-    integrate_branch_with, plan_branch_merge, predict_merge, write_merge_tree,
+    abort_branch_merge, integrate_branch_with, plan_branch_merge, predict_merge, write_merge_tree,
 };
 use support::{
     assert_git_fsck_strict, assert_merge_output_matches_oracle, commit_tree, git_ls_files_stage,
@@ -661,7 +661,7 @@ fn abort_removes_files_that_only_exist_as_conflict_stages() {
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
     assert!(root.join("b/new").exists());
-    grit_lib::porcelain::merge::abort_branch_merge(&repo).expect("abort");
+    abort_branch_merge(&repo).expect("abort");
     assert!(!root.join("b/new").exists());
     assert_eq!(
         git(root, &["status", "--porcelain", "--untracked-files=all"]),
@@ -696,7 +696,7 @@ fn abort_removes_files_that_only_exist_as_conflict_stages() {
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
     assert!(root.join("d/f").exists());
-    grit_lib::porcelain::merge::abort_branch_merge(&repo).expect("abort");
+    abort_branch_merge(&repo).expect("abort");
     assert!(!root.join("d").exists());
     assert_eq!(
         git(root, &["status", "--porcelain", "--untracked-files=all"]),

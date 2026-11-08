@@ -59,7 +59,10 @@ fn commit_tree(repo: &Repository, message: &str) -> ObjectId {
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("stage");
-    let mut index = repo.index().load().expect("index");
+    let mut index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
     repo.index()

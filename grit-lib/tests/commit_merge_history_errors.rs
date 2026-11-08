@@ -9,10 +9,6 @@ use grit_lib::merge::{ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome
 use grit_lib::merge::{ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
-use grit_lib::porcelain::merge::{
-    continue_merge, integrate_branch, integrate_branch_with, ContinueOptions, FastForwardPolicy,
-    IntegrateBranchOutcome, MergeOptions,
-};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::{CommitError, MergeError};
 use grit_lib::progress::{CancelToken, NullProgress};

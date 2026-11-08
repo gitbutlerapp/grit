@@ -12,14 +12,13 @@ use grit_lib::config::environment::Environment;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::tree_to_index_entries;
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::porcelain::switch::SwitchOptions;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::remote::clone::{clone as clone_repo, CloneError, CloneOptions};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_test_support::{git, git_hash_object_literally, HashAlgo};
+use grit_test_support::{git, git_hash_object_literally, tree_to_index_entries, HashAlgo};
 
 fn grit_bin() -> std::path::PathBuf {
     if let Ok(p) = std::env::var("GRIT_BIN") {
