@@ -7,9 +7,10 @@ mod s7;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use grit_lib::diff::userdiff::matcher_for_driver;
 use grit_lib::diff::{
-    line_change_counts, DiffAlgorithm, DiffDetail, DiffOptions, RenameDetection, TreeDiffOptions,
-    UnifiedDiffOptions,
+    line_change_counts, unified_diff, DiffAlgorithm, DiffDetail, DiffOptions, HunkExtent,
+    RenameDetection, TreeDiffOptions, UnifiedDiffOptions, WhitespaceMode,
 };
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{Index, IndexEntry};
@@ -216,6 +217,103 @@ fn bench_blob_myers_10k_lines(c: &mut Criterion) {
     group.finish();
 }
 
+/// 2,500 small Rust functions (10,000 lines) with an edit every 37 functions, a re-indented
+/// body every 53 and an inserted function every 101.
+fn code_like_pair() -> (String, String) {
+    let mut old = String::new();
+    let mut new = String::new();
+    for i in 0..2_500 {
+        old.push_str(&format!(
+            "fn f{i}(x: u32) -> u32 {{\n    let y = x + {i};\n    y * 2\n}}\n"
+        ));
+        if i % 101 == 0 {
+            new.push_str(&format!("fn added{i}() {{\n    todo!()\n}}\n"));
+        }
+        let body = if i % 37 == 0 {
+            format!("    let y = x - {i};\n")
+        } else if i % 53 == 0 {
+            format!("        let y = x  +  {i};\n")
+        } else {
+            format!("    let y = x + {i};\n")
+        };
+        new.push_str(&format!("fn f{i}(x: u32) -> u32 {{\n{body}    y * 2\n}}\n"));
+    }
+    (old, new)
+}
+
+/// `line_change_counts` per algorithm: the `--stat` / `--numstat` path.
+fn bench_text_diff_counts(c: &mut Criterion) {
+    let fx = HistoryBenchFixtures::global();
+    let (code_old, code_new) = code_like_pair();
+    let mut group = c.benchmark_group("diff/text_count");
+    for (name, algorithm) in [
+        ("myers", DiffAlgorithm::Myers),
+        ("minimal", DiffAlgorithm::Minimal),
+        ("patience", DiffAlgorithm::Patience),
+        ("histogram", DiffAlgorithm::Histogram),
+    ] {
+        let options = UnifiedDiffOptions::new().with_algorithm(algorithm);
+        group.bench_function(format!("code_{name}"), |b| {
+            b.iter(|| black_box(line_change_counts(&code_old, &code_new, &options)));
+        });
+        if matches!(algorithm, DiffAlgorithm::Myers | DiffAlgorithm::Histogram) {
+            let (old, new) = (&fx.blob_pathological_old, &fx.blob_pathological_new);
+            group.bench_function(format!("pathological_{name}"), |b| {
+                b.iter(|| black_box(line_change_counts(old, new, &options)));
+            });
+        }
+    }
+    group.finish();
+}
+
+/// `unified_diff` with `a/` / `b/` labels and function names, one row per option.
+fn bench_text_diff_render(c: &mut Criterion) {
+    let (old, new) = code_like_pair();
+    let config = grit_lib::config::ConfigSet::default();
+    let rust = matcher_for_driver(&config, "rust")
+        .expect("matcher")
+        .expect("rust driver");
+    let base = UnifiedDiffOptions::new().with_paths("f.rs", "f.rs");
+    let cases = [
+        ("myers", base.clone()),
+        (
+            "minimal",
+            base.clone().with_algorithm(DiffAlgorithm::Minimal),
+        ),
+        (
+            "patience",
+            base.clone().with_algorithm(DiffAlgorithm::Patience),
+        ),
+        (
+            "histogram",
+            base.clone().with_algorithm(DiffAlgorithm::Histogram),
+        ),
+        ("u0", base.clone().with_context_lines(0)),
+        ("inter_hunk_6", base.clone().with_inter_hunk_context(6)),
+        ("funcname_rust", base.clone().with_funcname(&rust)),
+        (
+            "ignore_space_change",
+            base.clone()
+                .with_whitespace(WhitespaceMode::ignore_space_change()),
+        ),
+        (
+            "function_context",
+            base.clone().with_extent(HunkExtent::Function),
+        ),
+        (
+            "anchored",
+            base.clone().with_anchors(["fn f1250(x: u32) -> u32 {"]),
+        ),
+    ];
+    let mut group = c.benchmark_group("diff/text_render");
+    for (name, options) in &cases {
+        group.bench_function(*name, |b| {
+            b.iter(|| black_box(unified_diff(&old, &new, options)));
+        });
+    }
+    group.finish();
+}
+
 fn bench_diff_stat_vs_patch(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
     let entries = fx
@@ -268,6 +366,8 @@ criterion_group!(
     bench_tree_diff_siblings,
     bench_index_to_tree_wide_root,
     bench_blob_myers_10k_lines,
+    bench_text_diff_counts,
+    bench_text_diff_render,
     bench_diff_stat_vs_patch
 );
 criterion_main!(diff_benches);
