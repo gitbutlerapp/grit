@@ -1,7 +1,11 @@
 //! CLI tests for `grit diff --stat`, `--numstat`, `--name-only`, `--name-status`.
 
+use std::path::Path;
+use std::process::Command;
+
 use grit_test_support::cli_fixture::CliFixture;
 use grit_test_support::{git, grit};
+use unicode_width::UnicodeWidthStr;
 
 #[test]
 fn diff_detail_flags_conflict() {
@@ -434,4 +438,140 @@ fn diff_stat_binary_shows_byte_sizes_like_git() {
     assert_eq!(file["binary"], true);
     assert_eq!(file["old_size"], 4096);
     assert_eq!(file["new_size"], 100);
+}
+
+fn stat_pipe_display_column(line: &str) -> usize {
+    let pipe = line.find('|').expect("stat line with bar");
+    line[..pipe].width()
+}
+
+fn stat_file_lines<'a>(out: &'a str) -> Vec<&'a str> {
+    out.lines()
+        .filter(|line| line.contains('|') && !line.contains("changed"))
+        .collect()
+}
+
+fn assert_stat_pipe_columns_match_git(repo: &Path, grit_args: &[&str], git_args: &[&str]) {
+    let grit_out = grit(repo, grit_args);
+    assert!(grit_out.ok(), "{}", grit_out.dump("grit stat"));
+    let git_out = Command::new("git")
+        .current_dir(repo)
+        .env("COLUMNS", "200")
+        .args(git_args)
+        .output()
+        .expect("git stat");
+    assert!(
+        git_out.status.success(),
+        "git failed: {}",
+        String::from_utf8_lossy(&git_out.stderr)
+    );
+    let git_s = String::from_utf8_lossy(&git_out.stdout);
+    let grit_lines = stat_file_lines(&grit_out.stdout);
+    let git_lines = stat_file_lines(&git_s);
+    assert_eq!(
+        grit_lines.len(),
+        git_lines.len(),
+        "line count grit={} git={}",
+        grit_out.stdout,
+        git_s
+    );
+    let grit_cols: Vec<_> = grit_lines
+        .iter()
+        .map(|line| stat_pipe_display_column(line))
+        .collect();
+    let git_cols: Vec<_> = git_lines
+        .iter()
+        .map(|line| stat_pipe_display_column(line))
+        .collect();
+    assert_eq!(
+        grit_cols, git_cols,
+        "grit cols {grit_cols:?} git {git_cols:?}"
+    );
+    assert!(
+        grit_cols.windows(2).all(|pair| pair[0] == pair[1]),
+        "grit stat pipes misaligned: {grit_cols:?}\n{}",
+        grit_out.stdout
+    );
+}
+
+fn init_wide_filename_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    assert!(grit(dir.path(), &["init", "-b", "main"]).ok(), "grit init");
+    std::fs::write(dir.path().join("plain.txt"), b"a\n").expect("plain");
+    std::fs::write(dir.path().join("日本語.txt"), b"b\n").expect("jp");
+    std::fs::write(dir.path().join("emoji-😀.txt"), b"c\n").expect("emoji");
+    std::fs::write(dir.path().join("café.txt"), b"d\n").expect("cafe");
+    assert!(grit(dir.path(), &["commit", "-m", "files"]).ok(), "commit");
+    dir
+}
+
+#[test]
+fn stat_pipe_column_aligns_for_wide_filenames() {
+    let dir = init_wide_filename_repo();
+    assert_stat_pipe_columns_match_git(
+        dir.path(),
+        &["show", "HEAD", "--stat"],
+        &[
+            "-c",
+            "core.quotepath=false",
+            "show",
+            "--stat",
+            "--format=",
+            "HEAD",
+        ],
+    );
+    assert_stat_pipe_columns_match_git(
+        dir.path(),
+        &["log", "-n", "1", "--stat"],
+        &[
+            "-c",
+            "core.quotepath=false",
+            "log",
+            "-1",
+            "--stat",
+            "--format=",
+        ],
+    );
+
+    std::fs::write(dir.path().join("日本語.txt"), b"bb\n").expect("modify");
+    assert_stat_pipe_columns_match_git(
+        dir.path(),
+        &["diff", "--stat"],
+        &["-c", "core.quotepath=false", "diff", "--stat"],
+    );
+
+    assert!(
+        grit(dir.path(), &["stash", "push", "-m", "wide"]).ok(),
+        "stash push"
+    );
+    assert_stat_pipe_columns_match_git(
+        dir.path(),
+        &["stash", "show", "--stat"],
+        &["-c", "core.quotepath=false", "stash", "show", "--stat"],
+    );
+
+    assert!(
+        grit(dir.path(), &["branch", "feature", "main"]).ok(),
+        "branch"
+    );
+    assert!(
+        grit(dir.path(), &["checkout", "feature"]).ok(),
+        "checkout feature"
+    );
+    std::fs::write(dir.path().join("plain.txt"), b"ahead\n").expect("ahead edit");
+    assert!(
+        grit(dir.path(), &["commit", "-m", "ahead commit"]).ok(),
+        "ahead commit"
+    );
+    let shortlog = grit(dir.path(), &["shortlog", "--stat"]);
+    assert!(shortlog.ok(), "{}", shortlog.dump("shortlog --stat"));
+    let cols: Vec<_> = stat_file_lines(&shortlog.stdout)
+        .iter()
+        .map(|line| stat_pipe_display_column(line))
+        .collect();
+    assert!(
+        cols.windows(2).all(|pair| pair[0] == pair[1]),
+        "shortlog stat misaligned: {cols:?}\n{}",
+        shortlog.stdout
+    );
 }

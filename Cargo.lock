@@ -946,6 +946,7 @@ dependencies = [
  "time",
  "tracing-core",
  "tracing-subscriber",
+ "unicode-width",
  "windows-sys 0.61.2",
 ]
 
@@ -2975,6 +2976,12 @@ name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
+
+[[package]]
+name = "unicode-width"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca718471876992059f251e33aafc334346ada08042b7661dd1fe313a9bced557"
 
 [[package]]
 name = "untrusted"

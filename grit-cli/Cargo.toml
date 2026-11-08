@@ -50,6 +50,7 @@ terminal_size.workspace = true
 libc.workspace = true
 rpassword = "7"
 shell-words.workspace = true
+unicode-width.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "http-ureq-native-tls", "tracing", "hot-text-layout"] }
@@ -59,6 +60,7 @@ grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "ht
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
 
 [dev-dependencies]
+unicode-width.workspace = true
 grit-lib = { path = "../grit-lib", features = ["http-ureq", "test-support"] }
 grit-test-support = { path = "../grit-test-support" }
 insta = { version = "1.42", features = ["json", "filters"] }

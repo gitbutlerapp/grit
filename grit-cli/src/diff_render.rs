@@ -7,6 +7,8 @@ use grit_lib::diff::{DiffStat as LibDiffStat, DiffTotals, FileStat, StatBar};
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::commands::diff::FileDiff;
 use crate::markdown;
 use crate::output::{outln, ChangeStatus};
@@ -165,7 +167,7 @@ fn render_stat_with_options(
     let name_width = stat
         .files()
         .iter()
-        .map(|f| stat_path(f, path_opts).chars().count())
+        .map(|f| stat_path_display_width(f, path_opts))
         .max()
         .unwrap_or(0)
         .min(60);
@@ -173,10 +175,11 @@ fn render_stat_with_options(
 
     for file in stat.files() {
         let path = stat_path(file, path_opts);
+        let padded = pad_stat_path(&path, name_width);
         if file.binary {
             outln!(
                 w,
-                " {path:<name_width$} | Bin {} -> {} bytes",
+                " {padded} | Bin {} -> {} bytes",
                 file.old_size,
                 file.new_size
             );
@@ -185,9 +188,9 @@ fn render_stat_with_options(
         let total = file.lines.changes();
         let bar = paint_bar(file.lines.bar(max_changes, BAR_WIDTH), color);
         if bar.is_empty() {
-            outln!(w, " {path:<name_width$} | {total:>3}");
+            outln!(w, " {padded} | {total:>3}");
         } else {
-            outln!(w, " {path:<name_width$} | {total:>3} {bar}");
+            outln!(w, " {padded} | {total:>3} {bar}");
         }
     }
 
@@ -334,6 +337,16 @@ pub fn render_shortstat(w: &mut dyn Write, stat: &DiffStat) -> Result<()> {
     Ok(())
 }
 
+fn stat_path_display_width(file: &FileStat, path_opts: Option<&PathDisplayOptions>) -> usize {
+    stat_path(file, path_opts).width()
+}
+
+fn pad_stat_path(path: &str, width: usize) -> String {
+    let cols = path.width();
+    let pad = width.saturating_sub(cols);
+    format!("{path}{}", " ".repeat(pad))
+}
+
 fn stat_path(file: &FileStat, path_opts: Option<&PathDisplayOptions>) -> String {
     match &file.old_path {
         Some(old) => {
@@ -411,5 +424,33 @@ fn paint(color: bool, code: &str, text: &str) -> String {
         format!("\x1b[{code}m{text}\x1b[0m")
     } else {
         text.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pad_stat_path;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn stat_path_display_width_examples() {
+        assert_eq!("日".width(), 2);
+        assert_eq!("😀".width(), 2);
+        assert_eq!("é".width(), 1);
+    }
+
+    #[test]
+    fn padded_stat_paths_share_display_width() {
+        let paths = ["café.txt", "emoji-😀.txt", "plain.txt", "日本語.txt"];
+        let width = paths.iter().map(|p| p.width()).max().unwrap().min(60);
+        let padded: Vec<_> = paths
+            .iter()
+            .map(|p| format!(" {}", pad_stat_path(p, width)))
+            .collect();
+        let pipe_cols: Vec<_> = padded.iter().map(|line| line.width() + 1).collect();
+        assert!(
+            pipe_cols.windows(2).all(|w| w[0] == w[1]),
+            "pipe columns differ: {pipe_cols:?} for lines {padded:?}"
+        );
     }
 }
