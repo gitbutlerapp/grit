@@ -200,26 +200,18 @@ impl FuncnameMatcher {
         }
 
         for rule in &self.rules {
-            let matched_text = match &rule.matcher {
-                RuleMatcher::Rust(regex) => {
-                    if let Some(caps) = regex.captures(text) {
-                        caps.get(1)
-                            .or_else(|| caps.get(0))
-                            .map(|m| m.as_str())
-                            .unwrap_or_default()
-                            .trim_end_matches(char::is_whitespace)
-                            .to_owned()
-                    } else if regex.is_match(text) {
-                        text.trim_end_matches(char::is_whitespace).to_owned()
-                    } else {
-                        continue;
-                    }
-                }
+            let RuleMatcher::Rust(regex) = &rule.matcher;
+            let Some(caps) = regex.captures(text) else {
+                continue;
             };
             if rule.negate {
                 return None;
             }
-            return Some(matched_text.trim_end().to_owned());
+            let matched = caps
+                .get(1)
+                .or_else(|| caps.get(0))
+                .map_or("", |m| m.as_str());
+            return Some(matched.trim_end().to_owned());
         }
         None
     }
