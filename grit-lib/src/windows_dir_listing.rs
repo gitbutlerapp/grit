@@ -24,7 +24,6 @@ pub(crate) fn listing_cache_ref(
 
 #[cfg(windows)]
 mod imp {
-    use super::WorktreeListingCache;
     use std::ffi::OsStr;
     use std::io;
     use std::os::windows::ffi::OsStrExt;
@@ -34,7 +33,7 @@ mod imp {
     use hashbrown::HashMap;
 
     use crate::error::{Error, Result};
-    use crate::index::{munge_index_size, IndexStatFields, MODE_REGULAR, MODE_SYMLINK, MODE_TREE};
+    use crate::index::{IndexStatFields, MODE_REGULAR, MODE_SYMLINK, MODE_TREE};
     use crate::worktree_scan::BlobDiskStat;
 
     fn path_to_wide(path: &Path) -> Vec<u16> {
@@ -86,17 +85,9 @@ mod imp {
                 data.ftLastWriteTime.dwLowDateTime,
                 data.ftLastWriteTime.dwHighDateTime,
             );
-            let fields = IndexStatFields {
-                ctime_sec,
-                ctime_nsec,
-                mtime_sec,
-                mtime_nsec,
-                dev: 0,
-                ino: 0,
-                uid: 0,
-                gid: 0,
-                size: munge_index_size(size),
-            };
+            let fields = IndexStatFields::from_windows_directory_stat(
+                size, ctime_sec, ctime_nsec, mtime_sec, mtime_nsec,
+            );
             let git_mode = if is_dir && !is_reparse {
                 MODE_TREE
             } else if is_reparse {
@@ -136,7 +127,9 @@ mod imp {
         if pattern.last() == Some(&0) {
             pattern.pop();
         }
-        if pattern.last() != Some(&b'\\' as &u16) && pattern.last() != Some(&b'/' as &u16) {
+        if pattern.last().copied() != Some(b'\\' as u16)
+            && pattern.last().copied() != Some(b'/' as u16)
+        {
             pattern.push(b'\\' as u16);
         }
         pattern.extend_from_slice(&[b'*' as u16, 0]);

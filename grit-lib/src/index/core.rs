@@ -4930,6 +4930,54 @@ impl IndexStatFields {
             && (!policy.trust_ctime || self.ctime_nsec == ie.ctime_nsec)
     }
 
+    /// Stat tuple from `WIN32_FIND_DATA` (device/inode identity fields are zero).
+    #[must_use]
+    #[cfg(windows)]
+    pub(crate) fn from_windows_directory_stat(
+        raw_size: u64,
+        ctime_sec: u32,
+        ctime_nsec: u32,
+        mtime_sec: u32,
+        mtime_nsec: u32,
+    ) -> Self {
+        Self {
+            ctime_sec,
+            ctime_nsec,
+            mtime_sec,
+            mtime_nsec,
+            dev: 0,
+            ino: 0,
+            uid: 0,
+            gid: 0,
+            size: munge_index_size(raw_size),
+        }
+    }
+
+    /// Whether a directory-listing stat disagrees enough to require a path `symlink_metadata` probe.
+    #[must_use]
+    #[cfg(windows)]
+    pub(crate) fn windows_align_path_probe_needed(
+        &self,
+        ie: &IndexEntry,
+        policy: StatMatchPolicy,
+    ) -> bool {
+        if self.size != ie.size || self.mtime_sec != ie.mtime_sec {
+            return true;
+        }
+        if policy.use_nanosec && policy.check_stat && self.mtime_nsec != ie.mtime_nsec {
+            return true;
+        }
+        if policy.trust_ctime && policy.check_stat {
+            if self.ctime_sec != ie.ctime_sec {
+                return true;
+            }
+            if policy.use_nanosec && self.ctime_nsec != ie.ctime_nsec {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Whether cached stat fields match a stage-0 index row (Git `ie_match_stat`).
     #[must_use]
     pub(crate) fn matches_index_entry(&self, ie: &IndexEntry, policy: StatMatchPolicy) -> bool {

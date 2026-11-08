@@ -1437,7 +1437,7 @@ fn read_directory_recursive(
                     continue;
                 };
                 let stored_name = storage_string(&name_bytes);
-                let path = abs_parent.join(String::from_utf8_lossy(&name_bytes));
+                let path = abs_parent.join(String::from_utf8_lossy(&name_bytes).into_owned());
                 let is_dir = entry.stat.is_dir;
                 Some((stored_name, name_bytes, path, is_dir))
             }

@@ -243,25 +243,7 @@ fn align_lookup_needs_path_probe(
     if stat.reparse_point {
         return true;
     }
-    if stat.fields.size != ie.size {
-        return true;
-    }
-    if stat.fields.mtime_sec != ie.mtime_sec {
-        return true;
-    }
-    if stat_policy.use_nanosec && stat_policy.check_stat && stat.fields.mtime_nsec != ie.mtime_nsec
-    {
-        return true;
-    }
-    if stat_policy.trust_ctime && stat_policy.check_stat {
-        if stat.fields.ctime_sec != ie.ctime_sec {
-            return true;
-        }
-        if stat_policy.use_nanosec && stat.fields.ctime_nsec != ie.ctime_nsec {
-            return true;
-        }
-    }
-    false
+    stat.fields.windows_align_path_probe_needed(ie, stat_policy)
 }
 
 use std::collections::BTreeSet;

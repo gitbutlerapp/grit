@@ -1,7 +1,7 @@
 //! Issue #2566: warm `grit status` on ~3k tracked files should stay within ~2× of `git status` on Windows.
 //!
 //! Mirrors dogfood on rust-lang/cargo scale (~3081 tracked paths). Run on win-x64 with:
-//! `cargo build --release -p grit-cli && GRIT_STATUS_PERF=1 cargo test -p grit-lib --test status_cargo_scale_windows_perf_git_compat --release -- --test-threads=1`
+//! `cargo build --release -p grit-cli && GRIT_STATUS_PERF=1 cargo test -p grit-lib --features full-tests warm_clean_status_within_twice_git_on_cargo_scale --release -- --test-threads=1`
 
 #![cfg(windows)]
 
