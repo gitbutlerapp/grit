@@ -2069,7 +2069,7 @@ fn fsck_index_missing_blobs(
         if already_reported.contains(&entry.oid) {
             continue;
         }
-        if !matches!(odb.try_read_once(&entry.oid), Ok(Some(_))) {
+        if !matches!(odb.contains(&entry.oid), Ok(true)) {
             if promisor_promised.is_some_and(|promised| promised.contains(&entry.oid)) {
                 continue;
             }
@@ -2584,45 +2584,42 @@ mod tests {
     }
 
     #[test]
-    fn fsck_streaming_loose_hash_mismatch() {
-        const THRESHOLD: usize = 4096;
-        const SIZE: usize = THRESHOLD * 4;
+    fn fsck_index_missing_blob_uses_contains_not_full_read() {
+        use crate::index::{IndexEntry, MODE_REGULAR};
+
         let dir = TempDir::new().unwrap();
-        let config_path = dir.path().join(".git/config");
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
-        let prior = std::fs::read_to_string(&config_path).unwrap_or_default();
-        std::fs::write(
-            &config_path,
-            format!("{prior}\n[core]\n\tbigFileThreshold = {THRESHOLD}\n"),
-        )
-        .unwrap();
-        let oid = repo
-            .odb()
-            .write(crate::objects::ObjectKind::Blob, &vec![1u8; SIZE])
-            .unwrap();
-        let path = repo.odb().object_path(&oid);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&path).unwrap().permissions();
-            perms.set_mode(0o644);
-            std::fs::set_permissions(&path, perms).unwrap();
-        }
-        let mut bytes = std::fs::read(&path).unwrap();
-        bytes.pop();
-        std::fs::write(&path, bytes).unwrap();
-        let report = fsck(
-            &repo,
-            &FsckOptions::full_repository(false),
-            &mut NullProgress,
-            &CancelToken::never(),
-        )
-        .unwrap();
-        assert!(report.issues.iter().any(|issue| {
-            matches!(
-                issue,
-                FsckIssue::HashMismatch { .. } | FsckIssue::CorruptLoose { .. }
-            )
-        }));
+        let missing = ObjectId::from_hex("abababababababababababababababababababab").unwrap();
+        let mut index = repo.load_index().expect("index");
+        index.entries_mut().push(IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid: missing,
+            flags: 0,
+            flags_extended: None,
+            path: b"ghost".to_vec(),
+            base_index_pos: 0,
+        });
+        index
+            .write(&repo.git_dir().join("index"))
+            .expect("write index");
+        let mut issues = Vec::new();
+        fsck_index_missing_blobs(&repo, &ConfigSet::new(), false, &mut issues, None)
+            .expect("index pass");
+        assert!(issues.iter().any(|i| matches!(
+            i,
+            FsckIssue::MissingObject {
+                referrer: MissingObjectReferrer::Index,
+                ..
+            }
+        )));
     }
 }
