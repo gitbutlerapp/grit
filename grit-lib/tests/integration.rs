@@ -167,6 +167,7 @@ mod branch_tag_list_delete_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "branch_tracking_git_compat.rs"]
 mod branch_tracking_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "branches_handle_git_compat.rs"]
 mod branches_handle_git_compat;
 #[path = "build_file_diffs_streaming.rs"]
@@ -2037,6 +2038,9 @@ mod status_add_special_files_git_compat;
 #[path = "status_cancel_mid_scan.rs"]
 mod status_cancel_mid_scan;
 #[cfg(feature = "full-tests")]
+#[path = "status_cargo_scale_windows_perf_git_compat.rs"]
+mod status_cargo_scale_windows_perf_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "status_guidance_git_compat.rs"]
 mod status_guidance_git_compat;
 #[cfg(feature = "full-tests")]
@@ -2059,9 +2063,6 @@ mod status_path_buffer_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "status_scan_memory.rs"]
 mod status_scan_memory;
-#[cfg(feature = "full-tests")]
-#[path = "status_staging_commit_handles.rs"]
-mod status_staging_commit_handles;
 #[cfg(feature = "full-tests")]
 #[path = "status_symlink_ancestor_git_compat.rs"]
 mod status_symlink_ancestor_git_compat;

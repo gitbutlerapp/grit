@@ -116,6 +116,7 @@ pub(crate) fn stage_worktree_changes(
             use_untracked_cache: false,
             cache_miss: UntrackedCacheMissAction::RefreshFull,
             clean_unit_dirs: None,
+            listing_cache: None,
         },
         &worktree_rules,
         None,

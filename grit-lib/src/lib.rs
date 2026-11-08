@@ -387,6 +387,7 @@ pub(crate) mod upload_filter;
 pub(crate) mod url_rewrite;
 pub(crate) mod userdiff;
 pub(crate) mod wildmatch;
+mod windows_dir_listing;
 pub mod worktree;
 mod worktree_batch;
 pub(crate) mod worktree_cwd;

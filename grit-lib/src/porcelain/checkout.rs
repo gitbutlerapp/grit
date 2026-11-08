@@ -1944,6 +1944,7 @@ fn scan_index_blob_stats_for_hard_reset(
             preload_index: false,
             stat_parallel_threads: hard_reset_stat_parallel_threads(repo, config, positions.len()),
             parallel_stat_without_preload: true,
+            ..WorktreeBlobScanOptions::default()
         },
         &repo.thread_policy(),
         config,

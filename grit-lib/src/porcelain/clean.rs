@@ -107,6 +107,7 @@ pub(crate) fn clean_untracked_with_cancel(
         use_untracked_cache: false,
         cache_miss: UntrackedCacheMissAction::RefreshFull,
         clean_unit_dirs: Some(std::sync::Arc::clone(&clean_unit_dirs)),
+        listing_cache: None,
     };
 
     let (untracked, ignored, collect_meta) = collect_untracked_and_ignored_inner(

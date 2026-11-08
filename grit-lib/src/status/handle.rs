@@ -205,6 +205,7 @@ impl<'repo> Status<'repo> {
                 use_untracked_cache: use_cache,
                 cache_miss: Default::default(),
                 clean_unit_dirs: None,
+                listing_cache: None,
             },
             rules,
             Some(cancel.clone()),

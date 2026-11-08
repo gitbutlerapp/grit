@@ -532,6 +532,7 @@ pub(crate) fn collect_untracked_and_ignored_with_cache(
             use_untracked_cache,
             cache_miss: UntrackedCacheMissAction::RefreshFull,
             clean_unit_dirs: None,
+            listing_cache: None,
         },
         &rules,
         None,
@@ -591,6 +592,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
                 use_untracked_cache: false,
                 cache_miss: UntrackedCacheMissAction::RefreshFull,
                 clean_unit_dirs: None,
+                listing_cache: None,
             },
             &worktree_rules,
             None,
@@ -613,6 +615,7 @@ pub(crate) fn collect_untracked_and_ignored_with_rules_and_cancel(
     pathspec: &crate::pathspec::Pathspec,
     rules: &crate::worktree_rules::WorktreeRules,
     cancel: Option<crate::progress::CancelToken>,
+    listing_cache: Option<std::sync::Arc<crate::windows_dir_listing::WorktreeListingCache>>,
 ) -> Result<(Vec<String>, Vec<String>, UntrackedCollectMeta)> {
     let specs = if pathspec.is_entire_tree() {
         &[] as &[String]
@@ -632,6 +635,7 @@ pub(crate) fn collect_untracked_and_ignored_with_rules_and_cancel(
             use_untracked_cache: true,
             cache_miss: UntrackedCacheMissAction::RefreshFull,
             clean_unit_dirs: None,
+            listing_cache,
         },
         rules,
         cancel,
@@ -661,6 +665,8 @@ pub(crate) struct UntrackedScan {
     pub cache_miss: UntrackedCacheMissAction,
     /// When set, collapsed directories safe for `git clean` without rescanning are recorded here.
     pub clean_unit_dirs: CleanUnitDirHints,
+    /// Shared Windows directory listings for the same operation as tracked stat scan (#2566).
+    pub listing_cache: Option<std::sync::Arc<crate::windows_dir_listing::WorktreeListingCache>>,
 }
 
 /// Collapsed directory paths (`dir/`) that need no second walk for `clean` dry-run.
@@ -726,6 +732,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         use_untracked_cache,
         cache_miss,
         clean_unit_dirs,
+        listing_cache,
     } = scan;
     let pathspec_globals = pathspec_typed
         .map(crate::pathspec::Pathspec::globals)
@@ -768,6 +775,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
                         show_all,
                         ignored_mode_to_untracked_cache(ignored_mode),
                         cancel.as_ref(),
+                        crate::windows_dir_listing::listing_cache_ref(&listing_cache),
                     )?;
                     poll_untracked_cancel(cancel.as_ref())?;
                     let untracked = crate::untracked_cache::collect_untracked_from_cache(&uc);
@@ -2508,6 +2516,7 @@ pub(crate) fn status(
     let cancel_poll = std::sync::Arc::new(crate::progress::StackCancelPoll::new(
         std::sync::Arc::clone(&watch),
     ));
+    let listing_cache = crate::windows_dir_listing::spawn_listing_cache();
     let (unstaged_raw, index_stat_refresh_changed) =
         crate::diff::diff_index_to_worktree_with_owner_poll(
             repo.odb(),
@@ -2527,6 +2536,7 @@ pub(crate) fn status(
                 fsmonitor_query_boundary: opts.fsmonitor_query_boundary,
                 cancel: Some(cancel_token.clone()),
                 diagnostics: Some(repo.diagnostics()),
+                listing_cache: Some(std::sync::Arc::clone(&listing_cache)),
                 ..Default::default()
             },
             Some(cancel_poll),
@@ -2594,6 +2604,7 @@ pub(crate) fn status(
                     &opts.pathspec,
                     &rules_guard,
                     Some(cancel_token.clone()),
+                    Some(std::sync::Arc::clone(&listing_cache)),
                 )?;
             persist_index |= collect_meta.untracked_cache_refreshed;
             if opts.untracked == UntrackedMode::No {
