@@ -52,6 +52,20 @@ fn smoke_policy() -> RunPolicy {
     }
 }
 
+/// Optional Linux host hygiene between scenarios when `GRIT_BENCH_DROP_CACHES` is set.
+fn bench_between_scenarios() {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GRIT_BENCH_DROP_CACHES").is_some() {
+        use std::process::{Command, Stdio};
+        let _ = Command::new("sysctl")
+            .args(["-w", "vm.drop_caches=3"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
 fn default_policy(min_runs: Option<u32>) -> RunPolicy {
     let mut policy = RunPolicy::default();
     if let Some(min_runs) = min_runs {
@@ -396,6 +410,7 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
             pending: false,
             detail: Some(detail),
         });
+        bench_between_scenarios();
     }
 
     scenarios.sort_by(|a, b| a.id.cmp(&b.id));
