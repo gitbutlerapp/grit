@@ -2978,11 +2978,55 @@ Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HAS
 
 Criterion bench **`oid_hashmap`** (`cargo bench -p grit-lib --bench oid_hashmap`) compares `std` `HashMap`/`HashSet` keyed by [`ObjectId`](rustdoc:grit_lib::objects::ObjectId) (SipHash over the full digest) against [`OidHashMap`](rustdoc:grit_lib::objects::OidHashMap) / [`OidHashSet`](rustdoc:grit_lib::objects::OidHashSet) (hashbrown tables with [`OidBuildHasher`](rustdoc:grit_lib::objects::OidBuildHasher): first eight digest bytes; [`finish`](rustdoc:grit_lib::objects::OidHasher::finish) XORs that prefix with a process-wide random value). Insert has two symmetric variants at **1 M** keys (SHA-1 OIDs from seeded `ObjectHasher`, distinct first-eight-byte prefixes): **`oid_hashmap_insert_presized`** (both sides call `with_capacity`) and **`oid_hashmap_insert_default_growth`** (both start from empty maps). Factory VM medians from `cargo bench -p grit-lib --bench oid_hashmap -- --sample-size 10 --warm-up-time 1 --measurement-time 3 oid_hashmap_insert` (2026-10-21): presized **~72 ms** SipHash vs **~49 ms** OID (~**1.48×**); default-growth **~115 ms** vs **~72 ms** (~**1.59×**). Lookup and contains groups use the same pre-built tables on both sides. Hot paths (rev-list commit cache, pack delta planning, fsck connectivity, ODB session caches, and related maps) call `OidHashMap::with_capacity_and_hasher` / `OidHashSet::with_capacity_and_hasher` when an object count is known; public APIs still expose standard `HashSet`/`HashMap` at boundaries.
 
+## Pluggable object store (0.6 sign-off, 2026-11-08)
+
+Headline census on `dist` builds in one sitting (12–20 hyperfine samples per row, `--offline`). **Base** grit is `f52021f4cb` (last commit before [`RepositoryOptions::with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store), parent of the pluggable-store plan). **After** is `90f552da7e` on the same VM with `--baseline-grit` timing the base binary on every headline row. Reports: `pluggable-store-7249-before.json` → `pluggable-store-7249-after.json`.
+
+**Sign-off:** wall-time regressions vs base grit stayed within ±2% on most headlines; **peak RSS rose more than 2% on nine rows**, led by `status/clean@synth-10k` (+15% vs base grit). That blocks the ±2% RSS gate until the status working-set is trimmed (likely post-primary-store dispatch / session-cache routing). Time edges: `stash/push-pop@synth-10k` (+2.8%), `show/head@git-git` (+2.2%), `pull/rebase@synth-10k` (+2.1%).
+
+| Headline | git ms / MB | base ms / MB | after ms / MB | after vs base time | after vs base RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `add/modified@synth-10k` | 16.00 / 12.4 | 9.35 / 18.7 | 9.50 / 18.8 | +1.6% | +0.7% |
+| `blame/file@git-git` | 264.54 / 244.8 | 215.21 / 267.1 | 215.85 / 267.0 | +0.3% | -0.0% |
+| `branch/list-json@many-refs` | 1.42 / 7.9 | 2.03 / 9.7 | 2.02 / 10.0 | -0.7% | +2.9% |
+| `branch/list@many-refs` | 1.26 / 6.8 | 1.86 / 10.0 | 1.78 / 9.9 | -3.9% | -1.0% |
+| `branch/merged@many-refs` | 1.25 / 7.6 | 1.98 / 10.8 | 1.90 / 11.1 | -4.2% | +3.5% |
+| `clone/local@synth-10k` | 942.71 / 37.0 | 814.59 / 29.2 | 813.49 / 29.4 | -0.1% | +0.7% |
+| `commit/small@synth-10k` | 25.91 / 13.9 | 15.73 / 16.8 | 15.36 / 16.8 | -2.3% | +0.1% |
+| `diff/worktree@synth-10k` | 6.41 / 9.9 | 5.87 / 13.6 | 5.95 / 14.4 | +1.3% | +5.4% |
+| `fetch/incremental@git-git` | 108.18 / 70.7 | 53.96 / 60.9 | 52.31 / 45.8 | -3.1% | -24.7% |
+| `log/json-100@git-git` | 2.91 / 14.9 | 3.96 / 18.8 | 3.89 / 19.0 | -1.9% | +0.9% |
+| `log/oneline-100@git-git` | 2.88 / 14.8 | 3.63 / 18.1 | 3.64 / 18.4 | +0.2% | +2.0% |
+| `merge/clean@synth-10k` | 95.97 / 14.2 | 50.91 / 18.0 | 51.00 / 18.3 | +0.2% | +2.1% |
+| `pick/one@synth-10k` | 110.30 / 9.4 | 51.15 / 17.9 | 50.40 / 18.2 | -1.5% | +1.6% |
+| `pull/fast-forward@git-git` | 119.10 / 76.4 | 58.31 / 46.8 | 59.25 / 46.2 | +1.6% | -1.3% |
+| `pull/rebase@synth-10k` | 72.77 / 41.5 | 18.25 / 23.5 | 18.63 / 23.3 | +2.1% | -0.5% |
+| `push/force-with-lease@git-git` | 2096.98 / 333.5 | 936.28 / 71.9 | 939.51 / 70.8 | +0.3% | -1.4% |
+| `push/incremental@git-git` | 2120.77 / 333.7 | 1397.74 / 88.5 | 1412.61 / 88.6 | +1.1% | +0.2% |
+| `show/head@git-git` | 1.77 / 9.0 | 2.31 / 10.7 | 2.36 / 10.7 | +2.2% | +0.1% |
+| `stash/push-pop@synth-10k` | 266.30 / 17.3 | 114.29 / 19.4 | 117.46 / 19.7 | +2.8% | +1.4% |
+| `status/clean@synth-10k` | 9.11 / 11.4 | 6.48 / 13.2 | 6.55 / 15.2 | +1.0% | +14.9% |
+| `status/dirty@synth-10k` | 9.35 / 12.7 | 6.58 / 13.3 | 6.45 / 13.1 | -2.0% | -1.5% |
+| `switch/branch@synth-10k` | 54.90 / 24.5 | 14.82 / 14.8 | 14.64 / 15.2 | -1.2% | +2.3% |
+
+```bash
+cargo build --profile dist -p grit-cli -p grit-utils -p grit-http-server
+# Base worktree at f52021f4cb03fe824be5bc766baf4f543979d739
+./target/dist/grit-bench fixtures prepare --only many-refs,git-git,git-git-wt,synth-10k,synth-10k-smoke
+GRIT_BENCH_REPORT_GRIT_COMMIT=f52021f4c ./target/dist/grit-bench daily --offline --min-runs 12 \
+  --only '<22 headline ids>' --grit /path/to/base/target/dist/grit \
+  --format json --output grit-utils/baselines/pluggable-store-7249-before.json
+GRIT_BENCH_REPORT_GRIT_COMMIT=$(git rev-parse HEAD) ./target/dist/grit-bench daily --offline --min-runs 12 \
+  --only '<22 headline ids>' --grit ./target/dist/grit \
+  --baseline-grit /path/to/base/target/dist/grit \
+  --format json --output grit-utils/baselines/pluggable-store-7249-after.json
+```
+
 ## grit-lib: ODB backend (pluggable object store)
 
 Criterion group **`odb_backend`** compares post-refactor [`Odb`](rustdoc:grit_lib::objects::odb::Odb) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). Built-in layouts route hot reads through [`FilesSource`](rustdoc:grit_lib::objects::odb::store::FilesSource) on the primary store and [`CompositeStore`](rustdoc:grit_lib::objects::odb::store::CompositeStore) for alternates so behaviour matches the pre-refactor oracle tests while keeping a pluggable [`ObjectStore`](rustdoc:grit_lib::objects::odb::ObjectStore) boundary.
 
-**Pluggable object store overhead (factory VM, 2026-10-09):** Re-run Criterion with `--baseline odb-before` after ODB changes; command-level **`grit-bench odb-backend`** baselines are in **`odb-backend-before.json`** (pre-refactor capture, scenario ids suffixed `-pre-refactor`) and **`odb-backend-after.json`**. Post-refactor Grit medians for cat-file batch/check are much lower than the pre-refactor capture on the same fixture; rev-list wall time is similar while Grit/Git **ratios** can drift when system `git` speeds up between runs.
+**Earlier capture (factory VM, 2026-10-09):** Command-level **`grit-bench odb-backend`** baselines are in **`odb-backend-before.json`** and **`odb-backend-after.json`** (pre/post first ODB refactor). Re-run Criterion with `--baseline odb-before` when hot paths change; the 0.6 sign-off headline census is in **`pluggable-store-7249-*.json`** above.
 
 Criterion measures [`Odb::read`](rustdoc:grit_lib::objects::odb::Odb), [`read_info`](rustdoc:grit_lib::objects::odb::Odb::read_info), [`exists`](rustdoc:grit_lib::objects::odb::Odb::exists) (hit and miss), and [`write`](rustdoc:grit_lib::objects::odb::Odb::write) on four deterministic layouts built in `grit-lib/benches/fixture.rs`:
 
