@@ -13735,6 +13735,8 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::StartPoint
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::StartPoint
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::StartPoint
 pub fn grit_lib::porcelain::branch::upstream_tracking_display(&str, &str) -> alloc::string::String
+pub type grit_lib::porcelain::branch::CreateBranchOptions = grit_lib::porcelain::branch::BranchCreateOptions
+pub type grit_lib::porcelain::branch::RenameBranchOptions = grit_lib::porcelain::branch::BranchRenameOptions
 pub mod grit_lib::porcelain::checkout
 pub struct grit_lib::porcelain::checkout::CheckoutOutcome
 pub grit_lib::porcelain::checkout::CheckoutOutcome::path_collisions: alloc::vec::Vec<alloc::string::String>
@@ -17261,12 +17263,6 @@ pub fn grit_lib::repo::Repository::work_tree(&self) -> core::option::Option<&std
 pub fn grit_lib::repo::Repository::workspace_snapshot(&self) -> grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'_>
 pub fn grit_lib::repo::Repository::worktrees(&self) -> grit_lib::repo_handles::RepositoryWorktrees<'_>
 pub fn grit_lib::repo::Repository::write_largest_pack_bitmap(&self, &grit_lib::objects::bitmap::PackBitmapWriteOptions, std::time::SystemTime) -> core::result::Result<std::path::PathBuf, grit_lib::objects::bitmap::PackBitmapWriteError>
-impl grit_lib::repo::Repository
-pub fn grit_lib::repo::Repository::build_commit_graph(&self, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphBuild>
-pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphWriteReport>
-pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
-impl grit_lib::repo::Repository
-pub fn grit_lib::repo::Repository::drop_promised_blobs(&self, &grit_lib::maintenance::DropPromisedBlobsOptions) -> grit_lib::error::Result<grit_lib::maintenance::DropPromisedBlobsReport>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::enforce_safe_directory(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::verify_safe_for_clone_source(&self) -> grit_lib::error::Result<()>
@@ -24936,12 +24932,6 @@ pub fn grit_lib::repo::Repository::work_tree(&self) -> core::option::Option<&std
 pub fn grit_lib::repo::Repository::workspace_snapshot(&self) -> grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'_>
 pub fn grit_lib::repo::Repository::worktrees(&self) -> grit_lib::repo_handles::RepositoryWorktrees<'_>
 pub fn grit_lib::repo::Repository::write_largest_pack_bitmap(&self, &grit_lib::objects::bitmap::PackBitmapWriteOptions, std::time::SystemTime) -> core::result::Result<std::path::PathBuf, grit_lib::objects::bitmap::PackBitmapWriteError>
-impl grit_lib::repo::Repository
-pub fn grit_lib::repo::Repository::build_commit_graph(&self, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphBuild>
-pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphWriteReport>
-pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
-impl grit_lib::repo::Repository
-pub fn grit_lib::repo::Repository::drop_promised_blobs(&self, &grit_lib::maintenance::DropPromisedBlobsOptions) -> grit_lib::error::Result<grit_lib::maintenance::DropPromisedBlobsReport>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::enforce_safe_directory(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::verify_safe_for_clone_source(&self) -> grit_lib::error::Result<()>
