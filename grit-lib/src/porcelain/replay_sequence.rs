@@ -15,7 +15,7 @@ use std::num::NonZeroU32;
 use std::path::Path;
 
 use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
-use crate::commit_trailers::finalize_cherry_pick_message;
+use crate::commit_trailers::{finalize_cherry_pick_message_with_options, CherryPickMessageOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::merge_file::{ConflictStyle, MergeFavor};
@@ -1422,10 +1422,9 @@ fn replay_message(
     match direction {
         ReplayDirection::Pick => {
             let (name, email) = identity_name_email(committer);
-            Ok(finalize_cherry_pick_message(
+            Ok(finalize_cherry_pick_message_with_options(
                 &source.message,
-                opts.record_origin,
-                false,
+                &CherryPickMessageOptions::default().with_append_source(opts.record_origin),
                 name,
                 email,
                 config,

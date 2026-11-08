@@ -24,7 +24,7 @@ use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
     RewordOptions, RewriteOptions, StartRebaseOptions,
 };
-use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use grit_test_support::integrate_branch_with;
 
 const IDENT: &str = "Hook Tester <hooks@grit.test> 1700000000 +0000";
@@ -226,9 +226,8 @@ fn worktree_add_runs_post_checkout_from_linked_worktree() {
     let repo = fx.repo();
     let linked_path = fx.wt().join("linked");
 
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked_path.clone(),
             branch: Some(WorktreeBranch::Create("wt".into())),
             start_point: Some("HEAD".into()),
@@ -236,9 +235,8 @@ fn worktree_add_runs_post_checkout_from_linked_worktree() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add worktree");
+        })
+        .expect("add worktree");
     let null = "0".repeat(40);
     let canonical = linked_path.canonicalize().expect("canonical");
     assert_eq!(
@@ -251,9 +249,8 @@ fn worktree_add_runs_post_checkout_from_linked_worktree() {
     );
 
     let detached = fx.wt().join("detached");
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: detached.clone(),
             branch: Some(WorktreeBranch::Detach),
             start_point: Some("HEAD".into()),
@@ -261,9 +258,8 @@ fn worktree_add_runs_post_checkout_from_linked_worktree() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("detach worktree");
+        })
+        .expect("detach worktree");
     let detached_canonical = detached.canonicalize().expect("canonical");
     assert_eq!(
         fx.take_log(),
@@ -282,9 +278,8 @@ fn worktree_add_no_checkout_or_orphan_skips_post_checkout() {
     fx.write_hook_with_pwd("post-checkout");
     let repo = fx.repo();
 
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: fx.wt().join("bare-tree"),
             branch: Some(WorktreeBranch::Create("nc".into())),
             start_point: Some("HEAD".into()),
@@ -292,14 +287,12 @@ fn worktree_add_no_checkout_or_orphan_skips_post_checkout() {
             lock: None,
             no_checkout: true,
             track: false,
-        },
-    )
-    .expect("no checkout");
+        })
+        .expect("no checkout");
     assert!(fx.take_log().is_empty());
 
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: fx.wt().join("orphan"),
             branch: Some(WorktreeBranch::Orphan("empty".into())),
             start_point: None,
@@ -307,9 +300,8 @@ fn worktree_add_no_checkout_or_orphan_skips_post_checkout() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("orphan");
+        })
+        .expect("orphan");
     assert!(fx.take_log().is_empty());
 }
 
@@ -321,9 +313,8 @@ fn worktree_add_failing_post_checkout_still_succeeds() {
     let repo = fx.repo();
     let linked_path = fx.wt().join("linked");
 
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked_path.clone(),
             branch: Some(WorktreeBranch::Create("wt".into())),
             start_point: Some("HEAD".into()),
@@ -331,9 +322,8 @@ fn worktree_add_failing_post_checkout_still_succeeds() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add despite hook failure");
+        })
+        .expect("add despite hook failure");
     assert!(linked_path.join("f").is_file());
 }
 
@@ -345,9 +335,8 @@ fn worktree_add_post_checkout_matches_git() {
     let repo = fx.repo();
 
     let grit_path = fx.wt().join("grit-wt");
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: grit_path.clone(),
             branch: Some(WorktreeBranch::Create("grit-branch".into())),
             start_point: Some("HEAD".into()),
@@ -355,9 +344,8 @@ fn worktree_add_post_checkout_matches_git() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("grit add");
+        })
+        .expect("grit add");
     let grit_line = fx.take_log().pop().expect("grit hook line");
 
     let git_path = fx.wt().join("git-wt");

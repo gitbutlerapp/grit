@@ -5,7 +5,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use tempfile::TempDir;
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -42,9 +42,8 @@ fn init_repo(tmp: &TempDir, with_commit: bool) -> PathBuf {
 
 fn add_orphan(main: &Path, wt: &Path, branch: &str) -> grit_lib::error::Result<()> {
     let repo = Repository::discover(Some(main), &RepositoryOptions::empty()).unwrap();
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: wt.to_owned(),
             branch: Some(WorktreeBranch::Orphan(branch.to_owned())),
             start_point: None,
@@ -52,9 +51,8 @@ fn add_orphan(main: &Path, wt: &Path, branch: &str) -> grit_lib::error::Result<(
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .map(|_| ())
+        })
+        .map(|_| ())
 }
 
 /// Files in `dir`, sorted.

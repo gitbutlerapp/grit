@@ -408,10 +408,10 @@ pub fn parse_blame_line_range(
     path: &str,
     spec: &str,
 ) -> Result<std::ops::RangeInclusive<usize>> {
-    use grit_lib::blame::resolve_blame_line_range;
-
     let start = blame_head_start(repo)?;
-    resolve_blame_line_range(repo, start, path, spec).map_err(|e| anyhow::anyhow!("{e}"))
+    repo.diff()
+        .resolve_blame_line_range(start, path, spec)
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 /// Emit `git blame --porcelain` for one worktree path at `HEAD`.
@@ -425,20 +425,21 @@ pub fn blame_porcelain_with_range(
     path: &str,
     line_range: Option<std::ops::RangeInclusive<usize>>,
 ) -> Result<()> {
-    use grit_lib::blame::{blame_file, BlameOptions};
+    use grit_lib::blame::BlameOptions;
     use std::io::{BufWriter, Write};
 
     let start = blame_head_start(repo)?;
-    let result = blame_file(
-        repo,
-        path,
-        &BlameOptions {
-            start: Some(start),
-            line_range,
-            ..Default::default()
-        },
-    )
-    .context("blame_file")?;
+    let result = repo
+        .diff()
+        .blame(
+            path,
+            &BlameOptions {
+                start: Some(start),
+                line_range,
+                ..Default::default()
+            },
+        )
+        .context("blame_file")?;
 
     let mut stdout = BufWriter::new(io::stdout().lock());
     let mut i = 0usize;

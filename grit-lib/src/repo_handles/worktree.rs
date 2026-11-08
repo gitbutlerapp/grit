@@ -1,13 +1,19 @@
 //! Linked worktree admin scoped to a [`Repository`](crate::repo::Repository).
 
-use std::path::Path;
+#![allow(deprecated)]
+
+use std::path::{Path, PathBuf};
 
 use crate::error::Result;
+use crate::progress::CancelToken;
 use crate::repo::Repository;
 use crate::worktree::{
-    add_linked_worktree, list_worktrees, lock_linked_worktree, move_linked_worktree,
-    remove_linked_worktree, repair_worktrees, unlock_linked_worktree, AddLinkedWorktreeOptions,
-    MoveWorktreeOptions, WorktreeEntry, WorktreeRepair,
+    add_linked_worktree, add_linked_worktree_with_cancel, ensure_branch_not_checked_out_elsewhere,
+    ensure_branch_not_checked_out_in_any_worktree, find_worktree_with_branch_checked_out,
+    list_worktrees, lock_linked_worktree, move_linked_worktree, prune_linked_worktrees,
+    remove_linked_worktree, repair_worktrees, unlock_linked_worktree, worktree_admin_dir,
+    AddLinkedWorktreeOptions, MoveWorktreeOptions, PruneWorktreesOptions, PrunedWorktreeEntry,
+    WorktreeEntry, WorktreeRepair,
 };
 
 pub use crate::worktree::LockWorktreeOptions;
@@ -82,6 +88,39 @@ impl<'repo> RepositoryWorktrees<'repo> {
         add_linked_worktree(self.repo, options)
     }
 
+    /// Like [`Self::add`], but observes cancellation while populating the worktree.
+    pub fn add_with_cancel(
+        &self,
+        options: &AddLinkedWorktreeOptions,
+        cancel: &CancelToken,
+    ) -> Result<WorktreeEntry> {
+        add_linked_worktree_with_cancel(self.repo, options, cancel)
+    }
+
+    /// Admin directory for linked worktrees under this repository.
+    #[must_use]
+    pub fn admin_dir(&self) -> PathBuf {
+        worktree_admin_dir(self.repo)
+    }
+
+    /// Path to a linked worktree that has `branch` checked out, if any.
+    pub fn find_with_branch_checked_out(&self, branch: &str) -> Result<Option<PathBuf>> {
+        Ok(
+            find_worktree_with_branch_checked_out(self.repo, branch, None)?
+                .map(|checkout| checkout.worktree_path),
+        )
+    }
+
+    /// Refuse when `branch` is checked out in another linked worktree (not the main worktree).
+    pub fn ensure_branch_not_checked_out_elsewhere(&self, branch: &str) -> Result<()> {
+        ensure_branch_not_checked_out_elsewhere(self.repo, branch)
+    }
+
+    /// Refuse when `branch` is checked out in any worktree including the main one.
+    pub fn ensure_branch_not_checked_out_in_any_worktree(&self, branch: &str) -> Result<()> {
+        ensure_branch_not_checked_out_in_any_worktree(self.repo, branch)
+    }
+
     /// Remove a linked worktree at `path`.
     ///
     /// # Errors
@@ -147,5 +186,10 @@ impl<'repo> RepositoryWorktrees<'repo> {
     /// Propagates [`repair_worktrees`] failures.
     pub fn repair(&self, paths: &[&Path], dry_run: bool) -> Result<Vec<WorktreeRepair>> {
         repair_worktrees(self.repo, paths, dry_run)
+    }
+
+    /// Remove stale linked worktree registrations with missing directories.
+    pub fn prune(&self, options: &PruneWorktreesOptions) -> Result<Vec<PrunedWorktreeEntry>> {
+        prune_linked_worktrees(self.repo, options)
     }
 }

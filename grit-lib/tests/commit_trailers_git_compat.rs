@@ -5,6 +5,7 @@ use std::path::Path;
 
 use grit_lib::commit::trailers::{
     append_signoff_trailer, finalize_cherry_pick_message, format_signoff_line,
+    CherryPickMessageOptions,
 };
 use grit_lib::config::environment::Environment;
 use grit_lib::config::ConfigSet;

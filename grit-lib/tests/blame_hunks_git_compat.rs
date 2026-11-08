@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::blame::{blame_file, BlameHunk, BlameOptions};
+use grit_lib::blame::{BlameHunk, BlameOptions};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -142,16 +142,17 @@ fn grit_blame_hunks(
     start: Option<ObjectId>,
     line_range: Option<std::ops::RangeInclusive<usize>>,
 ) -> Vec<BlameHunk> {
-    let result = blame_file(
-        repo,
-        file,
-        &BlameOptions {
-            start,
-            line_range,
-            ..Default::default()
-        },
-    )
-    .expect("blame_file");
+    let result = repo
+        .diff()
+        .blame(
+            file,
+            &BlameOptions {
+                start,
+                line_range,
+                ..Default::default()
+            },
+        )
+        .expect("blame_file");
     result.hunks()
 }
 
@@ -207,7 +208,10 @@ fn blame_hunks_match_git_after_rename() {
     let dir = repo.work_tree().expect("worktree");
     assert_hunks_match(&repo, dir, "after.txt", None, None);
 
-    let result = blame_file(&repo, "after.txt", &BlameOptions::default()).expect("blame");
+    let result = repo
+        .diff()
+        .blame("after.txt", &BlameOptions::default())
+        .expect("blame");
     assert_eq!(result.lines[0].original_path, "before.txt");
     let porcelain = git_output(dir, &["blame", "--porcelain", "after.txt"]);
     assert!(porcelain.contains("filename before.txt"));
@@ -302,15 +306,16 @@ fn blame_hunks_match_git_across_rename_edit_and_subtree_move() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     for range in [Some((1, 3)), Some((11, 13)), None, Some((1, 13))] {
         assert_hunks_match(&repo, root, "vendor/final", None, range);
-        let result = blame_file(
-            &repo,
-            "vendor/final",
-            &BlameOptions {
-                line_range: range.map(|(a, b)| a..=b),
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        let result = repo
+            .diff()
+            .blame(
+                "vendor/final",
+                &BlameOptions {
+                    line_range: range.map(|(a, b)| a..=b),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         // Commit, path and line must navigate to the attributed source, even after
         // the suffix shifted by one line in the rename-and-edit commit.
         for line in &result.lines {

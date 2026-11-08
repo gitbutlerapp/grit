@@ -255,9 +255,8 @@ mod tests {
         commit_all(&repo, "base");
 
         let linked_path = dir.path().join("linked");
-        add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        repo.worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked_path.clone(),
                 branch: Some(WorktreeBranch::Create("linked".into())),
                 start_point: Some("HEAD".into()),
@@ -265,9 +264,8 @@ mod tests {
                 lock: None,
                 no_checkout: false,
                 track: false,
-            },
-        )
-        .expect("linked");
+            })
+            .expect("linked");
 
         let linked_repo = Repository::discover(Some(&linked_path), &RepositoryOptions::empty())
             .expect("open linked");
@@ -313,9 +311,8 @@ mod tests {
         commit_all(&repo, "base");
 
         let linked_path = dir.path().join("linked");
-        add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        repo.worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked_path.clone(),
                 branch: Some(WorktreeBranch::Create("linked".into())),
                 start_point: Some("HEAD".into()),
@@ -323,9 +320,8 @@ mod tests {
                 lock: None,
                 no_checkout: false,
                 track: false,
-            },
-        )
-        .expect("linked");
+            })
+            .expect("linked");
 
         let linked_repo = Repository::discover(Some(&linked_path), &RepositoryOptions::empty())
             .expect("open linked");
@@ -455,9 +451,9 @@ mod tests {
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
         commit_all(&repo, "base");
         let linked_path = dir.path().join("linked");
-        let entry = add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        let entry = repo
+            .worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked_path,
                 branch: Some(WorktreeBranch::Create("linked".into())),
                 start_point: Some("HEAD".into()),
@@ -465,9 +461,8 @@ mod tests {
                 lock: None,
                 no_checkout: true,
                 track: false,
-            },
-        )
-        .expect("linked");
+            })
+            .expect("linked");
         assert!(!entry.admin_dir.join("index").exists());
         reachability_roots(&repo).expect("roots with missing linked index");
         index_object_roots(&repo).expect("index roots with missing linked index");

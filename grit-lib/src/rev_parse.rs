@@ -73,10 +73,10 @@ pub(crate) fn show_prefix(repo: &Repository, cwd: &Path) -> String {
 }
 
 /// Superproject work tree when `git_dir` lives under `.../<wt>/.git/modules/...` (nested submodule).
-///
-/// Used when the submodule's recorded path in the superproject index does not match the on-disk
-/// layout (e.g. `dir/sub` recorded but git dir is `.../modules/dir/modules/sub`), so
-/// `ls-files`-based superproject detection cannot find a gitlink.
+#[deprecated(
+    since = "0.6.0",
+    note = "internal layout helper; may be removed in a future release"
+)]
 #[must_use]
 pub fn superproject_work_tree_from_nested_git_modules(git_dir: &Path) -> Option<PathBuf> {
     let mut p = git_dir.to_path_buf();
@@ -640,6 +640,7 @@ fn parse_branch_tracking(config: &str, branch: &str) -> Option<(String, String)>
 /// Load commit parent overrides from `.git/info/grafts` (same format as Git).
 ///
 /// Used for `^N` / `^@` / `^!` / `^-` resolution and for `rev-list` traversal.
+#[deprecated(since = "0.6.0", note = "prefer repository-scoped graft loading APIs")]
 pub fn load_graft_parents(git_dir: &Path) -> HashMap<ObjectId, Vec<ObjectId>> {
     let graft_path = crate::repo::common_git_dir_for_config(git_dir).join("info/grafts");
     let mut grafts = HashMap::new();
@@ -5719,8 +5720,23 @@ mod line_coverage_tests {
 
 #[cfg(test)]
 mod superproject_path_tests {
-    use super::superproject_work_tree_from_nested_git_modules;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    fn superproject_work_tree_from_nested_git_modules(git_dir: &Path) -> Option<PathBuf> {
+        let mut p = git_dir.to_path_buf();
+        while let Some(parent) = p.parent() {
+            if p.file_name().is_some_and(|n| n == "modules")
+                && parent.file_name().is_some_and(|n| n == ".git")
+            {
+                return parent.parent().map(PathBuf::from);
+            }
+            if parent == p {
+                break;
+            }
+            p = parent.to_path_buf();
+        }
+        None
+    }
 
     #[test]
     fn nested_modules_yields_superproject_work_tree() {

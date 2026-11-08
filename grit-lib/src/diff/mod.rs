@@ -76,8 +76,8 @@ pub use hunk_id::{
 pub use merge_commit::{combined_structured_patch_body, DiffMerges};
 pub use no_index::{diff_paths, write_paths_patch, NoIndexError};
 pub use options::{
-    renames_from_config, DiffAlgorithm, DiffOptions, RenameDetection, UnknownDiffAlgorithm,
-    RENAME_DETECTION_DISABLED, WORD_LEVEL_INLINE_MAX_CHANGED_FILES,
+    renames_from_config, DiffAlgorithm, DiffOptions, IndentHeuristicOverride, RenameDetection,
+    UnknownDiffAlgorithm, RENAME_DETECTION_DISABLED, WORD_LEVEL_INLINE_MAX_CHANGED_FILES,
 };
 pub(crate) use tree_content::tree_diff_structured_parallel;
 pub use tree_options::{BreakRewrites, CopyDetection, TreeDiffOptions};

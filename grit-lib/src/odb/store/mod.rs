@@ -16,7 +16,7 @@ mod midx;
 mod packs;
 
 pub use composite::CompositeStore;
-pub use files::FilesSource;
+pub use files::{FilesSource, FilesSourceOpenOptions};
 pub use loose::{enumerate_loose_objects, read_loose_object_info, LooseStore};
 pub(crate) use loose::{LooseNegativeCache, SharedLooseNegativeCache};
 pub use midx::{MidxObjects, MidxObjectsStatus};

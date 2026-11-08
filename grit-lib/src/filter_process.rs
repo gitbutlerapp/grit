@@ -1080,9 +1080,9 @@ mod subprocess_context_tests {
         )
         .expect("open main");
 
-        let entry = add_linked_worktree(
-            &main_repo,
-            &AddLinkedWorktreeOptions {
+        let entry = main_repo
+            .worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked_wt.clone(),
                 branch: Some(WorktreeBranch::Create("linked".into())),
                 start_point: None,
@@ -1090,9 +1090,8 @@ mod subprocess_context_tests {
                 lock: None,
                 no_checkout: true,
                 track: false,
-            },
-        )
-        .expect("add linked worktree");
+            })
+            .expect("add linked worktree");
 
         let linked_repo = main_repo
             .open_linked_worktree(&entry.admin_dir, &entry.path)

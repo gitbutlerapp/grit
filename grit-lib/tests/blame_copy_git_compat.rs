@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::blame::{blame_file, BlameOptions, CopyDetection};
+use grit_lib::blame::{BlameOptions, CopyDetection};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -167,7 +167,7 @@ fn grit_blame_with_options(
     file: &str,
     options: &BlameOptions,
 ) -> Vec<PorcelainLine> {
-    let result = blame_file(repo, file, options).expect("blame_file");
+    let result = repo.diff().blame(file, options).expect("blame_file");
     let mut out = Vec::new();
     for line in result.lines {
         out.push(PorcelainLine {

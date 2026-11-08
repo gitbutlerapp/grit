@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::apply::parse_patch;
-use grit_lib::blame::{blame_file, BlameOptions};
+use grit_lib::blame::BlameOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{CopyDetection, RenameDetection, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
@@ -117,8 +117,7 @@ fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
     let _ = repo
         .revwalk()
         .merge_bases(&[tip, tip], grit_lib::revwalk::MergeBaseMode::All)?;
-    let blame = blame_file(
-        &repo,
+    let blame = repo.diff().blame(
         "a.txt",
         &BlameOptions {
             start: Some(tip),

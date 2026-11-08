@@ -6,7 +6,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::{prune_linked_worktrees, PruneWorktreesOptions};
+use grit_lib::worktree::PruneWorktreesOptions;
 use tempfile::TempDir;
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -62,7 +62,9 @@ fn prune_removes_worktrees_without_git_file_like_git() {
     let grit_tmp = TempDir::new().unwrap();
     let grit_main = setup(&grit_tmp);
     let repo = Repository::discover(Some(&grit_main), &RepositoryOptions::empty()).unwrap();
-    prune_linked_worktrees(&repo, &PruneWorktreesOptions { dry_run: false }).unwrap();
+    repo.worktrees()
+        .prune(&PruneWorktreesOptions { dry_run: false })
+        .unwrap();
 
     let git_tmp = TempDir::new().unwrap();
     let git_main = setup(&git_tmp);

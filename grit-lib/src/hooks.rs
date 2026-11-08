@@ -349,6 +349,7 @@ enum ResolvedHook {
 ///
 /// Never carries a Windows `\\?\` prefix, so the path can be shown to users and handed to
 /// hook interpreters such as Git for Windows' `sh`.
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().hooks_dir()`")]
 pub fn resolve_hooks_dir(repo: &Repository) -> PathBuf {
     resolve_hooks_dir_for_config(repo, repo.config().snapshot().ok().as_deref())
 }
@@ -776,6 +777,7 @@ pub(crate) fn run_advisory_hook(
 /// Returns whether a hook ran (a non-zero exit still counts). The hook's outcome is never an
 /// error: a hook that cannot be started is reported as
 /// [`Warning::HookNotRun`](crate::diagnostics::Warning::HookNotRun) and returns `false`.
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run_post_checkout()`")]
 pub fn run_post_checkout(
     repo: &Repository,
     old: Option<ObjectId>,
@@ -800,6 +802,7 @@ pub fn run_post_checkout(
 /// `1` for a squash merge and `0` otherwise.
 ///
 /// Returns whether a hook ran; failures never become errors (see [`run_post_checkout`]).
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run_post_merge()`")]
 pub fn run_post_merge(repo: &Repository, squash: bool) -> bool {
     run_advisory_hook(
         repo,
@@ -824,6 +827,7 @@ pub fn run_post_merge(repo: &Repository, squash: bool) -> bool {
 /// [`HookError::Failed`] when the hook exits non-zero, which refuses the rebase;
 /// [`HookError::Spawn`], repository errors, or [`HookError::MissingHookCommand`] as for
 /// [`run_hook`].
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run_pre_rebase()`")]
 pub fn run_pre_rebase(repo: &Repository, upstream: Option<&str>) -> crate::error::Result<bool> {
     let configured;
     let upstream_arg = match upstream {
@@ -861,6 +865,7 @@ pub fn post_rewrite_stdin(pairs: &[(ObjectId, ObjectId)]) -> Vec<u8> {
 ///
 /// Nothing runs when `pairs` is empty. Returns whether a hook ran; failures never become errors
 /// (see [`run_post_checkout`]).
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run_post_rewrite()`")]
 pub fn run_post_rewrite(
     repo: &Repository,
     kind: RewriteKind,
@@ -1126,6 +1131,7 @@ fn finish_hook_wait(
 /// output earlier hooks for the event already wrote, and [`HookError::MissingHookCommand`] for an
 /// incomplete `hook.*` configuration. A hook that runs and exits non-zero is
 /// `Ok(HookResult::Failed { .. })`.
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run()` where possible")]
 pub fn run_hook_opts(
     repo: Option<&Repository>,
     hook_name: &str,
@@ -1339,6 +1345,7 @@ fn run_hook_opts_with_cancel(
 ///
 /// [`HookError::Failed`] with the hook's exit status and captured output, or any error from
 /// [`run_commit_hook`].
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run_commit_checked()`")]
 pub fn run_commit_hook_checked(
     repo: &Repository,
     hook_name: &str,
@@ -1360,6 +1367,7 @@ pub fn run_commit_hook_checked(
 /// [`HookError::Spawn`] when a hook cannot be started, repository errors when repository
 /// config cannot be loaded, or [`HookError::MissingHookCommand`] when a configured hook has no
 /// command.
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run_commit()`")]
 pub fn run_commit_hook(
     repo: &Repository,
     hook_name: &str,
@@ -1422,6 +1430,7 @@ fn repo_hook_options<'a>(repo: &Repository, hook_name: &str) -> RunHookOptions<'
 /// [`HookError::Spawn`] when a hook cannot be started, repository errors when repository
 /// config cannot be loaded, or [`HookError::MissingHookCommand`] when a configured hook has no
 /// command.
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run()`")]
 pub fn run_hook(
     repo: &Repository,
     hook_name: &str,
@@ -1449,6 +1458,7 @@ pub fn run_hook(
 /// Output is always captured, whatever [`Repository::hook_stdio`] says, because the server
 /// relays it to the client over the sideband. A hook that cannot be resolved or started is
 /// reported as `Failed { status: 1 }` so the push is declined.
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run_in_git_dir()`")]
 pub fn run_hook_in_git_dir(
     repo: &Repository,
     hook_name: &str,
@@ -1474,12 +1484,13 @@ fn hook_declined() -> HookResult {
     }
 }
 
-/// Like [`run_hook_in_git_dir`], but honours [`Cancel`] and can terminate the hook process group.
+/// Like [`run_hook_in_git_dir`], but honours [`CancelToken`](crate::progress::CancelToken) and can terminate the hook process group.
 ///
 /// # Errors
 ///
 /// [`Error::Cancelled`](crate::error::Error::Cancelled) when `cancel` is set while a hook subprocess runs.
-pub(crate) fn run_hook_in_git_dir_with_cancel(
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run_in_git_dir()`")]
+pub fn run_hook_in_git_dir_with_cancel(
     repo: &Repository,
     hook_name: &str,
     args: &[&str],
@@ -1561,6 +1572,7 @@ impl PrePushRef {
 /// [`HookError::Failed`] when the hook exits non-zero (the push must not proceed),
 /// [`HookError::Spawn`] when it cannot be started, repository errors when configuration
 /// cannot be loaded, and [`HookError::MissingHookCommand`] when a configured hook has no command.
+#[deprecated(since = "0.6.0", note = "use `repo.hooks().run_pre_push()`")]
 pub fn run_pre_push_hook(
     repo: &Repository,
     remote: &str,

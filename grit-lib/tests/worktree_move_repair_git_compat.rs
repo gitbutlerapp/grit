@@ -3,10 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::git_path::path_for_disk_compare;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::{
-    add_linked_worktree, list_worktrees, move_linked_worktree, repair_worktrees,
-    AddLinkedWorktreeOptions, MoveWorktreeOptions, WorktreeBranch,
-};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, MoveWorktreeOptions, WorktreeBranch};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -55,9 +52,8 @@ fn seed_repo(main: &Path) -> Repository {
 }
 
 fn add_linked(repo: &Repository, path: PathBuf, branch: &str) {
-    add_linked_worktree(
-        repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path,
             branch: Some(WorktreeBranch::Create(branch.to_owned())),
             start_point: Some("HEAD".to_owned()),
@@ -65,9 +61,8 @@ fn add_linked(repo: &Repository, path: PathBuf, branch: &str) {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add");
+        })
+        .expect("add");
 }
 
 #[test]
@@ -78,7 +73,9 @@ fn worktree_move_then_git_status_and_worktree_list_agree() {
     let linked = tmp.path().join("linked");
     add_linked(&repo, linked.clone(), "linked");
     let dest = tmp.path().join("moved");
-    move_linked_worktree(&repo, &linked, &dest, &MoveWorktreeOptions::default()).expect("move");
+    repo.worktrees()
+        .move_linked(&linked, &dest, &MoveWorktreeOptions::default())
+        .expect("move");
     assert!(!linked.exists());
     git_fsck(&main);
     let porcelain = git_worktree_porcelain(&main);
@@ -94,13 +91,14 @@ fn worktree_move_refuses_main_locked_and_existing_destination() {
     let repo = seed_repo(&main);
     let linked = tmp.path().join("linked");
     add_linked(&repo, linked.clone(), "linked");
-    assert!(move_linked_worktree(
-        &repo,
-        &main,
-        &tmp.path().join("x"),
-        &MoveWorktreeOptions::default()
-    )
-    .is_err());
+    assert!(repo
+        .worktrees()
+        .move_linked(
+            &main,
+            &tmp.path().join("x"),
+            &MoveWorktreeOptions::default()
+        )
+        .is_err());
     repo.worktrees()
         .lock(
             &linked,
@@ -109,32 +107,35 @@ fn worktree_move_refuses_main_locked_and_existing_destination() {
             },
         )
         .unwrap();
-    assert!(move_linked_worktree(
-        &repo,
-        &linked,
-        &tmp.path().join("m2"),
-        &MoveWorktreeOptions::default()
-    )
-    .is_err());
-    assert!(move_linked_worktree(
-        &repo,
-        &linked,
-        &tmp.path().join("m2"),
-        &MoveWorktreeOptions {
-            force: true,
-            dry_run: false,
-        }
-    )
-    .is_ok());
+    assert!(repo
+        .worktrees()
+        .move_linked(
+            &linked,
+            &tmp.path().join("m2"),
+            &MoveWorktreeOptions::default()
+        )
+        .is_err());
+    assert!(repo
+        .worktrees()
+        .move_linked(
+            &linked,
+            &tmp.path().join("m2"),
+            &MoveWorktreeOptions {
+                force: true,
+                dry_run: false,
+            }
+        )
+        .is_ok());
     repo.worktrees().unlock(&tmp.path().join("m2")).ok();
     std::fs::write(tmp.path().join("exists.txt"), b"x").unwrap();
-    assert!(move_linked_worktree(
-        &repo,
-        &tmp.path().join("m2"),
-        &tmp.path().join("exists.txt"),
-        &MoveWorktreeOptions::default()
-    )
-    .is_err());
+    assert!(repo
+        .worktrees()
+        .move_linked(
+            &tmp.path().join("m2"),
+            &tmp.path().join("exists.txt"),
+            &MoveWorktreeOptions::default()
+        )
+        .is_err());
 }
 
 #[test]
@@ -146,7 +147,10 @@ fn worktree_repair_fixes_moved_linked_tree_git_agrees() {
     add_linked(&repo, linked.clone(), "side");
     let moved = tmp.path().join("moved");
     std::fs::rename(&linked, &moved).unwrap();
-    let repairs = repair_worktrees(&repo, &[moved.as_path()], false).expect("repair");
+    let repairs = repo
+        .worktrees()
+        .repair(&[moved.as_path()], false)
+        .expect("repair");
     assert!(!repairs.is_empty());
     git_fsck(&main);
     git(&moved, &["status"]);
@@ -166,7 +170,7 @@ fn worktree_repair_no_paths_restores_broken_gitfile_without_touching_other_workt
 
     let canon_a = path_for_disk_compare(&wt_a);
     let canon_b = path_for_disk_compare(&wt_b);
-    let entries = list_worktrees(&repo).expect("list");
+    let entries = repo.worktrees().list().expect("list");
     let admin_a = entries
         .iter()
         .find(|e| e.path == canon_a)
@@ -184,8 +188,10 @@ fn worktree_repair_no_paths_restores_broken_gitfile_without_touching_other_workt
     std::fs::write(wt_a.join(".git"), broken_gitfile).unwrap();
 
     let gitdir_b_before = std::fs::read_to_string(admin_b.join("gitdir")).unwrap();
-    repair_worktrees(&repo, &[], false).expect("repair all");
-    repair_worktrees(&repo, &[], false).expect("repair again (order-independent idempotence)");
+    repo.worktrees().repair(&[], false).expect("repair all");
+    repo.worktrees()
+        .repair(&[], false)
+        .expect("repair again (order-independent idempotence)");
 
     let gitdir_a = std::fs::read_to_string(admin_a.join("gitdir")).unwrap();
     let gitdir_b = std::fs::read_to_string(admin_b.join("gitdir")).unwrap();
@@ -235,7 +241,7 @@ fn worktree_repair_no_paths_finds_sibling_moved_linked_tree() {
     add_linked(&repo, linked.clone(), "side");
     let moved = tmp.path().join("moved");
     std::fs::rename(&linked, &moved).unwrap();
-    let repairs = repair_worktrees(&repo, &[], false).expect("repair all");
+    let repairs = repo.worktrees().repair(&[], false).expect("repair all");
     assert!(!repairs.is_empty());
     git_fsck(&main);
     git(&moved, &["status"]);
@@ -257,7 +263,10 @@ fn worktree_repair_fixes_moved_main_repo_git_agrees() {
     std::fs::rename(&linked, &side_moved).unwrap();
     let repo_moved =
         Repository::discover(Some(&main_moved), &RepositoryOptions::empty()).expect("discover");
-    let repairs = repair_worktrees(&repo_moved, &[side_moved.as_path()], false).expect("repair");
+    let repairs = repo_moved
+        .worktrees()
+        .repair(&[side_moved.as_path()], false)
+        .expect("repair");
     assert!(!repairs.is_empty());
     git_fsck(&main_moved);
     git(&side_moved, &["status"]);
@@ -273,16 +282,16 @@ fn worktree_move_repair_dry_run_changes_nothing() {
     let linked = tmp.path().join("linked");
     add_linked(&repo, linked.clone(), "linked");
     let before = std::fs::read_to_string(linked.join(".git")).unwrap();
-    move_linked_worktree(
-        &repo,
-        &linked,
-        &tmp.path().join("dest"),
-        &MoveWorktreeOptions {
-            dry_run: true,
-            ..Default::default()
-        },
-    )
-    .expect("dry move");
+    repo.worktrees()
+        .move_linked(
+            &linked,
+            &tmp.path().join("dest"),
+            &MoveWorktreeOptions {
+                dry_run: true,
+                ..Default::default()
+            },
+        )
+        .expect("dry move");
     assert!(linked.exists());
     assert_eq!(
         before,
@@ -301,7 +310,10 @@ fn worktree_move_repair_dry_run_changes_nothing() {
             .join("gitdir"),
     )
     .unwrap();
-    let repairs = repair_worktrees(&repo, &[renamed.as_path()], true).expect("dry repair");
+    let repairs = repo
+        .worktrees()
+        .repair(&[renamed.as_path()], true)
+        .expect("dry repair");
     assert!(!repairs.is_empty());
     let gitdir_after = std::fs::read_to_string(
         main.join(".git/worktrees")
@@ -356,7 +368,9 @@ fn git_move_then_grit_repair_worktree_list_agrees() {
     )
     .unwrap();
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).unwrap();
-    repair_worktrees(&repo, &[moved.as_path()], false).expect("repair");
+    repo.worktrees()
+        .repair(&[moved.as_path()], false)
+        .expect("repair");
     git_fsck(&main);
     git(&moved, &["status"]);
     let porcelain = git_worktree_porcelain(&main);
@@ -417,7 +431,8 @@ fn worktree_move_cross_device_preserves_tracked_and_dangling_symlinks() {
     std::os::unix::fs::symlink("missing-target", linked.join("dangling-link")).unwrap();
 
     let dest = dest_parent.join("moved-wt");
-    move_linked_worktree(&repo, &linked, &dest, &MoveWorktreeOptions::default())
+    repo.worktrees()
+        .move_linked(&linked, &dest, &MoveWorktreeOptions::default())
         .expect("cross-device move");
 
     assert!(dest.join("tracked-link").is_symlink());

@@ -7,9 +7,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use grit_lib::command_runner::hooks::{
-    resolve_hooks_dir, run_commit_hook, CommitHookEnv, HookResult,
-};
+use grit_lib::command_runner::hooks::{CommitHookEnv, HookResult};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -48,7 +46,7 @@ fn relative_hooks_path_resolves_against_work_tree_from_subdirectory() {
     )
     .expect("discover from sub/");
 
-    let dir = resolve_hooks_dir(&repo);
+    let dir = repo.hooks().hooks_dir();
     assert_eq!(
         dir.canonicalize().expect("hooks dir exists"),
         root.join("hooks2")
@@ -59,8 +57,10 @@ fn relative_hooks_path_resolves_against_work_tree_from_subdirectory() {
     assert_eq!(listed[0].name, "pre-commit");
     assert_eq!(listed[0].path.canonicalize().expect("hook path"), hook);
 
-    let result =
-        run_commit_hook(&repo, "pre-commit", &[], None, &CommitHookEnv::default()).expect("run");
+    let result = repo
+        .hooks()
+        .run_commit("pre-commit", &[], None, &CommitHookEnv::default())
+        .expect("run");
     assert!(
         matches!(result, HookResult::Failed { status: 5, .. }),
         "{result:?}"
@@ -80,7 +80,7 @@ fn relative_hooks_path_is_the_same_from_root_and_subdirectory() {
                 &RepositoryOptions::with_environment(process_env(cwd)),
             )
             .expect("discover");
-            resolve_hooks_dir(&repo)
+            repo.hooks().hooks_dir()
         })
         .collect();
     assert_eq!(dirs[0], dirs[1]);
@@ -93,5 +93,5 @@ fn relative_hooks_path_in_bare_repository_resolves_against_git_dir() {
     git(tmp.path(), &["init", "-q", "--bare", "r.git"]);
     git(&bare, &["config", "core.hooksPath", "custom"]);
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open bare");
-    assert_eq!(resolve_hooks_dir(&repo), bare.join("custom"));
+    assert_eq!(repo.hooks().hooks_dir(), bare.join("custom"));
 }

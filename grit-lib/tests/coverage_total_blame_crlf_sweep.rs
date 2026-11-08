@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::apply::parse_patch;
-use grit_lib::blame::{blame_file, BlameOptions};
+use grit_lib::blame::BlameOptions;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::crlf::{
@@ -63,8 +63,7 @@ fn blame_crlf_apply_and_pathspec_deep_sweep() -> grit_lib::error::Result<()> {
             Some(2usize..=3usize),
             Some(1usize..=1usize),
         ] {
-            let blame = blame_file(
-                &repo,
+            let blame = repo.diff().blame(
                 "file.txt",
                 &BlameOptions {
                     start,

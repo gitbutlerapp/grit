@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use grit_lib::blame::{blame_file, BlameOptions};
+use grit_lib::blame::BlameOptions;
 use grit_lib::bundle::BundleSpec;
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::{ConfigOverride, Environment, RepositoryOptions};
@@ -324,15 +324,16 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
     assert_untouched(scratch.path(), "before blame");
 
     // blame
-    let blame = blame_file(
-        &repo,
-        "a.txt",
-        &BlameOptions {
-            start: Some(merge_commit),
-            ..BlameOptions::default()
-        },
-    )
-    .expect("blame");
+    let blame = repo
+        .diff()
+        .blame(
+            "a.txt",
+            &BlameOptions {
+                start: Some(merge_commit),
+                ..BlameOptions::default()
+            },
+        )
+        .expect("blame");
     let blamed = blame
         .lines
         .iter()

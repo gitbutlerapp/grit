@@ -4,9 +4,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::rev_list::{
-    shallow_boundary_oids, MissingAction, ObjectFilter, OrderingMode, RevListOptions,
-};
+use grit_lib::revwalk::rev_list::{MissingAction, ObjectFilter, OrderingMode, RevListOptions};
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -225,7 +223,7 @@ fn shallow_and_filtered_reachability() {
     let commits = seed_linear(&repo, 3);
     let tip = commits.last().copied().expect("tip");
     fs::write(repo.git_dir().join("shallow"), format!("{tip}\n")).expect("shallow");
-    let bounds = shallow_boundary_oids(repo.git_dir());
+    let bounds = repo.revwalk().shallow_boundary_oids();
     assert!(bounds.contains(&tip));
     let walk = |filter: Option<ObjectFilter>| {
         let opts = RevListOptions {

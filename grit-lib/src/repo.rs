@@ -46,7 +46,6 @@ use crate::environment::{Environment, RepositoryOptions};
 use crate::error::{ConfigError, Error, NotARepositoryReason, Result};
 use crate::git_dir::io_error::{map_git_dir_io, map_index_write_error, GitDirPathOperation};
 use crate::git_path::path_for_error_message;
-use crate::hooks::run_hook;
 use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
 use crate::objects::{parse_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
@@ -2355,7 +2354,9 @@ impl Repository {
     ) -> crate::error::Result<()> {
         lock.commit_replace_index()?;
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
-        let _ = run_hook(self, "post-index-change", &[updated_workdir_arg, "0"], None)?;
+        let _ = self
+            .hooks()
+            .run("post-index-change", &[updated_workdir_arg, "0"], None)?;
         Ok(())
     }
 
@@ -2685,8 +2686,7 @@ impl Repository {
         // Git `write_locked_index`: `post-index-change` after a successful index write (t1800).
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
         let updated_skipworktree_arg = if updated_skipworktree { "1" } else { "0" };
-        let _ = run_hook(
-            self,
+        let _ = self.hooks().run(
             "post-index-change",
             &[updated_workdir_arg, updated_skipworktree_arg],
             None,

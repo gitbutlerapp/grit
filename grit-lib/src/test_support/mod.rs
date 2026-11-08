@@ -52,3 +52,7 @@ pub mod merge;
 /// Git-directory-level ref, reflog and reftable helpers for backend tests.
 #[cfg(any(test, feature = "test-support"))]
 pub mod refs;
+
+/// Worktree admin helpers not exposed on [`crate::repo_handles::RepositoryWorktrees`].
+#[cfg(any(test, feature = "test-support"))]
+pub mod worktree;

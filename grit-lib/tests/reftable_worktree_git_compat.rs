@@ -16,7 +16,7 @@ use grit_lib::refs::store::RawRef;
 use grit_lib::refs::store::RefNameRef;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::HeadState;
-use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use grit_test_support::git;
 
 fn open(path: &Path) -> Repository {
@@ -128,9 +128,9 @@ fn reftable_add_attached_detached_and_no_checkout_are_git_readable() {
         }
         let path = tmp.path().join(name);
         let repo = open(&main);
-        let entry = add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        let entry = repo
+            .worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: path.clone(),
                 branch: Some(if detached {
                     WorktreeBranch::Detach
@@ -146,9 +146,8 @@ fn reftable_add_attached_detached_and_no_checkout_are_git_readable() {
                 lock: None,
                 no_checkout,
                 track: false,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         assert!(entry.admin_dir.join("reftable/tables.list").is_file());
         assert!(entry.admin_dir.join("refs/heads").is_file());
         assert_eq!(

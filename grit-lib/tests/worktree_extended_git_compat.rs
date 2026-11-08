@@ -2,11 +2,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::{
-    add_linked_worktree, ensure_branch_not_checked_out_elsewhere,
-    ensure_branch_not_checked_out_in_any_worktree, find_worktree_with_branch_checked_out,
-    list_worktrees, remove_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch,
-};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use grit_test_support::git;
 use std::fs;
 use std::path::Path;
@@ -21,6 +17,10 @@ fn init_repo(root: &Path) {
     git_cmd(root, &["config", "user.name", "Test"]);
 }
 
+fn discover(main: &Path) -> Repository {
+    Repository::discover(Some(main), &RepositoryOptions::empty()).expect("discover")
+}
+
 #[test]
 fn add_detach_linked_worktree_and_list_locked_state() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -32,9 +32,9 @@ fn add_detach_linked_worktree_and_list_locked_state() {
     git_cmd(&main, &["commit", "-qm", "init"]);
 
     let linked = tmp.path().join("detached");
-    add_linked_worktree(
-        &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
-        &AddLinkedWorktreeOptions {
+    let repo = discover(&main);
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked.clone(),
             branch: Some(WorktreeBranch::Detach),
             start_point: Some("HEAD".into()),
@@ -42,35 +42,28 @@ fn add_detach_linked_worktree_and_list_locked_state() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("detach add");
+        })
+        .expect("detach add");
 
-    let entry = list_worktrees(
-        &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
-    )
-    .expect("list")
-    .into_iter()
-    .find(|e| e.path == linked.canonicalize().unwrap_or(linked.clone()))
-    .expect("listed");
+    let entry = repo
+        .worktrees()
+        .list()
+        .expect("list")
+        .into_iter()
+        .find(|e| e.path == linked.canonicalize().unwrap_or(linked.clone()))
+        .expect("listed");
     assert!(entry.head.is_detached());
 
     let admin = entry.admin_dir;
     fs::write(admin.join("locked"), "reason\n").expect("lock");
-    let listed = list_worktrees(
-        &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
-    )
-    .expect("list");
+    let listed = repo.worktrees().list().expect("list");
     let locked = listed.iter().find(|e| e.path == entry.path).expect("find");
     assert!(locked.is_locked);
     assert_eq!(locked.lock_reason.as_deref(), Some("reason"));
 
-    remove_linked_worktree(
-        &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
-        &linked,
-        true,
-    )
-    .expect("force remove locked");
+    repo.worktrees()
+        .remove(&linked, true)
+        .expect("force remove locked");
 }
 
 #[test]
@@ -85,9 +78,9 @@ fn add_worktree_on_existing_branch() {
     git_cmd(&main, &["branch", "feature"]);
 
     let linked = tmp.path().join("feature-wt");
-    add_linked_worktree(
-        &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
-        &AddLinkedWorktreeOptions {
+    discover(&main)
+        .worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked.clone(),
             branch: Some(WorktreeBranch::Existing("feature".into())),
             start_point: None,
@@ -95,9 +88,8 @@ fn add_worktree_on_existing_branch() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("existing branch checkout");
+        })
+        .expect("existing branch checkout");
     assert!(linked.join("f").is_file());
 }
 
@@ -112,9 +104,9 @@ fn remove_dirty_worktree_requires_force() {
     git_cmd(&main, &["commit", "-qm", "init"]);
 
     let linked = tmp.path().join("dirty");
-    add_linked_worktree(
-        &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
-        &AddLinkedWorktreeOptions {
+    let repo = discover(&main);
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked.clone(),
             branch: Some(WorktreeBranch::Create("dirty".into())),
             start_point: Some("HEAD".into()),
@@ -122,14 +114,13 @@ fn remove_dirty_worktree_requires_force() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add");
+        })
+        .expect("add");
     fs::write(linked.join("f"), "dirty change\n").unwrap();
-    let repo =
-        Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover");
-    assert!(remove_linked_worktree(&repo, &linked, false).is_err());
-    remove_linked_worktree(&repo, &linked, true).expect("force remove");
+    assert!(repo.worktrees().remove(&linked, false).is_err());
+    repo.worktrees()
+        .remove(&linked, true)
+        .expect("force remove");
 }
 
 #[test]
@@ -143,9 +134,9 @@ fn second_worktree_same_branch_is_rejected() {
     git_cmd(&main, &["commit", "-qm", "init"]);
 
     let first = tmp.path().join("first");
-    add_linked_worktree(
-        &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
-        &AddLinkedWorktreeOptions {
+    let repo = discover(&main);
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: first.clone(),
             branch: Some(WorktreeBranch::Create("shared".into())),
             start_point: Some("HEAD".into()),
@@ -153,14 +144,13 @@ fn second_worktree_same_branch_is_rejected() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("first");
+        })
+        .expect("first");
 
     let second = tmp.path().join("second");
-    assert!(add_linked_worktree(
-        &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
-        &AddLinkedWorktreeOptions {
+    assert!(repo
+        .worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: second,
             branch: Some(WorktreeBranch::Existing("shared".into())),
             start_point: None,
@@ -168,14 +158,17 @@ fn second_worktree_same_branch_is_rejected() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .is_err());
-    let repo =
-        Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover");
-    let found = find_worktree_with_branch_checked_out(&repo, "shared", None).expect("find");
+        },)
+        .is_err());
+    let found = repo
+        .worktrees()
+        .find_with_branch_checked_out("shared")
+        .expect("find");
     assert!(found.is_some());
-    assert!(ensure_branch_not_checked_out_elsewhere(&repo, "shared").is_err());
+    assert!(repo
+        .worktrees()
+        .ensure_branch_not_checked_out_elsewhere("shared")
+        .is_err());
 }
 
 #[test]
@@ -204,20 +197,22 @@ fn bare_repo_head_does_not_block_worktree_add_on_default_branch() {
         "refs/heads/main"
     );
 
-    let repo =
-        Repository::discover(Some(bare.as_path()), &RepositoryOptions::empty()).expect("discover");
+    let repo = discover(&bare);
     assert!(
-        find_worktree_with_branch_checked_out(&repo, "main", None)
+        repo.worktrees()
+            .find_with_branch_checked_out("main")
             .expect("find")
             .is_none(),
         "bare HEAD must not count as checking out main"
     );
-    assert!(ensure_branch_not_checked_out_in_any_worktree(&repo, "main").is_ok());
+    assert!(repo
+        .worktrees()
+        .ensure_branch_not_checked_out_in_any_worktree("main")
+        .is_ok());
 
     let wt = tmp.path().join("wt");
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: wt.clone(),
             branch: Some(WorktreeBranch::Existing("main".into())),
             start_point: None,
@@ -225,9 +220,8 @@ fn bare_repo_head_does_not_block_worktree_add_on_default_branch() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add main from bare repo");
+        })
+        .expect("add main from bare repo");
 
     git_cmd(&wt, &["status"]);
     git_cmd(&wt, &["fsck"]);
@@ -235,9 +229,8 @@ fn bare_repo_head_does_not_block_worktree_add_on_default_branch() {
 
     let second = tmp.path().join("wt2");
     assert!(
-        add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        repo.worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: second,
                 branch: Some(WorktreeBranch::Existing("main".into())),
                 start_point: None,
@@ -245,11 +238,10 @@ fn bare_repo_head_does_not_block_worktree_add_on_default_branch() {
                 lock: None,
                 no_checkout: false,
                 track: false,
-            },
-        )
-        .is_err(),
+            },)
+            .is_err(),
         "second checkout of main must still fail"
     );
 
-    remove_linked_worktree(&repo, &wt, true).expect("cleanup");
+    repo.worktrees().remove(&wt, true).expect("cleanup");
 }

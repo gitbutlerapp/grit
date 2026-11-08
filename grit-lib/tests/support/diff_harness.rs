@@ -380,7 +380,7 @@ pub fn config_from_snippet(text: &str) -> ConfigSet {
 }
 
 pub fn resolve_indent(config: &ConfigSet, cli_on: bool, cli_off: bool) -> bool {
-    grit_lib::diff::resolve_indent_heuristic(config, cli_on, cli_off)
+    grit_lib::diff::DiffOptions::resolve_indent_heuristic(config, cli_on, cli_off)
 }
 
 /// Ported blob pairs from upstream `t4033`, `t4050`, `t4071`, `t4065`, `t4061`, `t4015`, etc.

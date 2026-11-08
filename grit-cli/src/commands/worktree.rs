@@ -9,10 +9,8 @@ use grit_lib::refs::check_ref_format::RefName;
 use grit_lib::repo_handles::LockWorktreeOptions;
 use grit_lib::state::HeadState;
 use grit_lib::worktree::{
-    add_linked_worktree_with_cancel, list_worktrees, move_linked_worktree, prune_linked_worktrees,
-    remove_linked_worktree, resolve_linked_worktree_add_path, resolve_move_destination,
-    AddLinkedWorktreeOptions, MoveWorktreeOptions, PrunableReason, PruneWorktreesOptions,
-    WorktreeBranch, WorktreeRepairKind,
+    resolve_linked_worktree_add_path, resolve_move_destination, AddLinkedWorktreeOptions,
+    MoveWorktreeOptions, PrunableReason, PruneWorktreesOptions, WorktreeBranch, WorktreeRepairKind,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -182,7 +180,10 @@ impl MarkdownRender for WorktreeOutcome {
 
 pub fn run_list() -> Result<WorktreeOutcome> {
     let repo = context::discover()?;
-    let entries = list_worktrees(&repo).context("could not list worktrees")?;
+    let entries = repo
+        .worktrees()
+        .list()
+        .context("could not list worktrees")?;
     let worktrees = entries.into_iter().map(map_row).collect();
     Ok(WorktreeOutcome::List { worktrees })
 }
@@ -228,22 +229,23 @@ pub fn run_add(
     let relative_to = std::env::current_dir().context("could not read working directory")?;
     let path = resolve_linked_worktree_add_path(&path, &relative_to).map_err(anyhow::Error::new)?;
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let entry = add_linked_worktree_with_cancel(
-        &repo,
-        &AddLinkedWorktreeOptions {
-            path,
-            branch: branch_mode,
-            start_point,
-            force,
-            lock: lock.then(|| LockWorktreeOptions {
-                reason: lock_reason.clone(),
-            }),
-            no_checkout,
-            track,
-        },
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(anyhow::Error::new)?;
+    let entry = repo
+        .worktrees()
+        .add_with_cancel(
+            &AddLinkedWorktreeOptions {
+                path,
+                branch: branch_mode,
+                start_point,
+                force,
+                lock: lock.then(|| LockWorktreeOptions {
+                    reason: lock_reason.clone(),
+                }),
+                no_checkout,
+                track,
+            },
+            &crate::interrupt::process_cancel_token(),
+        )
+        .map_err(anyhow::Error::new)?;
     let (branch_name, head_hex) = head_summary(&entry.head);
     Ok(WorktreeOutcome::Add {
         path: user_display_path(&entry.path),
@@ -257,7 +259,9 @@ pub fn run_add(
 pub fn run_remove(path: PathBuf, force: bool) -> Result<WorktreeOutcome> {
     let repo = context::discover()?;
     let canonical = path_for_disk_compare(&path);
-    remove_linked_worktree(&repo, &canonical, force).map_err(anyhow::Error::new)?;
+    repo.worktrees()
+        .remove(&canonical, force)
+        .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Remove {
         path: user_display_path(&canonical),
     })
@@ -265,7 +269,9 @@ pub fn run_remove(path: PathBuf, force: bool) -> Result<WorktreeOutcome> {
 
 pub fn run_prune(dry_run: bool) -> Result<WorktreeOutcome> {
     let repo = context::discover()?;
-    let pruned = prune_linked_worktrees(&repo, &PruneWorktreesOptions { dry_run })
+    let pruned = repo
+        .worktrees()
+        .prune(&PruneWorktreesOptions { dry_run })
         .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Prune {
         dry_run,
@@ -302,13 +308,13 @@ pub fn run_move(from: PathBuf, to: PathBuf, force: bool, dry_run: bool) -> Resul
     let to_abs = std::path::absolute(&to).unwrap_or(to);
     let to_lexical = path_lexical_for_disk_compare(&to_abs);
     let dest = resolve_move_destination(&from_canon, &to_lexical).map_err(anyhow::Error::new)?;
-    move_linked_worktree(
-        &repo,
-        &from_canon,
-        &to_lexical,
-        &MoveWorktreeOptions { force, dry_run },
-    )
-    .map_err(anyhow::Error::new)?;
+    repo.worktrees()
+        .move_linked(
+            &from_canon,
+            &to_lexical,
+            &MoveWorktreeOptions { force, dry_run },
+        )
+        .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Move {
         from: absolute_path_for_gitfile_stored_path(&from_canon),
         to: absolute_path_for_gitfile_stored_path(&dest),

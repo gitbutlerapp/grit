@@ -5,10 +5,7 @@ use grit_lib::error::DiffError;
 use grit_lib::error::RevisionError;
 use std::path::Path;
 
-use grit_lib::blame::{
-    blame_file, resolve_blame_line_range_with_options, BlameFinalSource, BlameOptions, BlameResult,
-    CopyDetection,
-};
+use grit_lib::blame::{BlameFinalSource, BlameOptions, BlameResult, CopyDetection};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::WhitespaceMode;
 use grit_lib::error::Error;
@@ -93,7 +90,7 @@ fn worktree_options() -> BlameOptions {
 }
 
 fn blame(repo: &Repository, path: &str, options: &BlameOptions) -> BlameResult {
-    blame_file(repo, path, options).expect("blame_file")
+    repo.diff().blame(path, options).expect("blame_file")
 }
 
 /// Three commits touching `f.txt`, so attributions span several commits.
@@ -320,7 +317,10 @@ fn untracked_file_is_not_in_head() {
     assert!(!out.ok(), "git blames untracked files: {}", out.dump("git"));
 
     let repo = open_repo(root);
-    let err = blame_file(&repo, "untracked.txt", &worktree_options()).unwrap_err();
+    let err = repo
+        .diff()
+        .blame("untracked.txt", &worktree_options())
+        .unwrap_err();
     assert!(
         matches!(&err, Error::Revision(RevisionError::Parse(_))),
         "unexpected error: {err:?}"
@@ -335,7 +335,7 @@ fn missing_worktree_file_is_an_error() {
     history(root);
     std::fs::remove_file(root.join("f.txt")).unwrap();
     let repo = open_repo(root);
-    assert!(blame_file(&repo, "f.txt", &worktree_options()).is_err());
+    assert!(repo.diff().blame("f.txt", &worktree_options()).is_err());
     // The committed file can still be blamed.
     assert_eq!(
         blame(&repo, "f.txt", &BlameOptions::default()).lines.len(),
@@ -594,7 +594,9 @@ fn line_range_resolves_against_the_final_text() {
     .unwrap();
     let repo = open_repo(root);
     let mut options = worktree_options();
-    let range = resolve_blame_line_range_with_options(&repo, "f.txt", "/^two$/,+2", &options)
+    let range = repo
+        .diff()
+        .resolve_blame_line_range_with_options("f.txt", "/^two$/,+2", &options)
         .expect("range");
     assert_eq!(range, 6..=7);
     options.line_range = Some(range);
@@ -603,7 +605,9 @@ fn line_range_resolves_against_the_final_text() {
         attributions(&result),
         git_blame(root, &["-L", "/^two$/,+2", "--", "f.txt"])
     );
-    let numeric = resolve_blame_line_range_with_options(&repo, "f.txt", "9,10", &options)
+    let numeric = repo
+        .diff()
+        .resolve_blame_line_range_with_options("f.txt", "9,10", &options)
         .expect("numeric range");
     assert_eq!(numeric, 9..=10);
 }
@@ -697,7 +701,7 @@ fn bare_repository_rejects_worktree_but_accepts_contents() {
         &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
     );
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open bare");
-    let err = blame_file(&repo, "f.txt", &worktree_options()).unwrap_err();
+    let err = repo.diff().blame("f.txt", &worktree_options()).unwrap_err();
     assert!(
         matches!(err, Error::Diff(DiffError::BlameWorktreeBareRepository)),
         "unexpected error: {err:?}"

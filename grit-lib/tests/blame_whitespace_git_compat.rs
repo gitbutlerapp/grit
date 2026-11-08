@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::blame::{blame_file, BlameOptions};
+use grit_lib::blame::BlameOptions;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::WhitespaceMode;
 use grit_lib::objects::ObjectId;
@@ -106,15 +106,16 @@ fn git_blame_w(dir: &Path, file: &str) -> Vec<PorcelainLine> {
 }
 
 fn grit_blame_w(repo: &Repository, file: &str) -> Vec<PorcelainLine> {
-    let result = blame_file(
-        repo,
-        file,
-        &BlameOptions {
-            whitespace: WhitespaceMode::ignore_all_space(),
-            ..Default::default()
-        },
-    )
-    .expect("blame_file");
+    let result = repo
+        .diff()
+        .blame(
+            file,
+            &BlameOptions {
+                whitespace: WhitespaceMode::ignore_all_space(),
+                ..Default::default()
+            },
+        )
+        .expect("blame_file");
     let mut out: Vec<PorcelainLine> = result
         .lines
         .into_iter()

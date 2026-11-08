@@ -25,9 +25,7 @@ use grit_lib::refs::store::RefNameRef;
 use grit_lib::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::worktree_rules::WorktreeRules;
-use grit_lib::worktree::{
-    add_linked_worktree, remove_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch,
-};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use grit_test_support::git;
 
 fn commit_request(message: &str) -> CommitRequest {
@@ -69,9 +67,9 @@ fn linked_worktree_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, Repository
     let main_repo =
         Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("main");
     let linked = tmp.path().join("linked");
-    add_linked_worktree(
-        &main_repo,
-        &AddLinkedWorktreeOptions {
+    main_repo
+        .worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked.clone(),
             branch: Some(WorktreeBranch::Create("linked".to_owned())),
             start_point: Some("HEAD".to_owned()),
@@ -79,9 +77,8 @@ fn linked_worktree_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, Repository
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add linked");
+        })
+        .expect("add linked");
     (tmp, main, linked, main_repo)
 }
 
@@ -241,7 +238,9 @@ fn stale_index_stat_fixture() -> (tempfile::TempDir, PathBuf, Repository, Reposi
 #[test]
 fn stale_index_stat_with_identical_content_allows_worktree_remove() {
     let (_tmp, linked, _linked_repo, main_repo) = stale_index_stat_fixture();
-    remove_linked_worktree(&main_repo, &linked, false)
+    main_repo
+        .worktrees()
+        .remove(&linked, false)
         .expect("a stale size whose cleaned content is the indexed blob loses no data");
     assert!(!linked.exists(), "linked worktree directory removed");
 }
@@ -254,7 +253,10 @@ fn stale_index_stat_refresh_clears_git_diff_files_before_remove() {
         git_diff_files_quiet(&linked),
         "refresh must align index stat with worktree for git diff-files"
     );
-    remove_linked_worktree(&main_repo, &linked, false).expect("remove after refresh");
+    main_repo
+        .worktrees()
+        .remove(&linked, false)
+        .expect("remove after refresh");
 }
 
 #[test]
@@ -266,7 +268,7 @@ fn stale_index_stat_with_changed_content_blocks_worktree_remove() {
         "git diff-files must report the edit"
     );
     assert!(
-        remove_linked_worktree(&main_repo, &linked, false).is_err(),
+        main_repo.worktrees().remove(&linked, false).is_err(),
         "remove must refuse a worktree whose content changed under core.autocrlf"
     );
     assert!(
@@ -313,7 +315,10 @@ fn create_commit_refreshes_index_stat_for_worktree_remove() {
         git_diff_files_quiet(&linked),
         "git diff-files must be clean after create_commit"
     );
-    remove_linked_worktree(&main_repo, &linked, false).expect("remove after create_commit");
+    main_repo
+        .worktrees()
+        .remove(&linked, false)
+        .expect("remove after create_commit");
 }
 
 #[cfg(windows)]
@@ -335,5 +340,8 @@ fn create_commit_in_linked_worktree_allows_remove_on_windows() {
         git_diff_files_quiet(&linked),
         "Windows repro: git diff-files must be clean without update-index --refresh"
     );
-    remove_linked_worktree(&main_repo, &linked, false).expect("remove without prior status");
+    main_repo
+        .worktrees()
+        .remove(&linked, false)
+        .expect("remove without prior status");
 }

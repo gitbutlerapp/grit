@@ -189,6 +189,12 @@ impl<'repo> RevWalk<'repo> {
             inner: open_commit_stream(self.repo, &include, &exclude, &params)?,
         })
     }
+
+    /// Shallow-boundary commits recorded in `shallow` (empty when not a shallow clone).
+    #[must_use]
+    pub fn shallow_boundary_oids(&self) -> std::collections::HashSet<crate::objects::ObjectId> {
+        crate::rev_list::shallow_boundary_oids(self.repo.git_dir())
+    }
 }
 
 /// Revision specs from [`RevWalk::parse_stdin_specs`], ready for [`RevWalk::rev_list`].

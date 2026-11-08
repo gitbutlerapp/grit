@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::blame::{blame_file, resolve_blame_line_range, BlameOptions};
+use grit_lib::blame::BlameOptions;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -110,17 +110,21 @@ fn grit_blame_range(
     start: ObjectId,
     range_spec: &str,
 ) -> Vec<PorcelainLine> {
-    let range = resolve_blame_line_range(repo, start, file, range_spec).expect("resolve range");
-    let result = blame_file(
-        repo,
-        file,
-        &BlameOptions {
-            start: Some(start),
-            line_range: Some(range),
-            ..Default::default()
-        },
-    )
-    .expect("blame_file");
+    let range = repo
+        .diff()
+        .resolve_blame_line_range(start, file, range_spec)
+        .expect("resolve range");
+    let result = repo
+        .diff()
+        .blame(
+            file,
+            &BlameOptions {
+                start: Some(start),
+                line_range: Some(range),
+                ..Default::default()
+            },
+        )
+        .expect("blame_file");
     let mut out: Vec<PorcelainLine> = result
         .lines
         .into_iter()
@@ -318,15 +322,16 @@ fn packed_deep_history_range_matches_git_across_pack_layouts() {
             }
             let repo = open_repo(root);
             assert_range_matches_git(&repo, root, "target.txt", head_oid(root), "1,3");
-            let result = blame_file(
-                &repo,
-                "target.txt",
-                &BlameOptions {
-                    line_range: Some(1..=3),
-                    ..Default::default()
-                },
-            )
-            .expect("blame");
+            let result = repo
+                .diff()
+                .blame(
+                    "target.txt",
+                    &BlameOptions {
+                        line_range: Some(1..=3),
+                        ..Default::default()
+                    },
+                )
+                .expect("blame");
             let porcelain = git_output(
                 root,
                 &[
@@ -382,15 +387,16 @@ fn ranged_blame_visits_history_across_many_packs() {
         }
         let repo = open_repo(root);
         assert_range_matches_git(&repo, root, "target.txt", head_oid(root), "1,3");
-        let result = blame_file(
-            &repo,
-            "target.txt",
-            &BlameOptions {
-                line_range: Some(1..=3),
-                ..Default::default()
-            },
-        )
-        .expect("blame");
+        let result = repo
+            .diff()
+            .blame(
+                "target.txt",
+                &BlameOptions {
+                    line_range: Some(1..=3),
+                    ..Default::default()
+                },
+            )
+            .expect("blame");
         for (line, content) in result.lines.iter().zip(["first", "second", "third"]) {
             assert_eq!(line.original_path, "target.txt");
             assert_eq!(line.content.trim_end_matches('\n'), content);

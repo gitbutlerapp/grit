@@ -135,9 +135,9 @@ cargo run -p grit-examples --bin guide_embedding
 
 ## Blame and repository-relative paths
 
-[`blame_file`](rustdoc:grit_lib::blame::blame_file),
+[`Diff::blame`](rustdoc:grit_lib::diff::Diff::blame),
 [`compute_blame`](rustdoc:grit_lib::blame::compute_blame), and
-[`resolve_blame_line_range`](rustdoc:grit_lib::blame::resolve_blame_line_range)
+[`Diff::resolve_blame_line_range`](rustdoc:grit_lib::diff::Diff::resolve_blame_line_range)
 take **repository-relative** paths: the same string names the same file no matter
 where the host process is running. Pass status paths unchanged. For a raw byte
 path, build the input with `repo_relpath::storage_string`. Non-UTF-8 paths and
@@ -157,7 +157,7 @@ Line ranges and Git-written changed-path Bloom filters use the decoded path too.
 
 ### Blaming uncommitted content
 
-By default `blame_file` blames the file as committed at
+By default `repo.diff().blame` blames the file as committed at
 [`BlameOptions::start`](rustdoc:grit_lib::blame::BlameOptions::start) (or
 `HEAD`). Set
 [`BlameOptions::final_source`](rustdoc:grit_lib::blame::BlameOptions::final_source)
@@ -180,15 +180,14 @@ lines like `git blame --porcelain`; each
 hands back its own lines through
 [`BlameResult::hunk_lines`](rustdoc:grit_lib::blame::BlameResult::hunk_lines). Resolve `-L` specs against the same
 text with
-[`resolve_blame_line_range_with_options`](rustdoc:grit_lib::blame::resolve_blame_line_range_with_options).
+[`Diff::resolve_blame_line_range_with_options`](rustdoc:grit_lib::diff::Diff::resolve_blame_line_range_with_options).
 Nothing is written to the object database.
 
 ```rust
-use grit_lib::blame::{blame_file, BlameFinalSource, BlameOptions};
+use grit_lib::blame::{BlameFinalSource, BlameOptions};
 
 # fn editor(repo: &grit_lib::repo::Repository, buffer: Vec<u8>) -> grit_lib::error::Result<()> {
-let result = blame_file(
-    repo,
+let result = repo.diff().blame(
     "src/main.rs",
     &BlameOptions {
         final_source: BlameFinalSource::Contents(buffer),

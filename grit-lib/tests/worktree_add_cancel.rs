@@ -8,9 +8,7 @@ use grit_lib::porcelain::commit::CommitScope;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::worktree::{
-    add_linked_worktree_with_cancel, list_worktrees, AddLinkedWorktreeOptions, WorktreeBranch,
-};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 
 const IDENT: &str = "T <t@t> 0 +0000";
 
@@ -45,7 +43,7 @@ fn cancel_during_worktree_add_leaves_no_registration_or_branch() {
     let wt_path = tmp.path().join("wt");
     let cancel = CancelToken::new();
     let flag = cancel.clone();
-    let common = grit_lib::worktree::common_git_dir(repo.git_dir());
+    let common = repo.common_git_dir().to_path_buf();
     let handle = thread::spawn(move || {
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         while std::time::Instant::now() < deadline {
@@ -56,28 +54,29 @@ fn cancel_during_worktree_add_leaves_no_registration_or_branch() {
             thread::sleep(Duration::from_micros(200));
         }
     });
-    let err = add_linked_worktree_with_cancel(
-        &repo,
-        &AddLinkedWorktreeOptions {
-            path: wt_path.clone(),
-            branch: Some(WorktreeBranch::Create("wtb".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        },
-        &cancel,
-    )
-    .expect_err("cancelled add");
+    let err = repo
+        .worktrees()
+        .add_with_cancel(
+            &AddLinkedWorktreeOptions {
+                path: wt_path.clone(),
+                branch: Some(WorktreeBranch::Create("wtb".into())),
+                start_point: Some("HEAD".into()),
+                force: false,
+                lock: None,
+                no_checkout: false,
+                track: false,
+            },
+            &cancel,
+        )
+        .expect_err("cancelled add");
     handle.join().expect("join");
     assert!(err.is_cancelled(), "{err:?}");
-    assert_eq!(list_worktrees(&repo).expect("list").len(), 1);
+    assert_eq!(repo.worktrees().list().expect("list").len(), 1);
     assert!(
         repo.references().resolve("refs/heads/wtb").is_err(),
         "branch should be rolled back"
     );
-    let common = grit_lib::worktree::common_git_dir(repo.git_dir());
+    let common = repo.common_git_dir().to_path_buf();
     let linked = common.join("worktrees");
     let linked_count = linked
         .is_dir()

@@ -188,10 +188,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(repo.git_dir()),
         &LoadConfigOptions::repo_local_only(repo.git_dir()),
     )?;
-    let msg = trailers::finalize_cherry_pick_message(
+    let msg = trailers::finalize_cherry_pick_message_with_options(
         &picked_data.message,
-        true,
-        false,
+        &trailers::CherryPickMessageOptions::default().with_append_source(true),
         "Example",
         "example@example.com",
         &config,

@@ -4,15 +4,16 @@
 //! interpreter, the real exit status and output must come back, and a hook that cannot start
 //! must be reported as [`HookError::Spawn`] rather than a made-up exit status.
 
+use grit_lib::command_runner::hooks::run_hook_opts;
 use grit_lib::command_runner::hooks::{
-    resolve_hooks_dir, run_commit_hook_checked, run_hook_opts, run_post_checkout, run_post_merge,
-    run_post_rewrite, CommitHookEnv, HookError, HookName, HookResult, RewriteKind, RunHookOptions,
+    CommitHookEnv, HookError, HookName, HookResult, RewriteKind, RunHookOptions,
 };
 use grit_lib::command_runner::{
     CommandExit, CommandRunner, CommandSpec, RunningCommand, ShellInvocation,
 };
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
+use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{CommitOutcome, CommitRequest};
@@ -164,7 +165,8 @@ fn script_hook_exiting_zero_succeeds_and_commit_hook_passes() {
         matches!(result, Ok(HookResult::Success { .. })),
         "{result:?}, output: {output}"
     );
-    run_commit_hook_checked(&repo, "pre-commit", &[], None, &CommitHookEnv::default())
+    repo.hooks()
+        .run_commit_checked("pre-commit", &[], None, &CommitHookEnv::default())
         .expect("pre-commit exiting 0 lets the commit proceed");
 }
 
@@ -224,15 +226,17 @@ fn hook_that_cannot_start_is_a_typed_spawn_error() {
     let runner = FailingRunner::failing_with([io::Error::from(io::ErrorKind::NotFound)]);
     let repo = open(tmp.path(), Environment::empty(), Some(runner));
 
-    let err = run_commit_hook_checked(&repo, "pre-commit", &[], None, &CommitHookEnv::default())
+    let err = repo
+        .hooks()
+        .run_commit_checked("pre-commit", &[], None, &CommitHookEnv::default())
         .expect_err("spawn failure must not look like a hook exit status");
     match err {
-        HookError::Spawn {
+        Error::Hook(HookError::Spawn {
             hook_name,
             path,
             source,
             output,
-        } => {
+        }) => {
             assert!(output.is_empty(), "no hook ran before the failed start");
             assert_eq!(hook_name, "pre-commit");
             assert_eq!(path, Path::new(".git/hooks/pre-commit"));
@@ -321,7 +325,7 @@ fn hooks_dir_has_no_verbatim_prefix() {
     let canonical = tmp.path().canonicalize().expect("canonicalize");
     let repo = open(&canonical, Environment::empty(), None);
 
-    let hooks_dir = resolve_hooks_dir(&repo);
+    let hooks_dir = repo.hooks().hooks_dir();
     let shown = hooks_dir.to_string_lossy();
     assert!(!shown.starts_with(r"\\?\"), "{shown}");
     assert!(hooks_dir.ends_with("hooks"), "{shown}");
@@ -488,12 +492,14 @@ fn post_operation_hooks_receive_git_arguments() {
     let runner = FailingRunner::failing_with([]);
     let repo = open(tmp.path(), Environment::empty(), Some(runner.clone()));
 
-    assert!(run_post_checkout(&repo, Some(old), new, true));
-    assert!(run_post_checkout(&repo, None, new, false));
-    assert!(run_post_merge(&repo, true));
-    assert!(run_post_rewrite(&repo, RewriteKind::Amend, &[(old, new)]));
+    assert!(repo.hooks().run_post_checkout(Some(old), new, true));
+    assert!(repo.hooks().run_post_checkout(None, new, false));
+    assert!(repo.hooks().run_post_merge(true));
+    assert!(repo
+        .hooks()
+        .run_post_rewrite(RewriteKind::Amend, &[(old, new)]));
     assert!(
-        !run_post_rewrite(&repo, RewriteKind::Rebase, &[]),
+        !repo.hooks().run_post_rewrite(RewriteKind::Rebase, &[]),
         "an empty rewrite list runs nothing"
     );
 

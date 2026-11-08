@@ -7,7 +7,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::diff::combined_diff_patch::{format_combined_diff_body, CombinedDiffWsOptions};
 use grit_lib::diff::combined_tree_diff::{
     combined_diff_paths_filtered, format_combined_raw_line, format_combined_raw_line_all_paths,
-    CombinedTreeDiffOptions,
+    CombinedRawLineFormatOptions, CombinedTreeDiffOptions,
 };
 use grit_lib::diff::merge_diff::{
     combined_diff_paths, enrich_combined_path_renames, format_combined_textconv_patch,

@@ -11,7 +11,7 @@ use grit_lib::objects::ObjectKind;
 use grit_lib::refs::store::{MemoryRefStore, RefName, RefNameRef, RefStorageFormat};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::RevListOptions;
-use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 
 use crate::support;
 
@@ -331,9 +331,9 @@ fn config_handle_set_local_linked_worktree_matches_git() {
 
     let linked_holder = tempfile::tempdir_in(main.parent().expect("parent")).expect("linked dir");
     let linked = linked_holder.path().to_path_buf();
-    add_linked_worktree(
-        &open_grit_repo(main),
-        &AddLinkedWorktreeOptions {
+    open_grit_repo(main)
+        .worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked.clone(),
             branch: Some(WorktreeBranch::Create("linked".into())),
             start_point: Some("HEAD".into()),
@@ -341,9 +341,8 @@ fn config_handle_set_local_linked_worktree_matches_git() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add linked worktree");
+        })
+        .expect("add linked worktree");
 
     let linked_repo = open_grit_repo(&linked);
     linked_repo

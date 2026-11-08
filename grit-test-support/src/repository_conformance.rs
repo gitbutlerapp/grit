@@ -832,9 +832,10 @@ fn run_snapshot_on_repo(
         hunk_summaries(&commit_file_hunks(repo, clean_merge_tip, "feature.txt"));
     let committed_merge_hunk_ids = commit_file_hunk_hex_ids(repo, clean_merge_tip, "feature.txt");
 
-    let blame =
-        grit_lib::blame::blame_file(repo, "story.txt", &grit_lib::blame::BlameOptions::default())
-            .expect("blame");
+    let blame = repo
+        .diff()
+        .blame("story.txt", &grit_lib::blame::BlameOptions::default())
+        .expect("blame");
     let blame_commits: Vec<_> = blame.lines.iter().map(|l| l.commit).collect();
 
     let c2_oid = main_history[1].0;

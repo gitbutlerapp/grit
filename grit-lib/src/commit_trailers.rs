@@ -365,6 +365,32 @@ pub fn format_signoff_line(name: &str, email: &str) -> String {
     format!("{SIGN_OFF_HEADER}{name} <{email}>\n")
 }
 
+/// `-x` / `-s` options when finalizing a cherry-pick commit message.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CherryPickMessageOptions {
+    /// Append `(cherry picked from commit …)` when true (`-x`).
+    pub append_source: bool,
+    /// Add `Signed-off-by` when true (`-s`).
+    pub signoff: bool,
+}
+
+impl CherryPickMessageOptions {
+    /// Sets [`append_source`](Self::append_source).
+    #[must_use]
+    pub fn with_append_source(mut self, append_source: bool) -> Self {
+        self.append_source = append_source;
+        self
+    }
+
+    /// Sets [`signoff`](Self::signoff).
+    #[must_use]
+    pub fn with_signoff(mut self, signoff: bool) -> Self {
+        self.signoff = signoff;
+        self
+    }
+}
+
 /// Apply `-x` / `-s` rewriting plus optional `commit.cleanup` when `-x` is set.
 pub fn finalize_cherry_pick_message(
     original_message: &str,
@@ -375,10 +401,32 @@ pub fn finalize_cherry_pick_message(
     config: &ConfigSet,
     picked_commit_hex: &str,
 ) -> String {
+    finalize_cherry_pick_message_with_options(
+        original_message,
+        &CherryPickMessageOptions {
+            append_source,
+            signoff,
+        },
+        committer_name,
+        committer_email,
+        config,
+        picked_commit_hex,
+    )
+}
+
+/// Like [`finalize_cherry_pick_message`], with flags grouped in [`CherryPickMessageOptions`].
+pub fn finalize_cherry_pick_message_with_options(
+    original_message: &str,
+    options: &CherryPickMessageOptions,
+    committer_name: &str,
+    committer_email: &str,
+    config: &ConfigSet,
+    picked_commit_hex: &str,
+) -> String {
     let mut msg = original_message.to_owned();
 
     let explicit_cleanup = config.value("commit.cleanup").is_some();
-    let cleanup_space = append_source && !explicit_cleanup;
+    let cleanup_space = options.append_source && !explicit_cleanup;
     let cleanup_strip_comments =
         explicit_cleanup && matches!(config.value("commit.cleanup").as_deref(), Some("strip"));
 
@@ -396,11 +444,11 @@ pub fn finalize_cherry_pick_message(
         msg = cleaned.into_owned();
     }
 
-    if append_source {
+    if options.append_source {
         append_cherry_picked_from_line(&mut msg, picked_commit_hex, config);
     }
 
-    if signoff {
+    if options.signoff {
         let sob = format_signoff_line(committer_name, committer_email);
         append_signoff_trailer(&mut msg, &sob, config);
     }

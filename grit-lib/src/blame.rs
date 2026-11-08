@@ -4596,6 +4596,7 @@ fn commit_parents_for_blame(
 /// # Errors
 ///
 /// Returns [`LineRangeError`] when the spec is invalid or out of range for the file at `start`.
+#[deprecated(since = "0.6.0", note = "use `repo.diff().resolve_blame_line_range`")]
 pub fn resolve_blame_line_range(
     repo: &crate::repo::Repository,
     start: crate::objects::ObjectId,
@@ -4623,6 +4624,10 @@ pub fn resolve_blame_line_range(
 ///
 /// Returns [`LineRangeError`] when the spec is invalid or out of range, or when the
 /// final text cannot be loaded (reported as [`LineRangeError::InvalidSpec`]).
+#[deprecated(
+    since = "0.6.0",
+    note = "use `repo.diff().resolve_blame_line_range_with_options`"
+)]
 pub fn resolve_blame_line_range_with_options(
     repo: &crate::repo::Repository,
     path: &str,
@@ -5120,6 +5125,7 @@ fn blame_lines_share_hunk(prev: &BlameAttributedLine, next: &BlameAttributedLine
 /// index ([`crate::rev_parse_error::RevParseError::PathNotInRevision`]), and for
 /// [`BlameFinalSource::Worktree`] in a bare repository
 /// ([`crate::error::DiffError::BlameWorktreeBareRepository`]).
+#[deprecated(since = "0.6.0", note = "use `repo.diff().blame`")]
 pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Result<BlameResult> {
     let start_oid = resolve_blame_start(repo, options.start)?;
     let file_path = normalize_blame_path(repo, path);

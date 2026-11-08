@@ -6,14 +6,14 @@ use grit_lib::apply::{
     inflate_binary_payload, materialize_binary_patch_forward, materialize_binary_patch_reverse,
     parse_patch, write_git_binary_patch,
 };
-use grit_lib::blame::{blame_file, BlameOptions};
+use grit_lib::blame::BlameOptions;
 use grit_lib::commit::trailers::interpret::{
     complete_line, process_trailers, trailer_if_exists_from_str, trailer_if_missing_from_str,
     trailer_where_from_str, ProcessTrailerOptions,
 };
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::diff::rerere::{rerere_clear, rerere_conflict_id, rerere_enabled, rerere_gc};
+use grit_lib::diff::rerere::{rerere_conflict_id, rerere_enabled, rerere_gc};
 use grit_lib::merge::RerereAutoupdate;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
@@ -61,8 +61,7 @@ fn linear_repo(depth: usize) -> (tempfile::TempDir, Repository, grit_lib::object
 #[test]
 fn blame_apply_binary_and_trailer_sweep() -> grit_lib::error::Result<()> {
     let (_dir, repo, tip) = linear_repo(160);
-    let blame = blame_file(
-        &repo,
+    let blame = repo.diff().blame(
         "track.txt",
         &BlameOptions {
             start: Some(tip),
@@ -108,7 +107,7 @@ fn rerere_and_repository_index_paths() -> grit_lib::error::Result<()> {
     let _ = rerere_remaining_lines(&repo)?;
     let _ = rerere_diff_for_path(&repo, "track.txt")?;
     let _ = rerere_post_commit(&repo)?;
-    let _ = rerere_clear(repo.git_dir());
+    let _ = repo.merge().rerere().clear();
     let _ = rerere_gc(repo.environment(), repo.git_dir(), 200)?;
 
     let _ = repo.reload_config();

@@ -2,6 +2,7 @@
 #![deny(missing_docs)]
 #![warn(rustdoc::unescaped_backticks)]
 #![allow(rustdoc::private_intra_doc_links)]
+#![allow(deprecated)] // repository handles call legacy free functions during the 0.6 migration
 
 //! grit-lib — fast, linkable Git engine for Rust.
 //!

@@ -4035,9 +4035,8 @@ mod tests {
         .unwrap();
 
         let linked_path = dir.path().join("linked-wt");
-        add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        repo.worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked_path.clone(),
                 branch: Some(WorktreeBranch::Create("linked".into())),
                 start_point: Some("HEAD".into()),
@@ -4045,10 +4044,11 @@ mod tests {
                 lock: None,
                 no_checkout: true,
                 track: false,
-            },
-        )
-        .expect("linked worktree");
-        let linked_git = crate::worktree::list_worktrees(&repo)
+            })
+            .expect("linked worktree");
+        let linked_git = repo
+            .worktrees()
+            .list()
             .unwrap()
             .into_iter()
             .find(|e| e.path == linked_path)

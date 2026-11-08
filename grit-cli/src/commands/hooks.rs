@@ -1,7 +1,6 @@
 //! `grit hooks` — list hook scripts and run them.
 
 use anyhow::Result;
-use grit_lib::command_runner::hooks::run_hook;
 use grit_lib::repo_handles::{HookInfo, HookSource};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -142,7 +141,7 @@ pub fn run_list(limit: Option<usize>) -> Result<HooksOutcome> {
 pub fn run_hook_by_name(name: &str, args: &[String]) -> Result<HooksOutcome> {
     let repo = context::discover()?;
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let result = run_hook(&repo, name, &arg_refs, None)?;
+    let result = repo.hooks().run(name, &arg_refs, None)?;
     let lossy = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let output = result.output();
     Ok(HooksOutcome::Run {

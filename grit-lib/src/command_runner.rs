@@ -1073,7 +1073,7 @@ pub fn run_program(
     runner.spawn(&spec)?.wait_with_output()
 }
 
-/// Git hook execution helpers.
+/// Git hook execution helpers (legacy free functions; prefer [`crate::repo_handles::RepositoryHooks`]).
 pub mod hooks {
     pub use crate::hooks::*;
 }

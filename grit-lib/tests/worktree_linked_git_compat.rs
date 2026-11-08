@@ -2,10 +2,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::{
-    add_linked_worktree, list_worktrees, remove_linked_worktree, AddLinkedWorktreeOptions,
-    WorktreeBranch,
-};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use std::process::Command;
 
 fn git(dir: &std::path::Path, args: &[&str]) {
@@ -36,9 +33,9 @@ fn grit_add_and_remove_linked_worktree_git_list() {
     let repo =
         Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover");
     let linked = root.join("linked");
-    let entry = add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    let entry = repo
+        .worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked.clone(),
             branch: Some(WorktreeBranch::Create("linked".to_owned())),
             start_point: Some("HEAD".to_owned()),
@@ -46,9 +43,8 @@ fn grit_add_and_remove_linked_worktree_git_list() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add worktree");
+        })
+        .expect("add worktree");
 
     let gitdir_line = std::fs::read_to_string(linked.join(".git")).expect("linked .git");
     assert!(
@@ -79,7 +75,7 @@ fn grit_add_and_remove_linked_worktree_git_list() {
         );
     }
 
-    let list = list_worktrees(&repo).expect("list");
+    let list = repo.worktrees().list().expect("list");
     assert_eq!(list.len(), 2);
     assert!(linked.join("tracked.txt").is_file());
     let status = Command::new("git")
@@ -109,8 +105,10 @@ fn grit_add_and_remove_linked_worktree_git_list() {
     let text = String::from_utf8_lossy(&git_list.stdout);
     assert!(text.contains("linked"));
 
-    remove_linked_worktree(&repo, &linked, false).expect("remove clean worktree");
-    assert_eq!(list_worktrees(&repo).unwrap().len(), 1);
+    repo.worktrees()
+        .remove(&linked, false)
+        .expect("remove clean worktree");
+    assert_eq!(repo.worktrees().list().unwrap().len(), 1);
     assert!(
         !linked.exists(),
         "clean non-force removal must delete the worktree directory and tracked files"

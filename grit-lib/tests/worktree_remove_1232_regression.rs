@@ -8,9 +8,7 @@ use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::{
-    add_linked_worktree, remove_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch,
-};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use grit_test_support::git_cmd as git_shell;
 
 fn write_system_autocrlf_config(dir: &Path) -> PathBuf {
@@ -88,9 +86,9 @@ fn remove_linked_worktree_with_system_inherited_autocrlf_and_crlf_worktree_file(
 
     let main_repo = open_grit_inherited_autocrlf(&main, &system_cfg);
     let linked = root.path().join("w");
-    add_linked_worktree(
-        &main_repo,
-        &AddLinkedWorktreeOptions {
+    main_repo
+        .worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked.clone(),
             branch: Some(WorktreeBranch::Create("f".to_owned())),
             start_point: Some("HEAD".to_owned()),
@@ -98,9 +96,8 @@ fn remove_linked_worktree_with_system_inherited_autocrlf_and_crlf_worktree_file(
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("worktree add");
+        })
+        .expect("worktree add");
 
     std::fs::write(linked.join("new.txt"), b"new\r\n").expect("CRLF new file");
     let linked_repo = open_grit_inherited_autocrlf(&linked, &system_cfg);
@@ -131,7 +128,10 @@ fn remove_linked_worktree_with_system_inherited_autocrlf_and_crlf_worktree_file(
         "git diff-files must be quiet before remove"
     );
 
-    remove_linked_worktree(&main_repo, &linked, false).expect("remove clean linked worktree");
+    main_repo
+        .worktrees()
+        .remove(&linked, false)
+        .expect("remove clean linked worktree");
     assert!(
         !linked.exists(),
         "linked worktree directory should be removed"
@@ -156,9 +156,9 @@ fn remove_linked_worktree_windows_crlf_set_content() {
 
     let main_repo = open_grit_inherited_autocrlf(&main, &system_cfg);
     let linked = root.path().join("w");
-    add_linked_worktree(
-        &main_repo,
-        &AddLinkedWorktreeOptions {
+    main_repo
+        .worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked.clone(),
             branch: Some(WorktreeBranch::Create("f".to_owned())),
             start_point: Some("HEAD".to_owned()),
@@ -166,9 +166,8 @@ fn remove_linked_worktree_windows_crlf_set_content() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("worktree add");
+        })
+        .expect("worktree add");
 
     std::fs::write(linked.join("new.txt"), b"new\r\n").expect("CRLF via bytes");
     let linked_repo = open_grit_inherited_autocrlf(&linked, &system_cfg);
@@ -181,5 +180,8 @@ fn remove_linked_worktree_windows_crlf_set_content() {
         .create_staged(&commit_request("two"), &mut NullProgress)
         .expect("commit");
 
-    remove_linked_worktree(&main_repo, &linked, false).expect("remove on Windows CRLF path");
+    main_repo
+        .worktrees()
+        .remove(&linked, false)
+        .expect("remove on Windows CRLF path");
 }

@@ -1,8 +1,7 @@
 //! RecordingRunner coverage for hooks and shell filters.
 
 use grit_lib::command_runner::hooks::{
-    run_commit_hook_checked, run_hook, run_hook_opts, CommitHookEnv, HookError, HookOutput,
-    HookResult, HookStdio, RunHookOptions,
+    run_hook_opts, CommitHookEnv, HookError, HookOutput, HookResult, HookStdio, RunHookOptions,
 };
 use grit_lib::command_runner::{
     CommandEnvironment, CommandExit, CommandRunner, CommandSpec, CommandStdin, CommandStdio,
@@ -270,7 +269,10 @@ fn inherited_pre_push_keeps_stdout_separate() {
             .with_hook_stdio(HookStdio::Inherit),
     );
 
-    let result = run_hook(&repo, "pre-push", &["origin", "url"], None).expect("pre-push");
+    let result = repo
+        .hooks()
+        .run("pre-push", &["origin", "url"], None)
+        .expect("pre-push");
     assert!(result.is_ok());
     let spec = runner.specs().into_iter().next().expect("pre-push spawned");
     assert_eq!(spec.stdout, CommandStdio::Inherit);
@@ -291,7 +293,10 @@ fn successful_hook_output_is_returned_in_the_result() {
     }
     let repo = open_repo(tmp.path(), process_options(tmp.path()));
 
-    let result = run_hook(&repo, "post-checkout", &["a", "b", "1"], None).expect("hook");
+    let result = repo
+        .hooks()
+        .run("post-checkout", &["a", "b", "1"], None)
+        .expect("hook");
     assert_eq!(
         result,
         HookResult::Success {
@@ -321,7 +326,7 @@ fn configured_and_script_hooks_append_output_in_run_order() {
             .with_command_runner(runner.clone()),
     );
 
-    let result = run_hook(&repo, "pre-commit", &[], None).expect("hooks");
+    let result = repo.hooks().run("pre-commit", &[], None).expect("hooks");
     assert_eq!(
         runner.specs().len(),
         2,
@@ -363,7 +368,9 @@ fn recording_runner_pre_commit_hook_argv_and_failure() {
     let repo =
         Repository::open(&git_dir, &&opts.clone().with_work_tree(tmp.path())).expect("open repo");
 
-    let err = run_commit_hook_checked(&repo, "pre-commit", &[], None, &CommitHookEnv::default())
+    let err = repo
+        .hooks()
+        .run_commit_checked("pre-commit", &[], None, &CommitHookEnv::default())
         .expect_err("hook should fail");
     match err {
         grit_lib::error::Error::Hook(HookError::Failed {

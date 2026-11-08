@@ -11,7 +11,7 @@ use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::refs_fsck::{format_refs_fsck_line, refs_fsck, RefsFsckIssue};
 use grit_lib::refs::store::{Expected, RawRef, RefName, RefTransaction, RefUpdate, RefUpdateFlags};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use tempfile::tempdir;
 
 #[test]
@@ -209,9 +209,9 @@ fn refs_fsck_reftable_linked_worktree_placeholders_and_missing_object() {
     .expect("main");
 
     let wt_path = dir.path().join("linked");
-    let entry = add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    let entry = repo
+        .worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: wt_path.clone(),
             branch: Some(WorktreeBranch::Create("linked".into())),
             start_point: Some("HEAD".into()),
@@ -219,9 +219,8 @@ fn refs_fsck_reftable_linked_worktree_placeholders_and_missing_object() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("worktree");
+        })
+        .expect("worktree");
     assert_eq!(
         std::fs::read(entry.admin_dir.join("refs/heads")).expect("stub"),
         b"this repository uses the reftable format\n"
@@ -306,9 +305,9 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
     .expect("main");
 
     let wt_path = dir.path().join("linked");
-    let entry = add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    let entry = repo
+        .worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: wt_path.clone(),
             branch: Some(WorktreeBranch::Create("linked".into())),
             start_point: Some("HEAD".into()),
@@ -316,9 +315,8 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("worktree");
+        })
+        .expect("worktree");
     let wt_id = entry
         .admin_dir
         .file_name()

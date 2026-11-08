@@ -3,7 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::git_path::path_for_disk_compare;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::{list_worktrees, worktree_admin_dir, PrunableReason};
+use grit_lib::worktree::PrunableReason;
 use grit_test_support::git;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -62,7 +62,7 @@ fn open_grit(root: &Path) -> Repository {
 fn assert_list_matches_git(open_from: &Path, main: &Path, expected_current_path: &Path) {
     let git_rows = parse_git_worktree_porcelain(&git(main, &["worktree", "list", "--porcelain"]));
     let repo = open_grit(open_from);
-    let grit_list = list_worktrees(&repo).expect("list");
+    let grit_list = repo.worktrees().list().expect("list");
     for entry in &grit_list {
         let git_row = git_rows
             .get(&entry.path)
@@ -114,7 +114,7 @@ fn assert_list_matches_git(open_from: &Path, main: &Path, expected_current_path:
     );
     assert_eq!(
         path_for_disk_compare(&current.admin_dir),
-        path_for_disk_compare(&worktree_admin_dir(&repo)),
+        path_for_disk_compare(&repo.worktrees().admin_dir()),
         "is_current admin dir must match opened repository"
     );
 }

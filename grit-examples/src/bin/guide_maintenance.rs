@@ -3,7 +3,7 @@
 //! Source for the library guide "Maintenance" page (included in the docs site).
 
 use anyhow::Result;
-use grit_lib::command_runner::hooks::{run_hook, HookResult};
+use grit_lib::command_runner::hooks::HookResult;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::maintenance::fsck::{fsck_object, FsckObjectOptions};
 use grit_lib::objects::{HashAlgo, ObjectKind};
@@ -64,7 +64,7 @@ fn main() -> Result<()> {
         fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))?;
     }
 
-    let hook_result = run_hook(&repo, "pre-commit", &[], None)?;
+    let hook_result = repo.hooks().run("pre-commit", &[], None)?;
     let ran = matches!(hook_result, HookResult::Success { .. });
     println!("pre_commit_ran={ran}");
 

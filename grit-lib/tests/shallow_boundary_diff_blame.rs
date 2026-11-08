@@ -1,12 +1,11 @@
 //! Shallow boundary commits diff and blame like roots (issue #2520).
 
-use grit_lib::blame::blame_file;
 use grit_lib::blame::BlameOptions;
 use grit_lib::diff::{DiffDetail, DiffMerges, DiffOptions};
 use grit_lib::error::Error;
 use grit_lib::error::RefError;
 use grit_lib::error::RevisionError;
-use grit_lib::progress::CancelToken;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::git;
@@ -37,7 +36,7 @@ fn grit_shallow_clone(source_bare: &Path, dest: &Path, depth: u32) -> grit_lib::
             depth: Some(depth),
             ..CloneOptions::new(source_bare.to_string_lossy(), dest.to_path_buf())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -101,7 +100,10 @@ fn shallow_boundary_blame_matches_git_boundary_marker() {
     let clone_dir = dir.path().join("shallow");
     let repo = grit_shallow_clone(&bare, &clone_dir, 1);
 
-    let result = blame_file(&repo, "README", &BlameOptions::default()).unwrap();
+    let result = repo
+        .diff()
+        .blame("README", &BlameOptions::default())
+        .unwrap();
     assert!(
         result.lines.iter().any(|l| l.boundary),
         "expected at least one boundary line"

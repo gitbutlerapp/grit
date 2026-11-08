@@ -11,7 +11,6 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use grit_lib::blame::build_fuzzy_line_map;
-use grit_lib::command_runner::hooks::{resolve_hooks_dir, run_hook};
 use grit_lib::command_runner::{run_program, CommandStdin, CommandStdio, RecordingRunner};
 use grit_lib::config::config_file_display_for_error;
 use grit_lib::config::dotfile::is_ntfs_dot_gitignore;
@@ -229,11 +228,10 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
 fn hooks_helpers_with_repo() {
     let dir = tempdir().expect("tempdir");
     let repo = init_repo(dir.path());
-    let _ = resolve_hooks_dir(&repo);
+    let _ = repo.hooks().hooks_dir();
     let _ = repo.hooks().list(None);
-    let _ = run_hook(&repo, "pre-commit", &[], None);
-    let _ = run_hook(
-        &repo,
+    let _ = repo.hooks().run("pre-commit", &[], None);
+    let _ = repo.hooks().run(
         "reference-transaction",
         &["committed"],
         Some(b"0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 HEAD\n"),

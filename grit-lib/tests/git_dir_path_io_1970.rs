@@ -10,9 +10,7 @@ use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_lib::state::HeadState;
-use grit_lib::worktree::{
-    add_linked_worktree, list_worktrees, AddLinkedWorktreeOptions, WorktreeBranch,
-};
+use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use std::fs;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
@@ -240,9 +238,8 @@ fn read_only_linked_worktree_metadata_on_detached_commit_names_head_lock() {
     seed_commit(&repo, &main_wt, "base");
 
     let linked_wt = dir.path().join("linked");
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked_wt.clone(),
             branch: None,
             start_point: Some("HEAD".into()),
@@ -250,9 +247,8 @@ fn read_only_linked_worktree_metadata_on_detached_commit_names_head_lock() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add linked worktree");
+        })
+        .expect("add linked worktree");
 
     let linked_repo = Repository::discover(Some(linked_wt.as_path()), &RepositoryOptions::empty())
         .expect("discover linked");
@@ -291,9 +287,8 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
     seed_commit(&repo, &main_wt, "base");
 
     let linked_wt = dir.path().join("linked");
-    add_linked_worktree(
-        &repo,
-        &AddLinkedWorktreeOptions {
+    repo.worktrees()
+        .add(&AddLinkedWorktreeOptions {
             path: linked_wt.clone(),
             branch: Some(WorktreeBranch::Detach),
             start_point: Some("HEAD".into()),
@@ -301,9 +296,8 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
             lock: None,
             no_checkout: false,
             track: false,
-        },
-    )
-    .expect("add linked worktree");
+        })
+        .expect("add linked worktree");
 
     let linked_repo = Repository::discover(Some(linked_wt.as_path()), &RepositoryOptions::empty())
         .expect("discover linked");
@@ -317,7 +311,9 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
         )
         .expect("stage");
 
-    let admin = list_worktrees(&repo)
+    let admin = repo
+        .worktrees()
+        .list()
         .expect("list")
         .into_iter()
         .find(|e| e.path == linked_wt.canonicalize().unwrap_or(linked_wt.clone()))

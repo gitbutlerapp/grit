@@ -94,6 +94,7 @@ pub struct WorktreeEntry {
 
 /// Shared git directory for `git_dir` (follows `commondir` for linked worktrees).
 #[must_use]
+#[deprecated(since = "0.6.0", note = "use repository path helpers where available")]
 pub fn common_git_dir(git_dir: &Path) -> PathBuf {
     common_git_dir_for_config(git_dir)
 }
@@ -146,6 +147,7 @@ pub struct BranchWorktreeCheckout {
 
 /// Administrative git directory for the worktree `repo` was opened from.
 #[must_use]
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().admin_dir()`")]
 pub fn worktree_admin_dir(repo: &Repository) -> PathBuf {
     let common = common_git_dir(repo.git_dir());
     if repo.git_dir().starts_with(common.join("worktrees")) {
@@ -201,6 +203,10 @@ pub(crate) fn admin_dirs_match(a: &Path, b: &Path) -> bool {
 ///
 /// `exclude_admin_dir` is typically the current worktree's admin dir so a switch to the branch
 /// already checked out here is allowed.
+#[deprecated(
+    since = "0.6.0",
+    note = "use `repo.worktrees().find_with_branch_checked_out`"
+)]
 pub fn find_worktree_with_branch_checked_out(
     repo: &Repository,
     branch_short_name: &str,
@@ -231,6 +237,10 @@ pub fn find_worktree_with_branch_checked_out(
 /// # Errors
 ///
 /// Returns [`crate::porcelain::branch_error::BranchError::CheckedOut`] when a different worktree holds the branch.
+#[deprecated(
+    since = "0.6.0",
+    note = "use `repo.worktrees().ensure_branch_not_checked_out_elsewhere`"
+)]
 pub fn ensure_branch_not_checked_out_elsewhere(
     repo: &Repository,
     branch_short_name: &str,
@@ -252,6 +262,10 @@ pub fn ensure_branch_not_checked_out_elsewhere(
 /// # Errors
 ///
 /// Returns [`crate::porcelain::branch_error::BranchError::CheckedOut`] when any registered worktree holds the branch.
+#[deprecated(
+    since = "0.6.0",
+    note = "use `repo.worktrees().ensure_branch_not_checked_out_in_any_worktree`"
+)]
 pub fn ensure_branch_not_checked_out_in_any_worktree(
     repo: &Repository,
     branch_short_name: &str,
@@ -288,6 +302,7 @@ fn main_worktree_list_is_bare(repo: &Repository) -> bool {
 /// Enumerate the main and linked worktrees for `repo`.
 ///
 /// Order matches Git: main worktree first, then linked worktrees sorted by admin id.
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().list`")]
 pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
     let common = common_git_dir(repo.git_dir());
     let git_dir = repo.git_dir();
@@ -478,6 +493,7 @@ pub fn allocate_worktree_admin_dir(common: &Path, wt_path: &Path) -> PathBuf {
 
 /// Copy `config.worktree` into a linked worktree admin dir, stripping keys Git omits
 /// when `extensions.worktreeConfig` is enabled (`core.bare`, `core.worktree`).
+#[deprecated(since = "0.6.0", note = "internal admin helper")]
 pub fn copy_filtered_worktree_config(source_git_dir: &Path, admin_dir: &Path) -> Result<()> {
     let src = source_git_dir.join("config.worktree");
     if !src.is_file() {
@@ -602,6 +618,7 @@ pub struct PrunedWorktreeEntry {
 ///
 /// Fails when the path is occupied, the branch is already checked out in a non-bare
 /// worktree, or checkout cannot complete.
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().add`")]
 pub fn add_linked_worktree(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
@@ -618,6 +635,7 @@ pub fn add_linked_worktree(
 /// # Errors
 ///
 /// Same as [`add_linked_worktree`], plus [`Error::Cancelled`](crate::error::Error::Cancelled).
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().add_with_cancel`")]
 pub fn add_linked_worktree_with_cancel(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
@@ -770,6 +788,7 @@ pub fn add_linked_worktree_with_cancel(
 /// # Errors
 ///
 /// Propagates I/O failures while reading or removing admin directories.
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().prune`")]
 pub fn prune_linked_worktrees(
     repo: &Repository,
     opts: &PruneWorktreesOptions,
@@ -1369,6 +1388,7 @@ fn plan_admin_dir_for_add(
 /// Returns [`LinkedWorktreeError::NotRegistered`] for an unknown `path`,
 /// [`LinkedWorktreeError::MainWorktree`] for the main worktree, and, unless `force` is set,
 /// [`LinkedWorktreeError::Locked`] or [`LinkedWorktreeError::HasLocalChanges`].
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().remove`")]
 pub fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Result<()> {
     let entry = find_linked_worktree(repo, path, LinkedWorktreeOperation::Remove)?;
     if entry.is_locked && !force {
@@ -1544,7 +1564,7 @@ mod tests {
             &RepositoryOptions::empty().with_work_tree(&root),
         )
         .unwrap();
-        let list = list_worktrees(&repo).unwrap();
+        let list = repo.worktrees().list().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].path, path_for_disk_compare(&root));
         assert!(!list[0].is_bare);
@@ -1598,7 +1618,7 @@ mod tests {
         // A bisect started on a branch holds it too.
         git(&linked, &["switch", "-q", "other"]);
         git(&linked, &["bisect", "start", "main", "other"]);
-        let head = list_worktrees(&repo).unwrap().remove(1).head;
+        let head = repo.worktrees().list().unwrap().remove(1).head;
         assert!(matches!(head, HeadState::Detached { .. }), "{head:?}");
         assert!(find_worktree_with_branch_checked_out(&repo, "other", None)
             .unwrap()
@@ -1702,9 +1722,8 @@ mod tests {
 
         let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
         let linked = tmp.path().join("linked");
-        add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        repo.worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked.clone(),
                 branch: Some(WorktreeBranch::Create("wt".into())),
                 start_point: Some("HEAD".into()),
@@ -1712,12 +1731,11 @@ mod tests {
                 lock: None,
                 no_checkout: false,
                 track: false,
-            },
-        )
-        .unwrap();
-        assert_eq!(list_worktrees(&repo).unwrap().len(), 2);
-        remove_linked_worktree(&repo, &linked, false).unwrap();
-        assert_eq!(list_worktrees(&repo).unwrap().len(), 1);
+            })
+            .unwrap();
+        assert_eq!(repo.worktrees().list().unwrap().len(), 2);
+        repo.worktrees().remove(&linked, false).unwrap();
+        assert_eq!(repo.worktrees().list().unwrap().len(), 1);
     }
 
     #[test]
@@ -1852,9 +1870,9 @@ mod tests {
         .unwrap();
         let repo = Repository::open(&bare, &RepositoryOptions::empty()).unwrap();
         let wt = tmp.path().join("wt");
-        let entry = add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        let entry = repo
+            .worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: wt.clone(),
                 branch: Some(WorktreeBranch::Orphan("wt".into())),
                 start_point: None,
@@ -1862,9 +1880,8 @@ mod tests {
                 lock: None,
                 no_checkout: false,
                 track: false,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         assert_eq!(
             entry.admin_dir,
             fs::canonicalize(&bare)
@@ -1943,7 +1960,7 @@ mod tests {
             .git_dir()
             .starts_with(bare.join("worktrees").as_path()));
 
-        let list = list_worktrees(&linked).unwrap();
+        let list = linked.worktrees().list().unwrap();
         assert_eq!(list.len(), 2);
         assert!(
             list[0].is_bare,
@@ -2006,9 +2023,8 @@ mod tests {
 
         let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
         let linked = tmp.path().join("linked");
-        add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        repo.worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked.clone(),
                 branch: Some(WorktreeBranch::Create("wt".into())),
                 start_point: Some("HEAD".into()),
@@ -2016,13 +2032,12 @@ mod tests {
                 lock: None,
                 no_checkout: false,
                 track: false,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
 
         let linked_repo =
             Repository::discover(Some(linked.as_path()), &RepositoryOptions::empty()).unwrap();
-        let list = list_worktrees(&linked_repo).unwrap();
+        let list = linked_repo.worktrees().list().unwrap();
         assert_eq!(list.len(), 2);
         let expected_main = path_for_disk_compare(&main);
         assert_eq!(list[0].path, expected_main);
@@ -2066,9 +2081,8 @@ mod tests {
 
         let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
         let linked = tmp.path().join("linked");
-        add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        repo.worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked.clone(),
                 branch: Some(WorktreeBranch::Create("feature".into())),
                 start_point: Some("HEAD".into()),
@@ -2076,9 +2090,8 @@ mod tests {
                 lock: None,
                 no_checkout: false,
                 track: false,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
 
         let linked_repo =
             Repository::discover(Some(linked.as_path()), &RepositoryOptions::empty()).unwrap();
@@ -2126,9 +2139,8 @@ mod tests {
             Repository::discover(Some(&main), &crate::environment::RepositoryOptions::empty())
                 .unwrap();
         let linked = tmp.path().join("linked");
-        add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        repo.worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked.clone(),
                 branch: Some(WorktreeBranch::Create("a".into())),
                 start_point: Some("HEAD".into()),
@@ -2136,14 +2148,12 @@ mod tests {
                 lock: None,
                 no_checkout: false,
                 track: false,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         fs::remove_dir_all(&linked).unwrap();
         assert!(matches!(
-            add_linked_worktree(
-                &repo,
-                &AddLinkedWorktreeOptions {
+            repo.worktrees()
+                .add(&AddLinkedWorktreeOptions {
                     path: linked.clone(),
                     branch: Some(WorktreeBranch::Create("b".into())),
                     start_point: Some("HEAD".into()),
@@ -2151,9 +2161,8 @@ mod tests {
                     lock: None,
                     no_checkout: false,
                     track: false,
-                },
-            )
-            .unwrap_err(),
+                },)
+                .unwrap_err(),
             Error::Worktree(WorktreeError::Linked(
                 LinkedWorktreeError::PathRegisteredMissing { .. }
             ))
@@ -2190,7 +2199,7 @@ mod tests {
 
         let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
         assert!(matches!(
-            remove_linked_worktree(&repo, &main, false),
+            repo.worktrees().remove(&main, false),
             Err(Error::Worktree(WorktreeError::Linked(
                 LinkedWorktreeError::MainWorktree {
                     operation: LinkedWorktreeOperation::Remove
@@ -2199,9 +2208,8 @@ mod tests {
         ));
 
         let linked = tmp.path().join("linked");
-        add_linked_worktree(
-            &repo,
-            &AddLinkedWorktreeOptions {
+        repo.worktrees()
+            .add(&AddLinkedWorktreeOptions {
                 path: linked.clone(),
                 branch: Some(WorktreeBranch::Create("wt".into())),
                 start_point: Some("HEAD".into()),
@@ -2209,9 +2217,8 @@ mod tests {
                 lock: None,
                 no_checkout: false,
                 track: false,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         let common = common_git_dir(repo.git_dir());
         let admin = fs::read_dir(common.join("worktrees"))
             .unwrap()
@@ -2220,14 +2227,14 @@ mod tests {
             .expect("admin");
         fs::write(admin.join("locked"), "hold\n").unwrap();
         assert!(matches!(
-            remove_linked_worktree(&repo, &linked, false),
+            repo.worktrees().remove( &linked, false),
             Err(Error::Worktree(WorktreeError::Linked(LinkedWorktreeError::Locked {
                 reason: Some(r)
             }))) if r == "hold"
         ));
-        assert!(remove_linked_worktree(&repo, &linked, true).is_ok());
+        assert!(repo.worktrees().remove(&linked, true).is_ok());
         assert!(matches!(
-            remove_linked_worktree(&repo, &linked, false),
+            repo.worktrees().remove(&linked, false),
             Err(Error::Worktree(WorktreeError::Linked(
                 LinkedWorktreeError::NotRegistered { .. }
             )))

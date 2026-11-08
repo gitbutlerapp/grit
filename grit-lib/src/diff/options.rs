@@ -3,7 +3,7 @@
 use crate::config::ConfigSet;
 
 use super::filter::DiffFilter;
-use super::{indent_heuristic_from_config, resolve_indent_heuristic, WhitespaceMode};
+use super::{indent_heuristic_from_config, WhitespaceMode};
 
 /// Line diff algorithm names matching Git's `diff.algorithm` and `--diff-algorithm`.
 #[non_exhaustive]
@@ -259,8 +259,39 @@ impl DiffOptions {
         cli_indent_heuristic: bool,
         cli_no_indent_heuristic: bool,
     ) -> bool {
-        resolve_indent_heuristic(config, cli_indent_heuristic, cli_no_indent_heuristic)
+        crate::diff::core::resolve_indent_heuristic(
+            config,
+            cli_indent_heuristic,
+            cli_no_indent_heuristic,
+        )
     }
+
+    /// Like [`Self::resolve_indent_heuristic`], with a structured CLI override enum.
+    #[must_use]
+    pub fn resolve_indent_heuristic_with_override(
+        config: &ConfigSet,
+        cli_override: IndentHeuristicOverride,
+    ) -> bool {
+        let (cli_on, cli_off) = match cli_override {
+            IndentHeuristicOverride::FromConfig => (false, false),
+            IndentHeuristicOverride::ForceOn => (true, false),
+            IndentHeuristicOverride::ForceOff => (false, true),
+        };
+        Self::resolve_indent_heuristic(config, cli_on, cli_off)
+    }
+}
+
+/// CLI override for `diff.indentHeuristic` when building [`DiffOptions`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IndentHeuristicOverride {
+    /// Use `diff.indentHeuristic` from config (Git default: on when unset).
+    #[default]
+    FromConfig,
+    /// Force the heuristic on (`--indent-heuristic`).
+    ForceOn,
+    /// Force the heuristic off (`--no-indent-heuristic`).
+    ForceOff,
 }
 
 /// `diff.renames`: `false` disables; `true` or copy modes use default similarity.

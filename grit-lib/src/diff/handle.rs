@@ -1,4 +1,7 @@
 //! Repository-scoped tree, index and work-tree diffs via [`Diff`].
+
+#![allow(deprecated)]
+
 use std::path::Path;
 
 use crate::diff::targets::{collect_files_for_target, limit_target_entries, stored_target_entries};
@@ -717,4 +720,42 @@ fn retain_submodule_entries(entries: &mut Vec<DiffEntry>, submodules: SubmoduleI
         let gitlink_or_absent = |mode: FileMode| mode.is_gitlink() || mode == FileMode::ABSENT;
         !(gitlink_or_absent(entry.old_mode) && gitlink_or_absent(entry.new_mode))
     });
+}
+
+impl<'repo> Diff<'repo> {
+    /// Attribute each line of a worktree path to a commit (blame).
+    ///
+    /// # Errors
+    ///
+    /// Propagates blame resolution, object read, and worktree failures documented on
+    /// [`crate::blame::blame_file`].
+    pub fn blame(
+        &self,
+        path: &str,
+        options: &crate::blame::BlameOptions,
+    ) -> Result<crate::blame::BlameResult> {
+        crate::blame::blame_file(self.repo, path, options)
+    }
+
+    /// Resolve a Git-style `-L` range for blame on `path` at a fixed start commit.
+    pub fn resolve_blame_line_range(
+        &self,
+        start: ObjectId,
+        path: &str,
+        spec: &str,
+    ) -> std::result::Result<std::ops::RangeInclusive<usize>, crate::line_range::LineRangeError>
+    {
+        crate::blame::resolve_blame_line_range(self.repo, start, path, spec)
+    }
+
+    /// Resolve a Git-style `-L` range using full [`crate::blame::BlameOptions`].
+    pub fn resolve_blame_line_range_with_options(
+        &self,
+        path: &str,
+        spec: &str,
+        options: &crate::blame::BlameOptions,
+    ) -> std::result::Result<std::ops::RangeInclusive<usize>, crate::line_range::LineRangeError>
+    {
+        crate::blame::resolve_blame_line_range_with_options(self.repo, path, spec, options)
+    }
 }

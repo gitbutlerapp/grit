@@ -12,8 +12,7 @@ use std::fmt;
 pub struct BlameUsageError;
 
 use grit_lib::blame::{
-    blame_file, resolve_blame_line_range_with_options, BlameFinalSource, BlameOptions, BlameResult,
-    CopyDetection, IgnoreRevs, IgnoreRevsSources,
+    BlameFinalSource, BlameOptions, BlameResult, CopyDetection, IgnoreRevs, IgnoreRevsSources,
 };
 use grit_lib::diff::WhitespaceMode;
 use grit_lib::revwalk::{Peel, ResolveOptions};
@@ -244,7 +243,10 @@ pub fn run(
 
     options.line_range = line_range
         .as_deref()
-        .map(|spec| resolve_blame_line_range_with_options(&repo, &blame_path, spec, &options))
+        .map(|spec| {
+            repo.diff()
+                .resolve_blame_line_range_with_options(&blame_path, spec, &options)
+        })
         .transpose()
         .with_context(|| "could not parse line range")?;
 
@@ -270,7 +272,7 @@ pub fn run(
     options.whitespace = whitespace;
     options.copy_detection = copy_detection;
     options.move_detection = move_detection || copy_detection.count() > 0;
-    let result = blame_file(&repo, &blame_path, &options)?;
+    let result = repo.diff().blame(&blame_path, &options)?;
 
     outcome_from_result(
         &repo,

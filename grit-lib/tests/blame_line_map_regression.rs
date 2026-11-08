@@ -36,7 +36,7 @@ fn moved_include_line_maps_as_insert_not_reused_parent_index() {
     );
 }
 
-use grit_lib::blame::{blame_file, BlameOptions};
+use grit_lib::blame::BlameOptions;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
 use std::path::Path;
@@ -100,7 +100,7 @@ fn blame_merge_moved_include_matches_git() {
 /// Assert `blame_file` attributes every line of `path` to the commit `git blame` reports.
 fn assert_blame_matches_git(root: &Path, path: &str) {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
-    let result = blame_file(&repo, path, &BlameOptions::default()).unwrap();
+    let result = repo.diff().blame(path, &BlameOptions::default()).unwrap();
     let mut cmd = Command::new("git");
     cmd.current_dir(root).args(["blame", "--porcelain", path]);
     git_env(&mut cmd);

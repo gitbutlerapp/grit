@@ -40,6 +40,16 @@ impl std::fmt::Debug for FilesSource {
     }
 }
 
+/// MIDX-related switches when opening a [`FilesSource`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FilesSourceOpenOptions {
+    /// Read packs through a multi-pack-index when present.
+    pub use_midx: bool,
+    /// Use tip pack listing for MIDX `contains` probes (Git-compatible).
+    pub midx_tip_listing_for_exists: bool,
+}
+
 impl FilesSource {
     fn with_pack_access<R>(&self, f: impl FnOnce() -> R) -> R {
         if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
@@ -71,14 +81,32 @@ impl FilesSource {
         midx_tip_listing_for_exists: bool,
         diagnostics: DiagnosticsHandle,
     ) -> Result<Self> {
-        let midx = MidxObjects::new(Arc::clone(&pack_store), use_midx)?;
+        Self::open_with_options(
+            pack_store,
+            loose,
+            &FilesSourceOpenOptions {
+                use_midx,
+                midx_tip_listing_for_exists,
+            },
+            diagnostics,
+        )
+    }
+
+    /// Like [`Self::open`], with switches grouped in [`FilesSourceOpenOptions`].
+    pub fn open_with_options(
+        pack_store: Arc<PackStore>,
+        loose: LooseStore,
+        options: &FilesSourceOpenOptions,
+        diagnostics: DiagnosticsHandle,
+    ) -> Result<Self> {
+        let midx = MidxObjects::new(Arc::clone(&pack_store), options.use_midx)?;
         Ok(Self {
             objects_dir: pack_store.objects_dir().to_path_buf(),
             loose,
             packs: PackedObjects::new(pack_store),
             midx,
-            use_midx,
-            midx_tip_listing_for_exists,
+            use_midx: options.use_midx,
+            midx_tip_listing_for_exists: options.midx_tip_listing_for_exists,
             _diagnostics: diagnostics,
         })
     }

@@ -9,7 +9,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use grit_lib::command_runner::hooks::{run_pre_push_hook, HookError, PrePushRef};
+use grit_lib::command_runner::hooks::{HookError, PrePushRef};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
@@ -338,32 +338,32 @@ fn run_pre_push_hook_formats_stdin_lines() {
     let a = ObjectId::from_hex(&"a".repeat(40)).expect("oid");
     let b = ObjectId::from_hex(&"b".repeat(40)).expect("oid");
     let zero = "0".repeat(40);
-    run_pre_push_hook(
-        &repo,
-        "up",
-        "https://example.com/r.git",
-        &[
-            PrePushRef {
-                local_ref: Some("refs/heads/main".to_owned()),
-                local_oid: Some(a),
-                remote_ref: "refs/heads/main".to_owned(),
-                remote_oid: Some(b),
-            },
-            PrePushRef {
-                local_ref: None,
-                local_oid: Some(a),
-                remote_ref: "refs/heads/new".to_owned(),
-                remote_oid: None,
-            },
-            PrePushRef {
-                local_ref: None,
-                local_oid: None,
-                remote_ref: "refs/heads/gone".to_owned(),
-                remote_oid: Some(b),
-            },
-        ],
-    )
-    .expect("hook succeeds");
+    repo.hooks()
+        .run_pre_push(
+            "up",
+            "https://example.com/r.git",
+            &[
+                PrePushRef {
+                    local_ref: Some("refs/heads/main".to_owned()),
+                    local_oid: Some(a),
+                    remote_ref: "refs/heads/main".to_owned(),
+                    remote_oid: Some(b),
+                },
+                PrePushRef {
+                    local_ref: None,
+                    local_oid: Some(a),
+                    remote_ref: "refs/heads/new".to_owned(),
+                    remote_oid: None,
+                },
+                PrePushRef {
+                    local_ref: None,
+                    local_oid: None,
+                    remote_ref: "refs/heads/gone".to_owned(),
+                    remote_oid: Some(b),
+                },
+            ],
+        )
+        .expect("hook succeeds");
     let a = a.to_hex();
     let b = b.to_hex();
     assert_eq!(
@@ -377,7 +377,10 @@ fn run_pre_push_hook_formats_stdin_lines() {
     );
 
     fx.write_hook(4);
-    let err = run_pre_push_hook(&repo, "up", "u", &[]).expect_err("failing hook");
+    let err = repo
+        .hooks()
+        .run_pre_push("up", "u", &[])
+        .expect_err("failing hook");
     assert!(
         matches!(err, HookError::Failed { status: 4, .. }),
         "{err:?}"
@@ -388,7 +391,9 @@ fn run_pre_push_hook_formats_stdin_lines() {
 fn run_pre_push_hook_without_a_hook_is_ok() {
     let fx = Fixture::new();
     let repo = fx.open(&[]);
-    run_pre_push_hook(&repo, "origin", "../remote.git", &[]).expect("no hook installed");
+    repo.hooks()
+        .run_pre_push("origin", "../remote.git", &[])
+        .expect("no hook installed");
 }
 
 #[test]

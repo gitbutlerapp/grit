@@ -4,7 +4,7 @@ use grit_lib::error::DiffError;
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::blame::{blame_file, BlameOptions, IgnoreRevs, IgnoreRevsSources};
+use grit_lib::blame::{BlameOptions, IgnoreRevs, IgnoreRevsSources};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
@@ -143,15 +143,16 @@ fn grit_blame(repo: &Repository, file: &str, ignore: &IgnoreParams<'_>) -> Vec<P
         },
     )
     .expect("IgnoreRevs::load");
-    let result = blame_file(
-        repo,
-        file,
-        &BlameOptions {
-            ignore: loaded,
-            ..Default::default()
-        },
-    )
-    .expect("blame_file");
+    let result = repo
+        .diff()
+        .blame(
+            file,
+            &BlameOptions {
+                ignore: loaded,
+                ..Default::default()
+            },
+        )
+        .expect("blame_file");
     let mut out: Vec<PorcelainLine> = result
         .lines
         .into_iter()
@@ -457,16 +458,17 @@ fn line_range_through_ignored_commit() {
         },
     )
     .unwrap();
-    let grit = blame_file(
-        &repo,
-        "file",
-        &BlameOptions {
-            line_range: Some(1..=2),
-            ignore: grit_loaded,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let grit = repo
+        .diff()
+        .blame(
+            "file",
+            &BlameOptions {
+                line_range: Some(1..=2),
+                ignore: grit_loaded,
+                ..Default::default()
+            },
+        )
+        .unwrap();
     let parsed = parse_git_blame_porcelain(&git_lines);
     assert_eq!(parsed.len(), grit.lines.len());
     for (g, r) in parsed.iter().zip(grit.lines.iter()) {

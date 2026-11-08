@@ -2,7 +2,7 @@
 
 use crate::support;
 
-use grit_lib::blame::{blame_file, BlameOptions};
+use grit_lib::blame::BlameOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{CopyDetection, RenameDetection, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
@@ -116,8 +116,7 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
 
     for start in [None, Some(tip.parse().expect("tip"))] {
         for path in ["deep/layer40.txt", "wide/w40.txt", "fork/f5.txt"] {
-            let blame = blame_file(
-                &repo,
+            let blame = repo.diff().blame(
                 path,
                 &BlameOptions {
                     start,

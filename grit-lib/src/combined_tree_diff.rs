@@ -20,10 +20,21 @@ pub fn combined_parent_status_char(s: CombinedParentStatus) -> char {
     }
 }
 
+/// Formatting switches for [`format_combined_raw_line_all_paths_with_options`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CombinedRawLineFormatOptions {
+    /// Emit every parent's source path before the merge path on rename sides.
+    pub combined_all_paths: bool,
+    /// C-quote path components with `quote_path::quote_c_style`.
+    pub quote_fully: bool,
+}
+
 /// Git raw combined line (`::::modes... oids... MM\tpath`).
 ///
 /// When `combined_all_paths` is set and a parent side is a rename, the source name for every
-/// parent is emitted (tab-separated) before the merge-result path, each C-quoted with `quote_fully`.
+/// parent is emitted (tab-separated) before the merge-result path, each C-quoted when `quote_fully`
+/// is set.
 #[must_use]
 pub fn format_combined_raw_line_all_paths(
     p: &CombinedDiffPath,
@@ -31,9 +42,27 @@ pub fn format_combined_raw_line_all_paths(
     combined_all_paths: bool,
     quote_fully: bool,
 ) -> String {
-    if !combined_all_paths {
+    format_combined_raw_line_all_paths_with_options(
+        p,
+        abbrev_len,
+        &CombinedRawLineFormatOptions {
+            combined_all_paths,
+            quote_fully,
+        },
+    )
+}
+
+/// Like [`format_combined_raw_line_all_paths`], with flags grouped in [`CombinedRawLineFormatOptions`].
+#[must_use]
+pub fn format_combined_raw_line_all_paths_with_options(
+    p: &CombinedDiffPath,
+    abbrev_len: Option<usize>,
+    options: &CombinedRawLineFormatOptions,
+) -> String {
+    if !options.combined_all_paths {
         return format_combined_raw_line(p, abbrev_len);
     }
+    let quote_fully = options.quote_fully;
     // Emit metadata (modes/oids/status) followed by one source name per parent and the merge path.
     // We can't string-split the single-path line on `\t` because funny names contain tabs.
     let mut line = combined_raw_meta(p, abbrev_len);
@@ -45,6 +74,22 @@ pub fn format_combined_raw_line_all_paths(
     line.push('\t');
     line.push_str(&crate::quote_path::quote_c_style(&p.path, quote_fully));
     line
+}
+
+impl CombinedRawLineFormatOptions {
+    /// Sets [`combined_all_paths`](Self::combined_all_paths).
+    #[must_use]
+    pub fn with_combined_all_paths(mut self, combined_all_paths: bool) -> Self {
+        self.combined_all_paths = combined_all_paths;
+        self
+    }
+
+    /// Sets [`quote_fully`](Self::quote_fully).
+    #[must_use]
+    pub fn with_quote_fully(mut self, quote_fully: bool) -> Self {
+        self.quote_fully = quote_fully;
+        self
+    }
 }
 
 /// Git raw combined line (`::::modes... oids... MM\tpath`).
