@@ -95,12 +95,12 @@ mod tree;
 
 pub use branch_refresh::{BranchRefresh, BranchRefreshResult};
 pub use checkin::{BranchSet, CheckinRefusal, CheckinRule, CheckinUpdate};
-pub use graft::Grafted;
+pub use graft::{GraftError, Grafted};
 pub use graft_log::GraftLog;
 pub use guard::TargetGuard;
 pub(crate) use ids::give_change_ids;
 pub use landing::Landing;
-pub use project::ProjectError;
+pub use project::{ProjectError, ProjectedCommit, Projection};
 pub use refresh::{RefreshOutcome, RefreshedHead};
 pub use store::{valid_checkout_id, CheckoutRecord, CheckoutStore, ReservedName, StoredCheckout};
 pub(crate) use target::target_branch;
