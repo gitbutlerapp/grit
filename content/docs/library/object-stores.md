@@ -118,7 +118,7 @@ A bare repository opened this way never creates its git directory. [`grit-lib/te
 | Refs, reflogs, `HEAD` and ref transactions (`repo.references()`) | Work through the ref store. |
 | Config (`repo.config()`) | Comes from the `Environment`. |
 | Rev-parse, revwalk and log | Work. |
-| Tree diff, [`write_merge_tree`](rustdoc:grit_lib::porcelain::merge::write_merge_tree) and blame at a commit | Work. |
+| Tree diff, [`write_merge_tree`](rustdoc:grit_lib::porcelain::merge::WrittenMergeTree) and blame at a commit | Work. |
 | Notes, and bundles written to any `Write` ([`RepositoryBundles::write_to`](rustdoc:grit_lib::repo_handles::RepositoryBundles::write_to)) | Work. |
 | History edits ([`History::reword`](rustdoc:grit_lib::revwalk::history::History::reword), [`History::apply`](rustdoc:grit_lib::revwalk::history::History::apply)) | Work. |
 | Fetch from a path or URL | Works. The pack is spooled in the system temp directory and removed after ingest, and `FETCH_HEAD` is not written. |

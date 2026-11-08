@@ -35,8 +35,8 @@ describe("resolveRustdocPath associated items", () => {
 
   it("follows re-exports of items that are public elsewhere", () => {
     expect(resolveRustdocPath("grit_lib::config::Config")).toBe("config/struct.Config.html");
-    expect(resolveRustdocPath("grit_lib::porcelain::branch::DeleteMode::Safe")).toBe(
-      "porcelain/branch/enum.DeleteMode.html#variant.Safe",
+    expect(resolveRustdocPath("grit_lib::porcelain::branch::BranchDeleteMode::Safe")).toBe(
+      "porcelain/branch/enum.BranchDeleteMode.html#variant.Safe",
     );
   });
 

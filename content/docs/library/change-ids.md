@@ -38,9 +38,9 @@ Embedders inject randomness with [`ChangeIdGenerator`](rustdoc:grit_lib::change_
 
 ## Where ids are assigned
 
-[`create_commit`](rustdoc:grit_lib::porcelain::commit::create_commit) (and the CLI `grit commit` built on it) applies [`ChangeIdPolicy`](rustdoc:grit_lib::change_id::ChangeIdPolicy) before serializing: new commits, the initial commit, merge conclusions, and amends that need a stored id. Amends keep an existing `change-id` / `gitbutler-change-id` header; when the replaced tip had none, the derived id from that tip is stored.
+[`create_commit`](rustdoc:grit_lib::porcelain::commit::CommitRequest) (and the CLI `grit commit` built on it) applies [`ChangeIdPolicy`](rustdoc:grit_lib::change_id::ChangeIdPolicy) before serializing: new commits, the initial commit, merge conclusions, and amends that need a stored id. Amends keep an existing `change-id` / `gitbutler-change-id` header; when the replaced tip had none, the derived id from that tip is stored.
 
-[`prepare_commit_bytes`](rustdoc:grit_lib::porcelain::commit::prepare_commit_bytes) and [`write_commit_object`](rustdoc:grit_lib::porcelain::commit::write_commit_object) do **not** add change ids — stash, notes, and other auxiliary commits stay header-free unless the caller sets one.
+[`prepare_commit_bytes`](rustdoc:grit_lib::objects::Objects::write_commit) and [`write_commit_object`](rustdoc:grit_lib::objects::Objects::write_commit) do **not** add change ids — stash, notes, and other auxiliary commits stay header-free unless the caller sets one.
 
 ## Revisions
 
