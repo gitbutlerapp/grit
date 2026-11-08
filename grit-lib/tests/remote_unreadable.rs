@@ -358,8 +358,13 @@ fn clone_missing_relative_parent_path_uses_logical_absolute_url_in_error() {
     env.pwd = Some(sub.to_string_lossy().into_owned());
     let mut opts = CloneOptions::new("../nonexist2".into(), sub.join("dest"));
     opts.environment = env;
-    let err = clone(opts, &mut grit_lib::remote::fetch::NoProgress, &CancelToken::never(), None)
-        .expect_err("clone of missing relative path");
+    let err = clone(
+        opts,
+        &mut grit_lib::remote::fetch::NoProgress,
+        &CancelToken::never(),
+        None,
+    )
+    .expect_err("clone of missing relative path");
     let msg = err.to_string();
     let expected = format!("'{}/../nonexist2'", sub.display());
     assert!(

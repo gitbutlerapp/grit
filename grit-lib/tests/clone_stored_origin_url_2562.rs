@@ -109,6 +109,33 @@ fn local_clone_stored_url_prefers_pwd_prefix() {
     env.git_config_nosystem = Some("1".into());
     env.home = Some(tmp.path().as_os_str().to_owned());
 
+    let git_dest = sub.join("git-clone");
+    let git_url = std::process::Command::new("git")
+        .current_dir(&sub)
+        .env("PWD", logical_sub.as_os_str())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .args(["clone", "-q", "../src"])
+        .arg(git_dest.to_str().expect("utf8"))
+        .output()
+        .expect("git clone");
+    assert!(
+        git_url.status.success(),
+        "git clone: {}",
+        String::from_utf8_lossy(&git_url.stderr)
+    );
+    let git_url = std::process::Command::new("git")
+        .args([
+            "-C",
+            git_dest.to_str().expect("utf8"),
+            "config",
+            "--get",
+            "remote.origin.url",
+        ])
+        .output()
+        .expect("git config");
+    let git_url = String::from_utf8_lossy(&git_url.stdout).trim().to_owned();
+
     let grit_dest = sub.join("grit-clone");
     let mut opts = CloneOptions::new(String::from("../src"), grit_dest.clone());
     opts.environment = env;
@@ -120,10 +147,9 @@ fn local_clone_stored_url_prefers_pwd_prefix() {
     )
     .expect("config");
     let origin = config.get("remote.origin.url").expect("origin url");
-    let grit_url = origin.as_deref().expect("value");
-    assert!(
-        grit_url.starts_with(logical_sub.to_str().expect("utf8")),
-        "origin URL should use PWD prefix, got {grit_url}"
+    let grit_url = origin.as_deref().expect("value").to_owned();
+    assert_eq!(
+        grit_url, git_url,
+        "PWD-prefixed origin URL should match git"
     );
-    assert!(grit_url.contains("/../src"));
 }

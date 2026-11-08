@@ -161,12 +161,7 @@ pub(crate) fn absolute_local_clone_source_url(source_path: &Path, env: &Environm
 
 /// Working-directory prefix for [`absolute_local_clone_source_url`] (Git `strbuf_add_absolute_path`).
 fn clone_absolute_path_prefix(env: &Environment) -> PathBuf {
-    let getcwd = std::env::current_dir().unwrap_or_else(|_| env.cwd.clone());
-    let cwd = if env.cwd.as_os_str() != OsStr::new(".") && env.cwd.is_absolute() {
-        env.cwd.clone()
-    } else {
-        getcwd
-    };
+    let cwd = clone_prefix_cwd(env);
     if let Some(pwd) = env.pwd.as_deref() {
         let pwd_path = Path::new(pwd);
         if pwd_path.is_absolute()
@@ -177,6 +172,15 @@ fn clone_absolute_path_prefix(env: &Environment) -> PathBuf {
         }
     }
     cwd
+}
+
+/// Cwd string for config storage: logical absolute [`Environment::cwd`] when set, otherwise discovery resolution.
+fn clone_prefix_cwd(env: &Environment) -> PathBuf {
+    if env.cwd.is_absolute() {
+        env.cwd.clone()
+    } else {
+        env.discovery_cwd()
+    }
 }
 
 fn paths_differ(a: &Path, b: &Path) -> bool {
