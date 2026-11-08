@@ -48,7 +48,9 @@ fn is_lock_contention(err: &Error) -> bool {
 fn write_entry_under_lock(dir: &Path, path: &str, lock: &mut grit_lib::index::IndexLock) {
     let repo = open_grit_repo(dir);
     let handle = repo.index();
-    let mut index = handle.load().expect("load index under lock");
+    let mut index = handle
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("load index under lock");
     repo.index()
         .stage_on(
             &mut index,

@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::support::{git, git_ls_files_stage, open_grit_repo};
-use grit_lib::commits::CommitScope;
+use grit_lib::commits::{CommitOptions, CommitScope};
 use grit_lib::error::Error;
 use grit_lib::index::IndexError;
 use grit_lib::merge::IntegrateBranchOutcome;
