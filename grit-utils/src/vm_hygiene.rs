@@ -14,9 +14,9 @@ const MEMINFO: &str = "/proc/meminfo";
 
 /// Drop the Linux page cache when [`DROP_CACHES_ENV`] is present in the environment.
 ///
-/// Without `CAP_SYS_ADMIN`, writes to [`DROP_CACHES_PROC`] fail. When passwordless `sudo` is
+/// Without `CAP_SYS_ADMIN`, writes to `/proc/sys/vm/drop_caches` fail. When passwordless `sudo` is
 /// available (`sudo -n`), this uses it. The operation is verified by reading `Cached:` from
-/// [`MEMINFO`] before and after; if the cache does not shrink, returns an error instead of
+/// `/proc/meminfo` before and after; if the cache does not shrink, returns an error instead of
 /// continuing silently (sysctl can exit 0 while printing "permission denied").
 pub fn drop_page_caches_if_requested() -> Result<()> {
     if std::env::var_os(DROP_CACHES_ENV).is_none() {
