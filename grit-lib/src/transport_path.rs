@@ -2,7 +2,6 @@
 
 use crate::environment::Environment;
 use crate::git_path::CanonicalizeExt;
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
