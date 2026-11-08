@@ -6,7 +6,7 @@ use std::process::Command;
 use grit_lib::commit::signing::{verify_tag, GpgConfig};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
+use grit_lib::porcelain::tag::CreateTagRequest;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -92,9 +92,9 @@ fn create_tag_ssh_signed_verifies_with_git_verify_tag() {
     let head = repo.references().resolve("HEAD").unwrap();
     let tagger = "T <t@example.com> 1700000000 +0000".to_owned();
 
-    let outcome = create_tag(
-        &repo,
-        &CreateTagRequest {
+    let outcome = repo
+        .tags()
+        .create(&CreateTagRequest {
             name: "v1".to_owned(),
             target: head,
             message: Some("signed release".to_owned()),
@@ -104,9 +104,8 @@ fn create_tag_ssh_signed_verifies_with_git_verify_tag() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .expect("create signed tag");
+        })
+        .expect("create signed tag");
     assert!(outcome.signed);
 
     git_out(root, &["verify-tag", "v1"]);
@@ -138,9 +137,9 @@ fn create_tag_honors_tag_gpgsign_config() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let head = repo.references().resolve("HEAD").unwrap();
 
-    let outcome = create_tag(
-        &repo,
-        &CreateTagRequest {
+    let outcome = repo
+        .tags()
+        .create(&CreateTagRequest {
             name: "v2".to_owned(),
             target: head,
             message: None,
@@ -150,9 +149,8 @@ fn create_tag_honors_tag_gpgsign_config() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .expect("create tag with tag.gpgSign");
+        })
+        .expect("create tag with tag.gpgSign");
     assert!(outcome.signed);
     git_out(root, &["verify-tag", "v2"]);
 }
@@ -170,9 +168,8 @@ fn signed_tag_passes_git_fsck_strict() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let head = repo.references().resolve("HEAD").unwrap();
-    create_tag(
-        &repo,
-        &CreateTagRequest {
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "rel".to_owned(),
             target: head,
             message: Some("x".to_owned()),
@@ -182,9 +179,8 @@ fn signed_tag_passes_git_fsck_strict() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .expect("signed tag");
+        })
+        .expect("signed tag");
 
     git_out(root, &["fsck", "--strict"]);
 }
@@ -305,9 +301,9 @@ fn create_tag_openpgp_signed_verifies_with_git() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let head = repo.references().resolve("HEAD").unwrap();
-    let outcome = create_tag(
-        &repo,
-        &CreateTagRequest {
+    let outcome = repo
+        .tags()
+        .create(&CreateTagRequest {
             name: "openpgp-v1".to_owned(),
             target: head,
             message: Some("openpgp tag".to_owned()),
@@ -317,9 +313,8 @@ fn create_tag_openpgp_signed_verifies_with_git() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .expect("signed openpgp tag");
+        })
+        .expect("signed openpgp tag");
     assert!(outcome.signed);
 
     let verify = Command::new("git")

@@ -1526,16 +1526,15 @@ fn resolve_integrated(
             let Some(new) = name else {
                 bail!("name the new branch: `grit share resolve {branch} rename <name>`");
             };
-            grit_lib::porcelain::branch::rename_branch(
-                &here.repo,
-                &grit_lib::porcelain::branch::RenameBranchOptions {
+            here.repo
+                .branches()
+                .rename(&grit_lib::porcelain::branch::BranchRenameOptions {
                     old: branch.to_owned(),
                     new: new.to_owned(),
                     force: false,
                     dry_run: false,
-                },
-            )
-            .with_context(|| format!("renaming {branch} to {new}"))?;
+                })
+                .with_context(|| format!("renaming {branch} to {new}"))?;
             let specs = vec![
                 format!("refs/heads/{new}:refs/heads/{new}"),
                 format!(":refs/heads/{branch}"),

@@ -95,7 +95,6 @@ fn push_tracking_remote_refs_one_reftable_transaction() {
             "[remote \"origin\"]\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n",
         );
 
-        use grit_lib::refs::branch_tracking::apply_push_remote_tracking_updates;
         use grit_lib::remote::push_report::{PushRefResult, PushRefStatus};
 
         let results = vec![
@@ -122,7 +121,9 @@ fn push_tracking_remote_refs_one_reftable_transaction() {
         ];
 
         let (_, count_before) = reftable_tables_snapshot(&git_dir);
-        apply_push_remote_tracking_updates(&git_dir, "origin", &results).expect("tracking batch");
+        repo.branches()
+            .apply_push_remote_tracking_updates("origin", &results)
+            .expect("tracking batch");
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()

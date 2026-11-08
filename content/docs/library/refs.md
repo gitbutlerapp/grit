@@ -189,23 +189,32 @@ if let Some(op) = repo.operation().blocking_switch()? {
 
 ## Branches and tags
 
-[`porcelain::branch`](rustdoc:grit_lib::porcelain::branch) and [`porcelain::tag`](rustdoc:grit_lib::porcelain::tag) cover branch/tag mutations; listing for the CLI uses richer types below. [`list_branches`](rustdoc:grit_lib::refs::branch_tracking::list_branches) with [`BranchListQuery`](rustdoc:grit_lib::refs::branch_tracking::BranchListQuery) and [`BranchDetail::Full`](rustdoc:grit_lib::refs::branch_tracking::BranchDetail::Full) is what `grit branch` renders (subject, committer time, upstream ahead/behind, worktree). Use [`BranchDetail::Names`](rustdoc:grit_lib::refs::branch_tracking::BranchDetail::Names) for ref names and oids only. For a minimal local list without commit reads, [`porcelain::branch::list_branches`](rustdoc:grit_lib::porcelain::branch::list_branches) returns [`BranchList`](rustdoc:grit_lib::porcelain::branch::BranchList) (name, oid, current). [`list_tags`](rustdoc:grit_lib::porcelain::tag::list_tags) takes a [`RefQuery`](rustdoc:grit_lib::refs::listing::RefQuery) (patterns, sort, limit, `--contains`, `--points-at`) and returns complete [`TagSummary`](rustdoc:grit_lib::porcelain::tag::TagSummary) rows. Call [`list_tags_with_detail`](rustdoc:grit_lib::porcelain::tag::list_tags_with_detail) with [`TagDetail::Names`](rustdoc:grit_lib::porcelain::tag::TagDetail::Names) for names without tag-object reads, [`TagDetail::Kind`](rustdoc:grit_lib::porcelain::tag::TagDetail::Kind) for packed-peel classification, or [`TagDetail::Annotation`](rustdoc:grit_lib::porcelain::tag::TagDetail::Annotation) for annotation messages and taggers.
+[`repo.branches()`](rustdoc:grit_lib::repo_handles::Branches) covers branch create, delete, rename, upstream configuration, and listing. Pass [`BranchListQuery`](rustdoc:grit_lib::refs::branch_tracking::BranchListQuery) and [`BranchDetail::Full`](rustdoc:grit_lib::refs::branch_tracking::BranchDetail::Full) to [`Branches::list`](rustdoc:grit_lib::repo_handles::Branches::list) for what `grit branch` renders (subject, committer time, upstream ahead/behind, worktree). Use [`BranchDetail::Names`](rustdoc:grit_lib::refs::branch_tracking::BranchDetail::Names) for ref names and oids only. For a minimal local list without commit reads, [`Branches::list_simple`](rustdoc:grit_lib::repo_handles::Branches::list_simple) returns [`BranchList`](rustdoc:grit_lib::porcelain::branch::BranchList) (name, oid, current).
 
-[`delete_branch`](rustdoc:grit_lib::porcelain::branch::delete_branch) refuses the current branch and branches checked out in another worktree. With [`DeleteMode::Safe`](rustdoc:grit_lib::porcelain::branch::DeleteMode::Safe) it also requires the branch tip to be reachable from the branch's upstream, or from `HEAD` when there is no upstream (the same rule as `git branch -d`).
+[`repo.tags()`](rustdoc:grit_lib::repo_handles::Tags) creates, lists, deletes, and verifies tags. Call [`Tags::list`](rustdoc:grit_lib::repo_handles::Tags::list) with [`TagListOptions`](rustdoc:grit_lib::repo_handles::TagListOptions) and [`TagDetail::Names`](rustdoc:grit_lib::porcelain::tag::TagDetail::Names) for names without tag-object reads, [`TagDetail::Kind`](rustdoc:grit_lib::porcelain::tag::TagDetail::Kind) for packed-peel classification, or [`TagDetail::Annotation`](rustdoc:grit_lib::porcelain::tag::TagDetail::Annotation) for complete [`TagSummary`](rustdoc:grit_lib::porcelain::tag::TagSummary) rows (annotation messages and taggers). [`TagListOptions::full_annotations`](rustdoc:grit_lib::repo_handles::TagListOptions::full_annotations) is a convenience builder for the legacy annotated listing.
+
+[`repo.checkout()`](rustdoc:grit_lib::repo_handles::Checkout) switches branches, checks out trees, resets, restores paths, cleans untracked files, and performs index path moves — the same operations the `grit switch`, `reset`, `restore`, `clean`, `mv`, and `rm` commands call.
+
+[`Branches::delete`](rustdoc:grit_lib::repo_handles::Branches::delete) refuses the current branch and branches checked out in another worktree. With [`BranchDeleteMode::Safe`](rustdoc:grit_lib::porcelain::branch::BranchDeleteMode::Safe) it also requires the branch tip to be reachable from the branch's upstream, or from `HEAD` when there is no upstream (the same rule as `git branch -d`).
 
 Each refusal is an `Error::Branch(BranchError::...)`: `NotFound` for a missing branch, `CurrentlyCheckedOut { name }` for the branch named by this repository's own `HEAD`, `CheckedOut { name, worktree }` for a branch held by another worktree, or `NotFullyMerged` for an unmerged tip.
 
 The current-branch check reads `HEAD` through the repository's store, including injected stores, even when the on-disk `HEAD` differs. `DeleteMode::Force` skips only the merge-state check; both it and dry runs retain the checked-out safety checks and leave HEAD and refs unchanged on refusal. The CLI maps both checked-out variants to the JSON kind `branch_checked_out`.
 
-[`delete_tag`](rustdoc:grit_lib::porcelain::tag::delete_tag) returns the object the tag pointed at, or `Error::Tag(`[`TagError::NotFound`](rustdoc:grit_lib::porcelain::tag::TagError::NotFound)`)` when the tag does not exist. Both deletes run on the repository's ref store (so an injected store is honoured), compare-and-swap against the commit they checked, and remove the ref's reflog.
+[`Tags::delete`](rustdoc:grit_lib::repo_handles::Tags::delete) returns the object the tag pointed at, or `Error::Tag(`[`TagError::NotFound`](rustdoc:grit_lib::porcelain::tag::TagError::NotFound)`)` when the tag does not exist. Both deletes run on the repository's ref store (so an injected store is honoured), compare-and-swap against the commit they checked, and remove the ref's reflog.
 
 ```rust
 use grit_lib::error::Error;
-use grit_lib::porcelain::branch::delete_branch;
-use grit_lib::porcelain::branch::{BranchError, DeleteMode};
+use grit_lib::porcelain::branch::{BranchDeleteMode, BranchDeleteOptions, BranchError};
 
 let dry_run = false;
-match delete_branch(&repo, "topic", DeleteMode::Safe, dry_run) {
+match repo.branches().delete(
+    "topic",
+    &BranchDeleteOptions {
+        mode: BranchDeleteMode::Safe,
+        dry_run,
+    },
+) {
     Ok(deleted) => println!("deleted topic (was {})", deleted.oid),
     Err(Error::Branch(BranchError::CurrentlyCheckedOut { name })) => {
         println!("{name} is the current branch");
@@ -226,7 +235,7 @@ match delete_branch(&repo, "topic", DeleteMode::Safe, dry_run) {
 
 [`branch_tracking`](rustdoc:grit_lib::refs::branch_tracking) answers "how does this branch compare with its base?", the question `grit status` and `grit shortlog` show at the top. `upstream_branch` resolves a branch's configured upstream, `target_branch` finds the repository's trunk (the `target.branch` config value, then [`DEFAULT_TARGET_CANDIDATES`](rustdoc:grit_lib::refs::branch_tracking::DEFAULT_TARGET_CANDIDATES)), and `comparison_base` picks the upstream when it exists and the target otherwise (legacy helper). [`BranchStanding::compute`](rustdoc:grit_lib::refs::branch_tracking::BranchStanding::compute) returns separate [`TrackedComparison`](rustdoc:grit_lib::refs::branch_tracking::TrackedComparison) values for target and upstream for status, with [`StatusHeader`](rustdoc:grit_lib::refs::branch_tracking::StatusHeader) for the human header line and pull hints. Each base resolves to a [`ComparisonBase`](rustdoc:grit_lib::refs::branch_tracking::ComparisonBase) with the display name, full ref, commit, and [`BaseSource`](rustdoc:grit_lib::refs::branch_tracking::BaseSource), through the repository's ref store.
 
-[`TipComparison`](rustdoc:grit_lib::refs::branch_tracking::TipComparison)`::compute` then counts commits on each side (the same numbers as `git rev-list --left-right --count tip...base`), keeps the newest ahead commits up to a limit, and classifies the result as a [`Standing`](rustdoc:grit_lib::refs::branch_tracking::Standing): even, ahead, behind, or diverged. For `grit shortlog`, [`compare_with_target_optional`](rustdoc:grit_lib::refs::branch_tracking::compare_with_target_optional) with [`TargetComparisonOptions`](rustdoc:grit_lib::refs::branch_tracking::TargetComparisonOptions) resolves the current branch and target (including `--target`) and returns [`TargetComparison`](rustdoc:grit_lib::refs::branch_tracking::TargetComparison) with bounded ahead and optional behind OID lists. For symmetric tip comparisons when you already have two commit ids, use `TargetTipListOptions` and `TargetTipLists``::compute`.
+[`TipComparison`](rustdoc:grit_lib::refs::branch_tracking::TipComparison)`::compute` then counts commits on each side (the same numbers as `git rev-list --left-right --count tip...base`), keeps the newest ahead commits up to a limit, and classifies the result as a [`Standing`](rustdoc:grit_lib::refs::branch_tracking::Standing): even, ahead, behind, or diverged. For `grit shortlog`, [`Branches::compare_with_target`](rustdoc:grit_lib::repo_handles::Branches::compare_with_target) with [`TargetComparisonOptions`](rustdoc:grit_lib::refs::branch_tracking::TargetComparisonOptions) resolves the current branch and target (including `--target`) and returns [`TargetComparison`](rustdoc:grit_lib::refs::branch_tracking::TargetComparison) with bounded ahead and optional behind OID lists. For symmetric tip comparisons when you already have two commit ids, use `TargetTipListOptions` and `TargetTipLists``::compute`.
 
 ```rust
 use grit_lib::refs::branch_tracking::{BranchStanding, Standing, StandingOptions};

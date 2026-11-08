@@ -15,7 +15,8 @@ use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -154,13 +155,14 @@ fn assert_conflict_survives(root: &Path, repo: &Repository) {
     let state = state_snapshot(root);
 
     for pathspec in ["f", "."] {
-        let err = restore_paths(
-            repo,
-            &staged_only(pathspec),
-            &mut NullProgress,
-            &CancelToken::never(),
-        )
-        .unwrap_err();
+        let err = repo
+            .checkout()
+            .restore(
+                &staged_only(pathspec),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .unwrap_err();
         assert!(
             matches!(&err, Error::Worktree(WorktreeError::RestorePathUnmerged { paths }) if paths == &["f"]),
             "{err:?}"

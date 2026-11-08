@@ -10,9 +10,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::branch_tracking::{
-    list_branches, BranchDetail, BranchListQuery, BranchScope, BranchSummary,
-};
+use grit_lib::refs::branch_tracking::{BranchDetail, BranchListQuery, BranchScope, BranchSummary};
 use grit_lib::refs::listing::RefQuery;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
@@ -109,7 +107,9 @@ fn open(dir: &Path) -> Repository {
 }
 
 fn list(repo: &Repository, scope: BranchScope, refs: RefQuery) -> Vec<BranchSummary> {
-    list_branches(repo, &BranchListQuery { scope, refs }, BranchDetail::Full).expect("list")
+    repo.branches()
+        .list(&BranchListQuery { scope, refs }, BranchDetail::Full)
+        .expect("list")
 }
 
 /// `(refname, oid, subject, upstream, ahead/behind)` rows the way `git for-each-ref` shows them.

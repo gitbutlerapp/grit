@@ -60,7 +60,7 @@ use grit_lib::porcelain::hunk_select::unstaged_file_diffs;
 use grit_lib::porcelain::log::DecorationOptions;
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::RefName;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
@@ -165,17 +165,17 @@ fn head_oid(repo: &Repository, branch: &str) -> ObjectId {
 }
 
 fn switch(repo: &Repository, mode: SwitchMode) {
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode,
-            dry_run: false,
-            hooks: Default::default(),
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch");
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+                hooks: Default::default(),
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch");
 }
 
 fn commit_path(

@@ -97,7 +97,7 @@ pub struct BranchSummary {
 /// # Errors
 ///
 /// Propagates configuration, ref resolution, and rev-walk errors.
-pub fn upstream_status(repo: &Repository, branch: &str) -> Result<Option<UpstreamStatus>> {
+pub(crate) fn upstream_status(repo: &Repository, branch: &str) -> Result<Option<UpstreamStatus>> {
     let tip = repo
         .references()
         .resolve_if_exists(&format!("refs/heads/{branch}"))?;
@@ -118,7 +118,7 @@ pub fn upstream_status(repo: &Repository, branch: &str) -> Result<Option<Upstrea
 /// # Errors
 ///
 /// Propagates ref listing, configuration, object read, and walk errors.
-pub fn list_branches(
+pub(crate) fn list_branches(
     repo: &Repository,
     query: &BranchListQuery,
     detail: BranchDetail,

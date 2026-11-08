@@ -3,6 +3,7 @@
 //! Issue #1305: apply/pop must smudge restored bytes (tracked and `-u` untracked).
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_test_support::{git, git_cmd as git_shell};

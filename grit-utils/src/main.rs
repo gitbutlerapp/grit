@@ -1686,18 +1686,15 @@ fn main() -> Result<()> {
         }
         Cmd::RenameBranchLib { repo, old, new } => {
             use grit_lib::config::environment::RepositoryOptions;
-            use grit_lib::porcelain::branch::{rename_branch, RenameBranchOptions};
+            use grit_lib::porcelain::branch::BranchRenameOptions;
             use grit_lib::repo::Repository;
             let repo = Repository::discover(Some(repo.as_path()), &RepositoryOptions::empty())?;
-            rename_branch(
-                &repo,
-                &RenameBranchOptions {
-                    old: old.clone(),
-                    new: new.clone(),
-                    force: false,
-                    dry_run: false,
-                },
-            )?;
+            repo.branches().rename(&BranchRenameOptions {
+                old: old.clone(),
+                new: new.clone(),
+                force: false,
+                dry_run: false,
+            })?;
             return Ok(());
         }
         Cmd::PrepareParallelCheckout { git, url, dest } => {

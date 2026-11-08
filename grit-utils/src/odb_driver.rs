@@ -631,7 +631,7 @@ fn serve_request(repo: &Repository, request_file: &str) -> Result<()> {
 /// Materialize `branch` in the worktree (matches `git checkout -f` after `--no-checkout`).
 pub fn checkout_branch_force(repo: &Repository, branch: &str) -> Result<()> {
     use grit_lib::objects::parse_commit;
-    use grit_lib::porcelain::checkout::checkout_between_trees;
+    use grit_lib::progress::{CancelToken, NullProgress};
     let oid = if branch.eq_ignore_ascii_case("HEAD") {
         *repo
             .references()
@@ -654,7 +654,9 @@ pub fn checkout_branch_force(repo: &Repository, branch: &str) -> Result<()> {
             .data,
     )
     .context("parse commit")?;
-    checkout_between_trees(repo, None, &commit.tree).context("checkout branch")?;
+    repo.checkout()
+        .checkout(None, &commit.tree, &mut NullProgress, &CancelToken::never())
+        .context("checkout branch")?;
     Ok(())
 }
 

@@ -2,7 +2,7 @@
 
 use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Result};
-use grit_lib::porcelain::paths::{remove_paths, RemoveOptions, RemoveOutcome};
+use grit_lib::porcelain::paths::{RemoveOptions, RemoveOutcome};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::Pathspec;
 use schemars::JsonSchema;
@@ -127,6 +127,7 @@ fn rm(
         dry_run,
         ignore_unmatch,
     };
-    remove_paths(repo, &opts, cancel)
+    repo.checkout()
+        .remove_paths(&opts, cancel)
         .map_err(|err| crate::error_map::map_remove_paths_error(err, cached, path_display))
 }

@@ -4,7 +4,6 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::parse_commit;
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 
@@ -105,7 +104,16 @@ fn clone_local_mixed_packed_tree_and_loose_blob() {
         .read(&outcome.checkout_oid)
         .expect("read tip commit");
     let parsed = parse_commit(&commit.data).expect("parse commit");
-    checkout_between_trees(&outcome.repo, None, &parsed.tree).expect("checkout");
+    outcome
+        .repo
+        .checkout()
+        .checkout(
+            None,
+            &parsed.tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
     let contents = std::fs::read_to_string(dest.join("a")).expect("worktree file");
     assert_eq!(contents, "one\n");
 }

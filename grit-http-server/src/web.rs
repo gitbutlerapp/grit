@@ -28,7 +28,6 @@ use axum::{
     response::{Html, IntoResponse, Redirect},
 };
 use grit_lib::objects::{parse_commit, HashAlgo, ObjectKind};
-use grit_lib::porcelain::branch::list_branches;
 use grit_lib::remote::grit_server_auth::AUTHORIZE_PATH;
 use grit_lib::repo::Repository;
 use grit_lib::state::HeadState;
@@ -871,7 +870,9 @@ fn summarize(
     options: &RepositoryOptions,
 ) -> grit_lib::error::Result<RepositorySummary> {
     let repo = Repository::open(path, &options.clone().for_serving())?;
-    let branches = list_branches(&repo)?
+    let branches = repo
+        .branches()
+        .list_simple()?
         .branches
         .into_iter()
         .map(|b| (b.name, b.oid.to_short_hex(), b.current))

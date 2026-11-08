@@ -48,7 +48,6 @@ use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::checkout::apply_index_file_mode;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::status::expand_untracked_for_staging;
-use grit_lib::porcelain::tag::creator_date;
 use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryOptions};
@@ -369,30 +368,31 @@ fn porcelain_stash_tag_status_and_worktree() {
         .odb()
         .write(ObjectKind::Blob, b"not tag")
         .expect("blob");
-    let _ = grit_lib::porcelain::tag::list_tags(
-        &repo,
-        &RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            ..RefQuery::default()
-        },
-    )
-    .ok();
+    let tag_query = RefQuery {
+        namespaces: vec![RefNamespace::Tags],
+        ..RefQuery::default()
+    };
+    let _ = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            tag_query.clone(),
+        ))
+        .ok();
     for detail in [
         grit_lib::porcelain::tag::TagDetail::Names,
         grit_lib::porcelain::tag::TagDetail::Kind,
         grit_lib::porcelain::tag::TagDetail::Annotation,
     ] {
-        let _ = grit_lib::porcelain::tag::list_tags_with_detail(
-            &repo,
-            &RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                ..RefQuery::default()
-            },
-            detail,
-        )
-        .ok();
+        let _ = repo
+            .tags()
+            .list(
+                &grit_lib::repo_handles::TagListOptions::default()
+                    .with_query(tag_query.clone())
+                    .with_detail(detail),
+            )
+            .ok();
     }
-    let _ = creator_date(&repo, &tag_oid);
+    let _ = repo.tags().creator_date(&tag_oid);
     let _ = resolve_commit_filter_target(&repo, tag_oid).ok();
     let _ = ref_points_at(repo.odb(), tag_oid, &tag_oid).ok();
     let _ = repo

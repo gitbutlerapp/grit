@@ -8,8 +8,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::{
-    create_branch, delete_branch, set_upstream, unset_upstream, BranchError, CreateBranchOptions,
-    DeleteMode, StartPoint, TrackMode,
+    set_upstream, unset_upstream, BranchCreateOptions, BranchDeleteMode, BranchError, StartPoint,
+    TrackMode,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{git, git_cmd};
@@ -62,9 +62,8 @@ fn create_at_start_point_reflog_matches_git() {
     commit(dir, "c2");
     let start = oid(dir, "main~1");
     let repo = open(dir);
-    create_branch(
-        &repo,
-        &CreateBranchOptions {
+    repo.branches()
+        .create(&BranchCreateOptions {
             name: "topic".into(),
             start: Some(StartPoint {
                 oid: start,
@@ -73,9 +72,8 @@ fn create_at_start_point_reflog_matches_git() {
             force: false,
             track: TrackMode::Never,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     fsck(dir);
     let grit_log = git(dir, &["reflog", "show", "-1", "topic"]);
     let git_dir = tempfile::tempdir().unwrap();
@@ -100,9 +98,8 @@ fn force_overwrite_reflog_and_refuse_checked_out() {
     git(dir, &["branch", "topic"]);
     commit(dir, "c2");
     let repo = open(dir);
-    create_branch(
-        &repo,
-        &CreateBranchOptions {
+    repo.branches()
+        .create(&BranchCreateOptions {
             name: "topic".into(),
             start: Some(StartPoint {
                 oid: oid(dir, "main"),
@@ -111,9 +108,8 @@ fn force_overwrite_reflog_and_refuse_checked_out() {
             force: true,
             track: TrackMode::Never,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     assert_eq!(oid(dir, "topic"), oid(dir, "main"));
     let msg = git(dir, &["reflog", "show", "-1", "--format=%gs", "topic"]);
     assert!(msg.starts_with("branch: Reset to "));
@@ -123,17 +119,16 @@ fn force_overwrite_reflog_and_refuse_checked_out() {
         dir,
         &["worktree", "add", "-q", "-b", "held", wt.to_str().unwrap()],
     );
-    let err = create_branch(
-        &repo,
-        &CreateBranchOptions {
+    let err = repo
+        .branches()
+        .create(&BranchCreateOptions {
             name: "held".into(),
             start: None,
             force: true,
             track: TrackMode::Never,
             dry_run: false,
-        },
-    )
-    .unwrap_err();
+        })
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::Branch(BranchError::CheckedOut { name, .. }) if name == "held"
@@ -163,9 +158,8 @@ fn auto_track_matches_git_branch_track() {
     );
     let repo = open(&clone);
 
-    create_branch(
-        &repo,
-        &CreateBranchOptions {
+    repo.branches()
+        .create(&BranchCreateOptions {
             name: "upstream".into(),
             start: Some(StartPoint {
                 oid: oid(&clone, "refs/remotes/origin/upstream"),
@@ -174,9 +168,8 @@ fn auto_track_matches_git_branch_track() {
             force: false,
             track: TrackMode::Auto,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     fsck(&clone);
     let ours = branch_config(&clone);
 
@@ -248,7 +241,16 @@ fn safe_delete_unmerged_returns_not_fully_merged() {
     commit(dir, "c2");
     git(dir, &["switch", "-q", "main"]);
     let repo = open(dir);
-    let err = delete_branch(&repo, "side", DeleteMode::Safe, false).unwrap_err();
+    let err = repo
+        .branches()
+        .delete(
+            "side",
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Safe,
+                dry_run: false,
+            },
+        )
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::Branch(BranchError::NotFullyMerged { name, .. }) if name == "side"
@@ -268,18 +270,24 @@ fn dry_run_leaves_refs_config_and_reflogs_unchanged() {
     let before = snapshot_bytes(dir);
     let repo = open(dir);
 
-    create_branch(
-        &repo,
-        &CreateBranchOptions {
+    repo.branches()
+        .create(&BranchCreateOptions {
             name: "new".into(),
             start: None,
             force: false,
             track: TrackMode::Auto,
             dry_run: true,
-        },
-    )
-    .unwrap();
-    delete_branch(&repo, "topic", DeleteMode::Safe, true).unwrap();
+        })
+        .unwrap();
+    repo.branches()
+        .delete(
+            "topic",
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Safe,
+                dry_run: true,
+            },
+        )
+        .unwrap();
     assert_eq!(before, snapshot_bytes(dir));
 }
 
@@ -291,9 +299,9 @@ fn invalid_start_oid_is_rejected_before_writing_ref() {
     commit(dir, "c1");
     let repo = open(dir);
     let bad: ObjectId = "0000000000000000000000000000000000000001".parse().unwrap();
-    let err = create_branch(
-        &repo,
-        &CreateBranchOptions {
+    let err = repo
+        .branches()
+        .create(&BranchCreateOptions {
             name: "invalid-tip".into(),
             start: Some(StartPoint {
                 oid: bad,
@@ -302,9 +310,8 @@ fn invalid_start_oid_is_rejected_before_writing_ref() {
             force: false,
             track: TrackMode::Never,
             dry_run: false,
-        },
-    )
-    .unwrap_err();
+        })
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::Branch(BranchError::InvalidStartPoint { .. })
@@ -350,9 +357,9 @@ fn non_commit_start_oid_is_rejected_before_writing_ref() {
     commit(dir, "c1");
     let blob = git_hash_object_stdin(dir, b"not a commit");
     let repo = open(dir);
-    let err = create_branch(
-        &repo,
-        &CreateBranchOptions {
+    let err = repo
+        .branches()
+        .create(&BranchCreateOptions {
             name: "blob-tip".into(),
             start: Some(StartPoint {
                 oid: blob,
@@ -361,9 +368,8 @@ fn non_commit_start_oid_is_rejected_before_writing_ref() {
             force: false,
             track: TrackMode::Never,
             dry_run: false,
-        },
-    )
-    .unwrap_err();
+        })
+        .unwrap_err();
     assert!(matches!(
         err,
         Error::Branch(BranchError::InvalidStartPoint { .. })
@@ -385,7 +391,9 @@ fn create_at_head_does_not_configure_upstream_when_origin_exists() {
     git(dir, &["remote", "add", "origin", "/nonexistent"]);
     git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
     let repo = open(dir);
-    create_branch(&repo, &CreateBranchOptions::at_head("topic")).unwrap();
+    repo.branches()
+        .create(&BranchCreateOptions::at_head("topic"))
+        .unwrap();
     assert!(branch_config(dir).is_empty());
     fsck(dir);
 }
@@ -399,9 +407,8 @@ fn always_track_accepts_local_branch_start() {
     git(dir, &["branch", "base"]);
     commit(dir, "c2");
     let repo = open(dir);
-    create_branch(
-        &repo,
-        &CreateBranchOptions {
+    repo.branches()
+        .create(&BranchCreateOptions {
             name: "topic".into(),
             start: Some(StartPoint {
                 oid: oid(dir, "base"),
@@ -410,9 +417,8 @@ fn always_track_accepts_local_branch_start() {
             force: false,
             track: TrackMode::Always,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     assert_eq!(
         branch_config(dir),
         git(dir, &["config", "--get-regexp", r"^branch\.topic\."])
@@ -437,9 +443,8 @@ fn dry_run_force_does_not_reset_existing_branch() {
     commit(dir, "c2");
     let tip = oid(dir, "topic");
     let repo = open(dir);
-    create_branch(
-        &repo,
-        &CreateBranchOptions {
+    repo.branches()
+        .create(&BranchCreateOptions {
             name: "topic".into(),
             start: Some(StartPoint {
                 oid: oid(dir, "main"),
@@ -448,9 +453,8 @@ fn dry_run_force_does_not_reset_existing_branch() {
             force: true,
             track: TrackMode::Never,
             dry_run: true,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     assert_eq!(oid(dir, "topic"), tip);
 }
 
@@ -467,8 +471,8 @@ fn create_from(
     start: StartPoint,
     track: TrackMode,
     dry_run: bool,
-) -> CreateBranchOptions {
-    CreateBranchOptions {
+) -> BranchCreateOptions {
+    BranchCreateOptions {
         name: name.into(),
         start: Some(start),
         force: false,
@@ -491,15 +495,17 @@ fn create_reports_remote_upstream_git_reads_back() {
         label: "origin/main".into(),
     };
 
-    let preview = create_branch(
-        &repo,
-        &create_from("topic", start.clone(), TrackMode::Auto, true),
-    )
-    .unwrap();
+    let preview = repo
+        .branches()
+        .create(&create_from("topic", start.clone(), TrackMode::Auto, true))
+        .unwrap();
     assert_eq!(preview.upstream.as_deref(), Some("origin/main"));
     assert_eq!(git_upstream(dir, "topic"), None);
 
-    let live = create_branch(&repo, &create_from("topic", start, TrackMode::Auto, false)).unwrap();
+    let live = repo
+        .branches()
+        .create(&create_from("topic", start, TrackMode::Auto, false))
+        .unwrap();
     assert_eq!(live.upstream, preview.upstream);
     assert_eq!(git_upstream(dir, "topic"), live.upstream);
     fsck(dir);
@@ -518,18 +524,21 @@ fn create_reports_local_upstream_for_track_always() {
         label: "base".into(),
     };
 
-    let preview = create_branch(
-        &repo,
-        &create_from("topic", start.clone(), TrackMode::Always, true),
-    )
-    .unwrap();
+    let preview = repo
+        .branches()
+        .create(&create_from(
+            "topic",
+            start.clone(),
+            TrackMode::Always,
+            true,
+        ))
+        .unwrap();
     assert_eq!(preview.upstream.as_deref(), Some("base"));
 
-    let live = create_branch(
-        &repo,
-        &create_from("topic", start, TrackMode::Always, false),
-    )
-    .unwrap();
+    let live = repo
+        .branches()
+        .create(&create_from("topic", start, TrackMode::Always, false))
+        .unwrap();
     assert_eq!(live.upstream.as_deref(), Some("base"));
     assert_eq!(git_upstream(dir, "topic").as_deref(), Some("base"));
 }
@@ -549,14 +558,21 @@ fn create_without_tracking_reports_no_upstream() {
     };
 
     for dry_run in [true, false] {
-        let created = create_branch(
-            &repo,
-            &create_from("topic", start.clone(), TrackMode::Never, dry_run),
-        )
-        .unwrap();
+        let created = repo
+            .branches()
+            .create(&create_from(
+                "topic",
+                start.clone(),
+                TrackMode::Never,
+                dry_run,
+            ))
+            .unwrap();
         assert_eq!(created.upstream, None, "dry_run={dry_run}");
     }
-    let at_head = create_branch(&repo, &CreateBranchOptions::at_head("other")).unwrap();
+    let at_head = repo
+        .branches()
+        .create(&BranchCreateOptions::at_head("other"))
+        .unwrap();
     assert_eq!(at_head.upstream, None);
     assert_eq!(git_upstream(dir, "topic"), None);
 }
@@ -583,11 +599,11 @@ fn forced_reset_reports_kept_upstream_in_dry_run_and_live() {
     );
     opts.force = true;
 
-    let preview = create_branch(&repo, &opts).unwrap();
+    let preview = repo.branches().create(&opts).unwrap();
     assert_eq!(preview.upstream.as_deref(), Some("origin/main"));
 
     opts.dry_run = false;
-    let live = create_branch(&repo, &opts).unwrap();
+    let live = repo.branches().create(&opts).unwrap();
     assert_eq!(live.upstream, preview.upstream);
     assert_eq!(oid(dir, "topic"), oid(dir, "main"));
     assert_eq!(git_upstream(dir, "topic"), live.upstream);
@@ -599,10 +615,19 @@ fn public_branch_mutation_api_smoke() {
     let tmp = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
     git(tmp.path(), &["commit", "-q", "--allow-empty", "-m", "c1"]);
-    let opts = CreateBranchOptions::at_head("x");
+    let opts = BranchCreateOptions::at_head("x");
     assert_eq!(opts.track, TrackMode::Auto);
-    let _ = create_branch(&repo, &opts).unwrap();
+    let _ = repo.branches().create(&opts).unwrap();
     let _ = set_upstream(&repo, "x", "main").unwrap();
     let _ = unset_upstream(&repo, "x").unwrap();
-    let _ = delete_branch(&repo, "x", DeleteMode::Force, false).unwrap();
+    let _ = repo
+        .branches()
+        .delete(
+            "x",
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Force,
+                dry_run: false,
+            },
+        )
+        .unwrap();
 }

@@ -875,7 +875,7 @@ pub(crate) fn checkout_between_trees_locked(
 ///
 /// Returns [`Error::LockHeld`] without touching the work tree or index when another process
 /// holds `index.lock`, and propagates object, checkout I/O and index write failures.
-pub fn checkout_between_trees(
+pub(crate) fn checkout_between_trees(
     repo: &Repository,
     from: Option<&ObjectId>,
     to: &ObjectId,
@@ -905,7 +905,7 @@ pub fn checkout_between_trees(
 /// Same as [`checkout_between_trees`], plus [`Error::Cancelled`] when `cancel` or `progress`
 /// asked to stop, and [`crate::worktree::WorktreeError::CheckoutRollbackIncomplete`] (wrapping the cause) when some
 /// paths could not be put back.
-pub fn checkout_between_trees_with_progress(
+pub(crate) fn checkout_between_trees_with_progress(
     repo: &Repository,
     from: Option<&ObjectId>,
     to: &ObjectId,
@@ -954,7 +954,7 @@ pub fn checkout_between_trees_with_progress(
 /// holds `index.lock`, and an error when the repository has no work tree, required promised
 /// objects cannot be fetched, or checkout I/O fails; [`Error::Cancelled`] when `cancel`
 /// fires; and [`crate::worktree::WorktreeError::CheckoutRollbackIncomplete`] when some paths could not be put back.
-pub fn checkout_hard_to_tree_from_head_tree(
+pub(crate) fn checkout_hard_to_tree_from_head_tree(
     repo: &Repository,
     head_tree: &ObjectId,
     target_tree: &ObjectId,
@@ -2494,7 +2494,7 @@ fn verify_hard_reset_candidates(
 ///
 /// Returns [`Error::LockHeld`] without touching the work tree or index when another process
 /// holds `index.lock`, and propagates object, checkout I/O and index write failures.
-pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
+pub(crate) fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
     checkout_tree_changes_reporting(repo, changes, &mut NullProgress, CancelToken::never_ref())
 }
 

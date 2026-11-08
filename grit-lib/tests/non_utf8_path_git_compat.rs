@@ -18,11 +18,13 @@ use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::parse_commit;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::repo::Repository;
 use grit_lib::repo_relpath;
@@ -383,7 +385,13 @@ fn non_utf8_gitlink_added_by_checkout_between_trees() {
     let empty_tree = ObjectId::from_hex(EMPTY_TREE).expect("empty tree");
 
     let repo = open_repo(&root);
-    checkout_between_trees(&repo, Some(&empty_tree), &tree_with_gitlink)
+    repo.checkout()
+        .checkout(
+            Some(&empty_tree),
+            &tree_with_gitlink,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("checkout must materialize non-UTF-8 gitlink");
 
     let gitlink_dir = root.join(OsStr::from_bytes(BAD_GITLINK));
@@ -419,9 +427,21 @@ fn non_utf8_up_to_date_blob_skipped_on_checkout_between_trees() {
 
     let repo = open_repo(&root);
     std::fs::remove_file(bad_path(&root)).expect("clear worktree");
-    checkout_between_trees(&repo, Some(&empty_tree), &tree_with_bad)
+    repo.checkout()
+        .checkout(
+            Some(&empty_tree),
+            &tree_with_bad,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("first checkout creates non-UTF-8 file");
-    checkout_between_trees(&repo, Some(&empty_tree), &tree_with_bad)
+    repo.checkout()
+        .checkout(
+            Some(&empty_tree),
+            &tree_with_bad,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("second checkout must skip up-to-date non-UTF-8 blob");
     assert_eq!(
         std::fs::read(bad_path(&root)).expect("read bad"),
@@ -456,7 +476,13 @@ fn non_utf8_file_deleted_by_checkout_between_trees() {
     );
 
     let repo = open_repo(&root);
-    checkout_between_trees(&repo, Some(&tree_with_bad), &tree_without_bad)
+    repo.checkout()
+        .checkout(
+            Some(&tree_with_bad),
+            &tree_without_bad,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("checkout_between_trees old→new");
     assert!(
         !bad_path(&root).exists(),
@@ -541,7 +567,16 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
         .read(&outcome.checkout_oid)
         .expect("tip commit");
     let parsed = parse_commit(&commit.data).expect("parse commit");
-    checkout_between_trees(&outcome.repo, None, &parsed.tree).expect("checkout");
+    outcome
+        .repo
+        .checkout()
+        .checkout(
+            None,
+            &parsed.tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
     assert!(
         bad_path(&clone_dest).exists(),
         "clone must create file with original byte name"
@@ -551,21 +586,21 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
         "clone worktree must be clean for git"
     );
 
-    restore_paths(
-        &repo,
-        &RestoreOptions {
-            pathspecs: vec![".".to_owned()],
-            pathspec_sources: vec![".".to_owned()],
-            source: RestoreSource::Index,
-            staged: false,
-            worktree: true,
-            stage: None,
-            remerge: None,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("restore worktree from index");
+    repo.checkout()
+        .restore(
+            &RestoreOptions {
+                pathspecs: vec![".".to_owned()],
+                pathspec_sources: vec![".".to_owned()],
+                source: RestoreSource::Index,
+                staged: false,
+                worktree: true,
+                stage: None,
+                remerge: None,
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("restore worktree from index");
     assert_eq!(
         std::fs::read(bad_path(&r1)).expect("read restored bad"),
         b"one\n",
@@ -674,20 +709,20 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
 
     let repo = open_repo(&root);
     let br_oid = ObjectId::from_hex(git(&root, &["rev-parse", "br"]).trim()).expect("br oid");
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "br".to_owned(),
-                oid: br_oid,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "br".to_owned(),
+                    oid: br_oid,
+                },
+                dry_run: false,
+                hooks: PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit switch br on clean tree");
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit switch br on clean tree");
     assert_eq!(
         std::fs::read(root.join(OsStr::from_bytes(ISSUE_2513_FILE))).expect("read switched"),
         b"br"
@@ -699,20 +734,21 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
     git(&root, &["switch", "-q", "main"]);
 
     write_non_utf8_path(&root, ISSUE_2513_FILE, b"dirty");
-    let dirty_err = switch_repository(
-        &open_repo(&root),
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "br".to_owned(),
-                oid: br_oid,
+    let dirty_err = open_repo(&root)
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "br".to_owned(),
+                    oid: br_oid,
+                },
+                dry_run: false,
+                hooks: PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect_err("switch must refuse real local edit");
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect_err("switch must refuse real local edit");
     assert!(
         matches!(
             dirty_err,

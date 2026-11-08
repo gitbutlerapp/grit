@@ -19,7 +19,6 @@ use grit_lib::error::Error;
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -461,7 +460,14 @@ fn checkout_prefetch_uses_single_request() {
         .expect("parse head")
         .tree;
 
-    checkout_between_trees(&repo, Some(&empty), &head_tree).expect("checkout");
+    repo.checkout()
+        .checkout(
+            Some(&empty),
+            &head_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
@@ -529,7 +535,9 @@ fn blobless_clone_checkout_matches_git() {
     let head_tree = parse_commit(&repo.odb().read(&head_commit).expect("head commit").data)
         .expect("parse head")
         .tree;
-    checkout_between_trees(&repo, None, &head_tree).expect("checkout");
+    repo.checkout()
+        .checkout(None, &head_tree)
+        .expect("checkout");
 
     for name in ["a.txt", "b.txt", "c.txt", "d.txt"] {
         let git_bytes = fs::read(git_dest.path().join(name)).expect("git file");
@@ -645,9 +653,23 @@ fn repeated_checkout_does_not_refetch_promisor_blobs() {
         .tree;
     let empty = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("empty");
 
-    checkout_between_trees(&repo, Some(&empty), &head_tree).expect("first checkout");
+    repo.checkout()
+        .checkout(
+            Some(&empty),
+            &head_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("first checkout");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    checkout_between_trees(&repo, Some(&empty), &head_tree).expect("second checkout");
+    repo.checkout()
+        .checkout(
+            Some(&empty),
+            &head_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("second checkout");
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
@@ -728,20 +750,20 @@ fn revision(repo: &Repository, rev: &str) -> ObjectId {
 
 fn hard_reset(repo: &Repository, target: ObjectId) -> grit_lib::error::Result<()> {
     use grit_lib::ident::Signature;
-    use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+    use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
     let identity = Signature::new(
         "T",
         "t@example.com",
         time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
     )
     .unwrap();
-    reset_to_commit(
-        repo,
-        &ResetOptions::new(target, ResetMode::Hard, identity, "reset"),
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .map(|_| ())
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(target, ResetMode::Hard, identity, "reset"),
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .map(|_| ())
 }
 
 #[derive(Default)]
@@ -1079,7 +1101,7 @@ fn hard_reset_with_every_path_sparse_skipped_does_not_fetch_attributes() {
 /// ahead of the batched prefetch.
 #[test]
 fn chunked_hard_reset_fetches_attribute_blobs_with_the_batch() {
-    use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+    use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
     use grit_lib::progress::NullProgress;
 
     let layout = TempDir::new().expect("layout");
@@ -1126,18 +1148,18 @@ fn chunked_hard_reset_fetches_attribute_blobs_with_the_batch() {
         .stdout;
     let head = ObjectId::from_hex(head.trim()).expect("head");
 
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(
-            head,
-            ResetMode::Hard,
-            "T <t@t> 0 +0000".parse().expect("sig"),
-            "reset",
-        ),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("hard reset");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(
+                head,
+                ResetMode::Hard,
+                "T <t@t> 0 +0000".parse().expect("sig"),
+                "reset",
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("hard reset");
 
     assert_eq!(
         calls.load(Ordering::SeqCst),

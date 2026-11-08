@@ -10,13 +10,9 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::branch::{
-    create_branch, delete_branch, list_branches, BranchError, CreateBranchOptions, DeleteMode,
-};
+use grit_lib::porcelain::branch::{BranchCreateOptions, BranchDeleteMode, BranchError};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::tag::{
-    create_tag, delete_tag, list_tags, CreateTagRequest, TagError, TagKind,
-};
+use grit_lib::porcelain::tag::{CreateTagRequest, TagError, TagKind};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefSort, SortKey};
 use grit_lib::refs::ref_storage::RefStorageFormat;
@@ -118,9 +114,18 @@ fn assert_current_branch_deletion_refused(repo: &Repository, branch: &str) {
     assert!(matches!(before[1].0, Some(RawRef::Direct(_))));
     let config = std::fs::read(repo.git_dir().join("config")).unwrap();
 
-    for mode in [DeleteMode::Safe, DeleteMode::Force] {
+    for mode in [BranchDeleteMode::Safe, BranchDeleteMode::Force] {
         for dry_run in [false, true] {
-            let err = delete_branch(repo, branch, mode, dry_run).unwrap_err();
+            let err = repo
+                .branches()
+                .delete(
+                    branch,
+                    &grit_lib::porcelain::branch::BranchDeleteOptions {
+                        mode: mode,
+                        dry_run: dry_run,
+                    },
+                )
+                .unwrap_err();
             assert!(
                 matches!(
                     &err,
@@ -149,7 +154,7 @@ fn assert_current_branch_deletion_refused(repo: &Repository, branch: &str) {
 fn list_branches_matches_git_for_each_ref() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = git_fixture(tmp.path());
-    let listing = list_branches(&open(&dir)).unwrap();
+    let listing = open(&dir).branches().list_simple().unwrap();
 
     assert_eq!(listing.current.as_deref(), Some("main"));
     let ours: Vec<(String, ObjectId)> = listing
@@ -171,18 +176,21 @@ fn list_branches_matches_git_for_each_ref() {
 fn list_tags_matches_git_and_classifies_targets() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = git_fixture(tmp.path());
-    let tags = list_tags(
-        &open(&dir),
-        &RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            sort: RefSort {
-                key: SortKey::Name,
-                reverse: false,
+    let tags = open(&dir)
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            RefQuery {
+                namespaces: vec![RefNamespace::Tags],
+                sort: RefSort {
+                    key: SortKey::Name,
+                    reverse: false,
+                },
+                ..RefQuery::default()
             },
-            ..RefQuery::default()
-        },
-    )
-    .unwrap();
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap();
 
     let ours: Vec<(String, ObjectId)> = tags.iter().map(|t| (t.name.clone(), t.oid)).collect();
     assert_eq!(ours, for_each_ref(&dir, "refs/tags/"));
@@ -247,7 +255,13 @@ fn delete_branch_merged_check_agrees_with_git() {
         assert_eq!(git_deleted, merged, "git branch -d {name}");
 
         let tip = oid(&dir, name);
-        let ours = delete_branch(&repo, name, DeleteMode::Safe, false);
+        let ours = repo.branches().delete(
+            name,
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Safe,
+                dry_run: false,
+            },
+        );
         assert_eq!(ours.is_ok(), git_deleted, "{name}: {ours:?}");
         match ours {
             Ok(deleted) => {
@@ -268,7 +282,16 @@ fn delete_branch_merged_check_agrees_with_git() {
         }
     }
 
-    let forced = delete_branch(&repo, "side", DeleteMode::Force, false).unwrap();
+    let forced = repo
+        .branches()
+        .delete(
+            "side",
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Force,
+                dry_run: false,
+            },
+        )
+        .unwrap();
     assert_eq!(forced.oid, oid(&dir, "refs/remotes/origin/tracked"));
     assert!(!ref_exists(&dir, "refs/heads/side"));
     git(&dir, &["fsck", "--no-progress"]);
@@ -285,9 +308,18 @@ fn delete_branch_refuses_checked_out_branches() {
     let head_before = git(&dir, &["symbolic-ref", "HEAD"]);
     let refs_before = for_each_ref(&dir, "refs/");
     let worktree_head_before = git(&worktree, &["symbolic-ref", "HEAD"]);
-    for mode in [DeleteMode::Safe, DeleteMode::Force] {
+    for mode in [BranchDeleteMode::Safe, BranchDeleteMode::Force] {
         for dry_run in [false, true] {
-            let err = delete_branch(&repo, "wt", mode, dry_run).unwrap_err();
+            let err = repo
+                .branches()
+                .delete(
+                    "wt",
+                    &grit_lib::porcelain::branch::BranchDeleteOptions {
+                        mode: mode,
+                        dry_run: dry_run,
+                    },
+                )
+                .unwrap_err();
             assert!(
                 matches!(
                     &err,
@@ -304,7 +336,16 @@ fn delete_branch_refuses_checked_out_branches() {
             );
         }
     }
-    let err = delete_branch(&repo, "missing", DeleteMode::Force, false).unwrap_err();
+    let err = repo
+        .branches()
+        .delete(
+            "missing",
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Force,
+                dry_run: false,
+            },
+        )
+        .unwrap_err();
     assert!(
         matches!(
             &err,
@@ -324,8 +365,11 @@ fn delete_packed_tags_is_seen_by_git() {
     let repo = open(&dir);
     let annotated = oid(&dir, "refs/tags/v2");
 
-    assert_eq!(delete_tag(&repo, "v2", false).unwrap(), annotated);
-    assert_eq!(delete_tag(&repo, "v1", false).unwrap(), oid(&dir, "main~1"));
+    assert_eq!(repo.tags().delete("v2", false).unwrap(), annotated);
+    assert_eq!(
+        repo.tags().delete("v1", false).unwrap(),
+        oid(&dir, "main~1")
+    );
     assert!(!ref_exists(&dir, "refs/tags/v2"));
     assert!(!ref_exists(&dir, "refs/tags/v1"));
     assert_eq!(
@@ -339,7 +383,7 @@ fn delete_packed_tags_is_seen_by_git() {
             .collect::<Vec<_>>(),
         ["tree-tag"]
     );
-    let err = delete_tag(&repo, "v2", false).unwrap_err();
+    let err = repo.tags().delete("v2", false).unwrap_err();
     assert!(
         matches!(&err, Error::Tag(TagError::NotFound { name }) if name == "v2"),
         "{err:?}"
@@ -397,10 +441,11 @@ fn list_and_delete_on_reftable_backend() {
     .unwrap()
     .oid;
     assert_current_branch_deletion_refused(&repo, "main");
-    create_branch(&repo, &CreateBranchOptions::at_head("topic")).unwrap();
-    create_tag(
-        &repo,
-        &CreateTagRequest {
+    repo.branches()
+        .create(&BranchCreateOptions::at_head("topic"))
+        .unwrap();
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "v1".into(),
             target: tip,
             message: None,
@@ -410,11 +455,12 @@ fn list_and_delete_on_reftable_backend() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
-    let names: Vec<String> = list_branches(&repo)
+    let names: Vec<String> = repo
+        .branches()
+        .list_simple()
         .unwrap()
         .branches
         .into_iter()
@@ -422,41 +468,55 @@ fn list_and_delete_on_reftable_backend() {
         .collect();
     assert_eq!(names, ["main", "topic"]);
     assert_eq!(
-        list_tags(
-            &repo,
-            &RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                ..RefQuery::default()
-            },
-        )
-        .unwrap()
-        .len(),
+        repo.tags()
+            .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+                RefQuery {
+                    namespaces: vec![RefNamespace::Tags],
+                    ..RefQuery::default()
+                }
+            ))
+            .unwrap()
+            .into_summaries()
+            .unwrap()
+            .len(),
         1
     );
 
     assert_eq!(
-        delete_branch(&repo, "topic", DeleteMode::Safe, false)
+        repo.branches()
+            .delete(
+                "topic",
+                &grit_lib::porcelain::branch::BranchDeleteOptions {
+                    mode: BranchDeleteMode::Safe,
+                    dry_run: false
+                }
+            )
             .unwrap()
             .oid,
         tip
     );
-    assert_eq!(delete_tag(&repo, "v1", false).unwrap(), tip);
-    let names: Vec<String> = list_branches(&repo)
+    assert_eq!(repo.tags().delete("v1", false).unwrap(), tip);
+    let names: Vec<String> = repo
+        .branches()
+        .list_simple()
         .unwrap()
         .branches
         .into_iter()
         .map(|b| b.name)
         .collect();
     assert_eq!(names, ["main"]);
-    assert!(list_tags(
-        &repo,
-        &RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            ..RefQuery::default()
-        },
-    )
-    .unwrap()
-    .is_empty());
+    assert!(repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            RefQuery {
+                namespaces: vec![RefNamespace::Tags],
+                ..RefQuery::default()
+            }
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap()
+        .is_empty());
 }
 
 /// A repository whose refs live only in an injected `MemoryRefStore`: `HEAD -> main`,
@@ -511,7 +571,7 @@ fn list_and_delete_use_injected_memory_ref_store() {
     let (repo, store, tip) = memory_store_repo(tmp.path());
     let dir = tmp.path().join("repo");
 
-    let listing = list_branches(&repo).unwrap();
+    let listing = repo.branches().list_simple().unwrap();
     assert_eq!(listing.current.as_deref(), Some("main"));
     let names: Vec<(&str, bool)> = listing
         .branches
@@ -519,24 +579,36 @@ fn list_and_delete_use_injected_memory_ref_store() {
         .map(|b| (b.name.as_str(), b.current))
         .collect();
     assert_eq!(names, [("main", true), ("topic", false)]);
-    let tags: Vec<String> = list_tags(
-        &repo,
-        &RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            sort: RefSort {
-                key: SortKey::Name,
-                reverse: false,
+    let tags: Vec<String> = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            RefQuery {
+                namespaces: vec![RefNamespace::Tags],
+                sort: RefSort {
+                    key: SortKey::Name,
+                    reverse: false,
+                },
+                ..RefQuery::default()
             },
-            ..RefQuery::default()
-        },
-    )
-    .unwrap()
-    .into_iter()
-    .map(|t| t.name)
-    .collect();
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap()
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
     assert_eq!(tags, ["injected"]);
 
-    let err = delete_branch(&repo, "main", DeleteMode::Force, false).unwrap_err();
+    let err = repo
+        .branches()
+        .delete(
+            "main",
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Force,
+                dry_run: false,
+            },
+        )
+        .unwrap_err();
     assert!(
         matches!(&err, Error::Branch(BranchError::CurrentlyCheckedOut { name }) if name == "main"),
         "{err:?}"
@@ -547,7 +619,16 @@ fn list_and_delete_use_injected_memory_ref_store() {
     assert!(store
         .reflog_exists(RefNameRef::from_trusted("refs/heads/topic"))
         .unwrap());
-    let deleted = delete_branch(&repo, "topic", DeleteMode::Safe, false).unwrap();
+    let deleted = repo
+        .branches()
+        .delete(
+            "topic",
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Safe,
+                dry_run: false,
+            },
+        )
+        .unwrap();
     assert_eq!(deleted.oid, tip);
     assert_eq!(
         store
@@ -559,22 +640,25 @@ fn list_and_delete_use_injected_memory_ref_store() {
         .reflog_exists(RefNameRef::from_trusted("refs/heads/topic"))
         .unwrap());
 
-    assert_eq!(delete_tag(&repo, "injected", false).unwrap(), tip);
+    assert_eq!(repo.tags().delete("injected", false).unwrap(), tip);
     assert_eq!(
         store
             .read_raw(RefNameRef::from_trusted("refs/tags/injected"))
             .unwrap(),
         None
     );
-    assert!(list_tags(
-        &repo,
-        &RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            ..RefQuery::default()
-        },
-    )
-    .unwrap()
-    .is_empty());
+    assert!(repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            RefQuery {
+                namespaces: vec![RefNamespace::Tags],
+                ..RefQuery::default()
+            }
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap()
+        .is_empty());
 
     // The on-disk store was never consulted for these refs.
     assert_eq!(for_each_ref(&dir, "refs/"), [("main".to_owned(), tip)]);
@@ -641,7 +725,16 @@ fn delete_nested_branch_leaves_no_reflog_directories() {
     git(&dir, &["branch", "feature/x"]);
     assert!(dir.join(".git/logs/refs/heads/feature/x").is_file());
 
-    delete_branch(&open(&dir), "feature/x", DeleteMode::Safe, false).unwrap();
+    open(&dir)
+        .branches()
+        .delete(
+            "feature/x",
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Safe,
+                dry_run: false,
+            },
+        )
+        .unwrap();
     assert!(!dir.join(".git/logs/refs/heads/feature").exists());
     assert!(!dir.join(".git/refs/heads/feature").exists());
 

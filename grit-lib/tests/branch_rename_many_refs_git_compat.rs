@@ -7,7 +7,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::branch::{rename_branch, RenameBranchOptions};
+use grit_lib::porcelain::branch::BranchRenameOptions;
 use grit_lib::refs::store::RefNameRef;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
@@ -17,16 +17,14 @@ fn open(dir: &Path) -> Repository {
 }
 
 fn rename(repo: &Repository, old: &str, new: &str) {
-    rename_branch(
-        repo,
-        &RenameBranchOptions {
+    repo.branches()
+        .rename(&BranchRenameOptions {
             old: old.into(),
             new: new.into(),
             force: false,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 }
 
 fn fixture() -> tempfile::TempDir {

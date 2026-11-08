@@ -12,7 +12,7 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::ident::{Signature, SignatureError, SignatureField};
-use grit_lib::porcelain::reset::{preview_reset, reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::resolve_revision_spec;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -93,13 +93,12 @@ fn hard_reset_invalid_name_preserves_head_and_valuable_edit() {
     two_commits(dir.path());
     fs::write(dir.path().join("a"), "valuable uncommitted edit\n").unwrap();
     let repo = open_repo(dir.path());
-    let before = resolve_revision_spec(&repo, "HEAD").unwrap();
-    let target = resolve_revision_spec(&repo, "HEAD~1").unwrap();
+    let before = repo.checkout().resolve_revision_spec("HEAD").unwrap();
+    let target = repo.checkout().resolve_revision_spec("HEAD~1").unwrap();
     let mut identity = identity();
     identity.name = "bad\nname".into();
     let files = snapshot(dir.path());
-    let result = reset_to_commit(
-        &repo,
+    let result = repo.checkout().reset(
         &ResetOptions::new(target, ResetMode::Hard, identity, "reset probe"),
         &mut NullProgress,
         &CancelToken::never(),
@@ -111,7 +110,10 @@ fn hard_reset_invalid_name_preserves_head_and_valuable_edit() {
             ch: '\n',
         },
     );
-    assert_eq!(resolve_revision_spec(&repo, "HEAD").unwrap(), before);
+    assert_eq!(
+        repo.checkout().resolve_revision_spec("HEAD").unwrap(),
+        before
+    );
     assert_eq!(
         fs::read_to_string(dir.path().join("a")).unwrap(),
         "valuable uncommitted edit\n"
@@ -143,28 +145,35 @@ fn check_invalid_signatures(mode: ResetMode) {
                 fs::write(root.join(edited), "unstaged edit\n").unwrap();
                 fs::write(root.join("untracked"), "untracked edit\n").unwrap();
                 let repo = open_repo(root);
-                let head = resolve_revision_spec(&repo, "HEAD").unwrap();
-                let target =
-                    resolve_revision_spec(&repo, if current_head { "HEAD" } else { "HEAD~1" })
-                        .unwrap();
+                let head = repo.checkout().resolve_revision_spec("HEAD").unwrap();
+                let target = repo
+                    .checkout()
+                    .resolve_revision_spec(if current_head { "HEAD" } else { "HEAD~1" })
+                    .unwrap();
                 let files = snapshot(root);
                 for (identity, expected) in invalid_identities() {
                     let mut opts = ResetOptions::new(target, mode, identity, "reset probe");
-                    assert_invalid(preview_reset(&repo, &opts).unwrap_err(), &expected);
+                    assert_invalid(repo.checkout().preview_reset(&opts).unwrap_err(), &expected);
                     assert_unchanged(root, &files);
                     for dry_run in [true, false] {
                         opts.dry_run = dry_run;
-                        let error =
-                            reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never())
-                                .unwrap_err();
+                        let error = repo
+                            .checkout()
+                            .reset(&opts, &mut NullProgress, &CancelToken::never())
+                            .unwrap_err();
                         assert_invalid(error, &expected);
                         assert_unchanged(root, &files);
-                        assert_eq!(resolve_revision_spec(&repo, "HEAD").unwrap(), head);
+                        assert_eq!(repo.checkout().resolve_revision_spec("HEAD").unwrap(), head);
                     }
                 }
                 let opts = ResetOptions::new(target, mode, identity(), "valid reset");
-                reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
-                assert_eq!(resolve_revision_spec(&repo, "HEAD").unwrap(), target);
+                repo.checkout()
+                    .reset(&opts, &mut NullProgress, &CancelToken::never())
+                    .unwrap();
+                assert_eq!(
+                    repo.checkout().resolve_revision_spec("HEAD").unwrap(),
+                    target
+                );
                 assert_eq!(
                     git_cmd(&["rev-parse", "HEAD"])
                         .in_dir(root)

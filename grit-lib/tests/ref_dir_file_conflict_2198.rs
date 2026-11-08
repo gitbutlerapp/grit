@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
-use grit_lib::porcelain::switch::{resolve_create_branch, switch_repository, SwitchOptions};
+use grit_lib::porcelain::branch::BranchCreateOptions;
+use grit_lib::porcelain::switch::resolve_SwitchOptions;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::refs::RefnameUnavailable;
 use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
@@ -76,7 +77,7 @@ fn create_branch_over_a_ref_directory_names_the_ref() {
     for shape in [Shape::Loose, Shape::Packed] {
         let tmp = repo_with_rel_child(shape);
         let dir = tmp.path();
-        let err = create_branch(&open(dir), &CreateBranchOptions::at_head("rel")).unwrap_err();
+        let err = create_branch(&open(dir), &BranchCreateOptions::at_head("rel")).unwrap_err();
         assert_names_blocking_ref(&err, "refs/heads/rel/1.0", "refs/heads/rel");
         assert!(grit_test_support::refs::at(&dir.join(".git"))
             .references()
@@ -93,24 +94,22 @@ fn switch_create_over_a_ref_directory_names_the_ref() {
         let tmp = repo_with_rel_child(shape);
         let dir = tmp.path();
         let repo = open(dir);
-        let mode = resolve_create_branch(
-            &repo,
-            "rel",
-            None,
-            grit_lib::porcelain::branch::TrackMode::Auto,
-        )
-        .expect("resolve");
-        let err = switch_repository(
-            &repo,
-            &SwitchOptions {
-                mode,
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::CancelToken::never(),
-        )
-        .unwrap_err();
+        let mode = repo
+            .branches()
+            .resolve_create_for_switch("rel", None, grit_lib::porcelain::branch::TrackMode::Auto)
+            .expect("resolve");
+        let err = repo
+            .checkout()
+            .switch(
+                &SwitchOptions {
+                    mode,
+                    dry_run: false,
+                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+                },
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .unwrap_err();
         assert_names_blocking_ref(&err, "refs/heads/rel/1.0", "refs/heads/rel");
         assert_eq!(
             git(dir, &["symbolic-ref", "HEAD"]).trim(),
@@ -127,7 +126,7 @@ fn create_branch_over_a_stray_reflog_directory_names_the_log() {
     let dir = tmp.path();
     // Delete the ref behind git's back so only its log directory remains.
     fs::remove_file(dir.join(".git/refs/heads/rel/1.0")).unwrap();
-    let err = create_branch(&open(dir), &CreateBranchOptions::at_head("rel")).unwrap_err();
+    let err = create_branch(&open(dir), &BranchCreateOptions::at_head("rel")).unwrap_err();
     assert_names_blocking_ref(&err, "refs/heads/rel/1.0", "refs/heads/rel");
     assert!(grit_test_support::refs::at(&dir.join(".git"))
         .references()

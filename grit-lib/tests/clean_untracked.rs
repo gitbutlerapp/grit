@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::clean::{clean_untracked, CleanOptions, CleanScope};
+use grit_lib::porcelain::clean::{CleanOptions, CleanScope};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -156,16 +156,17 @@ fn dry_run_lists_same_as_git_clean_nd() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("reopen");
     let before = worktree_file_set(root);
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: true,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("dry run");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: true,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("dry run");
 
     assert_eq!(worktree_file_set(root), before, "dry run must not delete");
 
@@ -190,16 +191,16 @@ fn force_removes_same_as_git_clean_fd() {
 
     let repo =
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("force clean");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("force clean");
 
     git_clean_force(git_root.path(), &[]);
 
@@ -222,17 +223,17 @@ fn include_ignored_matches_git_clean_fdx() {
 
     let repo =
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            scope: CleanScope::UntrackedAndIgnored,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean -x");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                scope: CleanScope::UntrackedAndIgnored,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean -x");
 
     git_clean_force(git_root.path(), &["-x"]);
 
@@ -261,16 +262,17 @@ fn collapsed_parent_with_nested_repo_preserves_nested_and_matches_git() {
 
     let repo =
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
-    let preview = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: true,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("dry run");
+    let preview = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: true,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("dry run");
     let grit_preview: BTreeSet<String> = preview
         .removed
         .iter()
@@ -282,16 +284,16 @@ fn collapsed_parent_with_nested_repo_preserves_nested_and_matches_git() {
         "preview must match git clean -nd"
     );
 
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("force clean");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("force clean");
 
     git_clean_force(git_root.path(), &[]);
 
@@ -317,16 +319,16 @@ fn nested_empty_directories_removed_at_highest_level_like_git() {
 
     let repo =
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean");
 
     git_clean_force(git_root.path(), &[]);
 
@@ -372,16 +374,17 @@ fn collapsed_dir_preserves_ignored_files_like_git() {
 
     let repo =
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
-    let preview = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: true,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("dry run");
+    let preview = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: true,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("dry run");
     let grit_preview: BTreeSet<String> = preview
         .removed
         .iter()
@@ -393,16 +396,16 @@ fn collapsed_dir_preserves_ignored_files_like_git() {
         "preview must match git clean -nd"
     );
 
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("force clean");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("force clean");
 
     git_clean_force(git_root.path(), &[]);
 
@@ -426,16 +429,16 @@ fn nested_repo_directory_is_untouched() {
     fs::write(root.join("loose.txt"), b"go\n").unwrap();
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean");
 
     assert!(nested.join(".git").exists());
     assert!(nested.join("inside.txt").exists());
@@ -450,16 +453,16 @@ fn directories_false_preserves_empty_parent_dir() {
     fs::write(root.path().join("untracked-dir/file.txt"), b"u\n").unwrap();
 
     let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: false,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean without -d");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: false,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean without -d");
 
     assert!(
         root.path().join("untracked-dir").is_dir(),
@@ -505,16 +508,16 @@ fn empty_ignored_directory_preserves_collapsed_parent_like_git() {
 
     let repo =
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("force clean");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("force clean");
 
     git_clean_force(git_root.path(), &[]);
 
@@ -543,17 +546,17 @@ fn pathspec_limits_removal() {
     fs::write(root.join("only/remove.txt"), b"r\n").unwrap();
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            pathspecs: vec!["only".to_owned()],
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean scoped");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                pathspecs: vec!["only".to_owned()],
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean scoped");
 
     assert!(!root.join("only/remove.txt").exists());
     assert!(root.join("keep.txt").exists());
@@ -582,41 +585,43 @@ fn clean_dry_run_collapsed_dirs_match_git_on_dense_tree() {
     }
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let grit_default: BTreeSet<String> = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("grit clean -n -d")
-    .removed
-    .into_iter()
-    .map(|p| normalize_clean_path(&p))
-    .collect();
+    let grit_default: BTreeSet<String> = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("grit clean -n -d")
+        .removed
+        .into_iter()
+        .map(|p| normalize_clean_path(&p))
+        .collect();
     assert_eq!(
         grit_default,
         git_clean_preview(root, &["-d"]),
         "default clean dry-run must match git"
     );
 
-    let grit_ignored: BTreeSet<String> = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            scope: CleanScope::OnlyIgnored,
-            dry_run: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("grit clean only-ignored dry-run")
-    .removed
-    .into_iter()
-    .map(|p| normalize_clean_path(&p))
-    .collect();
+    let grit_ignored: BTreeSet<String> = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                scope: CleanScope::OnlyIgnored,
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("grit clean only-ignored dry-run")
+        .removed
+        .into_iter()
+        .map(|p| normalize_clean_path(&p))
+        .collect();
     assert_eq!(
         grit_ignored,
         git_clean_preview(root, &["-X", "-d"]),
@@ -643,16 +648,17 @@ fn force_removes_non_utf8_untracked_paths_like_git() {
     fs::write(root.path().join(OsStr::from_bytes(junk2)), b"y").unwrap();
 
     let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
-    let dry = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: true,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("dry run");
+    let dry = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: true,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("dry run");
 
     let expected: BTreeSet<String> = [storage_string(junk), storage_string(junk2)]
         .into_iter()
@@ -663,16 +669,17 @@ fn force_removes_non_utf8_untracked_paths_like_git() {
         "dry-run must list UTF-8 and non-UTF-8 untracked paths in storage form"
     );
 
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("force clean");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("force clean");
 
     assert_eq!(
         outcome.removed.iter().cloned().collect::<BTreeSet<_>>(),
@@ -703,16 +710,16 @@ fn force_removes_non_utf8_untracked_directory_like_git() {
     fs::create_dir_all(root.path().join(OsStr::from_bytes(dir))).unwrap();
 
     let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("force clean");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("force clean");
 
     assert!(
         !root.path().join(OsStr::from_bytes(dir)).exists(),
@@ -742,28 +749,29 @@ fn force_removes_literal_grit_pathhex_filename() {
     assert_ne!(stored, "grit+pathhex:6162");
 
     let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
-    let dry = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: true,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("dry run");
+    let dry = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: true,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("dry run");
     assert_eq!(dry.removed, vec![stored.clone()]);
 
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: false,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("force clean");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: false,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("force clean");
 
     assert!(
         !root.path().join(OsStr::from_bytes(literal)).exists(),

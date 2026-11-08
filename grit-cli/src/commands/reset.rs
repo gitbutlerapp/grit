@@ -6,8 +6,7 @@ use grit_lib::error::Error;
 use grit_lib::error::ObjectError;
 use grit_lib::error::RefError;
 use grit_lib::porcelain::reset::{
-    reset_to_commit, OrphanedCommitSummary, ResetMode, ResetOptions, ResetOutcome,
-    DEFAULT_ORPHAN_LIMIT,
+    OrphanedCommitSummary, ResetMode, ResetOptions, ResetOutcome, DEFAULT_ORPHAN_LIMIT,
 };
 use grit_lib::revwalk::{IndexDwim, Peel, ResolveOptions};
 
@@ -268,13 +267,11 @@ pub fn run(
     opts.orphan_limit = orphan_limit.unwrap_or(DEFAULT_ORPHAN_LIMIT);
 
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let outcome = reset_to_commit(
-        &repo,
-        &opts,
-        &mut grit_lib::progress::NullProgress,
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(anyhow::Error::new)?;
+    let cancel = crate::interrupt::process_cancel_token();
+    let outcome = repo
+        .checkout()
+        .reset(&opts, &mut grit_lib::progress::NullProgress, &cancel)
+        .map_err(anyhow::Error::new)?;
 
     Ok(outcome.into())
 }

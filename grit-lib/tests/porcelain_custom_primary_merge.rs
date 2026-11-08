@@ -9,9 +9,10 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{parse_commit, parse_tree};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
+use grit_lib::porcelain::branch::BranchCreateOptions;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
@@ -76,20 +77,20 @@ fn switch_to(repo: &Repository, branch: &str) {
             &grit_lib::revwalk::ResolveOptions::default(),
         )
         .expect("branch tip");
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: branch.into(),
-                oid,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: branch.into(),
+                    oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch");
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch");
 }
 
 fn assert_merge_commit_in_store(
@@ -116,7 +117,9 @@ fn integrate_branch_disjoint_files_on_custom_primary() {
 
     fs::write(wt.join("a.txt"), "hi\n").expect("write");
     commit_all(&repo, "first");
-    create_branch(&repo, &CreateBranchOptions::at_head("topic")).expect("branch");
+    repo.branches()
+        .create(&BranchCreateOptions::at_head("topic"))
+        .expect("branch");
 
     switch_to(&repo, "topic");
     fs::write(wt.join("b.txt"), "topic\n").expect("write");
@@ -160,7 +163,9 @@ fn integrate_branch_clean_content_merge_on_custom_primary() {
 
     fs::write(wt.join("a.txt"), "line1\nline2\nline3\n").expect("write");
     commit_all(&repo, "first");
-    create_branch(&repo, &CreateBranchOptions::at_head("topic")).expect("branch");
+    repo.branches()
+        .create(&BranchCreateOptions::at_head("topic"))
+        .expect("branch");
 
     switch_to(&repo, "topic");
     fs::write(wt.join("a.txt"), "line1\nline2\nline3 topic\n").expect("write");
@@ -229,7 +234,9 @@ fn integrate_branch_fast_forward_and_conflict_unchanged_on_custom_primary() {
 
     fs::write(wt.join("a.txt"), "hi\n").expect("write");
     let base = commit_all(&repo, "first");
-    create_branch(&repo, &CreateBranchOptions::at_head("topic")).expect("branch");
+    repo.branches()
+        .create(&BranchCreateOptions::at_head("topic"))
+        .expect("branch");
 
     switch_to(&repo, "topic");
     fs::write(wt.join("b.txt"), "topic\n").expect("write");

@@ -4,9 +4,7 @@ use anyhow::{Context, Result};
 use grit_lib::porcelain::hunk_select::{
     parse_hunk_id_list, restore_hunks, HunkSelectError, RestoreHunksOutcome,
 };
-use grit_lib::porcelain::restore::{
-    restore_paths, ConflictSide, RestoreOptions, RestoreOutcome, RestoreSource,
-};
+use grit_lib::porcelain::restore::{ConflictSide, RestoreOptions, RestoreOutcome, RestoreSource};
 use grit_lib::revwalk::ResolveOptions;
 
 use crate::conflict_style::{self, ConflictStyleArg};
@@ -214,12 +212,10 @@ pub fn run(
     };
 
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let outcome = restore_paths(
-        &repo,
-        &opts,
-        &mut grit_lib::progress::NullProgress,
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(crate::json_error::map_lib_error)?;
+    let cancel = crate::interrupt::process_cancel_token();
+    let outcome = repo
+        .checkout()
+        .restore(&opts, &mut grit_lib::progress::NullProgress, &cancel)
+        .map_err(crate::json_error::map_lib_error)?;
     Ok(RestoreCliOutcome::from(outcome).with_path_display(&repo))
 }

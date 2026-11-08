@@ -7,10 +7,7 @@ use std::path::{Path, PathBuf};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::tag::{
-    create_tag, list_tags_with_detail, CreateTagRequest, TagDetail, TagError, TagInfo, TagKind,
-    TagList,
-};
+use grit_lib::porcelain::tag::{CreateTagRequest, TagDetail, TagError, TagInfo, TagKind, TagList};
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
@@ -31,8 +28,14 @@ fn kind_tags(repo: &Repository) -> Vec<TagInfo> {
         },
         ..RefQuery::default()
     };
-    let TagList::Summaries(tags) =
-        list_tags_with_detail(repo, &query, TagDetail::Kind).expect("list tags")
+    let TagList::Summaries(tags) = repo
+        .tags()
+        .list(
+            &grit_lib::repo_handles::TagListOptions::default()
+                .with_query(query)
+                .with_detail(TagDetail::Kind),
+        )
+        .expect("list tags")
     else {
         panic!("kind detail must return summaries");
     };
@@ -238,17 +241,26 @@ fn create_tag_sees_packed_tags_and_writes_refs_git_reads() {
     let head = rev(&dir, "HEAD");
     let older = rev(&dir, "main~1");
 
-    let err = create_tag(&repo, &lightweight("light", head, false)).unwrap_err();
+    let err = repo
+        .tags()
+        .create(&lightweight("light", head, false))
+        .unwrap_err();
     assert!(
         matches!(&err, Error::Tag(TagError::AlreadyExists { name }) if name == "light"),
         "{err:?}"
     );
 
-    let replaced = create_tag(&repo, &lightweight("light", head, true)).unwrap();
+    let replaced = repo
+        .tags()
+        .create(&lightweight("light", head, true))
+        .unwrap();
     assert_eq!(replaced.replaced, Some(older));
     assert_eq!(rev(&dir, "refs/tags/light"), head);
 
-    let created = create_tag(&repo, &lightweight("fresh", older, false)).unwrap();
+    let created = repo
+        .tags()
+        .create(&lightweight("fresh", older, false))
+        .unwrap();
     assert_eq!(created.replaced, None);
     assert_eq!(created.peeled, Some(older));
     assert_eq!(rev(&dir, "refs/tags/fresh"), older);
@@ -264,7 +276,10 @@ fn create_tag_refuses_name_under_packed_tag() {
     let repo = open(&dir);
     let head = rev(&dir, "HEAD");
 
-    assert!(create_tag(&repo, &lightweight("light/child", head, false)).is_err());
+    assert!(repo
+        .tags()
+        .create(&lightweight("light/child", head, false))
+        .is_err());
     assert!(!dir.join(".git/refs/tags/light/child").exists());
     assert!(
         !git_cmd(&["rev-parse", "-q", "--verify", "refs/tags/light/child"])

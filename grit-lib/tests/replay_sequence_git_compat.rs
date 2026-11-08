@@ -16,7 +16,12 @@ use grit_lib::merge::{
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::replay_sequence::{
+    abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
+    skip_replay_step, start_replay_sequence, ReplayAbortOutcome, ReplayCreated, ReplayEmptyPolicy,
+    ReplayOptions, ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
+};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{
@@ -1625,13 +1630,14 @@ fn pick_abort_skip_and_hard_reset_remove_modify_delete_conflict_files() {
         &CancelToken::never(),
     )
     .expect("pick third time");
-    reset_to_commit(
-        &grit_repo,
-        &ResetOptions::new(start, ResetMode::Hard, replay_ident(), "hard reset"),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("hard reset");
+    grit_repo
+        .checkout()
+        .reset(
+            &ResetOptions::new(start, ResetMode::Hard, replay_ident(), "hard reset"),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("hard reset");
     assert_worktree_matches_git_oracle(grit_root.path(), git_root.path());
     git_fsck_strict(grit_root.path());
 }

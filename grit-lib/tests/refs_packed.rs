@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, RefLockError};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::branch::list_branches;
 use grit_lib::refs::PackedRefs;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::refs::{
@@ -760,7 +759,7 @@ fn sha256_packed_refs_short_last_record_rejected_like_git() {
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty().with_work_tree(wt))
         .expect("open sha256 repo");
     assert!(matches!(
-        list_branches(&repo),
+        repo.branches().list_simple(),
         Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
     ));
 }
@@ -915,7 +914,14 @@ fn non_utf8_packed_tag_leaves_branches_readable_like_git() {
     }
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty().with_work_tree(wt))
         .expect("open repo");
-    assert_eq!(list_branches(&repo).expect("branches").branches.len(), 2);
+    assert_eq!(
+        repo.branches()
+            .list_simple()
+            .expect("branches")
+            .branches
+            .len(),
+        2
+    );
     assert!(grit_test_support::refs::at(&git_dir)
         .references()
         .list("refs/tags/")

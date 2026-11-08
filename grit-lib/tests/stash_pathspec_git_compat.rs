@@ -2,6 +2,7 @@
 
 use grit_lib::error::Error;
 use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
 use grit_lib::worktree::WorktreeError;

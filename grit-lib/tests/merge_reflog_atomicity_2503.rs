@@ -14,9 +14,10 @@ use grit_lib::merge::{IntegrateBranchOutcome, MergeOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
+use grit_lib::porcelain::branch::BranchCreateOptions;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::merge::{integrate_branch_with, IntegrateBranchOutcome, MergeOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
@@ -233,26 +234,28 @@ fn switch_to(repo: &Repository, branch: &str) {
             &grit_lib::revwalk::ResolveOptions::default(),
         )
         .expect("branch tip");
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: branch.into(),
-                oid,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: branch.into(),
+                    oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch");
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch");
 }
 
 fn diverged_merge_fixture(repo: &Repository, wt: &std::path::Path) -> (ObjectId, ObjectId) {
     fs::write(wt.join("a.txt"), "c1\n").expect("write");
     commit_all(repo, "c1");
-    create_branch(repo, &CreateBranchOptions::at_head("feat")).expect("branch");
+    repo.branches()
+        .create(&BranchCreateOptions::at_head("feat"))
+        .expect("branch");
 
     switch_to(repo, "feat");
     fs::write(wt.join("b.txt"), "feat1\n").expect("write");

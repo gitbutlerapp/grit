@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions, PushOptions, PushRefSpec};
 

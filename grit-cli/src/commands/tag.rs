@@ -12,12 +12,12 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::short_hex;
 use grit_lib::porcelain::tag::{
-    create_tag, delete_tag, list_tags_with_detail, verify_tag_by_name, CreateTagRequest,
-    TagAnnotation, TagDetail, TagError, TagKind, TagList, TagSummary,
+    CreateTagRequest, TagAnnotation, TagDetail, TagError, TagKind, TagList, TagSummary,
 };
 use grit_lib::refs::check_ref_format::RefName;
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
+use grit_lib::repo_handles::TagListOptions;
 use grit_lib::revwalk::ResolveOptions;
 
 use grit_lib::tree_sha256::{
@@ -542,7 +542,7 @@ fn verify_one_tag(
     options: &TagVerifyOptions,
 ) -> Result<TagVerifyEntry> {
     let started = Instant::now();
-    let verified = verify_tag_by_name(repo, name, options).map_err(|err| match err {
+    let verified = repo.tags().verify(name, options).map_err(|err| match err {
         Error::Tag(TagError::InvalidName { detail }) => {
             anyhow::anyhow!(tag_short_name_error_message(name, &detail))
         }
@@ -640,8 +640,14 @@ fn list_with_query(repo: &Repository, query: RefQuery, detail: TagDetail) -> Res
     let user_limit = query.limit;
     let mut fetch_query = query;
     fetch_query.limit = grit_lib::list_limit::fetch_plus_one(user_limit);
-    let listed =
-        list_tags_with_detail(repo, &fetch_query, detail).context("could not list tags")?;
+    let listed = repo
+        .tags()
+        .list(
+            &TagListOptions::default()
+                .with_query(fetch_query)
+                .with_detail(detail),
+        )
+        .context("could not list tags")?;
     match listed {
         TagList::Names(names) => {
             let limited = grit_lib::list_limit::Limited::from_vec(names, user_limit);
@@ -723,9 +729,9 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
         None
     };
 
-    let outcome = create_tag(
-        repo,
-        &CreateTagRequest {
+    let outcome = repo
+        .tags()
+        .create(&CreateTagRequest {
             name: name.to_owned(),
             target: target_oid,
             message,
@@ -735,9 +741,8 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
             tree_sha256: tree_sha256_opts,
             force: opts.force,
             dry_run: opts.dry_run,
-        },
-    )
-    .map_err(map_tag_error)?;
+        })
+        .map_err(map_tag_error)?;
 
     let (
         tree_sha256,
@@ -779,7 +784,7 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
 }
 
 fn remove(repo: &Repository, name: &str, dry_run: bool) -> Result<TagOutcome> {
-    delete_tag(repo, name, dry_run).map_err(map_tag_error)?;
+    repo.tags().delete(name, dry_run).map_err(map_tag_error)?;
     Ok(TagOutcome::Delete {
         name: name.to_owned(),
         dry_run,

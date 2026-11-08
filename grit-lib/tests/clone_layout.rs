@@ -5,7 +5,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::transfer::{CloneReflog, FetchOptions, TagMode};
@@ -368,7 +367,16 @@ fn library_clone_api_passes_fsck_and_status() {
         .read(&outcome.checkout_oid)
         .expect("commit obj");
     let parsed = grit_lib::objects::parse_commit(&commit.data).expect("parse commit");
-    checkout_between_trees(&outcome.repo, None, &parsed.tree).expect("checkout");
+    outcome
+        .repo
+        .checkout()
+        .checkout(
+            None,
+            &parsed.tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
 
     assert!(git_in(dest.path(), &["fsck", "--strict"]));
     let status = git_out(dest.path(), &["status", "--porcelain"]).unwrap_or_default();

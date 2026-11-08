@@ -393,7 +393,7 @@ pub fn map_pull_options_error(repo: &grit_lib::repo::Repository, err: LibError) 
     }
 }
 
-/// Map [`remove_paths`](grit_lib::porcelain::paths::remove_paths) failures for `grit rm`.
+/// Map [`Checkout::remove_paths`](grit_lib::repo_handles::Checkout::remove_paths) failures for `grit rm`.
 #[must_use]
 pub fn map_remove_paths_error(
     err: LibError,

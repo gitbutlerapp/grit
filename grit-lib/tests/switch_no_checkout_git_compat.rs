@@ -10,7 +10,7 @@ use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::{Error, OverwriteReason};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions, SwitchOutcome};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions, SwitchOutcome};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
@@ -89,8 +89,7 @@ fn switch(
     mode: SwitchMode,
     dry_run: bool,
 ) -> grit_lib::error::Result<SwitchOutcome> {
-    switch_repository(
-        repo,
+    repo.checkout().switch(
         &SwitchOptions {
             mode,
             dry_run,
@@ -392,11 +391,15 @@ fn initial_switch_hook_receives_actual_previous_head() {
         dry_run: true,
         hooks: PostOperationHooks::Run,
     };
-    switch_repository(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
+    repo.checkout()
+        .switch(&opts, &mut NullProgress, &CancelToken::never())
+        .unwrap();
     assert_eq!(bytes(dest.path()), before);
     opts.dry_run = false;
-    let outcome =
-        switch_repository(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
+    let outcome = repo
+        .checkout()
+        .switch(&opts, &mut NullProgress, &CancelToken::never())
+        .unwrap();
     assert_eq!(
         outcome.hooks_run,
         vec![grit_lib::command_runner::hooks::HookName::PostCheckout]

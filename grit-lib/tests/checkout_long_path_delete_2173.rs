@@ -5,8 +5,8 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -29,20 +29,20 @@ fn open(root: &Path) -> Repository {
 }
 
 fn switch_to(repo: &Repository, branch: &str, oid: ObjectId) {
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: branch.into(),
-                oid,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: branch.into(),
+                    oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .unwrap_or_else(|err| panic!("switch to {branch}: {err}"));
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap_or_else(|err| panic!("switch to {branch}: {err}"));
 }
 
 fn assert_consistent(root: &Path, head: ObjectId) {
@@ -108,13 +108,14 @@ fn hard_reset_removes_a_deep_path() {
         .parse()
         .expect("identity");
 
-    let outcome = reset_to_commit(
-        &repo,
-        &ResetOptions::new(gone, ResetMode::Hard, identity, "reset: moving to gone"),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("hard reset");
+    let outcome = repo
+        .checkout()
+        .reset(
+            &ResetOptions::new(gone, ResetMode::Hard, identity, "reset: moving to gone"),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("hard reset");
 
     assert_eq!(outcome.target, gone);
     assert!(

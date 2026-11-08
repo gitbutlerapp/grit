@@ -89,7 +89,13 @@ fn populated_checkout_writes_cache_tree() {
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("clear index");
 
-    grit_lib::porcelain::checkout::checkout_between_trees(&repo, None, &tree)
+    repo.checkout()
+        .checkout(
+            None,
+            &tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("populated checkout");
 
     let index = Index::load(&repo.index().path()).expect("load index");

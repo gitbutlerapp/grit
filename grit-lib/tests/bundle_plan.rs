@@ -8,6 +8,7 @@ use grit_lib::bundle::bundle_remote::{resolve_bundle_spec, BundleCreateOptions};
 use grit_lib::bundle::{Bundle, BundleSpec};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::maintenance::{CommitGraphOptions, MidxOptions, PackRefsOptions, PruneOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 
 fn git_ok(dir: &Path, args: &[&str]) {

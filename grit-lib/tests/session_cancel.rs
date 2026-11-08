@@ -11,9 +11,10 @@ use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::replay::{ReplayDirection, ReplayRequest};
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayRequest};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -499,13 +500,13 @@ fn repo_with_side_branch() -> (tempfile::TempDir, Repository, ObjectId, ObjectId
     write_files(tmp.path(), "side", "side");
     let side = commit_all(&repo, "side");
     grit_test_support::refs::set_ref(&repo, "refs/heads/side", &side).expect("side");
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("reset");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("reset");
     (tmp, repo, base, side)
 }
 
@@ -573,13 +574,13 @@ fn conflicting_merge_cancel_restores_the_index() {
     fs::write(root.join("c.txt"), "side\n").expect("write");
     write_files(root, "side", "side");
     let side = commit_all(&repo, "side");
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("reset");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("reset");
     fs::write(root.join("c.txt"), "main\n").expect("write");
     let main = commit_all(&repo, "main");
     let before = index_bytes(&repo);
@@ -627,13 +628,13 @@ fn conflicting_merge_cancel_after_checkout_rolls_back_worktree() {
     fs::write(root.join("c.txt"), "side\n").expect("write");
     write_files(root, "side", "side");
     let side = commit_all(&repo, "side");
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("reset");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("reset");
     fs::write(root.join("c.txt"), "main\n").expect("write");
     let main = commit_all(&repo, "main");
     let before = index_bytes(&repo);
@@ -717,13 +718,13 @@ fn repo_for_conflicting_rebase() -> (tempfile::TempDir, Repository, ObjectId, Ob
     repo.references()
         .update_symbolic("HEAD", "refs/heads/topic")
         .expect("HEAD");
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("reset");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("reset");
     fs::write(root.join("c.txt"), "topic\n").expect("write");
     let topic = commit_all(&repo, "topic");
     (tmp, repo, main, topic)
@@ -907,7 +908,7 @@ fn restore_stops_when_the_sink_asks() {
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
     let cancel = sink.flag.clone();
     let before_index = index_bytes(&repo);
-    assert_cancelled(restore_paths(&repo, &opts, &mut sink, &cancel));
+    assert_cancelled(repo.checkout().restore(&opts, &mut sink, &cancel));
     let last = fs::read_to_string(tmp.path().join("d/f0299.txt")).expect("read");
     assert_eq!(
         last, "changed 299\n",
@@ -919,7 +920,9 @@ fn restore_stops_when_the_sink_asks() {
         "index must stay unchanged"
     );
 
-    restore_paths(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("restore");
+    repo.checkout()
+        .restore(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("restore");
     let last = fs::read_to_string(tmp.path().join("d/f0299.txt")).expect("read");
     assert_eq!(last, "base 299\n");
 }
@@ -966,7 +969,7 @@ fn restore_source_cancel_restores_directory_replacing_tracked_file() {
     let before_index = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 1);
     let cancel = sink.flag.clone();
-    assert_cancelled(restore_paths(&repo, &opts, &mut sink, &cancel));
+    assert_cancelled(repo.checkout().restore(&opts, &mut sink, &cancel));
 
     let victim_meta = fs::symlink_metadata(wt.join(victim)).expect("victim metadata");
     assert!(

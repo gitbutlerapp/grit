@@ -7,7 +7,6 @@ mod unix {
 
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::objects::ObjectId;
-    use grit_lib::porcelain::checkout::checkout_between_trees;
     use grit_lib::repo::Repository;
     use grit_test_support::git;
 
@@ -78,7 +77,15 @@ mod unix {
                 &RepositoryOptions::empty().with_work_tree(root),
             )
             .expect("open");
-            checkout_between_trees(&grit_repo, Some(&main_tree), &target_tree).expect("checkout");
+            grit_repo
+                .checkout()
+                .checkout(
+                    Some(&main_tree),
+                    &target_tree,
+                    &mut grit_lib::progress::NullProgress,
+                    &grit_lib::progress::CancelToken::never(),
+                )
+                .expect("checkout");
             grit_test_support::refs::set_ref(
                 &grit_repo,
                 "HEAD",
@@ -132,7 +139,15 @@ mod unix {
                 &RepositoryOptions::empty().with_work_tree(root),
             )
             .expect("open");
-            checkout_between_trees(&grit_repo, Some(&main_tree), &target_tree).expect("checkout");
+            grit_repo
+                .checkout()
+                .checkout(
+                    Some(&main_tree),
+                    &target_tree,
+                    &mut grit_lib::progress::NullProgress,
+                    &grit_lib::progress::CancelToken::never(),
+                )
+                .expect("checkout");
             grit_test_support::refs::set_ref(
                 &grit_repo,
                 "HEAD",

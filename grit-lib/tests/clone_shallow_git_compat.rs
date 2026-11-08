@@ -5,7 +5,6 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::shallow::load_shallow_oids;
@@ -262,7 +261,16 @@ fn clone_depth_one_records_shallow_boundary_and_limits_history() {
         .read(&outcome.checkout_oid)
         .expect("commit");
     let parsed = grit_lib::objects::parse_commit(&commit.data).expect("parse commit");
-    checkout_between_trees(&outcome.repo, None, &parsed.tree).expect("checkout");
+    outcome
+        .repo
+        .checkout()
+        .checkout(
+            None,
+            &parsed.tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
 
     let log = git(&dest, &["log", "--oneline"]);
     assert_eq!(log.lines().count(), 1, "expected single commit: {log}");

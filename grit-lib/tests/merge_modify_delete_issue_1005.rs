@@ -5,7 +5,8 @@ use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::ConflictKind;
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::paths::RemoveOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -116,15 +117,16 @@ fn modify_delete_conflict_resolves_by_accepting_deletion() {
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
 
-    let rm_out = remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec!["f".into()],
-            ..RemoveOptions::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("rm f");
+    let rm_out = repo
+        .checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec!["f".into()],
+                ..RemoveOptions::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("rm f");
     assert_eq!(rm_out.removed, vec!["f".to_owned()]);
     let index = repo
         .index()

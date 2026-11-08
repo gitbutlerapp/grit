@@ -6,6 +6,7 @@ use std::fs;
 use std::os::unix::fs::symlink;
 
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_test_support::git;
 
 use support::git as hist_git;

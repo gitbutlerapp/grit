@@ -1,8 +1,8 @@
 //! Issue #2521: assume-unchanged must survive reset, merge, and stash like Git.
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::merge::IntegrateBranchOutcome;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, DEFAULT_ORPHAN_LIMIT};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions, DEFAULT_ORPHAN_LIMIT};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
@@ -91,21 +91,21 @@ fn stash_push_opts() -> StashPushOptions {
 fn reset_mixed_and_hard_at_head_keep_assume_unchanged() {
     let (dir, repo, head) = seed_assume_unchanged_repo();
     let root = dir.path();
-    reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Mixed),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("mixed reset");
+    repo.checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Mixed),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("mixed reset");
     assert_b_assume_unchanged(root);
-    reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Hard),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("hard reset at head");
+    repo.checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Hard),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("hard reset at head");
     assert_b_assume_unchanged(root);
 }
 
@@ -134,25 +134,25 @@ fn reset_hard_parent_same_blob_keeps_assume_unchanged_edit() {
     let tip = commit_c_txt_tip(&repo, root);
     assert_ne!(init_oid, tip, "target tree must differ from reset target");
 
-    reset_to_commit(
-        &repo,
-        &reset_opts(init_oid, ResetMode::Hard),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("hard reset to init");
+    repo.checkout()
+        .reset(
+            &reset_opts(init_oid, ResetMode::Hard),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("hard reset to init");
     assert_b_assume_unchanged(root);
     assert_git_fsck_strict(root);
 
     git(root, &["reset", "--hard", &tip.to_hex()]);
     reapply_assume_unchanged_local_edits(root);
-    reset_to_commit(
-        &repo,
-        &reset_opts(init_oid, ResetMode::Mixed),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("mixed reset to init");
+    repo.checkout()
+        .reset(
+            &reset_opts(init_oid, ResetMode::Mixed),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("mixed reset to init");
     assert_b_assume_unchanged(root);
     assert_git_fsck_strict(root);
 }
@@ -167,13 +167,13 @@ fn reset_mixed_cross_blob_drops_assume_unchanged_keeps_skip_worktree() {
     git(root, &["commit", "-qm", "bump b in tree"]);
     git(root, &["update-index", "--assume-unchanged", "b.txt"]);
     std::fs::write(root.join("b.txt"), "b\nlocal\n").expect("local");
-    reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Mixed),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("mixed reset to init");
+    repo.checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Mixed),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("mixed reset to init");
     let tags = git_ls_files_verbose_map(root);
     assert_eq!(tags.get("b.txt").copied(), Some('H'));
     assert_eq!(tags.get("a.txt").copied(), Some('S'));

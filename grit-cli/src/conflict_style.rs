@@ -26,5 +26,5 @@ impl From<ConflictStyleArg> for ConflictStyle {
 
 /// Read `merge.conflictStyle` from repository config (Git default: `merge`).
 pub fn conflict_style_from_repo(repo: &grit_lib::repo::Repository) -> ConflictStyle {
-    grit_lib::porcelain::restore::conflict_style_from_config(repo)
+    repo.checkout().conflict_style()
 }

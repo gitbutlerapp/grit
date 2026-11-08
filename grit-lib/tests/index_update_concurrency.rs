@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use grit_lib::error::Error;
 use grit_lib::porcelain::add::{stage, stage_on_index, StageOptions};
-use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
+use grit_lib::porcelain::paths::RemoveOptions;
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 
 use support::{assert_git_fsck_strict, git, git_ls_files_stage0_map, open_grit_repo};
@@ -198,7 +198,11 @@ fn remove_reads_index_after_waiting_for_lock() {
             force: true,
             ..RemoveOptions::default()
         };
-        remove_paths(&repo, &opts, &grit_lib::progress::CancelToken::never()).map(|o| o.removed)
+        repo.checkout()
+            .opts
+            .checkout()
+            .remove_paths(&grit_lib::progress::CancelToken::never())
+            .map(|o| o.removed)
     });
     thread::sleep(HOLD_LOCK_FOR);
     write_entry_under_lock(dir, "a.txt", &mut lock);

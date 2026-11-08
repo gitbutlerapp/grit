@@ -16,19 +16,24 @@
 //! # }
 //! ```
 
+mod branches;
 mod bundle;
+mod checkout;
 mod hooks;
 mod notes;
 mod reflog;
 mod remote;
 mod remote_rename;
 mod stash;
+mod tags;
 mod workspace_snapshot;
 mod worktree;
 
 pub use crate::reflog::MessageMatcher;
 pub use crate::snapshot_checkout::handle::RepositorySnapshotCheckouts;
+pub use branches::Branches;
 pub use bundle::RepositoryBundles;
+pub use checkout::Checkout;
 pub use hooks::{HookInfo, HookSource, RepositoryHooks};
 pub use notes::{
     Note, NoteAddOutcome, NoteAddPlan, NoteListing, NoteRemoveManyPlan, NoteRemovePlan,
@@ -46,6 +51,7 @@ pub use remote::{
 };
 pub use remote_rename::RemoteRename;
 pub use stash::RepositoryStash;
+pub use tags::{TagListOptions, Tags};
 pub use workspace_snapshot::RepositoryWorkspaceSnapshot;
 pub use worktree::{LockWorktreeOptions, RepositoryWorktrees};
 

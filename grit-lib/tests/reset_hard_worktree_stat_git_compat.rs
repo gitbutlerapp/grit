@@ -7,7 +7,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -26,13 +26,13 @@ fn hard_reset_to_head(dir: &Path) {
     let repo =
         Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open repository");
     let head = grit_test_support::rev_parse(dir, "HEAD");
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(head, ResetMode::Hard, ident(), "reset: moving to HEAD"),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("hard reset");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(head, ResetMode::Hard, ident(), "reset: moving to HEAD"),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("hard reset");
 }
 
 fn init_repo(dir: &Path) {

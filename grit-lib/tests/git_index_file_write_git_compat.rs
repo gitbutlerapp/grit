@@ -6,8 +6,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope, HookPolicy};
-use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::paths::RemoveOptions;
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -149,18 +149,18 @@ fn reset_mixed_with_git_index_file_rewrites_temp_index_only() {
 
     let repo = open_with_index(&root, &alt_index);
     let head = repo.references().resolve("HEAD").expect("head");
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(
-            head,
-            ResetMode::Mixed,
-            "T <t@example.com> 0 +0000".parse().expect("sig"),
-            "reset",
-        ),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("reset mixed");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(
+                head,
+                ResetMode::Mixed,
+                "T <t@example.com> 0 +0000".parse().expect("sig"),
+                "reset",
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("reset mixed");
 
     assert_eq!(
         fs::read(root.join(".git/index")).expect("read default index"),
@@ -180,16 +180,16 @@ fn remove_cached_with_git_index_file_edits_temp_index_only() {
 
     let default_before = fs::read(root.join(".git/index")).expect("read default index");
     let repo = open_with_index(&root, &alt_index);
-    remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec!["a".into()],
-            cached: true,
-            ..Default::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("rm cached");
+    repo.checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec!["a".into()],
+                cached: true,
+                ..Default::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("rm cached");
 
     assert_eq!(
         fs::read(root.join(".git/index")).expect("read default index"),

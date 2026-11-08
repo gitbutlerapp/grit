@@ -92,7 +92,7 @@ pub fn workspace_snapshot_pin_ref_name(caller_id: &str) -> Result<String> {
 /// # Errors
 ///
 /// Propagates invalid refname and ref-transaction failures.
-pub fn pin_workspace_snapshot(
+pub(crate) fn pin_workspace_snapshot(
     repo: &Repository,
     snapshot: &WorkspaceSnapshot,
     caller_id: &str,
@@ -118,7 +118,7 @@ pub fn pin_workspace_snapshot(
 /// # Errors
 ///
 /// Propagates invalid refname and ref-transaction failures.
-pub fn unpin_workspace_snapshot(repo: &Repository, caller_id: &str) -> Result<()> {
+pub(crate) fn unpin_workspace_snapshot(repo: &Repository, caller_id: &str) -> Result<()> {
     let name = workspace_snapshot_pin_ref_name(caller_id)?;
     let update = RefUpdate {
         name: RefName::from_trusted(name),
@@ -179,7 +179,7 @@ mod index_mtime_serde {
 ///
 /// Returns [`RepositoryError::RequiresWorkTree`] on a bare repository and propagates index, ODB, and I/O
 /// failures.
-pub fn capture_workspace_snapshot(
+pub(crate) fn capture_workspace_snapshot(
     repo: &Repository,
     options: &WorkspaceCaptureOptions,
 ) -> Result<WorkspaceSnapshot> {
@@ -212,7 +212,7 @@ pub fn capture_workspace_snapshot(
 /// # Errors
 ///
 /// Propagates ref transaction, checkout, and I/O failures.
-pub fn restore_workspace_snapshot(
+pub(crate) fn restore_workspace_snapshot(
     repo: &Repository,
     snapshot: &WorkspaceSnapshot,
     options: &WorkspaceRestoreOptions,

@@ -5,7 +5,8 @@ use crate::support;
 
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git;
 use tempfile::TempDir;
@@ -74,13 +75,13 @@ fn reset_opts(target: grit_lib::objects::ObjectId, mode: ResetMode) -> ResetOpti
 }
 
 fn hard_reset_at_head(repo: &Repository, head: grit_lib::objects::ObjectId) {
-    reset_to_commit(
-        repo,
-        &reset_opts(head, ResetMode::Hard),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("hard reset at HEAD");
+    repo.checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Hard),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("hard reset at HEAD");
 }
 
 #[test]
@@ -247,18 +248,18 @@ fn reset_hard_preserves_nested_untracked_under_coalesced_deleted_directory() {
 
     let repo = crate::support::open_grit_repo(dir.path());
     let drop_oid = grit_lib::objects::ObjectId::from_hex(&drop_oid_hex).expect("drop oid");
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(
-            drop_oid,
-            ResetMode::Hard,
-            support::parse_reflog_signature("T <t@t.com> 0 +0000"),
-            "reset",
-        ),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit hard reset");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(
+                drop_oid,
+                ResetMode::Hard,
+                support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+                "reset",
+            ),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit hard reset");
     assert!(
         !dir.path().join("tracked-dir/tracked.txt").exists(),
         "grit must remove tracked.txt like git"

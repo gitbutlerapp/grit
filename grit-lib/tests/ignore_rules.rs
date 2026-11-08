@@ -995,20 +995,21 @@ fn assert_status_untracked_matches_git(home: &Path, root: &Path) {
 }
 
 fn assert_clean_ignored_matches_git(home: &Path, root: &Path) {
-    use grit_lib::porcelain::clean::{clean_untracked, CleanOptions, CleanScope};
+    use grit_lib::porcelain::clean::{CleanOptions, CleanScope};
     use grit_lib::progress::NullProgress;
     let repo = open_at(root);
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            scope: CleanScope::OnlyIgnored,
-            dry_run: true,
-            ..CleanOptions::default()
-        },
-        &mut grit_lib::progress::NullProgress,
-    )
-    .expect("clean dry run");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                scope: CleanScope::OnlyIgnored,
+                dry_run: true,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean dry run");
     let grit: std::collections::BTreeSet<String> = outcome
         .removed
         .iter()

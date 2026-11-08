@@ -14,7 +14,7 @@ use grit_lib::commit::signing::GpgConfig;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::{serialize_tag, set_extra_header, ObjectKind, TagData};
-use grit_lib::porcelain::tag::{verify_tag_by_name, TagError};
+use grit_lib::porcelain::tag::TagError;
 use grit_lib::repo::Repository;
 use grit_lib::tree_sha256::{
     parse_tree_sha256_tag_headers, verify_tag, MissingSubmodule, MissingSubmoduleReason,
@@ -542,7 +542,7 @@ fn verify_tag_by_name_reads_git_written_loose_and_packed_tags() {
                 .trim()
                 .parse()
                 .unwrap();
-        let verified = verify_tag_by_name(&repo, name, &options).expect("verify by name");
+        let verified = repo.tags().verify(name, &options).expect("verify by name");
         assert_eq!(verified.name, name);
         assert_eq!(verified.oid, tag_oid);
         assert_eq!(verified.target, commit);
@@ -553,7 +553,7 @@ fn verify_tag_by_name_reads_git_written_loose_and_packed_tags() {
         assert!(verified.verification.is_ok());
     }
 
-    let err = verify_tag_by_name(&repo, "light", &options).unwrap_err();
+    let err = repo.tags().verify("light", &options).unwrap_err();
     assert!(
         matches!(&err, Error::Tag(TagError::Lightweight { name }) if name == "light"),
         "{err:?}"

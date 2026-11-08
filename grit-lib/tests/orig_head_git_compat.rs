@@ -12,7 +12,11 @@ use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::merge::{FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::merge::{
+    integrate_branch_with, plan_branch_merge, FastForwardPolicy, IntegrateBranchOutcome,
+    MergeCommitMode, MergeOptions,
+};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::MergeError;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -80,13 +84,13 @@ fn set_stale_orig_head(dir: &Path) -> ObjectId {
 }
 
 fn reset(repo: &Repository, target: ObjectId, mode: ResetMode) -> Result<(), Error> {
-    reset_to_commit(
-        repo,
-        &ResetOptions::new(target, mode, ident(), "reset: moving"),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .map(|_| ())
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(target, mode, ident(), "reset: moving"),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .map(|_| ())
 }
 
 fn merge(
@@ -185,7 +189,9 @@ fn dry_run_and_refused_resets_leave_orig_head_alone() {
     let target = rev(dir, "HEAD~1");
     let mut opts = ResetOptions::new(target, ResetMode::Hard, ident(), "reset");
     opts.dry_run = true;
-    reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("dry run");
+    repo.checkout()
+        .reset(&opts, &mut NullProgress, &CancelToken::never())
+        .expect("dry run");
     assert_eq!(
         git_orig_head(dir),
         None,

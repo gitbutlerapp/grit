@@ -8,7 +8,7 @@ use std::process::Command;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::repo::Repository;
 
@@ -150,8 +150,8 @@ fn cancelled_checkout_restores_process_filtered_file() {
         seen: 0,
         in_checkout: false,
     };
-    let err = checkout_between_trees_with_progress(
-        &open(root, &state_file),
+    let err = open(
+        root.checkout().checkout(&state_file),
         Some(&from),
         &to,
         &mut progress,

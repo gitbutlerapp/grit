@@ -8,7 +8,8 @@ use grit_lib::index::IndexError;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_test_support::{abort_branch_merge, integrate_branch};
+use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
+use grit_lib::progress::{CancelToken, NullProgress};
 
 fn build_issue_2359_fixture(root: &Path) -> (ObjectId, ObjectId) {
     git(root, &["init", "-q", "-b", "main"]);

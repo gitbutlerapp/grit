@@ -3,9 +3,7 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use grit_lib::objects::{CommitData, OidHashMap};
-use grit_lib::refs::branch_tracking::{
-    compare_with_target_optional, TargetComparisonOptions, TargetSpec,
-};
+use grit_lib::refs::branch_tracking::{TargetComparisonOptions, TargetSpec};
 use grit_lib::state::HeadState;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -197,8 +195,10 @@ pub fn run(args: &ShortlogCliArgs) -> Result<ShortlogOutcome> {
         list_limit: args.max_count,
         include_behind: args.behind,
     };
-    let Some(comparison) =
-        compare_with_target_optional(&repo, &opts).context("could not compare with target")?
+    let Some(comparison) = repo
+        .branches()
+        .compare_with_target(&opts)
+        .context("could not compare with target")?
     else {
         let head = repo.references().head().context("could not resolve HEAD")?;
         let branch = match head {

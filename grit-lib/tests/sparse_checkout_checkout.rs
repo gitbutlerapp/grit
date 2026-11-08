@@ -16,9 +16,10 @@ use grit_lib::index::sparse_checkout::SparseCheckout;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::pull::{pull, PullMode, PullOptions};
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
@@ -201,18 +202,18 @@ fn assert_b_not_materialized(dir: &Path) {
 }
 
 fn reset(repo: &Repository, target: ObjectId, mode: ResetMode) {
-    reset_to_commit(
-        repo,
-        &ResetOptions::new(
-            target,
-            mode,
-            support::parse_reflog_signature("T <t@example.com>"),
-            "reset",
-        ),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit reset");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(
+                target,
+                mode,
+                support::parse_reflog_signature("T <t@example.com>"),
+                "reset",
+            ),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit reset");
 }
 
 #[test]
@@ -293,20 +294,20 @@ fn switch_detach_keeps_out_of_cone_paths_skip_worktree() {
     let pair = sparse_pair("switch-detach", false);
     git(&pair.git_dir, &["switch", "-q", "--detach", "HEAD~2"]);
     let repo = open(&pair.grit_dir);
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: rev(&pair.grit_dir, "HEAD~2"),
-                reflog_to_label: "HEAD~2".into(),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: rev(&pair.grit_dir, "HEAD~2"),
+                    reflog_to_label: "HEAD~2".into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch");
 
     assert_b_not_materialized(&pair.grit_dir);
     assert_eq!(
@@ -321,20 +322,20 @@ fn switch_branch_adds_out_of_cone_paths_as_skip_worktree() {
     let pair = sparse_pair("switch-branch", false);
     git(&pair.git_dir, &["switch", "-q", "side"]);
     let repo = open(&pair.grit_dir);
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "side".into(),
-                oid: rev(&pair.grit_dir, "side"),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "side".into(),
+                    oid: rev(&pair.grit_dir, "side"),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch");
 
     assert_b_not_materialized(&pair.grit_dir);
     assert_matches_git(&pair);
@@ -432,21 +433,21 @@ fn restore_from_source_matches_git() {
     let pair = sparse_pair("restore", false);
     git(&pair.git_dir, &["restore", "--source", "HEAD~2", "a"]);
     let repo = open(&pair.grit_dir);
-    restore_paths(
-        &repo,
-        &RestoreOptions {
-            pathspecs: vec!["a".into()],
-            pathspec_sources: vec!["a".into()],
-            source: RestoreSource::Tree(rev(&pair.grit_dir, "HEAD~2^{tree}")),
-            staged: false,
-            worktree: true,
-            stage: None,
-            remerge: None,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit restore");
+    repo.checkout()
+        .restore(
+            &RestoreOptions {
+                pathspecs: vec!["a".into()],
+                pathspec_sources: vec!["a".into()],
+                source: RestoreSource::Tree(rev(&pair.grit_dir, "HEAD~2^{tree}")),
+                staged: false,
+                worktree: true,
+                stage: None,
+                remerge: None,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit restore");
 
     assert_b_not_materialized(&pair.grit_dir);
     assert_matches_git(&pair);
@@ -539,20 +540,20 @@ fn sparse_index_survives_reset_hard_and_switch() {
     git(&pair.git_dir, &["switch", "-q", "side"]);
     let repo = open(&pair.grit_dir);
     reset(&repo, rev(&pair.grit_dir, "HEAD~2"), ResetMode::Hard);
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "side".into(),
-                oid: rev(&pair.grit_dir, "side"),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "side".into(),
+                    oid: rev(&pair.grit_dir, "side"),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch");
 
     assert_b_not_materialized(&pair.grit_dir);
     assert!(git(&pair.grit_dir, &["ls-files", "--sparse"]).contains("b/\n"));
@@ -584,20 +585,20 @@ fn switch_does_not_refuse_untracked_file_at_skipped_path() {
         put_untracked_out_of_cone_file(&pair, contents);
         git(&pair.git_dir, &["switch", "-q", "side"]);
         let repo = open(&pair.grit_dir);
-        switch_repository(
-            &repo,
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "side".into(),
-                    oid: rev(&pair.grit_dir, "side"),
+        repo.checkout()
+            .switch(
+                &SwitchOptions {
+                    mode: SwitchMode::Existing {
+                        branch: "side".into(),
+                        oid: rev(&pair.grit_dir, "side"),
+                    },
+                    dry_run: false,
+                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
                 },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("grit switch");
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("grit switch");
         assert_untracked_file_kept(&pair, contents);
     }
 }
@@ -664,20 +665,20 @@ fn switch_with_wholesale_deleted_directories_keeps_new_skip_worktree_rows() {
 
     git(&pair.git_dir, &["switch", "-q", "wide"]);
     let repo = open(&pair.grit_dir);
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "wide".into(),
-                oid: rev(&pair.grit_dir, "wide"),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "wide".into(),
+                    oid: rev(&pair.grit_dir, "wide"),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch");
 
     assert_b_not_materialized(&pair.grit_dir);
     assert_eq!(
@@ -751,20 +752,21 @@ fn git_sparse_index_nested_transitions_and_dirty_head_reset() {
             ],
         );
         let other = if target == "base" { "edited" } else { "base" };
-        switch_repository(
-            &open(&pair.grit_dir),
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: rev(&pair.grit_dir, other),
-                    reflog_to_label: other.into(),
+        open(&pair.grit_dir)
+            .checkout()
+            .switch(
+                &SwitchOptions {
+                    mode: SwitchMode::Detached {
+                        commit: rev(&pair.grit_dir, other),
+                        reflog_to_label: other.into(),
+                    },
+                    dry_run: false,
+                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
                 },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-            },
-            &mut grit_lib::progress::NullProgress,
-            &CancelToken::never(),
-        )
-        .expect("switch");
+                &mut grit_lib::progress::NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("switch");
         assert_matches_git(&pair);
     }
     for dir in [&pair.git_dir, &pair.grit_dir] {
@@ -801,20 +803,21 @@ fn sparse_index_switch_preserves_staged_and_unstaged_excluded_changes() {
         put(dir, "b/f", "unstaged outside cone\n");
     }
     git(&pair.git_dir, &["switch", "--detach", "HEAD~1"]);
-    switch_repository(
-        &open(&pair.grit_dir),
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: rev(&pair.grit_dir, "HEAD~1"),
-                reflog_to_label: "HEAD~1".into(),
+    open(&pair.grit_dir)
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: rev(&pair.grit_dir, "HEAD~1"),
+                    reflog_to_label: "HEAD~1".into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch");
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch");
     assert_matches_git(&pair);
     assert_eq!(
         fs::read(pair.grit_dir.join("b/f")).expect("present file"),
@@ -875,20 +878,21 @@ fn sparse_index_file_directory_and_gitlink_transitions_match_git() {
         assert_matches_git(&pair);
     }
     git(&pair.git_dir, &["switch", "--detach", "types"]);
-    switch_repository(
-        &open(&pair.grit_dir),
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: rev(&pair.grit_dir, "types"),
-                reflog_to_label: "types".into(),
+    open(&pair.grit_dir)
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: rev(&pair.grit_dir, "types"),
+                    reflog_to_label: "types".into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch");
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch");
     assert_matches_git(&pair);
     for dir in [&pair.git_dir, &pair.grit_dir] {
         git(dir, &["fsck", "--strict"]);

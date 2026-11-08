@@ -243,6 +243,26 @@ pub enum TagList {
     Summaries(Vec<TagSummary>),
 }
 
+impl TagList {
+    /// Extract summary rows when `list` used [`TagDetail::Annotation`] or [`TagDetail::Kind`].
+    #[must_use]
+    pub fn into_summaries(self) -> Option<Vec<TagSummary>> {
+        match self {
+            Self::Summaries(rows) => Some(rows),
+            Self::Names(_) => None,
+        }
+    }
+
+    /// Whether this listing contains no rows (names or summaries).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Names(names) => names.is_empty(),
+            Self::Summaries(rows) => rows.is_empty(),
+        }
+    }
+}
+
 /// Inputs for [`create_tag`].
 #[derive(Debug, Clone)]
 pub struct CreateTagRequest {
@@ -293,7 +313,7 @@ pub struct CreateTagOutcome {
 ///
 /// Returns [`TagError`] when the name is invalid, the tag exists without `force`,
 /// or the message is empty after cleanup. Propagates object-store and signing errors.
-pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTagOutcome> {
+pub(crate) fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTagOutcome> {
     RefName::tag(&req.name).map_err(|e| {
         Error::Tag(TagError::InvalidName {
             detail: e.to_string(),
@@ -419,7 +439,10 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
 
 /// Classify a tag ref target and peel to a commit when possible.
 #[must_use]
-pub fn tag_ref_metadata(repo: &Repository, ref_oid: &ObjectId) -> (TagKind, Option<ObjectId>) {
+pub(crate) fn tag_ref_metadata(
+    repo: &Repository,
+    ref_oid: &ObjectId,
+) -> (TagKind, Option<ObjectId>) {
     let Ok(info) = repo.odb().read_info(ref_oid) else {
         return (TagKind::Lightweight, None);
     };
@@ -441,7 +464,7 @@ pub fn tag_ref_metadata(repo: &Repository, ref_oid: &ObjectId) -> (TagKind, Opti
 /// # Errors
 ///
 /// Propagates ref-query, config, and object read failures.
-pub fn list_tags(repo: &Repository, query: &RefQuery) -> Result<Vec<TagSummary>> {
+pub(crate) fn list_tags(repo: &Repository, query: &RefQuery) -> Result<Vec<TagSummary>> {
     annotated_tag_summaries(repo, &tag_listings(repo, query)?)
 }
 
@@ -479,7 +502,7 @@ fn annotated_tag_summaries(repo: &Repository, listings: &[RefListing]) -> Result
 /// # Errors
 ///
 /// Propagates ref-query, config, and object read failures.
-pub fn list_tags_with_detail(
+pub(crate) fn list_tags_with_detail(
     repo: &Repository,
     query: &RefQuery,
     detail: TagDetail,
@@ -727,7 +750,7 @@ impl<'a> TagClassifier<'a> {
 ///
 /// Returns [`TagError::NotFound`] when the tag does not exist, and propagates ref
 /// store failures.
-pub fn delete_tag(repo: &Repository, name: &str, dry_run: bool) -> Result<ObjectId> {
+pub(crate) fn delete_tag(repo: &Repository, name: &str, dry_run: bool) -> Result<ObjectId> {
     let tag_ref = format!("{TAGS_PREFIX}{name}");
     let existing = repo.references().read_existing(&tag_ref)?.ok_or_else(|| {
         Error::Tag(TagError::NotFound {
@@ -766,7 +789,7 @@ pub struct VerifiedTag {
 /// [`TagError::NotFound`] when the tag ref does not exist, and
 /// [`TagError::Lightweight`] when the ref points at a non-tag object. Propagates
 /// ref-store, object-read, tag-header parse and signing errors.
-pub fn verify_tag_by_name(
+pub(crate) fn verify_tag_by_name(
     repo: &Repository,
     name: &str,
     options: &TagVerifyOptions,
@@ -806,7 +829,7 @@ pub fn verify_tag_by_name(
 /// (which point directly at a commit), this is the committer date.
 /// Returns 0 if the date cannot be determined.
 #[must_use]
-pub fn creator_date(repo: &Repository, oid: &ObjectId) -> i64 {
+pub(crate) fn creator_date(repo: &Repository, oid: &ObjectId) -> i64 {
     listing_creator_date(repo.odb(), oid).unwrap_or(0)
 }
 

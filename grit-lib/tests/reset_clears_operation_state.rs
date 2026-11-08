@@ -17,7 +17,10 @@ use grit_lib::merge::{ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, S
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::replay::ReplayDirection;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::replay_sequence::{
+    start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::{primary_in_progress_operation, resolve_head_for_repository};
@@ -165,13 +168,13 @@ fn assert_no_operation_state(repo: &Repository) {
 }
 
 fn reset_head(repo: &Repository, head: ObjectId, mode: ResetMode) {
-    reset_to_commit(
-        repo,
-        &ResetOptions::new(head, mode, test_ident(), "reset"),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("reset");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(head, mode, test_ident(), "reset"),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("reset");
 }
 
 #[test]
@@ -376,7 +379,7 @@ fn assert_invalid_reset_preserves_operation(root: &Path, repo: &Repository, head
         ResetMode::Keep,
     ] {
         let mut opts = ResetOptions::new(head, mode, identity.clone(), "invalid reset");
-        let err = grit_lib::porcelain::reset::preview_reset(repo, &opts).unwrap_err();
+        let err = repo.checkout().preview_reset(&opts).unwrap_err();
         assert!(
             matches!(err, Error::Object(ObjectError::InvalidSignature(_))),
             "{err:?}"
@@ -384,13 +387,14 @@ fn assert_invalid_reset_preserves_operation(root: &Path, repo: &Repository, head
         reset_snapshot::assert_unchanged(root, &before);
         for dry_run in [true, false] {
             opts.dry_run = dry_run;
-            let err = reset_to_commit(
-                repo,
-                &opts,
-                &mut NullProgress,
-                &grit_lib::progress::CancelToken::never(),
-            )
-            .unwrap_err();
+            let err = repo
+                .checkout()
+                .reset(
+                    &opts,
+                    &mut NullProgress,
+                    &grit_lib::progress::CancelToken::never(),
+                )
+                .unwrap_err();
             assert!(
                 matches!(err, Error::Object(ObjectError::InvalidSignature(_))),
                 "{err:?}"

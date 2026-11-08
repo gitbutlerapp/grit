@@ -9,7 +9,7 @@ use grit_lib::index::split_index::{
     format_dump_split_index_file, resolve_split_index_if_needed, WriteSplitIndexRequest,
 };
 use grit_lib::index::Index;
-use grit_lib::porcelain::paths::{move_path, remove_paths, RemoveOptions};
+use grit_lib::porcelain::paths::{move_path, RemoveOptions};
 use grit_lib::repo::Repository;
 use std::fs;
 use std::path::Path;
@@ -461,16 +461,16 @@ fn issue_2003_split_index_rm_mv_updates_index_for_git() {
     git(root, &["add", "n.txt"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec!["b.txt".into()],
-            pathspec_sources: vec!["b.txt".into()],
-            ..RemoveOptions::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("rm b.txt");
+    repo.checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec!["b.txt".into()],
+                pathspec_sources: vec!["b.txt".into()],
+                ..RemoveOptions::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("rm b.txt");
 
     assert!(
         git(root, &["ls-files"])
@@ -519,16 +519,16 @@ fn issue_2003_split_index_rm_mv_many_files_status_matches_git() {
     git(root, &["add", "extra.txt"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec!["f0030.txt".into()],
-            pathspec_sources: vec!["f0030.txt".into()],
-            ..RemoveOptions::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("rm one tracked file");
+    repo.checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec!["f0030.txt".into()],
+                pathspec_sources: vec!["f0030.txt".into()],
+                ..RemoveOptions::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("rm one tracked file");
     assert_index_matches_git(root, &repo);
 
     move_path(

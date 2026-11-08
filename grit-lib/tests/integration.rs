@@ -167,6 +167,8 @@ mod branch_tag_list_delete_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "branch_tracking_git_compat.rs"]
 mod branch_tracking_git_compat;
+#[path = "branches_handle_git_compat.rs"]
+mod branches_handle_git_compat;
 #[path = "build_file_diffs_streaming.rs"]
 mod build_file_diffs_streaming;
 #[cfg(feature = "full-tests")]

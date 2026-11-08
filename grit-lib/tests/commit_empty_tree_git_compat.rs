@@ -7,7 +7,7 @@ use std::process::Command;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
+use grit_lib::porcelain::paths::RemoveOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git;
@@ -117,15 +117,15 @@ fn grit_remove_everything_commit_git_fsck_clean() {
     )
     .expect("first");
 
-    remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec!["a".into()],
-            ..RemoveOptions::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("rm a");
+    repo.checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec!["a".into()],
+                ..RemoveOptions::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("rm a");
     let outcome = create_commit(
         &repo,
         &commit_req("remove everything", false),

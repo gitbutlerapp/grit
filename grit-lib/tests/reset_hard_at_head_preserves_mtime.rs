@@ -7,7 +7,8 @@ use crate::support;
 
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git;
 use tempfile::TempDir;
@@ -90,13 +91,13 @@ fn hard_reset_at_head_preserves_file_mtimes_on_clean_tree() {
         })
         .collect();
 
-    reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Hard),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("hard reset at HEAD");
+    repo.checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Hard),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("hard reset at HEAD");
 
     for (rel, old_mtime) in before {
         let path = work_tree.join(&rel);

@@ -13,8 +13,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::clean::{clean_untracked, CleanOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::porcelain::clean::CleanOptions;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -47,16 +47,18 @@ fn fixture(root: &Path, dirs: usize) {
 fn dry_run_clean(root: &Path) -> Duration {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let t0 = Instant::now();
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            dry_run: true,
-            ..CleanOptions::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean dry-run");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                dry_run: true,
+                ..CleanOptions::default()
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("clean dry-run");
     assert!(
         outcome.removed.is_empty(),
         "clean tree must list nothing to remove: {:?}",

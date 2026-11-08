@@ -8,8 +8,7 @@ use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::ProgressSink;
 use grit_lib::repo::Repository;
@@ -88,7 +87,14 @@ fn checkout_bounds_medium_blob_buffers_for_serial_and_parallel_preparation() {
     let tree = ObjectId::from_hex(tree.trim()).expect("tree oid");
 
     let before = peak_rss_kib();
-    checkout_between_trees(&repo, None, &tree).expect("checkout");
+    repo.checkout()
+        .checkout(
+            None,
+            &tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
     let growth = peak_rss_kib() - before;
     eprintln!("checkout peak RSS growth: {growth} KiB, initial {before} KiB");
     assert!(
@@ -116,20 +122,20 @@ fn checkout_bounds_medium_blob_buffers_for_serial_and_parallel_preparation() {
     git(root, &["checkout", "-q", "empty"], b"");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("reopen");
     let before = peak_rss_kib();
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "main".into(),
-                oid: ObjectId::from_hex(commit.trim()).expect("commit oid"),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "main".into(),
+                    oid: ObjectId::from_hex(commit.trim()).expect("commit oid"),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut SlowProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch with parallel preparation");
+            &mut SlowProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch with parallel preparation");
     let growth = peak_rss_kib() - before;
     eprintln!("parallel checkout peak RSS growth: {growth} KiB, initial {before} KiB");
     assert!(
@@ -170,7 +176,9 @@ fn checkout_bounds_medium_blob_buffers_for_serial_and_parallel_preparation() {
     let retained = repo.odb().read(&large).expect("cache large blob");
     let large_tree = ObjectId::from_hex(large_tree.trim()).expect("large tree oid");
     let before = peak_rss_kib();
-    checkout_between_trees(&repo, None, &large_tree).expect("checkout cached large blob");
+    repo.checkout()
+        .checkout(None, &large_tree)
+        .expect("checkout cached large blob");
     let growth = peak_rss_kib() - before;
     eprintln!("cached large-blob checkout peak RSS growth: {growth} KiB");
     assert!(

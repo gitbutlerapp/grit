@@ -6,7 +6,8 @@ use grit_lib::worktree::WorktreeError;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, OverwriteReason};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -55,20 +56,21 @@ fn switch_local_changes_refusal_paths_match_git() {
 
     let git_paths = git_switch_refused_paths(tmp.path(), &other);
 
-    let err = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: other.clone(),
-                oid: other_oid,
+    let err = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: other.clone(),
+                    oid: other_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("switch");
     match err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
@@ -91,20 +93,21 @@ fn switch_untracked_refusal_paths_match_git() {
 
     let git_paths = git_switch_refused_paths(tmp.path(), &other);
 
-    let err = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: other,
-                oid: other_oid,
+    let err = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: other,
+                    oid: other_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("switch");
     match err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::Untracked,
@@ -133,20 +136,21 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
         .filter(|l| !l.is_empty())
         .count();
 
-    let outcome = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: other.clone(),
-                oid: other_oid,
+    let outcome = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: other.clone(),
+                    oid: other_oid,
+                },
+                dry_run: true,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: true,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("dry-run switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("dry-run switch");
     assert!(outcome.dry_run);
     assert_eq!(outcome.changed_paths, git_count);
     assert_eq!(outcome.commit, other_oid);
@@ -160,19 +164,19 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
     assert_eq!(worktree_file_snapshot(tmp.path()), worktree_before);
 
     // Sanity: a real switch still works afterward.
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: other,
-                oid: other_oid,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: other,
+                    oid: other_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("real switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("real switch");
     let _ = main_oid;
 }

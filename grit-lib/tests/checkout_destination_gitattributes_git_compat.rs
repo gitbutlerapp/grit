@@ -4,7 +4,6 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::repo::Repository;
 
 fn git(repo: &std::path::Path, args: &[&str]) {
@@ -50,7 +49,15 @@ fn checkout_applies_destination_gitattributes_eol_crlf() {
     git(root, &["checkout", "-q", "main"]);
 
     let grit_repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    checkout_between_trees(&grit_repo, Some(&main_tree), &br_tree).expect("grit checkout");
+    grit_repo
+        .checkout()
+        .checkout(
+            Some(&main_tree),
+            &br_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit checkout");
 
     let grit_bytes = std::fs::read(root.join("f.txt")).expect("read grit checkout");
     assert_eq!(

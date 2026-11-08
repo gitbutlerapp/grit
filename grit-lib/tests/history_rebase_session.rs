@@ -2229,25 +2229,29 @@ fn git_started_conflict_rebase() -> (HistoryRepo, ObjectId, ObjectId) {
 #[test]
 fn switch_refuses_during_git_started_rebase_and_git_continue_still_moves_only_topic() {
     use grit_lib::error::Error;
-    use grit_lib::porcelain::switch::{resolve_switch_target, switch_repository, SwitchOptions};
+    use grit_lib::porcelain::switch::SwitchOptions;
 
     let (repo, main_tip, orig_tip) = git_started_conflict_rebase();
     let wt = repo.worktree();
     let grit = open_grit(wt);
     let head_before = git_oid(wt, "HEAD");
     for dry_run in [true, false] {
-        let mode = resolve_switch_target(&grit, "main").expect("resolve main");
-        let err = switch_repository(
-            &grit,
-            &SwitchOptions {
-                mode,
-                dry_run,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::CancelToken::never(),
-        )
-        .unwrap_err();
+        let mode = grit
+            .checkout()
+            .resolve_switch_target("main")
+            .expect("resolve main");
+        let err = grit
+            .checkout()
+            .switch(
+                &SwitchOptions {
+                    mode,
+                    dry_run,
+                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+                },
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -2289,24 +2293,28 @@ fn switch_refuses_during_git_started_rebase_and_git_continue_still_moves_only_to
 #[test]
 fn switch_refuses_during_merge_conflict() {
     use grit_lib::error::Error;
-    use grit_lib::porcelain::switch::{resolve_switch_target, switch_repository, SwitchOptions};
+    use grit_lib::porcelain::switch::SwitchOptions;
 
     let (repo, _upstream, _onto, _tip, orig_tip) = conflict_rebase_fixture();
     let wt = repo.worktree();
     support::git_merge_expect_conflict(wt, "topic");
     let grit = open_grit(wt);
-    let mode = resolve_switch_target(&grit, "topic").expect("resolve topic");
-    let err = switch_repository(
-        &grit,
-        &SwitchOptions {
-            mode,
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .unwrap_err();
+    let mode = grit
+        .checkout()
+        .resolve_switch_target("topic")
+        .expect("resolve topic");
+    let err = grit
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(
             err,

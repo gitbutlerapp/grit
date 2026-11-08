@@ -11,7 +11,7 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions, TrackMode};
+use grit_lib::porcelain::branch::{BranchCreateOptions, TrackMode};
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::refs::RefnameUnavailable;
 use grit_lib::repo::Repository;
@@ -24,7 +24,7 @@ fn open(dir: &Path) -> Repository {
 fn create(dir: &Path, name: &str) -> grit_lib::error::Result<()> {
     create_branch(
         &open(dir),
-        &CreateBranchOptions {
+        &BranchCreateOptions {
             name: name.into(),
             start: None,
             force: false,

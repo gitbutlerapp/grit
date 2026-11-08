@@ -12,7 +12,6 @@ use grit_lib::index::{
 use grit_lib::objects::FileMode;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::checkout::checkout_tree_changes;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
@@ -269,7 +268,14 @@ fn checkout_diff_with_policy(
 }
 
 fn reset_worktree_to_tree(root: &Path, from: ObjectId, current: ObjectId) {
-    checkout_between_trees(&open_with_policy(root, 1, None), Some(&current), &from)
+    open_with_policy(root, 1, None)
+        .checkout()
+        .checkout(
+            Some(&current),
+            &from,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("reset tree");
 }
 
@@ -400,14 +406,24 @@ fn parallel_matches_serial_gitlink_and_replacements() {
     index.sort();
     let to_tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree2");
-    checkout_between_trees(&repo, Some(&base_tree), &to_tree).expect("seed serial");
+    repo.checkout()
+        .checkout(
+            Some(&base_tree),
+            &to_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("seed serial");
     let snap_serial = snapshot_worktree(wt);
-    checkout_between_trees(
-        &open_with_policy(root, 4, Some(0)),
-        Some(&base_tree),
-        &to_tree,
-    )
-    .expect("parallel checkout");
+    open_with_policy(root, 4, Some(0))
+        .checkout()
+        .checkout(
+            Some(&base_tree),
+            &to_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("parallel checkout");
     let snap_par = snapshot_worktree(wt);
     assert_trees_match(&snap_serial, &snap_par);
 }
@@ -451,13 +467,22 @@ fn external_smudge_filter_runs_once_via_recording_runner() {
     let tree1 = commit_tree(&repo, "c1");
     fs::write(wt.join("filtered"), b"blob2\n").expect("new blob for checkout");
     let tree2 = commit_tree(&repo, "c2");
-    checkout_between_trees(&repo, None, &tree1).expect("sync to tree1");
+    repo.checkout()
+        .checkout(None, &tree1)
+        .expect("sync to tree1");
     runner.push_response(RecordedResponse::Output {
         stdout: b"SMUDGED\n".to_vec(),
         code: 0,
     });
     let smudge_calls_before = runner.specs().len();
-    checkout_between_trees(&repo, Some(&tree1), &tree2).expect("checkout with smudge");
+    repo.checkout()
+        .checkout(
+            Some(&tree1),
+            &tree2,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout with smudge");
     let body = fs::read(wt.join("filtered")).expect("read filtered");
     assert_eq!(body, b"SMUDGED\n", "smudge output must land on disk");
     assert_eq!(

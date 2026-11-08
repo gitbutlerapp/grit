@@ -23,7 +23,7 @@ use grit_lib::objects::CommitData;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, write_commit_object, CommitRequest};
-use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
+use grit_lib::porcelain::tag::CreateTagRequest;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::reflog::ReflogEntry;
@@ -394,9 +394,8 @@ fn create_tag_flushes_before_ref_update() {
     let tip = seed_commit(&repo);
     store.clear_events();
 
-    create_tag(
-        &repo,
-        &CreateTagRequest {
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "v1".into(),
             target: tip,
             message: Some("release\n".into()),
@@ -406,9 +405,8 @@ fn create_tag_flushes_before_ref_update() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .expect("tag");
+        })
+        .expect("tag");
 
     let tag_oid = repo
         .revwalk()

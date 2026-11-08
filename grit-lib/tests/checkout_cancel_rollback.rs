@@ -13,9 +13,9 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::repo::Repository;
 
@@ -313,13 +313,10 @@ fn full_switch_incs(fx: &Fixture) -> u64 {
         .expect("cp");
     assert!(status.success());
     let mut count = CountIncs::default();
-    switch_repository(
-        &open(copy.path()),
-        &detach_to(fx.next),
-        &mut count,
-        &CancelToken::never(),
-    )
-    .expect("full switch on the copy");
+    open(copy.path())
+        .checkout()
+        .switch(&detach_to(fx.next), &mut count, &CancelToken::never())
+        .expect("full switch on the copy");
     count.seen
 }
 
@@ -359,7 +356,9 @@ fn cancelled_switch_rolls_back(shape: Shape) {
             in_checkout: false,
             at_cancel: || {},
         };
-        let err = switch_repository(&open(&fx.root), &detach_to(fx.next), &mut progress, &cancel)
+        let err = open(&fx.root)
+            .checkout()
+            .switch(&detach_to(fx.next), &mut progress, &cancel)
             .expect_err(&context);
         assert!(matches!(err, Error::Cancelled), "{context}: {err:?}");
         assert!(progress.seen >= limit, "{context}: cancel never fired");
@@ -372,13 +371,14 @@ fn cancelled_switch_rolls_back(shape: Shape) {
         assert_clean(&fx.root, &context);
     }
 
-    let outcome = switch_repository(
-        &open(&fx.root),
-        &detach_to(fx.next),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("retry after cancelled switches");
+    let outcome = open(&fx.root)
+        .checkout()
+        .switch(
+            &detach_to(fx.next),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("retry after cancelled switches");
     assert_eq!(outcome.commit, fx.next);
     assert_eq!(
         git(&fx.root, &["rev-parse", "HEAD"]).trim(),
@@ -427,14 +427,10 @@ fn cancelled_tree_to_tree_checkout_leaves_repository_unchanged() {
             in_checkout: false,
             at_cancel: || {},
         };
-        let err = checkout_between_trees_with_progress(
-            &open(&fx.root),
-            Some(&from),
-            &to,
-            &mut progress,
-            &cancel,
-        )
-        .expect_err(&context);
+        let err = open(&fx.root)
+            .checkout()
+            .checkout(Some(&from), &to, &mut progress, &cancel)
+            .expect_err(&context);
         assert!(matches!(err, Error::Cancelled), "{context}: {err:?}");
         assert_eq!(repository_state(&fx.root), before, "{context}");
         assert_main_layout(&fx.root, Shape::Mixed, &context);
@@ -466,9 +462,10 @@ fn cancelled_initial_checkout_leaves_work_tree_empty() {
         in_checkout: false,
         at_cancel: || {},
     };
-    let err =
-        checkout_between_trees_with_progress(&open(&target), None, &tree, &mut progress, &cancel)
-            .expect_err("cancelled initial checkout");
+    let err = open(&target)
+        .checkout()
+        .checkout(None, &tree, &mut progress, &cancel)
+        .expect_err("cancelled initial checkout");
     assert!(matches!(err, Error::Cancelled), "{err:?}");
     let left: Vec<_> = fs::read_dir(&target)
         .expect("read clone")
@@ -478,14 +475,10 @@ fn cancelled_initial_checkout_leaves_work_tree_empty() {
     assert!(left.is_empty(), "initial checkout left {left:?}");
     assert!(!target.join(".git/index").exists(), "index written");
 
-    checkout_between_trees_with_progress(
-        &open(&target),
-        None,
-        &tree,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("retry");
+    open(&target)
+        .checkout()
+        .checkout(None, &tree, &mut NullProgress, &CancelToken::never())
+        .expect("retry");
     let status = git(&target, &["status", "--porcelain", "--untracked-files=all"]);
     assert!(status.is_empty(), "after retry:\n{status}");
 }
@@ -523,7 +516,9 @@ fn rollback_that_cannot_remove_a_created_file_reports_it() {
             }
         },
     };
-    let err = switch_repository(&open(&fx.root), &detach_to(fx.next), &mut progress, &cancel)
+    let err = open(&fx.root)
+        .checkout()
+        .switch(&detach_to(fx.next), &mut progress, &cancel)
         .expect_err("cancelled switch");
     if locked.is_dir() {
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("unlock");
@@ -856,20 +851,21 @@ fn preset_cancel_switch_returns_before_wholesale_delete() {
     let cancel = CancelToken::new();
     cancel.cancel();
     let start = Instant::now();
-    let err = switch_repository(
-        &open(&root),
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: ren,
-                reflog_to_label: "ren".into(),
+    let err = open(&root)
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: ren,
+                    reflog_to_label: "ren".into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &cancel,
-    )
-    .expect_err("pre-set cancel");
+            &mut NullProgress,
+            &cancel,
+        )
+        .expect_err("pre-set cancel");
     let elapsed = start.elapsed();
     assert!(matches!(err, Error::Cancelled), "{err:?}");
     assert!(
@@ -897,20 +893,21 @@ fn delayed_cancel_switch_during_wholesale_delete_leaves_some_dirs() {
         thread::sleep(Duration::from_millis(2));
         flip.cancel();
     });
-    let err = switch_repository(
-        &open(&root),
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: ren,
-                reflog_to_label: "ren".into(),
+    let err = open(&root)
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: ren,
+                    reflog_to_label: "ren".into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        cancel.as_ref(),
-    )
-    .expect_err("delayed cancel");
+            &mut NullProgress,
+            cancel.as_ref(),
+        )
+        .expect_err("delayed cancel");
     sleeper.join().expect("join");
     assert!(matches!(err, Error::Cancelled), "{err:?}");
     assert_eq!(repository_state(&root), before);

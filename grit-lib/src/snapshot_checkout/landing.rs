@@ -28,7 +28,7 @@
 use super::{CheckoutClient, CheckoutError, CheckoutMarker, IntegrateResponse, Result};
 use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
 use crate::objects::ObjectId;
-use crate::porcelain::branch::{rename_branch, RenameBranchOptions};
+use crate::porcelain::branch::{rename_branch, BranchRenameOptions};
 use crate::porcelain::branch_error::BranchError;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
@@ -350,7 +350,7 @@ pub(crate) fn move_off_landed_branch(
         let name = client.reserve_work_branch(&marker.id, wanted)?;
         let renamed = rename_branch(
             repo,
-            &RenameBranchOptions {
+            &BranchRenameOptions {
                 old: branch.to_owned(),
                 new: name.clone(),
                 force: false,

@@ -12,9 +12,9 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
+use grit_lib::porcelain::branch::BranchCreateOptions;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
+use grit_lib::porcelain::tag::CreateTagRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::{InitOptions, Repository};
@@ -125,10 +125,11 @@ fn sorted(mut v: Vec<String>) -> Vec<String> {
 fn battery(repo: &Repository, wt: &Path, linked: &Path) -> Observed {
     fs::write(wt.join("f"), "x\n").expect("write");
     let first = commit_all(repo, "hello world");
-    create_branch(repo, &CreateBranchOptions::at_head("side")).expect("side");
-    create_tag(
-        repo,
-        &CreateTagRequest {
+    repo.branches()
+        .create(&BranchCreateOptions::at_head("side"))
+        .expect("side");
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "v1".into(),
             target: first,
             message: None,
@@ -138,9 +139,8 @@ fn battery(repo: &Repository, wt: &Path, linked: &Path) -> Observed {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .expect("tag");
+        })
+        .expect("tag");
     fs::write(wt.join("g"), "y\n").expect("write");
     let second = commit_all(repo, "second change");
 

@@ -14,7 +14,7 @@ use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
@@ -262,17 +262,17 @@ fn the_main_git_dir_on_the_same_store_still_commits_onto_main() {
 }
 
 fn switch(repo: &Repository, mode: SwitchMode) {
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode,
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch");
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+                hooks: PostOperationHooks::Skip,
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch");
 }
 
 #[test]

@@ -2,7 +2,6 @@
 
 use grit_lib::command_runner::hooks::{HookName, PostOperationHooks};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::notes::read_notes_tree;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::CancelToken;
@@ -345,7 +344,10 @@ fn amend_copies_note_when_post_rewrite_runs() {
         note_on_object(dir.path(), &outcome.oid).as_deref(),
         Some("amend me")
     );
-    let entries = read_notes_tree(&repo, "refs/notes/commits").expect("read notes");
+    let entries = repo
+        .notes()
+        .read_tree("refs/notes/commits")
+        .expect("read notes");
     assert!(entries.iter().any(|e| {
         grit_lib::notes::note_object_name(&e.path).as_deref() == Some(outcome.oid.to_hex().as_str())
     }));

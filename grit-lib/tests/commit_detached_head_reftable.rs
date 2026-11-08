@@ -3,7 +3,7 @@
 use crate::support;
 
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest, HookPolicy};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::HeadState;
@@ -54,20 +54,20 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
         HeadState::Branch { oid: Some(oid), .. } => oid,
         other => panic!("expected branch tip, got {other:?}"),
     };
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: tip,
-                reflog_to_label: "HEAD".to_owned(),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: tip,
+                    reflog_to_label: "HEAD".to_owned(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("detach");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("detach");
 
     std::fs::write(wt.join("b.txt"), b"b\n").unwrap();
     let outcome = commit_worktree(
@@ -116,20 +116,20 @@ fn grit_amend_on_detached_reftable_head() {
         HeadState::Branch { oid: Some(oid), .. } => oid,
         other => panic!("expected branch tip, got {other:?}"),
     };
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: tip,
-                reflog_to_label: "HEAD".to_owned(),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: tip,
+                    reflog_to_label: "HEAD".to_owned(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("detach");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("detach");
 
     let mut amend = commit_req("amended");
     amend.amend = true;

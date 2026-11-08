@@ -19,7 +19,7 @@ use grit_lib::diff::merge_trees::{
 use grit_lib::diff::rerere::{repo_rerere, RerereAutoupdate, RerereEventKind};
 use grit_lib::ident::Signature;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
-use grit_lib::notes::{write_notes_commit, NotesTreeEntry};
+use grit_lib::notes::NotesTreeEntry;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -561,17 +561,17 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             RunHookOptions::default(),
         )
         .expect("traditional hook scan");
-        write_notes_commit(
-            &repo,
-            "refs/notes/commits",
-            &[NotesTreeEntry {
-                mode: 0o100644,
-                path: main_tip.to_hex().into_bytes(),
-                oid: main_tip,
-            }],
-            &format!("note for {email}"),
-        )
-        .expect("notes");
+        repo.notes()
+            .write_tree_commit(
+                "refs/notes/commits",
+                &[NotesTreeEntry {
+                    mode: 0o100644,
+                    path: main_tip.to_hex().into_bytes(),
+                    oid: main_tip,
+                }],
+                &format!("note for {email}"),
+            )
+            .expect("notes");
         let notes_tip = repo
             .references()
             .resolve("refs/notes/commits")

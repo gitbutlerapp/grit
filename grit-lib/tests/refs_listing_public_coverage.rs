@@ -4,7 +4,7 @@
 
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::commit::create_commit;
-use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
+use grit_lib::porcelain::tag::CreateTagRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::query_listings_on_store;
 use grit_lib::refs::listing::{
@@ -93,9 +93,8 @@ fn references_query_peels_annotated_tags() {
     )
     .unwrap()
     .oid;
-    create_tag(
-        &repo,
-        &CreateTagRequest {
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "v1".into(),
             target: commit,
             message: Some("note".into()),
@@ -105,9 +104,8 @@ fn references_query_peels_annotated_tags() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     let query = RefQuery {
         namespaces: vec![RefNamespace::Tags],
@@ -130,9 +128,8 @@ fn references_query_peels_annotated_tag_to_non_commit() {
     let dir = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let blob: ObjectId = repo.odb().write(ObjectKind::Blob, b"payload").unwrap();
-    create_tag(
-        &repo,
-        &CreateTagRequest {
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "of-blob".into(),
             target: blob,
             message: Some("annotated".into()),
@@ -142,9 +139,8 @@ fn references_query_peels_annotated_tag_to_non_commit() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     let rows = repo
         .references()
@@ -174,9 +170,8 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
     )
     .unwrap()
     .oid;
-    create_tag(
-        &repo,
-        &CreateTagRequest {
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "light".into(),
             target: commit,
             message: None,
@@ -186,9 +181,8 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     let rows = repo
         .references()
@@ -218,9 +212,8 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
     )
     .unwrap()
     .oid;
-    create_tag(
-        &repo,
-        &CreateTagRequest {
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "t".into(),
             target: commit,
             message: None,
@@ -230,9 +223,8 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     let query = RefQuery {
         namespaces: vec![

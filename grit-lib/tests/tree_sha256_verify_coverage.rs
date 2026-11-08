@@ -4,7 +4,7 @@
 
 use grit_lib::commit::signing::GpgConfig;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::tag::{verify_tag_by_name, TagError, VerifiedTag};
+use grit_lib::porcelain::tag::{TagError, VerifiedTag};
 use grit_lib::repo::Repository;
 use grit_lib::tree_sha256::{
     parse_tree_sha256_tag_headers, verify_tag, SignatureVerdict, TagVerification, TagVerifyOptions,
@@ -66,7 +66,7 @@ fn public_verify_tag_by_name() {
         check_signature: false,
         gpg: GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),
     };
-    let err = verify_tag_by_name(&repo, "missing", &options).unwrap_err();
+    let err = repo.tags().verify("missing", &options).unwrap_err();
     assert!(matches!(
         err,
         grit_lib::error::Error::Tag(TagError::NotFound { .. })

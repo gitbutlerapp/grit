@@ -5,8 +5,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 
 fn git(repo: &std::path::Path, args: &[&str]) -> String {
@@ -75,7 +75,10 @@ fn checkout_between_trees_honours_nested_binary_with_autocrlf() {
         Repository::discover(Some(&repo_root), &RepositoryOptions::empty()).expect("open");
     grit_repo.reload_config().expect("reload autocrlf config");
     let head_tree = tree_of_head(&repo_root);
-    checkout_between_trees(&grit_repo, None, &head_tree).expect("populate checkout");
+    grit_repo
+        .checkout()
+        .checkout(None, &head_tree)
+        .expect("populate checkout");
 
     let bytes = fs::read(repo_root.join("sub/bin-1")).expect("read worktree");
     assert_eq!(
@@ -117,7 +120,9 @@ fn bulk_populated_checkout_honours_nested_binary_with_autocrlf() {
     }
     fs::remove_file(repo_root.join("sub/.gitattributes")).expect("remove attrs");
 
-    checkout_between_trees(&repo, None, &tree).expect("bulk populated checkout");
+    repo.checkout()
+        .checkout(None, &tree)
+        .expect("bulk populated checkout");
 
     let sample = fs::read(repo_root.join("sub/bin-00")).expect("read");
     assert!(
@@ -144,36 +149,38 @@ fn switch_honours_nested_binary_with_autocrlf() {
     let grit_repo =
         Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("open");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "older".into(),
-                oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "older"]).trim())
-                    .expect("older"),
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "older".into(),
+                    oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "older"]).trim())
+                        .expect("older"),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch older");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch older");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "main".into(),
-                oid: main_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "main".into(),
+                    oid: main_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch main");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch main");
 
     let bytes = fs::read(tmp.path().join("sub/bin-1")).expect("read");
     assert_eq!(

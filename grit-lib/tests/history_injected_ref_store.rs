@@ -13,9 +13,9 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
+use grit_lib::porcelain::branch::BranchCreateOptions;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
@@ -278,22 +278,24 @@ fn clean_start_rebase_on_memory_backends_moves_the_branch_in_the_store() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (repo, refs, wt) = open_memory_repo(dir.path());
     let tips = three_commits(&repo, &wt);
-    create_branch(&repo, &CreateBranchOptions::at_head("side")).expect("side");
+    repo.branches()
+        .create(&BranchCreateOptions::at_head("side"))
+        .expect("side");
     let switch = |branch: &str, oid| {
-        switch_repository(
-            &repo,
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: branch.into(),
-                    oid,
+        repo.checkout()
+            .switch(
+                &SwitchOptions {
+                    mode: SwitchMode::Existing {
+                        branch: branch.into(),
+                        oid,
+                    },
+                    dry_run: false,
+                    hooks: Default::default(),
                 },
-                dry_run: false,
-                hooks: Default::default(),
-            },
-            &mut NullProgress,
-            &CancelToken::never(),
-        )
-        .expect("switch");
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect("switch");
     };
     switch("side", tips[2]);
     let side = commit_file(&repo, &wt, "s", "side");

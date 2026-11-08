@@ -13,12 +13,12 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{Diff, RenameDetection, UncommittedDiff};
 use grit_lib::error::{Error, OverwriteReason};
 use grit_lib::objects::{parse_tree, ObjectId, ObjectKind};
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::merge::integrate_detached_head;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{git_hash_object_literally, HashAlgo as FixtureAlgo};
 
@@ -232,7 +232,14 @@ fn grit_checkout_writes_canonical_index_modes() {
     let tree = init_legacy_mode_repo(root.path());
     let repo = open_repo(root.path());
 
-    checkout_between_trees(&repo, None, &tree).expect("checkout");
+    repo.checkout()
+        .checkout(
+            None,
+            &tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
 
     let ls = git(root.path(), &["ls-files", "-s"]);
     assert!(
@@ -279,18 +286,18 @@ fn hard_reset_to_head_keeps_canonical_index_modes() {
     let repo = open_repo(root.path());
 
     let head = repo.head_commit().expect("head commit");
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(
-            head,
-            ResetMode::Hard,
-            IDENT.parse().expect("identity"),
-            "reset: test",
-        ),
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("hard reset HEAD");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(
+                head,
+                ResetMode::Hard,
+                IDENT.parse().expect("identity"),
+                "reset: test",
+            ),
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("hard reset HEAD");
 
     assert_index_modes_canonical(root.path());
 
@@ -319,20 +326,20 @@ fn legacy_tree_modes_switch_and_merge_on_clean_tree() {
     .expect("status");
     assert!(model.is_clean(), "grit status must be clean before switch");
 
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "main".into(),
-                oid: c2,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "main".into(),
+                    oid: c2,
+                },
+                dry_run: false,
+                hooks: PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch to main");
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch to main");
 
     assert_eq!(
         std::fs::read(root.path().join("f")).expect("read f"),
@@ -372,20 +379,21 @@ fn legacy_tree_modes_switch_still_blocks_real_worktree_edit() {
     std::fs::write(root.path().join("f"), b"dirty").expect("write f");
 
     let repo = open_repo(root.path());
-    let err = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "main".into(),
-                oid: c2,
+    let err = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "main".into(),
+                    oid: c2,
+                },
+                dry_run: false,
+                hooks: PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("switch must refuse dirty worktree");
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("switch must refuse dirty worktree");
     assert!(
         matches!(
             err,

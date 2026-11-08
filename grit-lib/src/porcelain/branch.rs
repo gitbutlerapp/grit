@@ -31,13 +31,13 @@ use crate::worktree::{
     worktree_admin_dir,
 };
 
-pub use crate::porcelain::branch_error::{BranchError, DeleteMode, StartPoint, TrackMode};
+pub use crate::porcelain::branch_error::{BranchDeleteMode, BranchError, StartPoint, TrackMode};
 
 const HEADS_PREFIX: &str = "refs/heads/";
 
-/// Inputs for [`create_branch`].
+/// Inputs for [`Branches::create`](crate::repo_handles::Branches::create).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreateBranchOptions {
+pub struct BranchCreateOptions {
     /// Short branch name (without `refs/heads/`).
     pub name: String,
     /// Start commit and reflog label; `None` uses the current `HEAD` commit.
@@ -50,7 +50,7 @@ pub struct CreateBranchOptions {
     pub dry_run: bool,
 }
 
-impl CreateBranchOptions {
+impl BranchCreateOptions {
     /// Convenience for `grit branch <name>` (start at `HEAD`, no force, auto track, live).
     #[must_use]
     pub fn at_head(name: impl Into<String>) -> Self {
@@ -66,7 +66,7 @@ impl CreateBranchOptions {
 
 /// Options for [`rename_branch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RenameBranchOptions {
+pub struct BranchRenameOptions {
     /// Current short branch name.
     pub old: String,
     /// New short branch name.
@@ -118,7 +118,10 @@ pub struct CreateBranchOutcome {
 ///
 /// Returns [`Error::Branch`] for invalid names, existing branches, missing commits, checked-out
 /// conflicts, and upstream tracking failures.
-pub fn create_branch(repo: &Repository, opts: &CreateBranchOptions) -> Result<CreateBranchOutcome> {
+pub(crate) fn create_branch(
+    repo: &Repository,
+    opts: &BranchCreateOptions,
+) -> Result<CreateBranchOutcome> {
     let name = &opts.name;
     RefName::branch(name).map_err(|reason| {
         Error::Branch(BranchError::InvalidName {
@@ -176,7 +179,7 @@ pub fn create_branch(repo: &Repository, opts: &CreateBranchOptions) -> Result<Cr
 /// # Errors
 ///
 /// Returns [`Error::Branch`] when `track` is [`TrackMode::Always`] but no upstream can be configured.
-pub fn resolve_create_tracking(
+pub(crate) fn resolve_create_tracking(
     repo: &Repository,
     branch_short: &str,
     start_label: &str,
@@ -250,7 +253,7 @@ pub struct BranchList {
 /// and [`BranchDetail::Full`](crate::refs::branch_tracking::BranchDetail::Full); use
 /// [`BranchDetail::Names`](crate::refs::branch_tracking::BranchDetail::Names) when you only
 /// need the same ref listing at lower cost.
-pub fn list_branches(repo: &Repository) -> Result<BranchList> {
+pub(crate) fn list_branches(repo: &Repository) -> Result<BranchList> {
     let current = match resolve_head_for_repository(repo)? {
         HeadState::Branch { short_name, .. } => Some(short_name),
         HeadState::Detached { .. } | HeadState::Invalid => None,
@@ -272,7 +275,16 @@ pub fn list_branches(repo: &Repository) -> Result<BranchList> {
     Ok(BranchList { current, branches })
 }
 
-/// Result of [`delete_branch`].
+/// Options for [`Branches::delete`](crate::repo_handles::Branches::delete).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BranchDeleteOptions {
+    /// Safe delete requires the tip to be merged; force skips the check.
+    pub mode: BranchDeleteMode,
+    /// Validate only; leave refs, reflogs, and config unchanged.
+    pub dry_run: bool,
+}
+
+/// Result of [`Branches::delete`](crate::repo_handles::Branches::delete).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeletedBranch {
     /// Short branch name that was deleted.
@@ -293,15 +305,15 @@ pub struct DeletedBranch {
 /// repository's own `HEAD` names the branch, including through an injected ref
 /// store. A branch held by another worktree returns [`BranchError::CheckedOut`],
 /// carrying the branch name and that worktree's path. Both checks run before
-/// deletion, even with [`DeleteMode::Force`] or `dry_run = true`.
+/// deletion, even with [`BranchDeleteMode::Force`] or `dry_run = true`.
 ///
 /// Invalid names return [`BranchError::InvalidName`], missing branches return
 /// [`BranchError::NotFound`], and safe deletion of an unmerged branch returns
 /// [`BranchError::NotFullyMerged`]. Backend, config, and I/O errors propagate.
-pub fn delete_branch(
+pub(crate) fn delete_branch(
     repo: &Repository,
     name: &str,
-    mode: DeleteMode,
+    mode: BranchDeleteMode,
     dry_run: bool,
 ) -> Result<DeletedBranch> {
     RefName::branch(name).map_err(|reason| {
@@ -328,7 +340,7 @@ pub fn delete_branch(
         })?;
     let oid = existing.oid;
 
-    if mode == DeleteMode::Safe {
+    if mode == BranchDeleteMode::Safe {
         let (merged, base_label) = merge_status(repo, name, oid, &head)?;
         if !merged {
             return Err(Error::Branch(BranchError::NotFullyMerged {
@@ -374,7 +386,10 @@ pub fn delete_branch(
 /// - [`crate::porcelain::branch_error::BranchError::CheckedOut`] when `force` would clobber a branch
 ///   checked out in another worktree.
 /// - Ref store, config, and I/O errors are propagated.
-pub fn rename_branch(repo: &Repository, opts: &RenameBranchOptions) -> Result<RenameBranchOutcome> {
+pub(crate) fn rename_branch(
+    repo: &Repository,
+    opts: &BranchRenameOptions,
+) -> Result<RenameBranchOutcome> {
     RefName::branch(&opts.old).map_err(|e| {
         Error::Branch(BranchError::InvalidName {
             name: opts.old.clone(),
@@ -686,12 +701,16 @@ fn resolve_set_upstream(
 /// Validate [`set_upstream`] inputs and return the canonical upstream display name.
 ///
 /// Performs the same checks as [`set_upstream`] without writing config.
-pub fn validate_set_upstream(repo: &Repository, branch: &str, upstream: &str) -> Result<String> {
+pub(crate) fn validate_set_upstream(
+    repo: &Repository,
+    branch: &str,
+    upstream: &str,
+) -> Result<String> {
     resolve_set_upstream(repo, branch, upstream).map(|(_, _, display)| display)
 }
 
 /// Configure `branch.<branch>.remote` and `branch.<branch>.merge` from a resolved upstream ref.
-pub fn set_upstream(repo: &Repository, branch: &str, upstream: &str) -> Result<()> {
+pub(crate) fn set_upstream(repo: &Repository, branch: &str, upstream: &str) -> Result<()> {
     let (remote, merge, _) = resolve_set_upstream(repo, branch, upstream)?;
     write_branch_upstream_config(repo, branch, &remote, &merge)
 }
@@ -721,12 +740,12 @@ fn validate_unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
 }
 
 /// Validate [`unset_upstream`] inputs without clearing config.
-pub fn preview_unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
+pub(crate) fn preview_unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
     validate_unset_upstream(repo, branch)
 }
 
 /// Clear upstream configuration for `branch`.
-pub fn unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
+pub(crate) fn unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
     validate_unset_upstream(repo, branch)?;
     let remote_key = format!("branch.{branch}.remote");
     let merge_key = format!("branch.{branch}.merge");
@@ -968,8 +987,8 @@ mod tests {
     fn list_marks_current_and_sorts_by_name() {
         let (_tmp, repo) = init();
         let tip = commit(&repo, "one");
-        create_branch(&repo, &CreateBranchOptions::at_head("zeta")).unwrap();
-        create_branch(&repo, &CreateBranchOptions::at_head("alpha")).unwrap();
+        create_branch(&repo, &BranchCreateOptions::at_head("zeta")).unwrap();
+        create_branch(&repo, &BranchCreateOptions::at_head("alpha")).unwrap();
         let list = list_branches(&repo).unwrap();
         let current = list.current.clone().unwrap();
 
@@ -993,7 +1012,7 @@ mod tests {
         let (_tmp, repo) = init();
         commit(&repo, "one");
         let current = current(&repo);
-        let err = delete_branch(&repo, &current, DeleteMode::Force, false).unwrap_err();
+        let err = delete_branch(&repo, &current, BranchDeleteMode::Force, false).unwrap_err();
         assert!(
             matches!(
                 &err,
@@ -1030,7 +1049,7 @@ mod tests {
     fn delete_missing_branch_is_typed() {
         let (_tmp, repo) = init();
         commit(&repo, "one");
-        let err = delete_branch(&repo, "nope", DeleteMode::Force, false).unwrap_err();
+        let err = delete_branch(&repo, "nope", BranchDeleteMode::Force, false).unwrap_err();
         assert!(
             matches!(
                 &err,
@@ -1044,10 +1063,10 @@ mod tests {
     fn delete_merged_branch_returns_old_tip_and_removes_ref() {
         let (_tmp, repo) = init();
         let tip = commit(&repo, "one");
-        create_branch(&repo, &CreateBranchOptions::at_head("topic")).unwrap();
+        create_branch(&repo, &BranchCreateOptions::at_head("topic")).unwrap();
         commit(&repo, "two");
 
-        let deleted = delete_branch(&repo, "topic", DeleteMode::Safe, false).unwrap();
+        let deleted = delete_branch(&repo, "topic", BranchDeleteMode::Safe, false).unwrap();
         assert_eq!(
             deleted,
             DeletedBranch {
@@ -1063,11 +1082,11 @@ mod tests {
         let (_tmp, repo) = init();
         let first = commit(&repo, "one");
         let second = commit(&repo, "two");
-        create_branch(&repo, &CreateBranchOptions::at_head("topic")).unwrap();
+        create_branch(&repo, &BranchCreateOptions::at_head("topic")).unwrap();
         let current = current(&repo);
         refs::write_ref(repo.git_dir(), &format!("{HEADS_PREFIX}{current}"), &first).unwrap();
 
-        let err = delete_branch(&repo, "topic", DeleteMode::Safe, false).unwrap_err();
+        let err = delete_branch(&repo, "topic", BranchDeleteMode::Safe, false).unwrap_err();
         assert!(
             matches!(
                 &err,
@@ -1077,7 +1096,7 @@ mod tests {
         );
         assert!(branch_exists(&repo, "topic"));
 
-        let deleted = delete_branch(&repo, "topic", DeleteMode::Force, false).unwrap();
+        let deleted = delete_branch(&repo, "topic", BranchDeleteMode::Force, false).unwrap();
         assert_eq!(deleted.oid, second);
         assert!(!branch_exists(&repo, "topic"));
     }

@@ -8,7 +8,6 @@ use grit_lib::diff::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -88,8 +87,8 @@ fn grit_pick(repo: &Repository, source_hex: &str) -> grit_lib::error::Result<()>
     let index_handle = repo.index();
     let mut index = index_handle.load(&grit_lib::index::IndexLoadOptions::default())?;
     grit_lib::diff::merge_trees::apply_tree_merge_output_to_index(&mut index, &merged);
-    index_handle.write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
-    checkout_between_trees(repo, Some(&head_tree), &new_tree)?;
+    index_handle.write(&mut index)?;
+    repo.checkout().checkout(Some(&head_tree), &new_tree)?;
     let commit_data = CommitData {
         tree: new_tree,
         parents: vec![head_oid],

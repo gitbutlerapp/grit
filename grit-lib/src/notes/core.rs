@@ -172,7 +172,7 @@ fn notes_ref_tip(repo: &Repository, notes_ref: &str) -> Result<Option<ObjectId>>
 /// - Ref store and object read failures.
 ///
 /// Returns an empty vec when neither a ref nor a revision named `notes_ref` exists.
-pub fn read_notes_tree(repo: &Repository, notes_ref: &str) -> Result<Vec<NotesTreeEntry>> {
+pub(crate) fn read_notes_tree(repo: &Repository, notes_ref: &str) -> Result<Vec<NotesTreeEntry>> {
     Ok(read_notes_snapshot(repo, notes_ref)?.entries)
 }
 
@@ -236,7 +236,7 @@ pub(crate) fn read_notes_snapshot(repo: &Repository, notes_ref: &str) -> Result<
 ///
 /// Returns `(entries, truncated)` where `truncated` is true when the tree held more listable
 /// notes than returned.
-pub fn read_notes_tree_limited(
+pub(crate) fn read_notes_tree_limited(
     repo: &Repository,
     notes_ref: &str,
     max_entries: Option<usize>,
@@ -948,7 +948,7 @@ fn commit_notes_tree(
 /// - Ref store errors, including a compare-and-swap failure when `notes_ref` moves while the
 ///   commit is written.
 /// - Object write and config load failures.
-pub fn write_notes_commit(
+pub(crate) fn write_notes_commit(
     repo: &Repository,
     notes_ref: &str,
     entries: &[NotesTreeEntry],
@@ -1675,7 +1675,7 @@ fn write_notes_commit_with_parents(
 /// - [`crate::error::NotesError::MergeInProgress`] when [`NotesMergeStrategy::Manual`] finds conflict files
 ///   left by an earlier merge.
 /// - Ref store, object, and merge-base failures, or a failure while combining blobs.
-pub fn notes_merge_inner(
+pub(crate) fn notes_merge_inner(
     repo: &Repository,
     local_ref: &str,
     remote_ref: &str,
@@ -1954,7 +1954,7 @@ impl NotesRewritePlan {
 /// # Errors
 ///
 /// Returns [`crate::error::NotesError::UnknownRewriteMode`] when the configured rewrite mode is unknown.
-pub fn prepare_notes_for_rewrite(
+pub(crate) fn prepare_notes_for_rewrite(
     repo: &Repository,
     command: NotesRewriteCommand,
     pairs: &[(ObjectId, ObjectId)],
@@ -1983,7 +1983,7 @@ pub fn prepare_notes_for_rewrite(
 /// # Errors
 ///
 /// Propagates notes read/write and ref compare-and-swap failures.
-pub fn apply_prepared_notes_rewrite(
+pub(crate) fn apply_prepared_notes_rewrite(
     repo: &Repository,
     plan: &NotesRewritePlan,
     pairs: &[(ObjectId, ObjectId)],
@@ -2004,7 +2004,7 @@ pub fn apply_prepared_notes_rewrite(
 ///
 /// Returns [`crate::error::NotesError::UnknownRewriteMode`] when the configured rewrite mode is unknown, and other
 /// notes or ref store errors while reading or writing notes refs.
-pub fn copy_notes_for_rewrite(
+pub(crate) fn copy_notes_for_rewrite(
     repo: &Repository,
     command: NotesRewriteCommand,
     pairs: &[(ObjectId, ObjectId)],

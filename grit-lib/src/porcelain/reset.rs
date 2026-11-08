@@ -156,7 +156,7 @@ pub struct ResetOutcome {
 /// Same validation failures as [`reset_to_commit`], including [`crate::error::ObjectError::InvalidSignature`]
 /// for an invalid [`ResetOptions::identity`], even when the target is already `HEAD`
 /// or reflog updates are disabled. No repository state is changed.
-pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPreview> {
+pub(crate) fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPreview> {
     let (_previous, _head, preview) = plan_reset(repo, opts, true)?;
     Ok(preview)
 }
@@ -180,7 +180,7 @@ pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPrev
 /// changing HEAD, branch refs, index, worktree, reflogs, or operation state (including
 /// merge autostashes). This also applies to dry runs, resets to the current HEAD,
 /// and resets with reflog updates disabled. Later I/O failures may leave partial updates.
-pub fn reset_to_commit(
+pub(crate) fn reset_to_commit(
     repo: &Repository,
     opts: &ResetOptions,
     progress: &mut dyn crate::progress::ProgressSink,

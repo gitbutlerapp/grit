@@ -4,7 +4,6 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -117,7 +116,15 @@ fn checkout_between_trees_git_clean_after() {
         &RepositoryOptions::empty().with_work_tree(tmp.path()),
     )
     .expect("open grit repo");
-    checkout_between_trees(&grit_repo, Some(&from_tree), &to_tree).expect("checkout");
+    grit_repo
+        .checkout()
+        .checkout(
+            Some(&from_tree),
+            &to_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
 
     let to_commit = ObjectId::from_hex(&to_commit_hex).expect("commit oid");
     grit_test_support::refs::set_ref(&grit_repo, "HEAD", &to_commit).expect("head");

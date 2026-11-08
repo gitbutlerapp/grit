@@ -4,10 +4,8 @@ use anyhow::{bail, Result};
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::objects::short_hex;
 use grit_lib::porcelain::branch::{upstream_tracking_display, TrackMode};
-use grit_lib::porcelain::switch::{
-    resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
-    SwitchMode, SwitchOptions,
-};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::NullProgress;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -187,21 +185,22 @@ pub fn run(
             .or(start_point.as_deref())
             .ok_or_else(|| anyhow::anyhow!("revision required with --detach"))?;
         SwitchMode::Detached {
-            commit: resolve_revision_spec(&repo, spec).map_err(anyhow::Error::new)?,
+            commit: repo
+                .checkout()
+                .resolve_revision_spec(spec)
+                .map_err(anyhow::Error::new)?,
             reflog_to_label: spec.to_owned(),
         }
     } else if create {
         let branch = target.ok_or_else(|| anyhow::anyhow!("branch name required with --create"))?;
-        resolve_create_branch(
-            &repo,
-            &branch,
-            start_point.as_deref(),
-            track_mode(track, no_track),
-        )
-        .map_err(anyhow::Error::new)?
+        repo.branches()
+            .resolve_create_for_switch(&branch, start_point.as_deref(), track_mode(track, no_track))
+            .map_err(anyhow::Error::new)?
     } else {
         let spec = target.ok_or_else(|| anyhow::anyhow!("branch or revision required"))?;
-        resolve_switch_target(&repo, &spec).map_err(anyhow::Error::new)?
+        repo.checkout()
+            .resolve_switch_target(&spec)
+            .map_err(anyhow::Error::new)?
     };
 
     let upstream_display = match &mode {
@@ -213,17 +212,19 @@ pub fn run(
     };
 
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let outcome = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode,
-            dry_run,
-            hooks: PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(|err| crate::error_map::map_switch_lib_error(&repo, err))?;
+    let cancel = crate::interrupt::process_cancel_token();
+    let outcome = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode,
+                dry_run,
+                hooks: PostOperationHooks::Run,
+            },
+            &mut NullProgress,
+            &cancel,
+        )
+        .map_err(|err| crate::error_map::map_switch_lib_error(&repo, err))?;
 
     let detached = outcome.is_detached();
     Ok(SwitchOutcome {

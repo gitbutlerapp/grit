@@ -5,7 +5,6 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -60,14 +59,14 @@ fn bulk_checkout_applies_path_specific_eol_crlf() {
     let (main_tree, other_tree) = init_mixed_eol_repo(root);
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
 
-    checkout_between_trees_with_progress(
-        &repo,
-        Some(&main_tree),
-        &other_tree,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("grit checkout");
+    repo.checkout()
+        .checkout(
+            Some(&main_tree),
+            &other_tree,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("grit checkout");
 
     let lf_bytes = fs::read(root.join("f0.txt")).expect("grit lf file");
     assert_eq!(

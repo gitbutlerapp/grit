@@ -8,16 +8,17 @@ use super::super::helpers::{
     prepare_stash_reset, prepare_switch_reset, prepare_worktree_add, prepare_worktree_add_hunks,
     prepare_worktree_add_lines, prepare_worktree_add_patch_file, prepare_worktree_clean_untracked,
     prepare_worktree_commit, prepare_worktree_commit_staged, prepare_worktree_init_empty,
-    prepare_worktree_mv_file, prepare_worktree_restore_paths, prepare_worktree_rm_dir,
-    prepare_worktree_status_clean, prepare_worktree_status_dirty, reset_hard_bench,
-    reset_mixed_bench, restore_paths_bench, rm_dir_bench, scenario_spec, setup_big_blobs,
-    setup_deep_tree, setup_hot_path_switch, setup_init_empty, setup_shape_worktree, setup_small,
-    setup_stash_repo, setup_synth100k, stash_bench, status_clean_bench, status_dirty_bench,
-    status_paths_bench, status_renamed_bench, switch_bench,
+    prepare_worktree_mv_file, prepare_worktree_rm_dir, prepare_worktree_status_clean,
+    prepare_worktree_status_dirty, reset_hard_bench, reset_mixed_bench, restore_paths_bench,
+    rm_dir_bench, scenario_spec, setup_big_blobs, setup_deep_tree, setup_hot_path_switch,
+    setup_init_empty, setup_shape_worktree, setup_small, setup_stash_repo, setup_synth100k,
+    stash_bench, status_clean_bench, status_dirty_bench, status_paths_bench, status_renamed_bench,
+    switch_bench,
 };
 use super::super::helpers::{
-    clean_only_ignored_bench, init_branch_bench, prepare_worktree_restore_hunks, reset_keep_bench,
-    restore_hunks_bench, rm_dry_run_bench, stash_pop_index_bench, stash_push_paths_bench,
+    clean_only_ignored_bench, init_branch_bench, prepare_worktree_restore_hunks,
+    prepare_worktree_restore_paths, reset_keep_bench, restore_hunks_bench, rm_dry_run_bench,
+    stash_pop_index_bench, stash_push_paths_bench,
 };
 use super::super::matrix_helpers::{
     prepare_clean_only_ignored, prepare_reset_keep, prepare_stash_pop_index,

@@ -17,7 +17,7 @@ use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
 
 /// Committer identity line for reflog updates (`Name <email> epoch tz`).
-pub fn checkout_reflog_identity(repo: &Repository) -> String {
+pub(crate) fn checkout_reflog_identity(repo: &Repository) -> String {
     let env = repo.environment();
     let config = ConfigSet::load(
         env,
@@ -65,7 +65,7 @@ pub fn switch_create_reflog_source_label(start_point: Option<&str>) -> String {
 ///
 /// Respects `core.logAllRefUpdates` for auto-creating a new log, but still appends when
 /// `HEAD` already has a reflog (Git `append_reflog` semantics).
-pub fn append_head_checkout_reflog(
+pub(crate) fn append_head_checkout_reflog(
     repo: &Repository,
     old_oid: ObjectId,
     new_oid: ObjectId,
@@ -93,7 +93,7 @@ pub fn append_head_checkout_reflog(
 }
 
 /// Create a branch ref and `branch: Created from …` reflog atomically.
-pub fn create_branch_ref_with_reflog(
+pub(crate) fn create_branch_ref_with_reflog(
     repo: &Repository,
     branch_ref: &str,
     start_oid: ObjectId,
@@ -189,7 +189,7 @@ fn restore_head(repo: &Repository, head_before: &HeadState) -> Result<()> {
 
 /// Create branch (if needed), move `HEAD`, append checkout reflog; roll back branch on failure.
 #[allow(clippy::too_many_arguments)]
-pub fn finish_switch_ref_updates(
+pub(crate) fn finish_switch_ref_updates(
     repo: &Repository,
     head_before: &HeadState,
     branch_create: Option<(String, ObjectId, String)>,
@@ -232,7 +232,7 @@ pub fn finish_switch_ref_updates(
 }
 
 /// Whether `HEAD` already points at this attached branch tip (no checkout reflog).
-pub fn is_already_on_branch(
+pub(crate) fn is_already_on_branch(
     repo: &Repository,
     branch_ref: &str,
     target_oid: ObjectId,
@@ -249,7 +249,7 @@ pub fn is_already_on_branch(
 }
 
 /// Whether detached `HEAD` already points at `target_oid`.
-pub fn is_already_detached_at(repo: &Repository, target_oid: ObjectId) -> Result<bool> {
+pub(crate) fn is_already_detached_at(repo: &Repository, target_oid: ObjectId) -> Result<bool> {
     let head = resolve_head_for_repository(repo)?;
     Ok(matches!(
         head,

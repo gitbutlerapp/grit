@@ -4,7 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectKind;
-use grit_lib::porcelain::tag::{create_tag, list_tags, CreateTagRequest, TagKind};
+use grit_lib::porcelain::tag::{CreateTagRequest, TagKind};
 use grit_lib::refs::listing::RefQuery;
 use grit_lib::repo::Repository;
 use std::process::Command;
@@ -41,11 +41,19 @@ fn force_replace_lightweight_with_annotated_git_clean() {
     let (repo, head) = seed_repo(&root);
     git(&root, &["tag", "v1"]);
 
-    let lightweight = list_tags(&repo, &RefQuery::default()).unwrap()[0].oid;
+    let lightweight = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            RefQuery::default(),
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap()[0]
+        .oid;
     let tagger = "Tagger <t@example.com> 946684800 +0000";
-    let outcome = create_tag(
-        &repo,
-        &CreateTagRequest {
+    let outcome = repo
+        .tags()
+        .create(&CreateTagRequest {
             name: "v1".into(),
             target: head,
             message: Some("annotated release\n".into()),
@@ -55,9 +63,8 @@ fn force_replace_lightweight_with_annotated_git_clean() {
             tree_sha256: None,
             force: true,
             dry_run: false,
-        },
-    )
-    .expect("force annotated");
+        })
+        .expect("force annotated");
 
     assert_eq!(outcome.kind, TagKind::Annotated);
     assert_eq!(outcome.replaced, Some(lightweight));
@@ -82,10 +89,18 @@ fn force_replace_annotated_with_lightweight_git_clean() {
     let (repo, head) = seed_repo(&root);
     git(&root, &["tag", "-a", "v1", "-m", "old"]);
 
-    let annotated = list_tags(&repo, &RefQuery::default()).unwrap()[0].oid;
-    let outcome = create_tag(
-        &repo,
-        &CreateTagRequest {
+    let annotated = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            RefQuery::default(),
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap()[0]
+        .oid;
+    let outcome = repo
+        .tags()
+        .create(&CreateTagRequest {
             name: "v1".into(),
             target: head,
             message: None,
@@ -95,9 +110,8 @@ fn force_replace_annotated_with_lightweight_git_clean() {
             tree_sha256: None,
             force: true,
             dry_run: false,
-        },
-    )
-    .expect("force lightweight");
+        })
+        .expect("force lightweight");
 
     assert_eq!(outcome.kind, TagKind::Lightweight);
     assert_eq!(outcome.replaced, Some(annotated));
@@ -119,9 +133,8 @@ fn create_dry_run_leaves_refs_untouched() {
     std::fs::create_dir_all(&root).unwrap();
     let (repo, head) = seed_repo(&root);
 
-    create_tag(
-        &repo,
-        &CreateTagRequest {
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "preview".into(),
             target: head,
             message: Some("note\n".into()),
@@ -131,16 +144,20 @@ fn create_dry_run_leaves_refs_untouched() {
             tree_sha256: None,
             force: false,
             dry_run: true,
-        },
-    )
-    .expect("dry-run create");
+        })
+        .expect("dry-run create");
 
-    assert!(list_tags(&repo, &RefQuery::default()).unwrap().is_empty());
+    assert!(repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            RefQuery::default()
+        ))
+        .unwrap()
+        .is_empty());
 
     git(&root, &["tag", "existing"]);
-    create_tag(
-        &repo,
-        &CreateTagRequest {
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "existing".into(),
             target: head,
             message: Some("other\n".into()),
@@ -150,11 +167,17 @@ fn create_dry_run_leaves_refs_untouched() {
             tree_sha256: None,
             force: true,
             dry_run: true,
-        },
-    )
-    .expect("dry-run force");
+        })
+        .expect("dry-run force");
 
-    let listed = list_tags(&repo, &RefQuery::default()).unwrap();
+    let listed = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            RefQuery::default(),
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].kind, TagKind::Lightweight);
 

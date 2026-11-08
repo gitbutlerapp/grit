@@ -175,7 +175,8 @@ pub(crate) fn apply_push_set_upstream(
 /// # Errors
 ///
 /// Propagates errors opening the ref store under `git_dir` and committing the batch.
-pub fn apply_push_remote_tracking_updates(
+#[allow(dead_code)]
+pub(crate) fn apply_push_remote_tracking_updates(
     git_dir: &Path,
     remote_name: &str,
     results: &[PushRefResult],
@@ -260,7 +261,7 @@ fn commit_push_tracking_updates(
 /// `remote.<remote>.fetch` (with no positive refspecs, `refs/heads/<branch>` maps to
 /// `refs/remotes/<remote>/<branch>`). `None` when the refspecs do not store it locally.
 #[must_use]
-pub fn upstream_tracking_full_ref(repo: &Repository, branch_short: &str) -> Option<String> {
+pub(crate) fn upstream_tracking_full_ref(repo: &Repository, branch_short: &str) -> Option<String> {
     let config = repo.config().snapshot().ok()?;
     let remote = config.value(&format!("branch.{branch_short}.remote"))?;
     let merge = config.value(&format!("branch.{branch_short}.merge"))?;
@@ -490,7 +491,7 @@ pub(crate) fn compare_with_target(
 ///
 /// Returns the same HEAD, revision-resolution, and object-read errors as
 /// `compare_with_target`. An explicit target that cannot be resolved is always an error.
-pub fn compare_with_target_optional(
+pub(crate) fn compare_with_target_optional(
     repo: &Repository,
     opts: &TargetComparisonOptions,
 ) -> Result<Option<TargetComparison>> {
@@ -1264,8 +1265,7 @@ impl TipComparison {
 }
 
 pub use crate::branch_inventory::{
-    list_branches, upstream_status, BranchDetail, BranchListQuery, BranchScope, BranchSummary,
-    UpstreamStatus,
+    BranchDetail, BranchListQuery, BranchScope, BranchSummary, UpstreamStatus,
 };
 
 #[cfg(test)]

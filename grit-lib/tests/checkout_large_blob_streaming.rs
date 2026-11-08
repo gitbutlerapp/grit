@@ -11,9 +11,9 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 
@@ -22,7 +22,6 @@ const BIG: usize = 3 * 1024 * 1024 + 123;
 
 #[test]
 fn streamed_files_keep_cancellation_bounded_after_checkout_chunks_grow() {
-    use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
     use grit_lib::progress::{CancelToken, ProgressSink};
 
     /// Cancels on the ninth file and records how many files were on disk at that moment (the
@@ -72,7 +71,9 @@ fn streamed_files_keep_cancellation_bounded_after_checkout_chunks_grow() {
         root,
         written_at_cancel: None,
     };
-    let err = checkout_between_trees_with_progress(&repo, None, &tree, &mut progress, &cancel)
+    let err = repo
+        .checkout()
+        .checkout(None, &tree, &mut progress, &cancel)
         .expect_err("cancel after the initial eight-file chunk");
     assert!(matches!(err, grit_lib::error::Error::Cancelled), "{err:?}");
     assert_eq!(progress.completed, 9);
@@ -229,38 +230,38 @@ fn assert_git_clean(fx: &Fixture, context: &str) {
 }
 
 fn restore_from_index(repo: &Repository, paths: &[&str]) {
-    restore_paths(
-        repo,
-        &RestoreOptions {
-            pathspecs: paths.iter().map(|p| (*p).to_owned()).collect(),
-            pathspec_sources: paths.iter().map(|p| (*p).to_owned()).collect(),
-            source: RestoreSource::Index,
-            staged: false,
-            worktree: true,
-            stage: None,
-            remerge: None,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("restore");
+    repo.checkout()
+        .restore(
+            &RestoreOptions {
+                pathspecs: paths.iter().map(|p| (*p).to_owned()).collect(),
+                pathspec_sources: paths.iter().map(|p| (*p).to_owned()).collect(),
+                source: RestoreSource::Index,
+                staged: false,
+                worktree: true,
+                stage: None,
+                remerge: None,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("restore");
 }
 
 fn switch_to(repo: &Repository, branch: &str, oid: ObjectId) {
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: branch.into(),
-                oid,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: branch.into(),
+                    oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch");
 }
 
 fn exercise(storage: Storage) {
@@ -279,18 +280,18 @@ fn exercise(storage: Storage) {
 
     fs::write(fx.root.join("assets/big.dat"), b"scribbled over\n").expect("modify");
     fs::remove_file(fx.root.join("tool.sh")).expect("rm exec");
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(
-            fx.main,
-            ResetMode::Hard,
-            support::parse_reflog_signature("T <t@example.com>"),
-            "reset: test",
-        ),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("reset --hard");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(
+                fx.main,
+                ResetMode::Hard,
+                support::parse_reflog_signature("T <t@example.com>"),
+                "reset: test",
+            ),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("reset --hard");
     assert_git_clean(&fx, &format!("{storage:?} reset --hard"));
 }
 
@@ -330,8 +331,7 @@ fn corrupt_large_blob_never_leaves_a_partial_file() {
     let repo = open(&fx.root);
 
     fs::remove_file(fx.root.join("assets/big.dat")).expect("rm big");
-    let err = restore_paths(
-        &repo,
+    let err = repo.checkout().restore(
         &RestoreOptions {
             pathspecs: vec!["assets/big.dat".into()],
             pathspec_sources: vec!["assets/big.dat".into()],
@@ -351,8 +351,7 @@ fn corrupt_large_blob_never_leaves_a_partial_file() {
     );
 
     fs::write(fx.root.join("assets/big.dat"), b"local edit\n").expect("modify");
-    let err = reset_to_commit(
-        &repo,
+    let err = repo.checkout().reset(
         &ResetOptions::new(
             fx.main,
             ResetMode::Hard,
@@ -399,21 +398,21 @@ fn large_text_blob_under_autocrlf_is_converted_not_copied() {
 
     fs::remove_file(root.join("big.txt")).expect("rm");
     let repo = open(root);
-    restore_paths(
-        &repo,
-        &RestoreOptions {
-            pathspecs: vec!["big.txt".into()],
-            pathspec_sources: vec!["big.txt".into()],
-            source: RestoreSource::Index,
-            staged: false,
-            worktree: true,
-            stage: None,
-            remerge: None,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("restore");
+    repo.checkout()
+        .restore(
+            &RestoreOptions {
+                pathspecs: vec!["big.txt".into()],
+                pathspec_sources: vec!["big.txt".into()],
+                source: RestoreSource::Index,
+                staged: false,
+                worktree: true,
+                stage: None,
+                remerge: None,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("restore");
 
     let restored = fs::read(root.join("big.txt")).expect("read");
     assert_eq!(restored.len(), text.len() + lines, "every LF becomes CRLF");

@@ -2,7 +2,8 @@
 
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::switch::{resolve_switch_target, switch_repository, SwitchOptions};
+use grit_lib::porcelain::switch::SwitchOptions;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{git, git_hash_object_literally, HashAlgo};
 use std::fs;
@@ -52,18 +53,21 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
     let index_path = repo.index().path();
     index.write(&index_path).expect("write index");
 
-    let mode = resolve_switch_target(&repo, "feature").expect("resolve feature");
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode,
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch despite hostile index path");
+    let mode = repo
+        .checkout()
+        .resolve_switch_target("feature")
+        .expect("resolve feature");
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch despite hostile index path");
 
     assert!(wt.join("feature.txt").exists());
     let index = Index::load(&repo.index().path()).expect("index after switch");

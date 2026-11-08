@@ -4,9 +4,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::maintenance::GcOptions;
 use grit_lib::objects::{parse_tag, ObjectKind};
-use grit_lib::porcelain::tag::{
-    create_tag, list_tags_with_detail, tag_ref_metadata, CreateTagRequest, TagDetail, TagKind,
-};
+use grit_lib::porcelain::tag::{tag_ref_metadata, CreateTagRequest, TagDetail, TagKind};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::listing::RefQuery;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
@@ -42,9 +40,9 @@ fn grit_annotated_tag_round_trips_with_git() {
         Repository::discover(Some(root.as_path()), &RepositoryOptions::empty()).expect("discover");
     let head = repo.references().resolve("HEAD").unwrap();
     let tagger = "Tagger <t@example.com> 946684800 +0000";
-    let outcome = create_tag(
-        &repo,
-        &CreateTagRequest {
+    let outcome = repo
+        .tags()
+        .create(&CreateTagRequest {
             name: "v1".to_owned(),
             target: head,
             message: Some("release\n".to_owned()),
@@ -54,9 +52,8 @@ fn grit_annotated_tag_round_trips_with_git() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .expect("create annotated tag");
+        })
+        .expect("create annotated tag");
     assert_eq!(outcome.kind, TagKind::Annotated);
     assert_eq!(outcome.peeled, Some(head));
 
@@ -114,7 +111,13 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
         report.issues
     );
 
-    let listed = list_tags_with_detail(&host_repo, &RefQuery::default(), TagDetail::Annotation)
+    let listed = host_repo
+        .tags()
+        .list(
+            &grit_lib::repo_handles::TagListOptions::default()
+                .with_query(RefQuery::default())
+                .with_detail(TagDetail::Annotation),
+        )
         .expect("list tags");
     let grit_lib::porcelain::tag::TagList::Summaries(tags) = listed else {
         panic!("expected annotation summaries");

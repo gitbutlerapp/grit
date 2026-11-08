@@ -7,7 +7,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 
 /// Incompressible payload size: large enough to catch whole-buffer inflate regressions.
@@ -50,21 +51,21 @@ fn write_incompressible_blob(path: &Path) {
 fn restore_with_grit(root: &Path) {
     fs::remove_file(root.join("big.bin")).expect("rm");
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    restore_paths(
-        &repo,
-        &RestoreOptions {
-            pathspecs: vec!["big.bin".into()],
-            pathspec_sources: vec!["big.bin".into()],
-            source: RestoreSource::Index,
-            staged: false,
-            worktree: true,
-            stage: None,
-            remerge: None,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit restore");
+    repo.checkout()
+        .restore(
+            &RestoreOptions {
+                pathspecs: vec!["big.bin".into()],
+                pathspec_sources: vec!["big.bin".into()],
+                source: RestoreSource::Index,
+                staged: false,
+                worktree: true,
+                stage: None,
+                remerge: None,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit restore");
 }
 
 fn restore_with_git(root: &Path) {

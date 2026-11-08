@@ -125,7 +125,14 @@ fn nested_anchored_binary_pattern_blocks_autocrlf_on_checkout() {
     fs::remove_file(root.join("sub/bin-1")).expect("remove");
     let tree_hex = git(root, &["rev-parse", "HEAD^{tree}"]).trim().to_string();
     let tree = grit_lib::objects::ObjectId::from_hex(&tree_hex).expect("tree");
-    grit_lib::porcelain::checkout::checkout_between_trees(&repo, None, &tree).expect("checkout");
+    repo.checkout()
+        .checkout(
+            None,
+            &tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
 
     let bytes = fs::read(root.join("sub/bin-1")).expect("read");
     assert_eq!(

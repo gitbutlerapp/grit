@@ -5,11 +5,14 @@ use crate::error::Result;
 use crate::ident::Signature;
 use crate::list_limit::{fetch_plus_one, Limited};
 use crate::notes::{
-    lookup_note_blob_oid, materialize_notes_tree, note_object_name, preview_notes_commit,
-    preview_notes_commit_on_tree, read_blob_bytes, read_notes_snapshot, read_notes_tree_limited,
-    remove_note_entry, resolve_notes_ref_tree, splice_note_remove, splice_note_upsert,
-    upsert_note_entry, write_notes_commit_idents, write_notes_commit_idents_on_tree, NotesCommit,
-    NotesRef, NotesSnapshot, NotesSpliceResult, NotesTreeEntry,
+    apply_prepared_notes_rewrite, copy_notes_for_rewrite, lookup_note_blob_oid,
+    materialize_notes_tree, note_object_name, notes_merge_inner, prepare_notes_for_rewrite,
+    preview_notes_commit, preview_notes_commit_on_tree, read_blob_bytes, read_notes_snapshot,
+    read_notes_tree, read_notes_tree_limited, remove_note_entry, resolve_notes_ref_tree,
+    splice_note_remove, splice_note_upsert, upsert_note_entry, write_notes_commit,
+    write_notes_commit_idents, write_notes_commit_idents_on_tree, NotesCommit, NotesMergeStrategy,
+    NotesRef, NotesRewriteCommand, NotesRewritePlan, NotesSnapshot, NotesSpliceResult,
+    NotesTreeEntry,
 };
 use crate::objects::{ObjectId, ObjectKind};
 use crate::porcelain::merge::MemOverlayGuard;
@@ -427,6 +430,67 @@ impl<'repo> RepositoryNotes<'repo> {
             )?;
         }
         Ok(removed)
+    }
+
+    /// Read the notes tree entries for `notes_ref` (full tree walk).
+    pub fn read_tree(&self, notes_ref: &str) -> Result<Vec<NotesTreeEntry>> {
+        read_notes_tree(self.repo, notes_ref)
+    }
+
+    /// Read notes tree entries with an optional cap (see [`read_notes_tree_limited`]).
+    pub fn read_tree_limited(
+        &self,
+        notes_ref: &str,
+        max_entries: Option<usize>,
+    ) -> Result<(Vec<NotesTreeEntry>, bool)> {
+        read_notes_tree_limited(self.repo, notes_ref, max_entries)
+    }
+
+    /// Write a new notes commit for `entries` on `notes_ref` using wall-clock identities.
+    pub fn write_tree_commit(
+        &self,
+        notes_ref: &str,
+        entries: &[NotesTreeEntry],
+        message: &str,
+    ) -> Result<()> {
+        write_notes_commit(self.repo, notes_ref, entries, message)
+    }
+
+    /// Merge two notes refs using `strategy`.
+    pub fn merge_refs(
+        &self,
+        local_ref: &str,
+        remote_ref: &str,
+        strategy: NotesMergeStrategy,
+    ) -> Result<std::result::Result<ObjectId, ObjectId>> {
+        notes_merge_inner(self.repo, local_ref, remote_ref, strategy)
+    }
+
+    /// Plan a notes rewrite for rewritten commit pairs.
+    pub fn prepare_rewrite(
+        &self,
+        command: NotesRewriteCommand,
+        pairs: &[(ObjectId, ObjectId)],
+    ) -> Result<Option<NotesRewritePlan>> {
+        prepare_notes_for_rewrite(self.repo, command, pairs)
+    }
+
+    /// Apply a plan from [`Self::prepare_rewrite`].
+    pub fn apply_rewrite_plan(
+        &self,
+        plan: &NotesRewritePlan,
+        pairs: &[(ObjectId, ObjectId)],
+    ) -> Result<()> {
+        apply_prepared_notes_rewrite(self.repo, plan, pairs)
+    }
+
+    /// Copy notes for rewritten commits (`notes.rewrite.*` config).
+    pub fn copy_for_rewrite(
+        &self,
+        command: NotesRewriteCommand,
+        pairs: &[(ObjectId, ObjectId)],
+    ) -> Result<()> {
+        copy_notes_for_rewrite(self.repo, command, pairs)
     }
 
     /// Read `notes_ref` and classify an add on `object`, refusing to replace without `force`.

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use filetime::FileTime;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
+use grit_lib::porcelain::paths::RemoveOptions;
 use grit_lib::repo::Repository;
 use grit_test_support::git_cmd as git_shell;
 
@@ -91,15 +91,16 @@ fn remove_paths_succeeds_with_system_inherited_autocrlf_only() {
     force_stat_mismatch_preserving_bytes(&dir.join("f.txt"));
 
     let repo = open_grit_inherited_autocrlf(&dir, &system_cfg);
-    let outcome = remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec!["f.txt".into()],
-            ..Default::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("remove must not treat CRLF smudge as local changes");
+    let outcome = repo
+        .checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec!["f.txt".into()],
+                ..Default::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("remove must not treat CRLF smudge as local changes");
     assert_eq!(outcome.removed, vec!["f.txt".to_string()]);
 
     let porcelain = git_with_system_config(&dir, &system_cfg, &["status", "--porcelain"]);

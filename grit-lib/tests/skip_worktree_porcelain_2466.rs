@@ -2,8 +2,8 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, DEFAULT_ORPHAN_LIMIT};
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions, DEFAULT_ORPHAN_LIMIT};
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
@@ -100,13 +100,13 @@ fn stash_push_opts() -> StashPushOptions {
 fn restore_dot_leaves_skip_worktree_file_and_flag() {
     let (dir, repo, _head) = seed_skip_worktree_repo();
     let root = dir.path();
-    restore_paths(
-        &repo,
-        &restore_opts(&["."]),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("restore");
+    repo.checkout()
+        .restore(
+            &restore_opts(&["."]),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("restore");
     assert_config_local_skip_worktree(root);
     assert_eq!(
         std::fs::read_to_string(root.join("config.local")).expect("read"),
@@ -146,21 +146,21 @@ fn stash_push_pop_leaves_skip_worktree_untouched() {
 fn reset_mixed_and_hard_same_tree_keep_skip_worktree() {
     let (dir, repo, head) = seed_skip_worktree_repo();
     let root = dir.path();
-    reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Mixed),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("mixed reset");
+    repo.checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Mixed),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("mixed reset");
     assert_config_local_skip_worktree(root);
-    reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Hard),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("hard reset at head");
+    repo.checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Hard),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("hard reset at head");
     assert_config_local_skip_worktree(root);
 }
 
@@ -178,13 +178,13 @@ fn reset_hard_parent_same_blob_keeps_skip_worktree_edit() {
         .oid()
         .expect("commit");
     assert_ne!(parent, head);
-    reset_to_commit(
-        &repo,
-        &reset_opts(parent, ResetMode::Hard),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("hard reset parent");
+    repo.checkout()
+        .reset(
+            &reset_opts(parent, ResetMode::Hard),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("hard reset parent");
     assert_config_local_skip_worktree(root);
     assert_eq!(
         std::fs::read_to_string(root.join("config.local")).expect("read"),
@@ -205,13 +205,13 @@ fn reset_mixed_cross_blob_keeps_skip_worktree_flag() {
     git(root, &["commit", "-qm", "bump config in tree"]);
     git(root, &["update-index", "--skip-worktree", "config.local"]);
     std::fs::write(root.join("config.local"), "DB_URL=prod-password-123\n").expect("local");
-    reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Mixed),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("mixed reset to init");
+    repo.checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Mixed),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("mixed reset to init");
     assert_config_local_skip_worktree(root);
     assert_eq!(
         std::fs::read_to_string(root.join("config.local")).expect("read"),
@@ -245,13 +245,13 @@ fn reset_hard_cross_blob_clean_worktree_keeps_skip_worktree() {
         ],
     );
     git(root, &["update-index", "--skip-worktree", "config.local"]);
-    reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Hard),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("hard reset to init");
+    repo.checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Hard),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("hard reset to init");
     assert_config_local_skip_worktree(root);
     assert_eq!(
         std::fs::read_to_string(root.join("config.local")).expect("read"),
@@ -268,13 +268,14 @@ fn reset_hard_aborts_when_skip_worktree_path_removed_in_target() {
     git(root, &["commit", "-qm", "add secret"]);
     git(root, &["update-index", "--skip-worktree", "secret.local"]);
     std::fs::write(root.join("secret.local"), "PRIVATE-EDIT\n").expect("local edit");
-    let err = reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Hard),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = repo
+        .checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Hard),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(err, Error::Worktree(WorktreeError::WouldOverwrite { .. })),
         "expected WouldOverwrite, got {err:?}"
@@ -304,13 +305,14 @@ fn reset_hard_aborts_when_skip_worktree_blob_changes_and_worktree_dirty() {
     git(root, &["commit", "-qm", "bump config in tree"]);
     git(root, &["update-index", "--skip-worktree", "config.local"]);
     std::fs::write(root.join("config.local"), "DB_URL=other-local\n").expect("local edit");
-    let err = reset_to_commit(
-        &repo,
-        &reset_opts(head, ResetMode::Hard),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = repo
+        .checkout()
+        .reset(
+            &reset_opts(head, ResetMode::Hard),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(err, Error::Worktree(WorktreeError::WouldOverwrite { .. })),
         "expected WouldOverwrite, got {err:?}"

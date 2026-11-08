@@ -6,9 +6,9 @@ use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -20,20 +20,20 @@ fn switch_existing(
     branch: &str,
     oid: ObjectId,
 ) -> grit_lib::porcelain::switch::SwitchOutcome {
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: branch.to_owned(),
-                oid,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: branch.to_owned(),
+                    oid,
+                },
+                dry_run: false,
+                hooks: PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch")
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch")
 }
 
 fn git_porcelain(repo: &std::path::Path) -> String {
@@ -218,7 +218,15 @@ fn checkout_replaced_src_tree_matches_git_after_issue_2336_shape() {
         &RepositoryOptions::empty().with_work_tree(tmp.path()),
     )
     .expect("open grit repo");
-    checkout_between_trees(&grit_repo, Some(&from_tree), &to_tree).expect("checkout");
+    grit_repo
+        .checkout()
+        .checkout(
+            Some(&from_tree),
+            &to_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
     let to_commit = ObjectId::from_hex(&to_commit_hex).expect("commit");
     grit_test_support::refs::set_ref(&grit_repo, "HEAD", &to_commit).expect("head");
 
@@ -254,20 +262,21 @@ fn switch_detach_replaced_src_tree_matches_git_after_issue_2336_shape() {
     )
     .expect("open grit repo");
     let new_commit = ObjectId::from_hex(&new_commit_hex).expect("commit");
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: new_commit,
-                reflog_to_label: "new".to_owned(),
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: new_commit,
+                    reflog_to_label: "new".to_owned(),
+                },
+                dry_run: false,
+                hooks: PostOperationHooks::Skip,
             },
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch detach");
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch detach");
 
     assert_eq!(
         index_file_count(tmp.path()),
@@ -451,7 +460,15 @@ fn checkout_replaced_src_with_chunked_wholesale_deletes_is_clean() {
         &RepositoryOptions::empty().with_work_tree(tmp.path()),
     )
     .expect("open grit repo");
-    checkout_between_trees(&grit_repo, Some(&from_tree), &to_tree).expect("checkout");
+    grit_repo
+        .checkout()
+        .checkout(
+            Some(&from_tree),
+            &to_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
     grit_test_support::refs::set_ref(&grit_repo, "HEAD", &new_commit).expect("head");
 
     assert_eq!(

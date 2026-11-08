@@ -6,8 +6,8 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::clean::{clean_untracked, CleanOptions, CleanScope};
-use grit_lib::porcelain::paths::{move_paths, remove_paths, MoveOptions, RemoveOptions};
+use grit_lib::porcelain::clean::{CleanOptions, CleanScope};
+use grit_lib::porcelain::paths::{MoveOptions, RemoveOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -86,17 +86,18 @@ fn rm_dry_run_reports_same_paths_and_changes_nothing() {
     let wt_before = fs::read(root.join("a.txt")).unwrap();
 
     let repo = grit_repo(root);
-    let outcome = remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec!["a.txt".into(), "dir/".into()],
-            pathspec_sources: vec!["a.txt".into(), "dir/".into()],
-            dry_run: true,
-            ..Default::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("dry rm");
+    let outcome = repo
+        .checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec!["a.txt".into(), "dir/".into()],
+                pathspec_sources: vec!["a.txt".into(), "dir/".into()],
+                dry_run: true,
+                ..Default::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("dry rm");
 
     let grit_set: BTreeSet<String> = outcome.removed.into_iter().collect();
     let git_set = git_rm_preview(root, &["a.txt", "dir/"]);
@@ -117,17 +118,18 @@ fn rm_ignore_unmatch_succeeds_on_missing() {
     git(root, &["commit", "-q", "-m", "init"]);
 
     let repo = grit_repo(root);
-    let outcome = remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec!["missing.txt".into()],
-            pathspec_sources: vec!["missing.txt".into()],
-            ignore_unmatch: true,
-            ..Default::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("ignore unmatch");
+    let outcome = repo
+        .checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec!["missing.txt".into()],
+                pathspec_sources: vec!["missing.txt".into()],
+                ignore_unmatch: true,
+                ..Default::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("ignore unmatch");
     assert!(outcome.removed.is_empty());
     assert!(root.join("keep.txt").is_file());
 }
@@ -143,17 +145,18 @@ fn move_paths_multi_source_requires_existing_directory() {
     git(root, &["commit", "-q", "-m", "init"]);
 
     let repo = grit_repo(root);
-    let err = move_paths(
-        &repo,
-        &MoveOptions {
-            sources: vec!["one.txt".into(), "two.txt".into()],
-            destination: "missing-dir".into(),
-            force: false,
-            dry_run: false,
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("multi-source into missing dir");
+    let err = repo
+        .checkout()
+        .move_paths(
+            &MoveOptions {
+                sources: vec!["one.txt".into(), "two.txt".into()],
+                destination: "missing-dir".into(),
+                force: false,
+                dry_run: false,
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("multi-source into missing dir");
     assert!(
         err.to_string().contains("not a directory"),
         "unexpected error: {err}"
@@ -172,17 +175,17 @@ fn move_paths_multi_source_into_dir_git_status_agrees() {
     git(root, &["commit", "-q", "-m", "init"]);
 
     let repo = grit_repo(root);
-    move_paths(
-        &repo,
-        &MoveOptions {
-            sources: vec!["one.txt".into(), "two.txt".into()],
-            destination: "dest".into(),
-            force: false,
-            dry_run: false,
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("mv");
+    repo.checkout()
+        .move_paths(
+            &MoveOptions {
+                sources: vec!["one.txt".into(), "two.txt".into()],
+                destination: "dest".into(),
+                force: false,
+                dry_run: false,
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("mv");
 
     let grit_status = git_out(root, &["status", "--porcelain"]);
     let git_root = tempfile::tempdir().expect("git copy");
@@ -208,17 +211,18 @@ fn move_paths_dry_run_changes_nothing() {
 
     let index_before = index_bytes(root);
     let repo = grit_repo(root);
-    let outcome = move_paths(
-        &repo,
-        &MoveOptions {
-            sources: vec!["src.txt".into()],
-            destination: "dst.txt".into(),
-            force: false,
-            dry_run: true,
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("dry mv");
+    let outcome = repo
+        .checkout()
+        .move_paths(
+            &MoveOptions {
+                sources: vec!["src.txt".into()],
+                destination: "dst.txt".into(),
+                force: false,
+                dry_run: true,
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("dry mv");
     assert_eq!(outcome.moves.len(), 1);
     assert_eq!(outcome.moves[0].from, "src.txt");
     assert_eq!(outcome.moves[0].to, "dst.txt");
@@ -239,17 +243,18 @@ fn move_paths_validates_all_before_moving() {
 
     let index_before = index_bytes(root);
     let repo = grit_repo(root);
-    let err = move_paths(
-        &repo,
-        &MoveOptions {
-            sources: vec!["good.txt".into(), "missing.txt".into()],
-            destination: "dest".into(),
-            force: false,
-            dry_run: false,
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("untracked second source should block the batch");
+    let err = repo
+        .checkout()
+        .move_paths(
+            &MoveOptions {
+                sources: vec!["good.txt".into(), "missing.txt".into()],
+                destination: "dest".into(),
+                force: false,
+                dry_run: false,
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("untracked second source should block the batch");
     assert!(
         err.to_string().contains("not under version control"),
         "unexpected error: {err}"
@@ -273,17 +278,18 @@ fn clean_only_ignored_matches_git_clean_X() {
     git(root, &["commit", "-q", "-m", "init"]);
 
     let repo = grit_repo(root);
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            scope: CleanScope::OnlyIgnored,
-            dry_run: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean -X preview");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                scope: CleanScope::OnlyIgnored,
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean -X preview");
     let grit_set: BTreeSet<String> = outcome
         .removed
         .iter()
@@ -309,17 +315,18 @@ fn clean_nested_exclude_matches_git_clean_e() {
     fs::write(root.join("dir/drop.txt"), b"drop\n").unwrap();
 
     let repo = grit_repo(root);
-    let preview = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            excludes: vec!["dir/keep.txt".into()],
-            dry_run: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean nested exclude preview");
+    let preview = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                excludes: vec!["dir/keep.txt".into()],
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean nested exclude preview");
     let grit_set: BTreeSet<String> = preview
         .removed
         .iter()
@@ -332,17 +339,17 @@ fn clean_nested_exclude_matches_git_clean_e() {
     );
     assert!(!grit_set.contains("dir/keep.txt"));
 
-    clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            excludes: vec!["dir/keep.txt".into()],
-            dry_run: false,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean nested exclude force");
+    repo.checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                excludes: vec!["dir/keep.txt".into()],
+                dry_run: false,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean nested exclude force");
     git(root, &["clean", "-fd", "-e", "dir/keep.txt"]);
     assert!(root.join("dir/keep.txt").is_file());
     assert!(!root.join("dir/drop.txt").exists());
@@ -359,17 +366,18 @@ fn clean_exclude_pattern_matches_git_clean_e() {
     git(root, &["commit", "-q", "-m", "init"]);
 
     let repo = grit_repo(root);
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            excludes: vec!["drop.txt".into()],
-            dry_run: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean -e preview");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                excludes: vec!["drop.txt".into()],
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean -e preview");
     let grit_set: BTreeSet<String> = outcome
         .removed
         .iter()
@@ -398,17 +406,18 @@ fn move_paths_rejects_duplicate_destinations_even_with_force() {
 
     let index_before = index_bytes(root);
     let repo = grit_repo(root);
-    let err = move_paths(
-        &repo,
-        &MoveOptions {
-            sources: vec!["dir1/x".into(), "dir2/x".into()],
-            destination: "dest".into(),
-            force: true,
-            dry_run: false,
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("duplicate basename targets must fail");
+    let err = repo
+        .checkout()
+        .move_paths(
+            &MoveOptions {
+                sources: vec!["dir1/x".into(), "dir2/x".into()],
+                destination: "dest".into(),
+                force: true,
+                dry_run: false,
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("duplicate basename targets must fail");
     assert!(
         err.to_string()
             .contains("multiple sources for the same target"),
@@ -430,17 +439,18 @@ fn clean_exclude_inside_untracked_dir_matches_git() {
     git(root, &["commit", "-q", "--allow-empty", "-m", "empty"]);
 
     let repo = grit_repo(root);
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            excludes: vec!["*.special".into()],
-            dry_run: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean -e dir");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                excludes: vec!["*.special".into()],
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean -e dir");
     let grit_set: BTreeSet<String> = outcome
         .removed
         .iter()
@@ -467,16 +477,17 @@ fn clean_nested_untracked_dir_without_d_matches_git() {
     git(root, &["commit", "-q", "-m", "init"]);
 
     let repo = grit_repo(root);
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            files_only: true,
-            dry_run: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("files-only preview");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                files_only: true,
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("files-only preview");
     let grit_set: BTreeSet<String> = outcome
         .removed
         .iter()
@@ -502,18 +513,19 @@ fn clean_only_ignored_with_exclude_matches_git_clean_Xe() {
     git(root, &["commit", "-q", "-m", "init"]);
 
     let repo = grit_repo(root);
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            scope: CleanScope::OnlyIgnored,
-            excludes: vec!["*.special".into()],
-            dry_run: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("clean -Xe preview");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                scope: CleanScope::OnlyIgnored,
+                excludes: vec!["*.special".into()],
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("clean -Xe preview");
     let grit_set: BTreeSet<String> = outcome
         .removed
         .iter()
@@ -538,17 +550,18 @@ fn clean_files_only_matches_git_clean_without_d() {
     git(root, &["commit", "-q", "-m", "init"]);
 
     let repo = grit_repo(root);
-    let outcome = clean_untracked(
-        &repo,
-        &CleanOptions {
-            directories: true,
-            files_only: true,
-            dry_run: true,
-            ..Default::default()
-        },
-        &mut NullProgress,
-    )
-    .expect("files-only preview");
+    let outcome = repo
+        .checkout()
+        .clean(
+            &CleanOptions {
+                directories: true,
+                files_only: true,
+                dry_run: true,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("files-only preview");
     let grit_set: BTreeSet<String> = outcome
         .removed
         .iter()

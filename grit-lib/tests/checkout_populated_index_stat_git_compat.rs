@@ -12,7 +12,6 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::stat_matches;
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -76,7 +75,9 @@ fn populated_checkout_index_stat_matches_worktree_with_autocrlf() {
         let _ = fs::remove_file(repo_root.join(&name));
     }
 
-    checkout_between_trees(&repo, None, &tree).expect("populated checkout");
+    repo.checkout()
+        .checkout(None, &tree)
+        .expect("populated checkout");
     assert_index_stats_match_worktree(repo_root, &repo);
 
     let git_diff = git(repo_root, &["diff-files"]);
@@ -112,7 +113,9 @@ fn first_status_after_populated_checkout_does_not_rewrite_warm_index() {
         let name = format!("file-{i:04}.txt");
         let _ = fs::remove_file(repo_root.join(&name));
     }
-    checkout_between_trees(&repo, None, &tree).expect("populated checkout");
+    repo.checkout()
+        .checkout(None, &tree)
+        .expect("populated checkout");
     assert_index_stats_match_worktree(repo_root, &repo);
 
     let index_path = repo.index().path();

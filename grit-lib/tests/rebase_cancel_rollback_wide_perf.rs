@@ -80,18 +80,18 @@ fn repo_for_rebase() -> (
     write_files(tmp.path(), "side", "side");
     let side = commit_all(&repo, "side");
     grit_test_support::refs::set_ref(&repo, "refs/heads/side", &side).expect("side");
-    grit_lib::porcelain::reset::reset_to_commit(
-        &repo,
-        &grit_lib::porcelain::reset::ResetOptions::new(
-            base,
-            grit_lib::porcelain::reset::ResetMode::Hard,
-            IDENT.parse().expect("sig"),
-            "reset",
-        ),
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("reset");
+    repo.checkout()
+        .reset(
+            &grit_lib::porcelain::reset::ResetOptions::new(
+                base,
+                grit_lib::porcelain::reset::ResetMode::Hard,
+                IDENT.parse().expect("sig"),
+                "reset",
+            ),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("reset");
     grit_test_support::refs::set_ref(&repo, "refs/heads/topic", &base).expect("topic");
     repo.references()
         .update_symbolic("HEAD", "refs/heads/topic")

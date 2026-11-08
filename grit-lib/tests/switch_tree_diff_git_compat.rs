@@ -10,7 +10,8 @@ use switch_overwrite_git_helpers::git_switch_refused_paths;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -115,20 +116,21 @@ fn switch_nested_gitattributes_crlf_clean_worktree_matches_git() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch must succeed on clean nested-eol=crlf worktree like git");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch must succeed on clean nested-eol=crlf worktree like git");
 
     assert!(
         git_porcelain(tmp.path()).trim().is_empty(),
@@ -194,20 +196,21 @@ fn switch_wholesale_deleted_gitattributes_does_not_apply_stale_eol() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch");
 
     let grit_bytes = std::fs::read(tmp.path().join("d/new.txt")).expect("grit new.txt");
     assert_eq!(
@@ -273,20 +276,21 @@ fn switch_preserves_untracked_in_wholesale_deleted_directory() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch to target");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch to target");
 
     let kept = std::fs::read_to_string(tmp.path().join("d/untracked.txt")).expect("untracked kept");
     assert_eq!(kept, "precious\n");
@@ -350,20 +354,21 @@ fn switch_preserves_untracked_fifo_under_fast_wholesale_delete_scan() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch to target");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch to target");
 
     assert!(
         fifo.exists(),
@@ -419,20 +424,21 @@ fn switch_preserves_ignored_file_in_wholesale_deleted_directory() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch to target");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch to target");
 
     let kept = std::fs::read_to_string(tmp.path().join("d/ignored.log")).expect("ignored kept");
     assert_eq!(kept, "keep\n");
@@ -486,20 +492,21 @@ fn switch_preserves_ignored_file_from_nested_tracked_gitignore() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch to target");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch to target");
 
     let kept = std::fs::read_to_string(tmp.path().join("d/ignored.log")).expect("ignored kept");
     assert_eq!(kept, "keep\n");
@@ -553,20 +560,21 @@ fn switch_preserves_ignored_file_from_deep_nested_tracked_gitignore() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch to target");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch to target");
 
     let kept = std::fs::read_to_string(tmp.path().join("d/e/x.log")).expect("ignored kept");
     assert_eq!(kept, "keep\n");
@@ -637,20 +645,21 @@ fn switch_preserves_populated_gitlink_under_wholesale_deleted_directory() {
     let target_oid =
         ObjectId::from_hex(git(root, &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch to target");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch to target");
 
     let after = std::fs::read_to_string(inner.join("nested.txt")).expect("inner after grit");
     assert_eq!(after, inner_payload);
@@ -762,20 +771,21 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
     let git_paths = git_switch_refused_paths(tmp.path(), "target");
-    let err = switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    let err = grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("grit switch must refuse racy dirty worktree like git");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("grit switch must refuse racy dirty worktree like git");
     match err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
@@ -815,20 +825,21 @@ fn switch_tree_diff_git_clean_after() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch to target");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch to target");
 
     assert!(
         git_porcelain(tmp.path()).trim().is_empty(),
@@ -873,20 +884,21 @@ fn switch_refuses_dirty_conflicting_path_and_leaves_file() {
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "other"]).trim()).expect("other oid");
 
     let git_paths = git_switch_refused_paths(tmp.path(), "other");
-    let err = switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "other".into(),
-                oid: other_oid,
+    let err = grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "other".into(),
+                    oid: other_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("dirty switch must fail");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("dirty switch must fail");
     match err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
@@ -954,20 +966,21 @@ fn switch_refuses_dirty_second_path_when_first_has_stat_drift_only_like_git() {
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
     let git_paths = git_switch_refused_paths(tmp.path(), "target");
-    let err = switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    let err = grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("grit switch must refuse when b.txt is dirty");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("grit switch must refuse when b.txt is dirty");
     match err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
@@ -1085,20 +1098,21 @@ fn switch_refuses_racy_second_path_when_first_has_stat_drift_only_like_git() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
     let git_paths = git_switch_refused_paths(tmp.path(), "target");
-    let err = switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    let err = grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("grit switch must refuse racy dirty b.txt");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("grit switch must refuse racy dirty b.txt");
     match err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
@@ -1200,20 +1214,21 @@ fn switch_refuses_dirty_file_deleted_on_target_like_git() {
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
     let git_paths = git_switch_refused_paths(tmp.path(), "target");
-    let err = switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    let err = grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("grit must refuse switch like git");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("grit must refuse switch like git");
     match err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
@@ -1274,20 +1289,21 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch");
 
     assert!(
         git_porcelain(tmp.path()).trim().is_empty(),
@@ -1301,21 +1317,22 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
     );
     git_fsck(tmp.path());
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "main".into(),
-                oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "main"]).trim())
-                    .expect("main oid"),
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "main".into(),
+                    oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "main"]).trim())
+                        .expect("main oid"),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch back");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch back");
     assert!(
         git_porcelain(tmp.path()).trim().is_empty(),
         "git status must be clean after switch back"
@@ -1420,20 +1437,21 @@ fn switch_removes_gitlink_when_parent_directory_dropped() {
     let target_oid =
         ObjectId::from_hex(git(root, &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch");
 
     let porcelain = git_porcelain(root);
     assert!(
@@ -1523,20 +1541,21 @@ fn switch_dirty_gitlink_on_changing_gitlink_matches_git() {
     let target_oid =
         ObjectId::from_hex(git(root, &["rev-parse", "target"]).trim()).expect("target oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch must match git and preserve dirty gitlink worktree");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch must match git and preserve dirty gitlink worktree");
 
     let grit_inner_after = std::fs::read_to_string(inner.join("f")).expect("grit inner");
     assert_eq!(
@@ -1580,20 +1599,21 @@ fn switch_scoped_worktree_diff_limits_metadata_probes() {
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
 
     let _probe = reset_worktree_metadata_probe(tmp.path());
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch");
     const FILE_COUNT: usize = 500;
     const TOUCH: usize = 40;
     let calls = worktree_metadata_probe_count();
@@ -1676,20 +1696,21 @@ fn switch_tracked_deletes_fail_and_roll_back_when_wholesale_dir_removal_fails() 
     // Git warns and switches anyway, leaving the files it could not unlink. Grit refuses
     // instead (#1968): the unlink failure is a typed error, and the switch is rolled back
     // so HEAD, the index and the work tree stay on `main`.
-    let err = switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    let err = grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("grit switch must fail when tracked deletes cannot be unlinked");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("grit switch must fail when tracked deletes cannot be unlinked");
     match &err {
         Error::WorktreePathIo {
             path,
@@ -1784,20 +1805,21 @@ fn issue_1160_unstaged_delete_with_staged_add_deleted_allows_switch() {
     let main_oid =
         ObjectId::from_hex(git(grit_root, &["rev-parse", "main"]).trim()).expect("main oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "main".into(),
-                oid: main_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "main".into(),
+                    oid: main_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch main with unstaged delete + AD path");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch main with unstaged delete + AD path");
 
     assert_eq!(
         git_porcelain(grit_root),
@@ -1878,20 +1900,21 @@ fn issue_1160_dangling_symlink_with_staged_add_deleted_refuses_switch() {
     let main_oid =
         ObjectId::from_hex(git(grit_root, &["rev-parse", "main"]).trim()).expect("main oid");
     let git_paths = git_switch_refused_paths(grit_root, "main");
-    let grit_err = switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "main".into(),
-                oid: main_oid,
+    let grit_err = grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "main".into(),
+                    oid: main_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("grit must refuse switch for retargeted dangling symlink");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("grit must refuse switch for retargeted dangling symlink");
     match grit_err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
@@ -1960,20 +1983,21 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
     let main_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "main"]).trim()).expect("main oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch to target");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch to target");
     assert!(
         git_porcelain(tmp.path()).trim().is_empty(),
         "git must be clean after grit switch to target:\n{}",
@@ -1985,20 +2009,21 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
         assert_eq!(body, format!("new {i}\n"));
     }
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "main".into(),
-                oid: main_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "main".into(),
+                    oid: main_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch back to main");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch back to main");
     assert!(
         git_porcelain(tmp.path()).trim().is_empty(),
         "git must be clean after grit switch back to main:\n{}",
@@ -2145,20 +2170,20 @@ impl GitlinkAhead {
 }
 
 fn grit_switch_detach(repo: &Repository, commit: ObjectId) {
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit,
-                reflog_to_label: "tip-b".into(),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit,
+                    reflog_to_label: "tip-b".into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch --detach tip-b");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch --detach tip-b");
 }
 
 /// The issue #2200 shapes: submodule checkout ahead of the old gitlink (at the target), behind
@@ -2179,22 +2204,22 @@ fn switch_detach_advances_index_gitlink_when_submodule_ahead() {
 fn switch_create_advances_index_gitlink_when_submodule_ahead() {
     let fixture = GitlinkAhead::new(1, false);
     let repo = fixture.repo();
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Create {
-                branch: "x".into(),
-                start_oid: fixture.rev("tip-b"),
-                create_source_label: "tip-b".into(),
-                track_upstream: None,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Create {
+                    branch: "x".into(),
+                    start_oid: fixture.rev("tip-b"),
+                    create_source_label: "tip-b".into(),
+                    track_upstream: None,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch -c x tip-b");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch -c x tip-b");
     assert_eq!(git_porcelain(&fixture.root), "");
     assert_eq!(fixture.sub_head(), fixture.up[1]);
     fixture.assert_index_follows_head();
@@ -2309,20 +2334,21 @@ fn switch_refuses_staged_gitlink_that_differs_from_target_like_git() {
     let fixture = GitlinkAhead::new(2, false);
     git(&fixture.root, &["add", "sub"]);
     let repo = fixture.repo();
-    let err = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "tip-b".into(),
-                oid: fixture.rev("tip-b"),
+    let err = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "tip-b".into(),
+                    oid: fixture.rev("tip-b"),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("grit switch must refuse a staged gitlink the target would overwrite");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("grit switch must refuse a staged gitlink the target would overwrite");
     match err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
@@ -2386,34 +2412,36 @@ fn switch_tracked_symlink_to_dir_with_wholesale_deletes_matches_git() {
     let s_oid = ObjectId::from_hex(git(tmp.path(), &["rev-parse", "s"]).trim()).expect("s oid");
     let m_oid = ObjectId::from_hex(git(tmp.path(), &["rev-parse", "m"]).trim()).expect("m oid");
 
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "s".into(),
-                oid: s_oid,
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "s".into(),
+                    oid: s_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch to s");
-    switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "m".into(),
-                oid: m_oid,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch to s");
+    grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "m".into(),
+                    oid: m_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("grit switch to m must not false-positive through tracked symlink");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit switch to m must not false-positive through tracked symlink");
 
     assert!(
         tmp.path().join("t/inv/in").is_dir(),
@@ -2467,20 +2495,21 @@ fn switch_wholesale_fast_path_still_blocks_genuine_untracked_at_added_path() {
     .expect("open grit repo");
     let target_oid =
         ObjectId::from_hex(git(tmp.path(), &["rev-parse", "target"]).trim()).expect("target oid");
-    let err = switch_repository(
-        &grit_repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "target".into(),
-                oid: target_oid,
+    let err = grit_repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "target".into(),
+                    oid: target_oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("untracked at added path must block switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("untracked at added path must block switch");
     match err {
         Error::Worktree(WorktreeError::WouldOverwrite {
             reason: OverwriteReason::Untracked,

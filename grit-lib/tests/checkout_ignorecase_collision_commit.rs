@@ -9,11 +9,12 @@ use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{entry_from_stat, Index, MODE_REGULAR};
 use grit_lib::objects::ObjectKind;
-use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
@@ -68,14 +69,10 @@ fn populated_checkout_reports_collisions_and_auto_stage_skips_losers() {
         let _ = fs::remove_file(dest.join(name));
     }
 
-    let checkout = checkout_between_trees_with_progress(
-        &repo,
-        None,
-        &tree,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("checkout");
+    let checkout = repo
+        .checkout()
+        .checkout(None, &tree, &mut NullProgress, &CancelToken::never())
+        .expect("checkout");
 
     assert_eq!(
         checkout.path_collisions,
@@ -176,14 +173,9 @@ fn checkout_collision_tree(repo: &Repository, dest: &Path) {
     for name in ["File.txt", "file.txt", "dir/A.txt", "Dir/a.txt"] {
         let _ = fs::remove_file(dest.join(name));
     }
-    checkout_between_trees_with_progress(
-        repo,
-        None,
-        &tree,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("checkout");
+    repo.checkout()
+        .checkout(None, &tree, &mut NullProgress, &CancelToken::never())
+        .expect("checkout");
 }
 
 fn keep_one_spelling_per_collision_group(dest: &Path) {
@@ -631,20 +623,22 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
         )
         .expect("empty index");
 
-    let outcome = switch_repository(
-        &fx.repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "collide".into(),
-                oid: collide_tip,
+    let outcome = fx
+        .repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "collide".into(),
+                    oid: collide_tip,
+                },
+                dry_run: false,
+                hooks: Default::default(),
             },
-            dry_run: false,
-            hooks: Default::default(),
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch");
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch");
     assert!(
         outcome
             .path_collisions

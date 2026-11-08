@@ -16,7 +16,7 @@ use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitOutcome, CommitRequest};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use std::collections::VecDeque;
@@ -526,20 +526,21 @@ fn switch_with_unstartable_post_checkout_hook_succeeds_with_warning() {
         .with_diagnostics(diagnostics.clone());
     let repo = Repository::open(&tmp.path().join(".git"), &opts).expect("open repo");
 
-    let outcome = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: first,
-                reflog_to_label: "HEAD~1".into(),
+    let outcome = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: first,
+                    reflog_to_label: "HEAD~1".into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("post-checkout runs after the switch and must not fail it");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("post-checkout runs after the switch and must not fail it");
     assert!(outcome.hooks_run.is_empty());
     assert_eq!(runner.specs().len(), 1, "post-checkout was attempted");
     assert_eq!(repo.references().head().expect("head").oid(), Some(&first));

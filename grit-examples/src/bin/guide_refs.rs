@@ -5,8 +5,6 @@
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::branch::list_branches;
-use grit_lib::porcelain::tag::list_tags;
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefSort, SortKey};
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::RefName;
@@ -64,7 +62,7 @@ fn main() -> Result<()> {
         println!("head_file_symbolic={target}");
     }
 
-    for branch in list_branches(&repo)?.branches {
+    for branch in repo.branches().list_simple()?.branches {
         let marker = if branch.current { "*" } else { " " };
         println!("branch {marker} {} {}", branch.name, branch.oid.to_hex());
     }
@@ -76,7 +74,14 @@ fn main() -> Result<()> {
         },
         ..RefQuery::default()
     };
-    for tag in list_tags(&repo, &tag_query)? {
+    let tag_rows = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            tag_query,
+        ))?
+        .into_summaries()
+        .ok_or_else(|| anyhow::anyhow!("expected annotated tag summaries"))?;
+    for tag in tag_rows {
         println!("tag {} {} {:?}", tag.name, tag.oid.to_hex(), tag.kind);
     }
 

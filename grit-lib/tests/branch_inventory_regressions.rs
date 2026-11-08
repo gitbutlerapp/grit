@@ -8,7 +8,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::refs::branch_tracking::{list_branches, BranchDetail, BranchListQuery, BranchScope};
+use grit_lib::refs::branch_tracking::{BranchDetail, BranchListQuery, BranchScope};
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
@@ -77,15 +77,16 @@ fn upstream_uses_custom_fetch_refspec_mapping() {
     assert_eq!(expected, "refs/custom/origin/main");
 
     let repo = open(dir.path());
-    let rows = list_branches(
-        &repo,
-        &BranchListQuery {
-            scope: BranchScope::Local,
-            refs: RefQuery::default(),
-        },
-        BranchDetail::Full,
-    )
-    .expect("list");
+    let rows = repo
+        .branches()
+        .list(
+            &BranchListQuery {
+                scope: BranchScope::Local,
+                refs: RefQuery::default(),
+            },
+            BranchDetail::Full,
+        )
+        .expect("list");
     let topic = rows.iter().find(|r| r.name == "topic").expect("topic row");
     let up = topic.upstream.as_ref().expect("upstream");
     assert_eq!(up.full_ref, expected);
@@ -122,15 +123,16 @@ fn subject_preserves_whitespace_like_git() {
     let expected = expected.strip_suffix('\n').unwrap_or(&expected);
 
     let repo = open(dir.path());
-    let rows = list_branches(
-        &repo,
-        &BranchListQuery {
-            scope: BranchScope::Local,
-            refs: RefQuery::default(),
-        },
-        BranchDetail::Full,
-    )
-    .expect("list");
+    let rows = repo
+        .branches()
+        .list(
+            &BranchListQuery {
+                scope: BranchScope::Local,
+                refs: RefQuery::default(),
+            },
+            BranchDetail::Full,
+        )
+        .expect("list");
     assert_eq!(rows[0].subject.as_deref(), Some(expected));
 }
 
@@ -159,15 +161,16 @@ fn empty_commit_message_subject_is_empty() {
     assert!(expected.is_empty());
 
     let repo = open(dir.path());
-    let rows = list_branches(
-        &repo,
-        &BranchListQuery {
-            scope: BranchScope::Local,
-            refs: RefQuery::default(),
-        },
-        BranchDetail::Full,
-    )
-    .expect("list");
+    let rows = repo
+        .branches()
+        .list(
+            &BranchListQuery {
+                scope: BranchScope::Local,
+                refs: RefQuery::default(),
+            },
+            BranchDetail::Full,
+        )
+        .expect("list");
     assert_eq!(rows[0].subject.as_deref(), Some(""));
 }
 
@@ -199,15 +202,16 @@ fn multiline_subject_matches_git_contents_subject() {
     assert_eq!(expected, "hello world");
 
     let repo = open(dir.path());
-    let rows = list_branches(
-        &repo,
-        &BranchListQuery {
-            scope: BranchScope::Local,
-            refs: RefQuery::default(),
-        },
-        BranchDetail::Full,
-    )
-    .expect("list");
+    let rows = repo
+        .branches()
+        .list(
+            &BranchListQuery {
+                scope: BranchScope::Local,
+                refs: RefQuery::default(),
+            },
+            BranchDetail::Full,
+        )
+        .expect("list");
     assert_eq!(rows[0].subject.as_deref(), Some("hello world"));
 }
 
@@ -236,7 +240,9 @@ fn names_detail_rejects_date_sort_without_reading_objects() {
         scope: BranchScope::Local,
         refs: RefQuery::default(),
     };
-    list_branches(&repo, &name_query, BranchDetail::Names).expect("name sort lists ref");
+    repo.branches()
+        .list(&name_query, BranchDetail::Names)
+        .expect("name sort lists ref");
 
     let date_query = BranchListQuery {
         scope: BranchScope::Local,
@@ -248,7 +254,10 @@ fn names_detail_rejects_date_sort_without_reading_objects() {
             ..RefQuery::default()
         },
     };
-    let err = list_branches(&repo, &date_query, BranchDetail::Names).unwrap_err();
+    let err = repo
+        .branches()
+        .list(&date_query, BranchDetail::Names)
+        .unwrap_err();
     assert!(
         matches!(err, Error::Branch(BranchError::ListNamesDateSort)),
         "expected typed sort error, got {err:?}"

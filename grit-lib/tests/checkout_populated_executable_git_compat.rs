@@ -7,7 +7,6 @@ mod unix {
 
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::objects::ObjectId;
-    use grit_lib::porcelain::checkout::checkout_between_trees;
     use grit_lib::repo::Repository;
     use grit_test_support::git;
 
@@ -84,7 +83,10 @@ mod unix {
                 &RepositoryOptions::empty().with_work_tree(&grit_dest),
             )
             .expect("open");
-            checkout_between_trees(&grit_repo, None, &tree).expect("fresh checkout");
+            grit_repo
+                .checkout()
+                .checkout(None, &tree)
+                .expect("fresh checkout");
             let grit_mode = mode_bits(&grit_dest.join("run.sh"));
             assert_eq!(
                 grit_mode, git_mode,

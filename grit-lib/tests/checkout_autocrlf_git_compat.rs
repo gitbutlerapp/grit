@@ -7,7 +7,7 @@ use std::process::Command;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn git_eol(repo: &std::path::Path, path: &str) -> String {
@@ -92,7 +92,14 @@ fn checkout_autocrlf_writes_crlf_to_worktree() {
     fs::write(wt.join("f.txt"), b"A\r\nB\r\nC\r\n").expect("branch write");
     let branch_tree = commit_all(&repo, "branch");
 
-    checkout_between_trees(&repo, Some(&branch_tree), &main_tree).expect("switch to main");
+    repo.checkout()
+        .checkout(
+            Some(&branch_tree),
+            &main_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch to main");
 
     let on_disk = fs::read(wt.join("f.txt")).expect("read worktree");
     assert_eq!(

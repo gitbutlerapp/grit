@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
-use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
+use grit_lib::porcelain::tag::CreateTagRequest;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 use grit_lib::repo::Repository;
@@ -554,9 +554,9 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
         .references()
         .resolve("refs/remotes/origin/main")
         .expect("origin/main");
-    let tag_outcome = create_tag(
-        &repo,
-        &CreateTagRequest {
+    let tag_outcome = repo
+        .tags()
+        .create(&CreateTagRequest {
             name: "v1-ann".to_owned(),
             target: head,
             message: Some("release".to_owned()),
@@ -566,9 +566,8 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .expect("annotated tag");
+        })
+        .expect("annotated tag");
 
     match transport.connect(&url, Service::ReceivePack, &ConnectOptions::default()) {
         Ok(_) => {}

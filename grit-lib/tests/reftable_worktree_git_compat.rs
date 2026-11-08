@@ -8,7 +8,7 @@ use std::path::Path;
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
@@ -80,17 +80,18 @@ fn assert_head(path: &Path, oid: ObjectId, branch: Option<&str>, status: &str) {
 }
 
 fn switch(path: &Path, mode: SwitchMode) {
-    switch_repository(
-        &open(path),
-        &SwitchOptions {
-            mode,
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .unwrap();
+    open(path)
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+                hooks: PostOperationHooks::Skip,
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap();
 }
 
 #[test]

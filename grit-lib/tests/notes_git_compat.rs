@@ -5,10 +5,7 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::notes::{
-    notes_merge_inner, read_notes_tree, upsert_note_entry, write_notes_commit, NotesMergeStrategy,
-    NotesRef,
-};
+use grit_lib::notes::{upsert_note_entry, NotesMergeStrategy, NotesRef};
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::NotesWriteOptions;
@@ -55,7 +52,7 @@ fn git_note_show(root: &std::path::Path, object: &ObjectId) -> String {
 }
 
 fn grit_note_blob(repo: &Repository, notes_ref: &str, object: &ObjectId) -> Option<String> {
-    let entries = read_notes_tree(repo, notes_ref).ok()?;
+    let entries = repo.notes().read_tree(notes_ref).ok()?;
     let hex = object.to_hex();
     let entry = entries
         .iter()
@@ -69,9 +66,14 @@ fn write_grit_note(repo: &Repository, object: &ObjectId, text: &str, message: &s
         .odb()
         .write(ObjectKind::Blob, text.as_bytes())
         .expect("blob");
-    let mut entries = read_notes_tree(repo, "refs/notes/commits").unwrap_or_default();
+    let mut entries = repo
+        .notes()
+        .read_tree("refs/notes/commits")
+        .unwrap_or_default();
     upsert_note_entry(&mut entries, &object.to_hex(), blob);
-    write_notes_commit(repo, "refs/notes/commits", &entries, message).expect("write notes");
+    repo.notes()
+        .write_tree_commit("refs/notes/commits", &entries, message)
+        .expect("write notes");
 }
 
 #[test]
@@ -126,7 +128,10 @@ fn t3305_fanout_layouts_read_and_written() {
     assert_fsck_strict(dir.path());
 
     let repo = open_grit(dir.path());
-    let entries = read_notes_tree(&repo, "refs/notes/commits").expect("read git fanout");
+    let entries = repo
+        .notes()
+        .read_tree("refs/notes/commits")
+        .expect("read git fanout");
     assert!(
         entries.iter().any(|e| e.path.iter().any(|b| *b == b'/')),
         "git fanout layout must use slash-separated paths"
@@ -193,14 +198,11 @@ fn t3309_notes_merge_strategies_match_git() {
         );
 
         let grit_repo = open_grit(grit_dir.path());
-        notes_merge_inner(
-            &grit_repo,
-            "refs/notes/commits",
-            "refs/notes/remote",
-            grit_strategy,
-        )
-        .expect("merge")
-        .expect("no conflict");
+        grit_repo
+            .notes()
+            .merge_refs("refs/notes/commits", "refs/notes/remote", grit_strategy)
+            .expect("merge")
+            .expect("no conflict");
 
         let commit: ObjectId = git_cmd(grit_dir.path(), &["rev-parse", "HEAD"])
             .trim()
@@ -260,14 +262,15 @@ fn t3309_manual_notes_merge_keeps_local_ref_on_conflict() {
     let local_tip = git_cmd(grit_dir.path(), &["rev-parse", "refs/notes/commits"])
         .trim()
         .to_owned();
-    notes_merge_inner(
-        &grit_repo,
-        "refs/notes/commits",
-        "refs/notes/remote",
-        NotesMergeStrategy::Manual,
-    )
-    .expect("merge")
-    .expect_err("manual merge must report conflicts");
+    grit_repo
+        .notes()
+        .merge_refs(
+            "refs/notes/commits",
+            "refs/notes/remote",
+            NotesMergeStrategy::Manual,
+        )
+        .expect("merge")
+        .expect_err("manual merge must report conflicts");
 
     let grit_notes_tip = git_cmd(grit_dir.path(), &["rev-parse", "refs/notes/commits"])
         .trim()
@@ -293,7 +296,7 @@ fn t3303_notes_subtrees_read_flat_entries() {
     git_cmd(dir.path(), &["notes", "add", "-m", "n2", &c2.to_hex()]);
 
     let repo = open_grit(dir.path());
-    let entries = read_notes_tree(&repo, "refs/notes/commits").expect("read");
+    let entries = repo.notes().read_tree("refs/notes/commits").expect("read");
     assert_eq!(entries.len(), 2);
     let names: Vec<String> = entries
         .iter()
@@ -314,14 +317,16 @@ fn t3306_notes_prune_via_remove() {
     );
 
     let repo = open_grit(dir.path());
-    let mut entries = read_notes_tree(&repo, "refs/notes/commits").expect("read");
+    let mut entries = repo.notes().read_tree("refs/notes/commits").expect("read");
     entries.retain(|e| {
         grit_lib::notes::note_object_name(&e.path).as_deref() != Some(commit.to_hex().as_str())
     });
     if entries.is_empty() {
         git_cmd(dir.path(), &["update-ref", "-d", "refs/notes/commits"]);
     } else {
-        write_notes_commit(&repo, "refs/notes/commits", &entries, "prune note").expect("write");
+        repo.notes()
+            .write_tree_commit("refs/notes/commits", &entries, "prune note")
+            .expect("write");
     }
     assert_fsck_strict(dir.path());
     let show = std::process::Command::new("git")
@@ -391,7 +396,7 @@ fn find_noted_object_in_singleton_bucket(
     repo: &Repository,
     notes_ref: &str,
 ) -> (ObjectId, [u8; 2]) {
-    let entries = read_notes_tree(repo, notes_ref).expect("read notes");
+    let entries = repo.notes().read_tree(notes_ref).expect("read notes");
     let mut by_prefix: HashMap<[u8; 2], Vec<ObjectId>> = HashMap::new();
     for entry in entries {
         let Some(hex) = grit_lib::notes::note_object_name(&entry.path) else {
@@ -511,7 +516,7 @@ fn uppercase_hex_leaf_read_and_add_sees_existing_note() {
         "add without force must not treat uppercase leaf as missing"
     );
 
-    let entries = read_notes_tree(&repo, "refs/notes/commits").expect("list");
+    let entries = repo.notes().read_tree("refs/notes/commits").expect("list");
     let for_object = entries
         .iter()
         .filter(|e| {
@@ -606,7 +611,9 @@ fn flat_tree_256th_insert_via_add_refans_out() {
             .expect("blob");
         upsert_note_entry(&mut entries, &object.to_hex(), blob);
     }
-    write_notes_commit(&repo, "refs/notes/commits", &entries, "255 flat notes").expect("write");
+    repo.notes()
+        .write_tree_commit("refs/notes/commits", &entries, "255 flat notes")
+        .expect("write");
     assert_fsck_strict(dir.path());
 
     assert_eq!(

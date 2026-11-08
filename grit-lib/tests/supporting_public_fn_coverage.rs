@@ -31,10 +31,7 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::parallel::{index_parallelism_from_config, ParallelOp, ThreadPolicy};
 use grit_lib::porcelain::terminal::{ansi_supported, stderr_supports_color, stdout_supports_color};
 use grit_lib::progress::ProgressPhase;
-use grit_lib::refs::branch_tracking::{
-    apply_push_remote_tracking_updates, list_branches, upstream_status, upstream_tracking_full_ref,
-    BranchDetail, BranchListQuery, BranchScope,
-};
+use grit_lib::refs::branch_tracking::{BranchDetail, BranchListQuery, BranchScope};
 use grit_lib::refs::hide_refs::{hide_ref_patterns_receive, hide_ref_patterns_uploadpack};
 use grit_lib::refs::listing::RefQuery;
 use grit_lib::refs::ref_namespace::{
@@ -253,7 +250,9 @@ fn porcelain_checkout_glob_and_branch_tracking() {
     )
     .expect("main");
     assert_eq!(
-        upstream_tracking_full_ref(&repo, "main").as_deref(),
+        repo.branches()
+            .upstream_tracking_full_ref("main")
+            .as_deref(),
         Some("refs/remotes/origin/main")
     );
     let head = grit_test_support::refs::at(git_dir.as_path())
@@ -270,7 +269,8 @@ fn porcelain_checkout_glob_and_branch_tracking() {
         status: PushRefStatus::Ok,
         message: None,
     };
-    apply_push_remote_tracking_updates(git_dir.as_path(), "origin", &[pushed])
+    repo.branches()
+        .apply_push_remote_tracking_updates("origin", &[pushed])
         .expect("tracking update");
     assert_eq!(
         grit_test_support::refs::at(git_dir.as_path())
@@ -283,6 +283,12 @@ fn porcelain_checkout_glob_and_branch_tracking() {
         scope: BranchScope::Local,
         refs: RefQuery::default(),
     };
-    let _ = list_branches(&repo, &query, BranchDetail::Names).expect("list branches");
-    let _ = upstream_status(&repo, "main").expect("upstream status");
+    let _ = repo
+        .branches()
+        .list(&query, BranchDetail::Names)
+        .expect("list branches");
+    let _ = repo
+        .branches()
+        .upstream_status("main")
+        .expect("upstream status");
 }

@@ -112,7 +112,7 @@ pub struct RestoreOutcome {
 /// index is not written. Other failures are I/O or object-store errors.
 ///
 /// Work-tree writes report [`crate::progress::ProgressPhase::CheckingOutFiles`] to `progress`.
-pub fn restore_paths(
+pub(crate) fn restore_paths(
     repo: &Repository,
     opts: &RestoreOptions,
     progress: &mut dyn ProgressSink,
@@ -331,7 +331,7 @@ fn restore_conflict_paths(
 
 /// Default conflict-marker style from `merge.conflictStyle` (Git default: `merge`).
 #[must_use]
-pub fn conflict_style_from_config(repo: &Repository) -> ConflictStyle {
+pub(crate) fn conflict_style_from_config(repo: &Repository) -> ConflictStyle {
     let Ok(config) = repo.config().snapshot() else {
         return ConflictStyle::Merge;
     };

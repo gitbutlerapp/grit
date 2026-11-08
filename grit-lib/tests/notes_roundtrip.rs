@@ -4,7 +4,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::error::NotesError;
 use grit_lib::error::ObjectError;
-use grit_lib::notes::{read_notes_tree, resolve_configured_notes_ref, NotesRef};
+use grit_lib::notes::{resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
@@ -134,7 +134,10 @@ fn fanout_notes_tree_read_and_update() {
     assert_fsck_strict(dir.path());
 
     let repo = open_grit(dir.path());
-    let entries = read_notes_tree(&repo, "refs/notes/commits").expect("read fanout");
+    let entries = repo
+        .notes()
+        .read_tree("refs/notes/commits")
+        .expect("read fanout");
     assert!(
         entries.iter().any(|e| e.path.iter().any(|b| *b == b'/')),
         "git must use fanout paths with 320 notes"

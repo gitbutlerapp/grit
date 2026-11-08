@@ -6,9 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::repo::Repository;
@@ -129,39 +129,39 @@ fn restore_switch_clone_honor_core_symlinks_true() {
     let repo = open_repo(&grit);
 
     fs::remove_file(grit.join("link.txt")).expect("remove link");
-    restore_paths(
-        &repo,
-        &RestoreOptions {
-            pathspecs: vec!["link.txt".to_owned()],
-            pathspec_sources: vec!["link.txt".to_owned()],
-            source: RestoreSource::Index,
-            staged: false,
-            worktree: false,
-            stage: None,
-            remerge: None,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("restore");
+    repo.checkout()
+        .restore(
+            &RestoreOptions {
+                pathspecs: vec!["link.txt".to_owned()],
+                pathspec_sources: vec!["link.txt".to_owned()],
+                source: RestoreSource::Index,
+                staged: false,
+                worktree: false,
+                stage: None,
+                remerge: None,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("restore");
     assert_worktree_clean(&grit);
 
     git(&grit, &["checkout", "-q", "-b", "b2"]);
     git(&grit, &["rm", "-q", "link.txt"]);
     git(&grit, &["commit", "-qm", "rm"]);
-    switch_repository(
-        &repo,
-        SwitchOptions {
-            mode: SwitchMode::Existing {
-                name: "main".to_owned(),
-                start_point: None,
+    repo.checkout()
+        .switch(
+            SwitchOptions {
+                mode: SwitchMode::Existing {
+                    name: "main".to_owned(),
+                    start_point: None,
+                },
+                ..SwitchOptions::default()
             },
-            ..SwitchOptions::default()
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch main");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch main");
     assert_worktree_clean(&grit);
 
     let clone_dest = tmp.path().join("rc");

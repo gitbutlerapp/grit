@@ -1079,6 +1079,27 @@ impl Repository {
         crate::maintenance::Maintenance::new(self)
     }
 
+    /// Local branch create/delete/list/rename and upstream configuration.
+    #[inline]
+    #[must_use]
+    pub fn branches(&self) -> crate::repo_handles::Branches<'_> {
+        crate::repo_handles::Branches::new(self)
+    }
+
+    /// Tag create/list/delete/verify for this repository.
+    #[inline]
+    #[must_use]
+    pub fn tags(&self) -> crate::repo_handles::Tags<'_> {
+        crate::repo_handles::Tags::new(self)
+    }
+
+    /// Switch, checkout, reset, restore, clean, and path moves for this repository.
+    #[inline]
+    #[must_use]
+    pub fn checkout(&self) -> crate::repo_handles::Checkout<'_> {
+        crate::repo_handles::Checkout::new(self)
+    }
+
     /// Index load/write handle.
     #[inline]
     #[must_use]

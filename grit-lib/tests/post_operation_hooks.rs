@@ -16,7 +16,10 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::merge::{IntegrateBranchOutcome, MergeCommitMode, MergeOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::merge::{
+    integrate_branch_with, IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
+};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -133,17 +136,17 @@ fn pair_line(old: ObjectId, new: ObjectId) -> String {
 }
 
 fn switch(repo: &Repository, mode: SwitchMode) -> grit_lib::porcelain::switch::SwitchOutcome {
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode,
-            dry_run: false,
-            hooks: PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch")
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode,
+                dry_run: false,
+                hooks: PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch")
 }
 
 fn existing(branch: &str, oid: ObjectId) -> SwitchMode {
@@ -411,30 +414,32 @@ fn switch_dry_run_or_skip_runs_no_hook() {
     let (c1, _) = two_commits_and_side(&fx);
     let repo = fx.repo();
 
-    let outcome = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: existing("side", c1),
-            dry_run: true,
-            hooks: PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("dry run");
+    let outcome = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: existing("side", c1),
+                dry_run: true,
+                hooks: PostOperationHooks::Run,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("dry run");
     assert!(outcome.hooks_run.is_empty());
 
-    let outcome = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: existing("side", c1),
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("switch without hooks");
+    let outcome = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: existing("side", c1),
+                dry_run: false,
+                hooks: PostOperationHooks::Skip,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("switch without hooks");
     assert!(outcome.hooks_run.is_empty());
     assert_eq!(fx.oid("HEAD"), c1);
     assert!(fx.take_log().is_empty());

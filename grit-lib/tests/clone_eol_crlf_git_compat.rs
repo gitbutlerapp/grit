@@ -6,7 +6,7 @@ use std::process::Command;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::repo::Repository;
 
@@ -72,7 +72,16 @@ fn grit_clone_and_checkout(source: &std::path::Path, dest: &std::path::Path) {
         .read(&outcome.checkout_oid)
         .expect("commit");
     let parsed = grit_lib::objects::parse_commit(&commit.data).expect("parse commit");
-    checkout_between_trees(&outcome.repo, None, &parsed.tree).expect("grit checkout");
+    outcome
+        .repo
+        .checkout()
+        .checkout(
+            None,
+            &parsed.tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("grit checkout");
 }
 
 #[test]
@@ -135,7 +144,9 @@ fn empty_index_checkout_populated_tree_applies_eol_crlf() {
     std::fs::remove_file(dest.path().join("f.txt")).expect("remove f.txt");
     std::fs::remove_file(dest.path().join(".gitattributes")).expect("remove attrs");
 
-    checkout_between_trees(&repo, None, &tree).expect("populate from tree");
+    repo.checkout()
+        .checkout(None, &tree)
+        .expect("populate from tree");
     assert_worktree_crlf(dest.path());
 }
 
@@ -160,7 +171,14 @@ fn checkout_populated_tree_smudge_when_gitattributes_sorts_before_target() {
     // Tree walk uses a stack (deepest/last sibling first). Root entries are sorted so
     // `.gitattributes` precedes `f.txt`, meaning `f.txt` is often written before attributes
     // would appear in a naïve incremental index — prospective rules must still smudge CRLF.
-    checkout_between_trees(&repo, None, &tree).expect("checkout");
+    repo.checkout()
+        .checkout(
+            None,
+            &tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("checkout");
     assert_worktree_crlf(dest.path());
 }
 
@@ -205,6 +223,8 @@ fn populated_tree_fallback_still_applies_eol_gitattributes() {
     std::fs::remove_file(dest.path().join("f.txt")).expect("remove f.txt");
     std::fs::remove_file(dest.path().join("link")).expect("remove link");
 
-    checkout_between_trees(&repo, None, &tree).expect("populate via slow chunk path");
+    repo.checkout()
+        .checkout(None, &tree)
+        .expect("populate via slow chunk path");
     assert_worktree_crlf(dest.path());
 }

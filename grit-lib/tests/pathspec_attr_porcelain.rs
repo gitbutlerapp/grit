@@ -6,8 +6,9 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::porcelain::paths::{remove_paths, RemoveOptions};
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
+use grit_lib::porcelain::paths::RemoveOptions;
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashMode, StashPushOptions};
 use tempfile::TempDir;
@@ -66,13 +67,13 @@ fn restore_attr_pathspec_worktree_and_staged() {
     let dir = vendored_fixture();
     let root = dir.path();
     let repo = open_repo(root);
-    restore_paths(
-        &repo,
-        &restore_opts(":(attr:vendored)src", false, true),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("restore worktree");
+    repo.checkout()
+        .restore(
+            &restore_opts(":(attr:vendored)src", false, true),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("restore worktree");
     assert_eq!(fs::read_to_string(root.join("src/a.rs")).unwrap(), "1\n");
     assert_eq!(
         fs::read_to_string(root.join("src/b.txt")).unwrap(),
@@ -81,13 +82,13 @@ fn restore_attr_pathspec_worktree_and_staged() {
 
     fs::write(root.join("src/a.rs"), "1\n2\n").unwrap();
     git(root, &["add", "src/a.rs"]);
-    restore_paths(
-        &repo,
-        &restore_opts(":(attr:vendored)src", true, false),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("restore staged");
+    repo.checkout()
+        .restore(
+            &restore_opts(":(attr:vendored)src", true, false),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("restore staged");
     assert!(git(root, &["diff", "--cached", "--name-only"])
         .trim()
         .is_empty());
@@ -97,13 +98,14 @@ fn restore_attr_pathspec_worktree_and_staged() {
 fn restore_attr_pathspec_no_match() {
     let dir = vendored_fixture();
     let repo = open_repo(dir.path());
-    let err = restore_paths(
-        &repo,
-        &restore_opts(":(attr:no-such)src", false, true),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect_err("no match");
+    let err = repo
+        .checkout()
+        .restore(
+            &restore_opts(":(attr:no-such)src", false, true),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect_err("no match");
     assert!(matches!(
         err,
         Error::Worktree(WorktreeError::PathspecNoMatch { .. })
@@ -155,13 +157,13 @@ fn objectmode_attr_pathspec_restore_stash_rm() {
     let repo = open_repo(root);
     let spec = ":(attr:builtin_objectmode=100755)";
 
-    restore_paths(
-        &repo,
-        &restore_opts(spec, false, true),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("restore executable only");
+    repo.checkout()
+        .restore(
+            &restore_opts(spec, false, true),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("restore executable only");
     assert_eq!(
         fs::read_to_string(root.join("run.sh")).unwrap(),
         "#!/bin/sh\n"
@@ -195,17 +197,17 @@ fn objectmode_attr_pathspec_restore_stash_rm() {
     git(root, &["stash", "drop"]);
     fs::write(root.join("run.sh"), "#!/bin/sh\necho\n").unwrap();
     git(root, &["add", "run.sh"]);
-    remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec![spec.into()],
-            pathspec_sources: vec![spec.into()],
-            cached: true,
-            ..Default::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("rm --cached executable");
+    repo.checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec![spec.into()],
+                pathspec_sources: vec![spec.into()],
+                cached: true,
+                ..Default::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("rm --cached executable");
     let ls = git(root, &["ls-files"]);
     assert!(ls.contains("plain.txt"));
     assert!(!ls.contains("run.sh"));
@@ -216,17 +218,17 @@ fn rm_cached_attr_pathspec() {
     let dir = vendored_fixture();
     let root = dir.path();
     let repo = open_repo(root);
-    remove_paths(
-        &repo,
-        &RemoveOptions {
-            pathspecs: vec![":(attr:vendored)src".into()],
-            pathspec_sources: vec![":(attr:vendored)src".into()],
-            cached: true,
-            ..Default::default()
-        },
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("rm --cached");
+    repo.checkout()
+        .remove_paths(
+            &RemoveOptions {
+                pathspecs: vec![":(attr:vendored)src".into()],
+                pathspec_sources: vec![":(attr:vendored)src".into()],
+                cached: true,
+                ..Default::default()
+            },
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("rm --cached");
     let ls = git(root, &["ls-files"]);
     assert!(ls.contains("src/b.txt"));
     assert!(!ls.contains("src/a.rs"));

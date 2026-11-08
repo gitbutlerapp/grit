@@ -4,7 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::tag::{list_tags, TagKind};
+use grit_lib::porcelain::tag::TagKind;
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use std::process::Command;
@@ -84,7 +84,14 @@ fn signed_tag_subject_ignores_appended_signature_without_blank_line() {
     git(&root, &["update-ref", "refs/tags/0.1.0", &tag_oid]);
 
     let repo = open(&root);
-    let tags = list_tags(&repo, &name_query()).unwrap();
+    let tags = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            name_query(),
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap();
     let tag = tags.iter().find(|t| t.name == "0.1.0").expect("0.1.0");
     let ann = tag.annotation.as_ref().expect("annotated");
     assert_eq!(
@@ -120,7 +127,14 @@ fn annotation_fields_match_git_for_each_ref() {
     git(&root, &["tag", "-a", "tree-tag", "-m", "tree", &tree]);
 
     let repo = open(&root);
-    let tags = list_tags(&repo, &name_query()).unwrap();
+    let tags = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            name_query(),
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap();
     for tag in &tags {
         if tag.kind != TagKind::Annotated {
             continue;
@@ -191,7 +205,14 @@ fn tag_type_header(root: &std::path::Path, oid: &str) -> String {
 /// Every listed tag's kind, peeled id and target kind, checked against `git for-each-ref`.
 fn assert_tags_classified_like_git(root: &std::path::Path) {
     let repo = open(root);
-    let tags = list_tags(&repo, &name_query()).unwrap();
+    let tags = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            name_query(),
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap();
     let rows = git(
         root,
         &[
@@ -324,7 +345,14 @@ fn packed_peel_lines_answer_without_reading_tag_objects() {
         .expect("light");
     assert_eq!(light.peeled, None);
 
-    let tags = list_tags(&repo, &name_query()).unwrap();
+    let tags = repo
+        .tags()
+        .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
+            name_query(),
+        ))
+        .unwrap()
+        .into_summaries()
+        .unwrap();
     let gone = tags.iter().find(|t| t.name == "gone").expect("gone");
     assert_eq!(gone.kind, TagKind::Lightweight, "unreadable tag object");
     assert_eq!(gone.peeled, Some(commit));

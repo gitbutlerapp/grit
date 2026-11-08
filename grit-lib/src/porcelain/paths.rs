@@ -186,7 +186,7 @@ pub struct MoveOutcome {
 ///
 /// Returns [`crate::worktree::WorktreeError::PathspecNoMatch`], [`crate::worktree::WorktreeError::RemoveBlocked`],
 /// [`crate::worktree::WorktreeError::NotRemovingRecursively`], or I/O / object-store failures.
-pub fn remove_paths(
+pub(crate) fn remove_paths(
     repo: &Repository,
     opts: &RemoveOptions,
     cancel: &CancelToken,
@@ -282,7 +282,7 @@ pub fn remove_paths(
 /// # Errors
 ///
 /// Same as [`move_paths`].
-pub fn move_path(
+pub(crate) fn move_path(
     repo: &Repository,
     src: &str,
     dst: &str,
@@ -314,7 +314,7 @@ pub fn move_path(
 ///
 /// Returns [`crate::worktree::WorktreeError::InvalidPath`], [`crate::worktree::WorktreeError::MoveSourceNotTracked`], [`crate::worktree::WorktreeError::MoveDestinationExists`],
 /// and related move errors, or I/O failures.
-pub fn move_paths(
+pub(crate) fn move_paths(
     repo: &Repository,
     opts: &MoveOptions,
     cancel: &CancelToken,

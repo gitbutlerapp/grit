@@ -1,6 +1,6 @@
 //! Remove untracked (and optionally ignored) paths from the work tree.
 //!
-//! [`clean_untracked`] reuses the same untracked/ignored walk as [`super::status`]
+//! [`Checkout::clean`](crate::repo_handles::Checkout::clean) reuses the same untracked/ignored walk as [`super::status`]
 //! ([`super::status::collect_untracked_and_ignored_with_rules_and_cancel`]) so results stay aligned with
 //! `grit status` and system `git status`.
 
@@ -20,7 +20,7 @@ use crate::repo::RepositoryError;
 use crate::worktree::WorktreeError;
 use crate::worktree_rules::WorktreeRules;
 
-/// Which untracked/ignored paths [`clean_untracked`] may remove.
+/// Which untracked/ignored paths [`Checkout::clean`](crate::repo_handles::Checkout::clean) may remove.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CleanScope {
     /// Untracked non-ignored paths only (default `git clean` without `-x`/`-X`).
@@ -32,7 +32,7 @@ pub enum CleanScope {
     OnlyIgnored,
 }
 
-/// Inputs for [`clean_untracked`].
+/// Inputs for [`Checkout::clean`](crate::repo_handles::Checkout::clean).
 #[derive(Debug, Clone, Default)]
 pub struct CleanOptions {
     /// Limit removal to paths matching these pathspecs (empty = entire tree).
@@ -60,7 +60,7 @@ fn clean_scope_includes_ignored(scope: CleanScope) -> bool {
     )
 }
 
-/// Result of [`clean_untracked`].
+/// Result of [`Checkout::clean`](crate::repo_handles::Checkout::clean).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CleanOutcome {
     /// Repository-relative paths removed (or that would be removed when `dry_run`).
@@ -71,18 +71,11 @@ pub struct CleanOutcome {
 ///
 /// Nested repositories and submodule checkouts (directories containing `.git`) are
 /// never entered or removed.
-pub fn clean_untracked(
-    repo: &Repository,
-    opts: &CleanOptions,
-    progress: &mut dyn ProgressSink,
-) -> Result<CleanOutcome> {
-    clean_untracked_with_cancel(repo, opts, progress, &CancelToken::never())
-}
-
-/// Like [`clean_untracked`], but stops between path removals when `cancel` is set.
+///
+/// Stops between path removals when `cancel` is set.
 ///
 /// Paths removed before cancellation stay removed; there is no index lock to restore.
-pub fn clean_untracked_with_cancel(
+pub(crate) fn clean_untracked_with_cancel(
     repo: &Repository,
     opts: &CleanOptions,
     progress: &mut dyn ProgressSink,

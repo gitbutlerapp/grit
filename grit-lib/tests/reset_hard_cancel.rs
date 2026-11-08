@@ -5,7 +5,7 @@ use crate::support;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -187,24 +187,25 @@ fn hard_reset_returns_cancelled_and_stops_checkout_early() {
         )
         .expect("first commit");
 
-    reset_to_commit(
-        &repo,
-        &ResetOptions::new(first, ResetMode::Hard, reset_identity(), "reset"),
-        &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("reset to first");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(first, ResetMode::Hard, reset_identity(), "reset"),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("reset to first");
 
     let before = ref_and_index(&repo);
     let mut progress = CancelHardResetOnFiles::new(5);
     let cancel = progress.flag.clone();
-    let err = reset_to_commit(
-        &repo,
-        &ResetOptions::new(head, ResetMode::Hard, reset_identity(), "reset"),
-        &mut progress,
-        &cancel,
-    )
-    .expect_err("cancel during hard reset checkout");
+    let err = repo
+        .checkout()
+        .reset(
+            &ResetOptions::new(head, ResetMode::Hard, reset_identity(), "reset"),
+            &mut progress,
+            &cancel,
+        )
+        .expect_err("cancel during hard reset checkout");
     assert!(
         matches!(err, grit_lib::error::Error::Cancelled),
         "expected cancelled reset, got {err:?}"
@@ -252,13 +253,14 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
     let before = ref_and_index(&repo);
     let mut progress = CancelHardResetOnFiles::new(5);
     let cancel = progress.flag.clone();
-    let err = reset_to_commit(
-        &repo,
-        &ResetOptions::new(first, ResetMode::Hard, reset_identity(), "reset"),
-        &mut progress,
-        &cancel,
-    )
-    .expect_err("cancel during backward hard reset deletes");
+    let err = repo
+        .checkout()
+        .reset(
+            &ResetOptions::new(first, ResetMode::Hard, reset_identity(), "reset"),
+            &mut progress,
+            &cancel,
+        )
+        .expect_err("cancel during backward hard reset deletes");
     assert!(
         matches!(err, grit_lib::error::Error::Cancelled),
         "expected cancelled reset, got {err:?}"
@@ -389,13 +391,14 @@ fn hard_reset_cancel_restores_coalesced_directory_delete() {
     let before = ref_and_index(&repo);
     let flag = CancelToken::new();
     let mut progress = CancelOnAnyCheckoutInc { flag: flag.clone() };
-    let err = reset_to_commit(
-        &repo,
-        &ResetOptions::new(commit_a, ResetMode::Hard, reset_identity(), "reset"),
-        &mut progress,
-        &flag,
-    )
-    .expect_err("cancel during coalesced directory delete");
+    let err = repo
+        .checkout()
+        .reset(
+            &ResetOptions::new(commit_a, ResetMode::Hard, reset_identity(), "reset"),
+            &mut progress,
+            &flag,
+        )
+        .expect_err("cancel during coalesced directory delete");
     assert!(
         matches!(err, grit_lib::error::Error::Cancelled),
         "expected cancelled reset, got {err:?}"

@@ -14,13 +14,12 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::branch::{create_branch, delete_branch, CreateBranchOptions, DeleteMode};
+use grit_lib::porcelain::branch::{BranchCreateOptions, BranchDeleteMode};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::porcelain::switch::{
-    resolve_switch_target, switch_repository, SwitchMode, SwitchOptions,
-};
-use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::porcelain::tag::CreateTagRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
@@ -96,20 +95,20 @@ fn switch_to(repo: &Repository, branch: &str) {
             &grit_lib::revwalk::ResolveOptions::default(),
         )
         .expect("branch tip");
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: branch.into(),
-                oid,
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: branch.into(),
+                    oid,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch");
 }
 
 fn head_branch(repo: &Repository) -> Option<String> {
@@ -148,10 +147,16 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         first
     );
 
-    create_branch(repo, &CreateBranchOptions::at_head("topic")).expect("create topic");
+    repo.branches()
+        .create(&BranchCreateOptions::at_head("topic"))
+        .expect("create topic");
     switch_to(repo, "topic");
     assert_eq!(head_branch(repo).as_deref(), Some("topic"));
-    match resolve_switch_target(repo, "-").expect("switch -") {
+    match repo
+        .checkout()
+        .resolve_switch_target("-")
+        .expect("switch -")
+    {
         SwitchMode::Existing { branch, oid } => {
             assert_eq!(branch, "main");
             assert_eq!(oid, first);
@@ -212,9 +217,8 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     );
     assert!(wt.join("b.txt").exists());
 
-    create_tag(
-        repo,
-        &CreateTagRequest {
+    repo.tags()
+        .create(&CreateTagRequest {
             name: "v1".into(),
             target: merged,
             message: None,
@@ -224,24 +228,32 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
             tree_sha256: None,
             force: false,
             dry_run: false,
-        },
-    )
-    .expect("tag");
+        })
+        .expect("tag");
 
-    delete_branch(repo, "topic", DeleteMode::Safe, false).expect("delete merged topic");
+    repo.branches()
+        .delete(
+            "topic",
+            &grit_lib::porcelain::branch::BranchDeleteOptions {
+                mode: BranchDeleteMode::Safe,
+                dry_run: false,
+            },
+        )
+        .expect("delete merged topic");
 
-    let reset = reset_to_commit(
-        repo,
-        &ResetOptions::new(
-            main_tip,
-            ResetMode::Hard,
-            support::parse_reflog_signature(IDENT_TS),
-            "reset: moving to HEAD~1",
-        ),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("reset");
+    let reset = repo
+        .checkout()
+        .reset(
+            &ResetOptions::new(
+                main_tip,
+                ResetMode::Hard,
+                support::parse_reflog_signature(IDENT_TS),
+                "reset: moving to HEAD~1",
+            ),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("reset");
     assert_eq!(reset.target, main_tip);
     assert_eq!(
         repo.revwalk()
@@ -251,18 +263,18 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     );
     assert!(!wt.join("b.txt").exists());
 
-    reset_to_commit(
-        repo,
-        &ResetOptions::new(
-            merged,
-            ResetMode::Hard,
-            support::parse_reflog_signature(IDENT_TS),
-            "reset: moving to v1",
-        ),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("reset back");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(
+                merged,
+                ResetMode::Hard,
+                support::parse_reflog_signature(IDENT_TS),
+                "reset: moving to v1",
+            ),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("reset back");
 
     fs::write(wt.join("a.txt"), "dirty\n").expect("write");
     let stash = repo
@@ -313,20 +325,20 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         .is_err());
     fs::write(wt.join("a.txt"), "hi\n").expect("write");
 
-    switch_repository(
-        repo,
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: main_tip,
-                reflog_to_label: "HEAD~1".into(),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: main_tip,
+                    reflog_to_label: "HEAD~1".into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("detach");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("detach");
     assert!(head_branch(repo).is_none());
     fs::write(wt.join("d.txt"), "detached\n").expect("write");
     let detached = commit_all(repo, "detached");
@@ -344,18 +356,18 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage rm");
-    reset_to_commit(
-        repo,
-        &ResetOptions::new(
-            detached,
-            ResetMode::Hard,
-            support::parse_reflog_signature(IDENT_TS),
-            "reset: moving to HEAD",
-        ),
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("clean detached");
+    repo.checkout()
+        .reset(
+            &ResetOptions::new(
+                detached,
+                ResetMode::Hard,
+                support::parse_reflog_signature(IDENT_TS),
+                "reset: moving to HEAD",
+            ),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("clean detached");
     switch_to(repo, "main");
 
     BatteryResult {
@@ -651,20 +663,21 @@ fn switch_to_existing_branch_installs_head_when_store_has_none() {
     let (repo, store, tip) = headless_store_repo(dir.path());
     assert_eq!(repo.references().head().expect("head"), HeadState::Invalid);
 
-    let outcome = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "topic".into(),
-                oid: tip,
+    let outcome = repo
+        .checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "topic".into(),
+                    oid: tip,
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("switch");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("switch");
     assert_eq!(outcome.commit, tip);
     assert_eq!(
         store
@@ -680,20 +693,20 @@ fn detached_switch_installs_head_when_store_has_none() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (repo, store, tip) = headless_store_repo(dir.path());
 
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: SwitchMode::Detached {
-                commit: tip,
-                reflog_to_label: "main".into(),
+    repo.checkout()
+        .switch(
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: tip,
+                    reflog_to_label: "main".into(),
+                },
+                dry_run: false,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
-        &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::CancelToken::never(),
-    )
-    .expect("detach");
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("detach");
     assert_eq!(
         store
             .read_raw(RefNameRef::from_trusted("HEAD"))

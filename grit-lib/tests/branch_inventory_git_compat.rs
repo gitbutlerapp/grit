@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::refs::branch_tracking::{list_branches, BranchDetail, BranchListQuery, BranchScope};
+use grit_lib::refs::branch_tracking::{BranchDetail, BranchListQuery, BranchScope};
 use grit_lib::refs::listing::RefQuery;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
@@ -159,7 +159,10 @@ fn assert_scope_matches_git(dir: &Path, scope: BranchScope, prefix: &str) {
         scope,
         refs: RefQuery::default(),
     };
-    let rows = list_branches(&repo, &query, BranchDetail::Full).expect("list");
+    let rows = repo
+        .branches()
+        .list(&query, BranchDetail::Full)
+        .expect("list");
     let git_rows = git_branch_rows(dir, prefix);
 
     assert_eq!(rows.len(), git_rows.len(), "row count");

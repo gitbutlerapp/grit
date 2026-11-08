@@ -3,6 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::progress::{CancelToken, NullProgress, ProgressSink};
 use grit_lib::repo::Repository;
 use grit_test_support::git;

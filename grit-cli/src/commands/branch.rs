@@ -5,13 +5,10 @@ use grit_lib::error::Error;
 use grit_lib::error::ObjectError;
 use grit_lib::error::RevisionError;
 use grit_lib::porcelain::branch::{
-    create_branch, delete_branch, preview_unset_upstream, rename_branch, set_upstream,
-    unset_upstream, validate_set_upstream, CreateBranchOptions, DeleteMode, RenameBranchOptions,
-    StartPoint, TrackMode,
+    BranchCreateOptions, BranchDeleteMode, BranchDeleteOptions, BranchRenameOptions, StartPoint,
+    TrackMode,
 };
-use grit_lib::refs::branch_tracking::{
-    list_branches, BranchDetail, BranchListQuery, BranchScope, BranchSummary,
-};
+use grit_lib::refs::branch_tracking::{BranchDetail, BranchListQuery, BranchScope, BranchSummary};
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::ResolveOptions;
@@ -577,7 +574,10 @@ fn list(repo: &Repository, opts: &BranchRunOptions) -> Result<BranchOutcome> {
         BranchDetail::Names
     };
     let limit = list.limit.get();
-    let rows = list_branches(repo, &query, detail).context("could not list branches")?;
+    let rows = repo
+        .branches()
+        .list(&query, detail)
+        .context("could not list branches")?;
     let limited = grit_lib::list_limit::Limited::from_vec(rows, limit);
     let rows = limited.items;
     let truncated = limited.truncated;
@@ -744,14 +744,17 @@ fn create(
         None
     };
 
-    let create_opts = CreateBranchOptions {
+    let create_opts = BranchCreateOptions {
         name: name.to_owned(),
         start: start_point,
         force: opts.force,
         track: track_mode(opts),
         dry_run: opts.dry_run,
     };
-    let created = create_branch(repo, &create_opts).map_err(map_branch_error)?;
+    let created = repo
+        .branches()
+        .create(&create_opts)
+        .map_err(map_branch_error)?;
     let oid = created.oid.to_hex();
     let short_oid = created.oid.to_short_hex();
     Ok(BranchOutcome::Create {
@@ -770,11 +773,14 @@ fn remove(
     dry_run: bool,
 ) -> Result<BranchOutcome> {
     let mode = if force_delete {
-        DeleteMode::Force
+        BranchDeleteMode::Force
     } else {
-        DeleteMode::Safe
+        BranchDeleteMode::Safe
     };
-    let deleted = delete_branch(repo, name, mode, dry_run).map_err(map_branch_error)?;
+    let deleted = repo
+        .branches()
+        .delete(name, &BranchDeleteOptions { mode, dry_run })
+        .map_err(map_branch_error)?;
     let oid = deleted.oid.to_hex();
     let short_oid = deleted.oid.to_short_hex();
     Ok(BranchOutcome::Delete {
@@ -792,16 +798,15 @@ fn rename(
     force: bool,
     dry_run: bool,
 ) -> Result<BranchOutcome> {
-    let outcome = rename_branch(
-        repo,
-        &RenameBranchOptions {
+    let outcome = repo
+        .branches()
+        .rename(&BranchRenameOptions {
             old: old.to_owned(),
             new: new.to_owned(),
             force,
             dry_run,
-        },
-    )
-    .map_err(map_branch_error)?;
+        })
+        .map_err(map_branch_error)?;
     Ok(BranchOutcome::Rename {
         old: outcome.old,
         new: outcome.new,
@@ -813,9 +818,14 @@ fn rename(
 }
 
 fn set(repo: &Repository, branch: &str, upstream: &str, dry_run: bool) -> Result<BranchOutcome> {
-    let display = validate_set_upstream(repo, branch, upstream).map_err(map_branch_error)?;
+    let display = repo
+        .branches()
+        .validate_set_upstream(branch, upstream)
+        .map_err(map_branch_error)?;
     if !dry_run {
-        set_upstream(repo, branch, upstream).map_err(map_branch_error)?;
+        repo.branches()
+            .set_upstream(branch, upstream)
+            .map_err(map_branch_error)?;
     }
     Ok(BranchOutcome::SetUpstream {
         branch: branch.to_owned(),
@@ -826,9 +836,13 @@ fn set(repo: &Repository, branch: &str, upstream: &str, dry_run: bool) -> Result
 
 fn unset(repo: &Repository, branch: &str, dry_run: bool) -> Result<BranchOutcome> {
     if dry_run {
-        preview_unset_upstream(repo, branch).map_err(map_branch_error)?;
+        repo.branches()
+            .preview_unset_upstream(branch)
+            .map_err(map_branch_error)?;
     } else {
-        unset_upstream(repo, branch).map_err(map_branch_error)?;
+        repo.branches()
+            .unset_upstream(branch)
+            .map_err(map_branch_error)?;
     }
     Ok(BranchOutcome::UnsetUpstream {
         branch: branch.to_owned(),

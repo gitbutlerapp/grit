@@ -10,7 +10,6 @@ use grit_lib::diff::{DiffStatus, TreeDiffOptions};
 use grit_lib::error::Error;
 use grit_lib::index::MODE_GITLINK;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::repo::Repository;
@@ -67,7 +66,9 @@ fn checkout_uninitialized_gitlink_matches_git_clone() {
     let head_oid = repo.references().resolve("HEAD").expect("head");
     let head_obj = repo.odb().read(&head_oid).expect("read");
     let commit = grit_lib::objects::parse_commit(&head_obj.data).expect("commit");
-    checkout_between_trees(&repo, None, &commit.tree).expect("checkout with gitlink");
+    repo.checkout()
+        .checkout(None, &commit.tree)
+        .expect("checkout with gitlink");
 
     let sub = grit_dest.join("sub");
     assert!(
@@ -228,7 +229,13 @@ fn checkout_removes_uninitialized_gitlink_on_delete() {
         FileMode::GITLINK,
         "gitlink delete should carry mode 160000"
     );
-    checkout_between_trees(&repo, Some(&with_sub_tree), &no_sub_tree)
+    repo.checkout()
+        .checkout(
+            Some(&with_sub_tree),
+            &no_sub_tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("checkout delete gitlink");
 
     assert!(

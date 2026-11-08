@@ -368,7 +368,14 @@ fn a_checkout_whose_blobs_cannot_be_fetched_keeps_the_clone() {
     let tree = grit_lib::objects::parse_commit(&repo.odb().read(&commit).unwrap().data)
         .unwrap()
         .tree;
-    grit_lib::porcelain::checkout::checkout_between_trees(&repo, None, &tree).unwrap();
+    repo.checkout()
+        .checkout(
+            None,
+            &tree,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .unwrap();
     assert_eq!(std::fs::read(dest.join("big")).unwrap().len(), 20 * 1024);
     assert_eq!(std::fs::read(dest.join("small")).unwrap(), b"small\n");
 }

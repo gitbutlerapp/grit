@@ -11,8 +11,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
-use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
@@ -115,39 +115,39 @@ fn materialize_without_loading(packed: bool) {
 
     fs::remove_file(root.join("big.txt")).expect("rm");
     let before = peak_rss_kib();
-    restore_paths(
-        &repo,
-        &RestoreOptions {
-            pathspecs: vec!["big.txt".into()],
-            pathspec_sources: vec!["big.txt".into()],
-            source: RestoreSource::Index,
-            staged: false,
-            worktree: true,
-            stage: None,
-            remerge: None,
-        },
-        &mut NullProgress,
-        &CancelToken::never(),
-    )
-    .expect("restore");
+    repo.checkout()
+        .restore(
+            &RestoreOptions {
+                pathspecs: vec!["big.txt".into()],
+                pathspec_sources: vec!["big.txt".into()],
+                source: RestoreSource::Index,
+                staged: false,
+                worktree: true,
+                stage: None,
+                remerge: None,
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("restore");
     assert_growth(before, &format!("{label} restore"));
     assert!(files_equal(&root.join("big.txt"), &reference));
 
     let switch = |branch: &str, oid: ObjectId| {
-        switch_repository(
-            &repo,
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: branch.into(),
-                    oid,
+        repo.checkout()
+            .switch(
+                &SwitchOptions {
+                    mode: SwitchMode::Existing {
+                        branch: branch.into(),
+                        oid,
+                    },
+                    dry_run: false,
+                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
                 },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::CancelToken::never(),
-        )
-        .expect("switch");
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("switch");
     };
     switch("without", without);
     let before = peak_rss_kib();

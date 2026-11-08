@@ -239,7 +239,7 @@ impl PreparedSwitch {
 /// Returns [`Error::Branch`] when the name is invalid, the branch already exists, or there are no
 /// commits to branch from. A `start_point` that does not resolve or does not name a commit fails
 /// like [`resolve_revision_spec`]. [`TrackMode::Always`] fails when no upstream can be derived.
-pub fn resolve_create_branch(
+pub(crate) fn resolve_create_branch(
     repo: &Repository,
     branch: &str,
     start_point: Option<&str>,
@@ -282,7 +282,7 @@ pub fn resolve_create_branch(
 /// Returns [`Error::Branch`] for invalid local branch names, missing branches, and `@{-1}` with no
 /// previous branch; tag names that would attach `HEAD` to a tag return
 /// [`BranchError::IsTag`].
-pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode> {
+pub(crate) fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode> {
     let spec = normalize_switch_spec(spec);
     if is_at_minus_branch_spec(spec) {
         let branch = match expand_at_minus_to_branch_name(repo, spec) {
@@ -408,7 +408,7 @@ fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<Sw
 ///
 /// Returns [`crate::error::RevisionError::NotFound`] when `spec` does not resolve; [`crate::error::RefError::Invalid`] when the
 /// resolved object is not a commit; other object database errors propagate.
-pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> {
+pub(crate) fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> {
     if crate::rev_parse::is_top_level_range(spec) {
         return Err(Error::Revision(RevisionError::NotFound {
             spec: spec.to_owned(),
@@ -459,7 +459,7 @@ fn map_revision_spec_error(spec: &str, err: Error) -> Error {
 /// [`Error::Cancelled`] when `cancel` or `progress` asked to stop;
 /// [`crate::worktree::WorktreeError::CheckoutRollbackIncomplete`] (wrapping the cause) when some work-tree paths could
 /// not be put back. On error the hook does not run.
-pub fn switch_repository(
+pub(crate) fn switch_repository(
     repo: &Repository,
     opts: &SwitchOptions,
     progress: &mut dyn crate::progress::ProgressSink,

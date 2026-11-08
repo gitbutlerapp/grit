@@ -87,7 +87,7 @@ pub enum BranchError {
         name: String,
     },
 
-    /// [`list_branches`](crate::branch_tracking::list_branches) with
+    /// [`Branches::list`](crate::repo_handles::Branches::list) with
     /// [`BranchDetail::Names`](crate::branch_tracking::BranchDetail::Names) cannot use date sort.
     #[error("branch list with Names detail cannot use date sort (date sort reads commit objects)")]
     ListNamesDateSort,
@@ -127,7 +127,7 @@ impl BranchError {
     }
 }
 
-/// Start commit and reflog label for [`crate::porcelain::branch::CreateBranchOptions::start`].
+/// Start commit and reflog label for [`crate::porcelain::branch::BranchCreateOptions::start`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartPoint {
     /// Tip commit for the new or updated branch.
@@ -149,9 +149,10 @@ pub enum TrackMode {
 }
 
 /// Safe delete requires the tip to be merged; force skips the check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeleteMode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BranchDeleteMode {
     /// Refuse when the tip is not reachable from upstream or `HEAD`.
+    #[default]
     Safe,
     /// Delete regardless of merge state.
     Force,

@@ -1,7 +1,7 @@
 //! `grit mv` — rename or move tracked paths.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::porcelain::paths::{move_paths, MoveOptions, PathMove};
+use grit_lib::porcelain::paths::{MoveOptions, PathMove};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::pathdiff;
 use schemars::JsonSchema;
@@ -102,17 +102,19 @@ pub fn run(sources: &[String], force: bool, dry_run: bool) -> Result<MvOutcome> 
     let resolved_dst = resolve_one(&repo, dst)?;
 
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let lib_outcome = move_paths(
-        &repo,
-        &MoveOptions {
-            sources: resolved_srcs,
-            destination: resolved_dst,
-            force,
-            dry_run,
-        },
-        &crate::interrupt::process_cancel_token(),
-    )
-    .map_err(crate::json_error::map_lib_error)?;
+    let cancel = crate::interrupt::process_cancel_token();
+    let lib_outcome = repo
+        .checkout()
+        .move_paths(
+            &MoveOptions {
+                sources: resolved_srcs,
+                destination: resolved_dst,
+                force,
+                dry_run,
+            },
+            &cancel,
+        )
+        .map_err(crate::json_error::map_lib_error)?;
 
     Ok(MvOutcome {
         moves: lib_outcome

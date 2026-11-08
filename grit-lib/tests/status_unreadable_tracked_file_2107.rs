@@ -17,7 +17,7 @@ mod unix {
     use grit_lib::objects::ObjectId;
     use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
     use grit_lib::porcelain::status::{status, StatusOptions};
-    use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+    use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::{forced_parallel_policy, git};
@@ -191,20 +191,21 @@ mod unix {
         let Some(fx) = setup(0) else { return };
         let repo = fx.open();
         let head_before = git(fx.root(), &["rev-parse", "HEAD"]);
-        let err = switch_repository(
-            &repo,
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "other".into(),
-                    oid: fx.other_oid,
+        let err = repo
+            .checkout()
+            .switch(
+                &SwitchOptions {
+                    mode: SwitchMode::Existing {
+                        branch: "other".into(),
+                        oid: fx.other_oid,
+                    },
+                    dry_run: false,
+                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
                 },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-            },
-            &mut NullProgress,
-            &CancelToken::never(),
-        )
-        .expect_err("switch must refuse to overwrite the unreadable path");
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
+            .expect_err("switch must refuse to overwrite the unreadable path");
         match err {
             Error::Worktree(WorktreeError::WouldOverwrite {
                 reason: OverwriteReason::LocalChanges,
