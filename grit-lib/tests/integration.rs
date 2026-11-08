@@ -776,6 +776,9 @@ mod filter_required_git_compat;
 #[path = "fsck_api_coverage.rs"]
 mod fsck_api_coverage;
 #[cfg(feature = "full-tests")]
+#[path = "fsck_large_blob_memory.rs"]
+mod fsck_large_blob_memory;
+#[cfg(feature = "full-tests")]
 #[path = "fsck_memory.rs"]
 mod fsck_memory;
 #[cfg(feature = "full-tests")]

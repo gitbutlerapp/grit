@@ -46,6 +46,7 @@ use crate::objects::{
     parse_commit_tree_and_parents_lenient, parse_tag, HashAlgo, ObjectId, ObjectKind, OidHashMap,
     OidHashSet, TreeEntryRef, TreeRefIter,
 };
+use crate::odb::store::loose::LooseStore;
 use crate::odb::{read_loose_object_info, Odb};
 use crate::pack::{
     prepare_pack_for_object_fsck, read_object_info_from_pack_at_offset, read_pack_index_cached,
@@ -782,8 +783,45 @@ enum LooseCheckOutcome {
 fn check_local_loose_object(
     item: &(ObjectId, PathBuf),
     fsck_opts: FsckObjectOptions,
+    big_file_threshold: u64,
 ) -> LooseCheckOutcome {
     let (oid, path) = item;
+    if let Ok(info) = read_loose_object_info(path) {
+        if info.kind == ObjectKind::Blob && info.size >= big_file_threshold {
+            return match LooseStore::verify_payload_hash_streaming(
+                path,
+                oid,
+                info.kind,
+                info.size,
+            ) {
+                Err(Error::Object(ObjectError::LooseHashMismatch { .. })) => {
+                    LooseCheckOutcome::Issue(FsckIssue::HashMismatch {
+                        oid: *oid,
+                        path: path.clone(),
+                    })
+                }
+                Err(Error::Object(ObjectError::HashCollision { oid: colliding })) => {
+                    LooseCheckOutcome::Issue(FsckIssue::BadObject {
+                        oid: *oid,
+                        error: FsckError::new(
+                            "sha1Collision",
+                            format!(
+                                "SHA-1 collision detected while verifying loose object (digest {colliding})"
+                            ),
+                        ),
+                    })
+                }
+                Err(_) => LooseCheckOutcome::Issue(FsckIssue::CorruptLoose {
+                    oid: *oid,
+                    path: path.clone(),
+                }),
+                Ok(()) => LooseCheckOutcome::Verified {
+                    obj: crate::objects::Object::new(info.kind, Vec::new()),
+                    fsck_err: None,
+                },
+            };
+        }
+    }
     match Odb::read_loose_verify_oid(path, oid) {
         Err(Error::Object(ObjectError::LooseHashMismatch { .. })) => {
             LooseCheckOutcome::Issue(FsckIssue::HashMismatch {
@@ -890,6 +928,7 @@ fn verify_loose_objects(
     progress.start(ProgressPhase::IndexingObjects, Some(total as u64));
     let par_opts: ParallelOptions = repo.thread_policy().resolve(ParallelOp::IndexPack, config);
     let fsck_opts = FsckObjectOptions::new(odb.hash_algo());
+    let big_file_threshold = odb.big_file_threshold().unwrap_or(u64::MAX);
     let mut dot = DotFsckTracker::default();
 
     if cancel.is_cancelled() {
@@ -932,13 +971,13 @@ fn verify_loose_objects(
             &loose,
             LOOSE_FSCK_BATCH,
             n_workers,
-            || fsck_opts,
-            |opts, item| Ok(check_local_loose_object(item, *opts)),
+            || (fsck_opts, big_file_threshold),
+            |opts, item| Ok(check_local_loose_object(item, opts.0, opts.1)),
             |batch, outcomes| record_outcomes(batch, outcomes),
         )?;
     } else {
         for item in &loose {
-            let outcome = check_local_loose_object(item, fsck_opts);
+            let outcome = check_local_loose_object(item, fsck_opts, big_file_threshold);
             record_outcomes(std::slice::from_ref(item), vec![outcome])?;
         }
     }
@@ -2030,7 +2069,7 @@ fn fsck_index_missing_blobs(
         if already_reported.contains(&entry.oid) {
             continue;
         }
-        if !matches!(odb.try_read_once(&entry.oid), Ok(Some(_))) {
+        if !matches!(odb.contains(&entry.oid), Ok(true)) {
             if promisor_promised.is_some_and(|promised| promised.contains(&entry.oid)) {
                 continue;
             }
@@ -2515,5 +2554,72 @@ mod tests {
             "{:?}",
             report.issues
         );
+    }
+
+    #[test]
+    fn fsck_streams_large_loose_blob_without_loading_whole_payload() {
+        const THRESHOLD: usize = 4096;
+        const SIZE: usize = THRESHOLD * 4;
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join(".git/config");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let prior = std::fs::read_to_string(&config_path).unwrap_or_default();
+        std::fs::write(
+            &config_path,
+            format!("{prior}\n[core]\n\tbigFileThreshold = {THRESHOLD}\n"),
+        )
+        .unwrap();
+        let blob = vec![0xABu8; SIZE];
+        repo.odb()
+            .write(crate::objects::ObjectKind::Blob, &blob)
+            .unwrap();
+        let report = fsck(
+            &repo,
+            &FsckOptions::full_repository(false),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap();
+        assert!(report.issues.is_empty(), "{:?}", report.issues);
+    }
+
+    #[test]
+    fn fsck_index_missing_blob_uses_contains_not_full_read() {
+        use crate::index::{IndexEntry, MODE_REGULAR};
+
+        let dir = TempDir::new().unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let missing = ObjectId::from_hex("abababababababababababababababababababab").unwrap();
+        let mut index = repo.load_index().expect("index");
+        index.entries_mut().push(IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid: missing,
+            flags: 0,
+            flags_extended: None,
+            path: b"ghost".to_vec(),
+            base_index_pos: 0,
+        });
+        index
+            .write(&repo.git_dir().join("index"))
+            .expect("write index");
+        let mut issues = Vec::new();
+        fsck_index_missing_blobs(&repo, &ConfigSet::new(), false, &mut issues, None)
+            .expect("index pass");
+        assert!(issues.iter().any(|i| matches!(
+            i,
+            FsckIssue::MissingObject {
+                referrer: MissingObjectReferrer::Index,
+                ..
+            }
+        )));
     }
 }

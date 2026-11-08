@@ -426,6 +426,78 @@ impl LooseStore {
         Ok(obj)
     }
 
+    /// Hash a loose object's payload while inflating, and compare the digest to `expected_oid`.
+    ///
+    /// `kind` and `size` must match the object header (call [`read_loose_object_info`] first).
+    pub(crate) fn verify_payload_hash_streaming(
+        path: &Path,
+        expected_oid: &ObjectId,
+        kind: ObjectKind,
+        size: u64,
+    ) -> Result<()> {
+        let file = fs::File::open(path).map_err(Error::Io)?;
+        let mut reader = match LoosePayloadReader::open(file) {
+            Ok(reader) => reader,
+            Err(err) => {
+                return Err(Error::wrap_loose_read_failure(
+                    *expected_oid,
+                    path.to_path_buf(),
+                    err,
+                ));
+            }
+        };
+        if reader.kind != kind {
+            return Err(Error::wrap_loose_read_failure(
+                *expected_oid,
+                path.to_path_buf(),
+                Error::Object(ObjectError::Corrupt {
+                    detail: format!(
+                        "loose object type mismatch: expected {kind:?}, got {:?}",
+                        reader.kind
+                    ),
+                }),
+            ));
+        }
+        if reader.payload_size != size {
+            return Err(Error::wrap_loose_read_failure(
+                *expected_oid,
+                path.to_path_buf(),
+                Error::Object(ObjectError::Corrupt {
+                    detail: format!(
+                        "loose object size mismatch: expected {size}, header says {}",
+                        reader.payload_size
+                    ),
+                }),
+            ));
+        }
+        let mut hasher = ObjectPayloadHasher::new(expected_oid.algo(), kind, size);
+        let mut chunk = [0u8; LOOSE_INFLATE_OUTPUT_CHUNK];
+        loop {
+            let n = match std::io::Read::read(&mut reader, &mut chunk) {
+                Ok(n) => n,
+                Err(err) => {
+                    return Err(Error::wrap_loose_read_failure(
+                        *expected_oid,
+                        path.to_path_buf(),
+                        Error::Io(err),
+                    ));
+                }
+            };
+            if n == 0 {
+                break;
+            }
+            hasher.update(&chunk[..n]);
+        }
+        let computed = hasher.finish()?;
+        if computed != *expected_oid {
+            return Err(Error::Object(ObjectError::LooseHashMismatch {
+                path: path.display().to_string(),
+                real_oid: computed.to_hex(),
+            }));
+        }
+        Ok(())
+    }
+
     /// Read `oid` unless its payload is larger than `limit` bytes, opening the file once.
     ///
     /// Inflation stops as soon as the header declares a payload larger than `limit`.
@@ -1755,5 +1827,22 @@ mod tests {
             .read(&oid)
             .expect("external loose write must be visible");
         assert_eq!(obj.data, payload);
+    }
+
+    #[test]
+    fn verify_payload_hash_streaming_matches_full_read() {
+        let (_dir, store) = temp_store();
+        let payload = vec![0xCDu8; 32 * 1024];
+        let oid =
+            WritableObjectStore::write(&store, ObjectKind::Blob, &payload, WriteOptions::default())
+                .unwrap();
+        let path = store.object_path(&oid);
+        LooseStore::verify_payload_hash_streaming(
+            &path,
+            &oid,
+            ObjectKind::Blob,
+            payload.len() as u64,
+        )
+        .expect("streaming verify");
     }
 }
