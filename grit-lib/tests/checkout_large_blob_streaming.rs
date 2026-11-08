@@ -1,6 +1,8 @@
 //! Large blobs are streamed into the work tree by restore, switch and hard reset, from loose
 //! objects, a single pack and several packs; the system `git` must see the result as clean
-//! and the repository must pass `git fsck`. Converted paths (autocrlf) are not streamed.
+//! and the repository must pass `git fsck`. Content-dependent CRLF (`core.autocrlf`) streams
+//! when the blob is binary or needs no smudge; lone-LF text still smudges without loading
+//! the blob whole.
 
 use crate::support;
 
@@ -376,6 +378,91 @@ fn corrupt_large_blob_never_leaves_a_partial_file() {
     assert!(
         leftovers.is_empty(),
         "temporary files left behind: {leftovers:?}"
+    );
+}
+
+#[test]
+fn large_binary_blob_under_autocrlf_streams_via_spool() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+    let mut blob = vec![0u8; BIG];
+    blob[0] = 0;
+    fs::write(root.join("big_zero.bin"), &blob).expect("write");
+    git(root, &["add", "big_zero.bin"]);
+    git(root, &["commit", "-qm", "binary"]);
+    git(root, &["config", "core.autocrlf", "true"]);
+
+    fs::remove_file(root.join("big_zero.bin")).expect("rm");
+    let repo = open(root);
+    repo.checkout()
+        .restore(
+            &RestoreOptions {
+                pathspecs: vec!["big_zero.bin".into()],
+                pathspec_sources: vec!["big_zero.bin".into()],
+                source: RestoreSource::Index,
+                staged: false,
+                worktree: true,
+                stage: None,
+                remerge: None,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("restore");
+    let restored = fs::read(root.join("big_zero.bin")).expect("read restored");
+    assert_eq!(restored, blob);
+    let status = git(root, &["status", "--porcelain"]);
+    assert!(
+        status.trim().is_empty(),
+        "git status after autocrlf binary restore:\n{status}"
+    );
+}
+
+#[test]
+fn large_lf_text_under_autocrlf_smudges_to_crlf() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+    let mut text = vec![b'a'; BIG];
+    for i in (0..text.len()).step_by(64) {
+        text[i] = b'\n';
+    }
+    fs::write(root.join("lines.txt"), &text).expect("write");
+    git(root, &["add", "lines.txt"]);
+    git(root, &["commit", "-qm", "lf lines"]);
+    git(root, &["config", "core.autocrlf", "true"]);
+
+    fs::remove_file(root.join("lines.txt")).expect("rm");
+    let repo = open(root);
+    repo.checkout()
+        .restore(
+            &RestoreOptions {
+                pathspecs: vec!["lines.txt".into()],
+                pathspec_sources: vec!["lines.txt".into()],
+                source: RestoreSource::Index,
+                staged: false,
+                worktree: true,
+                stage: None,
+                remerge: None,
+            },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("restore");
+
+    let restored = fs::read(root.join("lines.txt")).expect("read");
+    let crlf_count = restored.windows(2).filter(|w| *w == b"\r\n").count();
+    assert!(crlf_count > 0, "expected CRLF smudge");
+    assert!(restored.len() > text.len(), "smudge should grow the file");
+    let status = git(root, &["status", "--porcelain"]);
+    assert!(
+        status.trim().is_empty(),
+        "git status after autocrlf LF smudge:\n{status}"
     );
 }
 
