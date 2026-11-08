@@ -2982,7 +2982,7 @@ Criterion bench **`oid_hashmap`** (`cargo bench -p grit-lib --bench oid_hashmap`
 
 Headline census on `dist` builds in one sitting (12–20 hyperfine samples per row, `--offline`). **Base** grit is `f52021f4cb` (last commit before [`RepositoryOptions::with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store), parent of the pluggable-store plan). **After** is `90f552da7e` on the same VM with `--baseline-grit` timing the base binary on every headline row. Reports: `pluggable-store-7249-before.json` → `pluggable-store-7249-after.json`.
 
-**Sign-off:** wall-time regressions vs base grit stayed within ±2% on most headlines; **peak RSS rose more than 2% on nine rows**, led by `status/clean@synth-10k` (+15% vs base grit). That blocks the ±2% RSS gate until the status working-set is trimmed (likely post-primary-store dispatch / session-cache routing). Time edges: `stash/push-pop@synth-10k` (+2.8%), `show/head@git-git` (+2.2%), `pull/rebase@synth-10k` (+2.1%).
+**Sign-off (2026-11-08 rerun):** Reviewer blockers **`stash/push-pop@synth-10k` wall time** and **`status/clean@synth-10k` peak RSS** are within ±2% after matching baseline-grit sample count to the current grit series and deferring checkout delete-spool creation on journal-only paths. **`diff/worktree@synth-10k`**, **`switch/branch@synth-10k`**, and **`merge/clean@synth-10k`** remain above the RSS gate in isolated reruns (~+7%, +2%, +4% vs base grit); the full 22-row census can still show wider RSS spread when scenarios run back-to-back. Criterion matrix (`odb_read`, `odb_backend`, …) is still outstanding.
 
 | Headline | git ms / MB | base ms / MB | after ms / MB | after vs base time | after vs base RSS |
 | --- | ---: | ---: | ---: | ---: | ---: |
