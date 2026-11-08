@@ -81,6 +81,8 @@ fn remove_checkout_files_parallel_cancellable(
     let mut deleted_abs_paths = Vec::new();
     let wt = work_tree.to_path_buf();
     let (chunks, options) = cancellable_chunks(paths, options);
+    // Removing files contends in the kernel: lease workers from the filesystem budget.
+    let _filesystem = crate::parallel::FilesystemWork::enter();
     for chunk in chunks {
         crate::progress::poll_cancel(progress, cancel)?;
         let rollback = delete_rollback.clone_handle();
@@ -145,6 +147,8 @@ pub(crate) fn remove_created_checkout_paths(
         .thread_policy()
         .resolve(ParallelOp::Checkout, config.as_ref());
     let (chunks, options) = cancellable_chunks(paths, options);
+    // Removing files contends in the kernel: lease workers from the filesystem budget.
+    let _filesystem = crate::parallel::FilesystemWork::enter();
     for chunk in chunks {
         match try_par_map(chunk, options, 0, |rel| remove_one(rel)) {
             Ok(abs_paths) => removed_abs.extend(abs_paths),
@@ -511,6 +515,8 @@ fn remove_wholesale_dirs_parallel_cancellable(
     }
     let wt = work_tree.to_path_buf();
     let (chunks, options) = cancellable_chunks_cancel_friendly(dirs, options);
+    // Removing files contends in the kernel: lease workers from the filesystem budget.
+    let _filesystem = crate::parallel::FilesystemWork::enter();
     for chunk in chunks {
         crate::progress::poll_cancel(progress, cancel)?;
         for dir in chunk {

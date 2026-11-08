@@ -447,6 +447,8 @@ fn flush_prepared_writes_parallel(
 ) -> Result<()> {
     let work_tree = work_tree.to_path_buf();
     let parent_dirs = LeadingDirCache::with_ready_from(parent_dirs);
+    // Creating files contends in the kernel: lease workers from the filesystem budget.
+    let _filesystem = crate::parallel::FilesystemWork::enter();
     let entries = try_par_map_with_local(
         prepared,
         options,
