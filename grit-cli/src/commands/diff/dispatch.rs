@@ -46,10 +46,7 @@ pub fn execute(
             } else {
                 ExitStatus::Success
             };
-            if !quiet
-                && !patch_text
-                && !(outcome.body_streamed && opts.mode == OutputMode::Json)
-            {
+            if !quiet && !patch_text && !(outcome.body_streamed && opts.mode == OutputMode::Json) {
                 output::emit(outcome, opts, ctx)?;
             }
             Ok(status)
