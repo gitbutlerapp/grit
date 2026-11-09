@@ -5,8 +5,9 @@ Compares rustdoc JSON (pinned nightly, ``http-ureq`` feature; JSON at
 ``target/api-ratchet-doc/grit_lib.json``) and ``grit-lib/public-api.txt``
 against ``grit-lib/api-ratchet.toml``.
 
-Subcommands: ``check`` (CI gate), ``update`` (rewrite the baseline) and ``report``
-(consolidation offenders grouped by top-level public module; ``--module diff`` filters).
+Subcommands: ``check`` (CI gate), ``update`` (rewrite the baseline), ``report``
+(consolidation offenders grouped by top-level public module; ``--module diff`` filters),
+and ``audit`` (regenerate or check the Audit section in ``grit-lib/API.md``).
 """
 
 from __future__ import annotations
@@ -29,7 +30,10 @@ from public_fn_coverage import ensure_rustdoc_json
 ROOT = Path(__file__).resolve().parents[1]
 GRIT_LIB = ROOT / "grit-lib"
 PUBLIC_API_TXT = GRIT_LIB / "public-api.txt"
+API_MD_PATH = GRIT_LIB / "API.md"
 BASELINE_PATH = GRIT_LIB / "api-ratchet.toml"
+AUDIT_BEGIN = "<!-- api-audit:begin -->"
+AUDIT_END = "<!-- api-audit:end -->"
 # Isolated from `target/doc/grit_lib.json` (coverage, other tools) and from the
 # hidden-items rustdoc used by `public_api.py` check-test-items so timestamp
 # freshness cannot latch the wrong feature set or RUSTDOCFLAGS.
@@ -73,6 +77,39 @@ REPORT_METRIC_KEYS = (
     "pub_fn_two_plus_bare_bool",
     "pub_free_fn_repository_first",
     "pub_free_fn_git_dir_path_first",
+)
+
+CONSUMER_PATHS = (
+    "grit-cli",
+    "grit-utils",
+    "grit-examples",
+    "grit-protocol",
+    "grit-http-server",
+    "grit-test-support",
+    "grit-lib/tests",
+)
+
+# Offender lists included in the generated audit (counts-only metrics omitted).
+RESIDUAL_METRIC_KEYS = tuple(
+    key
+    for key in METRIC_KEYS
+    if key
+    not in (
+        "public_api_lines",
+        "pub_repo_constructors",
+        "umbrella_error_variants",
+        "error_message_construction_sites",
+    )
+)
+
+PUBLIC_MOD_RE = re.compile(r"^pub mod grit_lib::([a-z_0-9]+)$")
+PUBLIC_FN_MOD_RE = re.compile(r"^pub fn grit_lib::([a-z_0-9]+)::([^(\s]+)\(")
+PUBLIC_API_REPO_FIRST_RE = re.compile(
+    r"^pub fn grit_lib::([a-z_0-9]+)::[^(\s]+\("
+    r"(?:&grit_lib::repo::Repository|grit_lib::repo::Repository)",
+)
+REPOSITORY_ACCESSOR_RE = re.compile(
+    r"^pub fn grit_lib::repo::Repository::([a-z_0-9]+)\(&self\) -> (.+)$",
 )
 
 CANONICAL_MODULES_PATH = GRIT_LIB / "canonical-modules.toml"
@@ -2236,6 +2273,281 @@ def cmd_update(args: argparse.Namespace) -> int:
     return 0
 
 
+def load_baseline_meta(path: Path = BASELINE_PATH) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    meta = tomllib.loads(path.read_text(encoding="utf-8")).get("meta", {})
+    return {str(k): str(v) for k, v in meta.items()} if isinstance(meta, dict) else {}
+
+
+def public_api_nonempty_lines(public_api_text: str) -> list[str]:
+    return [line for line in public_api_text.splitlines() if line.strip()]
+
+
+def top_level_module_spans(lines: list[str]) -> list[tuple[str, int, int]]:
+    """``(module_name, start_line_index, end_line_index)`` from ``public-api.txt``."""
+    mods: list[tuple[str, int]] = []
+    for index, line in enumerate(lines):
+        match = PUBLIC_MOD_RE.match(line)
+        if match:
+            mods.append((match.group(1), index))
+    spans: list[tuple[str, int, int]] = []
+    for index, (name, start) in enumerate(mods):
+        end = mods[index + 1][1] if index + 1 < len(mods) else len(lines)
+        spans.append((name, start, end))
+    return spans
+
+
+def approx_module_repo_first_and_with(lines: list[str], module: str, start: int, end: int) -> tuple[int, int]:
+    repo_first = 0
+    with_in = 0
+    for line in lines[start:end]:
+        fn_match = PUBLIC_FN_MOD_RE.match(line)
+        if not fn_match or fn_match.group(1) != module:
+            continue
+        if PUBLIC_API_REPO_FIRST_RE.match(line):
+            repo_first += 1
+        if "_with_" in fn_match.group(2):
+            with_in += 1
+    return repo_first, with_in
+
+
+def rg_file_count(pattern: str, paths: Iterable[str]) -> int:
+    """Number of distinct files under ``paths`` that match ``pattern`` (ripgrep)."""
+    files: set[str] = set()
+    for tree in paths:
+        target = ROOT / tree
+        if not target.exists():
+            continue
+        result = subprocess.run(
+            ["rg", "-l", pattern, str(target)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            files.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+    return len(files)
+
+
+def external_module_files(module: str) -> int:
+    return rg_file_count(f"grit_lib::{module}", CONSUMER_PATHS)
+
+
+def external_accessor_files(accessor: str) -> int:
+    return rg_file_count(rf"\.{re.escape(accessor)}\(", CONSUMER_PATHS)
+
+
+def is_repository_handle_accessor(return_type: str) -> bool:
+    """True when ``Repository::accessor(&self)`` returns a domain handle, not a scalar/path."""
+    lowered = return_type.strip()
+    if lowered in {"bool", "i64", "u64", "usize"}:
+        return False
+    if "path::Path" in lowered or lowered.startswith("&str"):
+        return False
+    if lowered.startswith("core::option::Option<&str"):
+        return False
+    if "::" in lowered or "grit_lib::" in lowered:
+        return True
+    return False
+
+
+def shorten_rust_type(display: str) -> str:
+    """Stable short label for accessor return types in audit tables."""
+    display = display.strip()
+    if "grit_lib::" in display:
+        idx = display.index("grit_lib::")
+        return display[idx:]
+    return display
+
+
+def repository_accessors(public_api_lines: list[str]) -> list[tuple[str, str]]:
+    """``(accessor, return_type)`` for public ``Repository`` borrows that return handles."""
+    accessors: list[tuple[str, str]] = []
+    for line in public_api_lines:
+        match = REPOSITORY_ACCESSOR_RE.match(line)
+        if not match:
+            continue
+        name, ret = match.group(1), match.group(2)
+        if not is_repository_handle_accessor(ret):
+            continue
+        accessors.append((name, shorten_rust_type(ret)))
+    return accessors
+
+
+def count_type_mentions(public_api_lines: list[str], type_fragment: str) -> int:
+    return sum(1 for line in public_api_lines if type_fragment in line)
+
+
+def module_offender_totals(snapshot: RatchetSnapshot) -> dict[str, int]:
+    grouped = group_offenders_by_module(snapshot, REPORT_METRIC_KEYS)
+    return {module: sum(len(offs) for offs in by_key.values()) for module, by_key in grouped.items()}
+
+
+def collect_residual_rows(snapshot: RatchetSnapshot) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    for key in RESIDUAL_METRIC_KEYS:
+        metric = snapshot.metrics[key]
+        for offender in sorted(metric.offenders):
+            rows.append((key, offender))
+    rows.sort(key=lambda pair: (pair[0], pair[1]))
+    return rows
+
+
+def render_audit_markdown(
+    *,
+    snapshot: RatchetSnapshot,
+    public_api_lines: list[str],
+    public_api_file_lines: int,
+    meta: dict[str, str],
+) -> str:
+    """Markdown body for ``API.md`` between ``api-audit`` markers (deterministic)."""
+    api_line_count = len(public_api_lines)
+    updated = meta.get("updated", "unknown")
+    lines: list[str] = [
+        f"Snapshot: [`api-ratchet.toml`](api-ratchet.toml) `meta.updated` **{updated}**; "
+        f"[`public-api.txt`](public-api.txt) **{api_line_count:,}** non-empty lines "
+        f"(`wc -l` on the file: **{public_api_file_lines:,}**).",
+        "",
+        "Regenerate this block with `make api-audit`; CI runs `make api-audit-check` "
+        "in the **public-api** job next to `make api-ratchet-check`.",
+        "",
+        "### Summary — ratchet counts",
+        "",
+        "| Metric | Value |",
+        "| --- | ---: |",
+    ]
+    for key in METRIC_KEYS:
+        lines.append(f"| `{key}` | {snapshot.metrics[key].count:,} |")
+
+    offender_by_module = module_offender_totals(snapshot)
+    lines.extend(
+        [
+            "",
+            "### Top-level public modules",
+            "",
+            "Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/public-api.txt`. "
+            "**External files** counts files under consumer trees that reference "
+            "`grit_lib::<module>` (`rg -l`). **Offenders** is the consolidation-total from "
+            "`make api-ratchet-report` metrics in that module; **repo-first** / **`_with_`** "
+            "are approximated from `public-api.txt` in the module span.",
+            "",
+            "| Module | Lines | External files | Offenders | repo-first | `_with_` |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for name, start, end in top_level_module_spans(public_api_lines):
+        span_lines = end - start
+        repo_first, with_in = approx_module_repo_first_and_with(public_api_lines, name, start, end)
+        offenders = offender_by_module.get(name, 0)
+        external = external_module_files(name)
+        lines.append(
+            f"| `{name}` | {span_lines:,} | {external:,} | {offenders:,} | {repo_first:,} | {with_in:,} |",
+        )
+
+    lines.extend(
+        [
+            "",
+            "### `Repository` handle accessors",
+            "",
+            "Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.txt` "
+            "whose return type is a handle (not `Path`, `str`, or a scalar). **Lines** counts "
+            "public-api entries mentioning the shortened return type. **External** counts consumer "
+            "files calling `.<accessor>(` (`rg -l`).",
+            "",
+            "| Accessor | Return type | Lines | External `.accessor()` files |",
+            "| --- | --- | ---: | ---: |",
+        ]
+    )
+    for accessor, ret_type in sorted(repository_accessors(public_api_lines), key=lambda row: row[0]):
+        type_needle = ret_type.split("<", 1)[0]
+        line_count = count_type_mentions(public_api_lines, type_needle)
+        external = external_accessor_files(accessor)
+        lines.append(f"| `{accessor}` | `{ret_type}` | {line_count:,} | {external:,} |")
+
+    lines.extend(
+        [
+            "",
+            "### Residuals frozen in 0.6",
+            "",
+            "Remaining ratchet offenders at the snapshot above. These counts may only go down "
+            "until **0.6.0** freezes the supported surface; see [`api-ratchet.toml`](api-ratchet.toml).",
+            "",
+            "| Metric | Offender |",
+            "| --- | --- |",
+        ]
+    )
+    for metric, offender in collect_residual_rows(snapshot):
+        lines.append(f"| `{metric}` | `{offender}` |")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def read_audit_marked_section(path: Path = API_MD_PATH) -> str | None:
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    begin = text.find(AUDIT_BEGIN)
+    end = text.find(AUDIT_END)
+    if begin < 0 or end < 0 or end <= begin:
+        return None
+    body_start = begin + len(AUDIT_BEGIN)
+    return text[body_start:end].lstrip("\n")
+
+
+def write_audit_marked_section(body: str, path: Path = API_MD_PATH) -> None:
+    text = path.read_text(encoding="utf-8")
+    begin = text.find(AUDIT_BEGIN)
+    end = text.find(AUDIT_END)
+    if begin < 0 or end < 0 or end <= begin:
+        raise ValueError(f"missing {AUDIT_BEGIN} / {AUDIT_END} in {path}")
+    body_start = begin + len(AUDIT_BEGIN)
+    end_marker_start = end
+    new_text = text[:body_start] + "\n" + body.rstrip() + "\n" + text[end_marker_start:]
+    path.write_text(new_text, encoding="utf-8")
+
+
+def audit_snapshot(
+    args: argparse.Namespace,
+) -> tuple[RatchetSnapshot, list[str], int, dict[str, str]]:
+    pins = parse_pins()
+    ensure_inputs(nightly=pins["nightly_date"], rustdoc_json=args.rustdoc_json)
+    payload = load_rustdoc(args.rustdoc_json)
+    public_api_text = PUBLIC_API_TXT.read_text(encoding="utf-8")
+    public_api_lines = public_api_nonempty_lines(public_api_text)
+    file_lines = len(public_api_text.splitlines())
+    snapshot = compute_metrics(public_api_text=public_api_text, payload=payload)
+    meta = load_baseline_meta()
+    return snapshot, public_api_lines, file_lines, meta
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    snapshot, public_api_lines, file_lines, meta = audit_snapshot(args)
+    body = render_audit_markdown(
+        snapshot=snapshot,
+        public_api_lines=public_api_lines,
+        public_api_file_lines=file_lines,
+        meta=meta,
+    )
+    if args.audit_check:
+        committed = read_audit_marked_section()
+        if committed is None:
+            print(f"error: missing audit markers in {API_MD_PATH}", file=sys.stderr)
+            return 1
+        if committed != body:
+            print("api-audit check failed: API.md audit section drifted", file=sys.stderr)
+            print("run `make api-audit` and commit grit-lib/API.md", file=sys.stderr)
+            return 1
+        print("api-audit: section matches generator output.")
+        return 0
+    if args.audit_write:
+        write_audit_marked_section(body)
+        print(f"Wrote audit section in {API_MD_PATH.relative_to(ROOT)}")
+        return 0
+    sys.stdout.write(body)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="grit-lib API quality ratchet")
     parser.add_argument(
@@ -2255,6 +2567,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--module",
         help="only show one top-level module (for example `diff` or `porcelain`)",
     )
+    audit = sub.add_parser(
+        "audit",
+        help="render API audit Markdown (stdout), or check/write grit-lib/API.md markers",
+    )
+    audit.add_argument(
+        "--check",
+        dest="audit_check",
+        action="store_true",
+        help="fail if API.md audit markers drift from generator output",
+    )
+    audit.add_argument(
+        "--write",
+        dest="audit_write",
+        action="store_true",
+        help="rewrite the audit block in grit-lib/API.md",
+    )
     return parser
 
 
@@ -2267,6 +2595,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_update(args)
     if args.command == "report":
         return cmd_report(args)
+    if args.command == "audit":
+        return cmd_audit(args)
     parser.error(f"unknown command {args.command!r}")
     return 2
 

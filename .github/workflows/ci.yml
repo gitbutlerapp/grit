@@ -198,6 +198,7 @@ jobs:
 
       - run: make public-api-check
       - run: make api-ratchet-check
+      - run: make api-audit-check
 
   # Required check: blocks merges on breaking grit-lib API changes (additive-only within 0.6.x).
   semver-check:

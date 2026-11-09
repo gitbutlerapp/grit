@@ -275,6 +275,22 @@ make api-ratchet-report MODULE=diff # one module
 
 The report groups the `_with_`, `too_many_arguments`, two-bool, `&Repository`-first and git-dir-first offenders by public module (see **Canonical forms** in [`grit-lib/API.md`](grit-lib/API.md#canonical-forms)). It is informational and never fails.
 
+## API audit
+
+The **`audit`** subcommand in [`scripts/api_ratchet.py`](scripts/api_ratchet.py) renders the [Audit](grit-lib/API.md#audit) tables in [`grit-lib/API.md`](grit-lib/API.md) from the same rustdoc JSON and `public-api.txt` inputs as the ratchet. Regenerate after API changes that move module spans, accessor usage, or offender lists:
+
+```bash
+make api-audit
+```
+
+**Check locally (same as CI public-api job after ratchet):**
+
+```bash
+make api-audit-check
+```
+
+The check fails if the content between `<!-- api-audit:begin -->` and `<!-- api-audit:end -->` drifts from the generator output.
+
 Unit tests: `python3 -m unittest scripts/tests/test_api_ratchet.py` (also covered by the **scripts** CI job).
 
 | Metric | What increases the count |
@@ -316,7 +332,7 @@ Pushes and pull requests run only the fast jobs, the merge status. The nightly j
 | **fmt** | `cargo fmt --all --check` | `cargo fmt --all --check` |
 | **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **rustdoc** | Workspace API docs with warnings denied (see below) | `make doc` |
-| **public-api** | `make public-api-check` then `make api-ratchet-check` (`cargo public-api` on pinned nightly; diff vs `grit-lib/public-api.txt`; API quality counts vs `grit-lib/api-ratchet.toml`) | `make public-api-check` and `make api-ratchet-check` |
+| **public-api** | `make public-api-check`, `make api-ratchet-check`, and `make api-audit-check` (`cargo public-api` on pinned nightly; diff vs `grit-lib/public-api.txt`; API quality counts vs `grit-lib/api-ratchet.toml`; audit tables vs `grit-lib/API.md`) | `make public-api-check`, `make api-ratchet-check`, and `make api-audit-check` |
 | **semver-check** | `make semver-check` (`cargo-semver-checks`; baseline: env, then v0.6+ tag, pin, else latest `v*`; `--release-type minor` within 0.6.x) | `make semver-check` |
 | **coverage** | Nightly and on demand only: `make coverage` (llvm-cov over every `grit-lib` test, `full-tests` included, floor ratchet) | `make coverage` |
 | **test** | The fast run: `cargo nextest run --workspace --profile ci` (every test binary, in parallel, without stopping at the first failure) and `cargo test --workspace --doc` | `make test` |

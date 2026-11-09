@@ -2046,5 +2046,69 @@ class DocExampleFreeFnCallTests(unittest.TestCase):
         self.assertEqual(metric.count, 3)
 
 
+class AuditRenderTests(unittest.TestCase):
+    def test_render_audit_markdown_summary_and_modules(self) -> None:
+        snap = _report_snapshot()
+        snap.metrics["public_api_lines"] = ar.MetricResult(4)
+        lines = [
+            "pub mod grit_lib::alpha",
+            "pub fn grit_lib::alpha::open(&grit_lib::repo::Repository)",
+            "pub mod grit_lib::beta",
+            "pub fn grit_lib::beta::run()",
+        ]
+        body = ar.render_audit_markdown(
+            snapshot=snap,
+            public_api_lines=lines,
+            public_api_file_lines=len(lines),
+            meta={"updated": "2026-11-09"},
+        )
+        self.assertIn("### Summary — ratchet counts", body)
+        self.assertIn("| `public_api_lines` | 4 |", body)
+        self.assertIn("### Top-level public modules", body)
+        self.assertIn("| `alpha` | 2 |", body)
+        self.assertIn("Residuals frozen in 0.6", body)
+
+    def test_audit_markers_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "API.md"
+            body = "line one\nline two\n"
+            path.write_text(
+                f"## Audit\n\n{ar.AUDIT_BEGIN}\nold\n{ar.AUDIT_END}\n",
+                encoding="utf-8",
+            )
+            ar.write_audit_marked_section(body, path=path)
+            self.assertEqual(ar.read_audit_marked_section(path=path), body)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn(f"{ar.AUDIT_BEGIN}\nline one", text)
+
+    def test_audit_check_detects_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            api_md = Path(tmp) / "API.md"
+            api_md.write_text(
+                f"## Audit\n\n{ar.AUDIT_BEGIN}\nstale\n{ar.AUDIT_END}\n",
+                encoding="utf-8",
+            )
+            snap = ar.RatchetSnapshot(metrics={key: ar.MetricResult(0) for key in ar.METRIC_KEYS})
+            fresh = ar.render_audit_markdown(
+                snapshot=snap,
+                public_api_lines=["x"],
+                public_api_file_lines=1,
+                meta={},
+            )
+            self.assertNotEqual(ar.read_audit_marked_section(path=api_md), fresh)
+
+    def test_audit_output_is_deterministic(self) -> None:
+        snap = _report_snapshot()
+        kwargs = {
+            "snapshot": snap,
+            "public_api_lines": ["pub mod grit_lib::diff", "pub fn grit_lib::diff::f()"],
+            "public_api_file_lines": 2,
+            "meta": {"updated": "2026-01-01"},
+        }
+        first = ar.render_audit_markdown(**kwargs)
+        second = ar.render_audit_markdown(**kwargs)
+        self.assertEqual(first, second)
+
+
 if __name__ == "__main__":
     unittest.main()

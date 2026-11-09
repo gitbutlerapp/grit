@@ -110,6 +110,12 @@ api-ratchet:
 api-ratchet-check:
 	python3 scripts/api_ratchet.py check
 
+api-audit:
+	python3 scripts/api_ratchet.py audit --write
+
+api-audit-check:
+	python3 scripts/api_ratchet.py audit --check
+
 cli-layer-ratchet:
 	python3 scripts/cli_layer_stats.py update
 
