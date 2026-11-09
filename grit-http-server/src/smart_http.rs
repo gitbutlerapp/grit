@@ -318,6 +318,7 @@ pub(crate) async fn rpc_holding_with_cancel<H: Send + 'static>(
                 session,
                 idle_timeout,
                 hold,
+                cancel_guard.take(),
             )
             .await;
             (
@@ -1259,6 +1260,7 @@ async fn stream_upload_pack<H: Send + 'static>(
     session: grit_protocol::ServeSession,
     idle_timeout: Duration,
     hold: H,
+    cancel_guard: Option<crate::rpc_cancel::RpcCancelGuard>,
 ) -> (
     Response<Body>,
     Option<tokio::sync::oneshot::Receiver<grit_lib::remote::serve::UploadOutcome>>,
@@ -1269,6 +1271,12 @@ async fn stream_upload_pack<H: Send + 'static>(
     let task = tokio::task::spawn_blocking(move || {
         let _guard = PackBlockingGuard::enter();
         let _hold = hold;
+        let mut rpc_finished = cancel_guard;
+        let finish_rpc = |guard: &mut Option<crate::rpc_cancel::RpcCancelGuard>| {
+            if let Some(g) = guard.take() {
+                g.mark_finished();
+            }
+        };
         let mut request = fetch_request_body(raw, encoding);
         let mut out = ChannelWriter::new(tx, idle_timeout);
         let result = grit_protocol::upload_pack::stateless_rpc_to_reader_with_session(
@@ -1283,12 +1291,15 @@ async fn stream_upload_pack<H: Send + 'static>(
         match result {
             Ok(outcome) => {
                 let _ = outcome_tx.send(outcome);
-                out.send_pending().map_err(grit_protocol::Error::Io)
+                let flush = out.send_pending().map_err(grit_protocol::Error::Io);
+                finish_rpc(&mut rpc_finished);
+                flush
             }
             Err(e) => {
                 if out.sent {
                     out.signal_failure(&format!("upload-pack failed: {e}"));
                 }
+                finish_rpc(&mut rpc_finished);
                 Err(e)
             }
         }

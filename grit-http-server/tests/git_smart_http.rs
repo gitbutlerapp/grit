@@ -803,6 +803,235 @@ fn v2_fetch_pkt(buf: &mut String, line: &str) {
     buf.push_str(&payload);
 }
 
+/// Stateless v0 upload-pack body: `want` (with caps), flush, `done`.
+fn stateless_v0_fetch_body(oid: &str) -> Vec<u8> {
+    use grit_lib::remote::pkt_line;
+    let mut body = Vec::new();
+    let caps = " multi_ack side-band-64k thin-pack ofs-delta";
+    pkt_line::write_line_to_vec(&mut body, &format!("want {oid}{caps}")).expect("want");
+    body.extend_from_slice(b"0000");
+    pkt_line::write_line_to_vec(&mut body, "done").expect("done");
+    body
+}
+
+fn decode_http_chunked(mut data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let line_end = data.iter().position(|&b| b == b'\n').expect("chunked line");
+        let line = std::str::from_utf8(&data[..line_end])
+            .expect("chunk size utf8")
+            .trim_end_matches('\r');
+        let size = usize::from_str_radix(line, 16).expect("chunk size hex");
+        data = &data[line_end + 1..];
+        if size == 0 {
+            break;
+        }
+        out.extend_from_slice(&data[..size]);
+        data = &data[size + 2..];
+    }
+    out
+}
+
+fn post_upload_pack_response(
+    port: u16,
+    path: &str,
+    body: &[u8],
+    git_protocol: &str,
+) -> (u16, Vec<u8>) {
+    use std::io::{Read, Write};
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .expect("read timeout");
+    let head = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+         Content-Type: application/x-git-upload-pack-request\r\n\
+         Git-Protocol: {git_protocol}\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).expect("write head");
+    stream.write_all(body).expect("write body");
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).expect("read response");
+    let header_end = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("response headers");
+    let headers = String::from_utf8_lossy(&raw[..header_end]).into_owned();
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse().ok())
+        .expect("HTTP status");
+    let mut body_bytes = raw[header_end + 4..].to_vec();
+    if headers
+        .to_ascii_lowercase()
+        .contains("transfer-encoding: chunked")
+    {
+        body_bytes = decode_http_chunked(&body_bytes);
+    }
+    (status, body_bytes)
+}
+
+/// Band 1 payloads from a sideband-encoded upload-pack result.
+fn sideband_pack_bytes(sideband: &[u8]) -> Vec<u8> {
+    let mut pack = Vec::new();
+    let mut i = 0;
+    while i + 4 <= sideband.len() {
+        let len = usize::from_str_radix(
+            std::str::from_utf8(&sideband[i..i + 4]).expect("pkt-len utf8"),
+            16,
+        )
+        .expect("pkt-len hex");
+        if len == 0 {
+            break;
+        }
+        let end = i + len;
+        if end > sideband.len() {
+            break;
+        }
+        let payload = &sideband[i + 4..end];
+        if payload.first() == Some(&1) {
+            pack.extend_from_slice(&payload[1..]);
+        }
+        i = end;
+    }
+    pack
+}
+
+fn git_index_pack_accepts_pack(pack: &[u8]) {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = Command::new("git")
+        .args(["index-pack", "--stdin", "--strict", "--fix-thin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn git index-pack");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(pack)
+        .expect("write pack");
+    let out = child.wait_with_output().expect("wait index-pack");
+    assert!(
+        out.status.success(),
+        "git index-pack rejected pack: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Two incompressible ~300 KiB blobs through protocol v2 fetch must stream the
+/// full pack (regression for issue #2568: RpcCancelGuard cancelled upload-pack
+/// while the HTTP body was still streaming).
+#[test]
+fn protocol_v2_fetch_two_large_blobs_streams_full_pack() {
+    let server_bin = require_binary("grit-http-server");
+
+    const BLOB_SIZE: usize = 300_000;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = root.join("project.git");
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", bare.to_str().expect("utf8 path")],
+    );
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main", "."]);
+    for i in 1..=2 {
+        std::fs::write(
+            work.join(format!("b{i}.bin")),
+            pseudo_random_bytes(BLOB_SIZE, 0xcafe_babe + i as u64),
+        )
+        .unwrap();
+    }
+    git(&work, &["add", "-A"]);
+    git(&work, &["commit", "-q", "-m", "two large blobs"]);
+    git(
+        &work,
+        &["push", "-q", bare.to_str().expect("utf8 path"), "main"],
+    );
+    let oid = rev_parse(&bare, "refs/heads/main");
+
+    let port = require_port();
+    let child = spawn_server(&server_bin, &root, port, None);
+    let _guard = ServerGuard(child);
+    assert!(wait_ready(port), "grit-http-server ready on {port}");
+
+    let request = stateless_v0_fetch_body(&oid);
+    let (status, http_body) =
+        post_upload_pack_response(port, "/project.git/git-upload-pack", &request, "version=0");
+    assert_eq!(status, 200, "upload-pack HTTP status");
+    assert!(
+        !http_body.is_empty(),
+        "upload-pack response must not be truncated"
+    );
+
+    let options = grit_protocol::repository_options_from_process();
+    let extensions = grit_protocol::Extensions::default();
+    let session = grit_protocol::ServeSession::none();
+    let mut expected = Vec::new();
+    let mut req = std::io::Cursor::new(request);
+    grit_protocol::upload_pack::stateless_rpc_to_reader_with_session(
+        &bare,
+        &mut req,
+        Some(0),
+        &options,
+        &extensions,
+        &mut expected,
+        &session,
+    )
+    .expect("in-process upload-pack");
+    assert_eq!(
+        http_body.len(),
+        expected.len(),
+        "HTTP body must match in-process upload-pack output"
+    );
+    assert_eq!(
+        http_body, expected,
+        "HTTP body bytes must match upload-pack"
+    );
+
+    let pack = sideband_pack_bytes(&http_body);
+    assert!(
+        pack.starts_with(b"PACK"),
+        "sideband payload must contain a pack file"
+    );
+    git_index_pack_accepts_pack(&pack);
+
+    let url = format!("http://127.0.0.1:{port}/project.git");
+    let clone_dir = tmp.path().join("clone");
+    let clone_out = git_output(
+        tmp.path(),
+        &[
+            "-c",
+            "protocol.version=2",
+            "clone",
+            "-q",
+            "-b",
+            "main",
+            url.as_str(),
+            clone_dir.to_str().expect("utf8"),
+        ],
+    );
+    assert!(
+        clone_out.status.success(),
+        "protocol v2 clone failed: {}",
+        String::from_utf8_lossy(&clone_out.stderr)
+    );
+    assert!(git_ok(&clone_dir, &["fsck", "--strict"]));
+    assert_eq!(rev_parse(&clone_dir, "HEAD"), oid);
+}
+
 #[test]
 fn protocol_v2_fetch_body_over_limit_returns_http_413() {
     let server_bin = require_binary("grit-http-server");

@@ -1094,14 +1094,18 @@ impl grit_lib::remote::HttpClientFactory for NoHttp {
         &self,
         _: &grit_lib::config::ConfigSet,
     ) -> grit_lib::error::Result<Box<dyn grit_lib::remote::transport::http::HttpClient>> {
-        Err(grit_lib::remote::RemoteError::UnsupportedScheme)
+        Err(grit_lib::error::Error::Remote(
+            grit_lib::remote::RemoteError::UnsupportedScheme,
+        ))
     }
 
     fn create_for_preflight(
         &self,
         _: &grit_lib::config::ConfigSet,
     ) -> grit_lib::error::Result<Box<dyn grit_lib::remote::transport::http::HttpClient>> {
-        Err(grit_lib::remote::RemoteError::UnsupportedScheme)
+        Err(grit_lib::error::Error::Remote(
+            grit_lib::remote::RemoteError::UnsupportedScheme,
+        ))
     }
 }
 
