@@ -2,11 +2,10 @@
 
 use grit_lib::diff::structured::StructuredLineKind;
 use grit_lib::diff::DiffOptions;
-use grit_lib::diff::LineStat;
 use grit_lib::diff::{
-    annotate_structured_hunks, presentation_hunks_from_file_change, presentation_hunks_from_listed,
-    presentation_hunks_from_tree, AnnotatedStructuredHunk, DiffDetail, DiffSide, FileChange,
-    ListedFileDiff, TreeDiffStructured,
+    annotate_structured_hunks, line_stat_for_target_file, presentation_hunks_from_file_change,
+    presentation_hunks_from_listed, presentation_hunks_from_tree, AnnotatedStructuredHunk,
+    DiffDetail, DiffSide, FileChange, ListedFileDiff, TreeDiffStructured,
 };
 
 use super::{FileDiff, Hunk, Line, LineKind, LineStatJson, Segment};
@@ -164,15 +163,7 @@ pub fn cli_file_from_file_change(
 }
 
 pub fn cli_file_from_lib(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDiff {
-    let stat = if f.binary {
-        None
-    } else if detail == DiffDetail::Stat {
-        f.line_stat
-            .map(Into::into)
-            .or_else(|| Some(LineStat::from_hunks(&f.hunks).into()))
-    } else {
-        None
-    };
+    let stat = line_stat_for_target_file(&f, detail).map(LineStatJson::from);
     let hunks = if detail == DiffDetail::Patch {
         Some(cli_hunks_from_annotated(annotate_structured_hunks(
             DiffSide::Other,

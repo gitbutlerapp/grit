@@ -93,9 +93,9 @@ pub use patch_log::{
 };
 pub use pickaxe::{Pickaxe, PickaxeError, PickaxeKind};
 pub use presentation::{
-    annotate_structured_hunks, include_file_change_in_patch, presentation_hunks_from_file_change,
-    presentation_hunks_from_listed, presentation_hunks_from_tree,
-    should_report_inexact_rename_skipped, AnnotatedStructuredHunk,
+    annotate_structured_hunks, include_file_change_in_patch, line_stat_for_target_file,
+    presentation_hunks_from_file_change, presentation_hunks_from_listed,
+    presentation_hunks_from_tree, should_report_inexact_rename_skipped, AnnotatedStructuredHunk,
 };
 pub use stat::{DiffStat, FileStat, StatBar};
 pub use targets::HunkDiffBundle;
