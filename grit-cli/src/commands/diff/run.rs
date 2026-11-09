@@ -14,12 +14,8 @@
 //! intra-line word highlights — no `+`/`-` patch markers. Color is emitted only
 //! on a TTY (honoring `NO_COLOR`); piped output is plain text with `+`/`-`.
 
-use super::convert::{
-    cli_file_from_file_change, cli_file_from_lib, cli_file_from_tree, map_listed_file,
-};
-use super::{
-    DiffFormatArgs, DiffOutcome, DiffRunContext, DiffRunOptions, DiffTotalsJson, PatchBodies,
-};
+use super::convert::{cli_file_from_file_change, cli_file_from_lib, map_listed_file};
+use super::{DiffFormatArgs, DiffOutcome, DiffRunOptions, DiffTotalsJson, PatchBodies};
 use anyhow::{Context, Result};
 use grit_lib::diff::{
     include_file_change_in_patch, peer_hunks_by_primary_path, should_report_inexact_rename_skipped,
@@ -27,23 +23,19 @@ use grit_lib::diff::{
     write_patch_resolved, DiffArguments, DiffDetail, DiffEntry, DiffFilesOutput, DiffMerges,
     DiffOptions, DiffRequest, DiffSide, DiffTarget, FileChange, LineStat, ListedFileDiff,
     LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchSide, PatchTextOptions,
-    ResolveDiffArgumentsError, TreeDiffStructured, UncommittedDiff,
+    ResolveDiffArgumentsError, UncommittedDiff,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ParallelOp;
 use grit_lib::worktree::pathspec::pathdiff;
-use grit_lib::worktree::WorktreeError;
 use std::io::Write;
 
 use crate::context;
-use crate::diff_args::DiffCompareArgs;
 use crate::markdown;
-use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender};
-use crate::pathspec_args::TrailingPathspecArgs;
+use crate::output::outln;
 use crate::render::diff::{
-    diffstat_from_files, render_file, render_markdown_stat, render_name_only, render_name_status,
-    render_numstat, render_shortstat, render_stat, FileDiff, Hunk, Line, LineKind, LineStatJson,
-    Segment,
+    diffstat_from_files, render_file, render_name_only, render_name_status, render_numstat,
+    render_shortstat, render_stat, FileDiff, LineStatJson,
 };
 use crate::ui::PathDisplayOptions;
 
@@ -827,7 +819,7 @@ fn outcome_from_changes(
             .get(&fc.path)
             .map(|h| h.as_slice())
             .unwrap_or(&[]);
-        cli_file_from_file_change(&fc, diff_options.clone(), side, peer_hunks, assign_hunk_ids)
+        cli_file_from_file_change(fc, diff_options.clone(), side, peer_hunks, assign_hunk_ids)
     })
     .into_iter()
     .collect();

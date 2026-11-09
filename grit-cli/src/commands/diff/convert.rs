@@ -68,8 +68,7 @@ pub fn map_listed_file(f: ListedFileDiff, detail: DiffDetail) -> FileDiff {
                 .collect(),
         )
     } else {
-        presentation_hunks_from_listed(&f, detail)
-            .map(|annotated| cli_hunks_from_annotated(annotated))
+        presentation_hunks_from_listed(&f, detail).map(cli_hunks_from_annotated)
     };
     FileDiff {
         path: f.path,

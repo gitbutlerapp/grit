@@ -4,12 +4,11 @@ mod convert;
 mod run;
 mod stream;
 
-pub use convert::map_listed_file;
 pub(crate) use run::resolve_commit_diff_pathspecs;
 pub use run::{
     cli_outcome_from_lib, diff_for_commit, emit_commits_log_patch_text, emit_show_log_patch_text,
-    outcome_from_tree_entries, render_log_commit_diff, run, run_no_index,
-    streamed_log_patch_text_outcome, CommitDiffOptions, ShowLogPatchTextParams,
+    outcome_from_tree_entries, render_log_commit_diff, run, streamed_log_patch_text_outcome,
+    CommitDiffOptions, ShowLogPatchTextParams,
 };
 
 use std::io::{IsTerminal, Write};
