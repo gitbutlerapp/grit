@@ -87,10 +87,18 @@ pub mod grit_server_auth {
 pub mod grit_server_share {
     //! grit_server_share API (re-exported at this path).
     pub use crate::grit_server_share::{
-        accept, share, share_link, LinkOptions, LinkUses, NewShareLink, ShareAcceptReply,
-        ShareAcceptRequest, ShareAcceptStatus, ShareIntegration, ShareLinkInfo, ShareMember,
-        ShareMode, ShareReply, ShareRequest, ShareState, ShareView, SharedBranch,
+        accept, filter_listed_shares, share, share_link, LinkOptions, LinkUses, NewShareLink,
+        ShareAcceptReply, ShareAcceptRequest, ShareAcceptStatus, ShareIntegration, ShareLinkInfo,
+        ShareMember, ShareMode, ShareReply, ShareRequest, ShareState, ShareView, SharedBranch,
         DEFAULT_LINK_DAYS, MAX_LINK_DAYS, SHARED_REFS,
+    };
+}
+
+pub mod grit_server_sync {
+    //! Sync report flags for a grit hosting space.
+    pub use crate::grit_server_sync::{
+        sync_needs_attention, sync_needs_decision, SyncBranchAction, SyncBranchState,
+        SyncReportSummary, SyncTargetAction,
     };
 }
 

@@ -268,7 +268,7 @@ pub struct StatusSharedJson {
     /// The remote they were fetched from.
     pub remote: String,
     /// Each other member's head, compared with this branch.
-    pub heads: Vec<crate::commands::sync::SharedHead>,
+    pub heads: Vec<crate::render::sync::SharedHead>,
 }
 
 /// The other members' heads of `branch`, when it is shared here.

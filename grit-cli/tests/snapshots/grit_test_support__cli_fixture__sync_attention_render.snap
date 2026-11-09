@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Syncing alice/widget\n✗ main and upstream's have both moved; it changes only by integrating, so reset it to upstream's\n✗ spike diverged 2b12f15\n  spike and origin/spike each have commits the other lacks\n✗ blocked refused 538e7ad\n  non-fast-forward\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"space\":\"alice/widget\",\"remote\":\"origin\",\"configured\":false,\"target\":{\"name\":\"main\",\"action\":\"diverged\",\"tip\":\"7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1\"},\"branches\":[{\"name\":\"spike\",\"action\":\"diverged\",\"tip\":\"2b12f15c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a\",\"message\":\"spike and origin/spike each have commits the other lacks\"},{\"name\":\"blocked\",\"action\":\"refused\",\"tip\":\"538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8\",\"message\":\"non-fast-forward\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Sync `alice/widget`\n\n- **remote**: `origin`\n- **main**: diverged from upstream\n- `spike`: diverged — spike and origin/spike each have commits the other lacks\n- `blocked`: refused — non-fast-forward\n",
+    "stderr": ""
+  }
+}

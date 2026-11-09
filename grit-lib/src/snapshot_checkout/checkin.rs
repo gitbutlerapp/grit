@@ -902,4 +902,34 @@ mod tests {
             assert_eq!(r.kind(), kind);
         }
     }
+
+    #[test]
+    fn response_any_refused_uses_checkin_status_not_strings() {
+        use crate::snapshot_checkout::{CheckinResponse, CheckinResult};
+        let branch = |status: CheckinStatus| CheckinResult {
+            name: "topic".to_owned(),
+            status,
+            grafted: None,
+            previous: None,
+            commits: 0,
+            rule: None,
+            message: None,
+            reason: None,
+        };
+        assert!(!CheckinResponse {
+            results: vec![branch(CheckinStatus::Unchanged)],
+        }
+        .any_refused());
+        assert!(CheckinResponse {
+            results: vec![branch(CheckinStatus::Refused)],
+        }
+        .any_refused());
+        assert!(CheckinResponse {
+            results: vec![
+                branch(CheckinStatus::Created),
+                branch(CheckinStatus::Refused),
+            ],
+        }
+        .any_refused());
+    }
 }

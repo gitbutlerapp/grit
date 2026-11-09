@@ -428,6 +428,41 @@ pub struct CheckinResponse {
     pub results: Vec<CheckinResult>,
 }
 
+impl CheckinStatus {
+    /// Stable status name for scripts (matches JSON serialization).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Unchanged => "unchanged",
+            Self::Refused => "refused",
+        }
+    }
+
+    /// Whether the server refused to set this branch.
+    #[must_use]
+    pub const fn is_refused(self) -> bool {
+        matches!(self, Self::Refused)
+    }
+}
+
+impl CheckinResult {
+    /// Whether the server refused to set this branch.
+    #[must_use]
+    pub fn is_refused(&self) -> bool {
+        self.status.is_refused()
+    }
+}
+
+impl CheckinResponse {
+    /// Whether any branch in the response was refused.
+    #[must_use]
+    pub fn any_refused(&self) -> bool {
+        self.results.iter().any(CheckinResult::is_refused)
+    }
+}
+
 /// Who did something.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ident {

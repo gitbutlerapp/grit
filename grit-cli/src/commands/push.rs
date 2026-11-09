@@ -315,20 +315,21 @@ pub fn run(
             } else {
                 plan.remote.clone()
             };
-            if crate::commands::sync::fetch_shared_heads(&repo, &tracking).is_err() {
+            if crate::commands::sync::fetch_shared_heads(&repo, &tracking, false).is_err() {
                 continue;
             }
-            let heads_now = |ours: Option<ObjectId>| -> Vec<crate::commands::sync::SharedHead> {
-                crate::commands::sync::shared_heads(&repo, &tracking, name)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(user, tip)| {
-                        crate::commands::sync::SharedHead::new(
-                            &repo, &tracking, name, user, ours, tip,
-                        )
-                    })
-                    .collect()
-            };
+            let heads_now =
+                |ours: Option<ObjectId>| -> Vec<crate::render::shared_branch::SharedHead> {
+                    crate::commands::sync::shared_heads(&repo, &tracking, name)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(user, tip)| {
+                            crate::commands::sync::SharedHead::new(
+                                &repo, &tracking, name, user, ours, tip,
+                            )
+                        })
+                        .collect()
+                };
             let mut ours = repo.references().resolve(format!("refs/heads/{name}")).ok();
             let mut heads = heads_now(ours);
             // Heads that go together with yours without losing anything:
@@ -353,7 +354,7 @@ pub fn run(
             }
             let mut head = None;
             if !combined.is_empty() {
-                let again = crate::commands::sync::push(&plan.remote, &[name.to_owned()])?;
+                let again = crate::commands::sync::push(&plan.remote, &[name.to_owned()], false)?;
                 if let Some(Some(why)) = again.get(name) {
                     anyhow::bail!(
                         "combined {name} with {}'s head here, but pushing it was refused: {why}",
@@ -403,7 +404,7 @@ fn integrated_again(
     config: &ConfigSet,
     remote: &str,
     branch: &str,
-) -> Option<crate::commands::share::IntegratedJson> {
+) -> Option<crate::render::shared_branch::IntegratedJson> {
     let url = crate::context::config_string(config, &format!("remote.{remote}.pushurl"))
         .or_else(|| crate::context::config_string(config, &format!("remote.{remote}.url")))?;
     let (server, project) = grit_lib::remote::grit_server_space::hosted_project(&url)?;

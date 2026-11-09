@@ -222,6 +222,7 @@ pub(crate) mod github_auth;
 pub(crate) mod grit_server_auth;
 pub(crate) mod grit_server_share;
 pub(crate) mod grit_server_space;
+pub(crate) mod grit_server_sync;
 mod heap;
 pub(crate) mod line_interner;
 pub mod line_range;

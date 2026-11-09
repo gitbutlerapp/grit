@@ -385,7 +385,7 @@ fn space_for_clone(dir: &str, url: &str, remote: &str) -> Option<String> {
     // Shared branches: bring the other members' heads now, so the first
     // `grit status` shows them.
     if !setup.space.shared.is_empty() {
-        let _ = crate::commands::sync::fetch_shared_heads(&repo, &setup.remote);
+        let _ = crate::commands::sync::fetch_shared_heads(&repo, &setup.remote, false);
     }
     (setup.remote != remote).then_some(setup.space.project)
 }

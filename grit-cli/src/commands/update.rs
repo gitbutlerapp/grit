@@ -9,16 +9,15 @@
 //! runs the PowerShell installer (`irm <url> | iex`), the same scripts the documented
 //! one-line installs use.
 
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
-use schemars::JsonSchema;
-use serde::Serialize;
 
-use crate::markdown;
-use crate::output::{progress, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::dispatch::CommandInteraction;
+use crate::output::progress;
+
+pub use crate::render::update::UpdateOutcome;
 
 /// URL of the POSIX-sh installer (used on Unix).
 #[cfg(not(windows))]
@@ -27,41 +26,20 @@ const INSTALL_URL: &str = "https://grit-scm.com/install";
 #[cfg(windows)]
 const INSTALL_URL: &str = "https://grit-scm.com/install.ps1";
 
-/// Result of `grit update`.
-#[derive(Serialize, JsonSchema)]
-pub struct UpdateOutcome {
-    pub updated: bool,
-    /// The version of `grit` that ran the update (the new version is whatever the
-    /// installer fetched).
-    pub version: String,
-}
-
-impl HumanRender for UpdateOutcome {
-    fn render_human(&self, _w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        // The installer's own output is the user-facing feedback; nothing extra.
-        Ok(())
-    }
-}
-
-impl MarkdownRender for UpdateOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_update_outcome(w, self)?;
-        Ok(())
-    }
-}
-
 /// Send the installer's stdout to our stderr in JSON mode so our stdout stays a
 /// single clean object; inherit normally in human mode.
-fn child_stdout(mode: OutputMode) -> Stdio {
-    match mode {
-        OutputMode::Json | OutputMode::Markdown => Stdio::null(),
-        OutputMode::Human => Stdio::inherit(),
+fn child_stdout(human_progress: bool) -> Stdio {
+    if human_progress {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
     }
 }
 
 /// Run the `update` command.
 #[cfg(not(windows))]
-pub fn run(mode: OutputMode) -> Result<UpdateOutcome> {
+pub fn run(interaction: CommandInteraction) -> Result<UpdateOutcome> {
+    let mode = interaction.output_mode_for_progress();
     // The installer is a POSIX-sh pipeline that shells out to curl + tar.
     for tool in ["sh", "curl"] {
         if find_in_path(tool).is_none() {
@@ -75,13 +53,13 @@ pub fn run(mode: OutputMode) -> Result<UpdateOutcome> {
         mode,
         &format!("Updating grit (current: {})", env!("CARGO_PKG_VERSION")),
     );
-    report_install_dir(mode);
+    report_install_dir(&interaction);
 
     // Run `curl -fsSL <url> | sh`, exporting INSTALL_DIR so the installer targets our path.
     let mut cmd = Command::new("sh");
     cmd.arg("-c")
         .arg(format!("curl -fsSL {INSTALL_URL} | sh"))
-        .stdout(child_stdout(mode));
+        .stdout(child_stdout(interaction.human_progress));
     if let Some(dir) = current_exe_dir() {
         cmd.env("INSTALL_DIR", dir);
     }
@@ -101,12 +79,13 @@ pub fn run(mode: OutputMode) -> Result<UpdateOutcome> {
 
 /// Run the `update` command.
 #[cfg(windows)]
-pub fn run(mode: OutputMode) -> Result<UpdateOutcome> {
+pub fn run(interaction: CommandInteraction) -> Result<UpdateOutcome> {
+    let mode = interaction.output_mode_for_progress();
     progress(
         mode,
         &format!("Updating grit (current: {})", env!("CARGO_PKG_VERSION")),
     );
-    report_install_dir(mode);
+    report_install_dir(&interaction);
 
     // Run `irm <url> | iex` under PowerShell, exporting GRIT_INSTALL_DIR so the
     // installer targets our path (the env var the .ps1 installer reads).
@@ -118,7 +97,7 @@ pub fn run(mode: OutputMode) -> Result<UpdateOutcome> {
         "-Command",
         &format!("irm {INSTALL_URL} | iex"),
     ])
-    .stdout(child_stdout(mode));
+    .stdout(child_stdout(interaction.human_progress));
     if let Some(dir) = current_exe_dir() {
         cmd.env("GRIT_INSTALL_DIR", dir);
     }
@@ -138,7 +117,11 @@ pub fn run(mode: OutputMode) -> Result<UpdateOutcome> {
 
 /// Tell the user where we're installing (the running binary's directory, or the
 /// installer's own default if we can't determine it). Human mode only.
-fn report_install_dir(mode: OutputMode) {
+fn report_install_dir(interaction: &CommandInteraction) {
+    if !interaction.human_progress {
+        return;
+    }
+    let mode = interaction.output_mode_for_progress();
     match current_exe_dir() {
         Some(d) => progress(mode, &format!("Install directory: {}", d.display())),
         None => progress(mode, "Install directory: installer default"),
@@ -177,5 +160,11 @@ pub fn dispatch(
         process_env: _,
     } = env;
 
-    emit_success(commands::update::run(opts.mode)?, opts, ctx)
+    use crate::dispatch::CommandInteraction;
+
+    emit_success(
+        commands::update::run(CommandInteraction::from_mode(opts.mode))?,
+        opts,
+        ctx,
+    )
 }

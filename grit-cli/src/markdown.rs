@@ -9,7 +9,6 @@ use grit_lib::diff::{DiffEntry, DiffStatus};
 use grit_lib::objects::short_hex;
 
 use crate::commands::add::AddOutcome;
-use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
 use crate::commands::diff::{file_diff_status_label, FileDiff, Hunk, Line, LineKind, Segment};
 use crate::commands::serve_http::{
@@ -22,6 +21,7 @@ use crate::commands::update::UpdateOutcome;
 use crate::commands::worktree::{WorktreeOutcome, WorktreeRow};
 use crate::context::{self, CommitSummary};
 use crate::output::{outln, RenderContext};
+use crate::render::auth::{AuthOutcome, LogoutOutcome};
 use crate::stdio;
 use crate::ui::{self, PathDisplayOptions};
 

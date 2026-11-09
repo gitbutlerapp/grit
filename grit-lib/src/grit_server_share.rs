@@ -328,6 +328,61 @@ pub struct NewShareLink {
     pub info: ShareLinkInfo,
 }
 
+/// When a list reply includes every share, keep only the branch named in the
+/// request (if any).
+#[must_use]
+pub fn filter_listed_shares(
+    mut shares: Vec<SharedBranch>,
+    branch: Option<&str>,
+) -> Vec<SharedBranch> {
+    if let Some(branch) = branch {
+        shares.retain(|s| s.branch == branch);
+    }
+    shares
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+
+    #[test]
+    fn filter_listed_shares_keeps_one_branch() {
+        let shares = vec![
+            SharedBranch {
+                branch: "a".to_owned(),
+                origin: "o/p".to_owned(),
+                sharer: "alice".to_owned(),
+                state: ShareState::Active,
+                mode: ShareMode::Full,
+                paths: Vec::new(),
+                base_branch: None,
+                members: Vec::new(),
+                invited: Vec::new(),
+                links: Vec::new(),
+                integrated: None,
+                url: "https://example".to_owned(),
+            },
+            SharedBranch {
+                branch: "b".to_owned(),
+                origin: "o/p".to_owned(),
+                sharer: "alice".to_owned(),
+                state: ShareState::Active,
+                mode: ShareMode::Full,
+                paths: Vec::new(),
+                base_branch: None,
+                members: Vec::new(),
+                invited: Vec::new(),
+                links: Vec::new(),
+                integrated: None,
+                url: "https://example".to_owned(),
+            },
+        ];
+        let filtered = filter_listed_shares(shares, Some("a"));
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].branch, "a");
+    }
+}
+
 /// The answer to a [`ShareRequest`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShareReply {

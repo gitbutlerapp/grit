@@ -1184,4 +1184,22 @@ The keys are `initialized`, `path`, `bare`, `branch`, `object_format`, and optio
             assert_eq!(bad.kind(), clap::error::ErrorKind::ValueValidation);
         });
     }
+
+    #[test]
+    fn share_command_modules_stay_within_line_budget() {
+        const MAX_LINES: usize = 900;
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/commands/share");
+        for path in ["ops.rs", "divergence.rs", "integrated.rs", "mod.rs"] {
+            let path = root.join(path);
+            let lines = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+                .lines()
+                .count();
+            assert!(
+                lines <= MAX_LINES,
+                "{} has {lines} lines (max {MAX_LINES})",
+                path.display()
+            );
+        }
+    }
 }

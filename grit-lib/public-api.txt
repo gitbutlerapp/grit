@@ -22024,6 +22024,7 @@ pub const grit_lib::remote::grit_server_share::DEFAULT_LINK_DAYS: u32
 pub const grit_lib::remote::grit_server_share::MAX_LINK_DAYS: u32
 pub const grit_lib::remote::grit_server_share::SHARED_REFS: &str
 pub fn grit_lib::remote::grit_server_share::accept(&dyn grit_lib::remote::transport::http::HttpClient, &grit_lib::remote::grit_server_auth::ServerUrl, &grit_lib::remote::grit_server_share::ShareAcceptRequest) -> core::result::Result<grit_lib::remote::grit_server_share::ShareAcceptReply, grit_lib::remote::grit_server_auth::ServerAuthError>
+pub fn grit_lib::remote::grit_server_share::filter_listed_shares(alloc::vec::Vec<grit_lib::remote::grit_server_share::SharedBranch>, core::option::Option<&str>) -> alloc::vec::Vec<grit_lib::remote::grit_server_share::SharedBranch>
 pub fn grit_lib::remote::grit_server_share::share(&dyn grit_lib::remote::transport::http::HttpClient, &grit_lib::remote::grit_server_auth::ServerUrl, &str, &grit_lib::remote::grit_server_share::ShareRequest) -> core::result::Result<grit_lib::remote::grit_server_share::ShareReply, grit_lib::remote::grit_server_auth::ServerAuthError>
 pub fn grit_lib::remote::grit_server_share::share_link(&str) -> core::option::Option<(grit_lib::remote::grit_server_auth::ServerUrl, alloc::string::String)>
 pub mod grit_lib::remote::grit_server_space
@@ -22159,6 +22160,94 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_spac
 pub fn grit_lib::remote::grit_server_space::fetch_space(&dyn grit_lib::remote::transport::http::HttpClient, &grit_lib::remote::grit_server_auth::ServerUrl, &str) -> core::result::Result<grit_lib::remote::grit_server_space::Space, grit_lib::remote::grit_server_auth::ServerAuthError>
 pub fn grit_lib::remote::grit_server_space::hosted_project(&str) -> core::option::Option<(grit_lib::remote::grit_server_auth::ServerUrl, alloc::string::String)>
 pub fn grit_lib::remote::grit_server_space::integrate_branch(&dyn grit_lib::remote::transport::http::HttpClient, &grit_lib::remote::grit_server_auth::ServerUrl, &str, &grit_lib::remote::grit_server_space::IntegrateBranchRequest) -> core::result::Result<grit_lib::remote::grit_server_space::IntegrateBranchReply, grit_lib::remote::grit_server_auth::ServerAuthError>
+pub mod grit_lib::remote::grit_server_sync
+#[non_exhaustive] pub enum grit_lib::remote::grit_server_sync::SyncBranchAction
+pub grit_lib::remote::grit_server_sync::SyncBranchAction::Created
+pub grit_lib::remote::grit_server_sync::SyncBranchAction::Diverged
+pub grit_lib::remote::grit_server_sync::SyncBranchAction::Pulled
+pub grit_lib::remote::grit_server_sync::SyncBranchAction::Pushed
+pub grit_lib::remote::grit_server_sync::SyncBranchAction::Refused
+pub grit_lib::remote::grit_server_sync::SyncBranchAction::UpToDate
+impl core::clone::Clone for grit_lib::remote::grit_server_sync::SyncBranchAction
+pub fn grit_lib::remote::grit_server_sync::SyncBranchAction::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_sync::SyncBranchAction
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_sync::SyncBranchAction
+pub fn grit_lib::remote::grit_server_sync::SyncBranchAction::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_sync::SyncBranchAction
+pub fn grit_lib::remote::grit_server_sync::SyncBranchAction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::grit_server_sync::SyncBranchAction
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_sync::SyncBranchAction
+impl core::marker::Freeze for grit_lib::remote::grit_server_sync::SyncBranchAction
+impl core::marker::Send for grit_lib::remote::grit_server_sync::SyncBranchAction
+impl core::marker::Sync for grit_lib::remote::grit_server_sync::SyncBranchAction
+impl core::marker::Unpin for grit_lib::remote::grit_server_sync::SyncBranchAction
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_sync::SyncBranchAction
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_sync::SyncBranchAction
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_sync::SyncBranchAction
+#[non_exhaustive] pub enum grit_lib::remote::grit_server_sync::SyncTargetAction
+pub grit_lib::remote::grit_server_sync::SyncTargetAction::Ahead
+pub grit_lib::remote::grit_server_sync::SyncTargetAction::Created
+pub grit_lib::remote::grit_server_sync::SyncTargetAction::Diverged
+pub grit_lib::remote::grit_server_sync::SyncTargetAction::FastForwarded
+pub grit_lib::remote::grit_server_sync::SyncTargetAction::UpToDate
+impl core::clone::Clone for grit_lib::remote::grit_server_sync::SyncTargetAction
+pub fn grit_lib::remote::grit_server_sync::SyncTargetAction::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_sync::SyncTargetAction
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_sync::SyncTargetAction
+pub fn grit_lib::remote::grit_server_sync::SyncTargetAction::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_sync::SyncTargetAction
+pub fn grit_lib::remote::grit_server_sync::SyncTargetAction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::grit_server_sync::SyncTargetAction
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_sync::SyncTargetAction
+impl core::marker::Freeze for grit_lib::remote::grit_server_sync::SyncTargetAction
+impl core::marker::Send for grit_lib::remote::grit_server_sync::SyncTargetAction
+impl core::marker::Sync for grit_lib::remote::grit_server_sync::SyncTargetAction
+impl core::marker::Unpin for grit_lib::remote::grit_server_sync::SyncTargetAction
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_sync::SyncTargetAction
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_sync::SyncTargetAction
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_sync::SyncTargetAction
+pub struct grit_lib::remote::grit_server_sync::SyncBranchState
+pub grit_lib::remote::grit_server_sync::SyncBranchState::action: grit_lib::remote::grit_server_sync::SyncBranchAction
+pub grit_lib::remote::grit_server_sync::SyncBranchState::integrated: bool
+pub grit_lib::remote::grit_server_sync::SyncBranchState::shared_needs_decision: bool
+impl core::clone::Clone for grit_lib::remote::grit_server_sync::SyncBranchState
+pub fn grit_lib::remote::grit_server_sync::SyncBranchState::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_sync::SyncBranchState
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_sync::SyncBranchState
+pub fn grit_lib::remote::grit_server_sync::SyncBranchState::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_sync::SyncBranchState
+pub fn grit_lib::remote::grit_server_sync::SyncBranchState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::grit_server_sync::SyncBranchState
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_sync::SyncBranchState
+impl core::marker::Freeze for grit_lib::remote::grit_server_sync::SyncBranchState
+impl core::marker::Send for grit_lib::remote::grit_server_sync::SyncBranchState
+impl core::marker::Sync for grit_lib::remote::grit_server_sync::SyncBranchState
+impl core::marker::Unpin for grit_lib::remote::grit_server_sync::SyncBranchState
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_sync::SyncBranchState
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_sync::SyncBranchState
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_sync::SyncBranchState
+#[non_exhaustive] pub struct grit_lib::remote::grit_server_sync::SyncReportSummary
+pub grit_lib::remote::grit_server_sync::SyncReportSummary::branches: alloc::vec::Vec<grit_lib::remote::grit_server_sync::SyncBranchState>
+pub grit_lib::remote::grit_server_sync::SyncReportSummary::target: core::option::Option<grit_lib::remote::grit_server_sync::SyncTargetAction>
+impl grit_lib::remote::grit_server_sync::SyncReportSummary
+pub fn grit_lib::remote::grit_server_sync::SyncReportSummary::new(core::option::Option<grit_lib::remote::grit_server_sync::SyncTargetAction>, alloc::vec::Vec<grit_lib::remote::grit_server_sync::SyncBranchState>) -> Self
+impl core::clone::Clone for grit_lib::remote::grit_server_sync::SyncReportSummary
+pub fn grit_lib::remote::grit_server_sync::SyncReportSummary::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_sync::SyncReportSummary
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_sync::SyncReportSummary
+pub fn grit_lib::remote::grit_server_sync::SyncReportSummary::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_sync::SyncReportSummary
+pub fn grit_lib::remote::grit_server_sync::SyncReportSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_sync::SyncReportSummary
+impl core::marker::Freeze for grit_lib::remote::grit_server_sync::SyncReportSummary
+impl core::marker::Send for grit_lib::remote::grit_server_sync::SyncReportSummary
+impl core::marker::Sync for grit_lib::remote::grit_server_sync::SyncReportSummary
+impl core::marker::Unpin for grit_lib::remote::grit_server_sync::SyncReportSummary
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_sync::SyncReportSummary
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_sync::SyncReportSummary
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_sync::SyncReportSummary
+pub fn grit_lib::remote::grit_server_sync::sync_needs_attention(&grit_lib::remote::grit_server_sync::SyncReportSummary) -> bool
+pub fn grit_lib::remote::grit_server_sync::sync_needs_decision(&grit_lib::remote::grit_server_sync::SyncReportSummary) -> bool
 pub mod grit_lib::remote::http_client
 pub struct grit_lib::remote::http_client::UreqHttpClient
 impl grit_lib::remote::transport::http::ureq_client::UreqHttpClient
@@ -23248,6 +23337,9 @@ pub grit_lib::remote::snapshot_checkout::CheckinStatus::Created
 pub grit_lib::remote::snapshot_checkout::CheckinStatus::Refused
 pub grit_lib::remote::snapshot_checkout::CheckinStatus::Unchanged
 pub grit_lib::remote::snapshot_checkout::CheckinStatus::Updated
+impl grit_lib::remote::snapshot_checkout::CheckinStatus
+pub const fn grit_lib::remote::snapshot_checkout::CheckinStatus::as_str(self) -> &'static str
+pub const fn grit_lib::remote::snapshot_checkout::CheckinStatus::is_refused(self) -> bool
 impl core::clone::Clone for grit_lib::remote::snapshot_checkout::CheckinStatus
 pub fn grit_lib::remote::snapshot_checkout::CheckinStatus::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::CheckinStatus
@@ -23678,6 +23770,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_chec
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::CheckinRequest
 pub struct grit_lib::remote::snapshot_checkout::CheckinResponse
 pub grit_lib::remote::snapshot_checkout::CheckinResponse::results: alloc::vec::Vec<grit_lib::remote::snapshot_checkout::CheckinResult>
+impl grit_lib::remote::snapshot_checkout::CheckinResponse
+pub fn grit_lib::remote::snapshot_checkout::CheckinResponse::any_refused(&self) -> bool
 impl core::clone::Clone for grit_lib::remote::snapshot_checkout::CheckinResponse
 pub fn grit_lib::remote::snapshot_checkout::CheckinResponse::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::CheckinResponse
@@ -23706,6 +23800,8 @@ pub grit_lib::remote::snapshot_checkout::CheckinResult::previous: core::option::
 pub grit_lib::remote::snapshot_checkout::CheckinResult::reason: core::option::Option<grit_lib::remote::snapshot_checkout::CheckinRefusal>
 pub grit_lib::remote::snapshot_checkout::CheckinResult::rule: core::option::Option<grit_lib::remote::snapshot_checkout::CheckinRule>
 pub grit_lib::remote::snapshot_checkout::CheckinResult::status: grit_lib::remote::snapshot_checkout::CheckinStatus
+impl grit_lib::remote::snapshot_checkout::CheckinResult
+pub fn grit_lib::remote::snapshot_checkout::CheckinResult::is_refused(&self) -> bool
 impl core::clone::Clone for grit_lib::remote::snapshot_checkout::CheckinResult
 pub fn grit_lib::remote::snapshot_checkout::CheckinResult::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::CheckinResult

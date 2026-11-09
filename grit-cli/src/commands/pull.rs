@@ -24,7 +24,6 @@ use grit_lib::remote::HttpClientFactory;
 use grit_lib::repo::Repository;
 use grit_lib::state::InProgressOperation;
 
-pub(crate) use crate::render::pull::gave_change_ids_phrase;
 pub use crate::render::pull::{PullOutcome, PullResult};
 pub use pull_outcome::map_outcome;
 

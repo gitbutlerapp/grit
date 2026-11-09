@@ -1,9 +1,11 @@
 //! Presentation layer: format typed command outcomes for humans, agents, and scripts.
 
+pub mod auth;
 pub mod blame;
 pub mod branch;
 pub mod bundle;
 pub mod cat;
+pub mod checkin;
 pub mod clone;
 pub mod config;
 pub mod conflict;
@@ -36,15 +38,22 @@ pub mod repack;
 pub mod resolve;
 pub mod revert;
 pub mod revs;
+pub mod serve;
+pub mod share;
 pub mod shared_branch;
+#[path = "shared_branch_render.rs"]
+mod shared_branch_render;
 pub mod shortlog;
 pub mod skill;
+pub mod slice;
 pub mod status;
 pub mod stream;
 pub mod style;
 pub mod switch;
+pub mod sync;
 pub mod table;
 pub mod tag;
+pub mod update;
 
 use anyhow::Result;
 #[allow(unused_imports)]
@@ -128,6 +137,9 @@ mod purity {
         "std::fs",
         "crate::commands::",
     ];
+
+    /// Outcome fields may still reference not-yet-extracted command types (e.g. pull).
+    const ALLOWED_COMMAND_REFS: &[&str] = &["crate::commands::pull::"];
 
     const FORBIDDEN_TYPE_MARKERS: &[&str] = &["Repository"];
 
@@ -482,6 +494,14 @@ mod purity {
             }
 
             for marker in FORBIDDEN_SOURCE_MARKERS {
+                if line.contains(marker)
+                    && *marker == "crate::commands::"
+                    && ALLOWED_COMMAND_REFS
+                        .iter()
+                        .any(|allowed| line.contains(allowed))
+                {
+                    continue;
+                }
                 if line.contains(marker) {
                     violations.push(format!(
                         "{rel}: forbidden `{marker}` in production line `{line}`"

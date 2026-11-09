@@ -18,9 +18,9 @@ use crate::commands::checkout::{
 };
 use crate::commands::pull::{PullOutcome, PullResult};
 use crate::commands::serve_http::{ServeGrantJson, ServeUserJson, ServeUsersOutcome};
-use crate::commands::slice::{SliceJson, SliceListOutcome};
 use crate::commands::update::UpdateOutcome;
 use crate::output::{render_to_string, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::render::slice::{SliceJson, SliceListOutcome};
 use grit_test_support::ModeCapture;
 use serde::Serialize;
 
@@ -241,6 +241,14 @@ fn sample_checkin() -> CheckinOutcome {
 #[test]
 fn checkin_render() {
     snapshot_modes("checkin_render", &sample_checkin());
+}
+
+#[test]
+fn checkin_refused_render() {
+    let mut outcome = sample_checkin();
+    outcome.branches.retain(|b| b.status == "refused");
+    outcome.gave_change_ids = 0;
+    snapshot_modes("checkin_refused_render", &outcome);
 }
 
 /// The refresh `grit integrate` runs after the merge, as `grit pull` reports it.
@@ -644,6 +652,45 @@ fn sync_render() {
     snapshot_modes("sync_render", &outcome);
 }
 
+/// Sync stopped on diverged and refused branches only (`needs_attention`, not
+/// `needs_decision`).
+#[test]
+fn sync_attention_render() {
+    use crate::commands::sync::{SyncAction, SyncBranch, SyncOutcome, TargetAction};
+    let outcome = SyncOutcome {
+        space: "alice/widget".to_owned(),
+        upstream: None,
+        remote: "origin".to_owned(),
+        configured: false,
+        target: Some(crate::commands::sync::SyncTarget {
+            name: "main".to_owned(),
+            action: TargetAction::Diverged,
+            tip: Some("7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1".to_owned()),
+        }),
+        branches: vec![
+            SyncBranch {
+                name: "spike".to_owned(),
+                action: SyncAction::Diverged,
+                tip: Some("2b12f15c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a".to_owned()),
+                message: Some(
+                    "spike and origin/spike each have commits the other lacks".to_owned(),
+                ),
+                shared: Vec::new(),
+                integrated: None,
+            },
+            SyncBranch {
+                name: "blocked".to_owned(),
+                action: SyncAction::Refused,
+                tip: Some("538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8".to_owned()),
+                message: Some("non-fast-forward".to_owned()),
+                shared: Vec::new(),
+                integrated: None,
+            },
+        ],
+    };
+    snapshot_modes("sync_attention_render", &outcome);
+}
+
 /// `grit share`: sharing a branch with a link, listing it with each
 /// member's head, and accepting a link.
 #[test]
@@ -719,13 +766,23 @@ fn share_render() {
     let listed = ShareOutcome {
         action: "list".to_owned(),
         project: "alice/widget".to_owned(),
-        shares: vec![share],
+        shares: vec![share.clone()],
         link: None,
         added: Vec::new(),
         removed: Vec::new(),
         pushed: false,
     };
     snapshot_modes("share_render", &listed);
+    let removed = ShareOutcome {
+        action: "remove".to_owned(),
+        project: "alice/widget".to_owned(),
+        shares: vec![share],
+        link: None,
+        added: Vec::new(),
+        removed: vec!["dave".to_owned()],
+        pushed: false,
+    };
+    snapshot_modes("share_remove_render", &removed);
     let accepted = ShareAcceptOutcome {
         status: "accepted".to_owned(),
         branch: "feature".to_owned(),
