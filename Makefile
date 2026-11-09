@@ -17,7 +17,7 @@
 #   make api-ratchet       - regenerate grit-lib/api-ratchet.toml (API quality counts)
 #   make api-ratchet-check - fail if API quality counts rose or fell without baseline update
 #   make api-ratchet-report - list consolidation offenders per top-level module (MODULE=diff filters)
-#   make semver-check     - compare grit-lib API to latest v* tag (cargo-semver-checks; informational)
+#   make semver-check     - compare grit-lib API to semver baseline (cargo-semver-checks; see scripts/semver-check.sh)
 #   make coverage     - llvm-cov on grit-lib with per-module floor ratchet
 #   make clean        - remove build artifacts
 

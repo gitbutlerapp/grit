@@ -41,6 +41,18 @@ else
 	echo ""
 	echo "==> api-ratchet skipped (pinned nightly-${PUBLIC_API_NIGHTLY_DATE} not installed)"
 fi
+if git diff --name-only origin/main...HEAD 2>/dev/null | grep -qE '^grit-lib/'; then
+	SEMVER_CHECKS_VERSION="$(grep 'CARGO_SEMVER_CHECKS_VERSION=' scripts/semver-check.sh | cut -d'"' -f2)"
+	if command -v cargo >/dev/null 2>&1 && cargo semver-checks --version 2>/dev/null | grep -qF "${SEMVER_CHECKS_VERSION}"; then
+		run_stage "semver-check" make semver-check
+	else
+		echo ""
+		echo "==> semver-check skipped (cargo-semver-checks ${SEMVER_CHECKS_VERSION} not installed)"
+	fi
+else
+	echo ""
+	echo "==> semver-check skipped (no grit-lib/ changes vs origin/main)"
+fi
 WORKSPACE_TEST_FEATURES=(--features grit-lib/test-support)
 if cargo nextest --version >/dev/null 2>&1; then
 	run_stage "test" cargo nextest run --workspace "${WORKSPACE_TEST_FEATURES[@]}"

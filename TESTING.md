@@ -193,10 +193,14 @@ make gate
 This executes [`scripts/gate.sh`](scripts/gate.sh) in order, stopping at the first failure:
 
 1. `cargo fmt --all --check`
-2. `cargo clippy --workspace -- -D warnings`
-3. `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features`
-4. `cargo test -p grit-lib --test public_module_doctests`
-5. `cargo nextest run --workspace` and `cargo test --workspace --doc` when cargo-nextest is installed, otherwise `cargo test --workspace`
+2. `cargo check -p grit-lib` and `cargo check -p grit-cli`
+3. `cargo clippy --workspace -- -D warnings`
+4. `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features`
+5. `cargo test -p grit-lib --test public_module_doctests`
+6. **`make api-ratchet-check`** when the pinned public-api nightly is installed; otherwise a skip line
+7. **`make semver-check`** when the diff vs **`origin/main`** touches **`grit-lib/`** and pinned **`cargo-semver-checks`** is installed; otherwise a skip line
+8. `cargo nextest run --workspace` and `cargo test --workspace --doc` when cargo-nextest is installed, otherwise `cargo test --workspace`
+9. **`make cli-layer-ratchet-check`**
 
 The script exports **`CARGO_BUILD_JOBS`** as the CPU count (`nproc`, or `sysctl -n hw.ncpu` on macOS) for the run so builds use all cores despite the **`jobs = 2`** cap in [`.cargo/config.toml`](.cargo/config.toml). Each stage prints wall time on success or failure.
 
@@ -232,7 +236,7 @@ The first run may install the pinned nightly toolchain and `cargo-public-api` (O
 
 ## Semver check
 
-[`scripts/semver-check.sh`](scripts/semver-check.sh) runs [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks) **`check-release`** on **`grit-lib`** with **`--features http-ureq`** (same surface as the public API snapshot; no `test-support`). Until **0.6.0**, the baseline git revision comes from **`semver_baseline`** in [`grit-lib/api-ratchet.toml`](grit-lib/api-ratchet.toml) (bump it when you regenerate **`public-api.txt`** after an intentional API change). Override with **`SEMVER_BASELINE`**, or fall back to the latest **`v*`** tag when the pin is absent. Pin: **`CARGO_SEMVER_CHECKS_VERSION`** in the script.
+[`scripts/semver-check.sh`](scripts/semver-check.sh) runs [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks) **`check-release`** on **`grit-lib`** with **`--features http-ureq`** (same surface as the public API snapshot; no `test-support`). Baseline resolution (first match wins): **`SEMVER_BASELINE`**; else the latest reachable **`v*`** tag with version **≥ 0.6.0**; else **`semver_baseline`** in [`grit-lib/api-ratchet.toml`](grit-lib/api-ratchet.toml) (bump the pin when you regenerate **`public-api.txt`** after an intentional API change before **v0.6.0** exists on the branch); else the latest **`v*`** tag. Inspect the chosen baseline with **`./scripts/semver-check.sh baseline`**. When the baseline is a **v0.6+** tag and the workspace crate is still **0.6.x**, the check adds **`--release-type minor`** so patch releases only allow additive API changes. Pin: **`CARGO_SEMVER_CHECKS_VERSION`** in the script. **`make api-ratchet`** drops **`semver_baseline`** from the ratchet file automatically once a **v0.6+** tag is reachable.
 
 **Check locally (same as CI semver-check job):**
 
@@ -240,7 +244,7 @@ The first run may install the pinned nightly toolchain and `cargo-public-api` (O
 make semver-check
 ```
 
-The first run may install **`cargo-semver-checks`** (OpenSSL development headers required on Linux). The tool builds the baseline crate in **`target/semver-checks/`**, not the normal worktree target dir. The check is **not** part of **`make gate`** because it clones and compiles the baseline tag; CI runs it in the dedicated **semver-check** job (**`continue-on-error: true`** until **0.6.0** — delete that line when the release policy becomes additive-only within **0.6.x**).
+The first run may install **`cargo-semver-checks`** (OpenSSL development headers required on Linux). The tool builds the baseline crate in **`target/semver-checks/`**, not the normal worktree target dir. **`make gate`** runs **`make semver-check`** when your branch changes files under **`grit-lib/`** and **`cargo-semver-checks`** is installed; CI always runs it in the dedicated **semver-check** job (a **required** check — breaking API changes block merges once **v0.6.0** is the baseline).
 
 ## API ratchet
 
@@ -313,7 +317,7 @@ Pushes and pull requests run only the fast jobs, the merge status. The nightly j
 | **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **rustdoc** | Workspace API docs with warnings denied (see below) | `make doc` |
 | **public-api** | `make public-api-check` then `make api-ratchet-check` (`cargo public-api` on pinned nightly; diff vs `grit-lib/public-api.txt`; API quality counts vs `grit-lib/api-ratchet.toml`) | `make public-api-check` and `make api-ratchet-check` |
-| **semver-check** | `make semver-check` (`cargo-semver-checks` vs latest reachable `v*` tag; informational until 0.6.0) | `make semver-check` |
+| **semver-check** | `make semver-check` (`cargo-semver-checks`; baseline: env, then v0.6+ tag, pin, else latest `v*`; `--release-type minor` within 0.6.x) | `make semver-check` |
 | **coverage** | Nightly and on demand only: `make coverage` (llvm-cov over every `grit-lib` test, `full-tests` included, floor ratchet) | `make coverage` |
 | **test** | The fast run: `cargo nextest run --workspace --profile ci` (every test binary, in parallel, without stopping at the first failure) and `cargo test --workspace --doc` | `make test` |
 | **test-full** | Nightly and on demand only: the same with `full-tests` on every crate (system `git` comparisons, heavy fixtures, `grit-bench` scenarios), the transport tests and Criterion smoke runs | `make test-full`; see [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |

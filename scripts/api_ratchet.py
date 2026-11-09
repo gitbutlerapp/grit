@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import tomllib
 from collections import defaultdict
@@ -2003,6 +2004,55 @@ def load_baseline(path: Path) -> dict[str, int]:
     return counts
 
 
+def _parse_version_tag(tag: str) -> tuple[int, int, int] | None:
+    if not tag.startswith("v"):
+        return None
+    parts = tag[1:].split(".")
+    if len(parts) < 2:
+        return None
+    try:
+        major = int(parts[0])
+        minor = int(parts[1])
+        patch = int(parts[2]) if len(parts) > 2 else 0
+    except ValueError:
+        return None
+    return (major, minor, patch)
+
+
+def reachable_v06_plus_tag(repo_root: Path | None = None) -> str | None:
+    """Return the newest merged v* tag with version >= 0.6.0, or None."""
+    root = repo_root or ROOT
+    try:
+        out = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(root),
+                "tag",
+                "--merged",
+                "HEAD",
+                "--list",
+                "v*",
+                "--sort=-v:refname",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    for line in out.splitlines():
+        tag = line.strip()
+        if not tag:
+            continue
+        parsed = _parse_version_tag(tag)
+        if parsed is None:
+            continue
+        major, minor, _patch = parsed
+        if major > 0 or minor >= 6:
+            return tag
+    return None
+
+
 def write_baseline(path: Path, snapshot: RatchetSnapshot) -> None:
     today = date.today().isoformat()
     preserved_meta: dict[str, str] = {}
@@ -2013,6 +2063,8 @@ def write_baseline(path: Path, snapshot: RatchetSnapshot) -> None:
             for key, value in meta_table.items():
                 if key != "updated" and value is not None:
                     preserved_meta[str(key)] = str(value)
+    if reachable_v06_plus_tag() is not None:
+        preserved_meta.pop("semver_baseline", None)
     lines = [
         "# grit-lib public API quality counts — ratchet baseline",
         "# Regenerate with: make api-ratchet",
