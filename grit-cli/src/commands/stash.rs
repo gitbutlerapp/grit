@@ -765,7 +765,7 @@ pub fn run_apply(
         index: stack_index,
         conflicts: applied.has_conflicts(),
         index_restored: restore_index,
-        conflict_paths: crate::operation_output::conflict_paths(applied.conflicts),
+        conflict_paths: crate::render::operation::conflict_paths(applied.conflicts),
     })
 }
 
@@ -800,7 +800,7 @@ pub fn run_pop(
         dropped: !conflicts,
         conflicts,
         index_restored: restore_index,
-        conflict_paths: crate::operation_output::conflict_paths(popped.conflicts),
+        conflict_paths: crate::render::operation::conflict_paths(popped.conflicts),
     })
 }
 

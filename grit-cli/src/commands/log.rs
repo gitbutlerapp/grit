@@ -25,9 +25,8 @@ use std::io::Write;
 
 use crate::commands::diff::{
     cli_outcome_from_lib, render_log_commit_diff, resolve_commit_diff_pathspecs, DiffOutcome,
-    DiffTotalsJson, FileDiff,
 };
-use crate::commands::show::{diffstat, DiffStat};
+use crate::commands::show::diffstat;
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context::{self, CommitSummary};
 use crate::diff_format::DiffFormatArgs;
@@ -338,20 +337,7 @@ impl LogOutcome {
     }
 }
 
-/// One commit in `grit log` JSON output.
-#[derive(Serialize, JsonSchema)]
-pub struct LogCommit {
-    #[serde(flatten)]
-    pub commit: CommitJson,
-    /// Per-file diff detail when `-p`, `--stat`, `--name-only`, or `--name-status` is set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub files: Option<Vec<FileDiff>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub totals: Option<DiffTotalsJson>,
-    /// The files the commit changed, only with `--stat` (same shape as [`grit show`](../show/)).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stat: Option<DiffStat>,
-}
+pub use crate::log_commit::LogCommit;
 
 impl MarkdownRender for LogOutcome {
     fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {

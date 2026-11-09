@@ -1,20 +1,42 @@
 //! Presentation layer: format typed command outcomes for humans, agents, and scripts.
 
+pub mod branch;
 pub mod bundle;
 pub mod clone;
 pub mod conflict;
 pub mod diff;
 pub mod error;
 pub mod fetch;
+pub mod history;
 pub mod list;
+pub mod merge;
+pub mod operation;
+pub mod pick;
 pub mod promisor;
 pub mod pull;
 pub mod push;
+pub mod rebase;
 pub mod remote;
+pub mod revert;
 pub mod shared_branch;
+pub mod shortlog;
 pub mod stream;
 pub mod style;
+pub mod switch;
 pub mod table;
+pub mod tag;
+
+#[allow(unused_imports)]
+pub use operation::{
+    conflict_json, conflict_paths, format_conflict_human_line, render_conflicts_human,
+    render_conflicts_markdown, render_merge_check_conflicts_human,
+    render_merge_check_conflicts_markdown, render_merge_conflict_footer_human,
+    render_operation_guidance_markdown, render_pick_check_conflicts_human,
+    render_pick_conflict_footer_human, render_rebase_conflict_footer_human, render_rerere_human,
+    render_rerere_markdown, render_revert_check_conflicts_human,
+    render_revert_conflict_footer_human, rerere_events_json, ConflictJson, OperationConflictBlock,
+    RerereEventJson,
+};
 
 use anyhow::Result;
 use serde::Serialize;

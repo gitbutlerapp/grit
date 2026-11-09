@@ -3,16 +3,18 @@
 use crate::context;
 use crate::error_kind::ErrorKind;
 use crate::json_error::{StructuredCliError, StructuredJsonError};
-use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
+use crate::output::Person;
 use crate::ref_name_messages::tag_short_name_error_message;
+pub use crate::render::tag::{
+    ExcludedSubmoduleJson, NotVerifiableSubmoduleJson, TagAnnotationEntry, TagEntry, TagOutcome,
+    TagSignatureJson, TagTreeSha256Json, TagVerifyEntry, TagVerifyTimingJson,
+};
 use anyhow::{bail, Context, Error as AnyhowError, Result};
 use grit_lib::commit::signing::{should_sign_tag, GpgConfig, TrustLevel};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::objects::short_hex;
 use grit_lib::porcelain::tag::{
-    CreateTagRequest, TagAnnotation, TagDetail, TagError, TagKind, TagList, TagSummary,
+    CreateTagRequest, TagAnnotation, TagDetail, TagError, TagList, TagSummary,
 };
 use grit_lib::refs::check_ref_format::RefName;
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
@@ -24,17 +26,11 @@ use grit_lib::tree_sha256::{
     MissingSubmodule, MissingSubmoduleReason, SignatureVerdict, TagVerifyOptions,
     TreeSha256Options, TreeSha256Verdict,
 };
-use schemars::JsonSchema;
-use serde::Serialize;
 use std::error::Error as StdError;
 use std::fmt;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::time::{Duration, Instant};
 use time::OffsetDateTime;
-
-fn is_false(value: &bool) -> bool {
-    !*value
-}
 
 /// Sort order for `grit tag` list mode.
 #[derive(Clone, Copy, Debug, Default, clap::ValueEnum, PartialEq, Eq)]
@@ -55,271 +51,6 @@ impl TagListSort {
             Self::Date => SortKey::Date,
             Self::Name => SortKey::Name,
         }
-    }
-}
-
-/// Result of `grit tag`, tagged by `action` (`list` / `create` / `delete`).
-#[derive(Serialize, JsonSchema)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub enum TagOutcome {
-    /// Tags matching the list query.
-    List {
-        tags: Vec<TagEntry>,
-        /// True when more tags matched than returned (`-n` / `--limit`).
-        #[serde(default, skip_serializing_if = "is_false")]
-        #[schemars(default)]
-        truncated: bool,
-        #[serde(skip)]
-        #[schemars(skip)]
-        names: Vec<String>,
-    },
-    /// A new tag was created.
-    Create {
-        name: String,
-        /// Hex object id the tag ref points at.
-        oid: String,
-        kind: TagRefKind,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        peeled: Option<String>,
-        /// Whether the tag object carries a cryptographic signature.
-        signed: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        tree_sha256: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        tree_sha256_excluded: Option<Vec<String>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        tree_sha256_files: Option<usize>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        tree_sha256_submodules: Option<usize>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        tree_sha256_hash_ms: Option<f64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        replaced: Option<String>,
-        dry_run: bool,
-    },
-    /// A tag was deleted.
-    Delete { name: String, dry_run: bool },
-    /// One or more annotated tags were verified.
-    Verify {
-        /// True when every listed tag passed verification.
-        ok: bool,
-        tags: Vec<TagVerifyEntry>,
-    },
-}
-
-/// Per-tag result for `grit tag --verify`.
-#[derive(Serialize, JsonSchema)]
-pub struct TagVerifyEntry {
-    pub name: String,
-    /// Hex object id of the annotated tag object.
-    pub oid: String,
-    /// Hex object id from the tag's `object` header.
-    pub target: String,
-    pub ok: bool,
-    pub signature: TagSignatureJson,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub tree_sha256: Option<TagTreeSha256Json>,
-    /// Submodule paths that could not be hashed for digest verification.
-    pub not_verifiable_submodules: Vec<NotVerifiableSubmoduleJson>,
-    /// Wall time spent verifying this tag.
-    pub elapsed: TagVerifyTimingJson,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct TagSignatureJson {
-    /// `good`, `bad`, `missing`, or `not_checked`.
-    pub verdict: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub signer: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub trust: Option<String>,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct TagTreeSha256Json {
-    pub claimed: String,
-    pub computed: String,
-    pub match_digest: bool,
-    pub files: usize,
-    pub submodules: usize,
-    pub excluded: Vec<ExcludedSubmoduleJson>,
-    pub bogus_excluded: Vec<String>,
-    pub cycles: Vec<String>,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct ExcludedSubmoduleJson {
-    pub path: String,
-    pub oid: String,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct NotVerifiableSubmoduleJson {
-    pub path: String,
-    pub reason: String,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct TagVerifyTimingJson {
-    /// Elapsed milliseconds (rounded).
-    pub ms: u64,
-}
-
-/// Tag ref kind in JSON (`lightweight` or `annotated`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TagRefKind {
-    Lightweight,
-    Annotated,
-}
-
-impl TagRefKind {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Lightweight => "lightweight",
-            Self::Annotated => "annotated",
-        }
-    }
-}
-
-impl From<TagKind> for TagRefKind {
-    fn from(kind: TagKind) -> Self {
-        match kind {
-            TagKind::Lightweight => Self::Lightweight,
-            TagKind::Annotated => Self::Annotated,
-        }
-    }
-}
-
-impl std::fmt::Display for TagRefKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.label())
-    }
-}
-
-/// Annotated tag metadata in list JSON.
-#[derive(Serialize, JsonSchema)]
-pub struct TagAnnotationEntry {
-    pub subject: String,
-    pub message: String,
-    pub tagger: Person,
-}
-
-/// One tag in a `list` outcome.
-#[derive(Serialize, JsonSchema)]
-pub struct TagEntry {
-    pub name: String,
-    /// Hex object id the tag ref points at.
-    pub oid: String,
-    pub kind: TagRefKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub peeled: Option<String>,
-    pub target_kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub annotation: Option<TagAnnotationEntry>,
-}
-
-impl HumanRender for TagOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        match self {
-            TagOutcome::List { tags, names, .. } => {
-                if tags.is_empty() && names.is_empty() {
-                    outln!(w, "No tags yet.");
-                    return Ok(());
-                }
-                for name in names {
-                    outln!(w, "  {name}");
-                }
-                for tag in tags {
-                    outln!(w, "  {}", tag.name);
-                }
-            }
-            TagOutcome::Create { name, dry_run, .. } => {
-                if *dry_run {
-                    outln!(w, "Would create tag {name}");
-                } else {
-                    outln!(w, "Created tag {name}");
-                }
-            }
-            TagOutcome::Delete { name, dry_run } => {
-                if *dry_run {
-                    outln!(w, "Would delete tag {name}");
-                } else {
-                    outln!(w, "Deleted tag {name}");
-                }
-            }
-            TagOutcome::Verify { ok, tags } => {
-                for entry in tags {
-                    render_verify_human(w, entry)?;
-                }
-                if !*ok {
-                    outln!(w, "Verification failed.");
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for TagOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        match self {
-            TagOutcome::List { tags, .. } => markdown::print_tag_list(w, tags)?,
-            TagOutcome::Create {
-                name,
-                oid,
-                kind,
-                peeled,
-                signed,
-                replaced,
-                dry_run,
-                ..
-            } => {
-                let short = short_hex(oid);
-                let kind_note = match (*kind, *signed) {
-                    (TagRefKind::Annotated, true) => " (annotated, signed)",
-                    (TagRefKind::Annotated, false) => " (annotated)",
-                    _ => "",
-                };
-                let peel = peeled
-                    .as_ref()
-                    .map(|p| format!(" → `{}`", short_hex(p)))
-                    .unwrap_or_default();
-                let verb = if *dry_run { "Would create" } else { "Created" };
-                outln!(w, "{verb} tag `{name}`{kind_note} at `{short}`{peel}.");
-                if let Some(old) = replaced {
-                    let old_short = short_hex(old);
-                    outln!(w, "Replaced previous target `{old_short}`.");
-                }
-            }
-            TagOutcome::Delete { name, dry_run } => {
-                let verb = if *dry_run { "Would delete" } else { "Deleted" };
-                outln!(w, "{verb} tag `{name}`.");
-            }
-            TagOutcome::Verify { ok, tags } => {
-                outln!(w, "## Tag verify\n");
-                outln!(w, "- **ok:** {ok}\n");
-                for entry in tags {
-                    render_verify_markdown(w, entry)?;
-                }
-            }
-        }
-        Ok(())
     }
 }
 
@@ -879,88 +610,6 @@ fn trust_level_label(level: TrustLevel) -> &'static str {
     level.display_key()
 }
 
-fn render_verify_human(w: &mut dyn Write, entry: &TagVerifyEntry) -> Result<()> {
-    let status = if entry.ok { "ok" } else { "FAILED" };
-    outln!(
-        w,
-        "tag {name} ({oid}): {status}",
-        name = entry.name,
-        oid = entry.oid
-    );
-    outln!(w, "  target: {}", entry.target);
-    outln!(
-        w,
-        "  signature: {} ({})",
-        entry.signature.verdict,
-        entry.signature.signer.as_deref().unwrap_or("—")
-    );
-    if let Some(digest) = &entry.tree_sha256 {
-        outln!(
-            w,
-            "  tree-sha256: claimed {} computed {} ({})",
-            digest.claimed,
-            digest.computed,
-            if digest.match_digest {
-                "match"
-            } else {
-                "mismatch"
-            }
-        );
-        outln!(
-            w,
-            "  hashed: {} files, {} submodules",
-            digest.files,
-            digest.submodules
-        );
-    }
-    if !entry.not_verifiable_submodules.is_empty() {
-        outln!(w, "  not verifiable submodules:");
-        for miss in &entry.not_verifiable_submodules {
-            outln!(w, "    {} ({})", miss.path, miss.reason);
-        }
-    }
-    outln!(w, "  elapsed: {} ms", entry.elapsed.ms);
-    Ok(())
-}
-
-fn render_verify_markdown(w: &mut dyn Write, entry: &TagVerifyEntry) -> Result<()> {
-    outln!(w, "### `{}`\n", entry.name);
-    outln!(w, "- **ok:** {}", entry.ok);
-    outln!(w, "- **oid:** `{}`", entry.oid);
-    outln!(w, "- **target:** `{}`", entry.target);
-    outln!(w, "- **signature:** `{}`", entry.signature.verdict);
-    if let Some(signer) = &entry.signature.signer {
-        outln!(w, "- **signer:** `{signer}`");
-    }
-    if let Some(digest) = &entry.tree_sha256 {
-        outln!(
-            w,
-            "- **tree-sha256:** claimed `{}`, computed `{}` ({})",
-            digest.claimed,
-            digest.computed,
-            if digest.match_digest {
-                "match"
-            } else {
-                "mismatch"
-            }
-        );
-        outln!(
-            w,
-            "- **hashed:** {} files, {} submodules",
-            digest.files,
-            digest.submodules
-        );
-    }
-    if !entry.not_verifiable_submodules.is_empty() {
-        outln!(w, "- **not verifiable submodules:**");
-        for miss in &entry.not_verifiable_submodules {
-            outln!(w, "  - `{}` ({})", miss.path, miss.reason);
-        }
-    }
-    outln!(w, "- **elapsed:** {} ms\n", entry.elapsed.ms);
-    Ok(())
-}
-
 fn map_tag_error(err: Error) -> anyhow::Error {
     match err {
         Error::Tag(TagError::VerifyNotTag { .. }) => {
@@ -1010,8 +659,6 @@ pub fn dispatch(
     use crate::exit_status::ExitStatus;
 
     use crate::message_input;
-    use crate::output::OutputMode;
-
     let CommandEnv {
         opts,
         ctx,
@@ -1077,7 +724,7 @@ pub fn dispatch(
             limit: limit.get(),
             tree_sha256,
             exclude_submodule,
-            list_detail: if opts.mode == OutputMode::Human {
+            list_detail: if env.tag_list_names_only() {
                 grit_lib::porcelain::tag::TagDetail::Names
             } else {
                 grit_lib::porcelain::tag::TagDetail::Annotation

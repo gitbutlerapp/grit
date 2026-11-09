@@ -16,6 +16,20 @@ pub struct CommandEnv<'a> {
     pub process_env: &'a grit_lib::config::environment::Environment,
 }
 
+impl CommandEnv<'_> {
+    /// Branch/tag list JSON and markdown include commit and upstream fields.
+    #[must_use]
+    pub fn branch_list_full_detail(&self) -> bool {
+        matches!(self.opts.mode, OutputMode::Json | OutputMode::Markdown)
+    }
+
+    /// Tag list human mode shows names only.
+    #[must_use]
+    pub fn tag_list_names_only(&self) -> bool {
+        self.opts.mode == OutputMode::Human
+    }
+}
+
 /// Commands that write objects and so may start automatic maintenance when they succeed.
 pub(crate) fn writes_objects(command: &Command) -> bool {
     match command {

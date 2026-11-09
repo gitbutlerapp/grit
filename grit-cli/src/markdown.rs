@@ -1,6 +1,5 @@
 //! Shared Markdown formatters for `--markdown` command output.
 
-pub use crate::render::list::short_change_id;
 pub use crate::render::list::{
     diff_code_fence, format_inline_code, print_fenced_text, render_hook_output,
 };
@@ -15,20 +14,12 @@ use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
 use crate::commands::diff::{file_diff_status_label, FileDiff, Hunk, Line, LineKind, Segment};
-use crate::commands::history::{
-    HeadPair, HistoryAbsorbOutcome, HistoryRewriteOutcome, RebaseCheckOutcome, RebaseCheckResult,
-    RefPair, RewrittenPair,
-};
-use crate::commands::merge::{MergeOutcome, MergeResult};
-use crate::commands::pick::PickOutcome;
-use crate::commands::revert::RevertOutcome;
 use crate::commands::serve_http::{
     ServeGrantOutcome, ServeTokenOutcome, ServeUserOutcome, ServeUsersOutcome,
 };
 use crate::commands::stash::{
     StashApplyOutcome, StashDropOutcome, StashPopOutcome, StashPushOutcome,
 };
-use crate::commands::switch::SwitchOutcome;
 use crate::commands::update::UpdateOutcome;
 use crate::commands::worktree::{WorktreeOutcome, WorktreeRow};
 use crate::context::{self, CommitSummary};
@@ -77,7 +68,7 @@ pub fn commit_bullet_with_decorations(
     )
 }
 
-fn commit_bullet_with_short(c: &CommitSummary, short: &str, now: i64) -> String {
+pub(crate) fn commit_bullet_with_short(c: &CommitSummary, short: &str, now: i64) -> String {
     commit_bullet_with_decorations(c, short, &[], None, now)
 }
 
@@ -301,69 +292,6 @@ fn segments_text(segments: &[Segment]) -> String {
     segments.iter().map(|s| s.text.as_str()).collect()
 }
 
-/// Branch list as a table with upstream and worktree columns when present.
-pub fn print_branch_list(
-    w: &mut dyn Write,
-    branches: &[crate::commands::branch::BranchEntry],
-    scope: crate::commands::branch::BranchListScope,
-) -> anyhow::Result<()> {
-    if branches.is_empty() {
-        outln!(w, "{}", crate::commands::branch::empty_list_message(scope));
-        return Ok(());
-    }
-    outln!(w, "## Branches");
-    outln!(
-        w,
-        "| Branch | Current | OID | Subject | Upstream | Worktree |"
-    );
-    outln!(w, "| --- | --- | --- | --- | --- | --- |");
-    for branch in branches {
-        let short_oid = branch
-            .short_oid
-            .as_deref()
-            .or(branch.oid.as_deref())
-            .map(short_hex)
-            .unwrap_or("");
-        let current = if branch.current { "yes" } else { "" };
-        let subject = branch
-            .subject
-            .as_deref()
-            .map(escape_table_cell)
-            .unwrap_or_default();
-        let upstream = branch
-            .upstream
-            .as_ref()
-            .map(|up| {
-                let label = if up.gone {
-                    format!("{} [gone]", up.ref_name)
-                } else {
-                    match (up.ahead, up.behind) {
-                        (Some(a), Some(b)) => format!("{} (+{a}/-{b})", up.ref_name),
-                        _ => up.ref_name.clone(),
-                    }
-                };
-                escape_table_cell(&label)
-            })
-            .unwrap_or_default();
-        let worktree = branch
-            .worktree
-            .as_deref()
-            .map(escape_table_cell)
-            .unwrap_or_default();
-        outln!(
-            w,
-            "| `{}` | {} | `{}` | {} | {} | {} |",
-            escape_table_cell(&branch.name),
-            current,
-            short_oid,
-            subject,
-            upstream,
-            worktree
-        );
-    }
-    Ok(())
-}
-
 /// Config entries as a two-column table.
 pub fn print_config_entries(
     w: &mut dyn Write,
@@ -378,6 +306,31 @@ pub fn print_config_entries(
     for entry in entries {
         let value = entry.value.as_deref().unwrap_or("");
         outln!(w, "| `{}` | {} |", entry.key, escape_table_cell(value));
+    }
+    Ok(())
+}
+
+/// Remotes as a two-column table.
+pub fn print_remote_list(
+    w: &mut dyn Write,
+    remotes: &[crate::commands::remote::RemoteEntry],
+) -> anyhow::Result<()> {
+    if remotes.is_empty() {
+        outln!(
+            w,
+            "No remotes. Add one with: `grit remote add <name> <url>`."
+        );
+        return Ok(());
+    }
+    outln!(w, "| Name | URL |");
+    outln!(w, "| --- | --- |");
+    for remote in remotes {
+        outln!(
+            w,
+            "| `{}` | {} |",
+            remote.name,
+            escape_table_cell(&remote.url)
+        );
     }
     Ok(())
 }
@@ -401,36 +354,68 @@ pub fn print_notes_list(
     Ok(())
 }
 
-/// Tag names with short oids.
-pub fn print_tag_list(
+/// Fetch ref updates as bullets (`ref` · old → new). `changed` counts the refs
+/// the fetch changed, or on a dry run would change.
+pub fn print_fetch_updates(
     w: &mut dyn Write,
-    tags: &[crate::commands::tag::TagEntry],
+    remote: &str,
+    updates: &[crate::commands::fetch::FetchUpdate],
+    changed: usize,
+    dry_run: bool,
 ) -> anyhow::Result<()> {
-    if tags.is_empty() {
-        outln!(w, "No tags yet.");
+    if updates.is_empty() && changed == 0 {
+        outln!(w, "Already up to date with `{remote}`.");
         return Ok(());
     }
-    outln!(w, "## Tags");
-    for tag in tags {
-        let short = short_hex(&tag.oid);
-        let peel = tag
-            .peeled
-            .as_ref()
-            .map(|p| format!(" → `{}`", short_hex(p)))
-            .unwrap_or_default();
-        let subject = tag
-            .annotation
-            .as_ref()
-            .map(|a| format!(" — {}", a.subject))
-            .unwrap_or_default();
+    outln!(w, "## Updates from `{remote}`");
+    let mut any_rejected = false;
+    for update in updates {
+        if update.status == crate::commands::fetch::FetchUpdateStatus::Rejected {
+            any_rejected = true;
+            let reason = update.reason.as_deref().unwrap_or("ref update rejected");
+            outln!(w, "- **`{}`** · rejected: {reason}", update.ref_name);
+            continue;
+        }
+        let from = update.old_oid.as_deref().map(short_hex).unwrap_or("new");
+        let to = update
+            .new_oid
+            .as_deref()
+            .map(short_hex)
+            .unwrap_or("deleted");
+        if update.remote_ref.is_empty() || update.remote_ref == update.ref_name {
+            outln!(w, "- `{}` · `{from}` → `{to}`", update.ref_name);
+        } else {
+            outln!(
+                w,
+                "- `{}` ← `{}` · `{from}` → `{to}`",
+                update.ref_name,
+                update.remote_ref
+            );
+        }
+    }
+    if any_rejected {
+        outln!(w);
+        outln!(w, "Some ref updates from `{remote}` were **rejected**.");
+    } else if dry_run && changed > 0 {
+        outln!(w);
         outln!(
             w,
-            "- `{}` · {} `{short}`{peel}{subject}",
-            tag.name,
-            tag.kind
+            "Would fetch **{changed}** update{} from `{remote}`.",
+            if changed == 1 { "" } else { "s" }
+        );
+    } else if changed > 0 {
+        outln!(w);
+        outln!(
+            w,
+            "Fetched **{changed}** update{}.",
+            if changed == 1 { "" } else { "s" }
         );
     }
     Ok(())
+}
+
+fn short_change_id(id: &str) -> &str {
+    id.get(..7).unwrap_or(id)
 }
 
 /// Result of `grit commit` / `grit commit --amend`.
@@ -479,685 +464,356 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
     Ok(())
 }
 
-fn write_merge_fast_forward_markdown(
+fn print_pull_conflict_bullets(
     w: &mut dyn Write,
-    outcome: &MergeOutcome,
-    would: bool,
+    outcome: &crate::commands::pull::PullOutcome,
 ) -> anyhow::Result<()> {
-    let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
-    let head = if outcome.detached_head {
-        "HEAD"
-    } else {
-        outcome
-            .updated_branch
-            .as_deref()
-            .unwrap_or(outcome.branch.as_str())
-    };
-    let source = outcome
-        .updated_branch
-        .as_ref()
-        .map(|_| outcome.branch.as_str());
-    match (would, source) {
-        (true, Some(src)) => outln!(
+    let path_opts = crate::ui::path_display_for_discovered_repo();
+    if let Some(sources) = &outcome.conflict_sources {
+        crate::render::operation::render_conflicts_markdown(
+            sources,
+            outcome.conflict_merge_label.as_deref(),
+            path_opts.as_ref(),
             w,
-            "- Would fast-forward **`{head}`** → `{short}` (**`{src}`**)"
-        ),
-        (true, None) => outln!(w, "- Would fast-forward **`{head}`** → `{short}`"),
-        (false, Some(src)) => outln!(w, "- Fast-forwarded **`{head}`** → `{short}` (**`{src}`**)"),
-        (false, None) => outln!(w, "- Fast-forwarded **`{head}`** → `{short}`"),
+        )?;
+    } else if let Some(paths) = outcome.conflicts.as_deref() {
+        for path in paths {
+            let shown = path_opts
+                .as_ref()
+                .map(|opts| format_inline_code(&opts.format_path_for_human(path)))
+                .unwrap_or_else(|| format_inline_code(path));
+            outln!(w, "- {shown}");
+        }
     }
     Ok(())
 }
 
-/// Result of `grit merge` (and the merge half of `grit pull`).
-pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow::Result<()> {
-    outln!(w, "## Merge");
+/// Result of `grit pull`.
+pub fn print_pull_outcome(
+    w: &mut dyn Write,
+    outcome: &crate::commands::pull::PullOutcome,
+) -> anyhow::Result<()> {
+    use crate::commands::pull::PullResult;
+    outln!(w, "## Pull");
     outln!(w);
+    if let Some(r) = &outcome.refresh {
+        print_refresh_head(w, r)?;
+        if r.dry_run {
+            return Ok(());
+        }
+    }
+    if let Some(b) = &outcome.server_branch {
+        return print_pull_server_branch(w, outcome, b);
+    }
+    if let Some(check) = &outcome.check {
+        outln!(
+            w,
+            "- Check: {ahead} ahead, {behind} behind · fast-forward {} · would `{would:?}`",
+            if check.fast_forward_possible {
+                "possible"
+            } else {
+                "not possible"
+            },
+            ahead = check.ahead,
+            behind = check.behind,
+            would = check.would
+        );
+        return Ok(());
+    }
     match outcome.result {
-        MergeResult::UpToDate => {
+        PullResult::UpToDate => {
             outln!(w, "Already up to date with **`{}`**.", outcome.branch);
         }
-        MergeResult::FastForward if outcome.check => {
-            write_merge_fast_forward_markdown(w, outcome, true)?;
-        }
-        MergeResult::FastForward => {
-            write_merge_fast_forward_markdown(w, outcome, false)?;
+        PullResult::FastForward => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(w, "- Fast-forwarded **`{}`** → `{short}`", outcome.branch);
             if let Some(id) = outcome.change_id.as_deref() {
                 outln!(w, "- change id `{short}`", short = short_change_id(id));
             }
         }
-        MergeResult::Clean => {
+        PullResult::Merged => {
             let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
             outln!(
                 w,
-                "- Would merge **`{}`** cleanly · tree `{short}`",
+                "- Merged **`{}`** into the current branch · `{short}`",
                 outcome.branch
             );
-        }
-        MergeResult::Merged => {
-            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
-            if outcome.detached_head {
-                outln!(w, "- Merged **`{}`** into HEAD · `{short}`", outcome.branch);
-            } else {
-                outln!(
-                    w,
-                    "- Merged **`{}`** into the current branch · `{short}`",
-                    outcome.branch
-                );
-            }
             if let Some(id) = outcome.change_id.as_deref() {
                 outln!(w, "- change id `{short}`", short = short_change_id(id));
             }
-            crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
         }
-        MergeResult::Squashed => {
+        PullResult::RefusedNotFf => {
+            let ahead = outcome.ahead.unwrap_or(0);
+            let behind = outcome.behind.unwrap_or(0);
             outln!(
                 w,
-                "- Squash merge from **`{}`** applied to the index (see `SQUASH_MSG`)",
+                "- Not possible to fast-forward **`{}`** · {ahead} ahead, {behind} behind",
                 outcome.branch
             );
         }
-        MergeResult::Stopped => {
+        PullResult::Conflicts => {
+            outln!(w, "- Pull **`{}`** stopped with conflicts", outcome.branch);
+            outln!(w);
+            print_pull_conflict_bullets(w, outcome)?;
+            if outcome.operation.as_deref() == Some("rebase") {
+                if let Some(commit) = &outcome.commit {
+                    outln!(
+                        w,
+                        "- Rebase stopped at commit `{short}`",
+                        short = short_hex(commit)
+                    );
+                }
+                if let Some(stash) = &outcome.autostash {
+                    outln!(
+                        w,
+                        "- Local changes kept in the stash (`{short}`); `grit stash pop` after the rebase",
+                        short = short_hex(stash)
+                    );
+                }
+                crate::render::operation::render_operation_guidance_markdown(
+                    outcome.next_steps.as_deref().unwrap_or(&[]),
+                    outcome.alternatives.as_deref(),
+                    w,
+                )?;
+            } else {
+                outln!(
+                    w,
+                    "→ fix conflicts, then `grit commit \"message\"`, or `grit merge --abort`"
+                );
+            }
+        }
+        PullResult::SetUpstream => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            let upstream = outcome.upstream.as_deref().unwrap_or("");
             outln!(
                 w,
-                "- Merge from **`{}`** applied; finish with `grit commit` or `grit merge --abort`",
+                "- Set **`{}`** to `{upstream}` · `{short}`",
                 outcome.branch
             );
         }
-        MergeResult::RefusedNotFf => {
+        PullResult::Rebased => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(w, "- Rebased onto **`{}`** · `{short}`", outcome.branch);
+            if let Some(id) = outcome.change_id.as_deref() {
+                outln!(w, "- change id `{short}`", short = short_change_id(id));
+            }
+        }
+        PullResult::Landed => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
             outln!(
                 w,
-                "- **`--ff-only`**: cannot fast-forward **`{}`** (histories diverged)",
+                "- Moved to **`{}`** · `{short}`, which has this branch's commits; uncommitted changes kept",
                 outcome.branch
             );
         }
-        MergeResult::Conflicts if outcome.check => {
-            if let Some(details) = &outcome.conflict_sources {
-                let path_opts = crate::ui::path_display_for_discovered_repo();
-                crate::operation_output::render_merge_check_conflicts_markdown(
-                    &outcome.branch,
-                    details,
-                    path_opts.as_ref(),
-                    w,
-                )?;
-            }
+        PullResult::AutostashConflict => {
+            outln!(
+                w,
+                "- Pulled **`{}`**, but re-applying autostash left conflicts (stash kept)",
+                outcome.branch
+            );
         }
-        MergeResult::Conflicts => {
-            outln!(w, "- Merge **`{}`** stopped with conflicts", outcome.branch);
+        PullResult::RebaseStopped => {
+            outln!(
+                w,
+                "- Rebase onto **`{}`** stopped on a conflict; the rebase is in progress",
+                outcome.branch
+            );
             outln!(w);
-            if let Some(details) = &outcome.conflict_sources {
-                let path_opts = crate::ui::path_display_for_discovered_repo();
-                crate::operation_output::render_conflicts_markdown(
-                    details,
-                    Some(outcome.branch.as_str()),
-                    path_opts.as_ref(),
-                    w,
-                )?;
-            }
-            crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
-            if outcome.next_steps.is_some() || outcome.alternatives.is_some() {
-                crate::operation_output::render_operation_guidance_markdown(
-                    outcome.next_steps.as_deref().unwrap_or(&[]),
-                    outcome.alternatives.as_deref(),
-                    w,
-                )?;
-            } else {
-                outln!(w);
-                outln!(
-                    w,
-                    "→ fix conflicts, then `grit merge --continue`, or `grit merge --abort`"
-                );
-            }
-        }
-        MergeResult::Aborted => outln!(w, "Merge aborted."),
-    }
-    if let Some(steps) = &outcome.next_steps {
-        let already_rendered = matches!(outcome.result, MergeResult::Conflicts) && !outcome.check;
-        if !already_rendered {
-            outln!(w);
-            for step in steps {
-                outln!(w, "- `{step}`");
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Result of `grit pick`.
-pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::Result<()> {
-    use crate::commands::pick::PickResult;
-    outln!(w, "## Pick");
-    outln!(w);
-    match outcome.result {
-        PickResult::Picked | PickResult::Skipped => {
-            if outcome.dry_run == Some(true) {
-                outln!(w, "- Would pick **{}** commit(s)", outcome.commits.len());
-                for row in &outcome.commits {
-                    let src = short_hex(&row.source);
-                    outln!(w, "  - `{src}`");
-                }
-            } else {
-                for row in &outcome.commits {
-                    let src = short_hex(&row.source);
-                    if let Some(oid) = &row.oid {
-                        let new = short_hex(oid);
-                        outln!(w, "- `{src}` → `{new}` — {}", row.subject);
-                    } else {
-                        outln!(w, "- `{src}` — {} (no commit)", row.subject);
-                    }
-                }
-                if !outcome.dropped.is_empty() {
-                    outln!(w, "- Dropped **{}** empty commit(s)", outcome.dropped.len());
-                }
-                crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
-            }
-        }
-        PickResult::Conflicts => {
-            if outcome.check {
-                outln!(w, "- Would conflict during pick");
-                if let Some(details) = &outcome.conflict_sources {
-                    let path_opts = crate::ui::path_display_for_discovered_repo();
-                    for conflict in details {
-                        let shown = path_opts
-                            .as_ref()
-                            .map(|opts| {
-                                format_inline_code(&opts.format_path_for_human(&conflict.path))
-                            })
-                            .unwrap_or_else(|| format_inline_code(&conflict.path));
-                        outln!(w, "  - {shown}");
-                    }
-                }
-            } else {
-                outln!(w, "- Pick stopped with conflicts");
-                outln!(w);
-                if let Some(details) = &outcome.conflict_sources {
-                    let path_opts = crate::ui::path_display_for_discovered_repo();
-                    crate::operation_output::render_conflicts_markdown(
-                        details,
-                        None,
-                        path_opts.as_ref(),
-                        w,
-                    )?;
-                }
-                crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
-                crate::operation_output::render_operation_guidance_markdown(
-                    outcome.next_steps.as_deref().unwrap_or(&[]),
-                    outcome.alternatives.as_deref(),
-                    w,
-                )?;
-            }
-        }
-        PickResult::Clean => {
-            outln!(w, "- Would pick cleanly");
-            if let Some(oid) = &outcome.oid {
-                outln!(w, "  - tree `{oid}`");
-            }
-        }
-        PickResult::Empty => {
-            if outcome.check {
-                outln!(w, "- Would stop on an empty pick step");
-            } else if let Some(row) = outcome.commits.last() {
-                let src = short_hex(&row.source);
-                outln!(w, "- Stopped on empty commit `{src}` — {}", row.subject);
-                crate::operation_output::render_operation_guidance_markdown(
-                    outcome.next_steps.as_deref().unwrap_or(&[]),
-                    outcome.alternatives.as_deref(),
-                    w,
-                )?;
-            } else {
-                outln!(w, "- Pick stopped on an empty commit");
-                crate::operation_output::render_operation_guidance_markdown(
-                    outcome.next_steps.as_deref().unwrap_or(&[]),
-                    outcome.alternatives.as_deref(),
-                    w,
-                )?;
-            }
-        }
-        PickResult::Aborted => outln!(w, "Pick aborted."),
-    }
-    Ok(())
-}
-
-/// Result of `grit revert`.
-pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyhow::Result<()> {
-    use crate::commands::revert::RevertResult;
-    outln!(w, "## Revert");
-    outln!(w);
-    match outcome.result {
-        RevertResult::Aborted => outln!(w, "Revert aborted."),
-        RevertResult::Conflicts => {
-            if outcome.check {
-                outln!(w, "- Would conflict during revert");
-                if let Some(details) = &outcome.conflict_sources {
-                    let path_opts = crate::ui::path_display_for_discovered_repo();
-                    for conflict in details {
-                        let shown = path_opts
-                            .as_ref()
-                            .map(|opts| {
-                                format_inline_code(&opts.format_path_for_human(&conflict.path))
-                            })
-                            .unwrap_or_else(|| format_inline_code(&conflict.path));
-                        outln!(w, "  - {shown}");
-                    }
-                }
-            } else {
-                outln!(w, "- Revert stopped with conflicts");
-                outln!(w);
-                if let Some(details) = &outcome.conflict_sources {
-                    let path_opts = crate::ui::path_display_for_discovered_repo();
-                    crate::operation_output::render_conflicts_markdown(
-                        details,
-                        None,
-                        path_opts.as_ref(),
-                        w,
-                    )?;
-                }
-                crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
-                crate::operation_output::render_operation_guidance_markdown(
-                    outcome.next_steps.as_deref().unwrap_or(&[]),
-                    outcome.alternatives.as_deref(),
-                    w,
-                )?;
-            }
-        }
-        RevertResult::Clean => {
-            outln!(w, "- Would revert cleanly");
-            if let Some(oid) = &outcome.oid {
-                outln!(w, "  - tree `{oid}`");
-            }
-        }
-        RevertResult::Empty => {
-            if outcome.check {
-                outln!(w, "- Would stop on an empty revert step");
-            } else {
-                outln!(w, "- Revert stopped on an empty commit");
-                crate::operation_output::render_operation_guidance_markdown(
-                    outcome.next_steps.as_deref().unwrap_or(&[]),
-                    outcome.alternatives.as_deref(),
-                    w,
-                )?;
-            }
-        }
-        RevertResult::Completed => {
-            if outcome.dry_run == Some(true) {
-                outln!(w, "- Would revert {} commit(s)", outcome.commits.len());
-                for entry in &outcome.commits {
-                    let src = short_hex(&entry.source);
-                    outln!(w, "  - `{src}`");
-                }
-            } else {
-                for entry in &outcome.commits {
-                    let src = short_hex(&entry.source);
-                    let new = short_hex(&entry.oid);
-                    outln!(w, "- `{src}` → `{new}` — {}", entry.subject);
-                    if let Some(id) = entry.change_id.as_deref() {
-                        outln!(w, "- change id `{short}`", short = short_change_id(id));
-                    }
-                }
-                crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Result of `grit rebase`.
-pub fn print_rebase_outcome(
-    w: &mut dyn Write,
-    outcome: &crate::commands::history::RebaseCliOutcome,
-) -> anyhow::Result<()> {
-    use crate::commands::history::RebaseResult;
-    outln!(w, "## Rebase");
-    outln!(w);
-    match outcome.result {
-        RebaseResult::Aborted => {
-            outln!(w, "Rebase aborted.");
-            for pair in &outcome.refs {
-                outln!(
-                    w,
-                    "- `{}` was moved during the rebase; reset `{}` → `{}` (the moved tip stays in its reflog)",
-                    pair.ref_name,
-                    short_hex(&pair.old),
-                    short_hex(&pair.new)
-                );
-            }
-        }
-        RebaseResult::ExecDirty => {
+            print_pull_conflict_bullets(w, outcome)?;
             outln!(
                 w,
-                "- Rebase stopped: exec left tracked changes; edits are preserved."
+                "→ resolve the conflicts, `grit add` the files, then `grit rebase --continue`; or `grit rebase --abort` to put the branch back"
             );
+        }
+        PullResult::Detached => {
             outln!(
                 w,
-                "Save edits before continuing or skipping. Aborting discards exec edits."
+                "- `HEAD` is detached, so only **`{}`** moved; the new snapshot is there",
+                outcome.branch
             );
-            for path in &outcome.paths {
-                outln!(w, "- `{path}`");
-            }
-            crate::operation_output::render_operation_guidance_markdown(
-                outcome.next_steps.as_deref().unwrap_or(&[]),
-                outcome.alternatives.as_deref(),
-                w,
-            )?;
         }
-        RebaseResult::Conflicts => {
-            outln!(w, "- Rebase stopped with conflicts");
-            outln!(w);
-            if let Some(details) = &outcome.conflict_sources {
-                let path_opts = crate::ui::path_display_for_discovered_repo();
-                crate::operation_output::render_conflicts_markdown(
-                    details,
-                    None,
-                    path_opts.as_ref(),
-                    w,
-                )?;
-            }
-            crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
-            if let Some(commit) = &outcome.commit {
-                outln!(
-                    w,
-                    "- Stopped at commit `{short}`",
-                    short = short_hex(commit)
-                );
-            }
-            crate::operation_output::render_operation_guidance_markdown(
-                outcome.next_steps.as_deref().unwrap_or(&[]),
-                outcome.alternatives.as_deref(),
-                w,
-            )?;
-        }
-        RebaseResult::Completed => {
-            if outcome.dry_run {
-                outln!(w, "- Dry run (refs unchanged)");
-            }
-            if outcome.rewritten.is_empty() && outcome.head.is_none() {
-                if !outcome.exec.is_empty() {
-                    outln!(w, "- Exec commands ran; branch is unchanged");
-                } else {
-                    outln!(w, "- Already up to date");
-                }
-            } else {
-                print_history_rewrite_rows(
-                    w,
-                    &outcome.rewritten,
-                    &outcome.refs,
-                    outcome.head.as_ref(),
-                )?;
-            }
-            crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
-        }
-    }
-    Ok(())
-}
-
-/// Result of `grit rebase --check`.
-pub fn print_rebase_check_outcome(
-    w: &mut dyn Write,
-    outcome: &RebaseCheckOutcome,
-) -> anyhow::Result<()> {
-    outln!(w, "## Rebase check");
-    outln!(w);
-    match outcome.result {
-        RebaseCheckResult::UpToDate => outln!(w, "- Already up to date"),
-        RebaseCheckResult::Clean => {
-            let n = outcome.commits.as_ref().map_or(0, Vec::len);
-            outln!(w, "- Would rebase {n} commit(s) cleanly");
-        }
-        RebaseCheckResult::Conflicts => {
-            match &outcome.refs {
-                Some(refs) => {
-                    let refs: Vec<String> = refs.iter().map(|r| format!("`{r}`")).collect();
-                    outln!(
-                        w,
-                        "- Would conflict moving {} onto the rebased history",
-                        refs.join(", ")
-                    );
-                }
-                None => outln!(w, "- Would conflict during rebase"),
-            }
-            if let Some(conflicts) = &outcome.conflict_sources {
-                let path_opts = crate::ui::path_display_for_discovered_repo();
-                for conflict in conflicts {
-                    let shown = path_opts
-                        .as_ref()
-                        .map(|opts| format_inline_code(&opts.format_path_for_human(&conflict.path)))
-                        .unwrap_or_else(|| format_inline_code(&conflict.path));
-                    outln!(w, "- {shown} ({})", conflict.kind.as_str());
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-pub fn print_history_rewrite_outcome(
-    w: &mut dyn Write,
-    title: &str,
-    outcome: &HistoryRewriteOutcome,
-) -> anyhow::Result<()> {
-    outln!(w, "## {title}");
-    outln!(w);
-    if outcome.operation == "rebase" && outcome.rewritten.is_empty() && outcome.head.is_none() {
-        if !outcome.exec.is_empty() {
-            outln!(w, "- Exec commands ran; branch is unchanged");
-        } else {
-            outln!(w, "- Already up to date");
-        }
-        return Ok(());
-    }
-    if outcome.dry_run {
-        outln!(w, "- Dry run (refs unchanged)");
-    }
-    print_history_rewrite_rows(w, &outcome.rewritten, &outcome.refs, outcome.head.as_ref())
-}
-
-pub fn print_history_undo_restores(
-    w: &mut dyn Write,
-    dry_run: bool,
-    restored_paths: &[String],
-    unrestored_edits: Option<&str>,
-) -> anyhow::Result<()> {
-    let verb = if dry_run { "would restore" } else { "restored" };
-    for path in restored_paths {
-        outln!(w, "- {verb} `{path}` (index and work tree)");
-    }
-    if let Some(oid) = unrestored_edits {
-        outln!(
-            w,
-            "- staged edits from the undone command were not restored; they remain in commit `{}`",
-            short_hex(oid)
-        );
-    }
-    Ok(())
-}
-
-fn print_history_rewrite_rows(
-    w: &mut dyn Write,
-    rewritten: &[RewrittenPair],
-    refs: &[RefPair],
-    head: Option<&HeadPair>,
-) -> anyhow::Result<()> {
-    for pair in rewritten {
-        match &pair.new {
-            Some(new) => {
-                if let Some(subject) = pair.subject.as_deref() {
-                    outln!(
-                        w,
-                        "- commit `{}` → `{}` — {subject}",
-                        short_hex(&pair.old),
-                        short_hex(new)
-                    );
-                } else {
-                    outln!(
-                        w,
-                        "- commit `{}` → `{}`",
-                        short_hex(&pair.old),
-                        short_hex(new)
-                    );
-                }
-                if let Some(id) = pair.change_id.as_deref() {
-                    outln!(w, "  - change id `{short}`", short = short_change_id(id));
-                }
-            }
-            None => {
-                if let Some(subject) = pair.subject.as_deref() {
-                    outln!(
-                        w,
-                        "- commit `{}` → (dropped) — {subject}",
-                        short_hex(&pair.old)
-                    );
-                } else {
-                    outln!(w, "- commit `{}` → (dropped)", short_hex(&pair.old));
-                }
-            }
-        }
-    }
-    for update in refs {
-        outln!(
-            w,
-            "- `{}` `{}` → `{}`",
-            update.ref_name,
-            short_hex(&update.old),
-            short_hex(&update.new)
-        );
-    }
-    if let Some(head) = head {
-        outln!(
-            w,
-            "- HEAD `{}` → `{}`",
-            short_hex(&head.old),
-            short_hex(&head.new)
-        );
-    }
-    Ok(())
-}
-
-fn absorb_hunk_header(range: &crate::commands::history::HunkRangeOut) -> String {
-    use grit_lib::revwalk::history::{format_hunk_range_header, HunkRange};
-    format_hunk_range_header(&HunkRange {
-        old_start: range.old_start,
-        old_lines: range.old_lines,
-        new_start: range.new_start,
-        new_lines: range.new_lines,
-    })
-}
-
-/// Result of `grit history absorb`.
-pub fn print_history_absorb_outcome(
-    w: &mut dyn Write,
-    outcome: &HistoryAbsorbOutcome,
-) -> anyhow::Result<()> {
-    outln!(w, "## History absorb");
-    outln!(w);
-    if outcome.dry_run {
-        outln!(w, "- Dry run (refs unchanged)");
-        outln!(w);
-    }
-    if !outcome.assignments.is_empty() {
-        outln!(w, "### Assigned hunks");
-        outln!(w);
-        outln!(w, "| Path | Hunk | Commit | Subject |");
-        outln!(w, "| --- | --- | --- | --- |");
-        for row in &outcome.assignments {
+        PullResult::Created => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
             outln!(
                 w,
-                "| `{}` | `{}` | `{}` | {} |",
-                escape_table_cell(&row.path),
-                absorb_hunk_header(&row.hunk_range),
-                short_hex(&row.commit),
-                escape_table_cell(&row.subject)
+                "- Created a branch at **`{}`** · `{short}`",
+                outcome.branch
             );
         }
-        outln!(w);
     }
-    if !outcome.unassigned.is_empty() {
-        outln!(w, "### Unassigned hunks");
-        outln!(w);
-        outln!(w, "| Path | Hunk | Reason |");
-        outln!(w, "| --- | --- | --- |");
-        for row in &outcome.unassigned {
+    if let Some(r) = &outcome.refresh {
+        for f in &r.followed {
+            outln!(w, "- `{}` follows to `{}`", f.name, short_hex(&f.to));
+        }
+        for b in &r.behind {
             outln!(
                 w,
-                "| `{}` | `{}` | {} |",
-                escape_table_cell(&row.path),
-                absorb_hunk_header(&row.hunk_range),
-                escape_table_cell(&crate::commands::history::format_absorb_unassigned_reason(
-                    row
-                ))
+                "- `{}` still builds on an older snapshot → `grit switch {}`, then `grit pull`",
+                b.name,
+                b.name
             );
         }
-        outln!(w);
     }
-    print_history_rewrite_rows(w, &outcome.rewritten, &outcome.refs, outcome.head.as_ref())
+    Ok(())
 }
 
-/// Result of `grit switch`.
-pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyhow::Result<()> {
-    outln!(w, "## Switch");
-    outln!(w);
-    if outcome.dry_run {
+/// `grit pull <branch>` in a snapshot checkout: the server's branch as the
+/// checkout sees it, then what the local branch did.
+fn print_pull_server_branch(
+    w: &mut dyn Write,
+    outcome: &crate::commands::pull::PullOutcome,
+    b: &crate::commands::checkout::PullServerBranchJson,
+) -> anyhow::Result<()> {
+    use crate::commands::pull::PullResult;
+    if b.gave_change_ids > 0 {
         outln!(
             w,
-            "- Would switch to **`{}`** ({} path(s) would change)",
-            outcome.target_label(),
-            outcome.changed_paths.unwrap_or(0)
+            "- Change ids: gave {}",
+            crate::render::pull::gave_change_ids_phrase(b.gave_change_ids)
         );
-        return print_switch_stranded(w, outcome);
     }
-    match outcome.branch.as_deref() {
-        None => outln!(w, "- HEAD detached at `{}`", outcome.target_label()),
-        Some(branch) if outcome.created => {
-            if let Some(up) = outcome.upstream.as_deref() {
-                outln!(
-                    w,
-                    "- Created and switched to **`{branch}`** (tracking `{up}`)"
-                );
-            } else {
-                outln!(w, "- Created and switched to **`{branch}`**");
-            }
-        }
-        Some(branch) => outln!(w, "- Switched to **`{branch}`**"),
-    }
-    if !outcome.hooks_run.is_empty() {
-        outln!(w, "- Hooks: `{}`", outcome.hooks_run.join("`, `"));
-    }
-    if !outcome.path_collisions.is_empty() {
-        outln!(
-            w,
-            "- **Path collisions** (case-insensitive paths share one file):"
-        );
-        for path in &outcome.path_collisions {
-            outln!(w, "  - `{path}`");
-        }
-    }
-    print_switch_stranded(w, outcome)
-}
-
-fn print_switch_stranded(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyhow::Result<()> {
-    let Some(newest) = outcome.stranded_commits.first() else {
-        return Ok(());
-    };
-    let count = outcome.stranded_total;
-    let (noun, them) = if count == 1 {
-        ("commit", "it")
-    } else {
-        ("commits", "them")
-    };
-    let would = if outcome.dry_run { " would be" } else { "" };
-    outln!(w);
     outln!(
         w,
-        "> **Warning:** {count} {noun}{would} left behind, not on any branch:"
+        "- Server branch: **`{}`** at `{}` · {} · at `{}` (`{}`)",
+        b.name,
+        short_hex(&b.tip),
+        crate::render::pull::commits_on_snapshots(b.commits),
+        b.upstream_ref,
+        short_hex(&b.projected)
     );
-    outln!(w);
-    for commit in &outcome.stranded_commits {
-        outln!(w, "- `{}` {}", short_hex(&commit.oid), commit.subject);
+    if let Some(check) = &outcome.check {
+        outln!(
+            w,
+            "- Check: {ahead} ahead, {behind} behind · fast-forward {} · would `{would:?}`",
+            if check.fast_forward_possible {
+                "possible"
+            } else {
+                "not possible"
+            },
+            ahead = check.ahead,
+            behind = check.behind,
+            would = check.would
+        );
+        return Ok(());
     }
-    if outcome.stranded_truncated {
-        outln!(w, "- … and {} more", count - outcome.stranded_commits.len());
+    let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+    match outcome.result {
+        PullResult::Created => outln!(
+            w,
+            "- Created **`{}`** at `{short}`, the server's → `grit switch {}` to work on it",
+            b.name,
+            b.name
+        ),
+        PullResult::UpToDate => outln!(w, "- **`{}`** already has them", b.name),
+        PullResult::FastForward => outln!(
+            w,
+            "- Moved **`{}`** to **`{}`** · `{short}`; it had nothing of its own",
+            b.name,
+            outcome.branch
+        ),
+        PullResult::Rebased => outln!(
+            w,
+            "- Rebased **`{}`** onto **`{}`** · `{short}` · {} of yours on top → `grit checkin {}` sends it",
+            b.name,
+            outcome.branch,
+            if b.own == 1 {
+                "1 commit".to_owned()
+            } else {
+                format!("{} commits", b.own)
+            },
+            b.name
+        ),
+        PullResult::RebaseStopped => {
+            outln!(
+                w,
+                "- Rebase of **`{}`** onto **`{}`** stopped on a conflict; the rebase is in progress",
+                b.name,
+                outcome.branch
+            );
+            outln!(w);
+            print_pull_conflict_bullets(w, outcome)?;
+            outln!(
+                w,
+                "→ resolve the conflicts, `grit add` the files, then `grit rebase --continue`; or `grit rebase --abort` to put the branch back"
+            );
+        }
+        PullResult::Conflicts => {
+            outln!(
+                w,
+                "- Rebasing **`{}`** onto **`{}`** would stop on a conflict",
+                b.name,
+                outcome.branch
+            );
+            outln!(w);
+            print_pull_conflict_bullets(w, outcome)?;
+            outln!(
+                w,
+                "→ the index or worktree has changes of its own, so nothing changed; commit or stash them, then `grit pull {}` again",
+                b.name
+            );
+        }
+        PullResult::AutostashConflict => outln!(
+            w,
+            "- Rebased **`{}`**, but re-applying the stashed changes left conflicts (stash kept)",
+            b.name
+        ),
+        _ => {}
     }
-    outln!(w);
-    outln!(w, "Keep {them} with `grit branch <name> {}`.", newest.oid);
+    if b.switched {
+        match &b.was_on {
+            Some(was) => outln!(w, "- Now on `{}` (was `{was}`)", b.name),
+            None => outln!(w, "- Now on `{}` (`HEAD` was detached)", b.name),
+        }
+    }
+    Ok(())
+}
+
+/// The refresh line of `grit pull` in a snapshot checkout.
+fn print_refresh_head(
+    w: &mut dyn Write,
+    r: &crate::commands::checkout::PullRefreshJson,
+) -> anyhow::Result<()> {
+    if r.gave_change_ids > 0 {
+        outln!(
+            w,
+            "- Change ids: gave {}",
+            crate::render::pull::gave_change_ids_phrase(r.gave_change_ids)
+        );
+    }
+    let previous = r.previous_base.as_deref().map(short_hex).unwrap_or("?");
+    if !r.moved {
+        outln!(
+            w,
+            "- Refresh: **`{}`** has not moved since this checkout's last snapshot (`{}`)",
+            r.target,
+            short_hex(&r.base)
+        );
+    } else if r.dry_run {
+        outln!(
+            w,
+            "- Refresh (dry run): **`{}`** moved `{previous}` → `{}`; `grit pull` would refresh onto it",
+            r.target,
+            short_hex(&r.base)
+        );
+    } else {
+        let changes = match &r.changes {
+            Some(c) if c.files == 0 => " · nothing changed in this checkout's paths".to_owned(),
+            Some(c) => format!(
+                " · {} in this checkout's paths",
+                crate::render::pull::changes_phrase(c)
+            ),
+            None => String::new(),
+        };
+        outln!(
+            w,
+            "- Refresh: **`{}`** moved `{previous}` → `{}` · new snapshot `{}` at `{}`{changes}",
+            r.target,
+            short_hex(&r.base),
+            short_hex(&r.snapshot),
+            r.upstream_ref
+        );
+    }
     Ok(())
 }
 
@@ -1615,6 +1271,90 @@ pub fn print_add_outcome(
     Ok(())
 }
 
+/// Remote hook/diagnostic lines from a push (side-band channel 2).
+pub fn print_remote_push_messages(w: &mut dyn Write, messages: &[String]) -> anyhow::Result<()> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+    outln!(w, "### Remote messages");
+    for line in messages {
+        outln!(w, "- {}", format_inline_code(line));
+    }
+    Ok(())
+}
+
+/// Per-ref push results.
+pub fn print_push_results(
+    w: &mut dyn Write,
+    remote: &str,
+    kind: crate::commands::push::PushKind,
+    dry_run: bool,
+    results: &[crate::commands::push::PushRefResult],
+) -> anyhow::Result<()> {
+    if results.is_empty() {
+        outln!(w, "No refs pushed to `{remote}`.");
+        return Ok(());
+    }
+    outln!(w, "## Push to `{remote}`");
+    for result in results {
+        let target = format!("{remote} {}", result.ref_name);
+        match result.status {
+            crate::commands::push::PushRefOutcomeStatus::Ok => {
+                if result.deleted == Some(true) {
+                    let short = crate::render::push::ref_short_display(&result.ref_name);
+                    if dry_run {
+                        outln!(
+                            w,
+                            "- **`{}`** · would delete `{short}` from `{remote}`",
+                            result.ref_name
+                        );
+                    } else {
+                        outln!(
+                            w,
+                            "- **`{}`** · deleted `{short}` from `{remote}`",
+                            result.ref_name
+                        );
+                    }
+                } else {
+                    let label = crate::render::push::push_result_source_label(result, kind);
+                    if dry_run {
+                        outln!(
+                            w,
+                            "- **`{}`** · would push `{label}` → `{target}`",
+                            result.ref_name
+                        );
+                    } else {
+                        outln!(
+                            w,
+                            "- **`{}`** · pushed `{label}` → `{target}`",
+                            result.ref_name
+                        );
+                    }
+                }
+            }
+            crate::commands::push::PushRefOutcomeStatus::UpToDate => outln!(
+                w,
+                "- **`{}`** · `{target}` already up to date",
+                result.ref_name
+            ),
+            crate::commands::push::PushRefOutcomeStatus::Rejected => {
+                let reason = match result.reason.as_deref() {
+                    Some("tag_exists") => {
+                        "tag already exists (use `--force` to replace)".to_owned()
+                    }
+                    other => other.unwrap_or("rejected").to_owned(),
+                };
+                outln!(
+                    w,
+                    "- **`{}`** · rejected `{target}`: {reason}",
+                    result.ref_name
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{diff_code_fence, escape_table_cell, format_inline_code, print_fenced_text};
@@ -1668,6 +1408,15 @@ mod tests {
     }
 
     #[test]
+    fn remote_push_messages_use_safe_inline_code() {
+        use super::print_remote_push_messages;
+        let mut buf = Vec::new();
+        print_remote_push_messages(&mut buf, &["use `ticket` in message".to_owned()]).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("``use `ticket` in message``"));
+    }
+
+    #[test]
     fn format_inline_code_uses_longer_delimiter_for_embedded_backtick() {
         assert_eq!(format_inline_code("tick`name.txt"), "``tick`name.txt``");
         assert_eq!(format_inline_code("plain.txt"), "`plain.txt`");
@@ -1687,38 +1436,6 @@ mod tests {
     #[test]
     fn escape_table_cell_replaces_internal_newlines_and_pipes() {
         assert_eq!(escape_table_cell("a|b\nc"), "a\\|b\\nc");
-    }
-
-    #[test]
-    fn branch_list_table_escapes_pipe_in_subject() {
-        use crate::commands::branch::BranchEntry;
-
-        use crate::commands::branch::BranchListScope;
-
-        let branches = vec![BranchEntry {
-            name: "main".into(),
-            current: true,
-            is_remote: false,
-            full_ref: Some("refs/heads/main".into()),
-            remote: None,
-            oid: Some("b5ea30de417ac84c09b8cfc0acf5f2c39efc611f".into()),
-            short_oid: Some("b5ea30de".into()),
-            subject: Some("fix|widget".into()),
-            date: None,
-            upstream: None,
-            worktree: None,
-        }];
-        let mut buf = Vec::new();
-        super::print_branch_list(&mut buf, &branches, BranchListScope::Local).expect("markdown");
-        let rendered = String::from_utf8(buf).expect("utf-8");
-        let row = rendered
-            .lines()
-            .find(|line| line.contains("| `main` |"))
-            .expect("branch row");
-        assert!(
-            row.contains("fix\\|widget"),
-            "subject cell should escape pipe delimiters: {row}"
-        );
     }
 
     #[test]

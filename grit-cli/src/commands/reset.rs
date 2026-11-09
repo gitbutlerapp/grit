@@ -5,9 +5,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::error::ObjectError;
 use grit_lib::error::RefError;
-use grit_lib::porcelain::reset::{
-    OrphanedCommitSummary, ResetMode, ResetOptions, ResetOutcome, DEFAULT_ORPHAN_LIMIT,
-};
+use grit_lib::porcelain::reset::{ResetMode, ResetOptions, ResetOutcome, DEFAULT_ORPHAN_LIMIT};
 use grit_lib::revwalk::{IndexDwim, Peel, ResolveOptions};
 
 use schemars::JsonSchema;
@@ -16,6 +14,7 @@ use std::io::Write;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+pub use crate::render::switch::OrphanedCommitJson;
 
 /// Reset mode in JSON (`soft`, `mixed`, `hard`, or `keep`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -34,24 +33,6 @@ impl From<ResetMode> for ResetCliMode {
             ResetMode::Mixed => Self::Mixed,
             ResetMode::Hard => Self::Hard,
             ResetMode::Keep => Self::Keep,
-        }
-    }
-}
-
-/// One commit left unreachable by a reset, or by switching away from a detached `HEAD`.
-#[derive(Serialize, JsonSchema)]
-pub struct OrphanedCommitJson {
-    pub oid: String,
-    pub change_id: String,
-    pub subject: String,
-}
-
-impl From<OrphanedCommitSummary> for OrphanedCommitJson {
-    fn from(c: OrphanedCommitSummary) -> Self {
-        Self {
-            oid: c.oid.to_hex(),
-            change_id: c.change_id,
-            subject: c.subject,
         }
     }
 }

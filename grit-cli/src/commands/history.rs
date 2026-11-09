@@ -8,34 +8,34 @@ use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error as LibError;
-use grit_lib::objects::{short_hex, ObjectId};
-use grit_lib::operation::Conflict;
+use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelection};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    format_hunk_range_header, AbsorbOptions, ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec,
-    FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement, PreRebase, RebaseCheckPlan,
-    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope,
-    RewordOptions, RewriteOptions, RewritePlan, SplitOptions, SquashMessage, SquashOptions,
-    StartRebaseOptions, UnassignedHunk, UndoMode,
+    AbsorbOptions, ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec, FixupOptions, HistoryError,
+    Placement, PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan,
+    RebaseRequest, RebaseSessionError, RefScope, RewordOptions, RewriteOptions, SplitOptions,
+    SquashMessage, SquashOptions, StartRebaseOptions, UndoMode,
 };
 use grit_lib::revwalk::{Peel, ResolveOptions};
-
-use schemars::JsonSchema;
-use serde::Serialize;
 
 use crate::commands::merge_strategy::MergeStrategyArg;
 use crate::context;
 use crate::json_error;
-use crate::markdown;
 use crate::message_input::{parse_author_cli, read_message_input, AuthorArg, MessageInputArgs};
-use crate::operation_output::{
-    conflict_json, conflict_paths, render_conflicts_human, render_rebase_conflict_footer_human,
-    ConflictJson, OperationConflictBlock,
-};
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
-use crate::ui::path_display_for_discovered_repo;
+use crate::render::operation::conflict_paths;
+
+#[allow(unused_imports)]
+pub use crate::render::history::{
+    AbsorbAssignmentOut, AbsorbExcludedRefOut, ExecResultJson, HeadPair, HistoryAbsorbOutcome,
+    HistoryRewriteOutcome, HistoryUndoOutcome, HunkRangeOut, RefPair, RewrittenPair,
+    UnassignedHunkOut,
+};
+#[allow(unused_imports)]
+pub use crate::render::rebase::{
+    RebaseCheckOutcome, RebaseCheckResult, RebaseCliOutcome, RebaseResult, RebaseRunOutcome,
+};
 
 /// Which local refs a history rewrite may move.
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
@@ -114,115 +114,6 @@ impl RebaseRunFlags {
     }
 }
 
-/// Result of `grit rebase --check`.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RebaseCheckOutcome {
-    pub operation: String,
-    pub result: RebaseCheckResult,
-    pub check: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub commits: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub conflicts: Option<Vec<ConflictJson>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub commit: Option<String>,
-    /// Other branches whose replay would conflict; absent when the conflict is on the
-    /// rebased branch itself.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub refs: Option<Vec<String>>,
-    #[serde(skip)]
-    pub(crate) conflict_sources: Option<Vec<Conflict>>,
-}
-
-/// Outcome category for [`RebaseCheckOutcome`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RebaseCheckResult {
-    UpToDate,
-    Clean,
-    Conflicts,
-}
-
-impl RebaseCheckOutcome {
-    fn up_to_date() -> Self {
-        Self {
-            operation: "rebase".into(),
-            result: RebaseCheckResult::UpToDate,
-            check: true,
-            commits: None,
-            conflicts: None,
-            commit: None,
-            refs: None,
-            conflict_sources: None,
-        }
-    }
-
-    fn clean(commits: Vec<ObjectId>) -> Self {
-        Self {
-            operation: "rebase".into(),
-            result: RebaseCheckResult::Clean,
-            check: true,
-            commits: Some(commits.iter().map(ObjectId::to_hex).collect()),
-            conflicts: None,
-            commit: None,
-            refs: None,
-            conflict_sources: None,
-        }
-    }
-
-    fn conflicts(commit: ObjectId, conflicts: &[Conflict], refs: Vec<String>) -> Self {
-        let conflict_sources = Some(conflicts.to_vec());
-        let conflicts = Some(conflicts.iter().map(|c| conflict_json(c, None)).collect());
-        Self {
-            operation: "rebase".into(),
-            result: RebaseCheckResult::Conflicts,
-            check: true,
-            commits: None,
-            conflicts,
-            commit: Some(commit.to_hex()),
-            refs: (!refs.is_empty()).then_some(refs),
-            conflict_sources,
-        }
-    }
-}
-
-impl HumanRender for RebaseCheckOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        match self.result {
-            RebaseCheckResult::UpToDate => outln!(w, "Already up to date"),
-            RebaseCheckResult::Clean => {
-                let n = self.commits.as_ref().map_or(0, Vec::len);
-                outln!(w, "Would rebase {n} commit(s) cleanly");
-            }
-            RebaseCheckResult::Conflicts => {
-                match &self.refs {
-                    Some(refs) => outln!(
-                        w,
-                        "Would conflict moving {} onto the rebased history",
-                        refs.join(", ")
-                    ),
-                    None => outln!(w, "Would conflict during rebase"),
-                }
-                if let Some(conflicts) = &self.conflict_sources {
-                    let path_opts = path_display_for_discovered_repo();
-                    render_conflicts_human(conflicts, None, path_opts.as_ref(), w)?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for RebaseCheckOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_rebase_check_outcome(w, self)
-    }
-}
-
 /// Shared flags for history rewrite subcommands.
 #[derive(Debug, clap::Args)]
 pub struct HistoryRewriteArgs {
@@ -240,373 +131,6 @@ pub struct HistoryRewriteArgs {
     pub keep_committer: bool,
 }
 
-/// Result of `grit history drop`, `move`, `reword`, `fixup`, `squash`, `absorb`, `rebase`, and `undo`, and top-level `grit rebase`.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct HistoryRewriteOutcome {
-    /// Operation name (`drop`, `move`, `reword`, `fixup`, `squash`, `rebase`, or `undo`).
-    pub operation: String,
-    /// Original and replacement commit OIDs for every rewritten commit.
-    pub rewritten: Vec<RewrittenPair>,
-    /// Planned or applied ref tip updates.
-    pub refs: Vec<RefPair>,
-    /// Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged.
-    pub head: Option<HeadPair>,
-    /// Whether refs were left unchanged (`true` for `--dry-run`).
-    pub dry_run: bool,
-    /// `--exec` subprocess results when `--exec` was used (success only).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub exec: Vec<ExecResultJson>,
-}
-
-/// One `rebase --exec` command result in `--json` output.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ExecResultJson {
-    /// Commit OID (full hex) checked out when the command ran.
-    pub commit: String,
-    /// Shell command string.
-    pub command: String,
-    /// Subprocess exit code.
-    pub exit_code: i32,
-}
-
-impl HistoryRewriteOutcome {
-    /// Outcome when there is nothing to replay (`rewritten` is empty).
-    pub fn up_to_date(operation: &str, dry_run: bool) -> Self {
-        Self {
-            operation: operation.into(),
-            rewritten: Vec::new(),
-            refs: Vec::new(),
-            head: None,
-            dry_run,
-            exec: Vec::new(),
-        }
-    }
-
-    pub(crate) fn new(operation: &str, plan: &RewritePlan, dry_run: bool) -> Self {
-        Self {
-            operation: operation.into(),
-            rewritten: plan
-                .commits
-                .iter()
-                .map(|row| RewrittenPair {
-                    old: row.old.to_hex(),
-                    new: row.new.map(|new| new.to_hex()),
-                    change_id: row.change_id.as_ref().map(|id| id.as_str().to_owned()),
-                    subject: row.subject.clone(),
-                })
-                .collect(),
-            refs: plan
-                .ref_updates
-                .iter()
-                .map(|u| RefPair {
-                    ref_name: u.name.to_string(),
-                    name: u.name.to_string(),
-                    old: u.old.to_hex(),
-                    new: u.new.to_hex(),
-                })
-                .collect(),
-            head: plan.head_change().map(|(old, new)| HeadPair {
-                old: old.to_hex(),
-                new: new.to_hex(),
-            }),
-            dry_run,
-            exec: Vec::new(),
-        }
-    }
-
-    fn with_exec(mut self, exec: Vec<ExecResultJson>) -> Self {
-        self.exec = exec;
-        self
-    }
-}
-
-/// One commit OID before and after rewrite.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RewrittenPair {
-    /// Commit OID before rewrite (full hex).
-    pub old: String,
-    /// Replacement commit OID (full hex), or JSON `null` when the commit was dropped.
-    pub new: Option<String>,
-    /// Stored `change-id` on the replacement commit, or JSON `null` when dropped or absent.
-    pub change_id: Option<String>,
-    /// First line of the replacement commit message, or the original when dropped.
-    pub subject: Option<String>,
-}
-
-/// One ref tip before and after rewrite.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RefPair {
-    /// Full ref name.
-    #[serde(rename = "ref")]
-    pub ref_name: String,
-    /// Deprecated duplicate of [`Self::ref_name`]; removed in a future release.
-    pub name: String,
-    /// Previous tip OID (full hex).
-    pub old: String,
-    /// New tip OID (full hex).
-    pub new: String,
-}
-
-/// `HEAD` commit before and after rewrite.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct HeadPair {
-    /// Commit OID at `HEAD` before rewrite (full hex).
-    pub old: String,
-    /// Commit OID at `HEAD` after rewrite (full hex).
-    pub new: String,
-}
-
-/// High-level result of `grit rebase`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RebaseResult {
-    Completed,
-    Conflicts,
-    ExecDirty,
-    Aborted,
-}
-
-/// Result of `grit rebase` and `grit history rebase`.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RebaseCliOutcome {
-    /// Successful exec dirtied tracked files; preserved at `commit` until recovery.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
-    /// Changed tracked paths when `result` is `exec_dirty`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub paths: Vec<String>,
-    pub result: RebaseResult,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub operation: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rewritten: Vec<RewrittenPair>,
-    /// Ref tip updates. For `aborted`, branches something else moved during the stop that the
-    /// abort reset: `old` is the overwritten tip, `new` the restored pre-rebase tip.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub refs: Vec<RefPair>,
-    /// Previous and new `HEAD` commit OIDs for a completed invocation; null when unchanged.
-    /// On continue/skip, compares the stopped HEAD with HEAD after branch reattachment.
-    /// Dry runs describe the planned change; conflict and abort outcomes use null.
-    #[serde(default)]
-    pub head: Option<HeadPair>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub dry_run: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub commit: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub conflicts: Option<Vec<ConflictJson>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub next_steps: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub alternatives: Option<Vec<String>>,
-    /// `--exec` subprocess results through completion or a dirty exec stop.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub exec: Vec<ExecResultJson>,
-    /// Rerere replay or record events when `rerere.enabled` is active.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rerere: Vec<crate::operation_output::RerereEventJson>,
-    #[serde(skip)]
-    pub(crate) conflict_sources: Option<Vec<Conflict>>,
-}
-
-impl RebaseCliOutcome {
-    fn aborted() -> Self {
-        Self {
-            command: None,
-            paths: Vec::new(),
-            result: RebaseResult::Aborted,
-            operation: None,
-            rewritten: Vec::new(),
-            refs: Vec::new(),
-            head: None,
-            dry_run: false,
-            commit: None,
-            conflicts: None,
-            next_steps: None,
-            alternatives: None,
-            exec: Vec::new(),
-            rerere: Vec::new(),
-            conflict_sources: None,
-        }
-    }
-
-    fn from_rewrite(outcome: HistoryRewriteOutcome) -> Self {
-        Self {
-            command: None,
-            paths: Vec::new(),
-            result: RebaseResult::Completed,
-            operation: Some(outcome.operation),
-            rewritten: outcome.rewritten,
-            refs: outcome.refs,
-            head: outcome.head,
-            dry_run: outcome.dry_run,
-            exec: outcome.exec,
-            commit: None,
-            conflicts: None,
-            next_steps: None,
-            alternatives: None,
-            rerere: Vec::new(),
-            conflict_sources: None,
-        }
-    }
-
-    fn from_exec_dirty(
-        commit: ObjectId,
-        command: String,
-        paths: Vec<String>,
-        runs: Vec<ExecRunRecord>,
-    ) -> Self {
-        let mut outcome = Self::aborted();
-        outcome.result = RebaseResult::ExecDirty;
-        outcome.operation = Some("rebase".into());
-        outcome.commit = Some(commit.to_hex());
-        outcome.command = Some(command);
-        outcome.paths = paths;
-        outcome.exec = exec_rows(&runs);
-        outcome.next_steps = Some(vec![
-            "grit stash push -m 'exec edits'".into(),
-            "grit rebase --continue".into(),
-        ]);
-        outcome.alternatives = Some(vec![
-            "grit rebase --skip".into(),
-            "grit rebase --abort".into(),
-        ]);
-        outcome
-    }
-
-    fn from_exec_conflict(
-        commit: ObjectId,
-        conflicts: &[Conflict],
-        runs: &[ExecRunRecord],
-    ) -> Self {
-        let mut outcome = Self::from_stop(commit, conflicts, &[]);
-        outcome.exec = exec_rows(runs);
-        outcome
-    }
-
-    fn from_stop(
-        commit: ObjectId,
-        conflicts: &[Conflict],
-        rerere: &[grit_lib::diff::rerere::RerereEvent],
-    ) -> Self {
-        let block = OperationConflictBlock::for_rebase(conflicts);
-        Self {
-            command: None,
-            paths: Vec::new(),
-            result: RebaseResult::Conflicts,
-            operation: Some("rebase".into()),
-            rewritten: Vec::new(),
-            refs: Vec::new(),
-            head: None,
-            dry_run: false,
-            commit: Some(commit.to_hex()),
-            conflicts: Some(block.conflicts),
-            next_steps: Some(block.next_steps),
-            alternatives: block.alternatives,
-            exec: Vec::new(),
-            rerere: crate::operation_output::rerere_events_json(rerere),
-            conflict_sources: Some(conflicts.to_vec()),
-        }
-    }
-}
-
-impl HumanRender for RebaseCliOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        match self.result {
-            RebaseResult::Aborted => {
-                outln!(w, "Rebase aborted.");
-                for pair in &self.refs {
-                    outln!(
-                        w,
-                        "  {} was moved during the rebase; reset {} → {} (the moved tip stays in its reflog)",
-                        pair.ref_name,
-                        short_hex(&pair.old),
-                        short_hex(&pair.new)
-                    );
-                }
-            }
-            RebaseResult::ExecDirty => {
-                outln!(
-                    w,
-                    "Rebase stopped: exec left tracked changes; edits are preserved."
-                );
-                outln!(
-                    w,
-                    "Save edits before continuing or skipping. Aborting discards exec edits."
-                );
-                for path in &self.paths {
-                    outln!(w, "  {path}");
-                }
-                for step in self.next_steps.as_deref().unwrap_or(&[]) {
-                    outln!(w, "{step}");
-                }
-                for step in self.alternatives.as_deref().unwrap_or(&[]) {
-                    outln!(w, "{step}");
-                }
-            }
-            RebaseResult::Conflicts => {
-                if let Some(details) = &self.conflict_sources {
-                    let path_opts = path_display_for_discovered_repo();
-                    render_conflicts_human(details, None, path_opts.as_ref(), w)?;
-                }
-                crate::operation_output::render_rerere_human(&self.rerere);
-                render_rebase_conflict_footer_human();
-            }
-            RebaseResult::Completed => {
-                HistoryRewriteOutcome {
-                    operation: self.operation.clone().unwrap_or_else(|| "rebase".into()),
-                    rewritten: self.rewritten.clone(),
-                    refs: self.refs.clone(),
-                    head: self.head.clone(),
-                    dry_run: self.dry_run,
-                    exec: self.exec.clone(),
-                }
-                .render_human(w, ctx)?;
-                crate::operation_output::render_rerere_human(&self.rerere);
-            }
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for RebaseCliOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_rebase_outcome(w, self)?;
-        Ok(())
-    }
-}
-
-/// Either a resumable rebase outcome or a `--check` prediction.
-#[derive(Serialize, JsonSchema)]
-#[serde(untagged)]
-pub enum RebaseRunOutcome {
-    Rebase(RebaseCliOutcome),
-    Check(RebaseCheckOutcome),
-}
-
-impl HumanRender for RebaseRunOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        match self {
-            Self::Rebase(o) => o.render_human(w, ctx),
-            Self::Check(o) => o.render_human(w, ctx),
-        }
-    }
-}
-
-impl MarkdownRender for RebaseRunOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        match self {
-            Self::Rebase(o) => o.render_markdown(w, ctx),
-            Self::Check(o) => o.render_markdown(w, ctx),
-        }
-    }
-}
-
 /// Options for [`run_rebase`].
 #[derive(Debug)]
 pub struct RebaseRunOptions<'a> {
@@ -617,165 +141,6 @@ pub struct RebaseRunOptions<'a> {
     pub skip: bool,
     pub flags: &'a RebaseRunFlags,
     pub shared: &'a HistoryRewriteArgs,
-}
-
-fn render_rewrite_rows(
-    w: &mut dyn Write,
-    rewritten: &[RewrittenPair],
-    refs: &[RefPair],
-) -> Result<()> {
-    for pair in rewritten {
-        match &pair.new {
-            Some(new) => {
-                if let Some(subject) = pair.subject.as_deref() {
-                    outln!(
-                        w,
-                        "  commit {} → {} ({subject})",
-                        short_hex(&pair.old),
-                        short_hex(new)
-                    );
-                } else {
-                    outln!(w, "  commit {} → {}", short_hex(&pair.old), short_hex(new));
-                }
-            }
-            None => {
-                if let Some(subject) = pair.subject.as_deref() {
-                    outln!(
-                        w,
-                        "  commit {} → (dropped) ({subject})",
-                        short_hex(&pair.old)
-                    );
-                } else {
-                    outln!(w, "  commit {} → (dropped)", short_hex(&pair.old));
-                }
-            }
-        }
-    }
-    for update in refs {
-        outln!(
-            w,
-            "  {} {} → {}",
-            update.ref_name,
-            short_hex(&update.old),
-            short_hex(&update.new)
-        );
-    }
-    Ok(())
-}
-
-impl HumanRender for HistoryRewriteOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        if self.operation == "rebase" && self.rewritten.is_empty() && self.head.is_none() {
-            if !self.exec.is_empty() {
-                outln!(w, "Exec commands ran; branch is unchanged");
-                return Ok(());
-            }
-            if let Some(head) = &self.head {
-                outln!(
-                    w,
-                    "Rebased branch tip from {} to {}",
-                    short_hex(&head.old),
-                    short_hex(&head.new)
-                );
-                return Ok(());
-            }
-            outln!(w, "Already up to date");
-            return Ok(());
-        }
-        if self.dry_run {
-            if self.operation == "undo" {
-                outln!(w, "Dry run — undo would restore refs:");
-            } else {
-                outln!(w, "Dry run — refs would change:");
-            }
-        } else if self.operation == "undo" {
-            outln!(w, "Undid last history rewrite");
-        } else if self.operation == "drop" {
-            outln!(
-                w,
-                "Dropped 1 commit, replayed {} descendant commit(s)",
-                self.rewritten.len()
-            );
-        } else if self.operation == "rebase" {
-            outln!(w, "Rebased {} commit(s)", self.rewritten.len());
-        } else {
-            let verb = match self.operation.as_str() {
-                "fixup" => "Fixed up",
-                "squash" => "Squashed",
-                "split" => "Split",
-                _ => "Rewrote",
-            };
-            outln!(w, "{verb} {} commit(s)", self.rewritten.len());
-        }
-        render_rewrite_rows(w, &self.rewritten, &self.refs)
-    }
-}
-
-impl MarkdownRender for HistoryRewriteOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let title = match self.operation.as_str() {
-            "drop" => "History drop",
-            "move" => "History move",
-            "fixup" => "History fixup",
-            "squash" => "History squash",
-            "reword" => "History reword",
-            "rebase" => "History rebase",
-            "split" => "History split",
-            "undo" => "History undo",
-            _ => "History rewrite",
-        };
-        markdown::print_history_rewrite_outcome(w, title, self)
-    }
-}
-
-/// Result of `grit history undo`: the ref movement plus any edits put back.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct HistoryUndoOutcome {
-    /// Refs and `HEAD` the undo moved (or would move).
-    #[serde(flatten)]
-    pub rewrite: HistoryRewriteOutcome,
-    /// Paths whose staged and work tree edits were (or, with `--dry-run`, would be) put back,
-    /// because the undone fixup or absorb had folded them into history. Omitted when empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub restored_paths: Vec<String>,
-    /// Commit (full hex) that still holds the edits an undone fixup or absorb folded in, when
-    /// they could not be put back. Omitted otherwise.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unrestored_edits: Option<String>,
-}
-
-impl HumanRender for HistoryUndoOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        self.rewrite.render_human(w, ctx)?;
-        let verb = if self.rewrite.dry_run {
-            "would restore"
-        } else {
-            "restored"
-        };
-        for path in &self.restored_paths {
-            outln!(w, "  {verb} {path} (index and work tree)");
-        }
-        if let Some(oid) = &self.unrestored_edits {
-            outln!(
-                w,
-                "Staged edits from the undone command were not restored; they remain in commit {}",
-                short_hex(oid)
-            );
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for HistoryUndoOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        self.rewrite.render_markdown(w, ctx)?;
-        markdown::print_history_undo_restores(
-            w,
-            self.rewrite.dry_run,
-            &self.restored_paths,
-            self.unrestored_edits.as_deref(),
-        )
-    }
 }
 
 /// Repository, config and rewrite options shared by every history subcommand.
@@ -1127,157 +492,6 @@ pub fn run_split(
     Ok(HistoryRewriteOutcome::new("split", &plan, shared.dry_run))
 }
 
-/// JSON/markdown assignment row for `grit history absorb`.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct AbsorbAssignmentOut {
-    /// Repository-relative path.
-    pub path: String,
-    /// Staged hunk range in the index↔`HEAD` diff.
-    pub hunk_range: HunkRangeOut,
-    /// Target commit (full hex).
-    pub commit: String,
-    /// Target commit subject (first line, folded).
-    pub subject: String,
-}
-
-/// Hunk coordinates for JSON output.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct HunkRangeOut {
-    /// Old side start line (1-based).
-    pub old_start: usize,
-    /// Old side line count.
-    pub old_lines: usize,
-    /// New side start line (1-based).
-    pub new_start: usize,
-    /// New side line count.
-    pub new_lines: usize,
-}
-
-impl From<&HunkRange> for HunkRangeOut {
-    fn from(range: &HunkRange) -> Self {
-        Self {
-            old_start: range.old_start,
-            old_lines: range.old_lines,
-            new_start: range.new_start,
-            new_lines: range.new_lines,
-        }
-    }
-}
-
-impl From<&HunkAssignment> for AbsorbAssignmentOut {
-    fn from(row: &HunkAssignment) -> Self {
-        Self {
-            path: row.path.clone(),
-            hunk_range: (&row.hunk_range).into(),
-            commit: row.commit.to_hex(),
-            subject: row.subject.clone(),
-        }
-    }
-}
-
-impl From<&UnassignedHunk> for UnassignedHunkOut {
-    fn from(row: &UnassignedHunk) -> Self {
-        Self {
-            path: row.path.clone(),
-            hunk_range: (&row.hunk_range).into(),
-            reason: row.reason.as_str().into(),
-            detail: row.detail.clone(),
-        }
-    }
-}
-
-/// JSON/markdown unassigned hunk row.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct UnassignedHunkOut {
-    /// Repository-relative path.
-    pub path: String,
-    /// Staged hunk range.
-    pub hunk_range: HunkRangeOut,
-    /// Stable reason code.
-    pub reason: String,
-    /// Human-readable detail when the reason alone is not enough (for example `hidden_by_ref`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-}
-
-/// Local branch tip excluded from the absorb stack.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct AbsorbExcludedRefOut {
-    /// Full ref name.
-    #[serde(rename = "ref")]
-    pub ref_name: String,
-    /// Tip commit OID (full hex).
-    pub commit: String,
-}
-
-/// Result of `grit history absorb`.
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct HistoryAbsorbOutcome {
-    /// Operation name (`absorb`).
-    pub operation: String,
-    /// Assigned hunks.
-    pub assignments: Vec<AbsorbAssignmentOut>,
-    /// Hunks left staged.
-    pub unassigned: Vec<UnassignedHunkOut>,
-    /// Local branch tips hidden from the absorb stack (empty when none apply).
-    pub excluded_refs: Vec<AbsorbExcludedRefOut>,
-    /// Original and replacement commit OIDs for every rewritten commit.
-    pub rewritten: Vec<RewrittenPair>,
-    /// Planned or applied ref tip updates.
-    pub refs: Vec<RefPair>,
-    /// Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged.
-    pub head: Option<HeadPair>,
-    /// Whether refs were left unchanged (`true` for `--dry-run`).
-    pub dry_run: bool,
-}
-
-impl HumanRender for HistoryAbsorbOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        if self.dry_run {
-            outln!(
-                w,
-                "Dry run — absorb would change {} commit(s)",
-                self.rewritten.len()
-            );
-        } else {
-            outln!(
-                w,
-                "Absorbed {} hunk(s) into {} commit(s)",
-                self.assignments.len(),
-                self.rewritten.len()
-            );
-        }
-        for row in &self.assignments {
-            let header = format_absorb_hunk_header(&row.hunk_range);
-            outln!(
-                w,
-                "  {} {} → {} {}",
-                row.path,
-                header,
-                short_hex(&row.commit),
-                row.subject
-            );
-        }
-        for row in &self.unassigned {
-            let header = format_absorb_hunk_header(&row.hunk_range);
-            outln!(
-                w,
-                "  {} {} — {}",
-                row.path,
-                header,
-                format_absorb_unassigned_reason(row)
-            );
-        }
-        render_rewrite_rows(w, &self.rewritten, &self.refs)
-    }
-}
-
-impl MarkdownRender for HistoryAbsorbOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_history_absorb_outcome(w, self)
-    }
-}
-
 /// Non-zero exit from `rebase --exec` (refs were not updated).
 #[derive(Debug)]
 pub struct RebaseExecExit {
@@ -1352,12 +566,12 @@ fn run_rebase_with_exec(
             command,
             paths,
             runs,
-        })) => RebaseCliOutcome::from_exec_dirty(commit, command, paths, runs),
+        })) => RebaseCliOutcome::from_exec_dirty(commit, command, paths, exec_rows(&runs)),
         Err(LibError::History(HistoryError::ExecConflict {
             commit,
             conflicts,
             runs,
-        })) => RebaseCliOutcome::from_exec_conflict(commit, conflicts.as_ref(), &runs),
+        })) => RebaseCliOutcome::from_exec_conflict(commit, conflicts.as_ref(), exec_rows(&runs)),
         Err(LibError::History(HistoryError::ExecFailed {
             exit_code,
             stdout,
@@ -1452,12 +666,14 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
                 command,
                 paths,
                 runs,
-            })) => RebaseCliOutcome::from_exec_dirty(commit, command, paths, runs),
+            })) => RebaseCliOutcome::from_exec_dirty(commit, command, paths, exec_rows(&runs)),
             Err(LibError::History(HistoryError::ExecConflict {
                 commit,
                 conflicts,
                 runs,
-            })) => RebaseCliOutcome::from_exec_conflict(commit, conflicts.as_ref(), &runs),
+            })) => {
+                RebaseCliOutcome::from_exec_conflict(commit, conflicts.as_ref(), exec_rows(&runs))
+            }
             Err(LibError::History(HistoryError::ExecFailed {
                 exit_code,
                 stdout,
@@ -1605,7 +821,7 @@ fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
                 new: new.to_hex(),
             });
             let mut cli = RebaseCliOutcome::from_rewrite(outcome);
-            cli.rerere = crate::operation_output::rerere_events_json(&rerere);
+            cli.rerere = crate::render::operation::rerere_events_json(&rerere);
             Ok(cli)
         }
         RebaseOutcome::ExecDone { plan, exec, .. } => {
@@ -1819,24 +1035,6 @@ pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<His
     })
 }
 
-pub(crate) fn format_absorb_unassigned_reason(row: &UnassignedHunkOut) -> String {
-    if let Some(detail) = &row.detail {
-        format!("{}: {detail}", row.reason)
-    } else {
-        row.reason.clone()
-    }
-}
-
-fn format_absorb_hunk_header(range: &HunkRangeOut) -> String {
-    format_hunk_range_header(&HunkRange {
-        old_start: range.old_start,
-        old_lines: range.old_lines,
-        new_start: range.new_start,
-        new_lines: range.new_lines,
-    })
-}
-
-/// Error mapper for `operation` (for example `history drop`), for use with `map_err`.
 pub(crate) fn history_error(operation: &'static str) -> impl Fn(LibError) -> anyhow::Error + Copy {
     move |err| match err {
         LibError::History(history) => map_history_error(history, operation),

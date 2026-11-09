@@ -40,6 +40,7 @@ mod json_filter;
 mod json_schema;
 mod json_to_jaq;
 mod limit_args;
+mod log_commit;
 mod log_display;
 mod markdown;
 mod merge_strategy_args;

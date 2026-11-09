@@ -1,14 +1,5 @@
 //! `grit shortlog` — the commits on this branch that aren't on the target yet.
 
-use anyhow::{Context, Result};
-use clap::Args;
-use grit_lib::objects::{CommitData, OidHashMap};
-use grit_lib::refs::branch_tracking::{TargetComparisonOptions, TargetSpec};
-use grit_lib::state::HeadState;
-use schemars::JsonSchema;
-use serde::Serialize;
-use std::io::Write;
-
 use crate::commands::diff::{render_log_commit_diff, DiffOutcome};
 use crate::commands::log::{
     load_commits_with_format_for_oids, render_commit_diffs_markdown, LogCommit,
@@ -17,8 +8,15 @@ use crate::context::{self, CommitSummary};
 use crate::diff_format::{DiffFormatArgs, ShortlogDiffFormatArgs};
 use crate::diff_render::{render_stat, use_color};
 use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::RenderContext;
+use crate::render::shortlog::ShortlogHumanCommitLine;
+pub use crate::render::shortlog::ShortlogOutcome;
 use crate::ui;
+use anyhow::{Context, Result};
+use clap::Args;
+use grit_lib::objects::{CommitData, OidHashMap};
+use grit_lib::refs::branch_tracking::{TargetComparisonOptions, TargetSpec};
+use grit_lib::state::HeadState;
 
 /// CLI flags for [`run`].
 #[derive(Args, Debug, Default)]
@@ -36,160 +34,75 @@ pub struct ShortlogCliArgs {
     pub format: ShortlogDiffFormatArgs,
 }
 
-/// Result of `grit shortlog`.
-#[derive(Serialize, JsonSchema)]
-pub struct ShortlogOutcome {
-    pub branch: String,
-    /// Target branch name, or `null` when none could be resolved.
-    pub target: Option<String>,
-    pub ahead: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub behind: Option<usize>,
-    pub commits: Vec<LogCommit>,
-    /// True when more ahead commits exist than listed (`ahead` exceeds `commits.len()`).
-    pub truncated: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub behind_commits: Option<Vec<LogCommit>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub behind_truncated: Option<bool>,
-    /// Continuation cursor when the list is resumable; always `null` for `shortlog` today.
-    pub next: Option<String>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    commit_rows: Vec<CommitSummary>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    behind_commit_rows: Vec<CommitSummary>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    commit_diffs: Vec<Option<DiffOutcome>>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    behind_commit_diffs: Vec<Option<DiffOutcome>>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    _format: DiffFormatArgs,
-}
-
-impl HumanRender for ShortlogOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        outln!(w, "On {}", self.branch);
-        let Some(target) = &self.target else {
-            outln!(w, "No target branch found (tried target.branch, origin/master, origin/main, master, main).");
-            return Ok(());
-        };
-        outln!(
-            w,
-            "Ahead of {} by {} commit{}",
-            target,
-            self.ahead,
-            if self.ahead == 1 { "" } else { "s" }
-        );
-        self.render_commit_block(w, ctx, &self.commit_rows, &self.commits, &self.commit_diffs)?;
-        if let (Some(behind), Some(commits)) = (self.behind, self.behind_commits.as_ref()) {
-            outln!(w);
-            outln!(
-                w,
-                "Behind {} by {} commit{}",
-                target,
-                behind,
-                if behind == 1 { "" } else { "s" }
-            );
-            self.render_commit_block(
-                w,
-                ctx,
-                &self.behind_commit_rows,
-                commits,
-                &self.behind_commit_diffs,
-            )?;
-        }
-        Ok(())
+fn precompute_markdown_bullets(
+    repo: &grit_lib::repo::Repository,
+    rows: &[CommitSummary],
+    now: i64,
+) -> Result<Vec<String>> {
+    if rows.is_empty() {
+        return Ok(Vec::new());
     }
+    let sha_abbrevs = crate::log_display::abbrev_commit_summaries(repo, rows)?;
+    Ok(rows
+        .iter()
+        .zip(&sha_abbrevs)
+        .map(|(c, short)| markdown::commit_bullet_with_short(c, short, now))
+        .collect())
 }
 
-impl ShortlogOutcome {
-    fn render_commit_block(
-        &self,
-        w: &mut dyn Write,
-        ctx: &RenderContext,
-        rows: &[CommitSummary],
-        commits: &[LogCommit],
-        diffs: &[Option<DiffOutcome>],
-    ) -> Result<()> {
-        let color = use_color();
-        let repo = crate::context::discover()?;
-        let sha_abbrevs = crate::log_display::abbrev_commit_summaries(&repo, rows)?;
-        let opts = ui::CommitRowOptions {
-            sha_abbrevs: Some(&sha_abbrevs),
-            ..ui::CommitRowOptions::default()
+fn precompute_human_lines(
+    repo: &grit_lib::repo::Repository,
+    rows: &[CommitSummary],
+    commits: &[LogCommit],
+    diffs: &[Option<DiffOutcome>],
+    now: i64,
+) -> Result<Vec<ShortlogHumanCommitLine>> {
+    let color = use_color();
+    let sha_abbrevs = crate::log_display::abbrev_commit_summaries(repo, rows)?;
+    let opts = ui::CommitRowOptions {
+        sha_abbrevs: Some(&sha_abbrevs),
+        ..ui::CommitRowOptions::default()
+    };
+    let row_lines = ui::commit_rows_with(rows, now, &opts);
+    let mut out = Vec::with_capacity(row_lines.len());
+    for (row, (commit, diff)) in row_lines.into_iter().zip(commits.iter().zip(diffs)) {
+        let mut detail_buf = Vec::new();
+        let mut blank_after = false;
+        if let Some(outcome) = diff {
+            render_log_commit_diff(&mut detail_buf, outcome)?;
+            blank_after = !outcome.files.is_empty();
+        } else if let Some(stat) = &commit.stat {
+            render_stat(&mut detail_buf, stat, color, None)?;
+            blank_after = true;
+        }
+        let detail = if detail_buf.is_empty() {
+            None
+        } else {
+            Some(String::from_utf8(detail_buf).map_err(|e| anyhow::anyhow!("{e}"))?)
         };
-        for (row, (commit, diff)) in ui::commit_rows_with(rows, ctx.now.unix_timestamp(), &opts)
-            .iter()
-            .zip(commits.iter().zip(diffs))
-        {
-            outln!(w, "{row}");
-            if let Some(outcome) = diff {
-                render_log_commit_diff(w, outcome)?;
-            } else if let Some(stat) = &commit.stat {
-                render_stat(w, stat, color, None)?;
-            }
-            if diff.is_some() || commit.stat.is_some() {
-                outln!(w);
-            }
-        }
-        Ok(())
+        out.push(ShortlogHumanCommitLine {
+            row,
+            detail,
+            blank_after_detail: blank_after,
+        });
     }
+    Ok(out)
 }
 
-impl MarkdownRender for ShortlogOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        outln!(w, "# Branch `{}`", self.branch);
-        let Some(target) = &self.target else {
-            outln!(w);
-            outln!(
-                w,
-                "No target branch found (tried `target.branch`, `origin/master`, `origin/main`, `master`, `main`)."
-            );
-            return Ok(());
-        };
-        outln!(w);
-        outln!(
-            w,
-            "Ahead of `{target}` by **{}** commit{}.",
-            self.ahead,
-            if self.ahead == 1 { "" } else { "s" }
-        );
-        outln!(w);
-        markdown::print_commit_list(w, &self.commit_rows, ctx)?;
-        if self._format.any_format_flag() {
-            render_commit_diffs_markdown(w, &self.commit_rows, &self.commit_diffs, ctx)?;
-        }
-        if let (Some(behind), true) = (self.behind, self.behind_commits.is_some()) {
-            outln!(w);
-            outln!(
-                w,
-                "Behind `{target}` by **{}** commit{}.",
-                behind,
-                if behind == 1 { "" } else { "s" }
-            );
-            outln!(w);
-            markdown::print_commit_list(w, &self.behind_commit_rows, ctx)?;
-            if self._format.any_format_flag() {
-                render_commit_diffs_markdown(
-                    w,
-                    &self.behind_commit_rows,
-                    &self.behind_commit_diffs,
-                    ctx,
-                )?;
-            }
-        }
-        Ok(())
-    }
+fn precompute_markdown_diffs(
+    rows: &[CommitSummary],
+    diffs: &[Option<DiffOutcome>],
+    ctx: &RenderContext,
+) -> Result<String> {
+    let mut buf = Vec::new();
+    render_commit_diffs_markdown(&mut buf, rows, diffs, ctx)?;
+    String::from_utf8(buf).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
-pub fn run(args: &ShortlogCliArgs) -> Result<ShortlogOutcome> {
+pub fn run(args: &ShortlogCliArgs, md_ctx: &RenderContext) -> Result<ShortlogOutcome> {
     let format = args.format.to_diff_format();
     let repo = context::discover()?;
+    let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     let opts = TargetComparisonOptions {
         target: args.target.as_ref().map(|t| TargetSpec(t.clone())),
         list_limit: args.max_count,
@@ -217,25 +130,45 @@ pub fn run(args: &ShortlogCliArgs) -> Result<ShortlogOutcome> {
         &mut parsed,
         true,
     )?;
-
-    let (behind_commits, behind_commit_rows, behind_commit_diffs) = if args.behind {
-        let (bc, br, bd) = load_commits_with_format_for_oids(
-            &repo,
-            &comparison.newest_behind,
-            format,
-            &[],
-            &mut parsed,
-            true,
-        )?;
-        (Some(bc), br, bd)
+    let human_ahead = precompute_human_lines(&repo, &commit_rows, &commits, &commit_diffs, now)?;
+    let markdown_ahead_bullets = precompute_markdown_bullets(&repo, &commit_rows, now)?;
+    let markdown_ahead_diffs = if format.any_format_flag() {
+        precompute_markdown_diffs(&commit_rows, &commit_diffs, md_ctx)?
     } else {
-        (None, Vec::new(), Vec::new())
+        String::new()
     };
 
-    let truncated = comparison.ahead > commits.len();
-    let behind_truncated = args
-        .behind
-        .then_some(comparison.behind > comparison.newest_behind.len());
+    let (behind_commits, human_behind, markdown_behind_bullets, markdown_behind_diffs) =
+        if args.behind {
+            let (bc, br, bd) = load_commits_with_format_for_oids(
+                &repo,
+                &comparison.newest_behind,
+                format,
+                &[],
+                &mut parsed,
+                true,
+            )?;
+            let human_behind = precompute_human_lines(&repo, &br, &bc, &bd, now)?;
+            let markdown_behind_bullets = precompute_markdown_bullets(&repo, &br, now)?;
+            let markdown_behind_diffs = if format.any_format_flag() {
+                precompute_markdown_diffs(&br, &bd, md_ctx)?
+            } else {
+                String::new()
+            };
+            (
+                Some(bc),
+                human_behind,
+                markdown_behind_bullets,
+                markdown_behind_diffs,
+            )
+        } else {
+            (None, Vec::new(), Vec::new(), String::new())
+        };
+
+    let ahead_side = comparison.ahead_commits();
+    let behind_side = comparison.behind_commits();
+    let truncated = ahead_side.truncated;
+    let behind_truncated = args.behind.then_some(behind_side.truncated);
 
     Ok(ShortlogOutcome {
         branch: comparison.branch,
@@ -247,11 +180,13 @@ pub fn run(args: &ShortlogCliArgs) -> Result<ShortlogOutcome> {
         behind_commits,
         behind_truncated,
         next: None,
-        commit_rows,
-        behind_commit_rows,
-        commit_diffs,
-        behind_commit_diffs,
-        _format: format,
+        human_ahead,
+        human_behind,
+        markdown_ahead_bullets,
+        markdown_behind_bullets,
+        markdown_ahead_diffs,
+        markdown_behind_diffs,
+        format,
     })
 }
 
@@ -266,11 +201,13 @@ fn empty_outcome(branch: &str, format: DiffFormatArgs) -> ShortlogOutcome {
         behind_commits: None,
         behind_truncated: None,
         next: None,
-        commit_rows: Vec::new(),
-        behind_commit_rows: Vec::new(),
-        commit_diffs: Vec::new(),
-        behind_commit_diffs: Vec::new(),
-        _format: format,
+        human_ahead: Vec::new(),
+        human_behind: Vec::new(),
+        markdown_ahead_bullets: Vec::new(),
+        markdown_behind_bullets: Vec::new(),
+        markdown_ahead_diffs: String::new(),
+        markdown_behind_diffs: String::new(),
+        format,
     }
 }
 
@@ -290,6 +227,6 @@ pub fn dispatch(
     } = env;
     let shortlog = args;
     {
-        emit_success(commands::shortlog::run(&shortlog)?, opts, ctx)
+        emit_success(commands::shortlog::run(&shortlog, ctx)?, opts, ctx)
     }
 }
