@@ -14,7 +14,9 @@
 //! intra-line word highlights — no `+`/`-` patch markers. Color is emitted only
 //! on a TTY (honoring `NO_COLOR`); piped output is plain text with `+`/`-`.
 
-use super::convert::{cli_file_from_file_change, cli_file_from_lib, map_listed_file};
+use super::convert::{
+    cli_file_from_file_change, cli_file_from_lib, cli_file_from_tree, map_listed_file,
+};
 use super::{DiffFormatArgs, DiffOutcome, DiffRunOptions, DiffTotalsJson, PatchBodies};
 use anyhow::{Context, Result};
 use grit_lib::diff::{
@@ -932,15 +934,34 @@ fn tree_diff_outcome(
                 body_streamed: false,
                 preserve_changed: true,
             }),
-            PatchBodies::Stream | PatchBodies::Collect => {
-                super::stream::stream_tree_patch_to_stdout(
-                    repo,
-                    &entries,
-                    diff_options,
+            PatchBodies::Stream => super::stream::stream_tree_patch_to_stdout(
+                repo,
+                &entries,
+                diff_options,
+                format,
+                patch_bodies,
+                &ctx.render,
+            ),
+            PatchBodies::Collect if ctx.json_stream => super::stream::stream_tree_patch_to_stdout(
+                repo,
+                &entries,
+                diff_options,
+                format,
+                patch_bodies,
+                &ctx.render,
+            ),
+            PatchBodies::Collect => {
+                let structured = repo.diff().structured(entries, &diff_options)?;
+                let files: Vec<FileDiff> = structured.into_iter().map(cli_file_from_tree).collect();
+                Ok(DiffOutcome {
+                    changed: !files.is_empty(),
+                    files,
+                    totals: None,
                     format,
-                    patch_bodies,
-                    &ctx.render,
-                )
+                    path_display: None,
+                    body_streamed: false,
+                    preserve_changed: false,
+                })
             }
         }
     } else {

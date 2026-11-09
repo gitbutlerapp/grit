@@ -101,6 +101,8 @@ pub struct DiffRunOptions {
 pub struct DiffRunContext {
     pub word_level_inline: bool,
     pub emit_json_hunk_ids: bool,
+    /// When false with [`PatchBodies::Collect`], file rows stay in memory for `--json --filter`.
+    pub json_stream: bool,
     pub patch_bodies: PatchBodies,
     pub render: RenderContext,
 }
