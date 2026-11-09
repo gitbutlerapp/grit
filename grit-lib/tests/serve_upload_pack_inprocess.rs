@@ -947,3 +947,69 @@ fn upload_pack_stateless_v0_want_moved_annotated_blob_tag() {
         .stdout;
     assert!(git_out.as_bytes().starts_with(b"0008NAK\n"));
 }
+
+#[test]
+fn upload_pack_v0_deduplicates_identical_wants() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let tip = seed_bare_main(&repo);
+    let caps = "multi_ack_detailed side-band-64k thin-pack no-progress include-tag ofs-delta";
+
+    let mut one = pkt_line(&format!("want {} {caps}\n", tip.to_hex()));
+    one.extend_from_slice(b"0000");
+    one.extend_from_slice(&pkt_line("done"));
+    one.extend_from_slice(b"0000");
+
+    let mut two_same = pkt_line(&format!("want {} {caps}\n", tip.to_hex()));
+    two_same.extend_from_slice(&pkt_line(&format!("want {}\n", tip.to_hex())));
+    two_same.extend_from_slice(b"0000");
+    two_same.extend_from_slice(&pkt_line("done"));
+    two_same.extend_from_slice(b"0000");
+
+    let mut one_out = Vec::new();
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V0, false, true);
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(&mut Cursor::new(one), &mut one_out)
+        .expect("one want");
+
+    let mut dup_out = Vec::new();
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V0, false, true);
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(&mut Cursor::new(two_same), &mut dup_out)
+        .expect("duplicate wants");
+    assert_eq!(one_out, dup_out, "identical wants must match a single want");
+
+    std::fs::write(repo.git_dir().join("refs/heads/first"), format!("{tip}\n"))
+        .expect("keep original tip advertised");
+    let (other_tip, _) = seed_three_linear_commits(&repo);
+    let mut two_distinct = pkt_line(&format!("want {} {caps}\n", tip.to_hex()));
+    two_distinct.extend_from_slice(&pkt_line(&format!("want {}\n", other_tip.to_hex())));
+    two_distinct.extend_from_slice(b"0000");
+    two_distinct.extend_from_slice(&pkt_line("done"));
+    two_distinct.extend_from_slice(b"0000");
+    let mut distinct_out = Vec::new();
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V0, false, true);
+    UploadPack::new(&repo, &mut serve_opts)
+        .run(&mut Cursor::new(two_distinct), &mut distinct_out)
+        .expect("two wants");
+    assert_ne!(
+        one_out, distinct_out,
+        "two distinct wants must change the response"
+    );
+
+    let pack_one = sideband_band1(&one_out["0008NAK\n".len()..]);
+    let scratch = tempfile::tempdir().expect("scratch");
+    grit_test_support::git(scratch.path(), &["init", "-q", "--bare"]);
+    grit_test_support::git_cmd(&["index-pack", "--strict", "--stdin"])
+        .in_dir(scratch.path())
+        .stdin(pack_one)
+        .suc();
+}
