@@ -1,6 +1,7 @@
 //! `grit diff` — show changes as a delta-style, dual-line-numbered diff.
 
 mod convert;
+pub mod dispatch;
 mod run;
 mod stream;
 
