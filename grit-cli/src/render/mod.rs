@@ -18,6 +18,8 @@ pub struct RenderContext {
     pub now: OffsetDateTime,
     /// Selected stdout format for this invocation.
     pub mode: OutputMode,
+    /// Whether ANSI styling is enabled for this invocation (captured outside the render layer).
+    pub color: bool,
 }
 
 /// How a command's outcome should be rendered.
@@ -47,26 +49,27 @@ mod purity {
     use std::fs;
     use std::path::PathBuf;
 
-    const FORBIDDEN_USE_MARKERS: &[&str] = &[
+    const FORBIDDEN_SOURCE_MARKERS: &[&str] = &[
+        "std::env",
+        "::env::",
         "grit_lib::repo",
-        "::Repository",
         "crate::context",
         "std::fs",
-        "std::env",
         "crate::commands::",
     ];
 
+    const FORBIDDEN_TYPE_MARKERS: &[&str] = &["Repository"];
+
     const FORBIDDEN_HANDLE_CALLS: &[&str] = &[".objects()", ".references()", ".status()"];
 
-    fn line_has_forbidden_use(line: &str) -> Option<&'static str> {
+    fn line_is_ignorable(line: &str) -> bool {
         let trimmed = line.trim();
-        if !trimmed.starts_with("use ") && !trimmed.starts_with("pub use ") {
-            return None;
-        }
-        FORBIDDEN_USE_MARKERS
-            .iter()
-            .find(|marker| trimmed.contains(**marker))
-            .copied()
+        trimmed.is_empty()
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("///")
+            || trimmed.starts_with('*')
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with("*/")
     }
 
     fn render_rs_files() -> Vec<PathBuf> {
@@ -97,18 +100,29 @@ mod purity {
                 .unwrap()
                 .display();
             let source = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
-            let mut in_cfg_test = false;
+            let mut after_cfg_test = false;
             for line in source.lines() {
                 let trimmed = line.trim();
-                if trimmed.starts_with("#[cfg(test)]") {
-                    in_cfg_test = true;
+                if trimmed == "#[cfg(test)]" {
+                    after_cfg_test = true;
                     continue;
                 }
-                if in_cfg_test {
+                if after_cfg_test || line_is_ignorable(line) {
                     continue;
                 }
-                if let Some(marker) = line_has_forbidden_use(line) {
-                    violations.push(format!("{rel}: forbidden import `{marker}` in `{line}`"));
+                for marker in FORBIDDEN_SOURCE_MARKERS {
+                    if line.contains(marker) {
+                        violations.push(format!(
+                            "{rel}: forbidden `{marker}` in production line `{line}`"
+                        ));
+                    }
+                }
+                for marker in FORBIDDEN_TYPE_MARKERS {
+                    if line.contains(marker) {
+                        violations.push(format!(
+                            "{rel}: forbidden type `{marker}` in production line `{line}`"
+                        ));
+                    }
                 }
                 for call in FORBIDDEN_HANDLE_CALLS {
                     if line.contains(call) {

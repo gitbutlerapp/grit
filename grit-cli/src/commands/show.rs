@@ -657,8 +657,8 @@ impl MarkdownRender for ShowOutcome {
 }
 
 impl HumanRender for ShowOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let color = diff_render::use_color();
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        let color = ctx.color;
 
         if let Some(tag) = &self.tag {
             outln!(w, "{}", paint(color, "33;1", &format!("tag {}", tag.name)));
@@ -726,7 +726,7 @@ impl HumanRender for ShowOutcome {
             if !self.diff.files.is_empty() && fmt.detail() == grit_lib::diff::DiffDetail::Patch {
                 outln!(w);
             }
-            self.diff.render_human_diff(w, None)?;
+            self.diff.render_human_diff(w, None, color)?;
         }
         Ok(())
     }

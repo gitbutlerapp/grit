@@ -31,6 +31,7 @@ fn sample_ctx() -> RenderContext {
     RenderContext {
         now: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
         mode: OutputMode::Human,
+        color: false,
     }
 }
 

@@ -240,7 +240,7 @@ pub fn commit_rows_with(
     now: i64,
     opts: &CommitRowOptions<'_>,
 ) -> Vec<String> {
-    let color = style::use_color();
+    let color = crate::output::stdout_color_enabled();
     let term_width = style::terminal_width();
     let columns = opts
         .columns
@@ -418,7 +418,7 @@ pub fn print_change_group(
     if entries.is_empty() {
         return Ok(());
     }
-    let color = style::use_color();
+    let color = crate::output::stdout_color_enabled();
     outln!(w, "{}", style::paint(color, "1", title));
     for entry in entries {
         let g = glyph(&entry.status);
@@ -445,7 +445,7 @@ pub fn print_untracked(
     if paths.is_empty() {
         return Ok(());
     }
-    let color = style::use_color();
+    let color = crate::output::stdout_color_enabled();
     outln!(w, "{}", style::paint(color, "1", "Untracked"));
     for path in paths {
         let shown = path_opts
@@ -467,7 +467,7 @@ pub fn print_ignored(
     if paths.is_empty() {
         return Ok(());
     }
-    let color = style::use_color();
+    let color = crate::output::stdout_color_enabled();
     outln!(w, "{}", style::paint(color, "1", "Ignored"));
     for path in paths {
         let shown = path_opts

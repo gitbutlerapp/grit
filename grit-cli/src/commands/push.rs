@@ -823,6 +823,7 @@ mod tests {
         let ctx = RenderContext {
             now: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("timestamp"),
             mode: OutputMode::Human,
+            color: false,
         };
         let render = |result: PushRefResult| {
             let outcome = PushOutcome {

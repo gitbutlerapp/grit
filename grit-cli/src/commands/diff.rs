@@ -65,8 +65,8 @@ impl From<DiffTotals> for DiffTotalsJson {
 pub use crate::render::diff::{
     diffstat_from_files, file_diff_status_label, render_file, render_markdown_stat,
     render_name_only, render_name_status, render_numstat, render_shortstat, render_stat,
-    render_stat_with_leading_blank, summary_line, use_color, write_file_diff_metadata_human,
-    DiffStat, FileDiff, Hunk, Line, LineKind, LineStatJson, Segment,
+    render_stat_with_leading_blank, summary_line, write_file_diff_metadata_human, DiffStat,
+    FileDiff, Hunk, Line, LineKind, LineStatJson, Segment,
 };
 
 /// Result of `grit diff`.
@@ -246,7 +246,7 @@ pub fn render_log_commit_diff(w: &mut dyn Write, outcome: &DiffOutcome) -> Resul
     if outcome.files.is_empty() {
         return Ok(());
     }
-    let color = crate::render::diff::use_color();
+    let color = crate::output::stdout_color_enabled();
     let fmt = outcome.format;
     if fmt.human_numstat() {
         return render_numstat(w, &outcome.files, outcome.path_display.as_ref());
@@ -1319,7 +1319,7 @@ fn stream_tree_patch_diff(
         });
     }
     let path_display = PathDisplayOptions::from_repo(repo).ok();
-    let color = crate::render::diff::use_color();
+    let color = crate::output::stdout_color_enabled();
     crate::output::with_streaming_stdout(|stdout| {
         let w: &mut dyn Write = stdout;
         let mut index = 0usize;
@@ -1406,7 +1406,12 @@ impl DiffOutcome {
 
     /// Render only the diff body (no commit header). `empty_message` is printed when there
     /// are no files in patch mode; pass `None` to stay silent (as `grit show` does).
-    pub fn render_human_diff(&self, w: &mut dyn Write, empty_message: Option<&str>) -> Result<()> {
+    pub fn render_human_diff(
+        &self,
+        w: &mut dyn Write,
+        empty_message: Option<&str>,
+        color: bool,
+    ) -> Result<()> {
         if self.body_streamed {
             if !self.changed {
                 if let Some(msg) = empty_message {
@@ -1424,7 +1429,6 @@ impl DiffOutcome {
             }
             return Ok(());
         }
-        let color = crate::render::diff::use_color();
         let fmt = self.format;
         if fmt.human_numstat() {
             return render_numstat(w, &self.files, self.path_display.as_ref());
@@ -1499,8 +1503,8 @@ impl DiffOutcome {
 }
 
 impl HumanRender for DiffOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        self.render_human_diff(w, Some("No changes."))
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        self.render_human_diff(w, Some("No changes."), ctx.color)
     }
 }
 

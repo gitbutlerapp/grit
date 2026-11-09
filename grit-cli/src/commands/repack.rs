@@ -123,6 +123,7 @@ mod tests {
         RenderContext {
             now: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
             mode: crate::output::OutputMode::Human,
+            color: false,
         }
     }
 

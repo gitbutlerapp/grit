@@ -318,6 +318,7 @@ mod tests {
         let ctx = RenderContext {
             now: OffsetDateTime::UNIX_EPOCH,
             mode: crate::output::OutputMode::Human,
+            color: false,
         };
         let mut buf = Vec::new();
         outcome
@@ -330,6 +331,7 @@ mod tests {
         let ctx = RenderContext {
             now: OffsetDateTime::UNIX_EPOCH,
             mode: crate::output::OutputMode::Human,
+            color: false,
         };
         let mut buf = Vec::new();
         outcome.render_human(&mut buf, &ctx).expect("render");

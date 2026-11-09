@@ -1,18 +1,7 @@
 //! Terminal styling: color, width, and truncation helpers.
 
-use std::io::IsTerminal;
-
 /// ANSI reset sequence.
 pub(crate) const RESET: &str = "\x1b[0m";
-
-/// Whether to emit ANSI color: only when stdout is a TTY and `NO_COLOR` is unset
-/// (the de-facto standard for opting out — <https://no-color.org>).
-#[must_use]
-pub fn use_color() -> bool {
-    std::io::stdout().is_terminal()
-        && grit_lib::porcelain::terminal::ansi_supported()
-        && std::env::var_os("NO_COLOR").is_none()
-}
 
 /// Wrap `text` in the SGR `code` (e.g. `"32"`) when `color` is enabled.
 #[must_use]

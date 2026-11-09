@@ -16,8 +16,6 @@ use crate::render::{list, style, table};
 use crate::stdio;
 use crate::ui::{self, PathDisplayOptions};
 
-pub use style::use_color;
-
 const TAB_WIDTH: usize = 8;
 
 const BG_DEL: &str = "48;5;52";

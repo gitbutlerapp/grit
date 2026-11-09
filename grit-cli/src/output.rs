@@ -258,6 +258,14 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
     }
 }
 
+/// Whether human stdout should emit ANSI color for this process (TTY, ANSI, no `NO_COLOR`).
+#[must_use]
+pub fn stdout_color_enabled() -> bool {
+    std::io::stdout().is_terminal()
+        && grit_lib::porcelain::terminal::ansi_supported()
+        && std::env::var_os("NO_COLOR").is_none()
+}
+
 /// Emit a human-only progress line to **stderr**. Suppressed in JSON mode so
 /// stdout stays a single clean object. Use for mid-operation status that isn't
 /// part of the command's result (e.g. clone's "Cloning into …").
@@ -491,6 +499,7 @@ mod tests {
         RenderContext {
             now: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
             mode: OutputMode::Human,
+            color: false,
         }
     }
 

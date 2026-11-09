@@ -83,6 +83,7 @@ mod tests {
         let ctx = RenderContext {
             now: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
             mode: OutputMode::Human,
+            color: false,
         };
         let human =
             render_to_string(&outcome, OutputMode::Human, &ctx).expect("human render_to_string");

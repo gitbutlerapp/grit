@@ -2635,6 +2635,7 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
     let render_ctx = RenderContext {
         now: context::wall_clock_now(&env),
         mode: opts.mode,
+        color: output::stdout_color_enabled(),
     };
     let auto_maintenance = cli.command.as_ref().is_some_and(writes_objects);
     let result = if cli.command.as_ref().is_some_and(talks_to_remotes) {

@@ -653,6 +653,7 @@ mod map_remote_error_tests {
         let ctx = RenderContext {
             now: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("timestamp"),
             mode: OutputMode::Human,
+            color: false,
         };
         let mut human = Vec::new();
         outcome.render_human(&mut human, &ctx).expect("human");

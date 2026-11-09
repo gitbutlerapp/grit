@@ -60,7 +60,6 @@ pub fn finish_json_array_document(
 }
 
 /// Serialize one value into a JSON array, with a leading comma when `first` is false.
-/// Serialize one value into a JSON array, with a leading comma when `first` is false.
 pub fn write_json_array_element<T: serde::Serialize>(
     w: &mut dyn Write,
     first: &mut bool,
