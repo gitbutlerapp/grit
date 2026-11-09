@@ -63,37 +63,8 @@ class ErrorRatchetMetricTests(unittest.TestCase):
             "pub_error_enum_not_non_exhaustive",
             "pub_area_error_wraps_umbrella",
             "error_message_construction_sites",
-            "pub_deprecated_items",
         ):
             self.assertIn(key, snap.metrics)
-
-    def test_pub_deprecated_items_counts_rustdoc_top_level_deprecation(self) -> None:
-        index = {
-            "1": {
-                "id": 1,
-                "crate_id": 0,
-                "visibility": "public",
-                "name": "old_fn",
-                "deprecation": {"since": "0.6.0", "note": "use new_fn"},
-                "inner": {"function": {"sig": {}, "header": {}}},
-            },
-            "2": {
-                "id": 2,
-                "crate_id": 0,
-                "visibility": "public",
-                "name": "fresh_fn",
-                "inner": {"function": {"sig": {}, "header": {}}},
-            },
-            "3": {
-                "id": 3,
-                "crate_id": 0,
-                "visibility": "crate",
-                "name": "internal",
-                "deprecation": {"note": "not public"},
-                "inner": {"function": {"sig": {}, "header": {}}},
-            },
-        }
-        self.assertEqual(ar.count_pub_deprecated_items(index), 1)
 
     def test_variant_field_types_modern_tuple_encoding(self) -> None:
         """rustdoc encodes `Message(String)` as kind: {\"tuple\": [field_id]}."""
@@ -312,12 +283,7 @@ class ErrorRatchetMetricTests(unittest.TestCase):
             with mock.patch.object(ar, "GRIT_LIB", root):
                 self.assertEqual(ar.count_error_message_construction_sites(), 2)
 
-    def test_parse_version_tag_stable_only(self) -> None:
-        self.assertEqual(ar._parse_version_tag("v0.6.0"), (0, 6, 0))
-        self.assertIsNone(ar._parse_version_tag("v0.6.0-rc.1"))
-        self.assertIsNone(ar._parse_version_tag("v0.6"))
-
-    def test_write_baseline_preserves_semver_baseline(self) -> None:
+    def test_write_baseline_preserves_existing_meta_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "api-ratchet.toml"
             path.write_text(
@@ -338,37 +304,9 @@ class ErrorRatchetMetricTests(unittest.TestCase):
                 metrics={key: ar.MetricResult(0) for key in ar.METRIC_KEYS}
             )
             snap.metrics["public_api_lines"] = ar.MetricResult(2)
-            with mock.patch.object(ar, "reachable_v06_plus_tag", return_value=None):
-                ar.write_baseline(path, snap)
+            ar.write_baseline(path, snap)
             text = path.read_text(encoding="utf-8")
             self.assertIn('semver_baseline = "deadbeef"', text)
-            self.assertIn("public_api_lines = 2", text)
-
-    def test_write_baseline_drops_semver_baseline_when_v06_tag_exists(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "api-ratchet.toml"
-            path.write_text(
-                textwrap.dedent(
-                    """
-                    [meta]
-                    updated = "2026-01-01"
-                    semver_baseline = "deadbeef"
-
-                    [counts]
-                    public_api_lines = 1
-                    """
-                ).strip()
-                + "\n",
-                encoding="utf-8",
-            )
-            snap = ar.RatchetSnapshot(
-                metrics={key: ar.MetricResult(0) for key in ar.METRIC_KEYS}
-            )
-            snap.metrics["public_api_lines"] = ar.MetricResult(2)
-            with mock.patch.object(ar, "reachable_v06_plus_tag", return_value="v0.6.0"):
-                ar.write_baseline(path, snap)
-            text = path.read_text(encoding="utf-8")
-            self.assertNotIn("semver_baseline", text)
             self.assertIn("public_api_lines = 2", text)
 
     def test_non_exhaustive_error_enum_excluded_when_attributed(self) -> None:
@@ -2044,105 +1982,6 @@ class DocExampleFreeFnCallTests(unittest.TestCase):
             ],
         )
         self.assertEqual(metric.count, 3)
-
-
-class AuditRenderTests(unittest.TestCase):
-    def test_render_audit_markdown_summary_and_modules(self) -> None:
-        snap = _report_snapshot()
-        snap.metrics["public_api_lines"] = ar.MetricResult(4)
-        lines = [
-            "pub mod grit_lib::alpha",
-            "pub fn grit_lib::alpha::open(&grit_lib::repo::Repository)",
-            "pub mod grit_lib::beta",
-            "pub fn grit_lib::beta::run()",
-        ]
-        body = ar.render_audit_markdown(
-            snapshot=snap,
-            public_api_lines=lines,
-            public_api_file_lines=len(lines),
-            meta={"updated": "2026-11-09"},
-        )
-        self.assertIn("### Summary — ratchet counts", body)
-        self.assertIn("| `public_api_lines` | 4 |", body)
-        self.assertIn("### Top-level public modules", body)
-        self.assertIn("| `alpha` | 2 |", body)
-        self.assertIn("Residuals frozen in 0.6", body)
-
-    def test_audit_markers_round_trip(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "API.md"
-            body = "line one\nline two\n"
-            path.write_text(
-                f"## Audit\n\n{ar.AUDIT_BEGIN}\nold\n{ar.AUDIT_END}\n",
-                encoding="utf-8",
-            )
-            ar.write_audit_marked_section(body, path=path)
-            self.assertEqual(ar.read_audit_marked_section(path=path), body)
-            text = path.read_text(encoding="utf-8")
-            self.assertIn(f"{ar.AUDIT_BEGIN}\nline one", text)
-
-    def test_audit_check_detects_drift(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            api_md = Path(tmp) / "API.md"
-            api_txt = Path(tmp) / "public-api.txt"
-            api_txt.write_text("x\n", encoding="utf-8")
-            api_md.write_text(
-                f"## Audit\n\n{ar.AUDIT_BEGIN}\nstale\n{ar.AUDIT_END}\n",
-                encoding="utf-8",
-            )
-            with (
-                mock.patch.object(ar, "parse_pins", return_value={"nightly_date": "x"}),
-                mock.patch.object(ar, "ensure_inputs"),
-                mock.patch.object(ar, "load_rustdoc", return_value={"index": {}, "paths": {}}),
-                mock.patch.object(ar, "PUBLIC_API_TXT", api_txt),
-                mock.patch.object(ar, "API_MD_PATH", api_md),
-            ):
-                self.assertEqual(ar.main(["audit", "--check"]), 1)
-
-    def test_repository_accessors_dedupes_and_excludes_value_getters(self) -> None:
-        handle = "pub fn grit_lib::repo::Repository::checkout(&self) -> grit_lib::repo_handles::Checkout<'_>"
-        duplicate = handle
-        value_lines = [
-            "pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime",
-            "pub fn grit_lib::repo::Repository::thread_policy(&self) -> grit_lib::parallel::ThreadPolicy",
-            (
-                "pub fn grit_lib::repo::Repository::head_commit(&self) -> "
-                "grit_lib::error::Result<grit_lib::objects::ObjectId>"
-            ),
-            (
-                "pub fn grit_lib::repo::Repository::change_id_generator(&self) -> "
-                "alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>"
-            ),
-        ]
-        lines = [handle, duplicate, *value_lines]
-        accessors = ar.repository_accessors(lines)
-        names = [name for name, _ty in accessors]
-        self.assertEqual(names.count("checkout"), 1)
-        self.assertEqual(len(names), len(set(names)))
-        self.assertNotIn("identity_now", names)
-        self.assertNotIn("thread_policy", names)
-        self.assertNotIn("head_commit", names)
-        self.assertNotIn("change_id_generator", names)
-        self.assertEqual(accessors[0][1], "grit_lib::repo_handles::Checkout<'_>")
-
-    def test_shorten_rust_type_balanced_generics(self) -> None:
-        raw = "alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>"
-        self.assertEqual(
-            ar.shorten_rust_type(raw),
-            "grit_lib::change_id::ChangeIdGenerator",
-        )
-
-    def test_audit_output_is_deterministic(self) -> None:
-        snap = _report_snapshot()
-        kwargs = {
-            "snapshot": snap,
-            "public_api_lines": ["pub mod grit_lib::diff", "pub fn grit_lib::diff::f()"],
-            "public_api_file_lines": 2,
-            "meta": {"updated": "2026-01-01"},
-        }
-        first = ar.render_audit_markdown(**kwargs)
-        second = ar.render_audit_markdown(**kwargs)
-        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":
