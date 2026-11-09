@@ -1054,7 +1054,7 @@ pub(crate) fn render_markdown_diff(outcome: &DiffOutcome, w: &mut dyn Write) -> 
 #[cfg(test)]
 mod tests {
     mod stream_output_parity {
-        use super::super::convert::cli_file_from_tree;
+        use super::super::super::convert::cli_file_from_tree;
         use crate::markdown;
         use crate::output::OutputMode;
         use crate::render::diff::render_file;
