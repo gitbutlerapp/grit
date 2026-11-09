@@ -5,6 +5,7 @@ pub mod clone;
 pub mod conflict;
 pub mod diff;
 pub mod error;
+pub mod fetch;
 pub mod list;
 pub mod promisor;
 pub mod pull;
