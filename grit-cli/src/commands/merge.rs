@@ -9,7 +9,7 @@ use crate::json_error;
 use crate::merge_strategy_args::MergeStrategyArgs;
 use crate::message_input::{read_message_input, MessageInputArgs};
 pub(crate) use crate::render::merge::merge_conflict_json;
-pub use crate::render::merge::{MergeConflictJson, MergeOutcome, MergeResult};
+pub use crate::render::merge::{MergeOutcome, MergeResult};
 use anyhow::{bail, Context, Result};
 use grit_lib::change_id::ChangeId;
 use grit_lib::config::ident_resolve::IdentRole;
