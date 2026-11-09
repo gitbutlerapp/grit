@@ -381,3 +381,75 @@ fn map_reflog_error(err: Error) -> anyhow::Error {
         other => anyhow::Error::new(other),
     }
 }
+
+/// Dispatch parsed CLI args for `Reflog`.
+pub fn dispatch(
+    args: crate::args::ReflogArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let ReflogArgs {
+        reference,
+        max_count,
+        since,
+        after,
+        until,
+        before,
+        grep,
+        action,
+    } = args;
+    match action {
+        None => emit_success(
+            commands::reflog::run_show(
+                reference,
+                commands::reflog::ReflogListOptions {
+                    max_count,
+                    since,
+                    after,
+                    until,
+                    before,
+                    grep,
+                },
+            )?,
+            opts,
+            ctx,
+        ),
+        Some(ReflogAction::Delete { specs }) => {
+            emit_success(commands::reflog::run_delete(specs)?, opts, ctx)
+        }
+        Some(ReflogAction::Expire {
+            all,
+            expire,
+            expire_unreachable,
+            dry_run,
+        }) => emit_success(
+            commands::reflog::run_expire(all, expire, expire_unreachable, dry_run)?,
+            opts,
+            ctx,
+        ),
+        Some(ReflogAction::List { limit }) => {
+            emit_success(commands::reflog::run_list_refs(limit)?, opts, ctx)
+        }
+    }
+}

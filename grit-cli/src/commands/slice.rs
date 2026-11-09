@@ -295,3 +295,58 @@ pub fn delete(url: Option<&str>, name: &str) -> Result<SliceChangeOutcome> {
     )?;
     Ok(changed("delete", name, change))
 }
+
+/// Dispatch parsed CLI args for `Slice`.
+pub fn dispatch(
+    args: crate::args::SliceArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let SliceArgs { action, url } = args;
+    match action {
+        SliceAction::List => emit_success(commands::slice::list(url.as_deref())?, opts, ctx),
+        SliceAction::New {
+            name,
+            paths,
+            description,
+        } => emit_success(
+            commands::slice::new(url.as_deref(), &name, &paths, description.as_deref())?,
+            opts,
+            ctx,
+        ),
+        SliceAction::Edit {
+            name,
+            add,
+            remove,
+            description,
+        } => emit_success(
+            commands::slice::edit(url.as_deref(), &name, &add, &remove, description.as_deref())?,
+            opts,
+            ctx,
+        ),
+        SliceAction::Delete { name } => {
+            emit_success(commands::slice::delete(url.as_deref(), &name)?, opts, ctx)
+        }
+    }
+}

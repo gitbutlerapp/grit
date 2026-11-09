@@ -870,3 +870,86 @@ mod tests {
         );
     }
 }
+
+/// Dispatch parsed CLI args for `Push`.
+pub fn dispatch(
+    args: crate::args::PushArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let PushArgs {
+        tags,
+        delete,
+        all,
+        mirror,
+        prune,
+        remote,
+        dry_run,
+        force,
+        force_with_lease,
+        set_upstream,
+        atomic,
+        push_option,
+        follow_tags,
+        no_verify,
+        quiet,
+        remote_name,
+        refspecs,
+    } = args;
+    {
+        let mut positionals = Vec::new();
+        if let Some(r) = remote_name {
+            positionals.push(r);
+        }
+        positionals.extend(refspecs);
+        let outcome = commands::push::run(
+            tags,
+            delete,
+            all,
+            mirror,
+            prune,
+            remote,
+            &positionals,
+            dry_run,
+            force,
+            force_with_lease,
+            set_upstream,
+            atomic,
+            &push_option,
+            follow_tags,
+            &quiet,
+            opts.mode,
+            no_verify,
+        )?;
+        let rejected = outcome.rejected;
+        let decide = outcome.needs_decision();
+        if rejected || decide || quiet.shows_outcome(opts.mode) {
+            emit_success(outcome, opts, ctx)?;
+        }
+        // The outcome (per-ref results) is reported in both modes; a rejected
+        // push is still a failure, so mirror Git and exit non-zero. A shared
+        // branch whose heads need a decision exits 3.
+        Ok(ExitStatus::from_shared(rejected, decide))
+    }
+}

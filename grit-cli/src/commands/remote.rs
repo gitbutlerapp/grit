@@ -892,3 +892,124 @@ pub fn run_rename(old: &str, new: &str, dry_run: bool) -> Result<RemoteOutcome> 
         dry_run: out.dry_run,
     })
 }
+
+/// Dispatch parsed CLI args for `Remote`.
+pub fn dispatch(
+    args: crate::args::RemoteArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let RemoteArgs { verbose, action } = args;
+    match action {
+        None => emit_success(commands::remote::run_list_or_add(None, verbose)?, opts, ctx),
+        Some(RemoteAction::Add { name, url, fetch }) => emit_success(
+            commands::remote::run_list_or_add(Some((name, url, fetch)), false)?,
+            opts,
+            ctx,
+        ),
+        Some(RemoteAction::SetUrl {
+            name,
+            url,
+            push,
+            dry_run,
+        }) => emit_success(
+            commands::remote::run_set_url(&name, &url, push, dry_run)?,
+            opts,
+            ctx,
+        ),
+        Some(RemoteAction::Remove { name, dry_run }) => {
+            emit_success(commands::remote::run_remove(&name, dry_run)?, opts, ctx)
+        }
+        Some(RemoteAction::Prune { name, dry_run }) => {
+            emit_success(commands::remote::run_prune(&name, dry_run)?, opts, ctx)
+        }
+        Some(RemoteAction::SetHead {
+            name,
+            branch,
+            auto,
+            delete,
+            dry_run,
+        }) => {
+            use grit_lib::repo_handles::SetHead;
+            let mode = if delete {
+                SetHead::Delete
+            } else if auto {
+                SetHead::Auto
+            } else if let Some(branch) = branch {
+                SetHead::Branch(branch)
+            } else {
+                return Err(anyhow::Error::from(commands::remote::RemoteUsageError)
+                    .context("set-head requires --auto, --delete, or a branch name"));
+            };
+            emit_success(
+                commands::remote::run_set_head(&name, mode, dry_run)?,
+                opts,
+                ctx,
+            )
+        }
+        Some(RemoteAction::Show {
+            name,
+            no_query,
+            limit,
+        }) => emit_success(
+            commands::remote::run_show(
+                &name,
+                &commands::remote::RemoteShowCliOptions {
+                    query: !no_query,
+                    limit,
+                },
+            )?,
+            opts,
+            ctx,
+        ),
+        Some(RemoteAction::Rename { old, new, dry_run }) => emit_success(
+            commands::remote::run_rename(&old, &new, dry_run)?,
+            opts,
+            ctx,
+        ),
+        Some(RemoteAction::Refs {
+            remote_or_url,
+            heads,
+            tags,
+            sort,
+            reverse,
+            limit,
+            prefixes,
+        }) => {
+            let refs_cli = commands::remote::RemoteRefsCliOptions {
+                heads,
+                tags,
+                sort,
+                reverse,
+                limit,
+                prefixes,
+            };
+            emit_success(
+                commands::remote::run_refs(&remote_or_url, &refs_cli, opts.mode)?,
+                opts,
+                ctx,
+            )
+        }
+    }
+}

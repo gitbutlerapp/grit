@@ -851,3 +851,67 @@ fn unset(repo: &Repository, branch: &str, dry_run: bool) -> Result<BranchOutcome
 }
 
 pub use crate::error_map::map_branch_error;
+
+/// Dispatch parsed CLI args for `Branch`.
+pub fn dispatch(
+    args: crate::args::BranchArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let BranchArgs {
+        name,
+        start,
+        force,
+        track,
+        no_track,
+        set_upstream_to,
+        unset_upstream,
+        rename,
+        force_rename,
+        delete,
+        force_delete,
+        list,
+        dry_run,
+    } = args;
+    emit_success(
+        commands::branch::run(commands::branch::BranchRunOptions {
+            name,
+            start,
+            force,
+            track,
+            no_track,
+            set_upstream_to,
+            unset_upstream,
+            rename,
+            force_rename,
+            delete,
+            force_delete,
+            list,
+            list_full_detail: matches!(opts.mode, OutputMode::Json | OutputMode::Markdown),
+            dry_run,
+        })?,
+        opts,
+        ctx,
+    )
+}

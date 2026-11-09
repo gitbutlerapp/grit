@@ -1634,3 +1634,97 @@ mod tests {
         assert!(!line.contains("nothing to pack"));
     }
 }
+
+/// Dispatch parsed CLI args for `Gc`.
+pub fn dispatch(
+    args: crate::args::GcArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let GcArgs {
+        dry_run,
+        auto,
+        quiet,
+        action,
+    } = args;
+    {
+        let mode = opts.mode;
+        if auto && action.is_some() {
+            bail!("`--auto` cannot be combined with a gc subcommand");
+        }
+        let outcome = match action {
+            None if auto => commands::gc::run_auto(dry_run, quiet, ctx.now)?,
+            None => commands::gc::run(dry_run, quiet, mode)?,
+            Some(GcAction::Repack {
+                bitmaps,
+                force,
+                dry_run: repack_dry,
+            }) => commands::gc::run_repack(bitmaps, force, dry_run || repack_dry, quiet, mode)?,
+            Some(GcAction::CommitGraph { dry_run: sub_dry }) => {
+                commands::gc::run_commit_graph(dry_run || sub_dry, quiet, mode)?
+            }
+            Some(GcAction::Midx { dry_run: sub_dry }) => {
+                commands::gc::run_midx(dry_run || sub_dry, quiet, mode)?
+            }
+            Some(GcAction::PackRefs { dry_run: sub_dry }) => {
+                commands::gc::run_pack_refs(dry_run || sub_dry, quiet, mode)?
+            }
+            Some(GcAction::Prune {
+                older_than,
+                dry_run: sub_dry,
+            }) => commands::gc::run_prune(older_than.as_deref(), dry_run || sub_dry, quiet, mode)?,
+            Some(GcAction::Offload {
+                to,
+                blobs,
+                lop_dir,
+                configure_lop,
+                dry_run: sub_dry,
+            }) => commands::gc::run_offload(
+                commands::gc::OffloadArgs {
+                    remote: to,
+                    blobs,
+                    lop_dir,
+                    configure_lop,
+                    dry_run: dry_run || sub_dry,
+                },
+                quiet,
+                mode,
+                ctx.now,
+            )?,
+            Some(GcAction::DropLargeBlobs {
+                min_size,
+                older_than,
+                dry_run: sub_dry,
+            }) => commands::gc::run_drop_large_blobs(
+                min_size.as_deref(),
+                older_than.as_deref(),
+                dry_run || sub_dry,
+                quiet,
+                mode,
+                ctx.now,
+            )?,
+        };
+        emit_success(outcome, opts, ctx)
+    }
+}

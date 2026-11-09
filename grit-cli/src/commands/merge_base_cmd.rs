@@ -88,3 +88,48 @@ pub fn exit_code(outcome: &MergeBaseOutcome) -> i32 {
         None => 0,
     }
 }
+
+/// Dispatch parsed CLI args for `MergeBase`.
+pub fn dispatch(
+    args: crate::args::MergeBaseArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let MergeBaseArgs {
+        a,
+        b,
+        all,
+        is_ancestor,
+    } = args;
+    {
+        let outcome = commands::merge_base_cmd::run(&a, &b, all, is_ancestor)?;
+        let status = if is_ancestor {
+            ExitStatus::from_merge_base(&outcome)
+        } else {
+            ExitStatus::Success
+        };
+        emit_success(outcome, opts, ctx)?;
+        Ok(status)
+    }
+}

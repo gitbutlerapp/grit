@@ -291,3 +291,52 @@ mod tests {
         assert_eq!(issue_msg_id(&issue), "missingObject");
     }
 }
+
+/// Dispatch parsed CLI args for `Fsck`.
+pub fn dispatch(
+    args: crate::args::FsckArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let FsckArgs {
+        connectivity_only,
+        dangling,
+        no_dangling,
+        strict,
+        verbose,
+    } = args;
+    {
+        let outcome = commands::fsck::run(commands::fsck::FsckRunOptions {
+            connectivity_only,
+            dangling,
+            no_dangling,
+            strict,
+            verbose,
+            mode: opts.mode,
+        })?;
+        let status = ExitStatus::from_fsck(&outcome);
+        emit_success(outcome, opts, ctx)?;
+        Ok(status)
+    }
+}

@@ -507,3 +507,60 @@ pub fn run(
     }
     Ok(outcome)
 }
+
+/// Dispatch parsed CLI args for `Revs`.
+pub fn dispatch(
+    args: crate::args::RevsArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let RevsArgs {
+        rev,
+        pathspecs,
+        count,
+        left_right,
+        cherry_mark,
+    } = args;
+    {
+        let mode = commands::revs::RevsMode {
+            count,
+            left_right,
+            cherry_mark,
+        };
+        if opts.filter.is_none() && commands::revs::listing_can_stream(&rev, &pathspecs, mode)? {
+            let stdout = std::io::stdout();
+            let mut lock = stdout.lock();
+            match commands::revs::stream_listing(rev, pathspecs, opts.mode, ctx, &mut lock) {
+                Ok(()) => return Ok(ExitStatus::Success),
+                Err(e) if is_broken_pipe(&e) => return Ok(ExitStatus::Success),
+                Err(e) => return Err(e),
+            }
+        }
+        emit_success(
+            commands::revs::run(rev, pathspecs, mode, opts.mode)?,
+            opts,
+            ctx,
+        )
+    }
+}

@@ -141,3 +141,38 @@ fn resolve_one(repo: &Repository, sel: &str) -> Result<String> {
     repo.resolve_worktree_pathspec(sel, prefix.as_deref())
         .map_err(anyhow::Error::new)
 }
+
+/// Dispatch parsed CLI args for `Mv`.
+pub fn dispatch(
+    args: crate::args::MvArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let MvArgs {
+        paths,
+        force,
+        dry_run,
+    } = args;
+    emit_success(commands::mv::run(&paths, force, dry_run)?, opts, ctx)
+}

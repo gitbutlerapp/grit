@@ -414,3 +414,88 @@ mod user_path_tests {
         assert!(!shown.contains('\\'));
     }
 }
+
+/// Dispatch parsed CLI args for `Worktree`.
+pub fn dispatch(
+    args: crate::args::WorktreeArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let WorktreeArgs { action } = args;
+    match action {
+        WorktreeAction::List => emit_success(commands::worktree::run_list()?, opts, ctx),
+        WorktreeAction::Add {
+            path,
+            start_point,
+            branch,
+            force_branch,
+            detach,
+            force,
+            lock,
+            reason,
+            no_checkout,
+            track,
+        } => emit_success(
+            commands::worktree::run_add(
+                path,
+                start_point,
+                branch,
+                force_branch,
+                detach,
+                force,
+                lock,
+                reason,
+                no_checkout,
+                track,
+            )?,
+            opts,
+            ctx,
+        ),
+        WorktreeAction::Remove { path, force } => {
+            emit_success(commands::worktree::run_remove(path, force)?, opts, ctx)
+        }
+        WorktreeAction::Prune { dry_run } => {
+            emit_success(commands::worktree::run_prune(dry_run)?, opts, ctx)
+        }
+        WorktreeAction::Lock { path, reason } => {
+            emit_success(commands::worktree::run_lock(path, reason)?, opts, ctx)
+        }
+        WorktreeAction::Unlock { path } => {
+            emit_success(commands::worktree::run_unlock(path)?, opts, ctx)
+        }
+        WorktreeAction::Move {
+            worktree,
+            new_path,
+            force,
+            dry_run,
+        } => emit_success(
+            commands::worktree::run_move(worktree, new_path, force, dry_run)?,
+            opts,
+            ctx,
+        ),
+        WorktreeAction::Repair { paths, dry_run } => {
+            emit_success(commands::worktree::run_repair(paths, dry_run)?, opts, ctx)
+        }
+    }
+}

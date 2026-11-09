@@ -783,3 +783,75 @@ fn integrate_hosted(name: &str, without: &[String], mode: OutputMode) -> Result<
         unshared: reply.unshared,
     })
 }
+
+/// Dispatch parsed CLI args for `Checkin`.
+pub fn dispatch(
+    args: crate::args::CheckinArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let CheckinArgs { branches, force } = args;
+    {
+        let outcome = commands::checkin::run(&branches, force, opts.mode)?;
+        let status = ExitStatus::from_push_rejected(outcome.refused);
+        emit_success(outcome, opts, ctx)?;
+        Ok(status)
+    }
+}
+
+/// Dispatch parsed CLI args for `Integrate`.
+pub fn dispatch_integrate(
+    args: crate::args::IntegrateArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let IntegrateArgs { branch, without } = args;
+    {
+        let outcome = commands::checkin::integrate(&branch, &without, opts.mode)?;
+        let status = ExitStatus::from_integrate(&outcome);
+        emit_success(outcome, opts, ctx)?;
+        Ok(status)
+    }
+}

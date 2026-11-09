@@ -1038,3 +1038,88 @@ fn resolve_location(
         Ok(None)
     }
 }
+
+/// Dispatch parsed CLI args for `Config`.
+pub fn dispatch(
+    args: crate::args::ConfigArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let ConfigArgs {
+        global,
+        local,
+        system,
+        worktree,
+        file,
+        list,
+        all,
+        add,
+        unset,
+        unset_all,
+        rename_section,
+        rename_section_new,
+        remove_section,
+        value_type,
+        default_value,
+        dry_run,
+        key,
+        value,
+    } = args;
+    {
+        let rename_pair = match (rename_section, rename_section_new) {
+            (Some(old), Some(new)) => Some((old, new)),
+            (None, None) => None,
+            _ => {
+                bail!("--rename-section requires both OLD and --rename-section-new NEW");
+            }
+        };
+        let outcome = commands::config::run(
+            process_env,
+            global,
+            local,
+            system,
+            worktree,
+            file,
+            list,
+            unset,
+            unset_all,
+            add,
+            all,
+            value_type,
+            default_value,
+            rename_pair,
+            remove_section,
+            dry_run,
+            key,
+            value,
+            opts.mode,
+        )?;
+        let code = commands::config::exit_code(&outcome);
+        emit(outcome, opts, ctx)?;
+        if code != 0 {
+            std::process::exit(code);
+        }
+        Ok(ExitStatus::Success)
+    }
+}

@@ -102,3 +102,42 @@ pub fn run(args: &DescribeCliArgs) -> Result<Option<DescribeOutcome>> {
     let described = repo.revwalk().describe(&args.rev, &opts)?;
     Ok(described.map(DescribeOutcome::from))
 }
+
+/// Dispatch parsed CLI args for `Describe`.
+pub fn dispatch(
+    args: crate::args::DescribeArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let describe = args;
+    match commands::describe::run(&describe)? {
+        Some(outcome) => emit_success(outcome, opts, ctx),
+        None => {
+            anyhow::bail!(
+                "cannot describe '{}': no annotated tag is reachable",
+                describe.rev
+            );
+        }
+    }
+}

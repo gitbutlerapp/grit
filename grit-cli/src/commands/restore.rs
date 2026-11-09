@@ -219,3 +219,86 @@ pub fn run(
         .map_err(crate::json_error::map_lib_error)?;
     Ok(RestoreCliOutcome::from(outcome).with_path_display(&repo))
 }
+
+/// Dispatch parsed CLI args for `Restore`.
+pub fn dispatch(
+    args: crate::args::RestoreArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let RestoreArgs {
+        pathspecs,
+        staged,
+        worktree,
+        source,
+        ours,
+        theirs,
+        merge,
+        conflict_style,
+        hunks,
+        lines,
+        dry_run,
+    } = args;
+    {
+        use grit_lib::porcelain::restore::ConflictSide;
+        let side = if ours {
+            Some(ConflictSide::Ours)
+        } else if theirs {
+            Some(ConflictSide::Theirs)
+        } else {
+            None
+        };
+        if !hunks.is_empty() || !lines.is_empty() {
+            if source.is_some() || side.is_some() || merge || conflict_style.is_some() {
+                bail!("--hunks and --lines cannot be used with --source, --ours, --theirs, or --merge");
+            }
+            match commands::restore::run_hunks(
+                &pathspecs, &hunks, &lines, staged, worktree, dry_run,
+            ) {
+                Ok(outcome) => emit_success(outcome, opts, ctx),
+                Err(err) => {
+                    let code = commands::restore::hunks_exit_code(&err);
+                    Ok(finish_hunk_error(err, opts, code))
+                }
+            }
+        } else {
+            if dry_run {
+                bail!("--dry-run requires --hunks or --lines");
+            }
+            emit_success(
+                commands::restore::run(
+                    &pathspecs,
+                    staged,
+                    worktree,
+                    source,
+                    side,
+                    merge,
+                    conflict_style,
+                )?,
+                opts,
+                ctx,
+            )
+        }
+    }
+}
