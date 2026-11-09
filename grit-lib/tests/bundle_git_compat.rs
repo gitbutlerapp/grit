@@ -452,17 +452,77 @@ fn verify_prerequisites_not_connected_when_dangling() {
 }
 
 #[test]
+fn shallow_prerequisite_still_needs_complete_tree_git_parity() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    let (c1, c2) = init_repo_with_two_commits(src);
+    let inc = src.join("inc.bundle");
+    git_ok(
+        src,
+        &[
+            "bundle",
+            "create",
+            inc.to_str().unwrap(),
+            &format!("{c1}..{c2}"),
+            "main",
+        ],
+    );
+
+    let consumer = tempfile::tempdir().expect("consumer");
+    git_ok(
+        consumer.path(),
+        &["init", "-q", "--bare", "-b", "main", "."],
+    );
+    let obj_path = src
+        .join(".git/objects")
+        .join(&c1.to_hex()[..2])
+        .join(&c1.to_hex()[2..]);
+    let dest_dir = consumer.path().join("objects").join(&c1.to_hex()[..2]);
+    std::fs::create_dir_all(&dest_dir).expect("dest dir");
+    std::fs::copy(&obj_path, dest_dir.join(&c1.to_hex()[2..])).expect("copy loose");
+    std::fs::write(
+        consumer.path().join("shallow"),
+        format!("{}\n", c1.to_hex()),
+    )
+    .expect("shallow");
+
+    let git_verify = Command::new("git")
+        .current_dir(consumer.path())
+        .args(["bundle", "verify", inc.to_str().unwrap()])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git bundle verify");
+    assert!(
+        !git_verify.status.success(),
+        "git must reject incomplete prerequisite even when listed in shallow: {}",
+        String::from_utf8_lossy(&git_verify.stderr)
+    );
+
+    let repo = grit_repo(consumer.path());
+    let report = Bundle::open(&inc)
+        .expect("open")
+        .verify(&repo)
+        .expect("verify");
+    assert!(
+        report.prerequisites_not_connected,
+        "shallow must not bypass tree validation: {report:?}"
+    );
+    assert!(!report.is_ok());
+}
+
+#[test]
 fn incremental_bundle_after_refless_full_unbundle() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let src = tmp.path();
     let (c1, c2) = init_repo_with_two_commits(src);
+    let full = src.join("full.bundle");
+    git_ok(src, &["bundle", "create", full.to_str().unwrap(), "--all"]);
     std::fs::write(src.join("c.txt"), b"three\n").unwrap();
     git_ok(src, &["add", "c.txt"]);
     git_ok(src, &["commit", "-q", "-m", "third"]);
     let c3 = rev_parse(src, "HEAD");
     git_ok(src, &["tag", "-a", "v1.1", "-m", "v1.1"]);
-    let full = src.join("full.bundle");
-    git_ok(src, &["bundle", "create", full.to_str().unwrap(), "--all"]);
     let inc = src.join("incr.bundle");
     git_ok(
         src,
@@ -486,6 +546,10 @@ fn incremental_bundle_after_refless_full_unbundle() {
             grit_lib::progress::CancelToken::never_ref(),
         )
         .expect("unbundle full");
+    assert!(
+        repo.odb().read(&c3).is_err(),
+        "full bundle must not include the third commit; incremental unbundle should add it"
+    );
 
     git_ok(empty.path(), &["bundle", "verify", inc.to_str().unwrap()]);
     let inc_bundle = Bundle::open(&inc).expect("open incr");

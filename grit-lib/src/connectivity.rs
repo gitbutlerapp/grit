@@ -91,9 +91,6 @@ pub fn bundle_prerequisites_connected_to_refs(
         if ref_commits.contains(&commit) {
             continue;
         }
-        if shallow.contains(&commit) {
-            continue;
-        }
         let obj = match repo.odb().read(&commit) {
             Ok(obj) => obj,
             Err(_) => return Ok(false),
@@ -104,6 +101,9 @@ pub fn bundle_prerequisites_connected_to_refs(
         let parsed = parse_commit(&obj.data)?;
         if !walk_tree_objects(repo, parsed.tree, oid_len)? {
             return Ok(false);
+        }
+        if shallow.contains(&commit) {
+            continue;
         }
         for parent in parsed.parents {
             if ref_commits.contains(&parent) || shallow.contains(&parent) {
@@ -191,6 +191,29 @@ mod tests {
         assert!(
             bundle_prerequisites_connected_to_refs(&repo, &[base]).expect("check base"),
             "prerequisite base with full graph"
+        );
+    }
+
+    #[test]
+    fn shallow_boundary_still_requires_commit_tree() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (repo, _) =
+            Repository::init(dir.path(), &InitOptions::new().with_bare(true)).expect("init");
+        let missing_tree = ObjectId::from_hex(&"b".repeat(40)).expect("oid");
+        let mut body = format!("tree {missing_tree}\n");
+        body.push_str("author T <t@e> 1 +0000\ncommitter T <t@e> 1 +0000\n\nm\n");
+        let lone = repo
+            .odb()
+            .write(ObjectKind::Commit, body.as_bytes())
+            .expect("commit");
+        std::fs::write(
+            shallow::shallow_file_path(repo.git_dir()),
+            format!("{}\n", lone.to_hex()),
+        )
+        .expect("shallow");
+        assert!(
+            !bundle_prerequisites_connected_to_refs(&repo, &[lone]).expect("check"),
+            "shallow listing must not skip commit/tree validation"
         );
     }
 
