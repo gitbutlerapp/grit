@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "On GitButler workspace  ·  2 branches applied\n\n  one  0e3a7cf  nkonoqyt  Test  [TIME_AGO]  one commit 1\n  two  dd10197  kmvqupnv  Test  [TIME_AGO]  two commit 0\n\nNothing to commit — working tree clean.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"branch\":\"gitbutler/workspace\",\"detached\":false,\"head\":\"c68930307cd3492ea3db61691d2a3dc31a64e9ed\",\"target\":\"main\",\"ahead\":3,\"behind\":0,\"upstream\":null,\"commits\":[{\"oid\":\"0e3a7cf293357b45ad2174770f9669fe7cdae084\",\"parents\":[\"460ad33c848900450a34d86013182a43e19568f8\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"one commit 1\",\"message\":\"one commit 1\",\"refs\":[{\"name\":\"one\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\",\"change_id\":\"nkonoqytzzpskyorsowwmxuttkvxtzxs\",\"change_id_stored\":true},{\"oid\":\"dd1019754e92dd122fed2f4fec93f116569e7754\",\"parents\":[\"83352a61f6715ec3f0a297c6d6150725154fb833\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"two commit 0\",\"message\":\"two commit 0\",\"refs\":[{\"name\":\"two\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\",\"change_id\":\"kmvqupnvkznpovtkqxpnzqnkzmxrozqp\",\"change_id_stored\":true},{\"oid\":\"460ad33c848900450a34d86013182a43e19568f8\",\"parents\":[\"83352a61f6715ec3f0a297c6d6150725154fb833\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"one commit 0\",\"message\":\"one commit 0\",\"refs\":[],\"relative_date\":\"[TIME_AGO]\",\"change_id\":\"ozzszonuktorlrwtktpqwqlwwxvtnszn\",\"change_id_stored\":true}],\"staged\":[],\"unstaged\":[],\"untracked\":[],\"clean\":true,\"merging\":false,\"stash_count\":0,\"gitbutler_workspace\":{\"commit\":\"c68930307cd3492ea3db61691d2a3dc31a64e9ed\",\"heads\":[{\"commit\":\"0e3a7cf293357b45ad2174770f9669fe7cdae084\",\"branches\":[\"one\"],\"subject\":\"one commit 1\",\"ahead\":2},{\"commit\":\"dd1019754e92dd122fed2f4fec93f116569e7754\",\"branches\":[\"two\"],\"subject\":\"two commit 0\",\"ahead\":1}]}}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "On a **GitButler workspace** · 2 branches applied\n\n- **`one`** `0e3a7cf` one commit 1 · 2 ahead\n- **`two`** `dd10197` two commit 0 · 1 ahead\n\nNothing to commit — working tree clean.\n",
+    "stderr": ""
+  }
+}

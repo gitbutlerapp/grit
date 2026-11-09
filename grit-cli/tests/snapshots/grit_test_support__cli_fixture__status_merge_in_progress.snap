@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "On main  ·  merging — resolve conflicts\n\nStaged\n  !  conflict      f.txt\n\nConflicts\n  both modified (1)\n    f.txt\n\n→ grit diff  ·  grit add .\nor grit merge --abort\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"branch\":\"main\",\"detached\":false,\"head\":\"152d70abad433da8595fef75d1e1136533d50ee7\",\"target\":\"main\",\"ahead\":0,\"behind\":0,\"upstream\":null,\"commits\":[],\"staged\":[{\"path\":\"f.txt\",\"status\":\"unmerged\"}],\"unstaged\":[],\"untracked\":[],\"clean\":false,\"merging\":true,\"in_progress\":[\"merge\"],\"conflicts\":[{\"path\":\"f.txt\",\"kind\":\"both_modified\"}],\"operation\":{\"kind\":\"merge\",\"next_steps\":[\"grit diff\",\"grit add .\"],\"alternatives\":[\"grit merge --abort\"]},\"stash_count\":0}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "On **`main`** · merging — resolve conflicts\n\n## Staged\n- **conflict** `f.txt`\n\n## Conflicts\n- **both modified** (1 paths)\n  - `f.txt`\n\n→ `grit diff`  ·  `grit add .`\nor `grit merge --abort`\n",
+    "stderr": ""
+  }
+}

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "stash@{0} f69513d: On main: first stash\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"list\",\"entries\":[{\"index\":0,\"oid\":\"f69513da3264c31ee57978fb6afba6bf5eb3c0f5\",\"message\":\"On main: first stash\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "- **stash@{0}** `f69513d` — On main: first stash\n",
+    "stderr": ""
+  }
+}

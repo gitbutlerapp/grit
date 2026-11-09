@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "On main  ·  1 ahead of origin/main\n\n  22e3cc5  ovrpovxq  Test  [TIME_AGO]  ahead of origin\n\nNothing to commit — working tree clean.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"branch\":\"main\",\"detached\":false,\"head\":\"22e3cc5b7ae76a866425047ec808ff576601a5bd\",\"target\":\"origin/main\",\"ahead\":1,\"behind\":0,\"upstream\":null,\"commits\":[{\"oid\":\"22e3cc5b7ae76a866425047ec808ff576601a5bd\",\"parents\":[\"83352a61f6715ec3f0a297c6d6150725154fb833\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"committer\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"subject\":\"ahead of origin\",\"message\":\"ahead of origin\",\"refs\":[{\"name\":\"HEAD\",\"kind\":\"head\"},{\"name\":\"main\",\"kind\":\"branch\"}],\"relative_date\":\"[TIME_AGO]\",\"change_id\":\"ovrpovxqwoynllwuxmqskuwokmksqzlp\",\"change_id_stored\":true}],\"staged\":[],\"unstaged\":[],\"untracked\":[],\"clean\":true,\"merging\":false,\"stash_count\":0}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "On **`main`** · **1** ahead of `origin/main`\n\n- `22e3cc5` `ovrpovxq` ahead of origin (Test, [TIME_AGO])\n\nNothing to commit — working tree clean.\n",
+    "stderr": ""
+  }
+}
