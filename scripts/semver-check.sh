@@ -58,6 +58,16 @@ read_ratchet_semver_baseline() {
 	printf '%s\n' "${line}" | sed -n 's/.*=[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
+is_full_object_name() {
+	local rev="$1"
+	[[ "${rev}" =~ ^[0-9a-fA-F]{40}$ ]]
+}
+
+git_object_exists() {
+	local rev="$1"
+	git -C "${REPO}" rev-parse --verify --quiet "${rev}^{commit}" >/dev/null 2>&1
+}
+
 is_stable_v_tag() {
 	local tag="$1"
 	[[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
@@ -106,8 +116,11 @@ baseline_rev() {
 	local pinned=""
 	pinned="$(read_ratchet_semver_baseline || true)"
 	if [[ -n "${pinned}" ]]; then
-		printf '%s\n' "${pinned}"
-		return 0
+		if ! is_full_object_name "${pinned}" || git_object_exists "${pinned}"; then
+			printf '%s\n' "${pinned}"
+			return 0
+		fi
+		echo "warning: semver_baseline ${pinned} is not in this repository; ignoring pin" >&2
 	fi
 	git -C "${REPO}" describe --tags --abbrev=0 --match 'v*'
 }
