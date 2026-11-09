@@ -776,6 +776,7 @@ pub const SNAPSHOT_FILE_PREFIX: &str = "grit_test_support__cli_fixture__";
 /// fixtures, jq filter slices, and similar). Skipped by [`json_snapshots_match_schemas`] only;
 /// output snapshot coverage still requires human/json/markdown sections for render stems.
 pub const SNAPSHOT_JSON_SCHEMA_SKIP: &[&str] = &[
+    "help_output",
     "auth_render",
     "log_json_filter_commits_oid",
     "checkin_render",
