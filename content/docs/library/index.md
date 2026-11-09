@@ -7,6 +7,7 @@ These pages walk through every stable domain in `grit-lib`: repository discovery
 
 | Page | Topic |
 | --- | --- |
+| [grit-lib 0.6 API overview](api-0.6/) | One-page tour: entry points, handles, options, errors, stability |
 | [Repository](repository/) | Discover, open, init, typed handles overview |
 | [Embedding](embedding/) | Environment, sinks, subprocess injection, concurrency |
 | [Config](config/) | `Repository::config()` / `Config` get/set |
