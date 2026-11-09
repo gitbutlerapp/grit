@@ -265,6 +265,7 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::porcelain::workspace_snapshot::pin_workspace_snapshot` | `grit_lib::repo_handles::RepositoryWorkspaceSnapshot::pin` |  |
 | `grit_lib::porcelain::workspace_snapshot::restore_workspace_snapshot` | `grit_lib::repo_handles::RepositoryWorkspaceSnapshot::restore` |  |
 | `grit_lib::porcelain::workspace_snapshot::unpin_workspace_snapshot` | `grit_lib::repo_handles::RepositoryWorkspaceSnapshot::unpin` |  |
+| `grit_lib::prelude::InitOptions::environment` | `grit_lib::config::environment::RepositoryOptions::environment` |  |
 | `grit_lib::refs::branch_tracking::apply_push_remote_tracking_updates` | `grit_lib::repo_handles::Branches::apply_push_remote_tracking_updates` |  |
 | `grit_lib::refs::branch_tracking::compare_with_target_optional` | `grit_lib::repo_handles::Branches::compare_with_target` |  |
 | `grit_lib::refs::branch_tracking::list_branches` | `grit_lib::repo_handles::Branches::list` |  |

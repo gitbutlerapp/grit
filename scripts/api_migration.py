@@ -66,6 +66,9 @@ _EXACT: dict[str, str] = {
     "grit_lib::notes::read_notes_tree": "grit_lib::repo_handles::RepositoryNotes::read_tree",
     "grit_lib::notes::read_notes_tree_limited": "grit_lib::repo_handles::RepositoryNotes::read_tree_limited",
     "grit_lib::notes::write_notes_commit": "grit_lib::repo_handles::RepositoryNotes::write_tree_commit",
+    "grit_lib::prelude::InitOptions::environment": (
+        "grit_lib::config::environment::RepositoryOptions::environment"
+    ),
     "grit_lib::repo::InitOptions::environment": "grit_lib::config::environment::RepositoryOptions::environment",
     "grit_lib::repo::InitOptions::with_environment": "grit_lib::repo::InitOptions::with_repository_options",
     "grit_lib::revwalk::rev_list::shallow_boundary_oids": (
