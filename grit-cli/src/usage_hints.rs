@@ -46,7 +46,7 @@ pub fn checkout_restore_hint(name: &str) -> Option<String> {
 /// Turn a clap usage failure into a structured error when we recognize Git habits.
 pub fn clap_failure(argv: &[OsString], err: &clap::Error) -> Option<Error> {
     let hint = migration_hint(argv, err)?;
-    let human = clap_human_message(err, Some(hint.as_str()));
+    let human = crate::render::error::clap_human_message(err, Some(hint.as_str()));
     Some(Error::new(StructuredCliError {
         payload: StructuredJsonError {
             hint: Some(hint.clone()),
@@ -58,14 +58,7 @@ pub fn clap_failure(argv: &[OsString], err: &clap::Error) -> Option<Error> {
 
 /// Usage and help trailer lines after a mapped clap failure (human mode only).
 pub fn eprint_clap_trailer(argv: &[OsString], err: &clap::Error) {
-    for line in clap_usage_lines(argv, err) {
-        eprintln!("{line}");
-    }
-    for line in err.to_string().lines() {
-        if line.trim_start().starts_with("For more information") {
-            eprintln!("{line}");
-        }
-    }
+    crate::render::error::write_clap_trailer(argv, err);
 }
 
 fn migration_hint(argv: &[OsString], err: &clap::Error) -> Option<String> {
@@ -218,55 +211,6 @@ fn reset_unstage_hint(argv: &[OsString], path: &str) -> Option<String> {
         "unstage paths with `grit restore --staged {}`",
         shell_word(path)
     ))
-}
-
-fn clap_human_message(err: &clap::Error, hint: Option<&str>) -> String {
-    let mut lines: Vec<String> = err
-        .to_string()
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_owned)
-        .collect();
-    lines.retain(|line| !is_misleading_clap_tip(line));
-    if lines.is_empty() {
-        return "invalid arguments".to_owned();
-    }
-    let first = lines[0]
-        .strip_prefix("error:")
-        .or_else(|| lines[0].strip_prefix("error: "))
-        .unwrap_or(&lines[0])
-        .trim()
-        .to_owned();
-    if hint.is_some() {
-        first
-    } else {
-        lines.join("\n")
-    }
-}
-
-pub(crate) fn clap_usage_lines(argv: &[OsString], err: &clap::Error) -> Vec<String> {
-    err.to_string()
-        .lines()
-        .filter(|line| line.trim_start().starts_with("Usage:"))
-        .map(|line| rewrite_usage_line(argv, line))
-        .collect()
-}
-
-fn rewrite_usage_line(argv: &[OsString], line: &str) -> String {
-    let Some(display) = user_switch_display(argv) else {
-        return line.to_owned();
-    };
-    line.replace("Usage: grit switch", &format!("Usage: grit {display}"))
-        .replace("Usage: grit co", &format!("Usage: grit {display}"))
-        .replace("Usage: grit checkout", &format!("Usage: grit {display}"))
-}
-
-fn is_misleading_clap_tip(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    (trimmed.starts_with("tip:") && trimmed.contains("to pass") && trimmed.contains("use '--"))
-        || (trimmed.starts_with("tip:") && trimmed.contains("as text"))
-        || (trimmed.starts_with("tip:") && trimmed.contains("similar subcommand"))
 }
 
 fn unexpected_argument(err: &clap::Error) -> Option<String> {
@@ -442,7 +386,7 @@ mod tests {
     #[test]
     fn strips_generic_clap_pass_as_value_tip_from_message() {
         let err = parse_err(&["grit", "checkout", "-b", "feature"]);
-        let msg = clap_human_message(&err, Some("hint"));
+        let msg = crate::render::error::clap_human_message(&err, Some("hint"));
         assert!(!msg.contains("tip:"));
         assert!(msg.contains("unexpected argument '-b'"));
     }

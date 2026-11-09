@@ -1279,6 +1279,17 @@ fn snapshot_error_usage() {
 }
 
 #[test]
+fn snapshot_error_clap_habit() {
+    let fixture = CliFixture::new();
+    fixture.snapshot_all_modes_exits(
+        "error_clap_habit",
+        &["checkout", "-b", "feature"],
+        snapshot_dir(),
+        SnapshotExitCodes::all(2),
+    );
+}
+
+#[test]
 fn snapshot_error_invalid_pattern() {
     let fixture = CliFixture::new();
     fixture.snapshot_all_modes_exits(

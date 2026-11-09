@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 2,
+    "stdout": "",
+    "stderr": "error: unexpected argument '-b' found\nhint: create a branch and switch with `grit switch -c feature`\nUsage: grit checkout [OPTIONS] <URL> [SLICE]\nFor more information, try '--help'.\n"
+  },
+  "json": {
+    "exit": 2,
+    "stdout": "{\"error\":\"unexpected argument '-b' found\",\"hint\":\"create a branch and switch with `grit switch -c feature`\",\"kind\":\"usage\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 2,
+    "stdout": "**Error:** unexpected argument '-b' found\n\n**Hint:** create a branch and switch with `grit switch -c feature`\n",
+    "stderr": ""
+  }
+}

@@ -139,7 +139,7 @@ pub(crate) fn emit_success_quiet<
 pub(crate) fn finish_hunk_error(err: anyhow::Error, opts: &OutputOptions, code: i32) -> ExitStatus {
     let err = json_error::ensure_structured(err);
     if opts.mode == OutputMode::Human {
-        eprintln!("error: {err:#}");
+        crate::render::error::emit_fatal_line(&err);
     } else {
         output::emit_error(&err, opts);
     }

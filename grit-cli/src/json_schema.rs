@@ -1108,6 +1108,7 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("reflog_list", &["reflog", "list"]),
         ("worktree_prune", &["worktree", "prune"]),
         ("error_usage", &["branch", "--delete"]),
+        ("error_clap_habit", &["checkout", "-b", "feature"]),
         ("error_invalid_pattern", &["log", "--author", "["]),
         ("error_would_overwrite", &["switch", "br"]),
         ("error_conflict", &["history", "drop", "HEAD~1"]),

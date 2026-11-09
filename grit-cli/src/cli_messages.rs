@@ -1,9 +1,11 @@
 //! Map library and structured errors to short CLI messages.
 
 use anyhow::Error;
+
 /// Human-readable (and JSON `error` string) message for a command failure.
+#[allow(dead_code)] // used from command modules' tests and [`crate::error_map`] tests.
 pub fn human_error_message(err: &Error) -> String {
-    crate::error_map::classify(err).human
+    crate::render::error::human_message(err)
 }
 
 #[cfg(test)]

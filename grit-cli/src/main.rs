@@ -94,40 +94,6 @@ fn is_help_request(err: &clap::Error) -> bool {
     )
 }
 
-/// Format a clap usage error for `--json`: keep missing-argument detail, omit Usage/help.
-fn clap_json_error_message(err: &clap::Error) -> String {
-    let raw = err.to_string();
-    let mut lines = raw.lines();
-    let Some(first) = lines.next() else {
-        return "invalid arguments".to_owned();
-    };
-    let first = first
-        .strip_prefix("error: ")
-        .or_else(|| first.strip_prefix("error:"))
-        .unwrap_or(first)
-        .trim();
-    let mut out = vec![first.to_owned()];
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed.starts_with("Usage:") || trimmed.starts_with("For more information") {
-            break;
-        }
-        if trimmed.is_empty() {
-            if out.len() > 1 {
-                break;
-            }
-            continue;
-        }
-        out.push(line.to_owned());
-    }
-    let message = out.join("\n").trim().to_owned();
-    if message.is_empty() {
-        "invalid arguments".to_owned()
-    } else {
-        message
-    }
-}
-
 fn clap_failure_output_options(argv: &[OsString]) -> OutputOptions {
     let mode = if argv.iter().any(|a| a == "--json") {
         OutputMode::Json
@@ -161,7 +127,7 @@ fn main() {
     let status = match run() {
         Ok(status) => status,
         Err(err) => {
-            eprintln!("error: {err:#}");
+            crate::render::error::emit_fatal_line(&err);
             ExitStatus::Failure
         }
     };
@@ -199,18 +165,7 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
                 return Ok(ExitStatus::from_clap_code(err.exit_code()));
             }
             if opts.mode != OutputMode::Human {
-                let message = clap_json_error_message(&err);
-                let payload = json_error::StructuredJsonError::new(
-                    message.clone(),
-                    error_kind::ErrorKind::Usage,
-                );
-                output::emit_error(
-                    &anyhow::Error::new(json_error::StructuredCliError {
-                        payload,
-                        human: message,
-                    }),
-                    &opts,
-                );
+                output::emit_error(&crate::render::error::structured_clap_failure(&err), &opts);
                 return Ok(ExitStatus::from_clap_code(err.exit_code()));
             }
             let _ = err.print();
@@ -249,7 +204,7 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
         if opts.mode == OutputMode::Json {
             output::emit_error(&err, &opts);
         } else {
-            eprintln!("error: {err:#}");
+            crate::render::error::emit_fatal_line(&err);
         }
         return Ok(ExitStatus::Failure);
     }

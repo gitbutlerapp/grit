@@ -14,14 +14,11 @@
 //!   exit code *or* the presence of an `error` key.
 //! * progress / prompts / diagnostics go to **stderr** and never pollute stdout.
 
-use crate::cli_messages::human_error_message;
-use crate::json_error::structured_json_payload;
-use crate::json_filter::{apply_json_filter, write_json_filter_val};
+use crate::json_filter::write_json_filter_val;
 use crate::json_to_jaq;
 use crate::stdio;
 use crate::ui::entry_path;
 use anyhow::{bail, Result};
-use grit_lib::command_runner::hooks::HookError;
 use grit_lib::diff::{DiffEntry, DiffStatus};
 use grit_lib::porcelain::log::DecorationKind;
 use schemars::JsonSchema;
@@ -198,64 +195,7 @@ pub(crate) fn json_write(result: Result<(), serde_json::Error>) -> Result<()> {
 /// Report a command failure: `{"error": "…"}` on stdout in JSON mode, or the
 /// usual `error: …` line on stderr in human mode. The caller still exits 1.
 pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
-    if let Err(filter_err) = opts.validate() {
-        eprintln!("error: {filter_err:#}");
-        return;
-    }
-    let human = human_error_message(err);
-    let hook_output = crate::json_error::hook_error_from_chain(err).and_then(HookError::output);
-    let hint = structured_json_payload(err).and_then(|payload| payload.hint);
-    match opts.mode {
-        OutputMode::Human => {
-            if let Some(output) = hook_output {
-                let mut stderr = std::io::stderr().lock();
-                let _ = stdio::io_result(stderr.write_all(&output.stdout));
-                let _ = stdio::io_result(stderr.write_all(&output.stderr));
-            }
-            if human.starts_with("fatal:") || human.starts_with("error:") {
-                eprintln!("{human}");
-            } else {
-                eprintln!("error: {human}");
-            }
-            if let Some(hint) = &hint {
-                eprintln!("hint: {hint}");
-            }
-        }
-        OutputMode::Markdown => {
-            let stdout = std::io::stdout();
-            let mut lock = stdout.lock();
-            let _ = stdio::io_result(writeln!(lock, "**Error:** {human}"));
-            if let Some(hint) = &hint {
-                let _ = stdio::io_result(writeln!(lock, "\n**Hint:** {hint}"));
-            }
-            if let Some(output) = hook_output {
-                let _ = crate::render::list::render_hook_output(
-                    &mut lock,
-                    &String::from_utf8_lossy(&output.stdout),
-                    &String::from_utf8_lossy(&output.stderr),
-                );
-            }
-        }
-        OutputMode::Json => {
-            let payload = if let Some(structured) = structured_json_payload(err) {
-                serde_json::to_value(structured)
-                    .unwrap_or_else(|_| serde_json::json!({ "error": human.clone() }))
-            } else if let Some(expr) = opts.filter.as_deref() {
-                let full = serde_json::json!({ "error": human.clone() });
-                match apply_json_filter(&full, expr) {
-                    Ok(filtered) => filtered,
-                    Err(filter_err) => {
-                        serde_json::json!({ "error": format!("{filter_err:#}") })
-                    }
-                }
-            } else {
-                serde_json::json!({ "error": human })
-            };
-            let stdout = std::io::stdout();
-            let mut lock = stdout.lock();
-            let _ = stdio::io_result(writeln!(lock, "{payload}"));
-        }
-    }
+    crate::render::error::emit(err, opts);
 }
 
 /// Whether human stdout should emit ANSI color for this process (TTY, ANSI, no `NO_COLOR`).
