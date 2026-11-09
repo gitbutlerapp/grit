@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import io
 import json
+import re
+import shutil
 import sys
 import tempfile
 import textwrap
@@ -1982,6 +1984,66 @@ class DocExampleFreeFnCallTests(unittest.TestCase):
             ],
         )
         self.assertEqual(metric.count, 3)
+
+
+class TestRgFileCount(unittest.TestCase):
+    def test_counts_with_grep_when_rg_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            consumer = root / "grit-cli" / "src"
+            consumer.mkdir(parents=True)
+            (consumer / "main.rs").write_text(
+                "fn main() { let _ = grit_lib::diff::Diff; }\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(ar, "ROOT", root), mock.patch.object(
+                ar.shutil, "which", return_value=None
+            ):
+                self.assertEqual(
+                    ar.rg_file_count("grit_lib::diff", ("grit-cli",)),
+                    1,
+                )
+
+    def test_accessor_pattern_with_grep_fallback(self) -> None:
+        """Patterns from ``external_accessor_files`` must not use BRE ``grep -rl``."""
+        accessor = "objects"
+        pattern = rf"\.{re.escape(accessor)}\("
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            consumer = root / "grit-cli" / "src"
+            consumer.mkdir(parents=True)
+            (consumer / "main.rs").write_text(
+                "fn main() { let repo = (); repo.objects(); }\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(ar, "ROOT", root), mock.patch.object(
+                ar.shutil, "which", return_value=None
+            ):
+                self.assertEqual(ar.rg_file_count(pattern, ("grit-cli",)), 1)
+                self.assertEqual(ar.external_accessor_files(accessor), 1)
+
+    def test_search_error_not_treated_as_zero_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            consumer = root / "grit-cli" / "src"
+            consumer.mkdir(parents=True)
+            (consumer / "x.rs").write_text("fn f() {}\n", encoding="utf-8")
+            with mock.patch.object(ar, "ROOT", root), mock.patch.object(
+                ar.shutil, "which", return_value=None
+            ):
+                with self.assertRaises(RuntimeError):
+                    # Invalid ERE: GNU grep exits 2 instead of reporting zero matches.
+                    ar.rg_file_count("(", ("grit-cli",))
+
+    @unittest.skipUnless(shutil.which("rg"), "ripgrep not installed")
+    def test_grep_fallback_parity_with_rg_on_accessor_pattern(self) -> None:
+        accessor = "objects"
+        pattern = rf"\.{re.escape(accessor)}\("
+        with_rg = ar.rg_file_count(pattern, ar.CONSUMER_PATHS)
+        with mock.patch.object(ar.shutil, "which", return_value=None):
+            with_grep = ar.rg_file_count(pattern, ar.CONSUMER_PATHS)
+        self.assertEqual(with_grep, with_rg)
+        self.assertGreater(with_rg, 0)
 
 
 if __name__ == "__main__":

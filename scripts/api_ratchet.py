@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -2313,20 +2314,39 @@ def approx_module_repo_first_and_with(lines: list[str], module: str, start: int,
 
 
 def rg_file_count(pattern: str, paths: Iterable[str]) -> int:
-    """Number of distinct files under ``paths`` that match ``pattern`` (ripgrep)."""
+    """Number of distinct files under ``paths`` that match ``pattern``.
+
+    Uses ripgrep when installed; otherwise ``grep -Erl`` (extended regex, matching
+    ripgrep-style patterns such as ``\\.accessor\\(``). GitHub-hosted runners do not
+    ship ``rg``; see ``scripts/check_canonical_layout.py``.
+    """
     files: set[str] = set()
+    use_rg = shutil.which("rg") is not None
     for tree in paths:
         target = ROOT / tree
         if not target.exists():
             continue
+        if use_rg:
+            cmd = ["rg", "-l", pattern, str(target)]
+        else:
+            # -E: same metacharacters as ripgrep for patterns we emit (``\\.foo\\(``).
+            cmd = ["grep", "-Erl", "--include=*.rs", pattern, str(target)]
         result = subprocess.run(
-            ["rg", "-l", pattern, str(target)],
+            cmd,
             cwd=ROOT,
             capture_output=True,
             text=True,
         )
         if result.returncode == 0:
             files.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+        elif result.returncode == 1:
+            continue
+        else:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"file search failed ({' '.join(cmd)!r}): exit {result.returncode}"
+                + (f": {detail}" if detail else "")
+            )
     return len(files)
 
 
