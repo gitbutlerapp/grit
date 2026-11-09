@@ -4688,6 +4688,25 @@ impl core::marker::Unpin for grit_lib::diff::SubmoduleIgnoreMode
 impl core::marker::UnsafeUnpin for grit_lib::diff::SubmoduleIgnoreMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::SubmoduleIgnoreMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::SubmoduleIgnoreMode
+pub struct grit_lib::diff::AnnotatedStructuredHunk
+pub grit_lib::diff::AnnotatedStructuredHunk::hunk: grit_lib::diff::structured::StructuredHunk
+pub grit_lib::diff::AnnotatedStructuredHunk::id: core::option::Option<grit_lib::diff::HunkId>
+pub grit_lib::diff::AnnotatedStructuredHunk::index: core::option::Option<usize>
+impl core::clone::Clone for grit_lib::diff::AnnotatedStructuredHunk
+pub fn grit_lib::diff::AnnotatedStructuredHunk::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::AnnotatedStructuredHunk
+impl core::cmp::PartialEq for grit_lib::diff::AnnotatedStructuredHunk
+pub fn grit_lib::diff::AnnotatedStructuredHunk::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::AnnotatedStructuredHunk
+pub fn grit_lib::diff::AnnotatedStructuredHunk::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::AnnotatedStructuredHunk
+impl core::marker::Freeze for grit_lib::diff::AnnotatedStructuredHunk
+impl core::marker::Send for grit_lib::diff::AnnotatedStructuredHunk
+impl core::marker::Sync for grit_lib::diff::AnnotatedStructuredHunk
+impl core::marker::Unpin for grit_lib::diff::AnnotatedStructuredHunk
+impl core::marker::UnsafeUnpin for grit_lib::diff::AnnotatedStructuredHunk
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::AnnotatedStructuredHunk
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::AnnotatedStructuredHunk
 pub struct grit_lib::diff::CommitFilesManyInput
 pub grit_lib::diff::CommitFilesManyInput::oid: grit_lib::objects::ObjectId
 pub grit_lib::diff::CommitFilesManyInput::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
@@ -5487,6 +5506,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::WhitespaceMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::WhitespaceMode
 pub const grit_lib::diff::RENAME_DETECTION_DISABLED: u32
 pub const grit_lib::diff::WORD_LEVEL_INLINE_MAX_CHANGED_FILES: usize
+pub fn grit_lib::diff::annotate_structured_hunks(grit_lib::diff::DiffSide, &str, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>, &[grit_lib::diff::structured::StructuredHunk], bool) -> alloc::vec::Vec<grit_lib::diff::AnnotatedStructuredHunk>
 pub fn grit_lib::diff::bytes_for_diff(alloc::vec::Vec<u8>) -> (grit_lib::diff::structured::SideBytes, bool)
 pub fn grit_lib::diff::combined_structured_patch_body(&grit_lib::diff::combined_diff_patch::CombinedStructuredTextDiff) -> alloc::string::String
 pub fn grit_lib::diff::count_git_lines(&[u8]) -> usize
@@ -5495,8 +5515,10 @@ pub fn grit_lib::diff::empty_blob_oid() -> grit_lib::objects::ObjectId
 pub fn grit_lib::diff::format_raw(&grit_lib::diff::DiffEntry) -> alloc::string::String
 pub fn grit_lib::diff::format_raw_abbrev(&grit_lib::diff::DiffEntry, usize) -> alloc::string::String
 pub fn grit_lib::diff::hunk_ids(grit_lib::diff::DiffSide, &str, &[grit_lib::diff::structured::StructuredHunk], &[grit_lib::diff::structured::StructuredHunk]) -> alloc::vec::Vec<grit_lib::diff::HunkId>
+pub fn grit_lib::diff::include_file_change_in_patch(&grit_lib::diff::FileChange, &grit_lib::diff::DiffOptions) -> bool
 pub fn grit_lib::diff::index_mtime_for_diff(&grit_lib::index::Index, core::option::Option<(u32, u32)>) -> core::option::Option<(u32, u32)>
 pub fn grit_lib::diff::line_change_counts(&str, &str, &grit_lib::diff::UnifiedDiffOptions<'_>) -> grit_lib::diff::LineStat
+pub fn grit_lib::diff::line_stat_for_target_file(&grit_lib::diff::FileDiff, grit_lib::diff::DiffDetail) -> core::option::Option<grit_lib::diff::LineStat>
 pub fn grit_lib::diff::load_odb_blob_side_for_diff(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId, core::option::Option<&str>, bool) -> grit_lib::error::Result<(grit_lib::diff::structured::SideBytes, bool)>
 pub fn grit_lib::diff::mode_from_metadata(&std::fs::Metadata) -> u32
 pub fn grit_lib::diff::name_status_line(&grit_lib::diff::DiffEntry) -> alloc::string::String
@@ -5505,11 +5527,15 @@ pub fn grit_lib::diff::normalize_ignore_space_change_line(&str) -> alloc::string
 pub fn grit_lib::diff::parse_diff_rename_threshold_percent(&str) -> core::option::Option<u8>
 pub fn grit_lib::diff::peer_hunks_by_primary_path(&std::collections::hash::set::HashSet<&str>, impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>)>) -> std::collections::hash::map::HashMap<alloc::string::String, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>>
 pub fn grit_lib::diff::peer_scope_includes_path(&str, core::option::Option<&str>, &std::collections::hash::set::HashSet<&str>) -> bool
+pub fn grit_lib::diff::presentation_hunks_from_file_change(&grit_lib::diff::FileChange, grit_lib::diff::DiffOptions, grit_lib::diff::DiffSide, &[grit_lib::diff::structured::StructuredHunk], bool) -> alloc::vec::Vec<grit_lib::diff::AnnotatedStructuredHunk>
+pub fn grit_lib::diff::presentation_hunks_from_listed(&grit_lib::diff::ListedFileDiff, grit_lib::diff::DiffDetail) -> core::option::Option<alloc::vec::Vec<grit_lib::diff::AnnotatedStructuredHunk>>
+pub fn grit_lib::diff::presentation_hunks_from_tree(&grit_lib::diff::TreeDiffStructured) -> alloc::vec::Vec<grit_lib::diff::AnnotatedStructuredHunk>
 pub fn grit_lib::diff::read_worktree_side_bytes_for_diff(&grit_lib::prelude::Odb, &std::path::Path, &str, u32, &grit_lib::config::ConfigSet, core::option::Option<&grit_lib::index::IndexEntry>, core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::diff::refresh_index_stat_content_verified(&grit_lib::prelude::Odb, &std::path::Path, &mut grit_lib::index::Index, &std::path::Path, core::option::Option<(u32, u32)>, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<usize>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::diff::rename_similarity_score(&[u8], &[u8]) -> u32
 pub fn grit_lib::diff::renames_from_config(&grit_lib::config::ConfigSet) -> grit_lib::diff::RenameDetection
 pub fn grit_lib::diff::resolve_indent_heuristic(&grit_lib::config::ConfigSet, bool, bool) -> bool
+pub fn grit_lib::diff::should_report_inexact_rename_skipped(&grit_lib::diff::InexactRenameDetectionSkipped) -> bool
 pub fn grit_lib::diff::sort_entries_by_path(&mut [grit_lib::diff::DiffEntry])
 pub fn grit_lib::diff::stat_matches(&grit_lib::index::IndexEntry, &std::fs::Metadata) -> bool
 pub fn grit_lib::diff::submodule_porcelain_flags(&std::path::Path, &str, grit_lib::objects::ObjectId) -> grit_lib::diff::core::SubmodulePorcelainFlags
