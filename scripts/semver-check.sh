@@ -58,9 +58,14 @@ read_ratchet_semver_baseline() {
 	printf '%s\n' "${line}" | sed -n 's/.*=[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
+is_stable_v_tag() {
+	local tag="$1"
+	[[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
 version_ge_0_6_0() {
 	local ver="$1"
-	# ver is like 0.6.0 or 1.0.0 (no leading v)
+	# ver is like 0.6.0 or 1.0.0 (no leading v); caller must ensure a stable tag shape
 	awk -v v="${ver}" '
 		BEGIN {
 			split(v, p, ".");
@@ -77,6 +82,7 @@ latest_merged_v06_plus_tag() {
 	local tag=""
 	while IFS= read -r tag; do
 		[[ -n "${tag}" ]] || continue
+		is_stable_v_tag "${tag}" || continue
 		local ver="${tag#v}"
 		if version_ge_0_6_0 "${ver}"; then
 			printf '%s\n' "${tag}"
@@ -126,6 +132,7 @@ baseline_is_v06_plus_tag() {
 	local tag=""
 	tag="$(git -C "${REPO}" describe --tags --exact-match "${rev}" 2>/dev/null)" || return 1
 	[[ -n "${tag}" ]] || return 1
+	is_stable_v_tag "${tag}" || return 1
 	local ver="${tag#v}"
 	version_ge_0_6_0 "${ver}"
 }

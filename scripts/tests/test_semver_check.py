@@ -126,6 +126,33 @@ class SemverCheckBaselineTests(unittest.TestCase):
             self.assertIn("minor", cmd)
             self.assertIn("v0.6.0", cmd)
 
+    def test_baseline_pin_with_only_prerelease_v060_rc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            pin = "pinned-deadbeef"
+            _init_repo(repo, pin=pin)
+            _tag(repo, "v0.6.0-rc.1")
+            self.assertEqual(_run_script(repo, "baseline"), pin)
+
+    def test_baseline_stable_v060_when_rc_also_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            pin = "pinned-deadbeef"
+            _init_repo(repo, pin=pin)
+            _tag(repo, "v0.6.0")
+            _tag(repo, "v0.6.0-rc.1")
+            self.assertEqual(_run_script(repo, "baseline"), "v0.6.0")
+
+    def test_check_cmd_no_release_type_minor_with_only_rc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            pin = "pinned-deadbeef"
+            _init_repo(repo, pin=pin, workspace_version="0.6.1")
+            _tag(repo, "v0.6.0-rc.1")
+            cmd = _run_script(repo, "check-cmd")
+            self.assertNotIn("--release-type", cmd)
+            self.assertIn(pin, cmd)
+
 
 if __name__ == "__main__":
     unittest.main()

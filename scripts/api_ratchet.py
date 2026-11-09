@@ -2004,8 +2004,12 @@ def load_baseline(path: Path) -> dict[str, int]:
     return counts
 
 
+_STABLE_V_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
+
+
 def _parse_version_tag(tag: str) -> tuple[int, int, int] | None:
-    if not tag.startswith("v"):
+    """Parse a stable release tag (vMAJOR.MINOR.PATCH only; no prerelease suffix)."""
+    if not _STABLE_V_TAG_RE.fullmatch(tag):
         return None
     parts = tag[1:].split(".")
     if len(parts) < 2:

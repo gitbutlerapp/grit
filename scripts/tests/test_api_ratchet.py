@@ -283,6 +283,11 @@ class ErrorRatchetMetricTests(unittest.TestCase):
             with mock.patch.object(ar, "GRIT_LIB", root):
                 self.assertEqual(ar.count_error_message_construction_sites(), 2)
 
+    def test_parse_version_tag_stable_only(self) -> None:
+        self.assertEqual(ar._parse_version_tag("v0.6.0"), (0, 6, 0))
+        self.assertIsNone(ar._parse_version_tag("v0.6.0-rc.1"))
+        self.assertIsNone(ar._parse_version_tag("v0.6"))
+
     def test_write_baseline_preserves_semver_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "api-ratchet.toml"
