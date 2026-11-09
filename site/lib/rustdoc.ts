@@ -183,8 +183,11 @@ function isPublicRustdocPage(relative: string): boolean {
  * [`expandRustdocLinks`]. Paths behind private modules fail because rustdoc
  * writes only redirect stubs (no module `index.html`) for them.
  */
+const API_MIGRATION_BLOCK =
+  /<!-- api-migration:begin -->[\s\S]*?<!-- api-migration:end -->/g;
+
 export function unresolvedGritLibPaths(markdown: string): string[] {
-  const text = markdown.replace(RUSTDOC_LINK, "]()");
+  const text = markdown.replace(API_MIGRATION_BLOCK, "").replace(RUSTDOC_LINK, "]()");
   const paths = new Set<string>();
   for (const m of text.matchAll(GRIT_LIB_USE_GROUP)) {
     for (const item of m[2].split(",")) {

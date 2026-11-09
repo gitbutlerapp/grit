@@ -2,7 +2,7 @@
 
 Grit’s stable surface is the **canonical domain tree** (≤25 root modules plus [`prelude`](rustdoc:grit_lib::prelude)). Flat implementation modules such as `odb` or `fetch` at the crate root are **private**; use `grit_lib::objects::odb` and `grit_lib::remote::fetch` instead. The map in [`grit-lib/canonical-modules.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/canonical-modules.toml) lists every previously flat path and its canonical replacement.
 
-For naming rules, semver policy on the path to **0.6.0**, and how to add a public item, see [`grit-lib/API.md`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/API.md).
+For naming rules, semver policy on the path to **0.6.0**, and how to add a public item, see [`grit-lib/API.md`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/API.md). If you embed against **0.5.x**, see [Migrating to 0.6](migrating-to-0.6.md).
 
 ## Domain roots
 
