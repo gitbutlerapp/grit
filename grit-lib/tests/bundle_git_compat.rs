@@ -511,6 +511,92 @@ fn shallow_prerequisite_still_needs_complete_tree_git_parity() {
     assert!(!report.is_ok());
 }
 
+fn copy_loose_object(src_git: &Path, dest_objects: &Path, oid: &ObjectId) {
+    let hex = oid.to_hex();
+    let obj_path = src_git.join("objects").join(&hex[..2]).join(&hex[2..]);
+    let dest_dir = dest_objects.join(&hex[..2]);
+    std::fs::create_dir_all(&dest_dir).expect("dest dir");
+    std::fs::copy(&obj_path, dest_dir.join(&hex[2..])).expect("copy loose");
+}
+
+fn commit_tree_oid(dir: &Path, commit: &ObjectId) -> ObjectId {
+    let out = git(dir, &["cat-file", "commit", "-p", &commit.to_hex()]);
+    let tree_hex = out
+        .lines()
+        .next()
+        .expect("commit header")
+        .strip_prefix("tree ")
+        .expect("tree line");
+    ObjectId::from_hex(tree_hex).expect("tree oid")
+}
+
+#[test]
+fn shallow_parent_of_prerequisite_needs_complete_tree_git_parity() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    let (c1, c2) = init_repo_with_two_commits(src);
+    std::fs::write(src.join("c.txt"), b"three\n").unwrap();
+    git_ok(src, &["add", "c.txt"]);
+    git_ok(src, &["commit", "-q", "-m", "third"]);
+    let c3 = rev_parse(src, "HEAD");
+    let inc = src.join("inc.bundle");
+    git_ok(
+        src,
+        &[
+            "bundle",
+            "create",
+            inc.to_str().unwrap(),
+            &format!("{}..{}", c2.to_hex(), c3.to_hex()),
+        ],
+    );
+
+    let consumer = tempfile::tempdir().expect("consumer");
+    git_ok(
+        consumer.path(),
+        &["init", "-q", "--bare", "-b", "main", "."],
+    );
+    let c1_tree = commit_tree_oid(src, &c1);
+    let src_git = src.join(".git");
+    let dest_objects = consumer.path().join("objects");
+    for line in git(src, &["rev-list", "--objects", &c2.to_hex()]).lines() {
+        let hex = line.split_whitespace().next().expect("oid");
+        let oid = ObjectId::from_hex(hex).expect("parse oid");
+        if oid == c1_tree {
+            continue;
+        }
+        copy_loose_object(&src_git, &dest_objects, &oid);
+    }
+    std::fs::write(
+        consumer.path().join("shallow"),
+        format!("{}\n", c1.to_hex()),
+    )
+    .expect("shallow");
+
+    let git_verify = Command::new("git")
+        .current_dir(consumer.path())
+        .args(["bundle", "verify", inc.to_str().unwrap()])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git bundle verify");
+    assert!(
+        !git_verify.status.success(),
+        "git must reject missing shallow-parent tree: {}",
+        String::from_utf8_lossy(&git_verify.stderr)
+    );
+
+    let repo = grit_repo(consumer.path());
+    let report = Bundle::open(&inc)
+        .expect("open")
+        .verify(&repo)
+        .expect("verify");
+    assert!(
+        report.prerequisites_not_connected,
+        "shallow parent with missing tree must fail: {report:?}"
+    );
+    assert!(!report.is_ok());
+}
+
 #[test]
 fn incremental_bundle_after_refless_full_unbundle() {
     let tmp = tempfile::tempdir().expect("tempdir");

@@ -106,7 +106,7 @@ pub fn bundle_prerequisites_connected_to_refs(
             continue;
         }
         for parent in parsed.parents {
-            if ref_commits.contains(&parent) || shallow.contains(&parent) {
+            if ref_commits.contains(&parent) {
                 continue;
             }
             if commits.insert(parent) {
@@ -214,6 +214,32 @@ mod tests {
         assert!(
             !bundle_prerequisites_connected_to_refs(&repo, &[lone]).expect("check"),
             "shallow listing must not skip commit/tree validation"
+        );
+    }
+
+    #[test]
+    fn shallow_parent_still_requires_tree() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (repo, _) =
+            Repository::init(dir.path(), &InitOptions::new().with_bare(true)).expect("init");
+        let missing_tree = ObjectId::from_hex(&"c".repeat(40)).expect("oid");
+        let mut parent_body = format!("tree {missing_tree}\n");
+        parent_body.push_str("author T <t@e> 1 +0000\ncommitter T <t@e> 1 +0000\n\np\n");
+        let parent = repo
+            .odb()
+            .write(ObjectKind::Commit, parent_body.as_bytes())
+            .expect("parent");
+        let blob = blob(&repo, b"d\n");
+        let root = tree(&repo, &[("100644", "f", blob)]);
+        let tip = commit(&repo, root, &[parent]);
+        std::fs::write(
+            shallow::shallow_file_path(repo.git_dir()),
+            format!("{}\n", parent.to_hex()),
+        )
+        .expect("shallow");
+        assert!(
+            !bundle_prerequisites_connected_to_refs(&repo, &[tip]).expect("check"),
+            "shallow parent reached via walk must still have a readable tree"
         );
     }
 
