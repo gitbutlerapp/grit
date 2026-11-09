@@ -67,14 +67,14 @@ class ErrorRatchetMetricTests(unittest.TestCase):
         ):
             self.assertIn(key, snap.metrics)
 
-    def test_pub_deprecated_items_counts_rustdoc_deprecation_attrs(self) -> None:
+    def test_pub_deprecated_items_counts_rustdoc_top_level_deprecation(self) -> None:
         index = {
             "1": {
                 "id": 1,
                 "crate_id": 0,
                 "visibility": "public",
                 "name": "old_fn",
-                "attrs": [{"deprecation": {"note": "use new_fn"}}],
+                "deprecation": {"since": "0.6.0", "note": "use new_fn"},
                 "inner": {"function": {"sig": {}, "header": {}}},
             },
             "2": {
@@ -89,7 +89,7 @@ class ErrorRatchetMetricTests(unittest.TestCase):
                 "crate_id": 0,
                 "visibility": "crate",
                 "name": "internal",
-                "attrs": [{"deprecation": {"note": "hidden"}}],
+                "deprecation": {"note": "not public"},
                 "inner": {"function": {"sig": {}, "header": {}}},
             },
         }

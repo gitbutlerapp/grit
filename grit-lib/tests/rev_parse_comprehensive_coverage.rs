@@ -7,6 +7,7 @@ use std::path::Path;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::{
+    abbreviate_ref_name, parse_index_colon_spec, parse_peel_suffix,
     reflog_date_selector_timestamp, reflog_date_selector_timestamp_at,
     revision_spec_contains_ancestry_navigation, spec_has_parent_shorthand_suffix,
     split_double_dot_range, split_treeish_colon, split_triple_dot_range, to_relative_path,

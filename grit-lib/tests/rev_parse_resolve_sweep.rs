@@ -5,6 +5,7 @@ use crate::support;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::{
+    parse_index_colon_spec, parse_peel_suffix, reflog_date_selector_timestamp,
     reflog_date_selector_timestamp_at, split_double_dot_range, split_treeish_colon,
     split_triple_dot_range,
 };

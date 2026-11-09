@@ -828,15 +828,11 @@ def is_unsafe_fn(fn: dict[str, Any]) -> bool:
 
 
 def item_has_deprecation(item: dict[str, Any]) -> bool:
-    for attr in item.get("attrs") or []:
-        if not isinstance(attr, dict):
-            continue
-        if attr.get("deprecation") is not None:
-            return True
-        text = str(attr.get("text") or "")
-        if "deprecated" in text.lower():
-            return True
-    return False
+    """True when rustdoc marks the item deprecated (top-level `deprecation` on the item).
+
+    Rustdoc JSON puts `#[deprecated]` on `Item.deprecation`, not in `attrs`.
+    """
+    return item.get("deprecation") is not None
 
 
 def count_pub_deprecated_items(index: dict[str, Any]) -> int:
