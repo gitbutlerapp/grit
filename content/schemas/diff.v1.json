@@ -16,7 +16,7 @@
       "type": "string"
     },
     "DiffTotalsJson": {
-      "description": "Aggregate line counts for `--stat`, `--numstat`, `--shortstat`, and `-p` JSON (omitted for `--name-only` / `--name-status`).",
+      "description": "Aggregate line counts for `--stat`, `--numstat`, `--shortstat`, and `-p` JSON.",
       "properties": {
         "deletions": {
           "format": "uint",

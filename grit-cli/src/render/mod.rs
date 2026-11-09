@@ -5,6 +5,7 @@ pub mod bundle;
 pub mod clone;
 pub mod conflict;
 pub mod diff;
+pub mod diff_stream;
 pub mod error;
 pub mod fetch;
 pub mod history;

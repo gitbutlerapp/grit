@@ -14,140 +14,34 @@
 //! intra-line word highlights — no `+`/`-` patch markers. Color is emitted only
 //! on a TTY (honoring `NO_COLOR`); piped output is plain text with `+`/`-`.
 
+use super::convert::{
+    cli_file_from_file_change, cli_file_from_lib, cli_file_from_tree, map_listed_file,
+};
+use super::{DiffFormatArgs, DiffOutcome, DiffRunOptions, DiffTotalsJson, PatchBodies};
 use anyhow::{Context, Result};
 use grit_lib::diff::{
-    hunk_ids, peer_hunks_by_primary_path, sort_entries_by_path, structured::StructuredLineKind,
-    write_commit_log_patch, write_commits_log_patch, write_patch, write_patch_resolved,
-    DiffArguments, DiffDetail, DiffEntry, DiffFilesOutput, DiffMerges, DiffOptions, DiffRequest,
-    DiffSide, DiffTarget, DiffTotals, FileChange, LineStat, ListedFileDiff, LogPatchCommitHeader,
-    LogPatchOptions, PatchResolvedSide, PatchSide, PatchTextOptions, ResolveDiffArgumentsError,
-    TreeDiffStructured, UncommittedDiff,
+    include_file_change_in_patch, peer_hunks_by_primary_path, should_report_inexact_rename_skipped,
+    sort_entries_by_path, write_commit_log_patch, write_commits_log_patch, write_patch,
+    write_patch_resolved, DiffArguments, DiffDetail, DiffEntry, DiffFilesOutput, DiffMerges,
+    DiffOptions, DiffRequest, DiffSide, DiffTarget, FileChange, LineStat, ListedFileDiff,
+    LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchSide, PatchTextOptions,
+    ResolveDiffArgumentsError, UncommittedDiff,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ParallelOp;
 use grit_lib::worktree::pathspec::pathdiff;
-use grit_lib::worktree::WorktreeError;
-use schemars::JsonSchema;
-use serde::Serialize;
-use std::io::IsTerminal;
 use std::io::Write;
 
 use crate::context;
-use crate::diff_args::DiffCompareArgs;
-use crate::diff_format::DiffFormatArgs;
 use crate::markdown;
-use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, OutputMode, RenderContext};
-use crate::pathspec_args::TrailingPathspecArgs;
+use crate::output::outln;
+use crate::render::diff::{
+    diffstat_from_files, render_file, render_name_only, render_name_status, render_numstat,
+    render_shortstat, render_stat, FileDiff, LineStatJson,
+};
 use crate::ui::PathDisplayOptions;
 
-/// Lines of unchanged context to show around each change.
 const CONTEXT_LINES: usize = 3;
-
-/// Aggregate line counts for `--stat`, `--numstat`, `--shortstat`, and `-p` JSON (omitted for `--name-only` / `--name-status`).
-#[derive(Serialize, JsonSchema, Clone, Copy)]
-pub struct DiffTotalsJson {
-    pub files_changed: usize,
-    pub insertions: usize,
-    pub deletions: usize,
-}
-
-impl From<DiffTotals> for DiffTotalsJson {
-    fn from(totals: DiffTotals) -> Self {
-        Self {
-            files_changed: totals.files_changed,
-            insertions: totals.insertions,
-            deletions: totals.deletions,
-        }
-    }
-}
-
-#[allow(unused_imports)]
-pub use crate::render::diff::{
-    diffstat_from_files, file_diff_status_label, render_file, render_markdown_stat,
-    render_name_only, render_name_status, render_numstat, render_shortstat, render_stat,
-    render_stat_with_leading_blank, summary_line, write_file_diff_metadata_human, DiffStat,
-    FileDiff, Hunk, Line, LineKind, LineStatJson, Segment,
-};
-
-/// Result of `grit diff`.
-#[derive(Serialize, JsonSchema)]
-pub struct DiffOutcome {
-    /// Whether any selected change exists (matches `grit diff --quiet` / `--exit-code`).
-    pub changed: bool,
-    pub files: Vec<FileDiff>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub totals: Option<DiffTotalsJson>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    format: DiffFormatArgs,
-    #[serde(skip)]
-    #[schemars(skip)]
-    path_display: Option<PathDisplayOptions>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    body_streamed: bool,
-    /// When true, [`finish_outcome`] must not recompute [`Self::changed`] from [`Self::files`].
-    #[serde(skip)]
-    #[schemars(skip)]
-    preserve_changed: bool,
-}
-
-/// How commit-range patch bodies are delivered (memory vs JSON aggregation).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiffBodyDelivery {
-    /// Build every file diff in memory (for `--json` and tests).
-    Collect,
-    /// Stream each file to stdout as it is computed (human or markdown).
-    Stream(OutputMode),
-    /// Only record whether anything changed (`--quiet`, `--exit-code`).
-    MetadataOnly,
-}
-
-/// Inputs for `grit diff` (flags and revision arguments).
-pub struct DiffRunOptions {
-    /// Compare two filesystem paths outside any repository (Git `--no-index`).
-    pub no_index: bool,
-    pub staged: bool,
-    pub unstaged: bool,
-    pub against: Option<String>,
-    pub commits: Vec<String>,
-    /// Trailing pathspec argv and optional `--pathspec-from-file`.
-    pub pathspecs: TrailingPathspecArgs,
-    /// Output format (`--stat`, `--name-only`, …).
-    pub format: DiffFormatArgs,
-    /// Line-diff flags (`-M`, `--no-renames`, `--diff-filter`, …).
-    pub line_format: DiffCompareArgs,
-    /// Intra-line word highlights in structured hunks (human TTY output only).
-    pub word_level_inline: bool,
-    /// Print nothing; `main` then exits with the `--exit-code` status.
-    pub quiet: bool,
-    /// Assign stable hunk ids (loads opposite-side peers when needed). True for `--json` patch output only.
-    pub emit_json_hunk_ids: bool,
-    /// Patch body delivery for ODB-backed tree diffs (commit ranges).
-    pub body_delivery: DiffBodyDelivery,
-}
-
-/// Exit status when `grit diff` fails while `--exit-code` or `--quiet` is set.
-pub const DIFF_ERROR_EXIT: i32 = 2;
-
-/// Process exit code for `--exit-code` / `--quiet`: 0 when clean, 1 when changed.
-#[must_use]
-pub fn exit_code(outcome: &DiffOutcome) -> i32 {
-    if outcome.changed {
-        1
-    } else {
-        0
-    }
-}
-
-/// Whether human diff output should compute word-level inline emphasis.
-#[must_use]
-pub fn diff_word_level_inline_for_output() -> bool {
-    std::io::stdout().is_terminal()
-        && grit_lib::porcelain::terminal::ansi_supported()
-        && std::env::var_os("NO_COLOR").is_none()
-}
 
 fn attach_path_display(
     repo: &grit_lib::repo::Repository,
@@ -290,13 +184,15 @@ fn outcome_from_lib(
     detail: DiffDetail,
 ) -> DiffOutcome {
     if let Some(skipped) = output.inexact_rename_skipped {
-        emit_inexact_rename_notice(&skipped);
+        if should_report_inexact_rename_skipped(&skipped) {
+            emit_inexact_rename_notice(&skipped);
+        }
     }
     let totals = output.totals.map(DiffTotalsJson::from);
     let files = output
         .files
         .into_iter()
-        .map(|f| lib_file_to_cli(f, detail))
+        .map(|f| map_listed_file(f, detail))
         .collect();
     outcome_from_files(files, totals, format)
 }
@@ -317,91 +213,6 @@ fn outcome_from_files(
     }
 }
 
-fn lib_file_to_cli(f: ListedFileDiff, detail: DiffDetail) -> FileDiff {
-    let content_changed = f
-        .stat
-        .map(|s| s.insertions + s.deletions > 0)
-        .unwrap_or(true);
-    let old_encoding_lossy = f
-        .structured
-        .as_ref()
-        .map(|s| s.old_encoding_lossy)
-        .unwrap_or(false);
-    let new_encoding_lossy = f
-        .structured
-        .as_ref()
-        .map(|s| s.new_encoding_lossy)
-        .unwrap_or(false);
-    let hunks = if let Some(combined) = f.combined {
-        Some(
-            combined
-                .hunks
-                .into_iter()
-                .map(|h| Hunk {
-                    old_start: 0,
-                    new_start: 0,
-                    old_lines: 0,
-                    new_lines: 0,
-                    context: None,
-                    combined_header: Some(h.header),
-                    id: None,
-                    index: None,
-                    lines: h
-                        .lines
-                        .into_iter()
-                        .map(|l| Line {
-                            kind: match l.kind {
-                                grit_lib::diff::combined_diff_patch::CombinedStructuredLineKind::Context => {
-                                    LineKind::Context
-                                }
-                                grit_lib::diff::combined_diff_patch::CombinedStructuredLineKind::Add => {
-                                    LineKind::Add
-                                }
-                                grit_lib::diff::combined_diff_patch::CombinedStructuredLineKind::Del => {
-                                    LineKind::Del
-                                }
-                            },
-                            old: None,
-                            new: None,
-                            segments: vec![Segment {
-                                text: l.text,
-                                emphasis: false,
-                            }],
-                            no_newline_at_eof: false,
-                            parents: Some(l.parents.iter().map(|c| c.to_string()).collect()),
-                        })
-                        .collect(),
-                })
-                .collect(),
-        )
-    } else {
-        f.structured.map(|structured| {
-            hunk_assign_ids(DiffSide::Other, &f.path, structured.hunks, &[], false)
-        })
-    };
-    FileDiff {
-        path: f.path,
-        old_path: f.old_path,
-        status: f.status.into(),
-        old_mode: f.old_mode,
-        new_mode: f.new_mode,
-        old_encoding_lossy,
-        new_encoding_lossy,
-        binary: f.binary,
-        old_size: f.binary.then_some(f.old_size),
-        new_size: f.binary.then_some(f.new_size),
-        content_changed,
-        similarity: f.similarity,
-        stat: f.stat.map(LineStatJson::from),
-        combined_status: f.combined_status,
-        hunks: if detail == DiffDetail::Patch {
-            Some(hunks.unwrap_or_default())
-        } else {
-            None
-        },
-    }
-}
-
 fn outcome_from_entries(
     repo: &grit_lib::repo::Repository,
     diff_result: grit_lib::diff::DiffEntriesResult,
@@ -410,13 +221,15 @@ fn outcome_from_entries(
     format: DiffFormatArgs,
 ) -> Result<DiffOutcome> {
     if let Some(skipped) = diff_result.inexact_rename_skipped {
-        emit_inexact_rename_notice(&skipped);
+        if should_report_inexact_rename_skipped(&skipped) {
+            emit_inexact_rename_notice(&skipped);
+        }
     }
     let entries = diff_result.entries;
     if matches!(detail, DiffDetail::NameOnly | DiffDetail::NameStatus) {
         let files = entries
             .into_iter()
-            .map(|entry| lib_file_to_cli(ListedFileDiff::from_metadata(entry), detail))
+            .map(|entry| map_listed_file(ListedFileDiff::from_metadata(entry), detail))
             .collect();
         return Ok(outcome_from_files(files, None, format));
     }
@@ -429,7 +242,7 @@ fn outcome_from_entries(
 }
 
 /// Compare two filesystem paths outside a repository ([`grit_lib::diff::diff_paths`]).
-pub fn run_no_index(opts: DiffRunOptions) -> Result<DiffOutcome> {
+pub fn run_no_index(opts: DiffRunOptions, ctx: super::DiffRunContext) -> Result<DiffOutcome> {
     if opts.staged || opts.unstaged || opts.against.is_some() {
         anyhow::bail!("--no-index cannot be combined with --staged, --unstaged, or --against");
     }
@@ -447,7 +260,7 @@ pub fn run_no_index(opts: DiffRunOptions) -> Result<DiffOutcome> {
     diff_options.context_lines = CONTEXT_LINES;
     opts.format.apply_context(&mut diff_options);
     diff_options = opts.line_format.to_options(diff_options)?;
-    diff_options.word_level_inline = opts.word_level_inline;
+    diff_options.word_level_inline = ctx.word_level_inline;
     let detail = opts.format.detail();
     let format = opts.format;
     if detail == DiffDetail::Stat {
@@ -461,7 +274,7 @@ pub fn run_no_index(opts: DiffRunOptions) -> Result<DiffOutcome> {
     .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let cli_files: Vec<FileDiff> = files
         .into_iter()
-        .map(|f| file_diff_from_lib(f, detail))
+        .map(|f| cli_file_from_lib(f, detail))
         .collect();
     Ok(finish_no_index_outcome(
         format,
@@ -477,7 +290,10 @@ pub fn run_no_index(opts: DiffRunOptions) -> Result<DiffOutcome> {
     ))
 }
 
-fn run_no_index_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
+fn run_no_index_patch_text(
+    opts: DiffRunOptions,
+    ctx: super::DiffRunContext,
+) -> Result<DiffOutcome> {
     if opts.staged || opts.unstaged || opts.against.is_some() {
         anyhow::bail!("--no-index cannot be combined with --staged, --unstaged, or --against");
     }
@@ -496,7 +312,7 @@ fn run_no_index_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
     diff_options.context_lines = CONTEXT_LINES;
     opts.format.apply_context(&mut diff_options);
     diff_options = opts.line_format.to_options(diff_options)?;
-    diff_options.word_level_inline = opts.word_level_inline;
+    diff_options.word_level_inline = ctx.word_level_inline;
     let format = opts.format;
     let a = std::path::Path::new(&path_args[0]);
     let b = std::path::Path::new(&path_args[1]);
@@ -666,7 +482,7 @@ fn patch_text_outcome(
     })
 }
 
-fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
+fn run_patch_text(opts: DiffRunOptions, _ctx: super::DiffRunContext) -> Result<DiffOutcome> {
     let quiet = opts.quiet;
     let repo = context::discover()?;
     let config = repo.config().snapshot().context("could not load config")?;
@@ -707,15 +523,15 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
     patch_text_outcome(&repo, entries, changes, diff_options, format, quiet)
 }
 
-pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
+pub fn run(opts: DiffRunOptions, ctx: super::DiffRunContext) -> Result<DiffOutcome> {
     if opts.no_index {
         if opts.format.patch_text {
-            return run_no_index_patch_text(opts);
+            return run_no_index_patch_text(opts, ctx);
         }
-        return run_no_index(opts);
+        return run_no_index(opts, ctx);
     }
     if opts.format.patch_text {
-        return run_patch_text(opts);
+        return run_patch_text(opts, ctx);
     }
     let repo = context::discover()?;
     let config = repo.config().snapshot().context("could not load config")?;
@@ -725,7 +541,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     diff_options.context_lines = CONTEXT_LINES;
     opts.format.apply_context(&mut diff_options);
     diff_options = opts.line_format.to_options(diff_options)?;
-    diff_options.word_level_inline = opts.word_level_inline;
+    diff_options.word_level_inline = ctx.word_level_inline;
     let detail = opts.format.detail();
     let format = opts.format;
     let outcome = match target {
@@ -739,7 +555,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 }
                 _ => {
                     let staged = repo.diff().object_changes(&entries.entries)?;
-                    let peer = if opts.emit_json_hunk_ids {
+                    let peer = if ctx.emit_json_hunk_ids {
                         uncommitted
                             .peer_changes(
                                 DiffSide::Staged,
@@ -760,7 +576,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                         diff_options,
                         format,
                         DiffSide::Staged,
-                        opts.emit_json_hunk_ids,
+                        ctx.emit_json_hunk_ids,
                     )
                 }
             }
@@ -780,7 +596,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 }
                 _ => {
                     let unstaged = uncommitted.load_worktree_changes(entries.entries)?;
-                    let peer = if opts.emit_json_hunk_ids {
+                    let peer = if ctx.emit_json_hunk_ids {
                         uncommitted
                             .peer_changes(
                                 DiffSide::Unstaged,
@@ -801,7 +617,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                         diff_options,
                         format,
                         DiffSide::Unstaged,
-                        opts.emit_json_hunk_ids,
+                        ctx.emit_json_hunk_ids,
                     )
                 }
             }
@@ -834,7 +650,8 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             detail,
             diff_options,
             format,
-            opts.body_delivery,
+            ctx.patch_bodies,
+            &ctx,
         )?,
     };
     Ok(finish_outcome(&repo, format, outcome))
@@ -936,162 +753,6 @@ pub fn outcome_from_tree_entries(
     ))
 }
 
-fn outcome_from_tree_structured(
-    items: Vec<TreeDiffStructured>,
-    format: DiffFormatArgs,
-) -> DiffOutcome {
-    let files: Vec<FileDiff> = items
-        .into_iter()
-        .map(file_diff_from_tree_structured)
-        .collect();
-    DiffOutcome {
-        changed: !files.is_empty(),
-        files,
-        totals: None,
-        format,
-        path_display: None,
-        body_streamed: false,
-        preserve_changed: false,
-    }
-}
-
-fn file_diff_from_lib(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDiff {
-    let stat = if f.binary {
-        None
-    } else if detail == DiffDetail::Stat {
-        f.line_stat
-            .map(Into::into)
-            .or_else(|| Some(LineStat::from_hunks(&f.hunks).into()))
-    } else {
-        None
-    };
-    let hunks = if detail == DiffDetail::Patch {
-        Some(hunk_assign_ids(
-            DiffSide::Other,
-            &f.path,
-            f.hunks,
-            &[],
-            false,
-        ))
-    } else {
-        None
-    };
-    FileDiff {
-        path: f.path,
-        old_path: f.old_path,
-        status: f.status.into(),
-        old_mode: f.old_mode,
-        new_mode: f.new_mode,
-        old_encoding_lossy: f.old_encoding_lossy,
-        new_encoding_lossy: f.new_encoding_lossy,
-        binary: f.binary,
-        old_size: f.binary.then_some(f.old_size),
-        new_size: f.binary.then_some(f.new_size),
-        content_changed: f.content_changed,
-        similarity: None,
-        stat,
-        combined_status: None,
-        hunks,
-    }
-}
-
-fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
-    let e = t.entry;
-    let path = e
-        .new_path
-        .clone()
-        .or_else(|| e.old_path.clone())
-        .unwrap_or_default();
-    let similarity = e.rename_similarity();
-    let old_path = e
-        .old_path
-        .as_ref()
-        .filter(|op| op.as_str() != path)
-        .cloned();
-    let structured = t.structured;
-    let hunks = hunk_assign_ids(DiffSide::Other, &path, structured.hunks, &[], false);
-    FileDiff {
-        path,
-        old_path,
-        status: e.status.into(),
-        old_mode: structured.old_mode,
-        new_mode: structured.new_mode,
-        old_encoding_lossy: structured.old_encoding_lossy,
-        new_encoding_lossy: structured.new_encoding_lossy,
-        binary: t.binary,
-        old_size: t.binary.then_some(t.old_size),
-        new_size: t.binary.then_some(t.new_size),
-        content_changed: e.old_oid != e.new_oid,
-        similarity,
-        stat: None,
-        combined_status: None,
-        hunks: Some(hunks),
-    }
-}
-
-fn hunk_assign_ids(
-    side: DiffSide,
-    path: &str,
-    hunks: Vec<grit_lib::diff::structured::StructuredHunk>,
-    peer_hunks: &[grit_lib::diff::structured::StructuredHunk],
-    assign_hunk_ids: bool,
-) -> Vec<Hunk> {
-    let assign = assign_hunk_ids && matches!(side, DiffSide::Unstaged | DiffSide::Staged);
-    let ids = if assign {
-        hunk_ids(side, path, &hunks, peer_hunks)
-    } else {
-        Vec::new()
-    };
-    hunks
-        .into_iter()
-        .enumerate()
-        .map(|(index, h)| {
-            let mut out = hunk_from_structured(h);
-            if assign {
-                out.id = Some(ids[index].to_string());
-                out.index = Some(index);
-            }
-            out
-        })
-        .collect()
-}
-
-fn hunk_from_structured(h: grit_lib::diff::structured::StructuredHunk) -> Hunk {
-    Hunk {
-        old_start: h.old_start,
-        new_start: h.new_start,
-        old_lines: h.old_lines,
-        new_lines: h.new_lines,
-        context: h.context,
-        combined_header: None,
-        id: None,
-        index: None,
-        lines: h
-            .lines
-            .into_iter()
-            .map(|l| Line {
-                kind: match l.kind {
-                    StructuredLineKind::Context => LineKind::Context,
-                    StructuredLineKind::Add => LineKind::Add,
-                    StructuredLineKind::Del => LineKind::Del,
-                },
-                old: l.old,
-                new: l.new,
-                segments: l
-                    .segments
-                    .into_iter()
-                    .map(|s| Segment {
-                        text: s.text,
-                        emphasis: s.emphasis,
-                    })
-                    .collect(),
-                no_newline_at_eof: l.no_newline_at_eof,
-                parents: None,
-            })
-            .collect(),
-    }
-}
-
 fn uncommitted_diff(repo: &grit_lib::repo::Repository) -> Result<UncommittedDiff<'_>> {
     repo.diff()
         .uncommitted()
@@ -1135,6 +796,10 @@ fn outcome_from_changes(
 ) -> DiffOutcome {
     use std::collections::HashSet;
 
+    let changes: Vec<_> = changes
+        .into_iter()
+        .filter(|fc| include_file_change_in_patch(fc, &diff_options))
+        .collect();
     let diff_options = diff_options.cap_word_level_inline_for_changed_files(changes.len());
     let primary_paths: HashSet<&str> = changes.iter().map(|fc| fc.path.as_str()).collect();
     let peer_hunks_by_path =
@@ -1156,23 +821,9 @@ fn outcome_from_changes(
             .get(&fc.path)
             .map(|h| h.as_slice())
             .unwrap_or(&[]);
-        build_file_diff(fc, diff_options.clone(), side, peer_hunks, assign_hunk_ids)
+        cli_file_from_file_change(fc, diff_options.clone(), side, peer_hunks, assign_hunk_ids)
     })
     .into_iter()
-    .filter(|f| {
-        let ws = diff_options.whitespace;
-        if !ws.ignore_all_space && !ws.ignore_space_change && !ws.ignore_blank_lines {
-            return true;
-        }
-        if f.old_path.is_some() && matches!(f.status, ChangeStatus::Renamed | ChangeStatus::Copied)
-        {
-            return true;
-        }
-        if f.binary {
-            return f.content_changed;
-        }
-        !matches!(&f.hunks, Some(h) if h.is_empty())
-    })
     .collect();
     DiffOutcome {
         changed: !files.is_empty(),
@@ -1259,7 +910,8 @@ fn tree_diff_outcome(
     detail: DiffDetail,
     diff_options: DiffOptions,
     format: DiffFormatArgs,
-    body_delivery: DiffBodyDelivery,
+    patch_bodies: PatchBodies,
+    ctx: &super::DiffRunContext,
 ) -> Result<DiffOutcome> {
     let grit_lib::diff::DiffEntriesResult {
         entries,
@@ -1267,11 +919,13 @@ fn tree_diff_outcome(
         ..
     } = diff_result;
     if let Some(skipped) = inexact_rename_skipped {
-        emit_inexact_rename_notice(&skipped);
+        if should_report_inexact_rename_skipped(&skipped) {
+            emit_inexact_rename_notice(&skipped);
+        }
     }
     if detail == DiffDetail::Patch {
-        match body_delivery {
-            DiffBodyDelivery::MetadataOnly => Ok(DiffOutcome {
+        match patch_bodies {
+            PatchBodies::MetadataOnly => Ok(DiffOutcome {
                 changed: !entries.is_empty(),
                 files: Vec::new(),
                 totals: None,
@@ -1280,12 +934,34 @@ fn tree_diff_outcome(
                 body_streamed: false,
                 preserve_changed: true,
             }),
-            DiffBodyDelivery::Stream(mode) => {
-                stream_tree_patch_diff(repo, &entries, diff_options, format, mode)
-            }
-            DiffBodyDelivery::Collect => {
+            PatchBodies::Stream => super::stream::stream_tree_patch_to_stdout(
+                repo,
+                &entries,
+                diff_options,
+                format,
+                patch_bodies,
+                &ctx.render,
+            ),
+            PatchBodies::Collect if ctx.json_stream => super::stream::stream_tree_patch_to_stdout(
+                repo,
+                &entries,
+                diff_options,
+                format,
+                patch_bodies,
+                &ctx.render,
+            ),
+            PatchBodies::Collect => {
                 let structured = repo.diff().structured(entries, &diff_options)?;
-                Ok(outcome_from_tree_structured(structured, format))
+                let files: Vec<FileDiff> = structured.into_iter().map(cli_file_from_tree).collect();
+                Ok(DiffOutcome {
+                    changed: !files.is_empty(),
+                    files,
+                    totals: None,
+                    format,
+                    path_display: None,
+                    body_streamed: false,
+                    preserve_changed: false,
+                })
             }
         }
     } else {
@@ -1299,228 +975,111 @@ fn tree_diff_outcome(
     }
 }
 
-fn stream_tree_patch_diff(
-    repo: &grit_lib::repo::Repository,
-    entries: &[DiffEntry],
-    diff_options: DiffOptions,
-    format: DiffFormatArgs,
-    mode: OutputMode,
-) -> Result<DiffOutcome> {
-    let changed = !entries.is_empty();
-    if !changed {
-        return Ok(DiffOutcome {
-            changed: false,
-            files: Vec::new(),
-            totals: None,
-            format,
-            path_display: None,
-            body_streamed: false,
-            preserve_changed: false,
-        });
-    }
-    let path_display = PathDisplayOptions::from_repo(repo).ok();
-    let color = crate::output::stdout_color_enabled();
-    crate::output::with_streaming_stdout(|stdout| {
-        let w: &mut dyn Write = stdout;
-        let mut index = 0usize;
-        repo.diff()
-            .for_each_structured(entries, &diff_options, |structured| {
-                let file = file_diff_from_tree_structured(structured);
-                let map_cli_err = |e: anyhow::Error| {
-                    grit_lib::error::Error::Worktree(WorktreeError::Path {
-                        detail: e.to_string(),
-                    })
-                };
-                match mode {
-                    OutputMode::Human => {
-                        render_file(w, &file, color, path_display.as_ref()).map_err(map_cli_err)?
-                    }
-                    OutputMode::Markdown => {
-                        markdown::print_diff_file(w, &file, path_display.as_ref(), index > 0)
-                            .map_err(map_cli_err)?
-                    }
-                    OutputMode::Json => unreachable!("stream delivery is not used for JSON"),
-                }
-                index += 1;
-                Ok(())
-            })
-            .context("structured diff")
-    })?;
-    Ok(DiffOutcome {
-        changed: true,
-        files: Vec::new(),
-        totals: None,
-        format,
-        path_display,
-        body_streamed: true,
-        preserve_changed: true,
-    })
-}
-
-fn build_file_diff(
-    fc: &FileChange,
-    diff_options: DiffOptions,
-    side: DiffSide,
-    peer_hunks: &[grit_lib::diff::structured::StructuredHunk],
-    assign_hunk_ids: bool,
-) -> FileDiff {
-    let structured = fc.structured(diff_options);
-    let hunks = hunk_assign_ids(
-        side,
-        &fc.path,
-        structured.hunks,
-        peer_hunks,
-        assign_hunk_ids,
-    );
-
-    FileDiff {
-        path: fc.path.clone(),
-        old_path: fc.old_path.clone(),
-        status: fc.status.into(),
-        old_mode: structured.old_mode,
-        new_mode: structured.new_mode,
-        old_encoding_lossy: structured.old_encoding_lossy,
-        new_encoding_lossy: structured.new_encoding_lossy,
-        binary: fc.binary,
-        old_size: fc.binary.then_some(fc.old_bytes.byte_len()),
-        new_size: fc.binary.then_some(fc.new_bytes.byte_len()),
-        content_changed: fc.content_changed,
-        similarity: fc.similarity,
-        stat: None,
-        combined_status: None,
-        hunks: Some(hunks),
-    }
-}
-
 // --- Human (delta-style) rendering -----------------------------------------
 
-impl DiffOutcome {
-    #[must_use]
-    pub(crate) fn format_flags(&self) -> DiffFormatArgs {
-        self.format
-    }
-
-    pub(crate) fn path_display_opts(&self) -> Option<&PathDisplayOptions> {
-        self.path_display.as_ref()
-    }
-
-    /// Render only the diff body (no commit header). `empty_message` is printed when there
-    /// are no files in patch mode; pass `None` to stay silent (as `grit show` does).
-    pub fn render_human_diff(
-        &self,
-        w: &mut dyn Write,
-        empty_message: Option<&str>,
-        color: bool,
-    ) -> Result<()> {
-        if self.body_streamed {
-            if !self.changed {
-                if let Some(msg) = empty_message {
-                    outln!(w, "{msg}");
-                }
-            }
-            return Ok(());
-        }
-        if self.files.is_empty() {
-            if format_is_byte_list_or_stat(self.format) {
-                return Ok(());
-            }
+/// Render only the diff body (no commit header).
+pub(crate) fn render_human_diff(
+    outcome: &DiffOutcome,
+    w: &mut dyn Write,
+    empty_message: Option<&str>,
+    color: bool,
+) -> Result<()> {
+    if outcome.body_streamed {
+        if !outcome.changed {
             if let Some(msg) = empty_message {
                 outln!(w, "{msg}");
             }
-            return Ok(());
         }
-        let fmt = self.format;
-        if fmt.human_numstat() {
-            return render_numstat(w, &self.files, self.path_display.as_ref());
-        }
-        if fmt.human_name_only() {
-            return render_name_only(w, &self.files, self.path_display.as_ref());
-        }
-        if fmt.human_name_status() {
-            return render_name_status(w, &self.files, self.path_display.as_ref());
-        }
-        if fmt.human_shortstat_only() {
-            let stat = diffstat_from_files(&self.files);
-            return render_shortstat(w, &stat);
-        }
-        if fmt.human_stat_block() {
-            let stat = diffstat_from_files(&self.files);
-            return render_stat(w, &stat, color, self.path_display.as_ref());
-        }
-        for file in &self.files {
-            render_file(w, file, color, self.path_display.as_ref())?;
-        }
-        Ok(())
+        return Ok(());
     }
-
-    /// Markdown diff body only (used by `grit show` after the commit header).
-    pub fn render_markdown_diff(&self, w: &mut dyn Write) -> Result<()> {
-        if self.body_streamed {
-            if !self.changed {
-                outln!(w, "No changes.");
-            }
+    if outcome.files.is_empty() {
+        if format_is_byte_list_or_stat(outcome.format) {
             return Ok(());
         }
-        if self.files.is_empty() && format_is_byte_list_or_stat(self.format) {
-            return Ok(());
+        if let Some(msg) = empty_message {
+            outln!(w, "{msg}");
         }
-        let fmt = self.format;
-        if fmt.human_shortstat_only() {
-            let stat = diffstat_from_files(&self.files);
-            outln!(
-                w,
-                "{}",
-                crate::render::diff::summary_line(stat.lib().totals())
-            );
-            return Ok(());
-        }
-        if fmt.detail() == DiffDetail::Stat {
-            let stat = diffstat_from_files(&self.files);
-            return crate::render::diff::render_markdown_stat(w, &stat, self.path_display.as_ref());
-        }
-        if fmt.human_name_status() {
-            for file in &self.files {
-                let mut buf = Vec::new();
-                render_name_status(
-                    &mut buf,
-                    std::slice::from_ref(file),
-                    self.path_display.as_ref(),
-                )?;
-                let line = String::from_utf8(buf).unwrap_or_default();
-                outln!(w, "- {}", markdown::format_inline_code(line.trim()));
-            }
-            return Ok(());
-        }
-        if fmt.human_name_only() {
-            for file in &self.files {
-                outln!(w, "- {}", markdown::format_inline_code(&file.path));
-            }
-            return Ok(());
-        }
-        markdown::print_diff_files(w, &self.files, self.path_display.as_ref())?;
-        Ok(())
+        return Ok(());
     }
+    let fmt = outcome.format;
+    if fmt.human_numstat() {
+        return render_numstat(w, &outcome.files, outcome.path_display.as_ref());
+    }
+    if fmt.human_name_only() {
+        return render_name_only(w, &outcome.files, outcome.path_display.as_ref());
+    }
+    if fmt.human_name_status() {
+        return render_name_status(w, &outcome.files, outcome.path_display.as_ref());
+    }
+    if fmt.human_shortstat_only() {
+        let stat = diffstat_from_files(&outcome.files);
+        return render_shortstat(w, &stat);
+    }
+    if fmt.human_stat_block() {
+        let stat = diffstat_from_files(&outcome.files);
+        return render_stat(w, &stat, color, outcome.path_display.as_ref());
+    }
+    for file in &outcome.files {
+        render_file(w, file, color, outcome.path_display.as_ref())?;
+    }
+    Ok(())
 }
 
-impl HumanRender for DiffOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        self.render_human_diff(w, Some("No changes."), ctx.color)
+pub(crate) fn render_markdown_diff(outcome: &DiffOutcome, w: &mut dyn Write) -> Result<()> {
+    if outcome.body_streamed {
+        if !outcome.changed {
+            outln!(w, "No changes.");
+        }
+        return Ok(());
     }
-}
-
-impl MarkdownRender for DiffOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        self.render_markdown_diff(w)
+    if outcome.files.is_empty() && format_is_byte_list_or_stat(outcome.format) {
+        return Ok(());
     }
+    let fmt = outcome.format;
+    if fmt.human_shortstat_only() {
+        let stat = diffstat_from_files(&outcome.files);
+        outln!(
+            w,
+            "{}",
+            crate::render::diff::summary_line(stat.lib().totals())
+        );
+        return Ok(());
+    }
+    if fmt.detail() == DiffDetail::Stat {
+        let stat = diffstat_from_files(&outcome.files);
+        return crate::render::diff::render_markdown_stat(w, &stat, outcome.path_display.as_ref());
+    }
+    if fmt.human_name_status() {
+        for file in &outcome.files {
+            let mut buf = Vec::new();
+            render_name_status(
+                &mut buf,
+                std::slice::from_ref(file),
+                outcome.path_display.as_ref(),
+            )?;
+            let line = String::from_utf8(buf).unwrap_or_default();
+            outln!(w, "- {}", markdown::format_inline_code(line.trim()));
+        }
+        return Ok(());
+    }
+    if fmt.human_name_only() {
+        for file in &outcome.files {
+            outln!(w, "- {}", markdown::format_inline_code(&file.path));
+        }
+        return Ok(());
+    }
+    markdown::print_diff_files(w, &outcome.files, outcome.path_display.as_ref())?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     mod stream_output_parity {
-        use super::super::{file_diff_from_tree_structured, PathDisplayOptions};
+        use super::super::super::convert::cli_file_from_tree;
         use crate::markdown;
         use crate::output::OutputMode;
         use crate::render::diff::render_file;
+        use crate::ui::PathDisplayOptions;
         use grit_lib::diff::{
             write_patch, write_patch_structured, DiffEntry, DiffOptions, PatchTextOptions,
             TreeDiffOptions,
@@ -1575,7 +1134,7 @@ mod tests {
             let path_display = PathDisplayOptions::from_repo(repo).ok();
             let mut buf = Vec::new();
             let mut render_one = |index: usize, structured| {
-                let file = file_diff_from_tree_structured(structured);
+                let file = cli_file_from_tree(structured);
                 match mode {
                     OutputMode::Human => {
                         render_file(&mut buf, &file, false, path_display.as_ref()).expect("human")
@@ -1655,7 +1214,7 @@ mod tests {
                 .into_iter()
                 .next()
                 .expect("one file");
-            let file = file_diff_from_tree_structured(structured);
+            let file = cli_file_from_tree(structured);
             let sizes = Rc::new(RefCell::new(Vec::new()));
             let spy = SpyWriter {
                 sizes: Rc::clone(&sizes),
@@ -1694,87 +1253,6 @@ mod tests {
             write_patch_structured(&repo, &structured, &patch_opts, &mut collected)
                 .expect("write_patch_structured");
             assert_eq!(pipelined, collected);
-        }
-    }
-}
-
-/// Dispatch parsed CLI args for `Diff`.
-pub fn dispatch(
-    args: crate::args::DiffArgs,
-    env: crate::dispatch::CommandEnv<'_>,
-) -> anyhow::Result<crate::exit_status::ExitStatus> {
-    use crate::args::*;
-    use crate::commands;
-
-    use crate::dispatch::{emit_success, CommandEnv};
-    use crate::exit_status::ExitStatus;
-    use crate::json_error;
-
-    use crate::output::{self, OutputMode};
-
-    use anyhow::bail;
-    let CommandEnv {
-        opts,
-        ctx,
-        process_env: _,
-    } = env;
-    let DiffArgs {
-        no_index,
-        staged,
-        unstaged,
-        against,
-        exit_code,
-        quiet,
-        commits,
-        pathspecs,
-        format,
-        line_format,
-    } = args;
-    {
-        if format.patch_text && opts.mode != OutputMode::Human {
-            bail!("`--patch-text` cannot be used with --json or --markdown");
-        }
-        let wants_exit_code = exit_code || quiet || no_index;
-        let body_delivery = if quiet || format.patch_text {
-            commands::diff::DiffBodyDelivery::MetadataOnly
-        } else if opts.mode == crate::output::OutputMode::Json {
-            commands::diff::DiffBodyDelivery::Collect
-        } else {
-            commands::diff::DiffBodyDelivery::Stream(opts.mode)
-        };
-        let run_opts = commands::diff::DiffRunOptions {
-            no_index,
-            staged,
-            unstaged,
-            against,
-            commits,
-            pathspecs,
-            format,
-            line_format,
-            word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
-                && commands::diff::diff_word_level_inline_for_output(),
-            quiet,
-            emit_json_hunk_ids: opts.mode == crate::output::OutputMode::Json,
-            body_delivery,
-        };
-        let run_result = commands::diff::run(run_opts);
-        match run_result {
-            Ok(outcome) => {
-                let status = if no_index || wants_exit_code {
-                    ExitStatus::from_diff_outcome(&outcome)
-                } else {
-                    ExitStatus::Success
-                };
-                if !quiet && !format.patch_text {
-                    emit_success(outcome, opts, ctx)?;
-                }
-                Ok(status)
-            }
-            Err(err) => {
-                let err = json_error::ensure_structured(err);
-                output::emit_error(&err, opts);
-                Ok(ExitStatus::diff_command_error(no_index || wants_exit_code))
-            }
         }
     }
 }

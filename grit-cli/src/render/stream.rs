@@ -8,7 +8,6 @@ use crate::output::json_write;
 use crate::stdio;
 
 /// Render a command outcome one item at a time (human or Markdown bodies, or JSON arrays).
-#[allow(dead_code)] // adopted by streaming commands in a later CLI layer step
 pub trait StreamRender {
     /// One element in the streamed listing.
     type Item;
@@ -60,6 +59,29 @@ pub fn finish_json_array_document(
 }
 
 /// Serialize one value into a JSON array, with a leading comma when `first` is false.
+/// Open a diff outcome JSON document with a streaming `"files"` array.
+pub fn begin_diff_json_document(w: &mut dyn Write) -> Result<()> {
+    begin_json_array_field(w, "files")
+}
+
+/// Close a diff JSON document after the `"files"` array.
+pub fn finish_diff_json_document(
+    w: &mut dyn Write,
+    changed: bool,
+    totals: Option<&impl serde::Serialize>,
+) -> Result<()> {
+    stdio::io_result(write!(w, "],\"changed\":{}", changed))
+        .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+    if let Some(totals) = totals {
+        let mut buf = Vec::new();
+        json_write(serde_json::to_writer(&mut buf, totals))?;
+        stdio::io_result(write!(w, ",\"totals\":"))
+            .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+        stdio::io_result(w.write_all(&buf)).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+    }
+    stdio::io_result(writeln!(w, "}}")).map_err(|e| anyhow::anyhow!("writing output: {e}"))
+}
+
 pub fn write_json_array_element<T: serde::Serialize>(
     w: &mut dyn Write,
     first: &mut bool,

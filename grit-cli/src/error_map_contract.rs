@@ -1147,15 +1147,19 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
         line_contains: "LibError::History(history) => map_history_error(history, operation)",
     },
     ControlFlowAllowance {
-        file: "src/commands/diff.rs",
+        file: "src/commands/diff/run.rs",
         line_contains: "grit_lib::error::Error::Diff(grit_lib::error::DiffError::Arguments(",
     },
     ControlFlowAllowance {
-        file: "src/commands/diff.rs",
+        file: "src/commands/diff/run.rs",
         line_contains: "anyhow::Error::new(grit_lib::error::Error::Revision(*source))",
     },
     ControlFlowAllowance {
-        file: "src/commands/diff.rs",
+        file: "src/commands/diff/run.rs",
+        line_contains: "grit_lib::error::Error::Worktree(WorktreeError::Path {",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/diff/stream.rs",
         line_contains: "grit_lib::error::Error::Worktree(WorktreeError::Path {",
     },
     ControlFlowAllowance {
@@ -1258,7 +1262,7 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
         line_contains: "map_err(grit_lib::error::Error::Io)",
     },
     ControlFlowAllowance {
-        file: "src/commands/diff.rs",
+        file: "src/commands/diff/run.rs",
         line_contains: "grit_lib::error::Error::PathError",
     },
     ControlFlowAllowance {
