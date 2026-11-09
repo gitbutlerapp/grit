@@ -12,113 +12,18 @@ use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::redact_url_for_display;
 use grit_lib::remote::transfer::PushOptions;
 use grit_lib::remote::DefaultHttpClientFactory;
-use schemars::JsonSchema;
-use serde::Serialize;
-use std::io::Write;
 
 use crate::commands::auth;
 use crate::commands::fetch::map_remote_error;
 use crate::context;
-use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
-use crate::progress::summary::{stdout_color, transfer_header, TransferSummary};
+use crate::progress::summary::{transfer_header, TransferSummary};
 use crate::progress::TerminalProgress;
 use crate::quiet_args::QuietArgs;
+pub use crate::render::push::{
+    PushKind, PushOutcome, PushRefOutcomeStatus, PushRefResult, PushSharedBranch,
+    PushedToIntegrated,
+};
 use grit_lib::remote::transfer::TransferStats;
-
-/// Result of `grit push`: the per-ref outcomes for the remote.
-#[derive(Serialize, JsonSchema)]
-pub struct PushOutcome {
-    /// Remote name, or the URL pushed to with any credentials removed.
-    pub remote: String,
-    /// High-level push kind (`branch`, `tags`, `delete`, `refspecs`).
-    pub kind: PushKind,
-    /// Local branch short name when [`Self::kind`] is `branch` or `delete` (legacy `branch` field).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
-    pub results: Vec<PushRefResult>,
-    pub rejected: bool,
-    /// True when `--dry-run` was used (no refs or objects written).
-    pub dry_run: bool,
-    /// Branch short names whose upstream was configured (`-u` / `--set-upstream`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub upstream_set: Option<Vec<String>>,
-    /// URL saved as `origin`: a `<owner>/<project>` push from a repository with no remotes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub origin_added: Option<String>,
-    /// Hook and diagnostic lines from the remote (`remote: …` in human output).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(skip_serializing_if = "Vec::is_empty")]
-    pub remote_messages: Vec<String>,
-    /// For each shared branch pushed (`grit share`): the other members'
-    /// heads, fetched after the push and compared with yours.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub shared: Vec<PushSharedBranch>,
-    /// Branches this push made again after a share of them was integrated
-    /// (scenario `pushed_to_integrated`): nobody shares them now. Each has
-    /// the options `grit share resolve` takes.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub pushed_to_integrated: Vec<PushedToIntegrated>,
-    /// Pack build and send timing, for the human summary after ref results.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub transfer: TransferSummary,
-}
-
-/// A shared branch a push replaced your head of.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct PushSharedBranch {
-    /// The branch.
-    pub branch: String,
-    /// The other members' heads, compared with yours.
-    pub heads: Vec<crate::commands::sync::SharedHead>,
-    /// Members whose diverged heads went together with yours without losing
-    /// anything: combined into your branch here, and pushed again.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub combined: Vec<String>,
-    /// Your head afterwards, when combining moved it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(default)]
-    pub head: Option<String>,
-}
-
-/// A branch pushed again after a share of it was integrated.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct PushedToIntegrated {
-    /// The branch.
-    pub branch: String,
-    /// What happened, and the options.
-    #[serde(flatten)]
-    pub report: crate::commands::share::IntegratedJson,
-}
-
-impl PushOutcome {
-    /// Whether a shared branch pushed needs someone to decide what to do.
-    pub fn needs_decision(&self) -> bool {
-        !self.pushed_to_integrated.is_empty()
-            || self.shared.iter().any(|s| {
-                s.heads
-                    .iter()
-                    .any(crate::commands::sync::SharedHead::needs_decision)
-            })
-    }
-}
-
-/// JSON classification for [`PushOutcome`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PushKind {
-    Branch,
-    Tags,
-    Delete,
-    Refspecs,
-}
 
 impl From<PushPlanKind> for PushKind {
     fn from(k: PushPlanKind) -> Self {
@@ -131,15 +36,6 @@ impl From<PushPlanKind> for PushKind {
     }
 }
 
-/// Per-ref push status in JSON (`ok`, `up_to_date`, or `rejected`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PushRefOutcomeStatus {
-    Ok,
-    UpToDate,
-    Rejected,
-}
-
 impl From<&PushRefStatus> for PushRefOutcomeStatus {
     fn from(status: &PushRefStatus) -> Self {
         match status {
@@ -147,218 +43,6 @@ impl From<&PushRefStatus> for PushRefOutcomeStatus {
             PushRefStatus::UpToDate => Self::UpToDate,
             _ => Self::Rejected,
         }
-    }
-}
-
-/// One ref's push result.
-#[derive(Serialize, JsonSchema)]
-pub struct PushRefResult {
-    #[serde(rename = "ref")]
-    pub ref_name: String,
-    pub status: PushRefOutcomeStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub old_oid: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub new_oid: Option<String>,
-    pub forced: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub src: Option<String>,
-    /// True when this ref was deleted on the remote (omit when false).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub deleted: Option<bool>,
-    /// The library's status, which [`Self::status`] and [`Self::reason`] summarize.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub detail: PushRefStatus,
-}
-
-/// Short display name for a pushed remote ref (`refs/heads/foo` → `foo`).
-pub(crate) fn ref_short_display(full_ref: &str) -> &str {
-    for prefix in ["refs/heads/", "refs/tags/", "refs/remotes/"] {
-        if let Some(rest) = full_ref.strip_prefix(prefix) {
-            return rest;
-        }
-    }
-    full_ref
-}
-
-pub(crate) fn push_result_source_label(result: &PushRefResult, kind: PushKind) -> &str {
-    if let Some(src) = result.src.as_deref() {
-        return ref_short_display(src);
-    }
-    if kind == PushKind::Tags {
-        return "--tags";
-    }
-    ref_short_display(&result.ref_name)
-}
-
-impl HumanRender for PushOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        for result in &self.results {
-            let target = format!("{} {}", self.remote, result.ref_name);
-            match result.status {
-                PushRefOutcomeStatus::Ok => {
-                    if result.deleted == Some(true) {
-                        let short = ref_short_display(&result.ref_name);
-                        if self.dry_run {
-                            outln!(w, "  would delete {short} from {}", self.remote);
-                        } else {
-                            outln!(w, "  deleted {short} from {}", self.remote);
-                        }
-                    } else {
-                        let label = push_result_source_label(result, self.kind);
-                        if self.dry_run {
-                            outln!(w, "  would push {label} → {target}");
-                        } else {
-                            outln!(w, "  pushed {label} → {target}");
-                        }
-                    }
-                }
-                PushRefOutcomeStatus::UpToDate => outln!(w, "  {target} already up to date"),
-                PushRefOutcomeStatus::Rejected => match result.detail {
-                    PushRefStatus::RejectStale => outln!(
-                        w,
-                        "  rejected {target}: stale remote ref — run `grit fetch --prune` and try again"
-                    ),
-                    PushRefStatus::RejectRemoteRefMissing => {
-                        outln!(w, "  rejected {target}: remote ref does not exist")
-                    }
-                    PushRefStatus::RejectAlreadyExists => {
-                        if result.reason.as_deref() == Some("tag_exists") {
-                            outln!(
-                                w,
-                                "  rejected {target}: tag already exists (use `--force` to replace)"
-                            );
-                        } else {
-                            outln!(
-                                w,
-                                "  rejected {target}: created on the remote meanwhile — run `grit fetch` and try again"
-                            );
-                        }
-                    }
-                    _ => {
-                        let detail = result.reason.as_deref().unwrap_or("rejected");
-                        outln!(w, "  rejected {target}: {detail}");
-                    }
-                },
-            }
-        }
-        if let Some(url) = &self.origin_added {
-            outln!(w, "  added remote origin → {url}");
-        }
-        for s in &self.shared {
-            if !s.combined.is_empty() {
-                outln!(
-                    w,
-                    "✓ combined {} with {}'s head (nothing lost) and pushed it{}",
-                    s.branch,
-                    s.combined.join("'s and "),
-                    s.head
-                        .as_deref()
-                        .map(|h| format!(": {}", grit_lib::objects::short_hex(h)))
-                        .unwrap_or_default()
-                );
-            }
-            for h in &s.heads {
-                if s.combined.contains(&h.user) {
-                    // Nothing to decide: their next sync takes the result.
-                    outln!(
-                        w,
-                        "  {}: {}'s head {} is in yours now; their next sync takes it",
-                        s.branch,
-                        h.user,
-                        grit_lib::objects::short_hex(&h.tip),
-                    );
-                    continue;
-                }
-                outln!(
-                    w,
-                    "  {}: {}'s head {} {}",
-                    s.branch,
-                    h.user,
-                    grit_lib::objects::short_hex(&h.tip),
-                    h.relation.words()
-                );
-                if let Some(d) = &h.divergence {
-                    d.render_human(w, "    ")?;
-                }
-            }
-        }
-        for p in &self.pushed_to_integrated {
-            p.report.render_human(w, &p.branch)?;
-        }
-        if self.transfer.received_anything() {
-            outln!(w);
-            self.transfer.render_rows(w, stdout_color())?;
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for PushOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_remote_push_messages(w, &self.remote_messages)?;
-        markdown::print_push_results(w, &self.remote, self.kind, self.dry_run, &self.results)?;
-        for s in &self.shared {
-            writeln!(w, "\n## Shared branch `{}`\n", s.branch)?;
-            if !s.combined.is_empty() {
-                writeln!(
-                    w,
-                    "Combined with {}'s head (nothing lost) and pushed the result{}.\n",
-                    s.combined.join("'s and "),
-                    s.head
-                        .as_deref()
-                        .map(|h| format!(", `{}`", grit_lib::objects::short_hex(h)))
-                        .unwrap_or_default()
-                )?;
-            }
-            if s.heads.is_empty() {
-                writeln!(w, "Nobody else has pushed a head yet.")?;
-            }
-            for h in &s.heads {
-                if s.combined.contains(&h.user) {
-                    writeln!(
-                        w,
-                        "- `{}`'s head `{}`: in yours now; their next sync takes it",
-                        h.user,
-                        grit_lib::objects::short_hex(&h.tip),
-                    )?;
-                    continue;
-                }
-                writeln!(
-                    w,
-                    "- `{}`'s head `{}`: {}",
-                    h.user,
-                    grit_lib::objects::short_hex(&h.tip),
-                    h.relation.words()
-                )?;
-                if let Some(d) = &h.divergence {
-                    d.render_markdown(w, "  ")?;
-                }
-            }
-            if s.heads
-                .iter()
-                .any(crate::commands::sync::SharedHead::needs_decision)
-            {
-                writeln!(w, "\nExit status 3: pushed, decision needed.")?;
-            }
-        }
-        for p in &self.pushed_to_integrated {
-            writeln!(w, "\n## Pushed to an integrated branch: `{}`\n", p.branch)?;
-            p.report.render_markdown(w, &p.branch)?;
-            writeln!(w, "\nExit status 3: pushed, decision needed.")?;
-        }
-        if let Some(url) = &self.origin_added {
-            writeln!(w, "\nAdded remote `origin` → `{url}`.")?;
-        }
-        Ok(())
     }
 }
 
@@ -389,7 +73,7 @@ pub fn run(
     push_options: &[String],
     follow_tags: bool,
     quiet: &QuietArgs,
-    mode: OutputMode,
+    human_interactive: bool,
     no_verify: bool,
 ) -> Result<PushOutcome> {
     let repo = context::discover()?;
@@ -479,7 +163,7 @@ pub fn run(
         no_verify,
     };
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let mut progress = quiet.progress(mode).with_overall(false);
+    let mut progress = quiet.progress(human_interactive).with_overall(false);
     let url = crate::context::config_string(&config, &format!("remote.{}.url", plan.remote))
         .or_else(|| shorthand_url.clone());
     if progress.is_drawing() {
@@ -631,7 +315,7 @@ pub fn run(
             } else {
                 plan.remote.clone()
             };
-            if crate::commands::sync::fetch_shared_heads(&repo, &tracking, mode).is_err() {
+            if crate::commands::sync::fetch_shared_heads(&repo, &tracking).is_err() {
                 continue;
             }
             let heads_now = |ours: Option<ObjectId>| -> Vec<crate::commands::sync::SharedHead> {
@@ -669,7 +353,7 @@ pub fn run(
             }
             let mut head = None;
             if !combined.is_empty() {
-                let again = crate::commands::sync::push(&plan.remote, &[name.to_owned()], mode)?;
+                let again = crate::commands::sync::push(&plan.remote, &[name.to_owned()])?;
                 if let Some(Some(why)) = again.get(name) {
                     anyhow::bail!(
                         "combined {name} with {}'s head here, but pushing it was refused: {why}",
@@ -784,162 +468,4 @@ fn push_once(
     remote
         .push(repo, specs, options, progress, cancel, Some(factory))
         .map_err(map_remote_error)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn push_status_serializes_snake_case() {
-        for (detail, expected) in [
-            (PushRefStatus::Ok, "ok"),
-            (PushRefStatus::UpToDate, "up_to_date"),
-            (PushRefStatus::RejectFetchFirst, "rejected"),
-        ] {
-            let result = result_with(detail, None);
-            let value = serde_json::to_value(&result).expect("json");
-            assert_eq!(value["status"].as_str(), Some(expected));
-            assert!(value.get("detail").is_none(), "{value}");
-        }
-    }
-
-    fn result_with(detail: PushRefStatus, reason: Option<&str>) -> PushRefResult {
-        PushRefResult {
-            ref_name: "refs/heads/main".to_owned(),
-            status: PushRefOutcomeStatus::from(&detail),
-            reason: reason.map(str::to_owned),
-            old_oid: None,
-            new_oid: None,
-            forced: false,
-            src: None,
-            deleted: None,
-            detail,
-        }
-    }
-
-    #[test]
-    fn human_rejection_wording_follows_the_library_status() {
-        let ctx = RenderContext {
-            now: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("timestamp"),
-            mode: OutputMode::Human,
-            color: false,
-        };
-        let render = |result: PushRefResult| {
-            let outcome = PushOutcome {
-                remote: "origin".to_owned(),
-                kind: PushKind::Branch,
-                branch: Some("main".to_owned()),
-                results: vec![result],
-                rejected: true,
-                dry_run: false,
-                upstream_set: None,
-                origin_added: None,
-                remote_messages: Vec::new(),
-                shared: Vec::new(),
-                pushed_to_integrated: Vec::new(),
-                transfer: TransferSummary::default(),
-            };
-            let mut out = Vec::new();
-            outcome.render_human(&mut out, &ctx).expect("render");
-            String::from_utf8(out).expect("utf8")
-        };
-
-        let stale = render(result_with(PushRefStatus::RejectStale, Some("stale")));
-        assert!(
-            stale.contains("stale remote ref — run `grit fetch --prune`"),
-            "{stale}"
-        );
-        let missing = render(result_with(
-            PushRefStatus::RejectRemoteRefMissing,
-            Some("remote_ref_missing"),
-        ));
-        assert!(missing.contains("remote ref does not exist"), "{missing}");
-        let exists = render(result_with(
-            PushRefStatus::RejectAlreadyExists,
-            Some("already_exists"),
-        ));
-        assert!(
-            exists.contains("created on the remote meanwhile"),
-            "{exists}"
-        );
-
-        let declined = render(result_with(PushRefStatus::RemoteRejected, Some("stale")));
-        assert!(
-            declined.contains("rejected origin refs/heads/main: stale"),
-            "a remote's own message is shown as given: {declined}"
-        );
-    }
-}
-
-/// Dispatch parsed CLI args for `Push`.
-pub fn dispatch(
-    args: crate::args::PushArgs,
-    env: crate::dispatch::CommandEnv<'_>,
-) -> anyhow::Result<crate::exit_status::ExitStatus> {
-    use crate::args::*;
-    use crate::commands;
-
-    use crate::dispatch::{emit_success, CommandEnv};
-    use crate::exit_status::ExitStatus;
-
-    let CommandEnv {
-        opts,
-        ctx,
-        process_env: _,
-    } = env;
-    let PushArgs {
-        tags,
-        delete,
-        all,
-        mirror,
-        prune,
-        remote,
-        dry_run,
-        force,
-        force_with_lease,
-        set_upstream,
-        atomic,
-        push_option,
-        follow_tags,
-        no_verify,
-        quiet,
-        remote_name,
-        refspecs,
-    } = args;
-    {
-        let mut positionals = Vec::new();
-        if let Some(r) = remote_name {
-            positionals.push(r);
-        }
-        positionals.extend(refspecs);
-        let outcome = commands::push::run(
-            tags,
-            delete,
-            all,
-            mirror,
-            prune,
-            remote,
-            &positionals,
-            dry_run,
-            force,
-            force_with_lease,
-            set_upstream,
-            atomic,
-            &push_option,
-            follow_tags,
-            &quiet,
-            opts.mode,
-            no_verify,
-        )?;
-        let rejected = outcome.rejected;
-        let decide = outcome.needs_decision();
-        if rejected || decide || quiet.shows_outcome(opts.mode) {
-            emit_success(outcome, opts, ctx)?;
-        }
-        // The outcome (per-ref results) is reported in both modes; a rejected
-        // push is still a failure, so mirror Git and exit non-zero. A shared
-        // branch whose heads need a decision exits 3.
-        Ok(ExitStatus::from_shared(rejected, decide))
-    }
 }

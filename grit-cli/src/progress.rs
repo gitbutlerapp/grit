@@ -16,8 +16,6 @@ use grit_lib::remote::fetch::{FetchMilestone, Progress};
 use grit_lib::remote::sideband_lines::{RemoteLine, SidebandLines};
 use terminal_size::{terminal_size, Width};
 
-use crate::output::OutputMode;
-
 pub mod resumable;
 pub mod summary;
 
@@ -159,21 +157,24 @@ pub struct TerminalProgress {
 }
 
 impl TerminalProgress {
-    /// Create a sink; it draws nothing unless `mode` is human and stderr is a TTY.
+    /// Create a sink; it draws nothing unless `human_interactive` is set and stderr is a TTY.
+    ///
+    /// `human_interactive` is true when the command renders for people (not
+    /// `--json` or `--markdown`), so stderr may carry live progress.
     #[must_use]
-    pub fn new(mode: OutputMode) -> Self {
-        Self::new_inner(mode, false)
+    pub fn new(human_interactive: bool) -> Self {
+        Self::new_inner(human_interactive, false)
     }
 
-    /// Progress sink that never draws (for `-q` / `--quiet`).
+    /// Progress sink that never draws or prints side-band lines (for `-q` / `--quiet`).
     #[must_use]
-    pub fn quiet(mode: OutputMode) -> Self {
-        Self::new_inner(mode, true)
+    pub fn quiet() -> Self {
+        Self::new_inner(false, true)
     }
 
-    fn new_inner(mode: OutputMode, force_silent: bool) -> Self {
-        let draw = !force_silent && mode == OutputMode::Human && io::stderr().is_terminal();
-        let emit_remote = !force_silent && mode == OutputMode::Human;
+    fn new_inner(human_interactive: bool, force_silent: bool) -> Self {
+        let draw = !force_silent && human_interactive && io::stderr().is_terminal();
+        let emit_remote = !force_silent && human_interactive;
         let color = draw
             && grit_lib::porcelain::terminal::stderr_supports_color()
             && std::env::var_os("NO_COLOR").is_none();
@@ -226,6 +227,12 @@ impl TerminalProgress {
     #[must_use]
     pub fn is_drawing(&self) -> bool {
         self.draw
+    }
+
+    /// Whether this sink reports status to stderr: human output, not `--quiet`.
+    #[must_use]
+    pub fn reports_status(&self) -> bool {
+        self.emit_remote
     }
 
     /// Whether drawn output uses ANSI color.
@@ -1153,7 +1160,7 @@ mod tests {
 
     #[test]
     fn overall_needs_an_ansi_terminal() {
-        let sink = TerminalProgress::new(OutputMode::Json).with_overall(true);
+        let sink = TerminalProgress::new(false).with_overall(true);
         assert!(!sink.wants_received_objects());
     }
 
@@ -1176,7 +1183,7 @@ mod tests {
 
     #[test]
     fn sink_records_phases_without_drawing() {
-        let mut sink = TerminalProgress::new(OutputMode::Json);
+        let mut sink = TerminalProgress::new(false);
         assert!(!sink.is_drawing());
         sink.start_with_unit(ProgressPhase::ReceivingObjects, ProgressUnit::Bytes, None);
         sink.inc(1024);

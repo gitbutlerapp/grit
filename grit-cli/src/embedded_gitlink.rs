@@ -61,22 +61,3 @@ pub fn emit_embedded_repository_status_notes(mode: OutputMode, paths: &[String])
         }
     }
 }
-
-/// Clone note for gitlinks that are not registered submodules.
-pub fn emit_bare_gitlink_note(mode: OutputMode, paths: &[String]) {
-    if paths.is_empty() {
-        return;
-    }
-    let count = paths.len();
-    let list = paths.join(", ");
-    let noun = if count == 1 { "gitlink" } else { "gitlinks" };
-    match mode {
-        OutputMode::Human => eprintln!(
-            "note: checkout left {count} empty {noun} ({list}) with no `.gitmodules` entry; nested repository files were not copied"
-        ),
-        OutputMode::Markdown => eprintln!(
-            "> **Note:** checkout left {count} empty {noun} (`{list}`) with no `.gitmodules` entry; nested repository files were not copied."
-        ),
-        OutputMode::Json => {}
-    }
-}

@@ -38,22 +38,9 @@ use crate::commands::sync::{configure_shared, ensure_space, fetch, push, tips};
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
 
-/// How another member's head compares with your branch here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum HeadRelation {
-    /// The same commit as yours.
-    Same,
-    /// It has commits yours doesn't, and yours is in its history: `grit
-    /// sync` fast-forwards to it.
-    Ahead,
-    /// Yours has commits it doesn't, and it is in yours.
-    Behind,
-    /// Each has commits the other lacks.
-    Diverged,
-    /// You have no branch here, or its commits aren't fetched.
-    Unknown,
-}
+pub use crate::render::shared_branch::{
+    DivergenceChangeJson, DivergenceJson, HeadRelation, IntegratedJson, ResolveOptionJson,
+};
 
 impl HeadRelation {
     pub(crate) fn words(self) -> &'static str {
@@ -65,68 +52,6 @@ impl HeadRelation {
             Self::Unknown => "not compared",
         }
     }
-}
-
-/// One commit of a divergence: what each side did to it.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct DivergenceChangeJson {
-    /// Its change id, or `patch:<patch id>` for a commit without one.
-    pub change: String,
-    /// Its subject line.
-    pub subject: String,
-    /// What you did to it: `unchanged`, `moved`, `reworded`, `amended`,
-    /// `dropped`, `squashed`, `split`, `new`, `split_piece` or `absent`.
-    pub you: String,
-    /// What they did to it, in the same words.
-    pub them: String,
-    /// The paths its versions change.
-    pub paths: Vec<String>,
-}
-
-/// One way out of a divergence.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ResolveOptionJson {
-    /// Its stable id: `combine`, `keep_mine`, `keep_theirs`, `keep_both`,
-    /// `keep_amended`, `drop`, `my_order`, `their_order`, `my_split`,
-    /// `their_split`, `restore` or `resolve`.
-    pub id: String,
-    /// What it does.
-    pub label: String,
-    /// What it leaves out (kept in the share's log), or `null` when it keeps
-    /// every change: such an option is safe to choose without asking.
-    pub loses: Option<String>,
-    /// The command that applies it.
-    pub command: String,
-}
-
-/// How another member's head diverged from yours
-/// ([`grit_lib::divergence`]).
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct DivergenceJson {
-    /// The scenario's stable code, such as `amended_both_conflicting`.
-    pub scenario: String,
-    /// What happened, in a sentence.
-    pub summary: String,
-    /// Whether someone has to decide what to do. When `false`, the heads can
-    /// be put together without losing anything.
-    pub needs_decision: bool,
-    /// The last head you both had, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base: Option<String>,
-    /// The commits either side changed or added, oldest first.
-    pub changes: Vec<DivergenceChangeJson>,
-    /// Paths where the two heads' changes conflict.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub conflicts: Vec<String>,
-    /// Other scenarios that also apply, most pressing first.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub also: Vec<String>,
-    /// The ways out, the recommended one first.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub options: Vec<ResolveOptionJson>,
 }
 
 impl DivergenceJson {
@@ -799,7 +724,7 @@ pub fn add(
     let pushed = match (local, remote) {
         (None, None) => bail!("there is no branch {branch} here or in your space"),
         (Some(local), remote) if Some(local) != remote => {
-            if let Some(Some(why)) = push(&here.remote, &[branch.to_owned()], mode)?.get(branch) {
+            if let Some(Some(why)) = push(&here.remote, &[branch.to_owned()])?.get(branch) {
                 bail!("pushing {branch} to your space first: {why}");
             }
             true
@@ -1044,7 +969,7 @@ pub fn resolve(
         move_branch(&here.repo, branch, head)?;
     }
     outcome.head = Some(head.to_hex());
-    if let Some(Some(why)) = push(&here.remote, &[branch.to_owned()], mode)?.get(branch) {
+    if let Some(Some(why)) = push(&here.remote, &[branch.to_owned()])?.get(branch) {
         bail!(
             "{branch} is at {} here, but pushing it was refused: {why}",
             short_hex(&head.to_hex())
@@ -1183,37 +1108,6 @@ impl MarkdownRender for ShareResolveOutcome {
 /// The `grit share resolve` options for a branch pushed again after its
 /// share was integrated.
 const INTEGRATED_OPTIONS: [&str; 3] = ["rebase", "rename", "reshare"];
-
-/// A branch pushed (or synced) again after its share was integrated,
-/// bringing integrated commits: scenario `pushed_to_integrated`. It is a
-/// branch nobody shares now.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct IntegratedJson {
-    /// Always `pushed_to_integrated`.
-    pub scenario: String,
-    /// What happened, in a sentence.
-    pub summary: String,
-    /// Who integrated it.
-    pub by: String,
-    /// When, RFC 3339.
-    pub at: String,
-    /// The project it was merged into, `<owner>/<project>`.
-    pub into: String,
-    /// The branch it was merged into.
-    pub target_branch: String,
-    /// The pull request it went through, for an organization's project.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pull: Option<u64>,
-    /// The pull request's page.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    /// How many of the branch's commits were integrated already.
-    pub integrated: usize,
-    /// How many are new.
-    pub new: usize,
-    /// The ways forward, recommended first.
-    pub options: Vec<ResolveOptionJson>,
-}
 
 impl IntegratedJson {
     /// The report, for people: what happened and the options.
@@ -1513,7 +1407,7 @@ fn resolve_integrated(
             }
             outcome.head = Some(head.to_hex());
             let spec = format!("+refs/heads/{branch}:refs/heads/{branch}");
-            let pushed = crate::commands::sync::push_specs(&here.remote, &[spec], mode)?;
+            let pushed = crate::commands::sync::push_specs(&here.remote, &[spec])?;
             if let Some(Some(why)) = pushed.get(branch) {
                 bail!(
                     "{branch} is at {} here, but pushing it was refused: {why}",
@@ -1539,7 +1433,7 @@ fn resolve_integrated(
                 format!("refs/heads/{new}:refs/heads/{new}"),
                 format!(":refs/heads/{branch}"),
             ];
-            let pushed = crate::commands::sync::push_specs(&here.remote, &specs, mode)?;
+            let pushed = crate::commands::sync::push_specs(&here.remote, &specs)?;
             if let Some(Some(why)) = pushed.get(new) {
                 bail!("{new} was renamed here, but pushing it was refused: {why}");
             }
@@ -1656,23 +1550,26 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
             (Some(dir), false)
         }
         None => {
-            let cloned = crate::commands::clone::run(crate::commands::clone::CloneRunOptions {
-                url: url.clone(),
-                dir: None,
-                depth: None,
-                branch: Some(share.branch.clone()),
-                shallow: false,
-                single_branch: Some(false),
-                no_tags: false,
-                origin: None,
-                bare: false,
-                no_checkout: false,
-                blobs: None,
-                config: Vec::new(),
-                quiet: crate::quiet_args::QuietArgs { quiet: true },
-                mode,
-            })
+            let cloned = crate::commands::clone::run(
+                crate::commands::clone::CloneRunOptions {
+                    url: url.clone(),
+                    dir: None,
+                    depth: None,
+                    branch: Some(share.branch.clone()),
+                    shallow: false,
+                    single_branch: Some(false),
+                    no_tags: false,
+                    origin: None,
+                    bare: false,
+                    no_checkout: false,
+                    blobs: None,
+                    config: Vec::new(),
+                    quiet: crate::quiet_args::QuietArgs { quiet: true },
+                },
+                mode.is_human(),
+            )
             .with_context(|| format!("cloning {url}"))?;
+            cloned.render_notes(&mut std::io::stderr(), mode)?;
             // grit runs from where it started, so open the new clone by path.
             let (options, _sink) = crate::diagnostics::repository_options(false);
             let repo = Repository::discover(Some(std::path::Path::new(&cloned.path)), &options)

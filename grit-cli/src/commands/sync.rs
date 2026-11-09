@@ -38,7 +38,9 @@ use crate::commands::fetch_args::FetchArgs;
 use crate::commands::merge::MergeRunOptions;
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
+
 use crate::quiet_args::QuietArgs;
+pub use crate::render::shared_branch::SharedHead;
 
 /// The remote a clone of an organization's project fetches your space from.
 pub const SPACE_REMOTE: &str = "space";
@@ -131,22 +133,6 @@ pub struct SyncBranch {
     /// options. Nobody shares it now.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub integrated: Option<crate::commands::share::IntegratedJson>,
-}
-
-/// Another member's head of a shared branch.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct SharedHead {
-    /// Their user name.
-    pub user: String,
-    /// Their head's tip.
-    pub tip: String,
-    /// How it compares with your branch here.
-    pub relation: crate::commands::share::HeadRelation,
-    /// For a head that diverged from yours: what happened, and whether
-    /// someone has to decide what to do.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(default)]
-    pub divergence: Option<crate::commands::share::DivergenceJson>,
 }
 
 impl SharedHead {
@@ -356,7 +342,7 @@ pub(crate) fn fetch_in(repo: &Repository, remote: &str, mode: OutputMode) -> Res
         quiet: QuietArgs { quiet: true },
         ..FetchArgs::default()
     };
-    crate::commands::fetch::run_one_in(repo, &args, mode)
+    crate::commands::fetch::run_one_in(repo, &args, mode.is_human())
         .with_context(|| format!("fetching {remote}"))?;
     let config = ConfigSet::load(
         &context::environment(),
@@ -370,14 +356,14 @@ pub(crate) fn fetch_in(repo: &Repository, remote: &str, mode: OutputMode) -> Res
     let refspec = shared_refspec(remote);
     if crate::context::config_strings(&config, &format!("remote.{remote}.fetch")).contains(&refspec)
     {
-        fetch_shared_heads(repo, remote, mode)?;
+        fetch_shared_heads(repo, remote)?;
     }
     Ok(())
 }
 
 /// Fetch only the other members' heads of shared branches from `remote`,
 /// dropping the ones the server no longer has.
-pub(crate) fn fetch_shared_heads(repo: &Repository, remote: &str, mode: OutputMode) -> Result<()> {
+pub(crate) fn fetch_shared_heads(repo: &Repository, remote: &str) -> Result<()> {
     let args = FetchArgs {
         remote: Some(remote.to_owned()),
         refspecs: vec![shared_refspec(remote)],
@@ -385,7 +371,7 @@ pub(crate) fn fetch_shared_heads(repo: &Repository, remote: &str, mode: OutputMo
         quiet: QuietArgs { quiet: true },
         ..FetchArgs::default()
     };
-    crate::commands::fetch::run_one_in(repo, &args, mode)
+    crate::commands::fetch::run_one_in(repo, &args, false)
         .with_context(|| format!("fetching shared heads from {remote}"))?;
     Ok(())
 }
@@ -540,23 +526,18 @@ fn set_tracking(repo: &Repository, branch: &str, remote: &str) -> Result<()> {
 }
 
 /// Push `branches` to `remote`; each branch's result.
-pub(crate) fn push(
-    remote: &str,
-    branches: &[String],
-    mode: OutputMode,
-) -> Result<BTreeMap<String, Option<String>>> {
+pub(crate) fn push(remote: &str, branches: &[String]) -> Result<BTreeMap<String, Option<String>>> {
     let specs: Vec<String> = branches
         .iter()
         .map(|b| format!("refs/heads/{b}:refs/heads/{b}"))
         .collect();
-    push_specs(remote, &specs, mode)
+    push_specs(remote, &specs)
 }
 
 /// Push refspecs `specs` to `remote`; each branch's result.
 pub(crate) fn push_specs(
     remote: &str,
     specs: &[String],
-    mode: OutputMode,
 ) -> Result<BTreeMap<String, Option<String>>> {
     if specs.is_empty() {
         return Ok(BTreeMap::new());
@@ -579,7 +560,7 @@ pub(crate) fn push_specs(
         &[],
         false,
         &QuietArgs { quiet: true },
-        mode,
+        false,
         false,
     )?;
     Ok(outcome
@@ -824,7 +805,7 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
         }
     }
 
-    let pushed = push(&setup.remote, &to_push, mode)?;
+    let pushed = push(&setup.remote, &to_push)?;
     let local = tips(&repo, "refs/heads/")?;
     for branch in &mut branches {
         if let Some(Some(why)) = pushed.get(&branch.name) {

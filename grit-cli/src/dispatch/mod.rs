@@ -1,5 +1,6 @@
 //! Route a parsed [`crate::args::Command`] to command implementations.
 
+mod network;
 pub(crate) mod support;
 
 pub(crate) use support::{
@@ -24,8 +25,8 @@ pub fn dispatch(cli: crate::args::Cli, env: CommandEnv<'_>) -> Result<ExitStatus
         Command::Sync { args } => commands::sync::dispatch(args, env),
         Command::Share { args } => commands::share::dispatch(args, env),
         Command::Slice { args } => commands::slice::dispatch(args, env),
-        Command::Clone { args } => commands::clone::dispatch(args, env),
-        Command::Remote { args } => commands::remote::dispatch(args, env),
+        Command::Clone { args } => network::clone(args, env),
+        Command::Remote { args } => network::remote(args, env),
         Command::Log { args } => commands::log::dispatch(args, env),
         Command::Revs { args } => commands::revs::dispatch(args, env),
         Command::MergeBase { args } => commands::merge_base_cmd::dispatch(args, env),
@@ -58,11 +59,11 @@ pub fn dispatch(cli: crate::args::Cli, env: CommandEnv<'_>) -> Result<ExitStatus
         Command::History { args } => commands::history::dispatch(args, env),
         Command::Stash { args } => commands::stash::dispatch(args, env),
         Command::Restore { args } => commands::restore::dispatch(args, env),
-        Command::Fetch { args } => commands::fetch::dispatch(args, env),
-        Command::Pull { args } => commands::pull::dispatch(args, env),
+        Command::Fetch { args } => network::fetch(args, env),
+        Command::Pull { args } => network::pull(args, env),
         Command::Rebase { args } => commands::history::dispatch_rebase(args, env),
-        Command::Push { args } => commands::push::dispatch(args, env),
-        Command::Bundle { args } => commands::bundle::dispatch(args, env),
+        Command::Push { args } => network::push(args, env),
+        Command::Bundle { args } => network::bundle(args, env),
         Command::Notes { args } => commands::notes::dispatch(args, env),
         Command::Tag { args } => commands::tag::dispatch(args, env),
         Command::Worktree { args } => commands::worktree::dispatch(args, env),

@@ -23,6 +23,10 @@ use serde::Serialize;
 
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::progress::{format_bytes, format_duration, paint, TerminalProgress, BOLD, DIM};
+pub use crate::render::pull::{
+    PullRefreshJson, PullServerBranchJson, RefreshBehindJson, RefreshChangesJson,
+    RefreshFollowedJson,
+};
 use crate::ui::filesystem_path_for_user;
 
 /// Result of `grit checkout <url>`.
@@ -206,7 +210,7 @@ pub fn run(
             filesystem_path_for_user(&dest)
         );
     }
-    let mut progress = TerminalProgress::new(mode);
+    let mut progress = TerminalProgress::new(mode.is_human());
     if progress.is_drawing() {
         let color = progress.uses_color();
         let what = if paths.is_empty() {
@@ -365,74 +369,6 @@ pub(crate) fn require_checkout() -> Result<OpenCheckout> {
     })
 }
 
-/// What `grit pull` refreshed in a checkout.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct PullRefreshJson {
-    /// The server's target branch.
-    pub target: String,
-    /// The local ref holding the newest snapshot, `refs/remotes/origin/<target>`.
-    pub upstream_ref: String,
-    /// The real commit the newest snapshot stands for. With `--dry-run`, where
-    /// the target is now.
-    pub base: String,
-    /// The newest snapshot commit, now `origin/<target>`. With `--dry-run`, the
-    /// checkout's snapshot as it is.
-    pub snapshot: String,
-    /// The real commit the checkout's previous snapshot stood for.
-    pub previous_base: Option<String>,
-    /// The checkout's previous snapshot.
-    pub previous_snapshot: Option<String>,
-    /// Whether the target had moved since the checkout's last snapshot.
-    pub moved: bool,
-    /// What changed in the checkout's paths between the two snapshots; null
-    /// when the target didn't move.
-    pub changes: Option<RefreshChangesJson>,
-    /// With `--dry-run`: nothing was fetched or changed, and the server made
-    /// no snapshot.
-    pub dry_run: bool,
-    /// Local branches with no commits of their own that moved to the new
-    /// snapshot: the one named after the target, and others whose commits
-    /// all landed in the target.
-    pub followed: Vec<RefreshFollowedJson>,
-    /// Other branches with commits of their own still on an older snapshot.
-    pub behind: Vec<RefreshBehindJson>,
-    /// Commits made with plain Git on the current branch that were given a
-    /// change id before the rebase (the branch was rewritten with it).
-    pub gave_change_ids: usize,
-}
-
-/// What changed in a checkout's paths between two snapshots, as
-/// `git diff --shortstat` counts it.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RefreshChangesJson {
-    /// Files changed.
-    pub files: usize,
-    /// Lines added.
-    pub insertions: usize,
-    /// Lines removed.
-    pub deletions: usize,
-}
-
-/// A branch a refresh moved along with the snapshot.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RefreshFollowedJson {
-    /// The branch.
-    pub name: String,
-    /// The older snapshot it was at.
-    pub from: String,
-    /// The new snapshot it is at.
-    pub to: String,
-}
-
-/// A branch still building on an older snapshot after a refresh.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RefreshBehindJson {
-    /// The branch.
-    pub name: String,
-    /// Its tip.
-    pub tip: String,
-}
-
 impl PullRefreshJson {
     /// The JSON of a refresh the library did.
     #[must_use]
@@ -498,43 +434,6 @@ impl PullRefreshJson {
             gave_change_ids: 0,
         }
     }
-}
-
-/// What `grit pull <branch>` did in a checkout: the server's branch as the
-/// checkout sees it, and the local branch brought onto it.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct PullServerBranchJson {
-    /// The branch, as the server spells it (which can differ in case from the
-    /// name given, on a server that ignores case).
-    pub name: String,
-    /// The local ref holding the server's branch as this checkout sees it,
-    /// `refs/remotes/origin/<branch>`.
-    pub upstream_ref: String,
-    /// Where the server's branch is, on its real history.
-    pub tip: String,
-    /// What this checkout sees of it, now at `upstream_ref`.
-    pub projected: String,
-    /// The server branch's commits the target lacks, all shown to this
-    /// checkout (cut down to its paths).
-    pub commits: usize,
-    /// How many of them were made afresh for this checkout.
-    pub made: usize,
-    /// How many were commits that were there already: checkout commits on
-    /// the same snapshots that the server's are grafts of (this checkout's
-    /// own among them), and what it was shown before.
-    pub reused: usize,
-    /// Where the local branch was; null when it was created.
-    pub previous: Option<String>,
-    /// Commits of the local branch replayed onto the server's (its own
-    /// commits, without copies of the server's).
-    pub own: usize,
-    /// Whether `HEAD` was moved onto the branch to rebase it.
-    pub switched: bool,
-    /// The branch `HEAD` was on before, if any.
-    pub was_on: Option<String>,
-    /// Commits made with plain Git on the branch that were given a change id
-    /// first (the branch was rewritten with it).
-    pub gave_change_ids: usize,
 }
 
 impl PullServerBranchJson {

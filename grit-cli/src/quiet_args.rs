@@ -16,11 +16,11 @@ pub struct QuietArgs {
 impl QuietArgs {
     /// Progress sink for this command: never draws when `--quiet` is set.
     #[must_use]
-    pub fn progress(&self, mode: OutputMode) -> TerminalProgress {
+    pub fn progress(&self, human_interactive: bool) -> TerminalProgress {
         if self.quiet {
-            TerminalProgress::quiet(mode)
+            TerminalProgress::quiet()
         } else {
-            TerminalProgress::new(mode)
+            TerminalProgress::new(human_interactive)
         }
     }
 

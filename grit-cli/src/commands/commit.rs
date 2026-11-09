@@ -825,7 +825,7 @@ pub fn dispatch(
                     all,
                     staged,
                     paths,
-                    &mut quiet.progress(opts.mode),
+                    &mut quiet.progress(opts.mode.is_human()),
                 )?,
                 &quiet,
                 opts,

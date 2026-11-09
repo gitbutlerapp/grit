@@ -13,6 +13,8 @@ use crate::operation_output::{
     conflict_json, render_conflicts_human, ConflictJson, OperationConflictBlock,
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+
+pub use crate::render::conflict::MergeConflictJson;
 use crate::ui::path_display_for_discovered_repo;
 use anyhow::{bail, Context, Result};
 use grit_lib::change_id::ChangeId;
@@ -113,16 +115,6 @@ pub struct MergeOutcome {
     /// Library conflicts for safe human/markdown path display (JSON uses [`Self::conflicts`]).
     #[serde(skip)]
     pub(crate) conflict_sources: Option<Vec<Conflict>>,
-}
-
-/// One conflicted path in `--json` output (pull v1 `conflict_details` and merge v2 items).
-#[derive(Clone, Serialize, JsonSchema)]
-pub struct MergeConflictJson {
-    pub path: String,
-    pub kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
 }
 
 pub(crate) fn merge_conflict_json(detail: &Conflict, merge_label: &str) -> MergeConflictJson {
@@ -1374,7 +1366,7 @@ pub fn dispatch(
                 strategy,
                 message,
             },
-            &mut progress::TerminalProgress::new(opts.mode),
+            &mut progress::TerminalProgress::new(opts.mode.is_human()),
         )?;
         let status = ExitStatus::from_merge_outcome(&outcome);
         emit_success(outcome, opts, ctx)?;

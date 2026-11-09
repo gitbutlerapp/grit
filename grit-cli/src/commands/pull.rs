@@ -10,7 +10,6 @@ use crate::commands::auth;
 use crate::commands::fetch::map_remote_error;
 use crate::commands::fetch_args::FetchArgs;
 use crate::context;
-use crate::output::OutputMode;
 use crate::progress::summary::transfer_header;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
@@ -25,8 +24,9 @@ use grit_lib::remote::HttpClientFactory;
 use grit_lib::repo::Repository;
 use grit_lib::state::InProgressOperation;
 
-pub(crate) use pull_outcome::{changes_phrase, commits_on_snapshots, gave_change_ids_phrase};
-pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
+pub(crate) use crate::render::pull::gave_change_ids_phrase;
+pub use crate::render::pull::{PullOutcome, PullResult};
+pub use pull_outcome::map_outcome;
 
 #[derive(Default)]
 pub struct PullRunArgs {
@@ -59,7 +59,7 @@ fn cli_mode(args: &PullRunArgs) -> Option<PullMode> {
     }
 }
 
-pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
+pub fn run(args: &PullRunArgs, human_interactive: bool) -> Result<PullOutcome> {
     if args.check && args.autostash {
         anyhow::bail!("--check cannot be used with --autostash");
     }
@@ -75,10 +75,10 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     .context("could not load config")?;
     match checkout_pull(&repo, &config, args) {
         Some(CheckoutPull::Refresh(marker)) => {
-            return refresh_checkout(&repo, &config, &marker, args, mode)
+            return refresh_checkout(&repo, &config, &marker, args, human_interactive)
         }
         Some(CheckoutPull::Branch(marker, name)) => {
-            return pull_server_branch(&repo, &config, &marker, &name, args, mode)
+            return pull_server_branch(&repo, &config, &marker, &name, args, human_interactive)
         }
         None => {}
     }
@@ -117,7 +117,11 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     let _interrupt = crate::interrupt::InterruptCancel::install();
     // The work-tree update after the fetch reports no progress, so the overall
     // bar covers the transfer only.
-    let mut progress = args.fetch.quiet.progress(mode).with_overall(false);
+    let mut progress = args
+        .fetch
+        .quiet
+        .progress(human_interactive)
+        .with_overall(false);
     let url = crate::context::config_string(&config, &format!("remote.{remote_name}.url"));
     if progress.is_drawing() && remote_name != "." {
         eprintln!(
@@ -223,7 +227,7 @@ fn pull_server_branch(
     marker: &CheckoutMarker,
     name: &str,
     args: &PullRunArgs,
-    mode: OutputMode,
+    human_interactive: bool,
 ) -> Result<PullOutcome> {
     if args.ff_only || args.no_rebase || args.autostash || args.fetch.dry_run {
         anyhow::bail!(
@@ -237,7 +241,11 @@ fn pull_server_branch(
         .create(config)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     let client = CheckoutClient::new(http.as_ref(), &marker.url)?;
-    let mut progress = args.fetch.quiet.progress(mode).with_overall(false);
+    let mut progress = args
+        .fetch
+        .quiet
+        .progress(human_interactive)
+        .with_overall(false);
     if progress.is_drawing() {
         eprintln!(
             "{}",
@@ -278,7 +286,7 @@ fn refresh_checkout(
     config: &ConfigSet,
     marker: &CheckoutMarker,
     args: &PullRunArgs,
-    mode: OutputMode,
+    human_interactive: bool,
 ) -> Result<PullOutcome> {
     repo.snapshot_checkouts()
         .ensure_refreshable()
@@ -291,7 +299,11 @@ fn refresh_checkout(
         let state = client.show(&marker.id)?;
         return Ok(PullOutcome::refresh_dry_run(marker, &state));
     }
-    let mut progress = args.fetch.quiet.progress(mode).with_overall(false);
+    let mut progress = args
+        .fetch
+        .quiet
+        .progress(human_interactive)
+        .with_overall(false);
     if progress.is_drawing() {
         eprintln!(
             "{}",
@@ -378,47 +390,5 @@ fn refresh_error(err: grit_lib::error::Error) -> anyhow::Error {
             "your {name} has nothing in common with the server's {name}; rename yours (`grit branch -m {name} <new name>`), then `grit pull {name}` gets the server's"
         ),
         other => anyhow::Error::new(grit_lib::error::Error::from(other)),
-    }
-}
-
-/// Dispatch parsed CLI args for `Pull`.
-pub fn dispatch(
-    args: crate::args::PullArgs,
-    env: crate::dispatch::CommandEnv<'_>,
-) -> anyhow::Result<crate::exit_status::ExitStatus> {
-    use crate::args::*;
-    use crate::commands;
-
-    use crate::dispatch::{emit_success, CommandEnv};
-    use crate::exit_status::ExitStatus;
-
-    let CommandEnv {
-        opts,
-        ctx,
-        process_env: _,
-    } = env;
-    let PullArgs {
-        fetch,
-        ff_only,
-        no_rebase,
-        rebase,
-        autostash,
-        check,
-    } = args;
-    {
-        let args = commands::pull::PullRunArgs {
-            fetch,
-            ff_only,
-            no_rebase,
-            rebase,
-            autostash,
-            check,
-        };
-        let outcome = commands::pull::run(&args, opts.mode)?;
-        let status = ExitStatus::from_pull(&outcome);
-        if args.fetch.quiet.shows_outcome(opts.mode) {
-            emit_success(outcome, opts, ctx)?;
-        }
-        Ok(status)
     }
 }

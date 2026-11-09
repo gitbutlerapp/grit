@@ -212,7 +212,7 @@ fn check_in(
     mode: OutputMode,
 ) -> Result<CheckinOutcome> {
     let _interrupt = crate::interrupt::InterruptCancel::install();
-    let mut progress = TerminalProgress::new(mode);
+    let mut progress = TerminalProgress::new(mode.is_human());
     let pushed = co
         .repo
         .snapshot_checkouts()
@@ -546,16 +546,18 @@ fn failure_text(err: &anyhow::Error) -> String {
 /// The merge stands whatever happens here, so failures are reported, not
 /// returned.
 fn follow_up(co: &OpenCheckout, name: &str, landing: &Landing, mode: OutputMode) -> FollowUp {
-    let refresh =
-        match crate::commands::pull::run(&crate::commands::pull::PullRunArgs::refresh(), mode) {
-            Ok(refresh) => refresh,
-            Err(e) => {
-                return FollowUp {
-                    error: Some(failure_text(&e)),
-                    ..FollowUp::default()
-                }
+    let refresh = match crate::commands::pull::run(
+        &crate::commands::pull::PullRunArgs::refresh(),
+        mode.is_human(),
+    ) {
+        Ok(refresh) => refresh,
+        Err(e) => {
+            return FollowUp {
+                error: Some(failure_text(&e)),
+                ..FollowUp::default()
             }
-        };
+        }
+    };
     let mut done = FollowUp {
         refresh: Some(refresh),
         ..FollowUp::default()
@@ -710,7 +712,7 @@ fn integrate_hosted(name: &str, without: &[String], mode: OutputMode) -> Result<
     let Some(tip) = tips(&repo, "refs/heads/")?.get(name).copied() else {
         bail!("there is no branch {name} here");
     };
-    if let Some(Some(why)) = push(&setup.remote, &[name.to_owned()], mode)?.get(name) {
+    if let Some(Some(why)) = push(&setup.remote, &[name.to_owned()])?.get(name) {
         bail!(
             "{name} could not be pushed to {}: {why}; run `grit sync`, then integrate again",
             setup.space.project

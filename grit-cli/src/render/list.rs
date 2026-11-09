@@ -100,3 +100,9 @@ mod tests {
         assert_eq!(format_inline_code("`edge"), "`` `edge ``");
     }
 }
+
+/// First seven characters of a change id.
+#[must_use]
+pub fn short_change_id(id: &str) -> &str {
+    id.get(..7).unwrap_or(id)
+}

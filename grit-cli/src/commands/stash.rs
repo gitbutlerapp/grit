@@ -942,7 +942,7 @@ pub fn dispatch(
                 dry_run,
                 limit: stash_limit,
                 pathspec_args: &pathspecs,
-                progress: &mut progress::TerminalProgress::new(opts.mode),
+                progress: &mut progress::TerminalProgress::new(opts.mode.is_human()),
             });
             match outcome {
                 Ok(o) => emit_success(o, opts, ctx),
@@ -988,7 +988,7 @@ pub fn dispatch(
                 dry_run: dry_run || push_dry_run,
                 limit: stash_limit,
                 pathspec_args: &merged_pathspecs,
-                progress: &mut progress::TerminalProgress::new(opts.mode),
+                progress: &mut progress::TerminalProgress::new(opts.mode.is_human()),
             });
             match outcome {
                 Ok(o) => emit_success(o, opts, ctx),
@@ -1031,7 +1031,7 @@ pub fn dispatch(
             let outcome = commands::stash::run_apply(
                 index,
                 restore_index,
-                &mut progress::TerminalProgress::new(opts.mode),
+                &mut progress::TerminalProgress::new(opts.mode.is_human()),
             )?;
             let status = ExitStatus::from_stash_conflicts(outcome.conflicts);
             emit_success(outcome, opts, ctx)?;
@@ -1044,7 +1044,7 @@ pub fn dispatch(
             let outcome = commands::stash::run_pop(
                 index,
                 restore_index,
-                &mut progress::TerminalProgress::new(opts.mode),
+                &mut progress::TerminalProgress::new(opts.mode.is_human()),
             )?;
             let status = ExitStatus::from_stash_conflicts(outcome.conflicts);
             emit_success(outcome, opts, ctx)?;

@@ -2,12 +2,10 @@
 //! branch's remote, else `origin`).
 
 use crate::commands::fetch_args::FetchArgs;
-use crate::output::OutputMode;
-use crate::progress::summary::{stdout_color, transfer_header, TransferSummary};
+use crate::progress::summary::{transfer_header, TransferSummary};
 use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::objects::short_hex;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::redact_url_for_display;
@@ -17,109 +15,14 @@ use grit_lib::remote::transfer::{
 };
 use grit_lib::remote::DefaultHttpClientFactory;
 use grit_lib::state::HeadState;
-use schemars::JsonSchema;
-use serde::Serialize;
-use std::io::Write;
 
 use crate::commands::auth;
 use crate::context;
-use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-
-/// Result of `grit fetch`: the refs that changed.
-#[derive(Serialize, JsonSchema)]
-pub struct FetchOutcome {
-    /// Remote name, or the URL fetched from with any credentials removed.
-    pub remote: String,
-    pub updates: Vec<FetchUpdate>,
-    pub updated: usize,
-    /// True when the fetch was a dry run (no refs or objects written).
-    pub dry_run: bool,
-    /// True when any ref update was rejected (exit 1 when set).
-    pub rejected: bool,
-    /// Shallow boundary changes when a depth/deepen/unshallow fetch ran.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub shallow: Option<FetchShallowDelta>,
-    /// Promisor remotes the server advertised, and whether this fetch accepted each.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub promisor_remotes: Vec<crate::commands::promisor_json::PromisorRemoteJson>,
-    /// Remote fields stored from the advertisement (`promisor.storeFields`).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub stored_fields: Vec<crate::commands::promisor_json::StoredFieldJson>,
-    /// Promisor config or advertised values that were ignored or could not be used.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub promisor_warnings: Vec<crate::commands::promisor_json::PromisorWarningJson>,
-    /// What was received and where the time went, for the human summary.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub transfer: TransferSummary,
-    /// Refs this fetch changed, or on a dry run would change.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub changed: usize,
-}
-
-/// Shallow boundaries added or removed by this fetch (`--json` only).
-#[derive(Serialize, JsonSchema)]
-pub struct FetchShallowDelta {
-    pub added: Vec<String>,
-    pub removed: Vec<String>,
-}
-
-/// Result of `grit fetch --all`.
-#[derive(Serialize, JsonSchema)]
-pub struct FetchAllOutcome {
-    pub remotes: Vec<FetchAllRemoteOutcome>,
-    pub updated: usize,
-    pub dry_run: bool,
-    /// Totals across every remote, for the human summary.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub transfer: TransferSummary,
-}
-
-/// One remote's result inside [`FetchAllOutcome`].
-#[derive(Serialize, JsonSchema)]
-pub struct FetchAllRemoteOutcome {
-    /// Remote name.
-    pub remote: String,
-    pub updates: Vec<FetchUpdate>,
-    pub updated: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    /// Refs this remote's fetch changed, or on a dry run would change.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub changed: usize,
-    /// True when any of this remote's ref updates was rejected.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub rejected: bool,
-}
-
-impl FetchAllRemoteOutcome {
-    /// This remote's result in the single-remote shape, for rendering.
-    fn as_single(&self, dry_run: bool) -> FetchOutcome {
-        FetchOutcome {
-            remote: self.remote.clone(),
-            updates: self.updates.clone(),
-            updated: self.updated,
-            dry_run,
-            rejected: self.rejected,
-            shallow: None,
-            promisor_remotes: Vec::new(),
-            stored_fields: Vec::new(),
-            promisor_warnings: Vec::new(),
-            transfer: TransferSummary::default(),
-            changed: self.changed,
-        }
-    }
-}
+pub use crate::render::fetch::{
+    FetchAllOutcome, FetchAllRemoteOutcome, FetchOutcome, FetchShallowDelta, FetchUpdate,
+    FetchUpdateStatus,
+};
+use crate::render::promisor;
 
 /// Human / JSON output for either single-remote or `--all` fetch.
 pub enum FetchRunOutcome {
@@ -137,46 +40,6 @@ impl FetchRunOutcome {
     }
 }
 
-impl HumanRender for FetchAllOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        for remote in &self.remotes {
-            if let Some(err) = &remote.error {
-                outln!(w, "From {}:", remote.remote);
-                outln!(w, "  error: {err}");
-                continue;
-            }
-            remote.as_single(self.dry_run).render_human(w, ctx)?;
-        }
-        render_transfer(&self.transfer, w)
-    }
-}
-
-impl MarkdownRender for FetchAllOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        for remote in &self.remotes {
-            if let Some(err) = &remote.error {
-                outln!(w, "## {}", remote.remote);
-                outln!(w, "- error: {err}");
-                continue;
-            }
-            remote.as_single(self.dry_run).render_markdown(w, ctx)?;
-        }
-        Ok(())
-    }
-}
-
-/// Per-ref fetch status in JSON.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum FetchUpdateStatus {
-    New,
-    FastForward,
-    Forced,
-    Pruned,
-    Rejected,
-    UpToDate,
-}
-
 impl From<UpdateKind> for FetchUpdateStatus {
     fn from(kind: UpdateKind) -> Self {
         match kind {
@@ -190,109 +53,16 @@ impl From<UpdateKind> for FetchUpdateStatus {
     }
 }
 
-/// One updated tracking ref. `old_oid`/`new_oid` are full hex, or `null` for a
-/// newly-created (`old_oid`) or deleted (`new_oid`) ref.
-#[derive(Clone, Serialize, JsonSchema)]
-pub struct FetchUpdate {
-    #[serde(rename = "ref")]
-    pub ref_name: String,
-    pub remote_ref: String,
-    pub status: FetchUpdateStatus,
-    pub old_oid: Option<String>,
-    pub new_oid: Option<String>,
-    /// Rejection detail, present only when `status == "rejected"`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
-impl HumanRender for FetchOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        for update in &self.updates {
-            if update.status == FetchUpdateStatus::Rejected {
-                let reason = update.reason.as_deref().unwrap_or("ref update rejected");
-                outln!(w, "  ! rejected {}  {}", update.ref_name, reason);
-                continue;
-            }
-            let from = update.old_oid.as_deref().map_or("new", short_hex);
-            let to = update.new_oid.as_deref().map_or("deleted", short_hex);
-            if update.remote_ref.is_empty() || update.remote_ref == update.ref_name {
-                outln!(w, "  {}  {from} → {to}", update.ref_name);
-            } else {
-                outln!(
-                    w,
-                    "  {}  ← {}  {from} → {to}",
-                    update.ref_name,
-                    update.remote_ref
-                );
-            }
-        }
-        if self.rejected {
-            outln!(w, "Some ref updates from {} were rejected.", self.remote);
-        } else if self.changed == 0 {
-            outln!(w, "Already up to date with {}.", self.remote);
-        } else {
-            outln!(
-                w,
-                "{} {} update{} from {}.",
-                if self.dry_run {
-                    "Would fetch"
-                } else {
-                    "Fetched"
-                },
-                self.changed,
-                plural(self.changed),
-                self.remote
-            );
-        }
-        for line in crate::commands::promisor_json::human_lines(
-            &self.promisor_remotes,
-            &self.stored_fields,
-            &self.promisor_warnings,
-        ) {
-            outln!(w, "  promisor  {line}");
-        }
-        render_transfer(&self.transfer, w)
-    }
-}
-
-/// The time bar and data/objects rows under a fetch's ref list, when the
-/// fetch received anything.
-fn render_transfer(transfer: &TransferSummary, w: &mut dyn Write) -> Result<()> {
-    if !transfer.received_anything() {
-        return Ok(());
-    }
-    outln!(w);
-    transfer.render_rows(w, stdout_color())
-}
-
-impl MarkdownRender for FetchOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_fetch_updates(w, &self.remote, &self.updates, self.changed, self.dry_run)?;
-        if let Some(line) = crate::commands::promisor_json::markdown_line(&self.promisor_remotes) {
-            outln!(w, "{line}");
-        }
-        for s in &self.stored_fields {
-            outln!(w, "- **stored**: `{}` for `{}`", s.field, s.remote);
-        }
-        for line in crate::commands::promisor_json::markdown_warning_lines(&self.promisor_warnings)
-        {
-            outln!(w, "{line}");
-        }
-        Ok(())
-    }
-}
-
-pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchRunOutcome> {
+pub fn run(args: &FetchArgs, human_interactive: bool) -> Result<FetchRunOutcome> {
     if args.all {
-        return run_all(args, mode).map(FetchRunOutcome::All);
+        return run_all(args, human_interactive).map(FetchRunOutcome::All);
     }
-    run_one(args, mode).map(FetchRunOutcome::One)
+    run_one(args, human_interactive).map(FetchRunOutcome::One)
 }
 
-fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
+fn run_one(args: &FetchArgs, human_interactive: bool) -> Result<FetchOutcome> {
     let repo = context::discover()?;
-    run_one_in(&repo, args, mode)
+    run_one_in(&repo, args, human_interactive)
 }
 
 /// Fetch into `repo`, wherever the process is (one remote; `args.all` is
@@ -300,7 +70,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
 pub(crate) fn run_one_in(
     repo: &grit_lib::repo::Repository,
     args: &FetchArgs,
-    mode: OutputMode,
+    human_interactive: bool,
 ) -> Result<FetchOutcome> {
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let config = ConfigSet::load(
@@ -326,7 +96,7 @@ pub(crate) fn run_one_in(
 
     let factory = crate::context::http_client_factory();
     // No checkout follows a fetch, so the overall bar ends with the pack.
-    let mut progress = args.quiet.progress(mode).with_overall(false);
+    let mut progress = args.quiet.progress(human_interactive).with_overall(false);
     if matches!(args.depth, Some(0)) {
         return Err(anyhow::anyhow!("--depth requires a positive integer"));
     }
@@ -404,11 +174,9 @@ pub(crate) fn run_one_in(
         rejected: refs.rejected,
         changed: refs.changed,
         shallow,
-        promisor_remotes: crate::commands::promisor_json::promisor_remotes(
-            result.promisor.as_ref(),
-        ),
-        stored_fields: crate::commands::promisor_json::stored_fields(result.promisor.as_ref()),
-        promisor_warnings: crate::commands::promisor_json::warnings(result.promisor.as_ref()),
+        promisor_remotes: promisor::promisor_remotes(result.promisor.as_ref()),
+        stored_fields: promisor::stored_fields(result.promisor.as_ref()),
+        promisor_warnings: promisor::warnings(result.promisor.as_ref()),
         transfer,
     })
 }
@@ -426,11 +194,11 @@ fn shallow_json(
     })
 }
 
-fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
+fn run_all(args: &FetchArgs, human_interactive: bool) -> Result<FetchAllOutcome> {
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let factory = crate::context::http_client_factory();
-    let mut progress = args.quiet.progress(mode);
+    let mut progress = args.quiet.progress(human_interactive);
     let mut base = FetchOptions::new();
     base.dry_run = args.dry_run;
     base.fetch_depth = args.fetch_depth();
@@ -581,14 +349,6 @@ fn map_remote_fetch_error(err: grit_lib::error::Error) -> anyhow::Error {
     map_remote_error(err)
 }
 
-fn plural(n: usize) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
-    }
-}
-
 #[cfg(test)]
 mod map_remote_error_tests {
     use grit_lib::error::Error as LibError;
@@ -648,13 +408,9 @@ mod map_remote_error_tests {
     }
 
     fn render(outcome: &super::FetchOutcome) -> (String, String) {
-        use crate::output::{HumanRender, MarkdownRender, OutputMode, RenderContext};
+        use crate::output::{HumanRender, MarkdownRender, RenderContext};
 
-        let ctx = RenderContext {
-            now: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("timestamp"),
-            mode: OutputMode::Human,
-            color: false,
-        };
+        let ctx = RenderContext::human_for_tests();
         let mut human = Vec::new();
         outcome.render_human(&mut human, &ctx).expect("human");
         let mut markdown = Vec::new();
@@ -745,38 +501,5 @@ mod map_remote_error_tests {
             let value = serde_json::to_value(&update).expect("json");
             assert_eq!(value["status"].as_str(), Some(expected));
         }
-    }
-}
-
-/// Dispatch parsed CLI args for `Fetch`.
-pub fn dispatch(
-    args: crate::args::FetchArgs,
-    env: crate::dispatch::CommandEnv<'_>,
-) -> anyhow::Result<crate::exit_status::ExitStatus> {
-    use crate::commands;
-
-    use crate::dispatch::{emit_success, CommandEnv};
-    use crate::exit_status::ExitStatus;
-
-    let CommandEnv {
-        opts,
-        ctx,
-        process_env: _,
-    } = env;
-    let fetch = args;
-    {
-        let outcome = commands::fetch::run(&fetch, opts.mode)?;
-        let status = ExitStatus::from_fetch(&outcome);
-        if fetch.quiet.shows_outcome(opts.mode) {
-            match outcome {
-                commands::fetch::FetchRunOutcome::One(one) => {
-                    emit_success(one, opts, ctx)?;
-                }
-                commands::fetch::FetchRunOutcome::All(all) => {
-                    emit_success(all, opts, ctx)?;
-                }
-            }
-        }
-        Ok(status)
     }
 }

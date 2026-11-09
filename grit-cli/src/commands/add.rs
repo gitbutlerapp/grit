@@ -504,7 +504,7 @@ pub fn dispatch(
                     force,
                     executable,
                     non_executable,
-                    &mut progress::TerminalProgress::new(opts.mode),
+                    &mut progress::TerminalProgress::new(opts.mode.is_human()),
                 )?,
                 opts,
                 ctx,

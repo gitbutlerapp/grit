@@ -285,7 +285,11 @@ pub fn dispatch(
             no_track,
             dry_run,
         )?;
-        commands::clone::emit_path_collision_warning(opts.mode, &outcome.path_collisions);
+        crate::render::clone::render_path_collision_warning(
+            &mut std::io::stderr(),
+            opts.mode,
+            &outcome.path_collisions,
+        )?;
         emit_success(outcome, opts, ctx)
     }
 }
