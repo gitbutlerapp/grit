@@ -10,7 +10,7 @@ use grit_lib::blame::{
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::rev_parse::load_graft_parents;
+use grit_lib::test_support::rev_parse::load_graft_parents;
 
 fn git_env(cmd: &mut Command) {
     cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -176,7 +176,7 @@ fn blame_pair_map_cache_respects_textconv_path() {
         .get_bool("diff.indentHeuristic")
         .and_then(|v| v.ok())
         .unwrap_or(false);
-    let grafts = load_graft_parents(repo.git_dir());
+    let grafts = load_graft_parents(&repo);
     let ctx = BlameTextconvContext::new(&repo);
 
     let grit_lines = compute_blame(

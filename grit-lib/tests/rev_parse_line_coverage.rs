@@ -7,11 +7,11 @@ use std::path::Path;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::{
-    abbreviate_ref_name, load_graft_parents, parse_index_colon_spec, parse_peel_suffix,
-    reflog_date_selector_timestamp, reflog_date_selector_timestamp_at,
-    revision_spec_contains_ancestry_navigation, spec_has_parent_shorthand_suffix,
-    split_treeish_colon, to_relative_path, upstream_suffix_info,
+    abbreviate_ref_name, parse_index_colon_spec, parse_peel_suffix, reflog_date_selector_timestamp,
+    reflog_date_selector_timestamp_at, revision_spec_contains_ancestry_navigation,
+    spec_has_parent_shorthand_suffix, split_treeish_colon, to_relative_path, upstream_suffix_info,
 };
+use grit_lib::test_support::rev_parse::load_graft_parents;
 
 use support::{build_commit_dag, commit_file, git, HistoryRepo};
 
@@ -180,7 +180,7 @@ fn abbrev_and_reflog_helpers() {
         .expect("hints");
     assert!(reflog_date_selector_timestamp("1.day.ago").is_some());
     assert!(reflog_date_selector_timestamp_at("now", 1_700_000_000).is_some());
-    let _ = load_graft_parents(repo.git_dir());
+    let _ = load_graft_parents(&repo);
     let _ = repo.revwalk().upstream_symbolic_name("main@{push}");
     let _ = repo.revwalk().upstream_symbolic_name("main@{u}");
 }

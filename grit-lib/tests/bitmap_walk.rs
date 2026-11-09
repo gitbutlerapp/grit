@@ -400,8 +400,7 @@ fn unsupported_filter_and_shallow_fall_back() {
     let shallow_index = BitmapIndex::open(&shallow_repo)
         .expect("open")
         .expect("bitmap on shallow-marked repo");
-    use grit_lib::revwalk::rev_list::shallow_boundary_oids;
-    assert!(!shallow_boundary_oids(shallow_repo.git_dir()).is_empty());
+    assert!(!shallow_repo.revwalk().shallow_boundary_oids().is_empty());
     assert!(matches!(
         bitmap_query(&shallow_repo, &shallow_index, &[head], &[], None),
         Err(BitmapWalkError::Unsupported(_))

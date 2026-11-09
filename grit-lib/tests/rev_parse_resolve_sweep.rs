@@ -5,10 +5,11 @@ use crate::support;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::{
-    load_graft_parents, parse_index_colon_spec, parse_peel_suffix, reflog_date_selector_timestamp,
+    parse_index_colon_spec, parse_peel_suffix, reflog_date_selector_timestamp,
     reflog_date_selector_timestamp_at, split_double_dot_range, split_treeish_colon,
     split_triple_dot_range,
 };
+use grit_lib::test_support::rev_parse::load_graft_parents;
 
 use support::{build_commit_dag, commit_file, git, HistoryRepo};
 
@@ -145,7 +146,7 @@ fn deep_history_resolver_sweep() {
     let _ = repo
         .revwalk()
         .resolve("@{-1}", &grit_lib::revwalk::ResolveOptions::default());
-    let _ = load_graft_parents(repo.git_dir());
+    let _ = load_graft_parents(&repo);
     assert!(reflog_date_selector_timestamp("1.day.ago").is_some());
     let _ = reflog_date_selector_timestamp_at("2.weeks.ago", 1_700_000_000);
     let (base, peel) = parse_peel_suffix("HEAD^{tree}");
