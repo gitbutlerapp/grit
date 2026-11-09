@@ -3,7 +3,7 @@
 
 [meta]
 updated = "2026-11-09"
-semver_baseline = "3bfa5bee185a62b160c8ee9e63cca6632df4f698"
+semver_baseline = "b3400649edc8099ed64c0975c50d71cac164b17f"
 
 [counts]
 pub_repo_constructors = 3
