@@ -364,6 +364,40 @@ pub struct TargetComparison {
     pub newest_behind: Vec<ObjectId>,
 }
 
+/// One side of a [`TargetComparison`] with total count, a bounded oid list, and truncation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BoundedCommitSide {
+    /// Full commit count on this side (may exceed [`Self::oids`].len()).
+    pub total: usize,
+    /// Newest commits on this side (newest first), bounded by the list limit.
+    pub oids: Vec<ObjectId>,
+    /// True when [`Self::total`] is greater than [`Self::oids`].len().
+    pub truncated: bool,
+}
+
+impl TargetComparison {
+    /// Ahead-of-target commits with truncation metadata for `grit shortlog`.
+    #[must_use]
+    pub fn ahead_commits(&self) -> BoundedCommitSide {
+        BoundedCommitSide {
+            total: self.ahead,
+            oids: self.newest_ahead.clone(),
+            truncated: self.ahead > self.newest_ahead.len(),
+        }
+    }
+
+    /// Behind-target commits with truncation metadata when behind listing was requested.
+    #[must_use]
+    pub fn behind_commits(&self) -> BoundedCommitSide {
+        BoundedCommitSide {
+            total: self.behind,
+            oids: self.newest_behind.clone(),
+            truncated: self.behind > self.newest_behind.len(),
+        }
+    }
+}
+
 /// Resolve `refname` through the repository's ref store; refs that are missing or cannot be
 /// resolved (dangling symrefs, unreadable files) count as absent.
 fn resolve_optional(repo: &Repository, refname: &str) -> Option<ObjectId> {
@@ -1355,6 +1389,33 @@ mod tests {
         assert_eq!(Standing::from_counts(3, 0), Standing::Ahead);
         assert_eq!(Standing::from_counts(0, 2), Standing::Behind);
         assert_eq!(Standing::from_counts(1, 1), Standing::Diverged);
+    }
+
+    #[test]
+    fn target_comparison_bounded_sides_report_truncation() {
+        let oid = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        let base = ComparisonBase {
+            name: "main".into(),
+            full_ref: "refs/heads/main".into(),
+            oid,
+            source: BaseSource::DefaultTarget,
+        };
+        let cmp = TargetComparison {
+            branch: "feat".into(),
+            base,
+            ahead: 5,
+            behind: 3,
+            newest_ahead: vec![oid, oid],
+            newest_behind: vec![oid],
+        };
+        let ahead = cmp.ahead_commits();
+        assert_eq!(ahead.total, 5);
+        assert_eq!(ahead.oids.len(), 2);
+        assert!(ahead.truncated);
+        let behind = cmp.behind_commits();
+        assert_eq!(behind.total, 3);
+        assert_eq!(behind.oids.len(), 1);
+        assert!(behind.truncated);
     }
 
     use crate::config::environment::RepositoryOptions;

@@ -18520,6 +18520,25 @@ impl core::marker::Unpin for grit_lib::refs::branch_tracking::StatusIntegrationA
 impl core::marker::UnsafeUnpin for grit_lib::refs::branch_tracking::StatusIntegrationAction
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::branch_tracking::StatusIntegrationAction
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::branch_tracking::StatusIntegrationAction
+#[non_exhaustive] pub struct grit_lib::refs::branch_tracking::BoundedCommitSide
+pub grit_lib::refs::branch_tracking::BoundedCommitSide::oids: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::refs::branch_tracking::BoundedCommitSide::total: usize
+pub grit_lib::refs::branch_tracking::BoundedCommitSide::truncated: bool
+impl core::clone::Clone for grit_lib::refs::branch_tracking::BoundedCommitSide
+pub fn grit_lib::refs::branch_tracking::BoundedCommitSide::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::branch_tracking::BoundedCommitSide
+impl core::cmp::PartialEq for grit_lib::refs::branch_tracking::BoundedCommitSide
+pub fn grit_lib::refs::branch_tracking::BoundedCommitSide::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::refs::branch_tracking::BoundedCommitSide
+pub fn grit_lib::refs::branch_tracking::BoundedCommitSide::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::refs::branch_tracking::BoundedCommitSide
+impl core::marker::Freeze for grit_lib::refs::branch_tracking::BoundedCommitSide
+impl core::marker::Send for grit_lib::refs::branch_tracking::BoundedCommitSide
+impl core::marker::Sync for grit_lib::refs::branch_tracking::BoundedCommitSide
+impl core::marker::Unpin for grit_lib::refs::branch_tracking::BoundedCommitSide
+impl core::marker::UnsafeUnpin for grit_lib::refs::branch_tracking::BoundedCommitSide
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::branch_tracking::BoundedCommitSide
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::branch_tracking::BoundedCommitSide
 pub struct grit_lib::refs::branch_tracking::BranchListQuery
 pub grit_lib::refs::branch_tracking::BranchListQuery::refs: grit_lib::refs::listing::RefQuery
 pub grit_lib::refs::branch_tracking::BranchListQuery::scope: grit_lib::refs::branch_tracking::BranchScope
@@ -18651,6 +18670,9 @@ pub grit_lib::refs::branch_tracking::TargetComparison::behind: usize
 pub grit_lib::refs::branch_tracking::TargetComparison::branch: alloc::string::String
 pub grit_lib::refs::branch_tracking::TargetComparison::newest_ahead: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::refs::branch_tracking::TargetComparison::newest_behind: alloc::vec::Vec<grit_lib::objects::ObjectId>
+impl grit_lib::refs::branch_tracking::TargetComparison
+pub fn grit_lib::refs::branch_tracking::TargetComparison::ahead_commits(&self) -> grit_lib::refs::branch_tracking::BoundedCommitSide
+pub fn grit_lib::refs::branch_tracking::TargetComparison::behind_commits(&self) -> grit_lib::refs::branch_tracking::BoundedCommitSide
 impl core::clone::Clone for grit_lib::refs::branch_tracking::TargetComparison
 pub fn grit_lib::refs::branch_tracking::TargetComparison::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::branch_tracking::TargetComparison
