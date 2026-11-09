@@ -1,6 +1,7 @@
 //! Presentation layer: format typed command outcomes for humans, agents, and scripts.
 
 pub mod diff;
+pub mod diff_stream;
 pub mod list;
 pub mod stream;
 pub mod style;

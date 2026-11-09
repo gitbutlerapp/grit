@@ -3415,12 +3415,12 @@ fn dispatch(
                 bail!("`--patch-text` cannot be used with --json or --markdown");
             }
             let wants_exit_code = exit_code || quiet || no_index;
-            let body_delivery = if quiet || format.patch_text {
-                commands::diff::DiffBodyDelivery::MetadataOnly
+            let patch_bodies = if quiet || format.patch_text {
+                commands::diff::PatchBodies::MetadataOnly
             } else if opts.mode == crate::output::OutputMode::Json {
-                commands::diff::DiffBodyDelivery::Collect
+                commands::diff::PatchBodies::Collect
             } else {
-                commands::diff::DiffBodyDelivery::Stream(opts.mode)
+                commands::diff::PatchBodies::Stream
             };
             let run_opts = commands::diff::DiffRunOptions {
                 no_index,
@@ -3431,13 +3431,20 @@ fn dispatch(
                 pathspecs,
                 format,
                 line_format,
+                quiet,
+            };
+            let run_ctx = commands::diff::DiffRunContext {
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                     && commands::diff::diff_word_level_inline_for_output(),
-                quiet,
                 emit_json_hunk_ids: opts.mode == crate::output::OutputMode::Json,
-                body_delivery,
+                patch_bodies,
+                render: RenderContext {
+                    now: ctx.now,
+                    mode: opts.mode,
+                    color: ctx.color,
+                },
             };
-            let run_result = commands::diff::run(run_opts);
+            let run_result = commands::diff::run(run_opts, run_ctx);
             match run_result {
                 Ok(outcome) => {
                     let status = if no_index || wants_exit_code {
@@ -3445,7 +3452,10 @@ fn dispatch(
                     } else {
                         ExitStatus::Success
                     };
-                    if !quiet && !format.patch_text {
+                    if !quiet
+                        && !format.patch_text
+                        && !(outcome.body_streamed && opts.mode == OutputMode::Json)
+                    {
                         emit_success(outcome, opts, ctx)?;
                     }
                     Ok(status)

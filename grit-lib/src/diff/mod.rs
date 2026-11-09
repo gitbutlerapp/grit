@@ -34,6 +34,7 @@ mod options;
 mod patch_log;
 pub(crate) mod pickaxe;
 mod posix_ere;
+mod presentation;
 mod rename_blob_cache;
 mod rename_lines;
 mod stat;
@@ -91,6 +92,11 @@ pub use patch_log::{
     PatchTextOptions,
 };
 pub use pickaxe::{Pickaxe, PickaxeError, PickaxeKind};
+pub use presentation::{
+    annotate_structured_hunks, include_file_change_in_patch, presentation_hunks_from_file_change,
+    presentation_hunks_from_listed, presentation_hunks_from_tree,
+    should_report_inexact_rename_skipped, AnnotatedStructuredHunk,
+};
 pub use stat::{DiffStat, FileStat, StatBar};
 pub use targets::HunkDiffBundle;
 pub(crate) use targets::{
