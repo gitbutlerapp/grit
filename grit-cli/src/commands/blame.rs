@@ -1,7 +1,7 @@
 //! `grit blame` — show who last modified each line of a file.
 
-use std::collections::BTreeMap;
 use anyhow::{bail, Context, Result};
+use std::collections::BTreeMap;
 use std::fmt;
 
 /// Invalid `grit blame` arguments (maps to exit code 2).

@@ -8,7 +8,6 @@ use serde::Serialize;
 
 use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
 
-
 /// Result of `grit reflog` (list/show).
 #[derive(Serialize, JsonSchema)]
 pub struct ReflogListOutcome {

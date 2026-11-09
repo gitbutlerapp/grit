@@ -43,7 +43,6 @@ impl RevsPresentationOptions {
     pub fn markdown_output(self) -> bool {
         self.format == LogStdoutFormat::Markdown
     }
-
 }
 
 /// Counting and side-marking switches for [`run`].
