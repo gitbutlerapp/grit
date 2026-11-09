@@ -283,6 +283,11 @@ class ErrorRatchetMetricTests(unittest.TestCase):
             with mock.patch.object(ar, "GRIT_LIB", root):
                 self.assertEqual(ar.count_error_message_construction_sites(), 2)
 
+    def test_parse_version_tag_stable_only(self) -> None:
+        self.assertEqual(ar._parse_version_tag("v0.6.0"), (0, 6, 0))
+        self.assertIsNone(ar._parse_version_tag("v0.6.0-rc.1"))
+        self.assertIsNone(ar._parse_version_tag("v0.6"))
+
     def test_write_baseline_preserves_semver_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "api-ratchet.toml"
@@ -304,9 +309,37 @@ class ErrorRatchetMetricTests(unittest.TestCase):
                 metrics={key: ar.MetricResult(0) for key in ar.METRIC_KEYS}
             )
             snap.metrics["public_api_lines"] = ar.MetricResult(2)
-            ar.write_baseline(path, snap)
+            with mock.patch.object(ar, "reachable_v06_plus_tag", return_value=None):
+                ar.write_baseline(path, snap)
             text = path.read_text(encoding="utf-8")
             self.assertIn('semver_baseline = "deadbeef"', text)
+            self.assertIn("public_api_lines = 2", text)
+
+    def test_write_baseline_drops_semver_baseline_when_v06_tag_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api-ratchet.toml"
+            path.write_text(
+                textwrap.dedent(
+                    """
+                    [meta]
+                    updated = "2026-01-01"
+                    semver_baseline = "deadbeef"
+
+                    [counts]
+                    public_api_lines = 1
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            snap = ar.RatchetSnapshot(
+                metrics={key: ar.MetricResult(0) for key in ar.METRIC_KEYS}
+            )
+            snap.metrics["public_api_lines"] = ar.MetricResult(2)
+            with mock.patch.object(ar, "reachable_v06_plus_tag", return_value="v0.6.0"):
+                ar.write_baseline(path, snap)
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("semver_baseline", text)
             self.assertIn("public_api_lines = 2", text)
 
     def test_non_exhaustive_error_enum_excluded_when_attributed(self) -> None:

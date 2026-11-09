@@ -13,10 +13,15 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 usage() {
 	cat <<EOF
-Usage: $(basename "$0") <check|ensure-deps>
+Usage: $(basename "$0") <check|baseline|check-cmd|ensure-deps>
 
-  check        Run cargo semver-checks (baseline: SEMVER_BASELINE, api-ratchet semver_baseline, else latest v* tag)
+  baseline     Print the chosen baseline revision (tag or commit)
+  check-cmd    Print the cargo semver-checks command line (no install or run)
+  check        Run cargo semver-checks (see baseline)
   ensure-deps  Install pinned cargo-semver-checks (for CI and local runs)
+
+Baseline resolution (first match wins): SEMVER_BASELINE; else latest reachable v0.6+
+tag when one exists; else api-ratchet semver_baseline pin; else latest v* tag.
 EOF
 }
 
@@ -53,9 +58,49 @@ read_ratchet_semver_baseline() {
 	printf '%s\n' "${line}" | sed -n 's/.*=[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
+is_stable_v_tag() {
+	local tag="$1"
+	[[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+version_ge_0_6_0() {
+	local ver="$1"
+	# ver is like 0.6.0 or 1.0.0 (no leading v); caller must ensure a stable tag shape
+	awk -v v="${ver}" '
+		BEGIN {
+			split(v, p, ".");
+			maj = p[1] + 0;
+			min = p[2] + 0;
+			if (maj > 0) exit 0;
+			if (min >= 6) exit 0;
+			exit 1;
+		}
+	'
+}
+
+latest_merged_v06_plus_tag() {
+	local tag=""
+	while IFS= read -r tag; do
+		[[ -n "${tag}" ]] || continue
+		is_stable_v_tag "${tag}" || continue
+		local ver="${tag#v}"
+		if version_ge_0_6_0 "${ver}"; then
+			printf '%s\n' "${tag}"
+			return 0
+		fi
+	done < <(git -C "${REPO}" tag --merged HEAD --list 'v*' --sort=-v:refname 2>/dev/null || true)
+	return 1
+}
+
 baseline_rev() {
 	if [[ -n "${SEMVER_BASELINE:-}" ]]; then
 		printf '%s\n' "${SEMVER_BASELINE}"
+		return 0
+	fi
+	local tag=""
+	tag="$(latest_merged_v06_plus_tag || true)"
+	if [[ -n "${tag}" ]]; then
+		printf '%s\n' "${tag}"
 		return 0
 	fi
 	local pinned=""
@@ -65,6 +110,54 @@ baseline_rev() {
 		return 0
 	fi
 	git -C "${REPO}" describe --tags --abbrev=0 --match 'v*'
+}
+
+workspace_version() {
+	grep -E '^version[[:space:]]*=' "${REPO}/Cargo.toml" | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/'
+}
+
+crates_still_0_6_x() {
+	local ver
+	ver="$(workspace_version)"
+	awk -v v="${ver}" '
+		BEGIN {
+			split(v, p, ".");
+			exit (p[1] + 0 == 0 && p[2] + 0 == 6) ? 0 : 1;
+		}
+	'
+}
+
+baseline_is_v06_plus_tag() {
+	local rev="$1"
+	local tag=""
+	tag="$(git -C "${REPO}" describe --tags --exact-match "${rev}" 2>/dev/null)" || return 1
+	[[ -n "${tag}" ]] || return 1
+	is_stable_v_tag "${tag}" || return 1
+	local ver="${tag#v}"
+	version_ge_0_6_0 "${ver}"
+}
+
+semver_check_release_args() {
+	local rev="$1"
+	local args=(
+		check-release -p grit-lib
+		--baseline-rev "${rev}"
+		--features http-ureq
+	)
+	if baseline_is_v06_plus_tag "${rev}" && crates_still_0_6_x; then
+		args+=(--release-type minor)
+	fi
+	printf '%s\n' "${args[@]}"
+}
+
+print_check_cmd() {
+	local rev
+	rev="$(baseline_rev)"
+	local -a args
+	mapfile -t args < <(semver_check_release_args "${rev}")
+	printf 'cargo semver-checks'
+	printf ' %q' "${args[@]}"
+	printf '\n'
 }
 
 write_step_summary() {
@@ -82,7 +175,7 @@ write_step_summary() {
 		else
 			echo "Reported breaking API changes against baseline \`${rev}\`."
 			echo
-			echo 'Informational until **0.6.0** (CI \`continue-on-error: true\`). At 0.6.0, remove that flag so this job blocks merges.'
+			echo 'Breaking changes block merges when the baseline is a **v0.6+** tag (additive-only within **0.6.x**). Before **v0.6.0** exists on the branch, the pin in \`api-ratchet.toml\` keeps the comparison stable.'
 		fi
 		echo
 		echo '```text'
@@ -100,13 +193,12 @@ run_check() {
 	local log
 	log="$(mktemp)"
 	trap "rm -f '${log}'" EXIT
+	local -a args
+	mapfile -t args < <(semver_check_release_args "${rev}")
 	set +e
 	# Uses the workspace toolchain (rust-toolchain.toml). cargo-semver-checks 0.51.0
 	# supports rustdoc JSON from Rust 1.99.0; no pinned nightly override needed.
-	cargo semver-checks check-release -p grit-lib \
-		--baseline-rev "${rev}" \
-		--features http-ureq \
-		2>&1 | tee "${log}"
+	cargo semver-checks "${args[@]}" 2>&1 | tee "${log}"
 	local status="${PIPESTATUS[0]}"
 	set -e
 	write_step_summary "${rev}" "${status}" "${log}"
@@ -123,6 +215,12 @@ case "${cmd}" in
 ensure-deps)
 	ensure_cargo_semver_checks
 	cargo semver-checks --version
+	;;
+baseline)
+	baseline_rev
+	;;
+check-cmd)
+	print_check_cmd
 	;;
 check)
 	run_check

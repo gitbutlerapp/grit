@@ -204,7 +204,7 @@ The report lists the offenders for `pub_fn_with_in_name`, `pub_fn_too_many_argum
 
 **From 0.6.0 through 0.6.x:** the public API only **grows**. No removals, renames, or signature changes without keeping the old form: add the replacement, mark the old entry `#[deprecated(since = "0.6.x", note = "use …")]`, and remove it in **0.7**.
 
-**Enforcement:** CI runs [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks) against the git revision pinned in [`api-ratchet.toml`](api-ratchet.toml) (`semver_baseline`) until **0.6.0**, then against the latest reachable `v*` tag (see [Gates](#gates)). The committed [`public-api.txt`](public-api.txt) snapshot and quality counts in the same ratchet file complement that check.
+**Enforcement:** CI runs [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks) with baseline resolution described in [Semver check](#semver-check-make-semver-check) (pin before **v0.6.0** exists on the branch, then the newest reachable **v0.6+** tag with additive-only checks across **0.6.x** patches). The committed [`public-api.txt`](public-api.txt) snapshot and quality counts in the same ratchet file complement that check.
 
 ## How to add a public item
 
@@ -360,17 +360,18 @@ These checks guard the public API on the path to **0.6.0** and afterward.
 [`scripts/semver-check.sh`](../scripts/semver-check.sh) runs:
 
 ```bash
-cargo semver-checks check-release -p grit-lib \
-  --baseline-rev "${SEMVER_BASELINE:-$(read from api-ratchet.toml semver_baseline)}" \
-  --features http-ureq
+./scripts/semver-check.sh check-cmd   # print the exact command (see baseline)
+make semver-check
 ```
 
-- **Baseline (pre-0.6.0):** [`api-ratchet.toml`](api-ratchet.toml) `semver_baseline` — the commit where the supported surface was last ratified (update alongside [`public-api.txt`](public-api.txt) when you intentionally break the API). Override with `SEMVER_BASELINE=…`. After **0.6.0**, drop `semver_baseline` and use the latest `v*` tag only.
+Baseline order: `SEMVER_BASELINE` → newest merged **v0.6+** tag → [`api-ratchet.toml`](api-ratchet.toml) `semver_baseline` → newest `v*` tag (`./scripts/semver-check.sh baseline`).
+
+- **Pin (pre-v0.6.0 on branch):** `semver_baseline` — update alongside [`public-api.txt`](public-api.txt) when you intentionally break the API. **`make api-ratchet`** removes the pin once a **v0.6+** tag is reachable (no manual edit).
+- **From v0.6.0:** compare to the newest reachable **v0.6+** tag; with workspace version still **0.6.x**, cargo-semver-checks runs with **`--release-type minor`** (additive-only across patch releases; see [Stability policy](#stability-policy)).
 - **Surface:** same optional features as the public API snapshot (`http-ureq` only; no `test-support`).
 - **Toolchain:** the workspace pin in [`rust-toolchain.toml`](../rust-toolchain.toml) (currently **1.99.0**). `cargo-semver-checks` builds baseline rustdoc in `target/semver-checks/`; that is separate from normal `cargo build` output.
-- **Local run:** `make semver-check` (installs the pinned `cargo-semver-checks` on first use; OpenSSL development headers are required on Linux, same as `cargo-public-api`).
-- **CI:** the **semver-check** job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) uses `fetch-depth: 0` so baseline commits and tags resolve. Until **0.6.0** the job may set `continue-on-error: true` as a safety net; the pinned `semver_baseline` should keep it green on `main`.
-- **At 0.6.0:** remove `semver_baseline`, compare to the **0.6.0** tag, and drop `continue-on-error` so **0.6.x** merges require additive-only API changes (see [Stability policy](#stability-policy)).
+- **Local run:** `make semver-check` (installs the pinned `cargo-semver-checks` on first use; OpenSSL development headers are required on Linux, same as `cargo-public-api`). **`make gate`** runs the same check when the branch diff touches `grit-lib/` and the tool is installed.
+- **CI:** the **semver-check** job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) uses `fetch-depth: 0` so baseline commits and tags resolve. It is a **required** check (no `continue-on-error`).
 
 ### Public API snapshot (`make public-api-check`)
 
