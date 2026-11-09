@@ -220,7 +220,7 @@ pub(crate) enum LogEmitKind {
 pub use crate::log_commit::LogCommit;
 
 /// The repository and walk a streamed listing runs on, set up once by
-/// [`listing_stream_plan`] and consumed by [`stream_listing`].
+/// [`listing_stream_plan`] and consumed by [`crate::render::log_stream::stream_listing`].
 pub struct LogStreamPlan {
     pub(crate) repo: grit_lib::repo::Repository,
     pub(crate) walk_pathspec: grit_lib::worktree::pathspec::Pathspec,
@@ -228,7 +228,7 @@ pub struct LogStreamPlan {
     pub(crate) walk_opts: grit_lib::revwalk::RevWalkListOptions,
 }
 
-/// The plan for [`stream_listing`] when it can replace a full [`run`] for this query, or
+/// The plan for [`crate::render::log_stream::stream_listing`] when it can replace a full [`run`] for this query, or
 /// `None` when it cannot.
 pub fn listing_stream_plan(
     rev: &RevSelectArgs,

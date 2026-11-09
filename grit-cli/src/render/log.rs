@@ -1,4 +1,4 @@
-//! `grit log` human and Markdown rendering for [`LogOutcome`](crate::commands::log::LogOutcome).
+//! `grit log` human and Markdown rendering for [`LogOutcome`].
 
 use std::io::Write;
 
