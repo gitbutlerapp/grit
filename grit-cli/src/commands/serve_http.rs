@@ -16,8 +16,6 @@ use grit_http_server::store::{generate_password, Access, AuthStore, HashedPasswo
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::ui::filesystem_path_for_user;
 
 /// The database path for `--db`, defaulting next to (or inside) `root`.
@@ -292,30 +290,6 @@ pub fn add_user(
     })
 }
 
-impl HumanRender for ServeUserOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let role = if self.admin { "admin user" } else { "user" };
-        outln!(w, "✓ Created {role} {} in {}", self.user, self.database);
-        if let Some(password) = &self.password {
-            outln!(w);
-            outln!(w, "  Email:    {}", self.user);
-            outln!(w, "  Password: {password}");
-            outln!(w);
-            outln!(
-                w,
-                "The password is temporary and not shown again: it must be changed at the first sign-in."
-            );
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for ServeUserOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_serve_user_outcome(w, self)
-    }
-}
-
 /// Result of `grit serve token`: a new access token for a user.
 #[derive(Serialize, JsonSchema)]
 pub struct ServeTokenOutcome {
@@ -340,26 +314,6 @@ pub fn token(root: &Path, db: Option<&Path>, email: &str) -> Result<ServeTokenOu
         user: user.email,
         token: token.secret().to_owned(),
     })
-}
-
-impl HumanRender for ServeTokenOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "✓ Created a token for {}", self.user);
-        outln!(w);
-        outln!(w, "  Token: {}", self.token);
-        outln!(w);
-        outln!(
-            w,
-            "Save it now; it is not shown again. Use it as the password when Git asks, or run `grit auth <url> --token <token>`."
-        );
-        Ok(())
-    }
-}
-
-impl MarkdownRender for ServeTokenOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_serve_token_outcome(w, self)
-    }
 }
 
 /// Result of `grit serve grant`.
@@ -395,25 +349,6 @@ pub fn grant(
         repository: grant.repository,
         access: grant.access.as_str().to_owned(),
     })
-}
-
-impl HumanRender for ServeGrantOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(
-            w,
-            "✓ {} now has {} access to {}",
-            self.user,
-            self.access,
-            self.repository
-        );
-        Ok(())
-    }
-}
-
-impl MarkdownRender for ServeGrantOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_serve_grant_outcome(w, self)
-    }
 }
 
 pub use crate::render::serve::{ServeGrantJson, ServeUserJson, ServeUsersOutcome};

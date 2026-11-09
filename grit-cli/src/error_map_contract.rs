@@ -1114,6 +1114,10 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
         line_contains: "grit_lib::error::Error::is_cancelled",
     },
     ControlFlowAllowance {
+        file: "src/commands/add/mod.rs",
+        line_contains: "grit_lib::error::Error::is_cancelled",
+    },
+    ControlFlowAllowance {
         file: "src/revision_errors.rs",
         line_contains:
             "grit_lib::error::Error::Revision(grit_lib::error::RevisionError::Resolve(resolve))",
@@ -1181,6 +1185,10 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
         line_contains: "anyhow::Error::new(grit_lib::error::Error::from(other))",
     },
     ControlFlowAllowance {
+        file: "src/commands/checkin/mod.rs",
+        line_contains: "remote @ grit_lib::error::Error::Remote(_)",
+    },
+    ControlFlowAllowance {
         file: "src/commands/checkin.rs",
         line_contains: "remote @ grit_lib::error::Error::Remote(_)",
     },
@@ -1189,8 +1197,17 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
         line_contains: "grit_lib::error::Error::Remote(RemoteError::UnknownRemote { .. })",
     },
     ControlFlowAllowance {
+        file: "src/commands/stash/mod.rs",
+        line_contains: "LibError::Diff(DiffError::HunkSelection(_))",
+    },
+    ControlFlowAllowance {
         file: "src/commands/stash.rs",
         line_contains: "LibError::Diff(DiffError::HunkSelection(_))",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/add/mod.rs",
+        line_contains:
+            "grit_lib::error::Error::Diff(grit_lib::error::DiffError::HunkSelection(sel))",
     },
     ControlFlowAllowance {
         file: "src/commands/add.rs",
@@ -1235,6 +1252,10 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
     },
     ControlFlowAllowance {
         file: "src/commands/add.rs",
+        line_contains: "LibError::Cancelled",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/add/mod.rs",
         line_contains: "LibError::Cancelled",
     },
     ControlFlowAllowance {
@@ -1305,6 +1326,18 @@ fn line_allowed(rel: &str, line: &str) -> bool {
     CONTROL_FLOW_ALLOWANCES
         .iter()
         .any(|entry| entry.file == rel && line.contains(entry.line_contains))
+        || legacy_command_module_allowance(rel, line)
+}
+
+/// Commands split into `foo/mod.rs` keep the same control-flow allowances as `foo.rs`.
+fn legacy_command_module_allowance(rel: &str, line: &str) -> bool {
+    let Some(base) = rel.strip_suffix("/mod.rs") else {
+        return false;
+    };
+    let legacy = format!("{base}.rs");
+    CONTROL_FLOW_ALLOWANCES
+        .iter()
+        .any(|entry| entry.file == legacy && line.contains(entry.line_contains))
 }
 
 fn visit_rs_sources(manifest: &Path, dir: &Path) {

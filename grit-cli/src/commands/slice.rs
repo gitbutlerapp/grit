@@ -1,22 +1,14 @@
 //! `grit slice` — named sets of paths to check out together, kept on the
 //! server's target branch.
 
-use std::io::Write;
-
+pub use crate::render::slice::*;
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::objects::short_hex;
 use grit_lib::remote::snapshot_checkout::{
     CheckoutClient, CheckoutMarker, Ident, Slice, SliceChange, SliceDeleteRequest, SliceRequest,
     SLICES_PATH,
 };
 use grit_lib::remote::{redact_url_for_display, HttpClientFactory};
-use schemars::JsonSchema;
-use serde::Serialize;
-
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-
-pub use crate::render::slice::*;
 
 impl From<Slice> for SliceJson {
     fn from(s: Slice) -> Self {
@@ -25,70 +17,6 @@ impl From<Slice> for SliceJson {
             description: s.description,
             paths: s.paths,
         }
-    }
-}
-
-/// Result of `grit slice new`, `edit` and `delete`.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct SliceChangeOutcome {
-    /// `new`, `edit` or `delete`.
-    pub action: String,
-    /// The slice's name.
-    pub name: String,
-    /// The slice as it is now; omitted once deleted.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub slice: Option<SliceJson>,
-    /// The target branch.
-    pub target: String,
-    /// Where it was.
-    pub previous: String,
-    /// Where it is: the server's commit changing the slices file.
-    pub head: String,
-}
-
-impl HumanRender for SliceChangeOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let verb = match self.action.as_str() {
-            "new" => "Added",
-            "edit" => "Changed",
-            _ => "Removed",
-        };
-        let short = |s: &str| short_hex(s).to_owned();
-        if self.previous == self.head {
-            outln!(w, "· slice {} is unchanged", self.name);
-        } else {
-            outln!(
-                w,
-                "✓ {verb} slice {} on {}: {} → {}",
-                self.name,
-                self.target,
-                short(&self.previous),
-                short(&self.head)
-            );
-        }
-        if let Some(s) = &self.slice {
-            outln!(w, "  {}", s.paths.join(", "));
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for SliceChangeOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "## Slice `{}` ({})", self.name, self.action);
-        outln!(w);
-        outln!(
-            w,
-            "- **target**: `{}` `{}` → `{}`",
-            self.target,
-            self.previous,
-            self.head
-        );
-        if let Some(s) = &self.slice {
-            let paths: Vec<String> = s.paths.iter().map(|p| format!("`{p}`")).collect();
-            outln!(w, "- **paths**: {}", paths.join(", "));
-        }
-        Ok(())
     }
 }
 

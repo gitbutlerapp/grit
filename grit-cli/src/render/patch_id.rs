@@ -1,4 +1,4 @@
-//! Outcome types and renderers for `grit patch-id`.
+//! `grit patch-id` outcomes and rendering.
 
 use std::io::Write;
 
@@ -6,7 +6,8 @@ use anyhow::Result;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::outln;
+use crate::render::{HumanRender, MarkdownRender, RenderContext};
 
 /// One `(patch_id, commit)` pair (Git `patch-id` stdout format).
 #[derive(Serialize, JsonSchema, Clone)]

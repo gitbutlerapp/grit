@@ -8,10 +8,17 @@ use grit_lib::revwalk::rev_parse_error::RevParseError;
 use grit_lib::revwalk::AbbrevLength;
 
 use crate::context;
-pub use crate::render::resolve::{
-    RefNameOutput, ResolveEntry, ResolveOutcome, VerifyResolveOutcome,
-};
 use crate::revision_errors::map_resolve_error;
+
+pub use crate::render::resolve::{ResolveEntry, ResolveOutcome, VerifyResolveOutcome};
+
+/// Ref-name output mode for `grit resolve`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefNameOutput {
+    ObjectIds,
+    AbbrevRef,
+    SymbolicFullName,
+}
 
 pub fn run_verify(spec: String, short: bool, quiet: bool) -> Result<VerifyResolveOutcome> {
     let repo = if quiet {

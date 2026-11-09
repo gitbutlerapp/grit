@@ -4,14 +4,11 @@ use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Result};
 use grit_lib::porcelain::clean::{CleanOptions, CleanScope};
 use grit_lib::progress::NullProgress;
-use schemars::JsonSchema;
-use serde::Serialize;
-use std::io::Write;
 
 use crate::context;
-use crate::markdown::format_inline_code;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::ui::PathDisplayOptions;
+
+pub use crate::render::clean::CleanOutcome;
 
 /// JSON scope label for [`CleanScope`].
 fn scope_label(scope: CleanScope) -> &'static str {
@@ -19,71 +16,6 @@ fn scope_label(scope: CleanScope) -> &'static str {
         CleanScope::Untracked => "untracked",
         CleanScope::UntrackedAndIgnored => "untracked_and_ignored",
         CleanScope::OnlyIgnored => "only_ignored",
-    }
-}
-
-/// Result of `grit clean`.
-#[derive(Serialize, JsonSchema)]
-pub struct CleanOutcome {
-    /// Paths removed, or that would be removed when dry-run.
-    pub removed: Vec<String>,
-    /// Whether this run only previewed removals (no `-f`).
-    pub dry_run: bool,
-    /// Which paths were eligible for removal.
-    pub scope: String,
-    #[serde(skip)]
-    #[schemars(skip)]
-    path_display: Option<PathDisplayOptions>,
-}
-
-impl CleanOutcome {
-    fn format_path(&self, path: &str) -> String {
-        self.path_display
-            .as_ref()
-            .map(|opts| opts.format_path_for_human(path))
-            .unwrap_or_else(|| path.to_owned())
-    }
-}
-
-impl HumanRender for CleanOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        if self.removed.is_empty() {
-            if self.dry_run {
-                outln!(w, "Nothing to clean.");
-            } else {
-                outln!(w, "Removed nothing.");
-            }
-            return Ok(());
-        }
-        let prefix = if self.dry_run {
-            "Would remove"
-        } else {
-            "Removed"
-        };
-        for path in &self.removed {
-            outln!(w, "{prefix} {}", self.format_path(path));
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for CleanOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        if self.removed.is_empty() {
-            outln!(w, "No paths to remove.");
-            return Ok(());
-        }
-        let heading = if self.dry_run {
-            "Would remove"
-        } else {
-            "Removed"
-        };
-        outln!(w, "## {heading}\n");
-        for path in &self.removed {
-            let shown = format_inline_code(&self.format_path(path));
-            outln!(w, "- {shown}");
-        }
-        Ok(())
     }
 }
 
@@ -131,12 +63,12 @@ pub fn run(
             &cancel,
         )
         .map_err(crate::json_error::map_lib_error)?;
-    Ok(CleanOutcome {
-        removed: lib_outcome.removed,
+    Ok(CleanOutcome::new(
+        lib_outcome.removed,
         dry_run,
-        scope: scope_label(scope).to_owned(),
-        path_display: PathDisplayOptions::from_repo(&repo).ok(),
-    })
+        scope_label(scope).to_owned(),
+        PathDisplayOptions::from_repo(&repo).ok(),
+    ))
 }
 
 /// Dispatch parsed CLI args for `Clean`.

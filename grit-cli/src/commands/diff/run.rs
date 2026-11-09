@@ -33,8 +33,6 @@ use grit_lib::worktree::pathspec::pathdiff;
 use std::io::Write;
 
 use crate::context;
-use crate::markdown;
-use crate::output::outln;
 use crate::render::diff::{
     diffstat_from_files, render_file, render_name_only, render_name_status, render_numstat,
     render_shortstat, render_stat, FileDiff, LineStatJson,
@@ -74,19 +72,6 @@ fn finish_outcome(
         outcome.totals = Some(diffstat_from_files(&outcome.files).lib().totals().into());
     }
     attach_path_display(repo, format, outcome)
-}
-
-fn format_is_byte_list_or_stat(format: DiffFormatArgs) -> bool {
-    format.human_numstat()
-        || format.human_name_only()
-        || format.human_name_status()
-        || format.human_shortstat_only()
-        || format.human_stat_block()
-        || format.detail() == DiffDetail::Stat
-        || matches!(
-            format.detail(),
-            DiffDetail::NameOnly | DiffDetail::NameStatus
-        )
 }
 
 fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -> DiffOutcome {
@@ -975,103 +960,6 @@ fn tree_diff_outcome(
     }
 }
 
-// --- Human (delta-style) rendering -----------------------------------------
-
-/// Render only the diff body (no commit header).
-pub(crate) fn render_human_diff(
-    outcome: &DiffOutcome,
-    w: &mut dyn Write,
-    empty_message: Option<&str>,
-    color: bool,
-) -> Result<()> {
-    if outcome.body_streamed {
-        if !outcome.changed {
-            if let Some(msg) = empty_message {
-                outln!(w, "{msg}");
-            }
-        }
-        return Ok(());
-    }
-    if outcome.files.is_empty() {
-        if format_is_byte_list_or_stat(outcome.format) {
-            return Ok(());
-        }
-        if let Some(msg) = empty_message {
-            outln!(w, "{msg}");
-        }
-        return Ok(());
-    }
-    let fmt = outcome.format;
-    if fmt.human_numstat() {
-        return render_numstat(w, &outcome.files, outcome.path_display.as_ref());
-    }
-    if fmt.human_name_only() {
-        return render_name_only(w, &outcome.files, outcome.path_display.as_ref());
-    }
-    if fmt.human_name_status() {
-        return render_name_status(w, &outcome.files, outcome.path_display.as_ref());
-    }
-    if fmt.human_shortstat_only() {
-        let stat = diffstat_from_files(&outcome.files);
-        return render_shortstat(w, &stat);
-    }
-    if fmt.human_stat_block() {
-        let stat = diffstat_from_files(&outcome.files);
-        return render_stat(w, &stat, color, outcome.path_display.as_ref());
-    }
-    for file in &outcome.files {
-        render_file(w, file, color, outcome.path_display.as_ref())?;
-    }
-    Ok(())
-}
-
-pub(crate) fn render_markdown_diff(outcome: &DiffOutcome, w: &mut dyn Write) -> Result<()> {
-    if outcome.body_streamed {
-        if !outcome.changed {
-            outln!(w, "No changes.");
-        }
-        return Ok(());
-    }
-    if outcome.files.is_empty() && format_is_byte_list_or_stat(outcome.format) {
-        return Ok(());
-    }
-    let fmt = outcome.format;
-    if fmt.human_shortstat_only() {
-        let stat = diffstat_from_files(&outcome.files);
-        outln!(
-            w,
-            "{}",
-            crate::render::diff::summary_line(stat.lib().totals())
-        );
-        return Ok(());
-    }
-    if fmt.detail() == DiffDetail::Stat {
-        let stat = diffstat_from_files(&outcome.files);
-        return crate::render::diff::render_markdown_stat(w, &stat, outcome.path_display.as_ref());
-    }
-    if fmt.human_name_status() {
-        for file in &outcome.files {
-            let mut buf = Vec::new();
-            render_name_status(
-                &mut buf,
-                std::slice::from_ref(file),
-                outcome.path_display.as_ref(),
-            )?;
-            let line = String::from_utf8(buf).unwrap_or_default();
-            outln!(w, "- {}", markdown::format_inline_code(line.trim()));
-        }
-        return Ok(());
-    }
-    if fmt.human_name_only() {
-        for file in &outcome.files {
-            outln!(w, "- {}", markdown::format_inline_code(&file.path));
-        }
-        return Ok(());
-    }
-    markdown::print_diff_files(w, &outcome.files, outcome.path_display.as_ref())?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     mod stream_output_parity {
@@ -1124,10 +1012,16 @@ mod tests {
             (dir, repo, entries)
         }
 
+        #[derive(Clone, Copy)]
+        enum DiffTestStyle {
+            Human,
+            Markdown,
+        }
+
         fn render_human_or_markdown(
             repo: &Repository,
             entries: &[DiffEntry],
-            mode: OutputMode,
+            mode: DiffTestStyle,
             stream: bool,
         ) -> Vec<u8> {
             let diff_options = DiffOptions::default().with_word_level_inline(false);
@@ -1136,14 +1030,13 @@ mod tests {
             let mut render_one = |index: usize, structured| {
                 let file = cli_file_from_tree(structured);
                 match mode {
-                    OutputMode::Human => {
+                    DiffTestStyle::Human => {
                         render_file(&mut buf, &file, false, path_display.as_ref()).expect("human")
                     }
-                    OutputMode::Markdown => {
+                    DiffTestStyle::Markdown => {
                         markdown::print_diff_file(&mut buf, &file, path_display.as_ref(), index > 0)
                             .expect("markdown")
                     }
-                    OutputMode::Json => unreachable!(),
                 }
             };
             if stream {
@@ -1170,16 +1063,17 @@ mod tests {
         #[test]
         fn human_stream_matches_collected() {
             let (_dir, repo, entries) = repo_with_range();
-            let collected = render_human_or_markdown(&repo, &entries, OutputMode::Human, false);
-            let streamed = render_human_or_markdown(&repo, &entries, OutputMode::Human, true);
+            let collected = render_human_or_markdown(&repo, &entries, DiffTestStyle::Human, false);
+            let streamed = render_human_or_markdown(&repo, &entries, DiffTestStyle::Human, true);
             assert_eq!(collected, streamed);
         }
 
         #[test]
         fn markdown_stream_matches_collected() {
             let (_dir, repo, entries) = repo_with_range();
-            let collected = render_human_or_markdown(&repo, &entries, OutputMode::Markdown, false);
-            let streamed = render_human_or_markdown(&repo, &entries, OutputMode::Markdown, true);
+            let collected =
+                render_human_or_markdown(&repo, &entries, DiffTestStyle::Markdown, false);
+            let streamed = render_human_or_markdown(&repo, &entries, DiffTestStyle::Markdown, true);
             assert_eq!(collected, streamed);
         }
 

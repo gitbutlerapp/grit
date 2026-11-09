@@ -1,10 +1,7 @@
 //! Route a parsed [`crate::args::Command`] to command implementations.
 
-mod cat;
 pub(crate) mod interaction;
-mod log;
 mod network;
-mod revs;
 pub(crate) mod support;
 
 pub(crate) use interaction::CommandInteraction;
@@ -33,8 +30,8 @@ pub fn dispatch(cli: crate::args::Cli, env: CommandEnv<'_>) -> Result<ExitStatus
         Command::Slice { args } => commands::slice::dispatch(args, env),
         Command::Clone { args } => network::clone(args, env),
         Command::Remote { args } => network::remote(args, env),
-        Command::Log { args } => log::dispatch(args, env),
-        Command::Revs { args } => revs::dispatch(args, env),
+        Command::Log { args } => commands::log::dispatch(args, env),
+        Command::Revs { args } => commands::revs::dispatch(args, env),
         Command::MergeBase { args } => commands::merge_base_cmd::dispatch(args, env),
         Command::Reflog { args } => commands::reflog::dispatch(args, env),
         Command::Blame { args } => commands::blame::dispatch(args, env),
@@ -54,7 +51,7 @@ pub fn dispatch(cli: crate::args::Cli, env: CommandEnv<'_>) -> Result<ExitStatus
         Command::Hooks { args } => commands::hooks::dispatch(args, env),
         Command::PatchId { args } => commands::patch_id::dispatch(args, env),
         Command::Resolve { args } => commands::resolve::dispatch(args, env),
-        Command::Cat { args } => cat::dispatch(args, env),
+        Command::Cat { args } => commands::cat::dispatch(args, env),
         Command::Commit { args } => commands::commit::dispatch(args, env),
         Command::Branch { args } => commands::branch::dispatch(args, env),
         Command::Switch { args } => commands::switch::dispatch(args, env),

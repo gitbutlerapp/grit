@@ -1185,6 +1185,181 @@ The keys are `initialized`, `path`, `bare`, `branch`, `object_format`, and optio
         });
     }
 
+    fn commands_src_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/commands")
+    }
+
+    fn list_command_rust_sources() -> Vec<PathBuf> {
+        let root = commands_src_root();
+        let mut paths = Vec::new();
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            let read_dir = std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("read {dir:?}: {e}"));
+            for entry in read_dir {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().is_some_and(|e| e == "rs") {
+                    paths.push(path);
+                }
+            }
+        }
+        paths.sort();
+        paths
+    }
+
+    const COMMAND_HELPER_MODULES: &[&str] = &[
+        "completions",
+        "manager",
+        "fetch_args",
+        "merge_strategy",
+        "replay_merge_args",
+        "pull_outcome",
+        "serve",
+    ];
+
+    fn command_stem(path: &std::path::Path) -> String {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name == "mod.rs" {
+            path.parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("mod")
+                .replace('-', "_")
+        } else {
+            path.file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .replace('-', "_")
+        }
+    }
+
+    fn render_module_stem(command_stem: &str) -> String {
+        match command_stem {
+            "merge_base_cmd" => "merge_base".to_string(),
+            "checkin" => "checkin".to_string(),
+            "serve_http" => "serve".to_string(),
+            other => other.to_string(),
+        }
+    }
+
+    fn read_source(path: &std::path::Path) -> String {
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path:?}: {e}"))
+    }
+
+    /// Command handlers must not branch on output mode; dispatch owns that.
+    #[test]
+    fn commands_do_not_branch_on_output_mode() {
+        let forbidden = [
+            "OutputMode::",
+            "opts.mode",
+            "output.mode",
+            "mode.is_human",
+            "mode == OutputMode",
+            "match opts.mode",
+            "match output.mode",
+            "match *mode",
+        ];
+        let mut problems = Vec::new();
+        for path in list_command_rust_sources() {
+            if path.file_name().is_some_and(|n| n == "dispatch.rs") {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src"))
+                .unwrap()
+                .display();
+            for line in read_source(&path).lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                for marker in forbidden {
+                    if line.contains(marker) {
+                        problems.push(format!("{rel}: `{marker}` in `{trimmed}`"));
+                    }
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    #[test]
+    fn commands_have_no_renderers() {
+        const FORBIDDEN: &[&str] = &[
+            "impl HumanRender",
+            "impl MarkdownRender",
+            "impl StreamRender",
+            "outln!",
+        ];
+        let mut problems = Vec::new();
+        for path in list_command_rust_sources() {
+            if path.file_name().is_some_and(|n| n == "dispatch.rs") {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src"))
+                .unwrap()
+                .display();
+            let source = read_source(&path);
+            for marker in FORBIDDEN {
+                if source.contains(marker) {
+                    problems.push(format!("{rel} must not contain `{marker}` (use render/)"));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    #[test]
+    fn every_command_has_a_renderer() {
+        let render_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/render");
+        let mut problems = Vec::new();
+        for path in list_command_rust_sources() {
+            if path.file_name().is_some_and(|n| n == "dispatch.rs") {
+                continue;
+            }
+            let stem = command_stem(&path);
+            if stem == "commands" {
+                continue;
+            }
+            if COMMAND_HELPER_MODULES.contains(&stem.as_str()) {
+                continue;
+            }
+            if NO_JSON_COMMANDS.contains(&stem.as_str()) {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/commands"))
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if rel.contains('/') {
+                // Nested command modules (e.g. share/*, diff/*) share a top-level renderer.
+                let top = rel.split('/').next().unwrap();
+                if top == "diff" || top == "share" {
+                    continue;
+                }
+            }
+            let render_stem = render_module_stem(&stem);
+            let render_path = render_root.join(format!("{render_stem}.rs"));
+            if !render_path.is_file() {
+                problems.push(format!("command `{stem}` has no render/{render_stem}.rs"));
+                continue;
+            }
+            let render_src = read_source(&render_path);
+            if !render_src.contains("impl HumanRender") {
+                problems.push(format!(
+                    "render/{render_stem}.rs must implement HumanRender for `{stem}` outcomes"
+                ));
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
     #[test]
     fn share_command_modules_stay_within_line_budget() {
         const MAX_LINES: usize = 900;

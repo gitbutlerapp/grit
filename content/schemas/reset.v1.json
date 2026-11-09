@@ -33,7 +33,7 @@
       "type": "string"
     }
   },
-  "description": "CLI view of [`ResetOutcome`].",
+  "description": "CLI view of a reset operation.",
   "properties": {
     "dry_run": {
       "type": "boolean"
@@ -48,7 +48,6 @@
       "type": "array"
     },
     "orphaned_total": {
-      "description": "Advisory count; without a commit-graph, severe clock skew can make it inaccurate.",
       "format": "uint",
       "minimum": 0.0,
       "type": "integer"

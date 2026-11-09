@@ -1,7 +1,7 @@
 {
   "$id": "https://grit-scm.com/schemas/restore/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "CLI result (mirrors [`RestoreOutcome`] or [`RestoreHunksOutcome`]).",
+  "description": "CLI result (mirrors library restore outcomes).",
   "properties": {
     "dry_run": {
       "type": "boolean"

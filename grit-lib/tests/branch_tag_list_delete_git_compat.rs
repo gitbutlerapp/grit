@@ -11,7 +11,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::{
-    create_branch, delete_branch, list_branches, BranchCreateOptions, BranchError, DeleteMode,
+    create_branch, delete_branch, list_branches, BranchError, CreateBranchOptions, DeleteMode,
 };
 use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::porcelain::tag::{

@@ -1,7 +1,7 @@
 //! `grit describe` — nearest tag and distance for a commit.
 
 use anyhow::Result;
-use grit_lib::revwalk::DescribeOptions;
+use grit_lib::revwalk::{DescribeOptions, DescribedCommit};
 
 use crate::context;
 
@@ -25,6 +25,28 @@ pub struct DescribeCliArgs {
     /// Minimum abbreviated commit id length (default follows `core.abbrev`).
     #[arg(long, value_name = "N")]
     pub abbrev: Option<usize>,
+}
+
+impl From<DescribedCommit> for DescribeOutcome {
+    fn from(d: DescribedCommit) -> Self {
+        let tag_short = d
+            .tag
+            .as_str()
+            .strip_prefix("refs/tags/")
+            .unwrap_or(d.tag.as_str())
+            .to_owned();
+        let long_format = format!("{}-{}-g{}", tag_short, d.distance, d.abbrev);
+        Self {
+            tag: d.tag.as_str().to_owned(),
+            tag_short,
+            tag_oid: d.tag_oid.to_hex(),
+            peeled: d.peeled.to_hex(),
+            distance: d.distance,
+            commit: d.commit.to_hex(),
+            abbrev: d.abbrev.clone(),
+            long_format,
+        }
+    }
 }
 
 pub fn run(args: &DescribeCliArgs) -> Result<Option<DescribeOutcome>> {

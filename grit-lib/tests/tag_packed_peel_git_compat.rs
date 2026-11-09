@@ -7,9 +7,7 @@ use std::path::{Path, PathBuf};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::porcelain::tag::{
-    CreateTagRequest, TagDetail, TagError, TagKind, TagList, TagSummary,
-};
+use grit_lib::porcelain::tag::{CreateTagRequest, TagDetail, TagError, TagInfo, TagKind, TagList};
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
@@ -22,7 +20,7 @@ fn rev(dir: &Path, rev: &str) -> ObjectId {
     git(dir, &["rev-parse", rev]).trim().parse().expect("oid")
 }
 
-fn kind_tags(repo: &Repository) -> Vec<TagSummary> {
+fn kind_tags(repo: &Repository) -> Vec<TagInfo> {
     let query = RefQuery {
         sort: RefSort {
             key: SortKey::Name,
@@ -72,7 +70,7 @@ fn packed_fixture(root: &Path) -> PathBuf {
 }
 
 /// What `git` says each tag is: (name, ref value, annotated?, commit it peels to).
-fn git_expectations(dir: &Path) -> Vec<TagSummary> {
+fn git_expectations(dir: &Path) -> Vec<TagInfo> {
     let listing = git(
         dir,
         &[
@@ -105,7 +103,7 @@ fn git_expectations(dir: &Path) -> Vec<TagSummary> {
                 "tag" => ObjectKind::Tag,
                 other => panic!("unexpected target kind {other}"),
             };
-            TagSummary {
+            TagInfo {
                 name,
                 oid,
                 kind,

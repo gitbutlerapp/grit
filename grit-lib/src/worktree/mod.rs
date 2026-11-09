@@ -22,9 +22,9 @@ pub(crate) mod symlink;
 pub use core::*;
 pub use error::{LinkedWorktreeError, LinkedWorktreeOperation, WorktreeError};
 pub(crate) use io_error::{io_with_path, map_worktree_io, WorktreePathOperation};
-pub(crate) use move_repair::{move_linked_worktree, repair_worktrees};
 pub use move_repair::{
-    resolve_move_destination, MoveWorktreeOptions, WorktreeRepair, WorktreeRepairKind,
+    move_linked_worktree, repair_worktrees, resolve_move_destination, MoveWorktreeOptions,
+    WorktreeRepair, WorktreeRepairKind,
 };
 pub(crate) use symlink::{
     create_worktree_symlink, create_worktree_symlink_from_blob, symlink_target_path_from_bytes,

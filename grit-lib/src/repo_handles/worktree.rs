@@ -1,5 +1,7 @@
 //! Linked worktree admin scoped to a [`Repository`](crate::repo::Repository).
 
+#![allow(deprecated)]
+
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;

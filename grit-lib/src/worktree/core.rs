@@ -94,7 +94,8 @@ pub struct WorktreeEntry {
 
 /// Shared git directory for `git_dir` (follows `commondir` for linked worktrees).
 #[must_use]
-pub(crate) fn common_git_dir(git_dir: &Path) -> PathBuf {
+#[deprecated(since = "0.6.0", note = "use repository path helpers where available")]
+pub fn common_git_dir(git_dir: &Path) -> PathBuf {
     common_git_dir_for_config(git_dir)
 }
 
@@ -146,7 +147,8 @@ pub struct BranchWorktreeCheckout {
 
 /// Administrative git directory for the worktree `repo` was opened from.
 #[must_use]
-pub(crate) fn worktree_admin_dir(repo: &Repository) -> PathBuf {
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().admin_dir()`")]
+pub fn worktree_admin_dir(repo: &Repository) -> PathBuf {
     let common = common_git_dir(repo.git_dir());
     if repo.git_dir().starts_with(common.join("worktrees")) {
         repo.git_dir().to_path_buf()
@@ -201,7 +203,11 @@ pub(crate) fn admin_dirs_match(a: &Path, b: &Path) -> bool {
 ///
 /// `exclude_admin_dir` is typically the current worktree's admin dir so a switch to the branch
 /// already checked out here is allowed.
-pub(crate) fn find_worktree_with_branch_checked_out(
+#[deprecated(
+    since = "0.6.0",
+    note = "use `repo.worktrees().find_with_branch_checked_out`"
+)]
+pub fn find_worktree_with_branch_checked_out(
     repo: &Repository,
     branch_short_name: &str,
     exclude_admin_dir: Option<&Path>,
@@ -231,7 +237,11 @@ pub(crate) fn find_worktree_with_branch_checked_out(
 /// # Errors
 ///
 /// Returns [`crate::porcelain::branch_error::BranchError::CheckedOut`] when a different worktree holds the branch.
-pub(crate) fn ensure_branch_not_checked_out_elsewhere(
+#[deprecated(
+    since = "0.6.0",
+    note = "use `repo.worktrees().ensure_branch_not_checked_out_elsewhere`"
+)]
+pub fn ensure_branch_not_checked_out_elsewhere(
     repo: &Repository,
     branch_short_name: &str,
 ) -> Result<()> {
@@ -252,7 +262,11 @@ pub(crate) fn ensure_branch_not_checked_out_elsewhere(
 /// # Errors
 ///
 /// Returns [`crate::porcelain::branch_error::BranchError::CheckedOut`] when any registered worktree holds the branch.
-pub(crate) fn ensure_branch_not_checked_out_in_any_worktree(
+#[deprecated(
+    since = "0.6.0",
+    note = "use `repo.worktrees().ensure_branch_not_checked_out_in_any_worktree`"
+)]
+pub fn ensure_branch_not_checked_out_in_any_worktree(
     repo: &Repository,
     branch_short_name: &str,
 ) -> Result<()> {
@@ -288,7 +302,8 @@ fn main_worktree_list_is_bare(repo: &Repository) -> bool {
 /// Enumerate the main and linked worktrees for `repo`.
 ///
 /// Order matches Git: main worktree first, then linked worktrees sorted by admin id.
-pub(crate) fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().list`")]
+pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
     let common = common_git_dir(repo.git_dir());
     let git_dir = repo.git_dir();
     let opened_from_linked = git_dir.starts_with(common.join("worktrees"));
@@ -478,7 +493,8 @@ pub fn allocate_worktree_admin_dir(common: &Path, wt_path: &Path) -> PathBuf {
 
 /// Copy `config.worktree` into a linked worktree admin dir, stripping keys Git omits
 /// when `extensions.worktreeConfig` is enabled (`core.bare`, `core.worktree`).
-pub(crate) fn copy_filtered_worktree_config(source_git_dir: &Path, admin_dir: &Path) -> Result<()> {
+#[deprecated(since = "0.6.0", note = "internal admin helper")]
+pub fn copy_filtered_worktree_config(source_git_dir: &Path, admin_dir: &Path) -> Result<()> {
     let src = source_git_dir.join("config.worktree");
     if !src.is_file() {
         return Ok(());
@@ -602,7 +618,8 @@ pub struct PrunedWorktreeEntry {
 ///
 /// Fails when the path is occupied, the branch is already checked out in a non-bare
 /// worktree, or checkout cannot complete.
-pub(crate) fn add_linked_worktree(
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().add`")]
+pub fn add_linked_worktree(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
 ) -> Result<WorktreeEntry> {
@@ -618,7 +635,8 @@ pub(crate) fn add_linked_worktree(
 /// # Errors
 ///
 /// Same as [`add_linked_worktree`], plus [`Error::Cancelled`](crate::error::Error::Cancelled).
-pub(crate) fn add_linked_worktree_with_cancel(
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().add_with_cancel`")]
+pub fn add_linked_worktree_with_cancel(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
     cancel: &CancelToken,
@@ -770,7 +788,8 @@ pub(crate) fn add_linked_worktree_with_cancel(
 /// # Errors
 ///
 /// Propagates I/O failures while reading or removing admin directories.
-pub(crate) fn prune_linked_worktrees(
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().prune`")]
+pub fn prune_linked_worktrees(
     repo: &Repository,
     opts: &PruneWorktreesOptions,
 ) -> Result<Vec<PrunedWorktreeEntry>> {
@@ -1369,7 +1388,8 @@ fn plan_admin_dir_for_add(
 /// Returns [`LinkedWorktreeError::NotRegistered`] for an unknown `path`,
 /// [`LinkedWorktreeError::MainWorktree`] for the main worktree, and, unless `force` is set,
 /// [`LinkedWorktreeError::Locked`] or [`LinkedWorktreeError::HasLocalChanges`].
-pub(crate) fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Result<()> {
+#[deprecated(since = "0.6.0", note = "use `repo.worktrees().remove`")]
+pub fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Result<()> {
     let entry = find_linked_worktree(repo, path, LinkedWorktreeOperation::Remove)?;
     if entry.is_locked && !force {
         return Err(LinkedWorktreeError::Locked {

@@ -15,7 +15,6 @@ mod cli_messages;
 #[cfg(test)]
 mod cli_test_stack;
 mod commands;
-mod commit_row;
 mod commits_json;
 mod conflict_style;
 mod context;

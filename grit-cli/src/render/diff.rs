@@ -12,7 +12,7 @@ use serde::Serialize;
 use unicode_width::UnicodeWidthStr;
 
 use crate::output::{outln, ChangeStatus};
-use crate::render::{list, style, table};
+use crate::render::{list, style, table, HumanRender, MarkdownRender, RenderContext};
 use crate::stdio;
 use crate::ui::{self, PathDisplayOptions};
 
@@ -48,25 +48,6 @@ impl From<LineStatJson> for LineStat {
         Self {
             insertions: stat.insertions,
             deletions: stat.deletions,
-        }
-    }
-}
-
-/// Aggregate line counts for log/show JSON when stat modes are active.
-#[allow(dead_code)]
-#[derive(Serialize, JsonSchema, Clone, Copy)]
-pub struct DiffTotalsJson {
-    pub files_changed: usize,
-    pub insertions: usize,
-    pub deletions: usize,
-}
-
-impl From<DiffTotals> for DiffTotalsJson {
-    fn from(totals: DiffTotals) -> Self {
-        Self {
-            files_changed: totals.files_changed,
-            insertions: totals.insertions,
-            deletions: totals.deletions,
         }
     }
 }
@@ -916,6 +897,131 @@ fn expand_tabs(s: &str, start_col: usize) -> std::borrow::Cow<'_, str> {
         }
     }
     std::borrow::Cow::Owned(out)
+}
+
+fn format_is_byte_list_or_stat(format: crate::diff_format::DiffFormatArgs) -> bool {
+    use grit_lib::diff::DiffDetail;
+    format.human_numstat()
+        || format.human_name_only()
+        || format.human_name_status()
+        || format.human_shortstat_only()
+        || format.human_stat_block()
+        || format.detail() == DiffDetail::Stat
+        || matches!(
+            format.detail(),
+            DiffDetail::NameOnly | DiffDetail::NameStatus
+        )
+}
+
+/// Render only the diff body (no commit header).
+pub(crate) fn render_human_diff(
+    outcome: &crate::commands::diff::DiffOutcome,
+    w: &mut dyn Write,
+    empty_message: Option<&str>,
+    color: bool,
+) -> Result<()> {
+    if outcome.body_streamed {
+        if !outcome.changed {
+            if let Some(msg) = empty_message {
+                outln!(w, "{msg}");
+            }
+        }
+        return Ok(());
+    }
+    if outcome.files.is_empty() {
+        if format_is_byte_list_or_stat(outcome.format) {
+            return Ok(());
+        }
+        if let Some(msg) = empty_message {
+            outln!(w, "{msg}");
+        }
+        return Ok(());
+    }
+    let fmt = outcome.format;
+    if fmt.human_numstat() {
+        return render_numstat(w, &outcome.files, outcome.path_display.as_ref());
+    }
+    if fmt.human_name_only() {
+        return render_name_only(w, &outcome.files, outcome.path_display.as_ref());
+    }
+    if fmt.human_name_status() {
+        return render_name_status(w, &outcome.files, outcome.path_display.as_ref());
+    }
+    if fmt.human_shortstat_only() {
+        let stat = diffstat_from_files(&outcome.files);
+        return render_shortstat(w, &stat);
+    }
+    if fmt.human_stat_block() {
+        let stat = diffstat_from_files(&outcome.files);
+        return render_stat(w, &stat, color, outcome.path_display.as_ref());
+    }
+    for file in &outcome.files {
+        render_file(w, file, color, outcome.path_display.as_ref())?;
+    }
+    Ok(())
+}
+
+pub(crate) fn render_markdown_diff(
+    outcome: &crate::commands::diff::DiffOutcome,
+    w: &mut dyn Write,
+) -> Result<()> {
+    use crate::markdown;
+    if outcome.body_streamed {
+        if !outcome.changed {
+            outln!(w, "No changes.");
+        }
+        return Ok(());
+    }
+    if outcome.files.is_empty() && format_is_byte_list_or_stat(outcome.format) {
+        return Ok(());
+    }
+    let fmt = outcome.format;
+    if fmt.human_shortstat_only() {
+        let stat = diffstat_from_files(&outcome.files);
+        outln!(w, "{}", summary_line(stat.lib().totals()));
+        return Ok(());
+    }
+    if fmt.detail() == grit_lib::diff::DiffDetail::Stat {
+        let stat = diffstat_from_files(&outcome.files);
+        return render_markdown_stat(w, &stat, outcome.path_display.as_ref());
+    }
+    if fmt.human_name_status() {
+        for file in &outcome.files {
+            let mut buf = Vec::new();
+            render_name_status(
+                &mut buf,
+                std::slice::from_ref(file),
+                outcome.path_display.as_ref(),
+            )?;
+            let line = String::from_utf8(buf).unwrap_or_default();
+            outln!(w, "- {}", markdown::format_inline_code(line.trim()));
+        }
+        return Ok(());
+    }
+    if fmt.human_name_only() {
+        for file in &outcome.files {
+            outln!(w, "- {}", markdown::format_inline_code(&file.path));
+        }
+        return Ok(());
+    }
+    markdown::print_diff_files(w, &outcome.files, outcome.path_display.as_ref())?;
+    Ok(())
+}
+
+impl HumanRender for crate::commands::diff::DiffOutcome {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> anyhow::Result<()> {
+        render_human_diff(self, w, Some("No changes."), ctx.color)
+    }
+}
+
+impl MarkdownRender for crate::commands::diff::DiffOutcome {
+    fn render_markdown(
+        &self,
+        w: &mut dyn Write,
+        _ctx: &crate::render::RenderContext,
+    ) -> anyhow::Result<()> {
+        render_markdown_diff(self, w)
+    }
 }
 
 #[cfg(test)]

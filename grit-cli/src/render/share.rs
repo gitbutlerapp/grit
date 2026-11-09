@@ -12,10 +12,7 @@ use crate::render::{HumanRender, MarkdownRender, RenderContext};
 
 #[allow(unused_imports)]
 pub use crate::render::shared_branch::IntegratedJson;
-#[allow(unused_imports)]
-pub use crate::render::shared_branch::{
-    DivergenceChangeJson, DivergenceJson, HeadRelation, ResolveOptionJson,
-};
+pub use crate::render::shared_branch::{DivergenceJson, HeadRelation, ResolveOptionJson};
 
 /// A member of a share, as `grit share` reports it.
 #[derive(Debug, Clone, Serialize, JsonSchema)]

@@ -1,8 +1,9 @@
 //! `grit reflog` — inspect and maintain reference logs.
 
+use grit_lib::error::RefError;
+
 use anyhow::{Context, Result};
 use grit_lib::error::Error;
-use grit_lib::error::RefError;
 use grit_lib::ident::Signature;
 use grit_lib::refs::reflog::{parse_reflog_ref, reflog_identity_timestamp, ReflogSelector};
 use grit_lib::repo::Repository;
@@ -11,6 +12,7 @@ use grit_lib::revwalk::AbbrevLength;
 
 use crate::context;
 use crate::output::Person;
+
 pub use crate::render::reflog::{
     ReflogDeleteOutcome, ReflogExpireOutcome, ReflogExpireRefOutcome, ReflogListEntry,
     ReflogListOutcome, ReflogRefRow, ReflogRefsListOutcome,

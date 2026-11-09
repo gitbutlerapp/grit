@@ -70,6 +70,7 @@ pub fn dispatch(
         } else {
             ExitStatus::Success
         };
-        emit_success(outcome, opts, ctx).map(|_| status)
+        emit_success(outcome, opts, ctx)?;
+        Ok(status)
     }
 }

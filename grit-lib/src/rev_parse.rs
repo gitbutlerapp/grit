@@ -72,6 +72,28 @@ pub(crate) fn show_prefix(repo: &Repository, cwd: &Path) -> String {
     out
 }
 
+/// Superproject work tree when `git_dir` lives under `.../<wt>/.git/modules/...` (nested submodule).
+#[deprecated(
+    since = "0.6.0",
+    note = "internal layout helper; may be removed in a future release"
+)]
+#[must_use]
+pub fn superproject_work_tree_from_nested_git_modules(git_dir: &Path) -> Option<PathBuf> {
+    let mut p = git_dir.to_path_buf();
+    while let Some(parent) = p.parent() {
+        if p.file_name().is_some_and(|n| n == "modules")
+            && parent.file_name().is_some_and(|n| n == ".git")
+        {
+            return parent.parent().map(PathBuf::from);
+        }
+        if parent == p {
+            break;
+        }
+        p = parent.to_path_buf();
+    }
+    None
+}
+
 /// Resolve a symbolic ref name to its full form.
 ///
 /// For `HEAD`, returns the symbolic target (e.g., `refs/heads/main`).
@@ -618,7 +640,8 @@ fn parse_branch_tracking(config: &str, branch: &str) -> Option<(String, String)>
 /// Load commit parent overrides from `.git/info/grafts` (same format as Git).
 ///
 /// Used for `^N` / `^@` / `^!` / `^-` resolution and for `rev-list` traversal.
-pub(crate) fn load_graft_parents(git_dir: &Path) -> HashMap<ObjectId, Vec<ObjectId>> {
+#[deprecated(since = "0.6.0", note = "prefer repository-scoped graft loading APIs")]
+pub fn load_graft_parents(git_dir: &Path) -> HashMap<ObjectId, Vec<ObjectId>> {
     let graft_path = crate::repo::common_git_dir_for_config(git_dir).join("info/grafts");
     let mut grafts = HashMap::new();
     let Ok(contents) = fs::read_to_string(&graft_path) else {

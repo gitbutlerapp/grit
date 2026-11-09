@@ -1,13 +1,13 @@
-//! Outcome types and renderers for `grit describe`.
+//! `grit describe` outcomes and rendering.
 
 use std::io::Write;
 
 use anyhow::Result;
-use grit_lib::revwalk::DescribedCommit;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::outln;
+use crate::render::{HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit describe`.
 #[derive(Serialize, JsonSchema)]
@@ -28,28 +28,6 @@ pub struct DescribeOutcome {
     pub abbrev: String,
     /// Human long form: `tag-distance-gabbrev` (includes `-0-` on exact tag hits).
     pub long_format: String,
-}
-
-impl From<DescribedCommit> for DescribeOutcome {
-    fn from(d: DescribedCommit) -> Self {
-        let tag_short = d
-            .tag
-            .as_str()
-            .strip_prefix("refs/tags/")
-            .unwrap_or(d.tag.as_str())
-            .to_owned();
-        let long_format = format!("{}-{}-g{}", tag_short, d.distance, d.abbrev);
-        Self {
-            tag: d.tag.as_str().to_owned(),
-            tag_short,
-            tag_oid: d.tag_oid.to_hex(),
-            peeled: d.peeled.to_hex(),
-            distance: d.distance,
-            commit: d.commit.to_hex(),
-            abbrev: d.abbrev.clone(),
-            long_format,
-        }
-    }
 }
 
 impl HumanRender for DescribeOutcome {

@@ -37,19 +37,16 @@ mod tests {
 
     #[test]
     fn skill_renders_to_string_in_human_and_markdown_modes() {
-        use crate::output::{render_to_string, HumanRender, OutputMode};
-        use time::OffsetDateTime;
+        use crate::output::render_to_string;
+        use crate::render::OutputMode as Out;
 
         let outcome = run().unwrap();
-        let ctx = crate::output::RenderContext {
-            now: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
-            mode: OutputMode::Human,
-            color: false,
-        };
-        let human =
-            render_to_string(&outcome, OutputMode::Human, &ctx).expect("human render_to_string");
-        let markdown = render_to_string(&outcome, OutputMode::Markdown, &ctx)
-            .expect("markdown render_to_string");
+        let ctx = crate::render::RenderContext::human_for_tests();
+        let human = render_to_string(&outcome, Out::Human, &ctx).expect("human render_to_string");
+        let mut ctx_md = ctx;
+        ctx_md.mode = Out::Markdown;
+        let markdown =
+            render_to_string(&outcome, Out::Markdown, &ctx_md).expect("markdown render_to_string");
         assert_eq!(human, outcome.content);
         assert_eq!(markdown, outcome.content);
         assert!(!human.is_empty());

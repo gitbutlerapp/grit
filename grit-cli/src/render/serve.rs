@@ -88,3 +88,63 @@ impl MarkdownRender for ServeUsersOutcome {
         markdown::print_serve_users_outcome(w, self)
     }
 }
+
+use crate::commands::serve_http::{ServeGrantOutcome, ServeTokenOutcome, ServeUserOutcome};
+
+impl HumanRender for ServeUserOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        let role = if self.admin { "admin user" } else { "user" };
+        outln!(w, "✓ Created {role} {} in {}", self.user, self.database);
+        if let Some(password) = &self.password {
+            outln!(w);
+            outln!(w, "  Email:    {}", self.user);
+            outln!(w, "  Password: {password}");
+            outln!(w);
+            outln!(
+                w,
+                "The password is temporary and not shown again: it must be changed at the first sign-in."
+            );
+        }
+        Ok(())
+    }
+}
+impl MarkdownRender for ServeUserOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_serve_user_outcome(w, self)
+    }
+}
+impl HumanRender for ServeTokenOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        outln!(w, "✓ Created a token for {}", self.user);
+        outln!(w);
+        outln!(w, "  Token: {}", self.token);
+        outln!(w);
+        outln!(
+            w,
+            "Save it now; it is not shown again. Use it as the password when Git asks, or run `grit auth <url> --token <token>`."
+        );
+        Ok(())
+    }
+}
+impl MarkdownRender for ServeTokenOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_serve_token_outcome(w, self)
+    }
+}
+impl HumanRender for ServeGrantOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        outln!(
+            w,
+            "✓ {} now has {} access to {}",
+            self.user,
+            self.access,
+            self.repository
+        );
+        Ok(())
+    }
+}
+impl MarkdownRender for ServeGrantOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_serve_grant_outcome(w, self)
+    }
+}

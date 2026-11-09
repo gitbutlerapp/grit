@@ -1,4 +1,4 @@
-//! Outcome types and renderers for `grit reflog`.
+//! `grit reflog` outcomes and rendering.
 
 use std::io::Write;
 
@@ -6,7 +6,9 @@ use anyhow::Result;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
+use crate::output::outln;
+use crate::output::Person;
+use crate::render::{HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit reflog` (list/show).
 #[derive(Serialize, JsonSchema)]
@@ -75,6 +77,7 @@ fn format_entry_line(ref_name: &str, entry: &ReflogListEntry, absolute_date: boo
         entry.index, entry.abbreviated_oid, when, entry.message
     )
 }
+
 /// Result of `grit reflog delete`.
 #[derive(Serialize, JsonSchema)]
 pub struct ReflogDeleteOutcome {

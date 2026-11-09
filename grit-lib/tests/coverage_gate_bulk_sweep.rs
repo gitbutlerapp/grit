@@ -26,7 +26,9 @@ use grit_lib::repo::{
     init_worktree_config, repository_format_warning, resolve_dot_git, resolve_git_directory_arg,
     validate_repo_config, validate_repo_format, worktree_config_enabled, InitOptions, Repository,
 };
-use grit_lib::revwalk::rev_list::{MissingAction, ObjectFilter, OrderingMode, RevListOptions};
+use grit_lib::revwalk::rev_list::{
+    shallow_boundary_oids, MissingAction, ObjectFilter, OrderingMode, RevListOptions,
+};
 
 use support::{commit_file, git, open_grit_repo, HistoryRepo};
 
@@ -269,7 +271,7 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
         .revwalk()
         .resolve_commits(&["main".to_owned(), "side".to_owned()])?;
     let _ = repo.revwalk().tag_targets()?;
-    let _ = repo.revwalk().shallow_boundary_oids();
+    let _ = shallow_boundary_oids(repo.git_dir());
     let filtered = RevListOptions {
         all_refs: true,
         objects: true,

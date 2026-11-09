@@ -2,7 +2,7 @@
 
 #![cfg(unix)]
 
-use grit_lib::command_runner::hooks::{HookError, RunHookOptions};
+use grit_lib::command_runner::hooks::{run_hook_opts, HookError, RunHookOptions};
 use grit_lib::command_runner::{RecordedResponse, RecordingRunner};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::FilterError;
@@ -44,18 +44,19 @@ fn system_hook_receives_stdin_on_pre_push() {
     perms.set_mode(0o755);
     fs::set_permissions(&hook, perms).expect("chmod");
 
+    let config = _repo.config().snapshot().expect("config");
     let stdin_data = b"expected hook stdin\n";
-    let result = _repo
-        .hooks()
-        .run_with_options(
-            "pre-push",
-            &[],
-            RunHookOptions {
-                stdin_data: Some(stdin_data),
-                ..RunHookOptions::default()
-            },
-        )
-        .expect("run hook");
+    let result = run_hook_opts(
+        Some(&_repo),
+        "pre-push",
+        &[],
+        config.as_ref(),
+        RunHookOptions {
+            stdin_data: Some(stdin_data),
+            ..RunHookOptions::default()
+        },
+    )
+    .expect("run hook");
     assert!(result.is_ok());
 
     let captured = fs::read(tmp.path().join(".git/hook-stdin.txt")).expect("read capture");

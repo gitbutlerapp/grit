@@ -1,5 +1,7 @@
 //! Git hooks scoped to a [`Repository`](crate::repo::Repository).
 
+#![allow(deprecated)]
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -10,13 +12,11 @@ use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::hooks::{
     resolve_hooks_dir, run_commit_hook, run_commit_hook_checked, run_hook, run_hook_in_git_dir,
-    run_hook_in_git_dir_with_cancel, run_hook_opts, run_post_checkout, run_post_merge,
-    run_post_rewrite, run_pre_push_hook, run_pre_rebase, CommitHookEnv, HookOutput, HookResult,
-    PrePushRef, RewriteKind, RunHookOptions,
+    run_post_checkout, run_post_merge, run_post_rewrite, run_pre_push_hook, run_pre_rebase,
+    CommitHookEnv, HookOutput, HookResult, PrePushRef, RewriteKind,
 };
 use crate::list_limit::Limited;
 use crate::objects::ObjectId;
-use crate::progress::CancelToken;
 use crate::repo::Repository;
 
 /// Where a traditional hook script was discovered.
@@ -93,17 +93,6 @@ impl<'repo> RepositoryHooks<'repo> {
         run_hook(self.repo, hook_name, args, stdin_data)
     }
 
-    /// Run a hook with full [`RunHookOptions`] (stdio, cwd, env, and related flags).
-    pub fn run_with_options(
-        &self,
-        hook_name: &str,
-        args: &[&str],
-        opts: RunHookOptions<'_>,
-    ) -> Result<HookResult> {
-        let config = self.repo.config().snapshot()?;
-        run_hook_opts(Some(self.repo), hook_name, args, config.as_ref(), opts)
-    }
-
     /// Run commit-style hooks with index/prefix environment (Git `run_commit_hook`).
     ///
     /// # Errors
@@ -140,18 +129,6 @@ impl<'repo> RepositoryHooks<'repo> {
         env_vars: &[(&str, &str)],
     ) -> HookResult {
         run_hook_in_git_dir(self.repo, hook_name, args, stdin_data, env_vars)
-    }
-
-    /// Like [`Self::run_in_git_dir`], but honours cancellation while the hook runs.
-    pub fn run_in_git_dir_with_cancel(
-        &self,
-        hook_name: &str,
-        args: &[&str],
-        stdin_data: Option<&[u8]>,
-        env_vars: &[(&str, &str)],
-        cancel: &CancelToken,
-    ) -> Result<HookResult> {
-        run_hook_in_git_dir_with_cancel(self.repo, hook_name, args, stdin_data, env_vars, cancel)
     }
 
     /// Run `post-checkout` after `HEAD` moved.

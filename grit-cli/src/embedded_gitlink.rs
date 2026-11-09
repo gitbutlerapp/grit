@@ -46,6 +46,16 @@ pub fn emit_embedded_gitlink_warnings(
 }
 
 /// Status note for untracked nested repositories (not yet indexed as gitlinks).
+/// Human stderr notes for untracked nested repositories on `grit status`.
+pub fn emit_embedded_repository_status_notes_human(paths: &[String]) {
+    emit_embedded_repository_status_notes(OutputMode::Human, paths);
+}
+
+/// Markdown stderr notes for untracked nested repositories on `grit status`.
+pub fn emit_embedded_repository_status_notes_markdown(paths: &[String]) {
+    emit_embedded_repository_status_notes(OutputMode::Markdown, paths);
+}
+
 pub fn emit_embedded_repository_status_notes(mode: OutputMode, paths: &[String]) {
     if paths.is_empty() {
         return;

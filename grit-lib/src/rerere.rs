@@ -1097,7 +1097,11 @@ pub(crate) fn finish_merge_rerere(repo: &Repository) -> Result<Vec<RerereEvent>>
 }
 
 /// `git rerere clear` — drop unresolved preimages tracked in `MERGE_RR`, remove `MERGE_RR`.
-pub(crate) fn rerere_clear(git_dir: &Path) -> Result<()> {
+#[deprecated(
+    since = "0.6.0",
+    note = "use rerere helpers on the repository API where available"
+)]
+pub fn rerere_clear(git_dir: &Path) -> Result<()> {
     let merge_rr = read_merge_rr(git_dir)?;
     for ent in merge_rr.values() {
         let Some(id) = &ent.id else {

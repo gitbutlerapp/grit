@@ -130,6 +130,12 @@ impl<'repo> RepositoryReflogs<'repo> {
             .collect())
     }
 
+    /// Legacy alias for [`Self::list_reflog_refs`].
+    #[deprecated(note = "use `list_reflog_refs`")]
+    pub fn refs(&self) -> Result<Vec<RefName>> {
+        self.list_reflog_refs()
+    }
+
     fn store(&self) -> &'repo dyn RefStore {
         self.repo.ref_store()
     }

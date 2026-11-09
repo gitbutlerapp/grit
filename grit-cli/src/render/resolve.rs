@@ -1,4 +1,4 @@
-//! Outcome types and renderers for `grit resolve`.
+//! `grit resolve` outcomes and rendering.
 
 use std::io::Write;
 
@@ -6,17 +6,10 @@ use anyhow::Result;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-
-use crate::markdown::{escape_table_cell, format_inline_code};
-
-/// Ref-name output mode for `grit resolve`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RefNameOutput {
-    ObjectIds,
-    AbbrevRef,
-    SymbolicFullName,
-}
+use crate::output::outln;
+use crate::render::list::format_inline_code;
+use crate::render::table::escape_table_cell;
+use crate::render::{HumanRender, MarkdownRender, RenderContext};
 
 /// One resolved spec in default oid mode (`--json` without ref-name flags).
 #[derive(Serialize, JsonSchema)]

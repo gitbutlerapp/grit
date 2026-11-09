@@ -1,7 +1,8 @@
 //! `grit blame` — show who last modified each line of a file.
 
-use anyhow::{bail, Context, Result};
 use std::collections::BTreeMap;
+
+use anyhow::{bail, Context, Result};
 use std::fmt;
 
 /// Invalid `grit blame` arguments (maps to exit code 2).
@@ -24,8 +25,26 @@ impl std::error::Error for BlameUsageError {}
 
 use crate::context::{self, relative_date_from};
 use crate::output::Person;
-use crate::render::blame::{blame_line_marker, normalize_blame_line_content, BlameDisplayLine};
+use crate::render::blame::BlameDisplayLine;
+
 pub use crate::render::blame::{BlameCommitJson, BlameHunkJson, BlameLineJson, BlameOutcome};
+
+fn blame_line_marker(boundary: bool, unblamable: bool, ignored: bool) -> char {
+    if boundary {
+        '^'
+    } else if unblamable {
+        '*'
+    } else if ignored {
+        '?'
+    } else {
+        ' '
+    }
+}
+
+/// Strip trailing line terminators from blamed line text for display and JSON.
+fn normalize_blame_line_content(content: &str) -> String {
+    content.trim_end_matches(['\n', '\r']).to_owned()
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(

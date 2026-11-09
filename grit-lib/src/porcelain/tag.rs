@@ -199,6 +199,10 @@ pub struct TagSummary {
     pub annotation: Option<TagAnnotation>,
 }
 
+/// Deprecated alias for [`TagSummary`].
+#[deprecated(note = "use TagSummary instead")]
+pub type TagInfo = TagSummary;
+
 #[cfg(feature = "serde-models")]
 impl serde::Serialize for TagAnnotation {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

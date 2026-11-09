@@ -1,20 +1,19 @@
-//! Outcome types and renderers for `grit blame`.
+//! `grit blame` outcomes and rendering.
 
+use std::collections::BTreeMap;
 use std::io::Write;
 
 use anyhow::Result;
 use schemars::JsonSchema;
 use serde::Serialize;
-
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-
-use std::collections::BTreeMap;
 use std::ops::Not;
 
-use crate::markdown;
+use crate::output::outln;
 use crate::output::Person;
+use crate::render::list::format_inline_code;
+use crate::render::table::escape_table_cell;
+use crate::render::{HumanRender, MarkdownRender, RenderContext};
 
-/// Result of `grit blame`.
 #[derive(Serialize, JsonSchema)]
 pub struct BlameOutcome {
     pub file: String,
@@ -74,13 +73,13 @@ pub struct BlameCommitJson {
 
 #[derive(Clone)]
 pub(crate) struct BlameDisplayLine {
-    pub commit_short: String,
-    pub original_line: usize,
-    pub final_line: usize,
-    pub content: String,
-    pub author_short: String,
-    pub date: String,
-    pub marker: char,
+    pub(crate) commit_short: String,
+    pub(crate) original_line: usize,
+    pub(crate) final_line: usize,
+    pub(crate) content: String,
+    pub(crate) author_short: String,
+    pub(crate) date: String,
+    pub(crate) marker: char,
 }
 
 impl HumanRender for BlameOutcome {
@@ -107,11 +106,7 @@ impl HumanRender for BlameOutcome {
 
 impl MarkdownRender for BlameOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(
-            w,
-            "## Blame: {}\n",
-            markdown::format_inline_code(&self.file)
-        );
+        outln!(w, "## Blame: {}\n", format_inline_code(&self.file));
         outln!(w, "Revision `{}`\n", self.rev);
         if self.display_lines.is_empty() {
             outln!(w, "No lines to show.\n");
@@ -124,7 +119,7 @@ impl MarkdownRender for BlameOutcome {
         outln!(w, "| ---: | :---: | --- | --- | --- | ---: | --- |");
         for line in &self.display_lines {
             let short = &line.commit_short;
-            let content = markdown::escape_table_cell(&line.content);
+            let content = escape_table_cell(&line.content);
             let mark = match line.marker {
                 ' ' => String::new(),
                 c => c.to_string(),
@@ -144,21 +139,4 @@ impl MarkdownRender for BlameOutcome {
         outln!(w);
         Ok(())
     }
-}
-
-pub(crate) fn blame_line_marker(boundary: bool, unblamable: bool, ignored: bool) -> char {
-    if boundary {
-        '^'
-    } else if unblamable {
-        '*'
-    } else if ignored {
-        '?'
-    } else {
-        ' '
-    }
-}
-
-/// Strip trailing line terminators from blamed line text for display and JSON.
-pub(crate) fn normalize_blame_line_content(content: &str) -> String {
-    content.trim_end_matches(['\n', '\r']).to_owned()
 }

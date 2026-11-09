@@ -4,6 +4,7 @@
   "description": "Result of `grit update`.",
   "properties": {
     "updated": {
+      "description": "Whether the installer ran successfully.",
       "type": "boolean"
     },
     "version": {

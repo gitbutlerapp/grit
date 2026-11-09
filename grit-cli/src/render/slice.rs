@@ -1,8 +1,9 @@
-//! JSON outcome types and rendering for `grit slice list`.
+//! JSON outcome types and rendering for `grit slice`.
 
 use std::io::Write;
 
 use anyhow::Result;
+use grit_lib::objects::short_hex;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -50,6 +51,70 @@ impl HumanRender for SliceListOutcome {
             if let Some(d) = &s.description {
                 outln!(w, "{:<width$}  {d}", "");
             }
+        }
+        Ok(())
+    }
+}
+
+/// Result of `grit slice new`, `edit` and `delete`.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct SliceChangeOutcome {
+    /// `new`, `edit` or `delete`.
+    pub action: String,
+    /// The slice's name.
+    pub name: String,
+    /// The slice as it is now; omitted once deleted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slice: Option<SliceJson>,
+    /// The target branch.
+    pub target: String,
+    /// Where it was.
+    pub previous: String,
+    /// Where it is: the server's commit changing the slices file.
+    pub head: String,
+}
+
+impl HumanRender for SliceChangeOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        let verb = match self.action.as_str() {
+            "new" => "Added",
+            "edit" => "Changed",
+            _ => "Removed",
+        };
+        let short = |s: &str| short_hex(s).to_owned();
+        if self.previous == self.head {
+            outln!(w, "· slice {} is unchanged", self.name);
+        } else {
+            outln!(
+                w,
+                "✓ {verb} slice {} on {}: {} → {}",
+                self.name,
+                self.target,
+                short(&self.previous),
+                short(&self.head)
+            );
+        }
+        if let Some(s) = &self.slice {
+            outln!(w, "  {}", s.paths.join(", "));
+        }
+        Ok(())
+    }
+}
+
+impl MarkdownRender for SliceChangeOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        outln!(w, "## Slice `{}` ({})", self.name, self.action);
+        outln!(w);
+        outln!(
+            w,
+            "- **target**: `{}` `{}` → `{}`",
+            self.target,
+            self.previous,
+            self.head
+        );
+        if let Some(s) = &self.slice {
+            let paths: Vec<String> = s.paths.iter().map(|p| format!("`{p}`")).collect();
+            outln!(w, "- **paths**: {}", paths.join(", "));
         }
         Ok(())
     }

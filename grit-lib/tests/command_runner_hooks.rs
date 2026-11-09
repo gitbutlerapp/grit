@@ -1,7 +1,7 @@
 //! RecordingRunner coverage for hooks and shell filters.
 
 use grit_lib::command_runner::hooks::{
-    CommitHookEnv, HookError, HookOutput, HookResult, HookStdio, RunHookOptions,
+    run_hook_opts, CommitHookEnv, HookError, HookOutput, HookResult, HookStdio, RunHookOptions,
 };
 use grit_lib::command_runner::{
     CommandEnvironment, CommandExit, CommandRunner, CommandSpec, CommandStdin, CommandStdio,
@@ -424,9 +424,15 @@ fn hook_environment_exports_repository_snapshot_not_process() {
     )
     .expect("open");
 
-    repo.hooks()
-        .run_with_options("pre-commit", &[], RunHookOptions::default())
-        .expect("hook");
+    let config = repo.config().snapshot().expect("config");
+    run_hook_opts(
+        Some(&repo),
+        "pre-commit",
+        &[],
+        config.as_ref(),
+        RunHookOptions::default(),
+    )
+    .expect("hook");
 
     let spec = runner.specs().into_iter().next().expect("spawn");
     assert!(

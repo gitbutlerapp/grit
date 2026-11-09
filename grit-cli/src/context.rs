@@ -81,7 +81,19 @@ pub fn wall_clock_now(env: &Environment) -> OffsetDateTime {
     grit_lib::config::environment::offset_from_epoch_and_tz(epoch, env.tz.as_deref())
 }
 
-pub use crate::commit_row::CommitSummary;
+/// A one-line summary of a commit, for shortlog-style output.
+#[derive(Debug, Clone)]
+pub struct CommitSummary {
+    pub oid: ObjectId,
+    pub subject: String,
+    /// Author display name: the identity name when present, otherwise the email
+    /// local-part (e.g. `schacon` from `schacon@gmail.com`).
+    pub author: String,
+    /// Author date as a Unix timestamp (for relative-date rendering).
+    pub timestamp: i64,
+    /// Full reverse-hex change id for display.
+    pub change_id: String,
+}
 
 /// Discover the repository containing the current directory.
 pub fn discover() -> Result<Repository> {

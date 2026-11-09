@@ -7,9 +7,9 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
+use grit_lib::command_runner::hooks::{run_hook_in_git_dir_with_cancel, HookError};
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::error::Error;
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 
@@ -53,12 +53,10 @@ fn cancelled_pre_receive_hook_terminates_sleeping_child() {
     });
 
     let stdin = b"0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 refs/heads/x\n";
-    let err = repo
-        .hooks()
-        .run_in_git_dir_with_cancel("pre-receive", &[], Some(stdin), &[], &cancel)
+    let err = run_hook_in_git_dir_with_cancel(&repo, "pre-receive", &[], Some(stdin), &[], &cancel)
         .expect_err("cancelled");
     kick.join().expect("join");
-    assert!(matches!(err, Error::Cancelled));
+    assert!(matches!(err, HookError::Cancelled));
 
     thread::sleep(Duration::from_millis(500));
     assert!(

@@ -12,6 +12,7 @@ use crate::render::{HumanRender, MarkdownRender, RenderContext};
 /// Result of `grit update`.
 #[derive(Serialize, JsonSchema)]
 pub struct UpdateOutcome {
+    /// Whether the installer ran successfully.
     pub updated: bool,
     /// The version of `grit` that ran the update (the new version is whatever the
     /// installer fetched).

@@ -8428,7 +8428,8 @@ fn all_ref_commit_tips_and_object_roots(
 /// At each boundary commit, history is cut: parents are omitted from the object store and must
 /// not be traversed for connectivity checks (`git fsck`, `pack-objects` reachability, etc.).
 #[must_use]
-pub(crate) fn shallow_boundary_oids(git_dir: &Path) -> HashSet<ObjectId> {
+#[deprecated(since = "0.6.0", note = "use `RevWalk::shallow_boundary_oids`")]
+pub fn shallow_boundary_oids(git_dir: &Path) -> HashSet<ObjectId> {
     crate::shallow::load_shallow_boundaries(git_dir)
 }
 

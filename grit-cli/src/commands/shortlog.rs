@@ -1,14 +1,13 @@
 //! `grit shortlog` — the commits on this branch that aren't on the target yet.
 
 use crate::commands::diff::{render_log_commit_diff, DiffOutcome};
-use crate::commands::log::{
-    load_commits_with_format_for_oids, render_commit_diffs_markdown, LogCommit,
-};
+use crate::commands::log::{load_commits_with_format_for_oids, LogCommit};
 use crate::context::{self, CommitSummary};
 use crate::diff_format::{DiffFormatArgs, ShortlogDiffFormatArgs};
 use crate::diff_render::{render_stat, use_color};
 use crate::markdown;
 use crate::output::RenderContext;
+use crate::render::log::render_commit_diffs_markdown;
 use crate::render::shortlog::ShortlogHumanCommitLine;
 pub use crate::render::shortlog::ShortlogOutcome;
 use crate::ui;

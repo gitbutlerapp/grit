@@ -50,11 +50,7 @@ mod tests {
     use crate::output::{HumanRender, RenderContext};
 
     fn sample_ctx() -> RenderContext {
-        RenderContext {
-            now: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
-            mode: crate::output::OutputMode::Human,
-            color: false,
-        }
+        crate::render::RenderContext::human_for_tests()
     }
 
     #[test]

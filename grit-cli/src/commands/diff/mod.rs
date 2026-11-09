@@ -21,7 +21,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::diff_format::DiffFormatArgs;
-use crate::output::{HumanRender, MarkdownRender, RenderContext};
+use crate::output::RenderContext;
 use crate::pathspec_args::TrailingPathspecArgs;
 use crate::ui::PathDisplayOptions;
 
@@ -147,22 +147,6 @@ impl DiffOutcome {
         empty_message: Option<&str>,
         color: bool,
     ) -> anyhow::Result<()> {
-        run::render_human_diff(self, w, empty_message, color)
-    }
-
-    pub(crate) fn render_markdown_diff(&self, w: &mut dyn Write) -> anyhow::Result<()> {
-        run::render_markdown_diff(self, w)
-    }
-}
-
-impl HumanRender for DiffOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> anyhow::Result<()> {
-        self.render_human_diff(w, Some("No changes."), ctx.color)
-    }
-}
-
-impl MarkdownRender for DiffOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> anyhow::Result<()> {
-        self.render_markdown_diff(w)
+        crate::render::diff::render_human_diff(self, w, empty_message, color)
     }
 }

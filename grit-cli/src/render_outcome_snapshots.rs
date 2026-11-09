@@ -498,7 +498,7 @@ fn serve_render() {
 
 /// carol amended the same commit as you did, overlapping in src/rpc.rs.
 fn sample_divergence() -> crate::commands::share::DivergenceJson {
-    use crate::commands::share::{DivergenceChangeJson, DivergenceJson};
+    use crate::render::shared_branch::{DivergenceChangeJson, DivergenceJson};
     DivergenceJson {
         scenario: "amended_both_conflicting".to_owned(),
         summary: "You and carol both amended \"Add the history RPC\", and the edits overlap in src/rpc.rs."

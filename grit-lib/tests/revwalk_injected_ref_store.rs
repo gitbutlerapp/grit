@@ -12,7 +12,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::StageOptions;
-use grit_lib::porcelain::branch::{create_branch, BranchCreateOptions};
+use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;

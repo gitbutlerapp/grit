@@ -1,4 +1,4 @@
-//! Outcome types and renderers for `grit cat`.
+//! `grit cat` outcomes and rendering.
 
 use std::io::Write;
 
@@ -6,8 +6,10 @@ use anyhow::Result;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::markdown::{escape_table_cell, format_inline_code, print_fenced_text};
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::outln;
+use crate::render::list::{format_inline_code, print_fenced_text};
+use crate::render::table::escape_table_cell;
+use crate::render::{HumanRender, MarkdownRender, RenderContext};
 
 /// Blob payload in JSON (`--json` contract).
 #[derive(Serialize, JsonSchema)]

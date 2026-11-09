@@ -23,7 +23,7 @@ use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
 use crate::repo::Repository;
 use crate::rev_parse::{
-    peel_to_commit_for_merge_base, resolve_upstream_symbolic_name,
+    load_graft_parents, peel_to_commit_for_merge_base, resolve_upstream_symbolic_name,
     try_peel_to_commit_for_merge_base, upstream_suffix_info,
 };
 use crate::shallow::load_shallow_boundaries;
@@ -3253,9 +3253,7 @@ impl<'r> CommitGraphCache<'r> {
             None
         };
         let shallow_boundaries = oid_hash_set_from(&load_shallow_boundaries(repo.git_dir()));
-        let graft_parents = crate::rev_parse::load_graft_parents(repo.git_dir())
-            .into_iter()
-            .collect();
+        let graft_parents = load_graft_parents(repo.git_dir()).into_iter().collect();
         Self {
             repo,
             closures: oid_hash_map(),

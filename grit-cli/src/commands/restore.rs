@@ -6,46 +6,13 @@ use grit_lib::porcelain::restore::{ConflictSide, RestoreOptions, RestoreOutcome,
 use grit_lib::revwalk::ResolveOptions;
 
 use crate::conflict_style::{self, ConflictStyleArg};
-use schemars::JsonSchema;
-use serde::Serialize;
 use std::collections::BTreeMap;
-use std::io::Write;
 
 use crate::context;
-use crate::markdown::format_inline_code;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::PathspecArgs;
 use crate::ui::PathDisplayOptions;
 
-/// CLI result (mirrors [`RestoreOutcome`] or [`RestoreHunksOutcome`]).
-#[derive(Serialize, JsonSchema, Clone)]
-pub struct RestoreCliOutcome {
-    pub restored: Vec<String>,
-    pub removed: Vec<String>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub restored_hunks: BTreeMap<String, Vec<String>>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub restored_lines: BTreeMap<String, Vec<String>>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub dry_run: bool,
-    #[serde(skip)]
-    #[schemars(skip)]
-    path_display: Option<PathDisplayOptions>,
-}
-
-impl RestoreCliOutcome {
-    fn with_path_display(mut self, repo: &grit_lib::repo::Repository) -> Self {
-        self.path_display = PathDisplayOptions::from_repo(repo).ok();
-        self
-    }
-
-    fn format_path(&self, path: &str) -> String {
-        self.path_display
-            .as_ref()
-            .map(|opts| opts.format_path_for_human(path))
-            .unwrap_or_else(|| path.to_owned())
-    }
-}
+pub use crate::render::restore::RestoreCliOutcome;
 
 impl From<RestoreOutcome> for RestoreCliOutcome {
     fn from(value: RestoreOutcome) -> Self {
@@ -78,48 +45,6 @@ impl From<RestoreHunksOutcome> for RestoreCliOutcome {
     }
 }
 
-impl HumanRender for RestoreCliOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let prefix = if self.dry_run {
-            "Would restore"
-        } else {
-            "Restored"
-        };
-        for path in &self.restored {
-            outln!(w, "{prefix} {}", self.format_path(path));
-        }
-        for path in &self.removed {
-            outln!(w, "Removed {}", self.format_path(path));
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for RestoreCliOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "## Restore");
-        if self.restored.is_empty() && self.removed.is_empty() {
-            outln!(w, "\nNo paths changed.");
-            return Ok(());
-        }
-        if !self.restored.is_empty() {
-            outln!(w, "\n### Restored");
-            for path in &self.restored {
-                let shown = format_inline_code(&self.format_path(path));
-                outln!(w, "- {shown}");
-            }
-        }
-        if !self.removed.is_empty() {
-            outln!(w, "\n### Removed");
-            for path in &self.removed {
-                let shown = format_inline_code(&self.format_path(path));
-                outln!(w, "- {shown}");
-            }
-        }
-        Ok(())
-    }
-}
-
 /// Exit code for `--hunks` / `--lines` failures.
 pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     if err.downcast_ref::<HunkSelectError>().is_some() {
@@ -147,7 +72,8 @@ pub fn run_hunks(
         .index()
         .restore_hunks(&selection, &pathspecs, staged, worktree, dry_run)
         .map_err(super::add::map_hunk_error)?;
-    Ok(RestoreCliOutcome::from(outcome).with_path_display(&repo))
+    Ok(RestoreCliOutcome::from(outcome)
+        .with_path_display(PathDisplayOptions::from_repo(&repo).ok()))
 }
 
 /// Run `grit restore` with the given flags and path arguments.
@@ -217,7 +143,8 @@ pub fn run(
         .checkout()
         .restore(&opts, &mut grit_lib::progress::NullProgress, &cancel)
         .map_err(crate::json_error::map_lib_error)?;
-    Ok(RestoreCliOutcome::from(outcome).with_path_display(&repo))
+    Ok(RestoreCliOutcome::from(outcome)
+        .with_path_display(PathDisplayOptions::from_repo(&repo).ok()))
 }
 
 /// Dispatch parsed CLI args for `Restore`.
