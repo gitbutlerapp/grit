@@ -2,6 +2,7 @@
 
 pub mod diff;
 pub mod list;
+pub mod share;
 pub mod stream;
 pub mod style;
 pub mod table;
