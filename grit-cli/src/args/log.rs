@@ -1,6 +1,5 @@
 //! Clap arguments for `grit log`.
 
-use super::LogGroupByArg;
 use crate::branch_list_args;
 use crate::clap_value_args;
 use crate::diff_args;
@@ -12,7 +11,12 @@ use crate::message_input;
 use crate::pathspec_args;
 use crate::quiet_args;
 use crate::rev_select;
-use clap::Args;
+use clap::{Args, ValueEnum};
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(crate) enum LogGroupByArg {
+    Author,
+}
 
 /// Show recent commits reachable from HEAD.
 #[derive(Debug, Args)]

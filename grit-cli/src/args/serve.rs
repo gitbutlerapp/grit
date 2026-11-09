@@ -1,6 +1,5 @@
 //! Clap arguments for `grit serve`.
 
-use super::ServeAction;
 use crate::branch_list_args;
 use crate::clap_value_args;
 use crate::diff_args;
@@ -12,7 +11,39 @@ use crate::message_input;
 use crate::pathspec_args;
 use crate::quiet_args;
 use crate::rev_select;
-use clap::Args;
+use clap::{Args, Subcommand};
+
+/// Subcommands of `grit serve`.
+#[derive(Debug, Subcommand)]
+pub(crate) enum ServeAction {
+    /// Add a user. Prompts for their password, or generates a temporary one.
+    #[command(name = "add-user")]
+    AddUser {
+        /// The user's email address, which is also their user name.
+        email: String,
+        /// Make the user an admin, with read and write access to every repository.
+        #[arg(long)]
+        admin: bool,
+    },
+    /// Create an access token for a user, for scripts and CI that cannot sign in in a browser.
+    Token {
+        /// The user's email address.
+        email: String,
+    },
+    /// Give a user read access to a repository (or write access with `--write`).
+    Grant {
+        /// The email address of the user to give access to.
+        user: String,
+        /// The repository name, with or without `.git`.
+        repository: String,
+        /// Allow pushing as well as fetching.
+        #[arg(long)]
+        write: bool,
+    },
+    /// List users, their tokens and their repository access.
+    Users,
+}
+
 
 /// Serve repositories over HTTP, with a web view where people sign in with email and password.
 #[derive(Debug, Args)]

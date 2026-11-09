@@ -1,6 +1,5 @@
 //! Clap arguments for `grit reflog`.
 
-use super::ReflogAction;
 use crate::branch_list_args;
 use crate::clap_value_args;
 use crate::diff_args;
@@ -12,7 +11,40 @@ use crate::message_input;
 use crate::pathspec_args;
 use crate::quiet_args;
 use crate::rev_select;
-use clap::Args;
+use clap::{Args, Subcommand};
+
+/// Subcommands of `grit reflog`.
+#[derive(Debug, Subcommand)]
+pub(crate) enum ReflogAction {
+    /// Remove one or more reflog entries (`ref@{n}`).
+    Delete {
+        /// Reflog selectors (`main@{1}`, `HEAD@{0}`, …).
+        #[arg(required = true, value_name = "REF@{N}")]
+        specs: Vec<String>,
+    },
+    /// Drop reflog entries older than configured or explicit cutoffs.
+    Expire {
+        /// Process every ref under `refs/`, not only refs that already have log files.
+        #[arg(long)]
+        all: bool,
+        /// Expire reachable entries older than this (Git `--expire` syntax).
+        #[arg(long = "expire", value_name = "DATE")]
+        expire: Option<String>,
+        /// Expire unreachable entries older than this.
+        #[arg(long = "expire-unreachable", value_name = "DATE")]
+        expire_unreachable: Option<String>,
+        /// Report what would be pruned without rewriting reflog files.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+    /// List refs that currently have a reflog.
+    List {
+        /// Return at most this many ref names (sorted).
+        #[arg(short = 'n', long = "limit", value_name = "N")]
+        limit: Option<usize>,
+    },
+}
+
 
 /// Show, delete, or expire reflog entries.
 #[derive(Debug, Args)]
