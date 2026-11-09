@@ -2338,16 +2338,62 @@ def external_accessor_files(accessor: str) -> int:
     return rg_file_count(rf"\.{re.escape(accessor)}\(", CONSUMER_PATHS)
 
 
+ACCESSOR_VALUE_TYPE_MARKERS = (
+    "objects::ObjectId",
+    "offset_date_time::OffsetDateTime",
+    "parallel::ThreadPolicy",
+    "repo::DiscoveryInfo",
+    "command_runner::hooks::HookStdio",
+    "config::environment::Environment",
+)
+
+
+def unwrap_result_ok_type(return_type: str) -> str:
+    """Inner ok-type of ``Result<…>`` wrappers in ``public-api.txt`` spellings."""
+    text = return_type.strip()
+    marker = "Result<"
+    idx = text.find(marker)
+    if idx < 0:
+        return text
+    start = idx + len(marker)
+    depth = 0
+    for pos in range(start, len(text)):
+        ch = text[pos]
+        if ch == "<":
+            depth += 1
+            continue
+        if ch == ">":
+            if depth == 0:
+                return text[start:pos].strip()
+            depth -= 1
+            continue
+        if ch == "," and depth == 0:
+            return text[start:pos].strip()
+    return text[start:].strip()
+
+
 def is_repository_handle_accessor(return_type: str) -> bool:
-    """True when ``Repository::accessor(&self)`` returns a domain handle, not a scalar/path."""
+    """True when ``Repository::accessor(&self)`` returns a domain handle (not a value getter)."""
     lowered = return_type.strip()
-    if lowered in {"bool", "i64", "u64", "usize"}:
+    ok_ty = unwrap_result_ok_type(lowered)
+
+    if ok_ty in {"()", "unit"} or ok_ty.endswith("Result<()>") or "Result<()>" in lowered:
         return False
-    if "path::Path" in lowered or lowered.startswith("&str"):
+    if ok_ty in {"bool", "i64", "u64", "usize"} or lowered.endswith("-> bool"):
         return False
-    if lowered.startswith("core::option::Option<&str"):
+    if "path::Path" in lowered or ok_ty.startswith("&str") or "Option<&str>" in lowered:
         return False
-    if "::" in lowered or "grit_lib::" in lowered:
+    if any(marker in ok_ty for marker in ACCESSOR_VALUE_TYPE_MARKERS):
+        return False
+    if ok_ty.startswith("alloc::rcs::arc::Arc") or "&dyn " in ok_ty or ok_ty.startswith("&dyn"):
+        return False
+    if ok_ty.startswith("&grit_lib::prelude::Odb"):
+        return False
+
+    # Borrowed repo handles (``Type<'_>``) are the supported accessor shape.
+    if "<'_>" in ok_ty and "grit_lib::" in ok_ty:
+        return True
+    if "grit_lib::diagnostics::DiagnosticsHandle" in ok_ty:
         return True
     return False
 
@@ -2355,15 +2401,26 @@ def is_repository_handle_accessor(return_type: str) -> bool:
 def shorten_rust_type(display: str) -> str:
     """Stable short label for accessor return types in audit tables."""
     display = display.strip()
-    if "grit_lib::" in display:
-        idx = display.index("grit_lib::")
-        return display[idx:]
-    return display
+    ok_ty = unwrap_result_ok_type(display)
+    idx = ok_ty.find("grit_lib::")
+    if idx < 0:
+        return ok_ty
+    rest = ok_ty[idx:]
+    depth = 0
+    for i, ch in enumerate(rest):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+            if depth == 0:
+                return rest[: i + 1]
+    match = re.match(r"grit_lib::[a-zA-Z0-9_:]+", rest)
+    return match.group(0) if match else rest
 
 
 def repository_accessors(public_api_lines: list[str]) -> list[tuple[str, str]]:
-    """``(accessor, return_type)`` for public ``Repository`` borrows that return handles."""
-    accessors: list[tuple[str, str]] = []
+    """Unique ``(accessor, return_type)`` for public ``Repository`` methods that return handles."""
+    by_name: dict[str, str] = {}
     for line in public_api_lines:
         match = REPOSITORY_ACCESSOR_RE.match(line)
         if not match:
@@ -2371,8 +2428,13 @@ def repository_accessors(public_api_lines: list[str]) -> list[tuple[str, str]]:
         name, ret = match.group(1), match.group(2)
         if not is_repository_handle_accessor(ret):
             continue
-        accessors.append((name, shorten_rust_type(ret)))
-    return accessors
+        short = shorten_rust_type(ret)
+        existing = by_name.get(name)
+        if existing is None:
+            by_name[name] = short
+        elif existing != short:
+            by_name[name] = short if len(short) <= len(existing) else existing
+    return sorted(by_name.items(), key=lambda item: item[0])
 
 
 def count_type_mentions(public_api_lines: list[str], type_fragment: str) -> int:
@@ -2571,13 +2633,14 @@ def build_parser() -> argparse.ArgumentParser:
         "audit",
         help="render API audit Markdown (stdout), or check/write grit-lib/API.md markers",
     )
-    audit.add_argument(
+    audit_mode = audit.add_mutually_exclusive_group()
+    audit_mode.add_argument(
         "--check",
         dest="audit_check",
         action="store_true",
         help="fail if API.md audit markers drift from generator output",
     )
-    audit.add_argument(
+    audit_mode.add_argument(
         "--write",
         dest="audit_write",
         action="store_true",

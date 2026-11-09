@@ -2084,18 +2084,53 @@ class AuditRenderTests(unittest.TestCase):
     def test_audit_check_detects_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             api_md = Path(tmp) / "API.md"
+            api_txt = Path(tmp) / "public-api.txt"
+            api_txt.write_text("x\n", encoding="utf-8")
             api_md.write_text(
                 f"## Audit\n\n{ar.AUDIT_BEGIN}\nstale\n{ar.AUDIT_END}\n",
                 encoding="utf-8",
             )
-            snap = ar.RatchetSnapshot(metrics={key: ar.MetricResult(0) for key in ar.METRIC_KEYS})
-            fresh = ar.render_audit_markdown(
-                snapshot=snap,
-                public_api_lines=["x"],
-                public_api_file_lines=1,
-                meta={},
-            )
-            self.assertNotEqual(ar.read_audit_marked_section(path=api_md), fresh)
+            with (
+                mock.patch.object(ar, "parse_pins", return_value={"nightly_date": "x"}),
+                mock.patch.object(ar, "ensure_inputs"),
+                mock.patch.object(ar, "load_rustdoc", return_value={"index": {}, "paths": {}}),
+                mock.patch.object(ar, "PUBLIC_API_TXT", api_txt),
+                mock.patch.object(ar, "API_MD_PATH", api_md),
+            ):
+                self.assertEqual(ar.main(["audit", "--check"]), 1)
+
+    def test_repository_accessors_dedupes_and_excludes_value_getters(self) -> None:
+        handle = "pub fn grit_lib::repo::Repository::checkout(&self) -> grit_lib::repo_handles::Checkout<'_>"
+        duplicate = handle
+        value_lines = [
+            "pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime",
+            "pub fn grit_lib::repo::Repository::thread_policy(&self) -> grit_lib::parallel::ThreadPolicy",
+            (
+                "pub fn grit_lib::repo::Repository::head_commit(&self) -> "
+                "grit_lib::error::Result<grit_lib::objects::ObjectId>"
+            ),
+            (
+                "pub fn grit_lib::repo::Repository::change_id_generator(&self) -> "
+                "alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>"
+            ),
+        ]
+        lines = [handle, duplicate, *value_lines]
+        accessors = ar.repository_accessors(lines)
+        names = [name for name, _ty in accessors]
+        self.assertEqual(names.count("checkout"), 1)
+        self.assertEqual(len(names), len(set(names)))
+        self.assertNotIn("identity_now", names)
+        self.assertNotIn("thread_policy", names)
+        self.assertNotIn("head_commit", names)
+        self.assertNotIn("change_id_generator", names)
+        self.assertEqual(accessors[0][1], "grit_lib::repo_handles::Checkout<'_>")
+
+    def test_shorten_rust_type_balanced_generics(self) -> None:
+        raw = "alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>"
+        self.assertEqual(
+            ar.shorten_rust_type(raw),
+            "grit_lib::change_id::ChangeIdGenerator",
+        )
 
     def test_audit_output_is_deterministic(self) -> None:
         snap = _report_snapshot()
