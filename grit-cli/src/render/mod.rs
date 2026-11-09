@@ -20,6 +20,7 @@ pub mod remote;
 pub mod revert;
 pub mod shared_branch;
 pub mod shortlog;
+pub mod status;
 pub mod stream;
 pub mod style;
 pub mod switch;

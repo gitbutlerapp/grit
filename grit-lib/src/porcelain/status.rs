@@ -21,7 +21,9 @@ use std::fs::{self, DirEntry, ReadDir};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::branch_tracking::{BranchStanding, StatusHeader};
+use crate::branch_tracking::{
+    status_integration_hint, BranchStanding, StandingOptions, StatusHeader, StatusIntegrationHint,
+};
 use crate::config::{parse_git_config_maybe_bool, ConfigSet};
 use crate::diff::{
     diff_index_to_worktree_with_options, is_unregistered_embedded_git_repo, DiffEntry,
@@ -369,6 +371,102 @@ pub enum StatusAction {
         /// Short name of the upstream, or of the target when no upstream is configured.
         from: String,
     },
+}
+
+/// Options for [`assemble_status_summary`].
+#[derive(Debug, Clone, Copy)]
+pub struct StatusSummaryOptions {
+    /// How far ahead to walk and whether to compute ahead/behind counts.
+    pub standing: StandingOptions,
+}
+
+impl StatusSummaryOptions {
+    /// Set how far ahead to walk and whether to compute ahead/behind counts.
+    #[must_use]
+    pub fn standing(mut self, standing: StandingOptions) -> Self {
+        self.standing = standing;
+        self
+    }
+}
+
+impl Default for StatusSummaryOptions {
+    fn default() -> Self {
+        Self {
+            standing: StandingOptions {
+                newest_ahead_limit: 10,
+                counts: true,
+            },
+        }
+    }
+}
+
+/// Typed dashboard outcome: worktree model plus branch standing and follow-up guidance.
+///
+/// Call [`assemble_status_summary`] after [`Repository::status`] returns a [`StatusModel`].
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct StatusSummary {
+    /// Index and worktree scan (staged, unstaged, conflicts, operation state).
+    pub model: StatusModel,
+    /// Target/upstream comparison for the current branch.
+    pub standing: BranchStanding,
+    /// Resolved header line (branch standing vs in-progress operation).
+    pub header: StatusHeader,
+    /// Suggested next steps for the user or agent.
+    pub guidance: StatusGuidance,
+    /// Unmerged paths grouped by conflict kind.
+    pub conflict_groups: Vec<ConflictGroup>,
+    /// When the branch should merge or pull to integrate, which ref to use.
+    pub integration_hint: Option<StatusIntegrationHint>,
+    /// Paused operations detected in the repository (merge, rebase, …).
+    pub in_progress: Vec<crate::state::InProgressOperation>,
+}
+
+/// Derive dashboard fields from a [`StatusModel`] without re-scanning the worktree.
+///
+/// # Examples
+///
+/// ```
+/// use grit_lib::progress::{CancelToken, NullProgress};
+/// use grit_lib::porcelain::status::{assemble_status_summary, StatusOptions, StatusSummaryOptions};
+/// use grit_lib::repo::{InitOptions, Repository};
+///
+/// # fn main() -> grit_lib::error::Result<()> {
+/// let dir = tempfile::tempdir()?;
+/// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+/// let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never())?;
+/// let summary = assemble_status_summary(&repo, model, StatusSummaryOptions::default())?;
+/// assert!(summary.conflict_groups.is_empty());
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// Propagates [`BranchStanding::compute`] failures (invalid refs, object load errors).
+pub fn assemble_status_summary(
+    repo: &Repository,
+    model: StatusModel,
+    options: StatusSummaryOptions,
+) -> Result<StatusSummary> {
+    let in_progress = repo.operation().in_progress();
+    let standing = BranchStanding::compute(repo, &model.head, options.standing)?;
+    let header = StatusHeader::resolve(&standing, &model.state, &in_progress);
+    let conflict_groups = model.conflict_groups();
+    let guidance = model.guidance(&standing);
+    let integration_hint = standing
+        .branch
+        .as_deref()
+        .and_then(|branch| status_integration_hint(&standing, Some((repo, branch))));
+    Ok(StatusSummary {
+        model,
+        standing,
+        header,
+        guidance,
+        conflict_groups,
+        integration_hint,
+        in_progress,
+    })
 }
 
 impl StatusModel {

@@ -7,8 +7,8 @@ use grit_lib::gitbutler::{GitButlerWorkspace, WorkspaceStanding};
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::status::{
-    short_status_lines, ConflictGroup, IgnoredMode, InterruptedRewrite, StatusAction,
-    StatusGuidance, UntrackedMode,
+    assemble_status_summary, short_status_lines, ConflictGroup, IgnoredMode, InterruptedRewrite,
+    StatusAction, StatusGuidance, StatusSummaryOptions, UntrackedMode,
 };
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -17,7 +17,7 @@ use grit_lib::refs::branch_tracking::{
     StatusHeader, StatusIntegrationAction, StatusIntegrationHint, TrackedComparison,
 };
 use grit_lib::revwalk::AbbrevLength;
-use grit_lib::state::{HeadState, InProgressOperation, NextStep};
+use grit_lib::state::{HeadState, NextStep};
 use grit_lib::status::StatusOptions;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -251,7 +251,7 @@ fn conflict_json(c: &Conflict) -> ConflictJson {
 
 fn operation_json(op: &grit_lib::state::Operation) -> OperationJson {
     OperationJson {
-        kind: in_progress_label(op.kind),
+        kind: op.kind.status_json_kind().to_owned(),
         next_steps: op.next_steps.iter().filter_map(NextStep::command).collect(),
         alternatives: op
             .alternatives
@@ -1018,19 +1018,7 @@ impl StatusOutcome {
 }
 
 fn kind_label(kind: &ConflictKind) -> &'static str {
-    match kind {
-        ConflictKind::BothModified => "both modified",
-        ConflictKind::BothAdded => "both added",
-        ConflictKind::BothDeleted => "both deleted",
-        ConflictKind::AddedByUs => "added by us",
-        ConflictKind::AddedByThem => "added by them",
-        ConflictKind::DeletedByUs => "deleted by us",
-        ConflictKind::DeletedByThem => "deleted by them",
-        ConflictKind::RenameRename(_) => "renamed differently",
-        ConflictKind::DirectoryRenameMoved(_) => "moved with its directory",
-        ConflictKind::DirectoryRenameSplit => "directory split up",
-        ConflictKind::DirectoryRenameBlocked(_) => "directory move blocked",
-    }
+    crate::render::status::conflict_kind_heading(kind.phrase())
 }
 
 /// CLI spelling for [`UntrackedMode`] (`grit status --untracked`).
@@ -1113,22 +1101,25 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         .run(&status_opts, &mut NullProgress, &CancelToken::never())
         .context("could not compute status")?;
 
-    let operations = repo.operation().in_progress();
-    let merging = model.state.merge_in_progress;
-    let conflicts: Vec<ConflictJson> = model.conflict_details.iter().map(conflict_json).collect();
-    let conflict_groups = model.conflict_groups();
-    let operation = model.operation.as_ref().map(operation_json);
-
-    let standing = BranchStanding::compute(
+    let summary = assemble_status_summary(
         &repo,
-        &model.head,
-        StandingOptions {
-            newest_ahead_limit: SHORTLOG_LIMIT,
-            counts: show_counts,
+        model,
+        StatusSummaryOptions {
+            standing: StandingOptions {
+                newest_ahead_limit: SHORTLOG_LIMIT,
+                counts: show_counts,
+            },
         },
     )
-    .context("could not resolve branch standing")?;
-    let header = StatusHeader::resolve(&standing, &model.state, &operations);
+    .context("could not assemble status summary")?;
+    let model = summary.model;
+    let operations = summary.in_progress;
+    let merging = model.state.merge_in_progress;
+    let conflicts: Vec<ConflictJson> = model.conflict_details.iter().map(conflict_json).collect();
+    let conflict_groups = summary.conflict_groups;
+    let operation = model.operation.as_ref().map(operation_json);
+    let standing = summary.standing;
+    let header = summary.header;
     let branch = match &header {
         StatusHeader::RebaseInProgress { branch, .. } => branch.clone(),
         _ => standing.branch.clone(),
@@ -1175,7 +1166,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         .map(|e| change_json_with_worktree(e, work_tree))
         .collect();
     let clean = model.is_clean();
-    let guidance = model.guidance(&standing);
+    let guidance = summary.guidance;
 
     let path_display = PathDisplayOptions::from_repo(&repo).ok();
     let short_lines = if args.short {
@@ -1186,9 +1177,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     let ignored_json = args.ignored.then(|| model.ignored.clone());
 
     let standing_for_outcome = standing.clone();
-    let integration_hint = standing.branch.as_deref().and_then(|branch| {
-        grit_lib::refs::branch_tracking::status_integration_hint(&standing, Some((&repo, branch)))
-    });
+    let integration_hint = summary.integration_hint;
     let interrupted_rewrite_lock_holder = model
         .interrupted_rewrite
         .as_ref()
@@ -1226,7 +1215,10 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         embedded_repositories: model.embedded_repositories,
         clean,
         merging,
-        in_progress: operations.into_iter().map(in_progress_label).collect(),
+        in_progress: operations
+            .into_iter()
+            .map(|op| op.status_json_kind().to_owned())
+            .collect(),
         conflicts,
         operation,
         ignored: ignored_json,
@@ -1309,19 +1301,6 @@ fn format_short_lines(
             })
         })
         .collect()
-}
-
-fn in_progress_label(op: InProgressOperation) -> String {
-    match op {
-        InProgressOperation::Merge => "merge".to_owned(),
-        InProgressOperation::RebaseInteractive => "rebase-interactive".to_owned(),
-        InProgressOperation::Rebase => "rebase".to_owned(),
-        InProgressOperation::CherryPick => "cherry-pick".to_owned(),
-        InProgressOperation::Revert => "revert".to_owned(),
-        InProgressOperation::Bisect => "bisect".to_owned(),
-        InProgressOperation::Am => "am".to_owned(),
-        InProgressOperation::RewriteApply => "rewrite-apply".to_owned(),
-    }
 }
 
 fn tracked_to_upstream_json(tracked: &TrackedComparison) -> StatusUpstreamJson {

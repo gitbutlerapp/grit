@@ -112,7 +112,53 @@ pub struct RenamedPaths {
     pub theirs_path: String,
 }
 
+/// Conflict category for grouped status output; the CLI maps each variant to its words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ConflictKindPhrase {
+    /// Both sides changed the same path.
+    BothModified,
+    /// Both sides added the same path.
+    BothAdded,
+    /// Both sides removed the same path.
+    BothDeleted,
+    /// Only our side added the path.
+    AddedByUs,
+    /// Only their side added the path.
+    AddedByThem,
+    /// Only our side deleted the path.
+    DeletedByUs,
+    /// Only their side deleted the path.
+    DeletedByThem,
+    /// Both sides renamed the same base file differently.
+    RenameRename,
+    /// A directory rename moved an add from the other side.
+    DirectoryRenameMoved,
+    /// A directory split blocked merging a renamed directory.
+    DirectoryRenameSplit,
+    /// A destination path blocked a directory rename.
+    DirectoryRenameBlocked,
+}
+
 impl ConflictKind {
+    /// Group conflicts by [`ConflictKindPhrase`] for dashboard output.
+    #[must_use]
+    pub fn phrase(&self) -> ConflictKindPhrase {
+        match self {
+            Self::BothModified => ConflictKindPhrase::BothModified,
+            Self::BothAdded => ConflictKindPhrase::BothAdded,
+            Self::BothDeleted => ConflictKindPhrase::BothDeleted,
+            Self::AddedByUs => ConflictKindPhrase::AddedByUs,
+            Self::AddedByThem => ConflictKindPhrase::AddedByThem,
+            Self::DeletedByUs => ConflictKindPhrase::DeletedByUs,
+            Self::DeletedByThem => ConflictKindPhrase::DeletedByThem,
+            Self::RenameRename(_) => ConflictKindPhrase::RenameRename,
+            Self::DirectoryRenameMoved(_) => ConflictKindPhrase::DirectoryRenameMoved,
+            Self::DirectoryRenameSplit => ConflictKindPhrase::DirectoryRenameSplit,
+            Self::DirectoryRenameBlocked(_) => ConflictKindPhrase::DirectoryRenameBlocked,
+        }
+    }
+
     /// Stable snake_case name for JSON and scripting.
     ///
     /// One of `both_modified`, `both_added`, `both_deleted`, `added_by_us`, `added_by_them`,

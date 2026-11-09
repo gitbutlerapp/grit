@@ -100,3 +100,4 @@ required-features = ["full-tests"]
 [[test]]
 name = "vm_hygiene_live"
 path = "tests/vm_hygiene_live.rs"
+required-features = ["full-tests"]

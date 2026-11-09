@@ -251,10 +251,7 @@ impl HttpClient for Cut {
         self.inner.post(url, ct, accept, body, gp)
     }
 
-    fn send(
-        &self,
-        request: &HttpRequest<'_>,
-    ) -> grit_lib::error::Result<HttpResponse> {
+    fn send(&self, request: &HttpRequest<'_>) -> grit_lib::error::Result<HttpResponse> {
         let request = request
             .clone()
             .header("Authorization", format!("Bearer {}", self.token));

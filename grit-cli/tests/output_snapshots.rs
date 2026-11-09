@@ -58,7 +58,11 @@ fn prepare_status_ignored(fixture: &CliFixture) {
 
 #[test]
 fn snapshot_status_ignored() {
-    snapshot_fresh("status_ignored", &["status", "--ignored"], prepare_status_ignored);
+    snapshot_fresh(
+        "status_ignored",
+        &["status", "--ignored"],
+        prepare_status_ignored,
+    );
 }
 
 fn prepare_status_upstream(fixture: &CliFixture) {
@@ -943,7 +947,11 @@ fn prepare_stash_list_multiple(fixture: &CliFixture) {
 
 #[test]
 fn snapshot_stash_list_multiple() {
-    snapshot_fresh("stash_list_multiple", &["stash", "list"], prepare_stash_list_multiple);
+    snapshot_fresh(
+        "stash_list_multiple",
+        &["stash", "list"],
+        prepare_stash_list_multiple,
+    );
 }
 
 const LINKED_WT: &str = "linked-wt";

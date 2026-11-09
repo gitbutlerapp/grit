@@ -2066,6 +2066,8 @@ mod status_path_buffer_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "status_scan_memory.rs"]
 mod status_scan_memory;
+#[path = "status_summary_coverage.rs"]
+mod status_summary_coverage;
 #[cfg(feature = "full-tests")]
 #[path = "status_symlink_ancestor_git_compat.rs"]
 mod status_symlink_ancestor_git_compat;
