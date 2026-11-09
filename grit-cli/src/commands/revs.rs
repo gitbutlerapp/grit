@@ -36,12 +36,17 @@ impl RevsPresentationOptions {
 
     #[must_use]
     pub fn list_extent(self) -> CommitExtent {
-        RevListPresentationOptions.commit_extent_for_full_json(self.json_output())
+        RevListPresentationOptions::default().commit_extent_for_full_json(self.json_output())
     }
 
     #[must_use]
     pub fn markdown_output(self) -> bool {
         self.format == LogStdoutFormat::Markdown
+    }
+
+    #[must_use]
+    pub fn human_output(self) -> bool {
+        self.format == LogStdoutFormat::Human
     }
 }
 
@@ -152,45 +157,31 @@ pub fn stream_listing(
         if batch.oids.is_empty() {
             break;
         }
-        match presentation.format {
-            LogStdoutFormat::Human => {
-                let summaries = load_batch_summaries(&repo, &mut batch)?;
-                let rows: Vec<RevsStreamRow> = summaries
-                    .into_iter()
-                    .map(|row| RevsStreamRow {
-                        oid_hex: row.oid.to_hex(),
-                        subject: row.subject,
-                    })
-                    .collect();
-                let mut buf = Vec::new();
+        if presentation.json_output() {
+            let commits = repo.odb().with_pack_read_context(|| {
+                loader.load_reusing(&repo, &batch.oids, now, batch.walked)
+            })?;
+            for commit in commits {
+                let row = RevsCommit::new(commit, RevsMarks::default());
+                write_json_array_element(w, &mut first_json, &row)?;
+            }
+        } else {
+            let summaries = load_batch_summaries(&repo, &mut batch)?;
+            let rows: Vec<RevsStreamRow> = summaries
+                .into_iter()
+                .map(|row| RevsStreamRow {
+                    oid_hex: row.oid.to_hex(),
+                    subject: row.subject,
+                })
+                .collect();
+            let mut buf = Vec::new();
+            if presentation.human_output() {
                 encode_revs_stream_human_batch(&rows, &mut buf)?;
-                if write_all_or_broken_pipe(w, &buf)? {
-                    return Ok(());
-                }
-            }
-            LogStdoutFormat::Markdown => {
-                let summaries = load_batch_summaries(&repo, &mut batch)?;
-                let rows: Vec<RevsStreamRow> = summaries
-                    .into_iter()
-                    .map(|row| RevsStreamRow {
-                        oid_hex: row.oid.to_hex(),
-                        subject: row.subject,
-                    })
-                    .collect();
-                let mut buf = Vec::new();
+            } else {
                 encode_revs_stream_markdown_batch(&rows, &mut buf)?;
-                if write_all_or_broken_pipe(w, &buf)? {
-                    return Ok(());
-                }
             }
-            LogStdoutFormat::Json => {
-                let commits = repo.odb().with_pack_read_context(|| {
-                    loader.load_reusing(&repo, &batch.oids, now, batch.walked)
-                })?;
-                for commit in commits {
-                    let row = RevsCommit::new(commit, RevsMarks::default());
-                    write_json_array_element(w, &mut first_json, &row)?;
-                }
+            if write_all_or_broken_pipe(w, &buf)? {
+                return Ok(());
             }
         }
         emitted += batch.oids.len();
@@ -211,14 +202,11 @@ fn write_empty_streaming_document(
     w: &mut dyn Write,
     presentation: RevsPresentationOptions,
 ) -> Result<()> {
-    match presentation.format {
-        LogStdoutFormat::Json => {
-            begin_commits_json_document(w)?;
-            finish_commits_json_document(w, false, ",\"count\":null")?;
-        }
-        LogStdoutFormat::Human | LogStdoutFormat::Markdown => {
-            write_revs_empty_stream(w, presentation.format)?;
-        }
+    if presentation.json_output() {
+        begin_commits_json_document(w)?;
+        finish_commits_json_document(w, false, ",\"count\":null")?;
+    } else {
+        write_revs_empty_stream(w, presentation.format)?;
     }
     Ok(())
 }

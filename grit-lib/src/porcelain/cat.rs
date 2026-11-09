@@ -4,9 +4,11 @@
 pub const JSON_INLINE_BLOB_MAX: u64 = 1024 * 1024;
 
 /// stdout format for porcelain cat (mirrors CLI modes without depending on the binary).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CatStdoutFormat {
     /// Human-readable terminal output.
+    #[default]
     Human,
     /// Machine-readable JSON on stdout.
     Json,
@@ -15,13 +17,24 @@ pub enum CatStdoutFormat {
 }
 
 /// Presentation inputs for [`CatBlobDisplayPlan::for_blob`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CatPresentationOptions {
     /// Selected stdout format.
     pub format: CatStdoutFormat,
 }
 
+impl CatPresentationOptions {
+    /// Set [`Self::format`].
+    #[must_use]
+    pub fn with_format(mut self, format: CatStdoutFormat) -> Self {
+        self.format = format;
+        self
+    }
+}
+
 /// How a blob's bytes are shown for a given size and output format.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CatBlobDisposition {
     /// Stream raw bytes to stdout in human mode (large blob).

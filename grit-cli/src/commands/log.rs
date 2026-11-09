@@ -1465,10 +1465,7 @@ impl LogStream {
             None,
             format,
             display,
-            LogPresentationOptions {
-                format: LogStdoutFormat::Human,
-                group_count_only: false,
-            },
+            LogPresentationOptions::default().with_format(LogStdoutFormat::Human),
             LogPage::Batches(FIRST_BATCH),
         )?;
         Ok(Self {
@@ -1515,10 +1512,7 @@ impl LogStream {
                 None,
                 false,
                 self.display,
-                LogPresentationOptions {
-                    format: LogStdoutFormat::Human,
-                    group_count_only: false,
-                },
+                LogPresentationOptions::default().with_format(LogStdoutFormat::Human),
                 None,
                 LogGraphBuild::default(),
             )?;

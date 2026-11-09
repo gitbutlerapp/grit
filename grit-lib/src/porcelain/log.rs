@@ -695,9 +695,11 @@ pub fn current_branch_decoration_index(
 }
 
 /// stdout format for log-style porcelain (independent of the CLI crate).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LogStdoutFormat {
     /// Human-readable terminal output.
+    #[default]
     Human,
     /// Machine-readable JSON on stdout.
     Json,
@@ -706,7 +708,8 @@ pub enum LogStdoutFormat {
 }
 
 /// Log presentation at the CLI boundary (format + `--count` / group-by flags).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LogPresentationOptions {
     /// Selected stdout format.
     pub format: LogStdoutFormat,
@@ -715,6 +718,20 @@ pub struct LogPresentationOptions {
 }
 
 impl LogPresentationOptions {
+    /// Set [`Self::format`].
+    #[must_use]
+    pub fn with_format(mut self, format: LogStdoutFormat) -> Self {
+        self.format = format;
+        self
+    }
+
+    /// Set [`Self::group_count_only`].
+    #[must_use]
+    pub fn with_group_count_only(mut self, group_count_only: bool) -> Self {
+        self.group_count_only = group_count_only;
+        self
+    }
+
     /// Policy for whether group-by paths include commit JSON rows.
     #[must_use]
     pub fn json_policy(self) -> LogCommitJsonPolicy {

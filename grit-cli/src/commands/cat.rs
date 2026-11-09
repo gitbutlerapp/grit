@@ -7,8 +7,7 @@ use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use grit_lib::objects::{Object, ObjectKind};
 use grit_lib::porcelain::cat::{
-    CatBlobDisplayPlan, CatBlobDisposition, CatPresentationOptions, CatStdoutFormat,
-    JSON_INLINE_BLOB_MAX,
+    CatBlobDisplayPlan, CatPresentationOptions, CatStdoutFormat, JSON_INLINE_BLOB_MAX,
 };
 use grit_lib::revwalk::object_inspect::{
     format_tree_entries_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
@@ -75,18 +74,16 @@ fn run_blob(
         })
     };
 
-    let (content, human_raw) = match plan.disposition {
-        CatBlobDisposition::StreamHumanStdout => (omitted_blob(), None),
-        CatBlobDisposition::OmitInline => (omitted_blob(), None),
-        CatBlobDisposition::Inline => {
-            let data = repo
-                .read_object_raw_for_display(&oid)
-                .with_context(|| format!("read object {}", oid.to_hex()))?
-                .data;
-            let json = blob_payload_json(&data, size);
-            let raw = matches!(presentation.format, CatStdoutFormat::Human).then_some(data);
-            (CatContentJson::Blob(json), raw)
-        }
+    let (content, human_raw) = if plan.streams_on_human_stdout() || plan.omits_json_inline() {
+        (omitted_blob(), None)
+    } else {
+        let data = repo
+            .read_object_raw_for_display(&oid)
+            .with_context(|| format!("read object {}", oid.to_hex()))?
+            .data;
+        let json = blob_payload_json(&data, size);
+        let raw = (presentation.format == CatStdoutFormat::Human).then_some(data);
+        (CatContentJson::Blob(json), raw)
     };
 
     Ok(CatOutcome {

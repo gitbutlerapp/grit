@@ -231,13 +231,9 @@ pub(crate) fn encode_revs_stream_markdown_batch(
 
 /// Empty streamed listing for each stdout format (JSON envelope is opened elsewhere).
 pub(crate) fn write_revs_empty_stream(w: &mut dyn Write, format: LogStdoutFormat) -> Result<()> {
-    match format {
-        LogStdoutFormat::Json => {}
-        LogStdoutFormat::Markdown => {
-            write_revs_stream_markdown_header(w)?;
-            outln!(w, "_No commits._");
-        }
-        LogStdoutFormat::Human => {}
+    if format == LogStdoutFormat::Markdown {
+        write_revs_stream_markdown_header(w)?;
+        outln!(w, "_No commits._");
     }
     Ok(())
 }

@@ -10,13 +10,12 @@ use crate::exit_status::ExitStatus;
 use crate::output::OutputMode;
 
 pub(crate) fn cat_presentation_from_mode(mode: OutputMode) -> CatPresentationOptions {
-    CatPresentationOptions {
-        format: match mode {
-            OutputMode::Human => CatStdoutFormat::Human,
-            OutputMode::Json => CatStdoutFormat::Json,
-            OutputMode::Markdown => CatStdoutFormat::Markdown,
-        },
-    }
+    let format = match mode {
+        OutputMode::Human => CatStdoutFormat::Human,
+        OutputMode::Json => CatStdoutFormat::Json,
+        OutputMode::Markdown => CatStdoutFormat::Markdown,
+    };
+    CatPresentationOptions::default().with_format(format)
 }
 
 /// Dispatch parsed CLI args for `Cat`.

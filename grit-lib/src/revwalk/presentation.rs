@@ -3,6 +3,7 @@
 use crate::revwalk::CommitExtent;
 
 /// How `grit revs` (and similar listers) retain commit bytes while walking.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RevListPresentationOptions;
 

@@ -19,14 +19,14 @@ pub(crate) fn log_presentation(
     mode: OutputMode,
     display: LogDisplayOptions,
 ) -> LogPresentationOptions {
-    LogPresentationOptions {
-        format: match mode {
-            OutputMode::Human => LogStdoutFormat::Human,
-            OutputMode::Json => LogStdoutFormat::Json,
-            OutputMode::Markdown => LogStdoutFormat::Markdown,
-        },
-        group_count_only: display.group_count_only,
-    }
+    let format = match mode {
+        OutputMode::Human => LogStdoutFormat::Human,
+        OutputMode::Json => LogStdoutFormat::Json,
+        OutputMode::Markdown => LogStdoutFormat::Markdown,
+    };
+    LogPresentationOptions::default()
+        .with_format(format)
+        .with_group_count_only(display.group_count_only)
 }
 
 /// Dispatch parsed CLI args for `Log`.
