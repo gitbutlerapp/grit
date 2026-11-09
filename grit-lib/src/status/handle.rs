@@ -5,12 +5,13 @@ use crate::error::Result;
 use crate::index::Index;
 use crate::pathspec::Pathspec;
 use crate::porcelain::status::{
-    assemble_status_summary, collect_untracked_and_ignored_inner, status as status_impl,
+    collect_untracked_and_ignored_inner, status as status_impl,
     status_diff_entry_matches_pathspec_typed, status_options_from_config, IgnoredMode, StatusModel,
-    StatusOptions, StatusSummary, StatusSummaryOptions, UntrackedCollectMeta, UntrackedScan,
+    StatusOptions, UntrackedCollectMeta, UntrackedScan,
 };
 use crate::progress::{CancelToken, ProgressSink};
 use crate::repo::Repository;
+use crate::status::summary::{assemble_status_summary, StatusSummary, StatusSummaryOptions};
 use crate::worktree_rules::WorktreeRules;
 
 /// Whether untracked collection may refresh and read the index UNTR extension.

@@ -16476,43 +16476,6 @@ impl core::marker::Unpin for grit_lib::porcelain::status::StatusOptions
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusOptions
-#[non_exhaustive] pub struct grit_lib::porcelain::status::StatusSummary
-pub grit_lib::porcelain::status::StatusSummary::conflict_groups: alloc::vec::Vec<grit_lib::porcelain::status::ConflictGroup>
-pub grit_lib::porcelain::status::StatusSummary::guidance: grit_lib::porcelain::status::StatusGuidance
-pub grit_lib::porcelain::status::StatusSummary::header: grit_lib::refs::branch_tracking::StatusHeader
-pub grit_lib::porcelain::status::StatusSummary::in_progress: alloc::vec::Vec<grit_lib::state::InProgressOperation>
-pub grit_lib::porcelain::status::StatusSummary::integration_hint: core::option::Option<grit_lib::refs::branch_tracking::StatusIntegrationHint>
-pub grit_lib::porcelain::status::StatusSummary::model: grit_lib::porcelain::status::StatusModel
-pub grit_lib::porcelain::status::StatusSummary::standing: grit_lib::refs::branch_tracking::BranchStanding
-impl core::clone::Clone for grit_lib::porcelain::status::StatusSummary
-pub fn grit_lib::porcelain::status::StatusSummary::clone(&self) -> Self
-impl core::fmt::Debug for grit_lib::porcelain::status::StatusSummary
-pub fn grit_lib::porcelain::status::StatusSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::porcelain::status::StatusSummary
-impl core::marker::Send for grit_lib::porcelain::status::StatusSummary
-impl core::marker::Sync for grit_lib::porcelain::status::StatusSummary
-impl core::marker::Unpin for grit_lib::porcelain::status::StatusSummary
-impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusSummary
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusSummary
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusSummary
-#[non_exhaustive] pub struct grit_lib::porcelain::status::StatusSummaryOptions
-pub grit_lib::porcelain::status::StatusSummaryOptions::standing: grit_lib::refs::branch_tracking::StandingOptions
-impl grit_lib::porcelain::status::StatusSummaryOptions
-pub fn grit_lib::porcelain::status::StatusSummaryOptions::standing(self, grit_lib::refs::branch_tracking::StandingOptions) -> Self
-impl core::clone::Clone for grit_lib::porcelain::status::StatusSummaryOptions
-pub fn grit_lib::porcelain::status::StatusSummaryOptions::clone(&self) -> Self
-impl core::default::Default for grit_lib::porcelain::status::StatusSummaryOptions
-pub fn grit_lib::porcelain::status::StatusSummaryOptions::default() -> Self
-impl core::fmt::Debug for grit_lib::porcelain::status::StatusSummaryOptions
-pub fn grit_lib::porcelain::status::StatusSummaryOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::Freeze for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::Send for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::Sync for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::Unpin for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusSummaryOptions
 pub struct grit_lib::porcelain::status::UntrackedCollectMeta
 pub grit_lib::porcelain::status::UntrackedCollectMeta::clean_collapsed_unit: std::collections::hash::set::HashSet<alloc::string::String>
 pub grit_lib::porcelain::status::UntrackedCollectMeta::untracked_cache_refreshed: bool
@@ -30418,7 +30381,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::Re
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::RenameDetection
 pub struct grit_lib::status::Status<'repo>
 impl<'repo> grit_lib::status::Status<'repo>
-pub fn grit_lib::status::Status<'repo>::assemble_summary(&self, grit_lib::porcelain::status::StatusModel, grit_lib::porcelain::status::StatusSummaryOptions) -> grit_lib::error::Result<grit_lib::porcelain::status::StatusSummary>
+pub fn grit_lib::status::Status<'repo>::assemble_summary(&self, grit_lib::porcelain::status::StatusModel, grit_lib::status::StatusSummaryOptions) -> grit_lib::error::Result<grit_lib::status::StatusSummary>
 pub fn grit_lib::status::Status<'repo>::diff_entry_matches_pathspec(&self, &grit_lib::diff::DiffEntry, &grit_lib::worktree::pathspec::Pathspec) -> grit_lib::error::Result<bool>
 pub fn grit_lib::status::Status<'repo>::expand_untracked_for_staging(&self, &mut grit_lib::index::Index, alloc::vec::Vec<alloc::string::String>, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::status::Status<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
@@ -30501,35 +30464,35 @@ pub grit_lib::status::StatusSummary::in_progress: alloc::vec::Vec<grit_lib::stat
 pub grit_lib::status::StatusSummary::integration_hint: core::option::Option<grit_lib::refs::branch_tracking::StatusIntegrationHint>
 pub grit_lib::status::StatusSummary::model: grit_lib::porcelain::status::StatusModel
 pub grit_lib::status::StatusSummary::standing: grit_lib::refs::branch_tracking::BranchStanding
-impl core::clone::Clone for grit_lib::porcelain::status::StatusSummary
-pub fn grit_lib::porcelain::status::StatusSummary::clone(&self) -> Self
-impl core::fmt::Debug for grit_lib::porcelain::status::StatusSummary
-pub fn grit_lib::porcelain::status::StatusSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::porcelain::status::StatusSummary
-impl core::marker::Send for grit_lib::porcelain::status::StatusSummary
-impl core::marker::Sync for grit_lib::porcelain::status::StatusSummary
-impl core::marker::Unpin for grit_lib::porcelain::status::StatusSummary
-impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusSummary
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusSummary
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusSummary
+impl core::clone::Clone for grit_lib::status::StatusSummary
+pub fn grit_lib::status::StatusSummary::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::status::StatusSummary
+pub fn grit_lib::status::StatusSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::status::StatusSummary
+impl core::marker::Send for grit_lib::status::StatusSummary
+impl core::marker::Sync for grit_lib::status::StatusSummary
+impl core::marker::Unpin for grit_lib::status::StatusSummary
+impl core::marker::UnsafeUnpin for grit_lib::status::StatusSummary
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::status::StatusSummary
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::status::StatusSummary
 #[non_exhaustive] pub struct grit_lib::status::StatusSummaryOptions
 pub grit_lib::status::StatusSummaryOptions::standing: grit_lib::refs::branch_tracking::StandingOptions
-impl grit_lib::porcelain::status::StatusSummaryOptions
-pub fn grit_lib::porcelain::status::StatusSummaryOptions::standing(self, grit_lib::refs::branch_tracking::StandingOptions) -> Self
-impl core::clone::Clone for grit_lib::porcelain::status::StatusSummaryOptions
-pub fn grit_lib::porcelain::status::StatusSummaryOptions::clone(&self) -> Self
-impl core::default::Default for grit_lib::porcelain::status::StatusSummaryOptions
-pub fn grit_lib::porcelain::status::StatusSummaryOptions::default() -> Self
-impl core::fmt::Debug for grit_lib::porcelain::status::StatusSummaryOptions
-pub fn grit_lib::porcelain::status::StatusSummaryOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::Freeze for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::Send for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::Sync for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::Unpin for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusSummaryOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusSummaryOptions
+impl grit_lib::status::StatusSummaryOptions
+pub fn grit_lib::status::StatusSummaryOptions::standing(self, grit_lib::refs::branch_tracking::StandingOptions) -> Self
+impl core::clone::Clone for grit_lib::status::StatusSummaryOptions
+pub fn grit_lib::status::StatusSummaryOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::status::StatusSummaryOptions
+pub fn grit_lib::status::StatusSummaryOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::status::StatusSummaryOptions
+pub fn grit_lib::status::StatusSummaryOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::status::StatusSummaryOptions
+impl core::marker::Freeze for grit_lib::status::StatusSummaryOptions
+impl core::marker::Send for grit_lib::status::StatusSummaryOptions
+impl core::marker::Sync for grit_lib::status::StatusSummaryOptions
+impl core::marker::Unpin for grit_lib::status::StatusSummaryOptions
+impl core::marker::UnsafeUnpin for grit_lib::status::StatusSummaryOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::status::StatusSummaryOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::status::StatusSummaryOptions
 pub struct grit_lib::status::UntrackedCollectMeta
 pub grit_lib::status::UntrackedCollectMeta::clean_collapsed_unit: std::collections::hash::set::HashSet<alloc::string::String>
 pub grit_lib::status::UntrackedCollectMeta::untracked_cache_refreshed: bool

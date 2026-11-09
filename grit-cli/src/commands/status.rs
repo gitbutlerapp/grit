@@ -8,7 +8,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::status::{
     short_status_lines, ConflictGroup, IgnoredMode, InterruptedRewrite, StatusAction,
-    StatusGuidance, StatusSummaryOptions, UntrackedMode,
+    StatusGuidance, UntrackedMode,
 };
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -19,6 +19,7 @@ use grit_lib::refs::branch_tracking::{
 use grit_lib::revwalk::AbbrevLength;
 use grit_lib::state::{HeadState, InProgressOperation, NextStep};
 use grit_lib::status::StatusOptions;
+use grit_lib::status::StatusSummaryOptions;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
