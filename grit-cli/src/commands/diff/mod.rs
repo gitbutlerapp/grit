@@ -5,6 +5,8 @@ pub mod dispatch;
 mod run;
 mod stream;
 
+pub use dispatch::dispatch;
+
 pub(crate) use run::resolve_commit_diff_pathspecs;
 pub use run::{
     cli_outcome_from_lib, diff_for_commit, emit_commits_log_patch_text, emit_show_log_patch_text,

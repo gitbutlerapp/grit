@@ -1,10 +1,44 @@
 //! `grit diff` dispatch from the CLI driver (output mode, patch streaming, exit status).
 
+use crate::args::DiffArgs;
+use crate::dispatch::CommandEnv;
 use crate::exit_status::ExitStatus;
 use crate::json_error;
 use crate::output::{self, OutputMode, OutputOptions, RenderContext};
 
 use super::{run, DiffRunContext, DiffRunOptions, PatchBodies};
+
+/// Parse [`DiffArgs`] and run `grit diff`.
+pub fn dispatch(
+    args: DiffArgs,
+    env: CommandEnv<'_>,
+) -> anyhow::Result<ExitStatus> {
+    let CommandEnv { opts, ctx, .. } = env;
+    let DiffArgs {
+        no_index,
+        staged,
+        unstaged,
+        against,
+        exit_code,
+        quiet,
+        commits,
+        pathspecs,
+        format,
+        line_format,
+    } = args;
+    let run_opts = DiffRunOptions {
+        no_index,
+        staged,
+        unstaged,
+        against,
+        commits,
+        pathspecs,
+        format,
+        line_format,
+        quiet,
+    };
+    execute(no_index, exit_code, quiet, run_opts, opts, ctx)
+}
 
 /// Run `grit diff` and map the result to process exit status.
 pub fn execute(
@@ -46,7 +80,10 @@ pub fn execute(
             } else {
                 ExitStatus::Success
             };
-            if !quiet && !patch_text && !(outcome.body_streamed && opts.mode == OutputMode::Json) {
+            if !quiet
+                && !patch_text
+                && !(outcome.body_streamed && opts.mode == OutputMode::Json)
+            {
                 output::emit(outcome, opts, ctx)?;
             }
             Ok(status)
