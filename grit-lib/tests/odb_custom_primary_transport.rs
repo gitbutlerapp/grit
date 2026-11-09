@@ -351,23 +351,22 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
         ],
     );
     let opened = grit_lib::bundle::Bundle::open(&incremental).expect("open bundle");
-    let disconnected = opened.verify(&repo).expect("verify");
-    assert!(disconnected.missing_prerequisites.is_empty());
-    assert!(disconnected.prerequisites_not_connected);
-    assert_eq!(
-        disconnected.into_result().unwrap_err(),
-        BundleError::PrerequisitesNotConnected
+    let report = opened.verify(&repo).expect("verify");
+    assert!(report.missing_prerequisites.is_empty());
+    assert!(
+        report.is_ok(),
+        "prerequisite objects in the store should verify even without local refs: {report:?}"
     );
-    assert!(matches!(
-        repo.bundles()
-            .unbundle(
-                &incremental,
-                &mut grit_lib::progress::NullProgress,
-                grit_lib::progress::CancelToken::never_ref()
-            )
-            .expect_err("unbundle without connected prerequisite"),
-        BundleError::PrerequisitesNotConnected
-    ));
+    let new_tip = rev_parse(upstream.path(), "main");
+    repo.bundles()
+        .unbundle(
+            &incremental,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
+        .expect("unbundle incremental without local refs connecting prerequisite");
+    assert!(store.contains(&new_tip).expect("contains"));
+    assert!(repo.odb().read(&new_tip).is_ok());
 
     grit_lib::refs::update_direct_ref_on_store(
         repo.ref_store(),
@@ -378,19 +377,6 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
     .expect("connect prerequisite to local ref");
     let connected = opened.verify(&repo).expect("verify after ref");
     assert!(connected.is_ok(), "{connected:?}");
-
-    let new_tip = rev_parse(upstream.path(), "main");
-    let outcome = repo
-        .bundles()
-        .unbundle(
-            &incremental,
-            &mut grit_lib::progress::NullProgress,
-            grit_lib::progress::CancelToken::never_ref(),
-        )
-        .expect("unbundle incremental");
-    assert_eq!(outcome.refs[0].oid, new_tip);
-    assert!(store.contains(&new_tip).expect("contains"));
-    assert!(repo.odb().read(&new_tip).is_ok());
 }
 
 #[test]

@@ -436,6 +436,74 @@ fn verify_prerequisites_not_connected_when_dangling() {
         report.into_result().unwrap_err(),
         BundleError::PrerequisitesNotConnected
     );
+
+    let git_verify = Command::new("git")
+        .current_dir(consumer.path())
+        .args(["bundle", "verify", inc.to_str().unwrap()])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git bundle verify");
+    assert!(
+        !git_verify.status.success(),
+        "git should reject a lone commit prerequisite without its tree: {}",
+        String::from_utf8_lossy(&git_verify.stderr)
+    );
+}
+
+#[test]
+fn incremental_bundle_after_refless_full_unbundle() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    let (c1, c2) = init_repo_with_two_commits(src);
+    std::fs::write(src.join("c.txt"), b"three\n").unwrap();
+    git_ok(src, &["add", "c.txt"]);
+    git_ok(src, &["commit", "-q", "-m", "third"]);
+    let c3 = rev_parse(src, "HEAD");
+    git_ok(src, &["tag", "-a", "v1.1", "-m", "v1.1"]);
+    let full = src.join("full.bundle");
+    git_ok(src, &["bundle", "create", full.to_str().unwrap(), "--all"]);
+    let inc = src.join("incr.bundle");
+    git_ok(
+        src,
+        &[
+            "bundle",
+            "create",
+            inc.to_str().unwrap(),
+            &format!("{c1}..{}", c3.to_hex()),
+            "main",
+        ],
+    );
+
+    let empty = tempfile::tempdir().expect("empty");
+    git_ok(empty.path(), &["init", "-q", "."]);
+    let repo = grit_repo(empty.path());
+    Bundle::open(&full)
+        .expect("open full")
+        .unbundle(
+            &repo,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
+        .expect("unbundle full");
+
+    git_ok(empty.path(), &["bundle", "verify", inc.to_str().unwrap()]);
+    let inc_bundle = Bundle::open(&inc).expect("open incr");
+    let report = inc_bundle.verify(&repo).expect("verify incr");
+    assert!(
+        report.is_ok(),
+        "dangling prerequisite graph should verify: {report:?}"
+    );
+    inc_bundle
+        .unbundle(
+            &repo,
+            &mut grit_lib::progress::NullProgress,
+            grit_lib::progress::CancelToken::never_ref(),
+        )
+        .expect("unbundle incr");
+    assert!(repo.odb().read(&c3).is_ok(), "new tip readable after incr");
+    git_ok(empty.path(), &["bundle", "verify", inc.to_str().unwrap()]);
+    git_ok(empty.path(), &["bundle", "unbundle", inc.to_str().unwrap()]);
 }
 
 #[test]

@@ -24,7 +24,7 @@ When the repository's objects are already packed, `create` copies the existing d
 
 `create` and `unbundle` honor Ctrl+C (and `SIGTERM` / `SIGHUP` on Unix) with `error: operation cancelled` and exit code **130**. A failed or cancelled `create` leaves an existing destination file unchanged and removes only the temporary `*.bundle.part` file; `unbundle` rolls back before refs are updated.
 
-`verify` checks the pack checksum and, when run inside a repository, confirms prerequisite commits are present and connected to your history.
+`verify` checks the pack checksum and, when run inside a repository, confirms prerequisite commits are present and their exclusive history is readable. Prerequisites already reachable from your refs satisfy this immediately; otherwise an unreferenced but complete object graph in the repository is enough (for example after `unbundle` of a full bundle leaves dangling prerequisites).
 
 `list` prints the refs recorded in the bundle header.
 

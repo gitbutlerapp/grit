@@ -106,7 +106,8 @@ pub struct UnbundleOutcome {
 pub struct BundleVerifyReport {
     /// Prerequisites missing from the object database.
     pub missing_prerequisites: Vec<(ObjectId, Option<String>)>,
-    /// Prerequisites exist as objects but are not reachable from local refs.
+    /// Prerequisites exist as objects but their exclusive history is incomplete in the ODB (not
+    /// ref-reachable and not a fully readable dangling graph).
     pub prerequisites_not_connected: bool,
 }
 
@@ -173,7 +174,8 @@ pub enum BundleError {
         /// Required commits from the bundle header (oid and optional subject).
         commits: Vec<(ObjectId, Option<String>)>,
     },
-    /// Prerequisite objects exist but are not connected to local refs.
+    /// Prerequisite objects exist locally but are not ref-reachable and their exclusive history is
+    /// missing commits, trees, or blobs.
     #[error("prerequisite commits are not connected to local refs")]
     PrerequisitesNotConnected,
     /// No ref tips were listed in the header.
