@@ -2011,6 +2011,8 @@ mod stash_apply_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "stash_apply_outcome_git_compat.rs"]
 mod stash_apply_outcome_git_compat;
+#[path = "stash_apply_tracked_deletion_issue_2570.rs"]
+mod stash_apply_tracked_deletion_issue_2570;
 #[cfg(feature = "full-tests")]
 #[path = "stash_diff_stat_git_compat.rs"]
 mod stash_diff_stat_git_compat;

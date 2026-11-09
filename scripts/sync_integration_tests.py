@@ -69,6 +69,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "repository_conformance_memory"),
     ("grit-lib", "repository_conformance_parity"),
     ("grit-lib", "stash_pop_untracked_rollback"),
+    ("grit-lib", "stash_apply_tracked_deletion_issue_2570"),
     ("grit-lib", "one_form_handles_git_compat"),
     ("grit-lib", "text_diff_options"),
 }

@@ -2893,9 +2893,6 @@ fn apply_stash_commit(
                 })?;
             } else {
                 checkout_journal.spool_remove(&rel)?;
-                fs::remove_file(&file_path).map_err(|source| {
-                    stash_worktree_io(&rel, WorktreePathOperation::Remove, source)
-                })?;
             }
             if let Some(parent) = file_path.parent() {
                 remove_empty_dirs(parent, work_tree, repo.environment());
@@ -2929,13 +2926,6 @@ fn apply_stash_commit(
                                     );
                                     checkout_journal.spool_remove(&rel_s)?;
                                 }
-                                fs::remove_file(&cur).map_err(|source| {
-                                    stash_worktree_io(
-                                        &storage_string(path),
-                                        WorktreePathOperation::Remove,
-                                        source,
-                                    )
-                                })?;
                             }
                         }
                     }
