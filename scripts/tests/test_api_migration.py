@@ -59,6 +59,18 @@ class ApiMigrationTests(unittest.TestCase):
             am.replacement_exists("grit_lib::diff::Diff::blame", paths),
         )
 
+    def test_annotated_grit_lib_path_is_validated(self) -> None:
+        paths = {"grit_lib::merge::Merge::abort"}
+        bogus = "grit_lib::definitely_missing::Nope (annotation)"
+        self.assertFalse(am.replacement_exists(bogus, paths))
+        bad = am.invalid_replacements(
+            {"grit_lib::old::item": bogus},
+            paths,
+        )
+        self.assertEqual(bad, [("grit_lib::old::item", bogus)])
+        good = "grit_lib::merge::Merge::abort (rerere state)"
+        self.assertTrue(am.replacement_exists(good, paths))
+
     def test_invalid_replacement_rejected(self) -> None:
         paths = {"grit_lib::repo_handles::Checkout::checkout"}
         self.assertFalse(

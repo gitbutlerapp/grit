@@ -236,9 +236,14 @@ def is_prose_replacement(replacement: str) -> bool:
         return True
     if not replacement.startswith("grit_lib::"):
         return True
-    if " (" in replacement:
-        return True
     return False
+
+
+def replacement_api_path(replacement: str) -> str:
+    """Grit-lib path prefix before an optional `` (annotation)`` suffix."""
+    if " (" in replacement:
+        return replacement.split(" (", 1)[0]
+    return replacement
 
 
 _DECLARED_FN = re.compile(r"^pub (?:async )?fn (grit_lib::.+?)(?:\(|\s+->)")
@@ -276,7 +281,7 @@ def replacement_exists(replacement: str, snapshot_paths: set[str] | None = None)
     if is_prose_replacement(replacement):
         return True
     paths = snapshot_paths if snapshot_paths is not None else current_public_api_paths()
-    target = canonical_api_path(replacement)
+    target = canonical_api_path(replacement_api_path(replacement))
     for path in paths:
         if canonical_api_path(path) == target:
             return True
