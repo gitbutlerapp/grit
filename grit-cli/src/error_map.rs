@@ -921,7 +921,6 @@ fn guide_rebase_session(err: &RebaseSessionError) -> Option<Error> {
     }
 }
 
-#[allow(deprecated)]
 fn guide_lib(err: &LibError) -> Option<Error> {
     match err {
         LibError::Remote(RemoteError::Clone(clone)) => guide_clone(clone),

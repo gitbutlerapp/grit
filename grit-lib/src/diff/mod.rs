@@ -60,9 +60,9 @@ pub use core::{
     count_git_lines, empty_blob_oid, format_raw, format_raw_abbrev, index_mtime_for_diff,
     mode_from_metadata, normalize_ignore_space_change, parse_diff_rename_threshold_percent,
     read_worktree_side_bytes_for_diff, refresh_index_stat_content_verified,
-    rename_similarity_score, resolve_indent_heuristic, sort_entries_by_path, stat_matches,
-    submodule_porcelain_flags, tree_oid_of_commit, zero_oid, DiffEntriesResult, DiffEntry,
-    DiffStatus, InexactRenameDetectionSkipped,
+    rename_similarity_score, sort_entries_by_path, stat_matches, submodule_porcelain_flags,
+    tree_oid_of_commit, zero_oid, DiffEntriesResult, DiffEntry, DiffStatus,
+    InexactRenameDetectionSkipped,
 };
 pub use detail::FileDiff as ListedFileDiff;
 pub use detail::{DiffDetail, DiffTotals, LineStat};

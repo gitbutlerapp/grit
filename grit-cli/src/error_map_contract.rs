@@ -1,7 +1,5 @@
 //! Pinned [`super::classify`] expectations (kind, exit, human, hint).
 
-#![allow(deprecated)]
-
 use grit_lib::error::ObjectError;
 use grit_lib::error::RefError;
 use grit_lib::error::RevisionError;

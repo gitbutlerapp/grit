@@ -10,8 +10,7 @@ use grit_lib::revwalk::rev_parse::{
     abbreviate_ref_name, load_graft_parents, parse_index_colon_spec, parse_peel_suffix,
     reflog_date_selector_timestamp, reflog_date_selector_timestamp_at,
     revision_spec_contains_ancestry_navigation, spec_has_parent_shorthand_suffix,
-    split_treeish_colon, superproject_work_tree_from_nested_git_modules, to_relative_path,
-    upstream_suffix_info,
+    split_treeish_colon, to_relative_path, upstream_suffix_info,
 };
 
 use support::{build_commit_dag, commit_file, git, HistoryRepo};
@@ -33,7 +32,6 @@ fn discovery_and_path_helpers() {
         .expect("discover")
         .is_some());
     let _ = to_relative_path(wt, wt);
-    assert!(superproject_work_tree_from_nested_git_modules(&wt.join(".git")).is_none());
 }
 
 #[test]

@@ -52,8 +52,7 @@ pub struct WorktreeRepair {
 /// [`LinkedWorktreeError::MainWorktree`] for the main worktree, [`LinkedWorktreeError::Locked`] unless
 /// [`MoveWorktreeOptions::force`] is set, [`LinkedWorktreeError::PathExists`] for an existing
 /// destination, [`LinkedWorktreeError::HasSubmodules`] for populated submodules, and I/O failures.
-#[deprecated(since = "0.6.0", note = "use `repo.worktrees().move_linked`")]
-pub fn move_linked_worktree(
+pub(crate) fn move_linked_worktree(
     repo: &Repository,
     from: &Path,
     to: &Path,
@@ -98,8 +97,7 @@ pub fn move_linked_worktree(
 /// Returns [`LinkedWorktreeError::PathNotFound`] or [`LinkedWorktreeError::NotADirectory`] for an invalid
 /// target, [`LinkedWorktreeError::DotGitIsDirectory`] or [`LinkedWorktreeError::BrokenGitFile`] when a
 /// target's `.git` cannot be traced to its registration, and I/O failures.
-#[deprecated(since = "0.6.0", note = "use `repo.worktrees().repair`")]
-pub fn repair_worktrees(
+pub(crate) fn repair_worktrees(
     repo: &Repository,
     paths: &[&Path],
     dry_run: bool,

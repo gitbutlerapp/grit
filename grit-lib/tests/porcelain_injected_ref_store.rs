@@ -14,7 +14,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::StageOptions;
-use grit_lib::porcelain::branch::{create_branch, delete_branch, CreateBranchOptions, DeleteMode};
+use grit_lib::porcelain::branch::{create_branch, delete_branch, BranchCreateOptions, DeleteMode};
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};

@@ -519,12 +519,13 @@ fn deprecated_with_environment_still_sets_the_environment() {
         dir.path().to_path_buf(),
     );
     let stores = Stores::new(HashAlgo::Sha1);
+    let mut repository_options = stores.options();
+    repository_options.environment = environment;
     let (_, outcome) = Repository::init(
         &dir.path().join("legacy.git"),
         &InitOptions::new()
             .with_bare(true)
-            .with_repository_options(stores.options())
-            .with_environment(environment),
+            .with_repository_options(repository_options),
     )
     .expect("init");
     assert_eq!(outcome.initial_branch, "legacy");

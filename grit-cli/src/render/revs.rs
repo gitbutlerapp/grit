@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::output::{outln, CommitJson};
 use crate::render::{HumanRender, MarkdownRender, RenderContext};
 
-/// How revs listing is emitted (mapped from `OutputMode` in dispatch only).
+/// How revs listing is emitted (mapped from [`crate::render::OutputMode`] in dispatch only).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RevsEmitKind {
     Human,
