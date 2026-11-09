@@ -8,7 +8,6 @@ use serde::Serialize;
 
 use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
 
-use grit_lib::ident::Signature;
 
 /// Result of `grit reflog` (list/show).
 #[derive(Serialize, JsonSchema)]

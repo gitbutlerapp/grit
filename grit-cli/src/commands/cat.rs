@@ -1,6 +1,6 @@
 //! `grit cat` — show object contents (blob, tree, commit, or tag).
 
-use std::io::{self, Write};
+use std::io;
 
 use crate::revision_errors::map_resolve_error;
 use anyhow::{Context, Result};
@@ -15,18 +15,7 @@ use grit_lib::revwalk::object_inspect::{
 };
 
 use crate::context;
-use crate::output::OutputMode;
 pub use crate::render::cat::{BlobJson, CatContentJson, CatOutcome, TextObjectJson, TreeLineJson};
-
-fn presentation_from_mode(mode: OutputMode) -> CatPresentationOptions {
-    CatPresentationOptions {
-        format: match mode {
-            OutputMode::Human => CatStdoutFormat::Human,
-            OutputMode::Json => CatStdoutFormat::Json,
-            OutputMode::Markdown => CatStdoutFormat::Markdown,
-        },
-    }
-}
 
 pub fn run(spec: String, presentation: CatPresentationOptions) -> Result<CatOutcome> {
     let (repo, sink) = context::discover_with_warnings()?;
@@ -204,27 +193,4 @@ fn kind_label(kind: ObjectKind) -> &'static str {
         ObjectKind::Commit => "commit",
         ObjectKind::Tag => "tag",
     }
-}
-
-/// Dispatch parsed CLI args for `Cat`.
-pub fn dispatch(
-    args: crate::args::CatArgs,
-    env: crate::dispatch::CommandEnv<'_>,
-) -> anyhow::Result<crate::exit_status::ExitStatus> {
-    use crate::args::*;
-    use crate::commands;
-
-    use crate::dispatch::{emit_success, CommandEnv};
-
-    let CommandEnv {
-        opts,
-        ctx,
-        process_env: _,
-    } = env;
-    let CatArgs { spec } = args;
-    emit_success(
-        commands::cat::run(spec, presentation_from_mode(opts.mode))?,
-        opts,
-        ctx,
-    )
 }

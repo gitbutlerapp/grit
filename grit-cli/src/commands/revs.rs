@@ -4,16 +4,18 @@ use anyhow::{bail, Result};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::log::LogStdoutFormat;
 use grit_lib::revwalk::rev_list::RevListResult;
-use grit_lib::revwalk::{CommitExtent, LeftRightCounts, RevListPresentationOptions};
+use grit_lib::revwalk::{CommitExtent, RevListPresentationOptions};
 use std::io::Write;
 
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context;
-use crate::output::{outln, CommitJson, RenderContext};
+use crate::output::RenderContext;
 use crate::pathspec_args::{promote_long_magic_pathspecs_from_revs, TrailingPathspecArgs};
+use crate::render::revs::{
+    encode_revs_stream_human_batch, encode_revs_stream_markdown_batch, write_revs_empty_stream,
+    write_revs_stream_markdown_header, RevsLine, RevsMarks, RevsStreamRow,
+};
 pub use crate::render::revs::{RevsCommit, RevsLeftRightCount, RevsOutcome, RevsSide};
-use crate::render::revs::{RevsLine, RevsMarks};
-use crate::render::OutputMode;
 use crate::rev_select::RevSelectArgs;
 use crate::stream_commit_list::{
     begin_commits_json_document, finish_commits_json_document, flush_or_broken_pipe,
@@ -34,7 +36,7 @@ impl RevsPresentationOptions {
 
     #[must_use]
     pub fn list_extent(self) -> CommitExtent {
-        RevListPresentationOptions::default().commit_extent_for_full_json(self.json_output())
+        RevListPresentationOptions.commit_extent_for_full_json(self.json_output())
     }
 
     #[must_use]
@@ -42,10 +44,6 @@ impl RevsPresentationOptions {
         self.format == LogStdoutFormat::Markdown
     }
 
-    #[must_use]
-    pub fn human_output(self) -> bool {
-        self.format == LogStdoutFormat::Human
-    }
 }
 
 /// Counting and side-marking switches for [`run`].
@@ -102,16 +100,6 @@ pub fn listing_can_stream(
     Ok(crate::stream_commit_list::plain_walk_streamable(&opts))
 }
 
-pub(crate) fn revs_presentation_from_mode(mode: OutputMode) -> RevsPresentationOptions {
-    RevsPresentationOptions {
-        format: match mode {
-            OutputMode::Human => LogStdoutFormat::Human,
-            OutputMode::Json => LogStdoutFormat::Json,
-            OutputMode::Markdown => LogStdoutFormat::Markdown,
-        },
-    }
-}
-
 pub fn stream_listing(
     mut rev: RevSelectArgs,
     mut pathspecs: TrailingPathspecArgs,
@@ -142,8 +130,7 @@ pub fn stream_listing(
     if presentation.json_output() {
         begin_commits_json_document(w)?;
     } else if presentation.markdown_output() {
-        outln!(w, "# Commits");
-        outln!(w);
+        write_revs_stream_markdown_header(w)?;
     }
     loop {
         let cap = if first_batch { FIRST_BATCH } else { BATCH };
@@ -169,20 +156,30 @@ pub fn stream_listing(
         match presentation.format {
             LogStdoutFormat::Human => {
                 let summaries = load_batch_summaries(&repo, &mut batch)?;
+                let rows: Vec<RevsStreamRow> = summaries
+                    .into_iter()
+                    .map(|row| RevsStreamRow {
+                        oid_hex: row.oid.to_hex(),
+                        subject: row.subject,
+                    })
+                    .collect();
                 let mut buf = Vec::new();
-                for row in summaries {
-                    outln!(buf, "{}  {}", row.oid, row.subject);
-                }
+                encode_revs_stream_human_batch(&rows, &mut buf)?;
                 if write_all_or_broken_pipe(w, &buf)? {
                     return Ok(());
                 }
             }
             LogStdoutFormat::Markdown => {
                 let summaries = load_batch_summaries(&repo, &mut batch)?;
+                let rows: Vec<RevsStreamRow> = summaries
+                    .into_iter()
+                    .map(|row| RevsStreamRow {
+                        oid_hex: row.oid.to_hex(),
+                        subject: row.subject,
+                    })
+                    .collect();
                 let mut buf = Vec::new();
-                for row in summaries {
-                    outln!(buf, "- `{}` {}", row.oid, row.subject);
-                }
+                encode_revs_stream_markdown_batch(&rows, &mut buf)?;
                 if write_all_or_broken_pipe(w, &buf)? {
                     return Ok(());
                 }
@@ -220,12 +217,9 @@ fn write_empty_streaming_document(
             begin_commits_json_document(w)?;
             finish_commits_json_document(w, false, ",\"count\":null")?;
         }
-        LogStdoutFormat::Markdown => {
-            outln!(w, "# Commits");
-            outln!(w);
-            outln!(w, "_No commits._");
+        LogStdoutFormat::Human | LogStdoutFormat::Markdown => {
+            write_revs_empty_stream(w, presentation.format)?;
         }
-        LogStdoutFormat::Human => {}
     }
     Ok(())
 }
@@ -354,61 +348,4 @@ pub fn run(
             .collect();
     }
     Ok(outcome)
-}
-
-/// Dispatch parsed CLI args for `Revs`.
-pub fn dispatch(
-    args: crate::args::RevsArgs,
-    env: crate::dispatch::CommandEnv<'_>,
-) -> anyhow::Result<crate::exit_status::ExitStatus> {
-    use crate::args::*;
-    use crate::commands;
-
-    use crate::dispatch::{emit_success, is_broken_pipe, CommandEnv};
-    use crate::exit_status::ExitStatus;
-
-    let CommandEnv {
-        opts,
-        ctx,
-        process_env: _,
-    } = env;
-    let RevsArgs {
-        rev,
-        pathspecs,
-        count,
-        left_right,
-        cherry_mark,
-    } = args;
-    {
-        let mode = commands::revs::RevsMode {
-            count,
-            left_right,
-            cherry_mark,
-        };
-        if opts.filter.is_none() && commands::revs::listing_can_stream(&rev, &pathspecs, mode)? {
-            let stdout = std::io::stdout();
-            let mut lock = stdout.lock();
-            match commands::revs::stream_listing(
-                rev,
-                pathspecs,
-                commands::revs::revs_presentation_from_mode(opts.mode),
-                ctx,
-                &mut lock,
-            ) {
-                Ok(()) => return Ok(ExitStatus::Success),
-                Err(e) if is_broken_pipe(&e) => return Ok(ExitStatus::Success),
-                Err(e) => return Err(e),
-            }
-        }
-        emit_success(
-            commands::revs::run(
-                rev,
-                pathspecs,
-                mode,
-                commands::revs::revs_presentation_from_mode(opts.mode),
-            )?,
-            opts,
-            ctx,
-        )
-    }
 }

@@ -4,6 +4,7 @@ use std::io::Write;
 
 use anyhow::Result;
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::log::LogStdoutFormat;
 use grit_lib::revwalk::LeftRightCounts;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -190,4 +191,53 @@ impl MarkdownRender for RevsOutcome {
         }
         Ok(())
     }
+}
+
+/// One streamed commit row for human or Markdown listing output.
+#[derive(Debug)]
+pub(crate) struct RevsStreamRow {
+    pub oid_hex: String,
+    pub subject: String,
+}
+
+/// Write the Markdown header for a streamed `grit revs` listing.
+pub(crate) fn write_revs_stream_markdown_header(w: &mut dyn Write) -> Result<()> {
+    outln!(w, "# Commits");
+    outln!(w);
+    Ok(())
+}
+
+/// Write one batch of streamed human lines into `buf`.
+pub(crate) fn encode_revs_stream_human_batch(
+    rows: &[RevsStreamRow],
+    buf: &mut Vec<u8>,
+) -> Result<()> {
+    for row in rows {
+        outln!(buf, "{}  {}", row.oid_hex, row.subject);
+    }
+    Ok(())
+}
+
+/// Write one batch of streamed Markdown bullets into `buf`.
+pub(crate) fn encode_revs_stream_markdown_batch(
+    rows: &[RevsStreamRow],
+    buf: &mut Vec<u8>,
+) -> Result<()> {
+    for row in rows {
+        outln!(buf, "- `{}` {}", row.oid_hex, row.subject);
+    }
+    Ok(())
+}
+
+/// Empty streamed listing for each stdout format (JSON envelope is opened elsewhere).
+pub(crate) fn write_revs_empty_stream(w: &mut dyn Write, format: LogStdoutFormat) -> Result<()> {
+    match format {
+        LogStdoutFormat::Json => {}
+        LogStdoutFormat::Markdown => {
+            write_revs_stream_markdown_header(w)?;
+            outln!(w, "_No commits._");
+        }
+        LogStdoutFormat::Human => {}
+    }
+    Ok(())
 }

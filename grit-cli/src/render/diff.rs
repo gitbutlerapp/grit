@@ -53,6 +53,7 @@ impl From<LineStatJson> for LineStat {
 }
 
 /// Aggregate line counts for log/show JSON when stat modes are active.
+#[allow(dead_code)]
 #[derive(Serialize, JsonSchema, Clone, Copy)]
 pub struct DiffTotalsJson {
     pub files_changed: usize,

@@ -662,6 +662,40 @@ pub fn still_production() {
         );
     }
 
+    fn command_outcome_rs_paths() -> Vec<PathBuf> {
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+        ["log.rs", "revs.rs", "cat.rs"]
+            .iter()
+            .map(|name| base.join(name))
+            .collect()
+    }
+
+    /// Outcome/command layer must not mention [`OutputMode`] (mapped only at dispatch).
+    #[test]
+    fn outcome_layer_commands_free_of_output_mode() {
+        let mut violations = Vec::new();
+        for path in command_outcome_rs_paths() {
+            let rel = path
+                .strip_prefix(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src"))
+                .unwrap()
+                .display();
+            let source = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+            for line in source.lines() {
+                if line.trim().starts_with("//") {
+                    continue;
+                }
+                if line.contains("OutputMode") {
+                    violations.push(format!("{rel}: `{line}`"));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "commands outcome layer must not reference OutputMode:\n{}",
+            violations.join("\n")
+        );
+    }
+
     #[test]
     fn purity_regression_ignores_cfg_test_bodies_only() {
         let src = r#"

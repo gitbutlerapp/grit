@@ -6,7 +6,7 @@ use anyhow::Result;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 use crate::markdown;
 use grit_lib::objects::short_hex;

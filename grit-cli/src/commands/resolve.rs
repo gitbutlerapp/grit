@@ -9,8 +9,7 @@ use grit_lib::revwalk::AbbrevLength;
 
 use crate::context;
 pub use crate::render::resolve::{
-    RefNameOutput, ResolveEntry, ResolveEntryObjectId, ResolveEntryRefName, ResolveOutcome,
-    VerifyResolveOutcome,
+    RefNameOutput, ResolveEntry, ResolveOutcome, VerifyResolveOutcome,
 };
 use crate::revision_errors::map_resolve_error;
 

@@ -8,9 +8,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::diff::{CommitFilesManyOptions, DiffOptions};
 use grit_lib::gitbutler::GitButlerWorkspace;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::log::{
-    CommitReuse, LogCommitJsonPolicy, LogPresentationOptions, LogStdoutFormat,
-};
+use grit_lib::porcelain::log::{CommitReuse, LogPresentationOptions, LogStdoutFormat};
 use grit_lib::revwalk::group_by::GroupByAuthorOptions;
 use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
 use grit_lib::revwalk::object_inspect::OidAbbrevBatch;
@@ -38,7 +36,7 @@ use crate::log_display::{
     render_author_groups_markdown, render_oneline_line, render_oneline_oid_subject,
 };
 use crate::markdown;
-use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::{promote_long_magic_pathspecs_from_revs, TrailingPathspecArgs};
 use crate::rev_select::{self, RevSelectArgs};
 use crate::stream_commit_list::{
@@ -82,20 +80,6 @@ impl LogPage {
 }
 
 pub use crate::render::log::{LogDisplayOptions, LogGroupBy};
-
-pub(crate) fn log_presentation(
-    mode: OutputMode,
-    display: LogDisplayOptions,
-) -> LogPresentationOptions {
-    LogPresentationOptions {
-        format: match mode {
-            OutputMode::Human => LogStdoutFormat::Human,
-            OutputMode::Json => LogStdoutFormat::Json,
-            OutputMode::Markdown => LogStdoutFormat::Markdown,
-        },
-        group_count_only: display.group_count_only,
-    }
-}
 
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
 #[derive(Serialize, JsonSchema)]
@@ -477,12 +461,12 @@ pub fn stream_listing(
     rev: RevSelectArgs,
     format: DiffFormatArgs,
     display: LogDisplayOptions,
-    output_mode: OutputMode,
+    presentation: LogPresentationOptions,
     ctx: &RenderContext,
     w: &mut dyn Write,
 ) -> Result<()> {
     if rev.max_count() == Some(0) {
-        return write_empty_log_stream(w, output_mode, display, ctx);
+        return write_empty_log_stream(w, presentation, display, ctx);
     }
     let LogStreamPlan {
         repo,
@@ -494,7 +478,7 @@ pub fn stream_listing(
     let default_tips: Vec<&str> = default_tips.iter().map(String::as_str).collect();
     let token_refs = rev.rev_tokens(&default_tips);
     let fetch_cap = fetch_limit_plus_one(rev.max_count());
-    let extent = if rows_need_commit_details(display, &format, output_mode) {
+    let extent = if rows_need_commit_details(display, &format, presentation) {
         CommitExtent::Whole
     } else {
         CommitExtent::ThroughSubject
@@ -507,7 +491,7 @@ pub fn stream_listing(
     let mut first_json = true;
     let mut first_batch = true;
     let mut columns = display.columns;
-    if output_mode == OutputMode::Json {
+    if presentation.json_output() {
         begin_commits_json_document(w)?;
     }
     loop {
@@ -545,7 +529,7 @@ pub fn stream_listing(
             None,
             batch_truncated && max.is_some(),
             display,
-            output_mode,
+            presentation,
             None,
             LogGraphBuild::default(),
         )?;
@@ -559,22 +543,19 @@ pub fn stream_listing(
         batch_display.columns = columns;
         let mut batch_outcome = outcome;
         batch_outcome.display = batch_display;
-        match output_mode {
-            OutputMode::Human | OutputMode::Markdown => {
-                let mut buf = Vec::new();
-                if output_mode == OutputMode::Human {
-                    batch_outcome.render_human(&mut buf, ctx)?;
-                } else {
-                    batch_outcome.render_markdown(&mut buf, ctx)?;
-                }
-                if write_all_or_broken_pipe(w, &buf)? {
-                    return Ok(());
-                }
+        if presentation.json_output() {
+            for commit in &batch_outcome.commits {
+                write_json_array_element(w, &mut first_json, commit)?;
             }
-            OutputMode::Json => {
-                for commit in &batch_outcome.commits {
-                    write_json_array_element(w, &mut first_json, commit)?;
-                }
+        } else {
+            let mut buf = Vec::new();
+            if presentation.human_output() {
+                batch_outcome.render_human(&mut buf, ctx)?;
+            } else {
+                batch_outcome.render_markdown(&mut buf, ctx)?;
+            }
+            if write_all_or_broken_pipe(w, &buf)? {
+                return Ok(());
             }
         }
         emitted += batch.oids.len();
@@ -585,7 +566,7 @@ pub fn stream_listing(
             break;
         }
     }
-    if output_mode == OutputMode::Json {
+    if presentation.json_output() {
         let final_truncated = truncated || max.is_some_and(|n| pulled > n);
         finish_commits_json_document(w, final_truncated, "")?;
     }
@@ -594,18 +575,18 @@ pub fn stream_listing(
 
 fn write_empty_log_stream(
     w: &mut dyn Write,
-    output_mode: OutputMode,
+    presentation: LogPresentationOptions,
     display: LogDisplayOptions,
     ctx: &RenderContext,
 ) -> Result<()> {
     let outcome = empty_outcome(display)?;
-    match output_mode {
-        OutputMode::Json => {
-            begin_commits_json_document(w)?;
-            finish_commits_json_document(w, false, "")?;
-        }
-        OutputMode::Human => outcome.render_human(w, ctx)?,
-        OutputMode::Markdown => outcome.render_markdown(w, ctx)?,
+    if presentation.json_output() {
+        begin_commits_json_document(w)?;
+        finish_commits_json_document(w, false, "")?;
+    } else if presentation.human_output() {
+        outcome.render_human(w, ctx)?;
+    } else {
+        outcome.render_markdown(w, ctx)?;
     }
     Ok(())
 }
@@ -620,7 +601,7 @@ pub fn run(
     cursor: Option<String>,
     format: DiffFormatArgs,
     display: LogDisplayOptions,
-    output_mode: OutputMode,
+    presentation: LogPresentationOptions,
     page: LogPage,
 ) -> Result<LogOutcome> {
     if display.group_by.is_some() {
@@ -638,7 +619,7 @@ pub fn run(
         if format.any_format_flag() {
             bail!("`grit log` cannot combine diff format flags with `--graph`");
         }
-        if output_mode == OutputMode::Json {
+        if presentation.json_output() {
             return Err(crate::json_error::incompatible_output_flags(
                 "`grit log --graph` is for human output only; omit `--graph` when using `--json`",
                 crate::error_kind::ErrorKind::IncompatibleFlags,
@@ -705,7 +686,7 @@ pub fn run(
             next,
             truncated,
             display,
-            output_mode,
+            presentation,
             None,
             LogGraphBuild::default(),
         );
@@ -718,7 +699,14 @@ pub fn run(
     walk_opts.graph = display.graph;
 
     if display.group_by == Some(LogGroupBy::Author) {
-        return run_log_group_by_author(&repo, &token_refs, &walk_opts, &rev, display, output_mode);
+        return run_log_group_by_author(
+            &repo,
+            &token_refs,
+            &walk_opts,
+            &rev,
+            display,
+            presentation,
+        );
     }
 
     let needs_rev_walk = display.graph
@@ -748,7 +736,7 @@ pub fn run(
         fetch_opts.limit = fetch_limit_plus_one(page_limit);
         fetch_opts.retain_commit_data = !display.graph;
         fetch_opts.retained_commit_extent = if fetch_opts.retain_commit_data
-            && log_through_subject_retained_extent(display, &format, output_mode)
+            && log_through_subject_retained_extent(display, &format, presentation)
         {
             CommitExtent::ThroughSubject
         } else {
@@ -769,7 +757,7 @@ pub fn run(
             None,
             truncated,
             display,
-            output_mode,
+            presentation,
             None,
             LogGraphBuild {
                 parent_rewrite: graph_needs_parent_rewrite(pathspecs.has_any(), &walk_opts),
@@ -797,7 +785,7 @@ pub fn run(
         next,
         truncated && resume.is_none(),
         display,
-        output_mode,
+        presentation,
         None,
         LogGraphBuild::default(),
     )?;
@@ -932,13 +920,13 @@ fn run_log_group_by_author(
     walk_opts: &grit_lib::revwalk::RevWalkListOptions,
     rev: &RevSelectArgs,
     display: LogDisplayOptions,
-    output_mode: OutputMode,
+    presentation: LogPresentationOptions,
 ) -> Result<LogOutcome> {
     let use_mailmap = rev_select::log_mailmap_enabled(repo, rev.no_mailmap);
     let max_count = rev.max_count();
     let reverse = rev.reverse;
     let mailmap = repo.revwalk().mailmap_for_grouping(use_mailmap)?;
-    let policy = log_presentation(output_mode, display).json_policy();
+    let policy = presentation.json_policy();
     let need_commit_json = policy.need_commit_json();
     let group_options = GroupByAuthorOptions {
         count_only: policy.group_by_count_only(),
@@ -966,7 +954,7 @@ fn run_log_group_by_author(
                 grouped,
                 truncated,
                 display,
-                output_mode,
+                presentation,
             );
         }
         let grouped = repo
@@ -978,7 +966,7 @@ fn run_log_group_by_author(
                 GroupByAuthorOptions { count_only: false },
             )
             .context("could not group commits by author")?;
-        return build_author_group_outcome_from_groups(repo, grouped, false, display, output_mode);
+        return build_author_group_outcome_from_groups(repo, grouped, false, display, presentation);
     }
 
     if max_count.is_none() {
@@ -986,7 +974,7 @@ fn run_log_group_by_author(
             .revwalk()
             .group_by_author_in_walk(token_refs, walk_opts, mailmap.as_ref(), group_options)
             .context("could not group commits by author")?;
-        return build_author_group_outcome_from_groups(repo, grouped, false, display, output_mode);
+        return build_author_group_outcome_from_groups(repo, grouped, false, display, presentation);
     }
 
     let mut fetch_opts = walk_opts.clone();
@@ -1000,7 +988,7 @@ fn run_log_group_by_author(
         .revwalk()
         .group_by_author(&oids, mailmap.as_ref(), group_options)
         .context("could not group commits by author")?;
-    build_author_group_outcome_from_groups(repo, grouped, truncated, display, output_mode)
+    build_author_group_outcome_from_groups(repo, grouped, truncated, display, presentation)
 }
 
 fn build_author_group_outcome_from_groups(
@@ -1008,11 +996,9 @@ fn build_author_group_outcome_from_groups(
     grouped: Vec<grit_lib::revwalk::AuthorGroup>,
     truncated: bool,
     display: LogDisplayOptions,
-    output_mode: OutputMode,
+    presentation: LogPresentationOptions,
 ) -> Result<LogOutcome> {
-    let include_commits = log_presentation(output_mode, display)
-        .json_policy()
-        .include_commits_in_groups();
+    let include_commits = presentation.json_policy().include_commits_in_groups();
     let loader = if include_commits {
         Some(CommitJsonLoader::new(repo)?)
     } else {
@@ -1160,10 +1146,10 @@ pub(crate) fn load_commits_with_format_for_oids(
 fn rows_need_commit_details(
     display: LogDisplayOptions,
     format: &DiffFormatArgs,
-    output_mode: OutputMode,
+    presentation: LogPresentationOptions,
 ) -> bool {
     display.decorate
-        || output_mode == OutputMode::Json
+        || presentation.json_output()
         || (format.any_format_flag() && !format.log_patch_text())
 }
 
@@ -1171,10 +1157,10 @@ fn rows_need_commit_details(
 fn log_through_subject_retained_extent(
     display: LogDisplayOptions,
     format: &DiffFormatArgs,
-    output_mode: OutputMode,
+    presentation: LogPresentationOptions,
 ) -> bool {
     display.oneline
-        && !rows_need_commit_details(display, format, output_mode)
+        && !rows_need_commit_details(display, format, presentation)
         && !display.line_counts
 }
 
@@ -1188,23 +1174,23 @@ fn build_commit_outcome(
     next: Option<String>,
     truncated: bool,
     display: LogDisplayOptions,
-    output_mode: OutputMode,
+    presentation: LogPresentationOptions,
     continuation_args: Option<String>,
     graph: LogGraphBuild,
 ) -> Result<LogOutcome> {
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
-    let json_output = output_mode == OutputMode::Json;
+    let json_output = presentation.json_output();
     let graph_human_oneline = display.graph
-        && output_mode == OutputMode::Human
+        && presentation.human_output()
         && display.oneline
         && !format.any_format_flag()
         && !display.decorate;
-    let need_commit_details = rows_need_commit_details(display, &format, output_mode);
+    let need_commit_details = rows_need_commit_details(display, &format, presentation);
     let plain_oneline = display.oneline
         && !need_commit_details
         && !display.decorate
-        && (!display.graph || output_mode == OutputMode::Markdown);
+        && (!display.graph || presentation.markdown_output());
     let head_branch = if display.oneline || display.decorate {
         resolve_current_branch(repo)?
     } else {
@@ -1238,7 +1224,7 @@ fn build_commit_outcome(
         });
     }
 
-    let graph_note = if display.graph && output_mode == OutputMode::Markdown {
+    let graph_note = if display.graph && presentation.markdown_output() {
         Some("`--graph` affects human output only; this listing omits graph columns.")
     } else {
         None
@@ -1324,26 +1310,25 @@ fn build_commit_outcome(
 
     let head_branch_ref = head_branch.as_deref();
     // Markdown lists `--graph --oneline` walks as plain oneline bullets (see `graph_note`).
-    let oneline_lines =
-        if display.oneline && (!display.graph || output_mode == OutputMode::Markdown) {
-            commits
-                .iter()
-                .map(|c| {
-                    render_oneline_line(
-                        repo,
-                        &mut abbrev_batch,
-                        &c.commit,
-                        display.decorate,
-                        head_branch_ref,
-                    )
-                })
-                .collect::<Result<Vec<_>>>()?
-        } else {
-            Vec::new()
-        };
+    let oneline_lines = if display.oneline && (!display.graph || presentation.markdown_output()) {
+        commits
+            .iter()
+            .map(|c| {
+                render_oneline_line(
+                    repo,
+                    &mut abbrev_batch,
+                    &c.commit,
+                    display.decorate,
+                    head_branch_ref,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
 
     let line_counts = if display.line_counts
-        && output_mode == OutputMode::Human
+        && presentation.human_output()
         && !display.oneline
         && !format.any_format_flag()
     {
@@ -1353,7 +1338,7 @@ fn build_commit_outcome(
     };
 
     let mut graph_for_text = graph;
-    let graph_lines = if display.graph && output_mode == OutputMode::Human {
+    let graph_lines = if display.graph && presentation.human_output() {
         build_graph_text_lines(
             repo,
             oids,
@@ -1435,10 +1420,6 @@ pub enum TerminalLog {
 
 impl TerminalLog {
     /// Draw it as human output to `w`.
-    ///
-    /// # Errors
-    ///
-    /// Returns render, walk and write errors (a reader that hangs up mid-stream is not one).
     pub fn render(self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         match self {
             Self::Listing(outcome) => outcome.render_human(w, ctx),
@@ -1484,7 +1465,10 @@ impl LogStream {
             None,
             format,
             display,
-            OutputMode::Human,
+            LogPresentationOptions {
+                format: LogStdoutFormat::Human,
+                group_count_only: false,
+            },
             LogPage::Batches(FIRST_BATCH),
         )?;
         Ok(Self {
@@ -1531,7 +1515,10 @@ impl LogStream {
                 None,
                 false,
                 self.display,
-                OutputMode::Human,
+                LogPresentationOptions {
+                    format: LogStdoutFormat::Human,
+                    group_count_only: false,
+                },
                 None,
                 LogGraphBuild::default(),
             )?;
@@ -1698,120 +1685,4 @@ fn build_graph_text_lines(
             .collect()
     };
     Ok(join_graph_blocks(blocks, texts))
-}
-
-/// Dispatch parsed CLI args for `Log`.
-pub fn dispatch(
-    args: crate::args::LogArgs,
-    env: crate::dispatch::CommandEnv<'_>,
-) -> anyhow::Result<crate::exit_status::ExitStatus> {
-    use crate::args::*;
-    use crate::commands;
-    use crate::context;
-    use crate::dispatch::{emit_success, is_broken_pipe, CommandEnv};
-    use crate::exit_status::ExitStatus;
-
-    use crate::output::OutputMode;
-    use crate::pager;
-
-    use crate::stdio;
-    use anyhow::bail;
-    let CommandEnv {
-        opts,
-        ctx,
-        process_env: _,
-    } = env;
-    let LogArgs {
-        rev,
-        pathspecs,
-        cursor,
-        format,
-        oneline,
-        decorate,
-        group_by,
-        count,
-        graph,
-        no_pager,
-        graph_ascii,
-        graph_unicode,
-    } = args;
-    {
-        if count && group_by.is_none() {
-            bail!("`--count` requires `--group-by`");
-        }
-        // A person at a terminal gets the whole history through the pager; scripts, agents
-        // and pipes get pages with a `--cursor` token.
-        let terminal =
-            opts.mode == OutputMode::Human && std::io::IsTerminal::is_terminal(&std::io::stdout());
-        let graph = graph || graph_unicode;
-        let display = commands::log::LogDisplayOptions {
-            oneline,
-            decorate,
-            group_by: group_by.map(|g| match g {
-                LogGroupByArg::Author => commands::log::LogGroupBy::Author,
-            }),
-            group_count_only: count,
-            graph,
-            graph_ascii: graph_ascii && !graph_unicode,
-            line_counts: terminal,
-            columns: None,
-            no_commits_in_repo: false,
-        };
-        if format.patch_text && opts.mode != OutputMode::Human {
-            bail!("`--patch-text` cannot be used with --json or --markdown");
-        }
-        if !terminal {
-            let plan = if opts.filter.is_none()
-                && commands::log::listing_should_stream_incrementally(&rev, true)
-            {
-                commands::log::listing_stream_plan(&rev, &pathspecs, display, &cursor, &format)?
-            } else {
-                None
-            };
-            if let Some(plan) = plan {
-                let stdout = std::io::stdout();
-                let mut lock = stdout.lock();
-                match commands::log::stream_listing(
-                    plan, rev, format, display, opts.mode, ctx, &mut lock,
-                ) {
-                    Ok(()) => return Ok(ExitStatus::Success),
-                    Err(e) if is_broken_pipe(&e) => return Ok(ExitStatus::Success),
-                    Err(e) => return Err(e),
-                }
-            }
-            let page = commands::log::LogPage::Paged;
-            let outcome =
-                commands::log::run(rev, pathspecs, cursor, format, display, opts.mode, page)?;
-            return emit_success(outcome, opts, ctx);
-        }
-        // With no `-n` or `--cursor`, the whole history, walked a batch at a time.
-        let view = if cursor.is_none() && rev.max_count().is_none() {
-            commands::log::TerminalLog::Stream(Box::new(commands::log::LogStream::start(
-                rev, pathspecs, format, display,
-            )?))
-        } else {
-            let page = commands::log::LogPage::Paged;
-            commands::log::TerminalLog::Listing(Box::new(commands::log::run(
-                rev, pathspecs, cursor, format, display, opts.mode, page,
-            )?))
-        };
-        // Start the pager only once the first batch is walked, so errors and Ctrl-C during
-        // a slow start behave as usual.
-        let mut pager = if no_pager {
-            None
-        } else {
-            pager::Pager::start(context::discover().ok().as_ref())
-        };
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        let w: &mut dyn std::io::Write = match pager.as_mut() {
-            Some(pager) => pager,
-            None => &mut stdout,
-        };
-        let result = stdio::with_sigpipe_ignored(|| view.render(w, ctx));
-        match result {
-            Err(e) if !is_broken_pipe(&e) => Err(e),
-            _ => Ok(ExitStatus::Success),
-        }
-    }
 }

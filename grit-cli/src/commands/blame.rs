@@ -1,8 +1,6 @@
 //! `grit blame` — show who last modified each line of a file.
 
 use std::collections::BTreeMap;
-use std::ops::Not;
-
 use anyhow::{bail, Context, Result};
 use std::fmt;
 
@@ -29,6 +27,7 @@ use crate::output::Person;
 use crate::render::blame::{blame_line_marker, normalize_blame_line_content, BlameDisplayLine};
 pub use crate::render::blame::{BlameCommitJson, BlameHunkJson, BlameLineJson, BlameOutcome};
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     rev_pos: Option<String>,
     file: Option<String>,
