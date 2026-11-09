@@ -5,8 +5,8 @@
 updated = "2026-11-09"
 
 [counts]
-render = 1139
-args = 0
-dispatch = 5168
-other = 49196
-total = 55503
+render = 1317
+args = 2272
+dispatch = 272
+other = 53279
+total = 57140
