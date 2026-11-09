@@ -2745,11 +2745,8 @@ pub fn grit_lib::config::Config<'repo>::get_i64(&self, &str) -> grit_lib::error:
 pub fn grit_lib::config::Config<'repo>::get_path(&self, &str) -> grit_lib::error::Result<core::option::Option<std::path::PathBuf>>
 pub fn grit_lib::config::Config<'repo>::mailmap(&self) -> grit_lib::error::Result<grit_lib::config::mailmap::MailmapTable>
 pub fn grit_lib::config::Config<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
-pub fn grit_lib::config::Config<'repo>::remove_local_section(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::Config<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
-pub fn grit_lib::config::Config<'repo>::set_local(&self, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::Config<'repo>::snapshot(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
-pub fn grit_lib::config::Config<'repo>::unset_local(&self, &str) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::config::Config<'repo>
 pub fn grit_lib::config::Config<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::config::Config<'repo>
@@ -17890,7 +17887,6 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::Index
 #[non_exhaustive] pub struct grit_lib::prelude::InitOptions
 pub grit_lib::prelude::InitOptions::bare: bool
 pub grit_lib::prelude::InitOptions::bare_with_worktree_at_path: bool
-pub grit_lib::prelude::InitOptions::environment: core::option::Option<grit_lib::config::environment::Environment>
 pub grit_lib::prelude::InitOptions::init_filesystem: grit_lib::config::init_filesystem::InitFilesystemConfigOptions
 pub grit_lib::prelude::InitOptions::initial_branch: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::InitOptions::object_format: core::option::Option<grit_lib::objects::HashAlgo>
@@ -26651,11 +26647,13 @@ pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run(&self, &str, &[&str],
 pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_commit(&self, &str, &[&str], core::option::Option<&[u8]>, &grit_lib::command_runner::hooks::CommitHookEnv<'_>) -> grit_lib::error::Result<grit_lib::command_runner::hooks::HookResult>
 pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_commit_checked(&self, &str, &[&str], core::option::Option<&[u8]>, &grit_lib::command_runner::hooks::CommitHookEnv<'_>) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_in_git_dir(&self, &str, &[&str], core::option::Option<&[u8]>, &[(&str, &str)]) -> grit_lib::command_runner::hooks::HookResult
+pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_in_git_dir_with_cancel(&self, &str, &[&str], core::option::Option<&[u8]>, &[(&str, &str)], &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::command_runner::hooks::HookResult>
 pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_post_checkout(&self, core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId, bool) -> bool
 pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_post_merge(&self, bool) -> bool
 pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_post_rewrite(&self, grit_lib::command_runner::hooks::RewriteKind, &[(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)]) -> bool
 pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_pre_push(&self, &str, &str, &[grit_lib::command_runner::hooks::PrePushRef]) -> grit_lib::error::Result<grit_lib::command_runner::hooks::HookOutput>
 pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_pre_rebase(&self, core::option::Option<&str>) -> grit_lib::error::Result<bool>
+pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::run_with_options(&self, &str, &[&str], grit_lib::command_runner::hooks::RunHookOptions<'_>) -> grit_lib::error::Result<grit_lib::command_runner::hooks::HookResult>
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryHooks<'repo>
 pub fn grit_lib::repo_handles::RepositoryHooks<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::repo_handles::RepositoryHooks<'repo>
@@ -26708,7 +26706,6 @@ pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::exists(&self, impl core
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::expire(&self, &grit_lib::repo_handles::ExpireOptions) -> grit_lib::error::Result<grit_lib::repo_handles::ReflogExpireOutcome>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::list_reflog_refs(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::store::RefName>>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::query(&self, &grit_lib::refs::store::RefName, &grit_lib::repo_handles::ReflogQuery) -> grit_lib::error::Result<grit_lib::repo_handles::ReflogPage>
-pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::refs(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::store::RefName>>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryReflogs<'repo>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::clone(&self) -> Self
