@@ -711,6 +711,7 @@ fn read_v0_request(
     stop: &CancelSignal<'_>,
 ) -> Result<Option<V0Request>> {
     let mut wants = Vec::new();
+    let mut seen_wants = HashSet::new();
     let mut caps = HashSet::new();
     let mut shallow = ShallowRequest::default();
     let mut filter: Option<ObjectFilter> = None;
@@ -722,9 +723,12 @@ fn read_v0_request(
                 if let Some(rest) = line.strip_prefix("want ") {
                     let mut parts = rest.split(' ');
                     let hex = parts.next().unwrap_or_default();
-                    wants.push(parse_oid(repo, hex)?);
-                    if wants.len() == 1 {
-                        caps.extend(parts.filter(|c| !c.is_empty()).map(str::to_owned));
+                    let oid = parse_oid(repo, hex)?;
+                    if seen_wants.insert(oid) {
+                        wants.push(oid);
+                        if wants.len() == 1 {
+                            caps.extend(parts.filter(|c| !c.is_empty()).map(str::to_owned));
+                        }
                     }
                     continue;
                 }
@@ -975,7 +979,7 @@ fn serve_v2(
     loop {
         stop.poll()?;
         opts.server_options.clear();
-        let Some(request) = read_v2_request(input, opts, promisor_adv.as_ref())? else {
+        let Some(request) = read_v2_request(repo, input, opts, promisor_adv.as_ref())? else {
             return Ok(aggregate);
         };
         check_object_format(repo, request.object_format.as_deref())?;
@@ -1022,6 +1026,7 @@ struct V2Request {
 /// advertised in [`ServeOptions::accepted_promisor_remotes`]; other names are
 /// ignored, and a reply without names is a protocol error.
 fn read_v2_request(
+    repo: &Repository,
     input: &mut dyn Read,
     opts: &mut ServeOptions,
     promisor_adv: Option<&PromisorAdvertisement>,
@@ -1029,6 +1034,8 @@ fn read_v2_request(
     let mut command = None;
     let mut object_format = None;
     let mut args = Vec::new();
+    let mut seen_wants = HashSet::new();
+    let mut seen_haves = HashSet::new();
     let mut in_args = false;
     loop {
         match read_packet(input)? {
@@ -1046,6 +1053,16 @@ fn read_v2_request(
             Some(Packet::Data(line)) if in_args => {
                 if let Some(value) = line.strip_prefix("server-option ") {
                     opts.server_options.push(value.to_owned());
+                } else if let Some(hex) = line.strip_prefix("want ") {
+                    let oid = parse_oid(repo, hex.trim())?;
+                    if seen_wants.insert(oid) {
+                        args.push(line);
+                    }
+                } else if let Some(hex) = line.strip_prefix("have ") {
+                    let oid = parse_oid(repo, hex.trim())?;
+                    if seen_haves.insert(oid) {
+                        args.push(line);
+                    }
                 } else {
                     args.push(line);
                 }
