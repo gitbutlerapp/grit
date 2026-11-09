@@ -90,7 +90,7 @@ pub fn normalize_tag_verify_argv(mut args: Vec<OsString>) -> Vec<OsString> {
     args
 }
 
-/// [`Cli::try_parse_from`] over [`cli_command::parse_command`]'s tree.
+/// Parse argv into [`Cli`] using the deferred command tree from [`crate::cli_command::parse_command`].
 pub fn parse_cli(argv: &[OsString]) -> Result<Cli, clap::Error> {
     use clap::{CommandFactory, FromArgMatches};
     let mut matches = cli_command::parse_command(argv).try_get_matches_from(argv)?;
