@@ -1,11 +1,17 @@
 //! Presentation layer: format typed command outcomes for humans, agents, and scripts.
 
+pub mod auth;
+pub mod checkin;
 pub mod diff;
 pub mod list;
+pub mod serve;
 pub mod share;
+pub mod slice;
 pub mod stream;
 pub mod style;
+pub mod sync;
 pub mod table;
+pub mod update;
 
 use anyhow::Result;
 use serde::Serialize;
@@ -58,6 +64,9 @@ mod purity {
         "std::fs",
         "crate::commands::",
     ];
+
+    /// Outcome fields may still reference not-yet-extracted command types (e.g. pull).
+    const ALLOWED_COMMAND_REFS: &[&str] = &["crate::commands::pull::"];
 
     const FORBIDDEN_TYPE_MARKERS: &[&str] = &["Repository"];
 
@@ -207,6 +216,14 @@ mod purity {
             }
 
             for marker in FORBIDDEN_SOURCE_MARKERS {
+                if line.contains(marker)
+                    && *marker == "crate::commands::"
+                    && ALLOWED_COMMAND_REFS
+                        .iter()
+                        .any(|allowed| line.contains(allowed))
+                {
+                    continue;
+                }
                 if line.contains(marker) {
                     violations.push(format!(
                         "{rel}: forbidden `{marker}` in production line `{line}`"

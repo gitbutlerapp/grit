@@ -190,7 +190,7 @@ pub(crate) fn resolve_integrated(
     outcome.option = Some(option.to_owned());
     match option {
         "rebase" => {
-            fetch("origin", mode)?;
+            fetch("origin", mode == crate::output::OutputMode::Human)?;
             let target = &report.target_branch;
             let onto = tips(&here.repo, "refs/remotes/origin/")?
                 .get(target)
@@ -229,7 +229,11 @@ pub(crate) fn resolve_integrated(
             }
             outcome.head = Some(head.to_hex());
             let spec = format!("+refs/heads/{branch}:refs/heads/{branch}");
-            let pushed = crate::commands::sync::push_specs(&here.remote, &[spec], mode)?;
+            let pushed = crate::commands::sync::push_specs(
+                &here.remote,
+                &[spec],
+                mode == crate::output::OutputMode::Human,
+            )?;
             if let Some(Some(why)) = pushed.get(branch) {
                 bail!(
                     "{branch} is at {} here, but pushing it was refused: {why}",
@@ -255,7 +259,11 @@ pub(crate) fn resolve_integrated(
                 format!("refs/heads/{new}:refs/heads/{new}"),
                 format!(":refs/heads/{branch}"),
             ];
-            let pushed = crate::commands::sync::push_specs(&here.remote, &specs, mode)?;
+            let pushed = crate::commands::sync::push_specs(
+                &here.remote,
+                &specs,
+                mode == crate::output::OutputMode::Human,
+            )?;
             if let Some(Some(why)) = pushed.get(new) {
                 bail!("{new} was renamed here, but pushing it was refused: {why}");
             }

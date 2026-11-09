@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "✗ main: main is the server's target branch and can't be changed directly\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"url\":\"http://127.0.0.1:8080/demo.git\",\"gave_change_ids\":0,\"branches\":[{\"name\":\"main\",\"status\":\"refused\",\"commits\":0,\"message\":\"main is the server's target branch and can't be changed directly\",\"reason\":\"target_branch\"}],\"refused\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Check-in to `http://127.0.0.1:8080/demo.git`\n\n| Branch | Status | Server commit | Commits | Rule |\n| --- | --- | --- | ---: | --- |\n| `main` | refused |  | 0 |  |\n\n- `main`: main is the server's target branch and can't be changed directly\n",
+    "stderr": ""
+  }
+}

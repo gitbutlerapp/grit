@@ -21,7 +21,8 @@ use grit_lib::remote::{redact_url_for_display, HttpClientFactory};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::dispatch::CommandInteraction;
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::progress::{format_bytes, format_duration, paint, TerminalProgress, BOLD, DIM};
 use crate::ui::filesystem_path_for_user;
 
@@ -161,8 +162,9 @@ pub fn run(
     slice: Option<&str>,
     paths: &[String],
     into: Option<&Path>,
-    mode: OutputMode,
+    interaction: CommandInteraction,
 ) -> Result<CheckoutOutcome> {
+    let mode = interaction.output_mode_for_progress();
     let started = Instant::now();
     let env = crate::context::environment();
     let config = ConfigSet::load(
@@ -569,7 +571,7 @@ pub fn dispatch(
     use crate::args::*;
     use crate::commands;
 
-    use crate::dispatch::{emit_success, CommandEnv};
+    use crate::dispatch::{emit_success, CommandEnv, CommandInteraction};
 
     let CommandEnv {
         opts,
@@ -590,7 +592,13 @@ pub fn dispatch(
         )
     } else {
         emit_success(
-            commands::checkout::run(&url, slice.as_deref(), &paths, into.as_deref(), opts.mode)?,
+            commands::checkout::run(
+                &url,
+                slice.as_deref(),
+                &paths,
+                into.as_deref(),
+                CommandInteraction::from_mode(opts.mode),
+            )?,
             opts,
             ctx,
         )

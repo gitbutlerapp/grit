@@ -1,6 +1,9 @@
 //! Route a parsed [`crate::args::Command`] to command implementations.
 
+pub(crate) mod interaction;
 pub(crate) mod support;
+
+pub(crate) use interaction::CommandInteraction;
 
 pub(crate) use support::{
     emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,

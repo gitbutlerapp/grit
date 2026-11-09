@@ -76,7 +76,7 @@ pub struct PushSharedBranch {
     /// The branch.
     pub branch: String,
     /// The other members' heads, compared with yours.
-    pub heads: Vec<crate::commands::sync::SharedHead>,
+    pub heads: Vec<crate::render::sync::SharedHead>,
     /// Members whose diverged heads went together with yours without losing
     /// anything: combined into your branch here, and pushed again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -105,7 +105,7 @@ impl PushOutcome {
             || self.shared.iter().any(|s| {
                 s.heads
                     .iter()
-                    .any(crate::commands::sync::SharedHead::needs_decision)
+                    .any(crate::render::sync::SharedHead::needs_decision)
             })
     }
 }
@@ -345,7 +345,7 @@ impl MarkdownRender for PushOutcome {
             }
             if s.heads
                 .iter()
-                .any(crate::commands::sync::SharedHead::needs_decision)
+                .any(crate::render::sync::SharedHead::needs_decision)
             {
                 writeln!(w, "\nExit status 3: pushed, decision needed.")?;
             }
@@ -631,10 +631,16 @@ pub fn run(
             } else {
                 plan.remote.clone()
             };
-            if crate::commands::sync::fetch_shared_heads(&repo, &tracking, mode).is_err() {
+            if crate::commands::sync::fetch_shared_heads(
+                &repo,
+                &tracking,
+                mode == OutputMode::Human,
+            )
+            .is_err()
+            {
                 continue;
             }
-            let heads_now = |ours: Option<ObjectId>| -> Vec<crate::commands::sync::SharedHead> {
+            let heads_now = |ours: Option<ObjectId>| -> Vec<crate::render::sync::SharedHead> {
                 crate::commands::sync::shared_heads(&repo, &tracking, name)
                     .unwrap_or_default()
                     .into_iter()
@@ -669,7 +675,11 @@ pub fn run(
             }
             let mut head = None;
             if !combined.is_empty() {
-                let again = crate::commands::sync::push(&plan.remote, &[name.to_owned()], mode)?;
+                let again = crate::commands::sync::push(
+                    &plan.remote,
+                    &[name.to_owned()],
+                    mode == OutputMode::Human,
+                )?;
                 if let Some(Some(why)) = again.get(name) {
                     anyhow::bail!(
                         "combined {name} with {}'s head here, but pushing it was refused: {why}",

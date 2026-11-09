@@ -13,6 +13,7 @@ use grit_lib::repo::Repository;
 
 use crate::commands::sync::{configure_shared, ensure_space, fetch, push, tips};
 use crate::context;
+use crate::dispatch::CommandInteraction;
 use crate::output::OutputMode;
 use crate::render::share::{
     HeadRelation, ShareAcceptOutcome, ShareBranchJson, ShareLinkJson, ShareMemberJson,
@@ -188,7 +189,7 @@ fn ask(here: &Here, request: &ShareRequest) -> Result<ShareReply> {
 }
 
 /// Bring the shares' heads into the clone after a change.
-fn refresh(here: &Here, reply: &ShareReply, mode: OutputMode) -> Result<()> {
+fn refresh(here: &Here, reply: &ShareReply, interaction: CommandInteraction) -> Result<()> {
     for share in &reply.shares {
         configure_shared(
             &here.repo,
@@ -197,7 +198,7 @@ fn refresh(here: &Here, reply: &ShareReply, mode: OutputMode) -> Result<()> {
             share.base_branch.as_deref(),
         )?;
     }
-    fetch(&here.remote, mode)
+    fetch(&here.remote, interaction.human_progress)
 }
 
 fn outcome(here: &Here, action: &str, reply: ShareReply, pushed: bool) -> ShareOutcome {
@@ -241,8 +242,9 @@ pub fn add(
     uses: Option<&str>,
     expires: Option<u32>,
     view: Option<api::ShareView>,
-    mode: OutputMode,
+    interaction: CommandInteraction,
 ) -> Result<ShareOutcome> {
+    let human_progress = interaction.human_progress;
     if !link && (uses.is_some() || expires.is_some()) {
         bail!("--uses and --expires go with --link");
     }
@@ -257,7 +259,9 @@ pub fn add(
     let pushed = match (local, remote) {
         (None, None) => bail!("there is no branch {branch} here or in your space"),
         (Some(local), remote) if Some(local) != remote => {
-            if let Some(Some(why)) = push(&here.remote, &[branch.to_owned()], mode)?.get(branch) {
+            if let Some(Some(why)) =
+                push(&here.remote, &[branch.to_owned()], human_progress)?.get(branch)
+            {
                 bail!("pushing {branch} to your space first: {why}");
             }
             true
@@ -285,12 +289,12 @@ pub fn add(
             view,
         },
     )?;
-    refresh(&here, &reply, mode)?;
+    refresh(&here, &reply, interaction)?;
     Ok(outcome(&here, "add", reply, pushed))
 }
 
 /// `grit share list`.
-pub fn list(branch: Option<&str>, mode: OutputMode) -> Result<ShareOutcome> {
+pub fn list(branch: Option<&str>, interaction: CommandInteraction) -> Result<ShareOutcome> {
     let here = here()?;
     let reply = ask(
         &here,
@@ -299,13 +303,17 @@ pub fn list(branch: Option<&str>, mode: OutputMode) -> Result<ShareOutcome> {
         },
     )?;
     if !reply.shares.is_empty() {
-        refresh(&here, &reply, mode)?;
+        refresh(&here, &reply, interaction)?;
     }
     Ok(outcome(&here, "list", reply, false))
 }
 
 /// `grit share remove`.
-pub fn remove(branch: &str, users: &[String], mode: OutputMode) -> Result<ShareOutcome> {
+pub fn remove(
+    branch: &str,
+    users: &[String],
+    interaction: CommandInteraction,
+) -> Result<ShareOutcome> {
     let here = here()?;
     let reply = ask(
         &here,
@@ -317,12 +325,12 @@ pub fn remove(branch: &str, users: &[String], mode: OutputMode) -> Result<ShareO
     if users.is_empty() {
         configure_shared(&here.repo, &here.remote, &[], None)?;
     }
-    fetch(&here.remote, mode)?;
+    fetch(&here.remote, interaction.human_progress)?;
     Ok(outcome(&here, "remove", reply, false))
 }
 
 /// `grit share leave`.
-pub fn leave(branch: &str, mode: OutputMode) -> Result<ShareOutcome> {
+pub fn leave(branch: &str, interaction: CommandInteraction) -> Result<ShareOutcome> {
     let here = here()?;
     let reply = ask(
         &here,
@@ -331,7 +339,7 @@ pub fn leave(branch: &str, mode: OutputMode) -> Result<ShareOutcome> {
         },
     )?;
     crate::commands::sync::unmark_shared(&here.repo, branch)?;
-    fetch(&here.remote, mode)?;
+    fetch(&here.remote, interaction.human_progress)?;
     Ok(outcome(&here, "leave", reply, false))
 }
 
@@ -355,7 +363,7 @@ pub fn resolve(
     mode: OutputMode,
 ) -> Result<ShareResolveOutcome> {
     let here = here()?;
-    fetch(&here.remote, mode)?;
+    fetch(&here.remote, mode == OutputMode::Human)?;
     let Some(ours) = tips(&here.repo, "refs/heads/")?.get(branch).copied() else {
         bail!("there is no branch {branch} here");
     };
@@ -455,7 +463,13 @@ pub fn resolve(
         move_branch(&here.repo, branch, head)?;
     }
     outcome.head = Some(head.to_hex());
-    if let Some(Some(why)) = push(&here.remote, &[branch.to_owned()], mode)?.get(branch) {
+    if let Some(Some(why)) = push(
+        &here.remote,
+        &[branch.to_owned()],
+        mode == OutputMode::Human,
+    )?
+    .get(branch)
+    {
         bail!(
             "{branch} is at {} here, but pushing it was refused: {why}",
             short_hex(&head.to_hex())
@@ -535,7 +549,7 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
                 std::slice::from_ref(&share.branch),
                 share.base_branch.as_deref(),
             )?;
-            fetch(&setup.remote, mode)?;
+            fetch(&setup.remote, mode == OutputMode::Human)?;
             let dir = repo
                 .work_tree()
                 .map(grit_lib::config::git_path::user_display_path)
@@ -570,7 +584,7 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
                 std::slice::from_ref(&share.branch),
                 share.base_branch.as_deref(),
             )?;
-            crate::commands::sync::fetch_in(&repo, "origin", mode)?;
+            crate::commands::sync::fetch_in(&repo, "origin", mode == OutputMode::Human)?;
             (Some(cloned.path), true)
         }
     };

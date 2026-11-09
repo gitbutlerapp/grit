@@ -36,7 +36,7 @@ pub fn dispatch(
     use crate::args::*;
     use crate::commands;
 
-    use crate::dispatch::{emit_success, CommandEnv};
+    use crate::dispatch::{emit_success, CommandEnv, CommandInteraction};
     use crate::exit_status::ExitStatus;
 
     let CommandEnv {
@@ -62,13 +62,13 @@ pub fn dispatch(
                 uses.as_deref(),
                 expires,
                 (no_history || !paths.is_empty()).then(|| api_view(paths)),
-                opts.mode,
+                CommandInteraction::from_mode(opts.mode),
             )?,
             opts,
             ctx,
         ),
         ShareAction::List { branch } => emit_success(
-            commands::share::list(branch.as_deref(), opts.mode)?,
+            commands::share::list(branch.as_deref(), CommandInteraction::from_mode(opts.mode))?,
             opts,
             ctx,
         ),
@@ -76,13 +76,15 @@ pub fn dispatch(
             emit_success(commands::share::accept(&link, opts.mode)?, opts, ctx)
         }
         ShareAction::Remove { branch, users } => emit_success(
-            commands::share::remove(&branch, &users, opts.mode)?,
+            commands::share::remove(&branch, &users, CommandInteraction::from_mode(opts.mode))?,
             opts,
             ctx,
         ),
-        ShareAction::Leave { branch } => {
-            emit_success(commands::share::leave(&branch, opts.mode)?, opts, ctx)
-        }
+        ShareAction::Leave { branch } => emit_success(
+            commands::share::leave(&branch, CommandInteraction::from_mode(opts.mode))?,
+            opts,
+            ctx,
+        ),
         ShareAction::Resolve {
             branch,
             option,

@@ -9,16 +9,15 @@
 //! runs the PowerShell installer (`irm <url> | iex`), the same scripts the documented
 //! one-line installs use.
 
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
-use schemars::JsonSchema;
-use serde::Serialize;
 
-use crate::markdown;
-use crate::output::{progress, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::dispatch::CommandInteraction;
+use crate::output::{progress, OutputMode};
+
+pub use crate::render::update::UpdateOutcome;
 
 /// URL of the POSIX-sh installer (used on Unix).
 #[cfg(not(windows))]
@@ -26,29 +25,6 @@ const INSTALL_URL: &str = "https://grit-scm.com/install";
 /// URL of the PowerShell installer (used on Windows).
 #[cfg(windows)]
 const INSTALL_URL: &str = "https://grit-scm.com/install.ps1";
-
-/// Result of `grit update`.
-#[derive(Serialize, JsonSchema)]
-pub struct UpdateOutcome {
-    pub updated: bool,
-    /// The version of `grit` that ran the update (the new version is whatever the
-    /// installer fetched).
-    pub version: String,
-}
-
-impl HumanRender for UpdateOutcome {
-    fn render_human(&self, _w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        // The installer's own output is the user-facing feedback; nothing extra.
-        Ok(())
-    }
-}
-
-impl MarkdownRender for UpdateOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        markdown::print_update_outcome(w, self)?;
-        Ok(())
-    }
-}
 
 /// Send the installer's stdout to our stderr in JSON mode so our stdout stays a
 /// single clean object; inherit normally in human mode.
@@ -61,7 +37,8 @@ fn child_stdout(mode: OutputMode) -> Stdio {
 
 /// Run the `update` command.
 #[cfg(not(windows))]
-pub fn run(mode: OutputMode) -> Result<UpdateOutcome> {
+pub fn run(interaction: CommandInteraction) -> Result<UpdateOutcome> {
+    let mode = interaction.output_mode_for_progress();
     // The installer is a POSIX-sh pipeline that shells out to curl + tar.
     for tool in ["sh", "curl"] {
         if find_in_path(tool).is_none() {
@@ -101,7 +78,8 @@ pub fn run(mode: OutputMode) -> Result<UpdateOutcome> {
 
 /// Run the `update` command.
 #[cfg(windows)]
-pub fn run(mode: OutputMode) -> Result<UpdateOutcome> {
+pub fn run(interaction: CommandInteraction) -> Result<UpdateOutcome> {
+    let mode = interaction.output_mode_for_progress();
     progress(
         mode,
         &format!("Updating grit (current: {})", env!("CARGO_PKG_VERSION")),
@@ -177,5 +155,11 @@ pub fn dispatch(
         process_env: _,
     } = env;
 
-    emit_success(commands::update::run(opts.mode)?, opts, ctx)
+    use crate::dispatch::CommandInteraction;
+
+    emit_success(
+        commands::update::run(CommandInteraction::from_mode(opts.mode))?,
+        opts,
+        ctx,
+    )
 }
