@@ -74,6 +74,44 @@ mod purity {
     struct BraceLexerState {
         /// When set, the scanner is inside a raw string continued from a previous line.
         raw_string_hashes: Option<usize>,
+        /// Block comment open across the previous line boundary (`/*` without a same-line `*/`).
+        in_block_comment: bool,
+    }
+
+    fn skip_to_block_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
+        let mut i = start;
+        while i + 1 < bytes.len() {
+            if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                return Some(i + 2);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Resume scanning after a multiline block comment; `None` if the line is still comment-only.
+    fn resume_block_comment(bytes: &[u8], lex: &mut BraceLexerState) -> Option<usize> {
+        if !lex.in_block_comment {
+            return Some(0);
+        }
+        match skip_to_block_comment_end(bytes, 0) {
+            Some(end) => {
+                lex.in_block_comment = false;
+                Some(end)
+            }
+            None => None,
+        }
+    }
+
+    fn enter_block_comment(bytes: &[u8], start: usize, lex: &mut BraceLexerState) -> Option<usize> {
+        lex.in_block_comment = true;
+        match skip_to_block_comment_end(bytes, start) {
+            Some(end) => {
+                lex.in_block_comment = false;
+                Some(end)
+            }
+            None => None,
+        }
     }
 
     fn line_is_ignorable(line: &str) -> bool {
@@ -115,6 +153,10 @@ mod purity {
             lex.raw_string_hashes = None;
             i = next;
         }
+        match resume_block_comment(bytes, lex) {
+            None => return 0,
+            Some(start) => i = start,
+        }
         while i < bytes.len() {
             let b = bytes[i];
             if b == b'/' && i + 1 < bytes.len() {
@@ -123,14 +165,13 @@ mod purity {
                 }
                 if bytes[i + 1] == b'*' {
                     i += 2;
-                    while i + 1 < bytes.len() {
-                        if bytes[i] == b'*' && bytes[i + 1] == b'/' {
-                            i += 2;
-                            break;
+                    match enter_block_comment(bytes, i, lex) {
+                        Some(next) => {
+                            i = next;
+                            continue;
                         }
-                        i += 1;
+                        None => break,
                     }
-                    continue;
                 }
             }
             if b == b'"' || b == b'\'' {
@@ -204,6 +245,10 @@ mod purity {
             lex.raw_string_hashes = None;
             i = next;
         }
+        match resume_block_comment(bytes, lex) {
+            None => return false,
+            Some(start) => i = start,
+        }
         while i < bytes.len() {
             let b = bytes[i];
             if b == b'/' && i + 1 < bytes.len() {
@@ -212,14 +257,13 @@ mod purity {
                 }
                 if bytes[i + 1] == b'*' {
                     i += 2;
-                    while i + 1 < bytes.len() {
-                        if bytes[i] == b'*' && bytes[i + 1] == b'/' {
-                            i += 2;
-                            break;
+                    match enter_block_comment(bytes, i, lex) {
+                        Some(next) => {
+                            i = next;
+                            continue;
                         }
-                        i += 1;
+                        None => return false,
                     }
-                    continue;
                 }
             }
             if b == b'"' || b == b'\'' {
@@ -496,6 +540,27 @@ pub fn still_production() {
         assert!(
             !v.iter().any(|line| line.contains("OPEN")),
             "cfg(test) body must stay ignored: {v:?}"
+        );
+    }
+
+    #[test]
+    fn purity_regression_scans_production_after_cfg_test_with_brace_in_block_comment() {
+        let src = r#"
+#[cfg(test)]
+mod tests { /*
+{
+*/
+}
+
+pub fn still_production() {
+    let _ = std::env::var_os("Y");
+}
+"#;
+        let v = scan_render_source("render/fixture.rs", src);
+        assert!(
+            v.iter()
+                .any(|line| line.contains("std::env") && line.contains('Y')),
+            "production code after #[cfg(test)] with brace in multiline block comment must be scanned: {v:?}"
         );
     }
 
