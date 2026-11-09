@@ -19,6 +19,7 @@ pub mod group_by;
 pub mod handle;
 mod log;
 mod merge_bases;
+pub mod presentation;
 pub(crate) mod queries;
 mod resolve;
 
@@ -34,6 +35,7 @@ pub use group_by::{AuthorGroup, GroupByAuthorOptions};
 pub use handle::RevWalk;
 pub use handle::{RevWalkCommitIter, StdinRevisionSpecs};
 pub use merge_bases::{AheadBehind, AheadBehindOptions, MergeBaseMode, ReachableWalkOptions};
+pub use presentation::RevListPresentationOptions;
 pub(crate) use queries::parse_rev_walk_tokens;
 pub use queries::{
     committer_cutoff_from_date, rev_walk_list_supports_stream, LeftRightCounts, MergeFilter,

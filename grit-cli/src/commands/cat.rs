@@ -6,142 +6,29 @@ use crate::revision_errors::map_resolve_error;
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use grit_lib::objects::{Object, ObjectKind};
+use grit_lib::porcelain::cat::{
+    CatBlobDisplayPlan, CatBlobDisposition, CatPresentationOptions, CatStdoutFormat,
+    JSON_INLINE_BLOB_MAX,
+};
 use grit_lib::revwalk::object_inspect::{
     format_tree_entries_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
 };
-use schemars::JsonSchema;
-use serde::Serialize;
 
 use crate::context;
-use crate::markdown::{escape_table_cell, format_inline_code, print_fenced_text};
-use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::output::OutputMode;
+pub use crate::render::cat::{BlobJson, CatContentJson, CatOutcome, TextObjectJson, TreeLineJson};
 
-/// Blob payload in JSON (`--json` contract).
-#[derive(Serialize, JsonSchema)]
-pub struct BlobJson {
-    pub encoding: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub data_base64: Option<String>,
-    /// When the blob is too large to embed inline in JSON.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub omitted_inline: Option<bool>,
-}
-
-/// One tree line in JSON (same fields as human `ls-tree` output).
-#[derive(Serialize, JsonSchema)]
-pub struct TreeLineJson {
-    pub mode: String,
-    #[serde(rename = "type")]
-    pub object_type: String,
-    pub oid: String,
-    pub path: String,
-}
-
-/// Commit or tag body in JSON (raw object payload bytes).
-#[derive(Serialize, JsonSchema)]
-pub struct TextObjectJson {
-    pub encoding: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub data_base64: Option<String>,
-}
-
-/// Object payload shape in `--json` output.
-#[derive(Serialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum CatContentJson {
-    Blob(BlobJson),
-    Tree { entries: Vec<TreeLineJson> },
-    Commit(TextObjectJson),
-    Tag(TextObjectJson),
-}
-
-/// Result of `grit cat`.
-#[derive(Serialize, JsonSchema)]
-pub struct CatOutcome {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(default)]
-    pub warnings: Vec<crate::diagnostics::WarningRecord>,
-    pub spec: String,
-    pub oid: String,
-    pub kind: String,
-    pub size: u64,
-    pub content: CatContentJson,
-    /// Raw bytes written to stdout in human mode (omitted from JSON). Empty when streamed.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub human_raw: Option<Vec<u8>>,
-}
-
-impl HumanRender for CatOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        if let Some(bytes) = &self.human_raw {
-            w.write_all(bytes)
-                .map_err(|e| anyhow::anyhow!("writing object: {e}"))?;
-        }
-        Ok(())
+fn presentation_from_mode(mode: OutputMode) -> CatPresentationOptions {
+    CatPresentationOptions {
+        format: match mode {
+            OutputMode::Human => CatStdoutFormat::Human,
+            OutputMode::Json => CatStdoutFormat::Json,
+            OutputMode::Markdown => CatStdoutFormat::Markdown,
+        },
     }
 }
 
-impl MarkdownRender for CatOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "## Cat\n");
-        outln!(w, "- **spec:** {}", format_inline_code(&self.spec));
-        outln!(w, "- **oid:** `{}`", self.oid);
-        outln!(w, "- **kind:** {}", self.kind);
-        outln!(w, "- **size:** {}", self.size);
-        outln!(w);
-        match &self.content {
-            CatContentJson::Blob(b) => {
-                if b.omitted_inline == Some(true) {
-                    outln!(
-                        w,
-                        "_large binary blob (streamed in human mode; omitted from JSON)_"
-                    );
-                } else if let Some(text) = &b.text {
-                    print_fenced_text(w, text)?;
-                } else {
-                    outln!(w, "_binary blob (base64 in JSON)_");
-                }
-            }
-            CatContentJson::Tree { entries } => {
-                outln!(w, "| Mode | Type | OID | Path |");
-                outln!(w, "| --- | --- | --- | --- |");
-                for e in entries {
-                    let path_cell = format_inline_code(&escape_table_cell(&e.path));
-                    outln!(
-                        w,
-                        "| {} | {} | `{}` | {path_cell} |",
-                        e.mode,
-                        e.object_type,
-                        e.oid,
-                    );
-                }
-            }
-            CatContentJson::Commit(t) | CatContentJson::Tag(t) => {
-                if let Some(text) = &t.text {
-                    print_fenced_text(w, text.trim_end())?;
-                } else {
-                    outln!(w, "_non-UTF-8 object payload (base64 in JSON)_");
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Maximum blob size whose bytes are embedded in `--json` output.
-const JSON_INLINE_BLOB_MAX: u64 = 1024 * 1024;
-
-pub fn run(spec: String, output: OutputMode) -> Result<CatOutcome> {
+pub fn run(spec: String, presentation: CatPresentationOptions) -> Result<CatOutcome> {
     let (repo, sink) = context::discover_with_warnings()?;
     let resolved = repo
         .resolve(&spec)
@@ -153,14 +40,14 @@ pub fn run(spec: String, output: OutputMode) -> Result<CatOutcome> {
             spec,
             resolved.oid,
             resolved.size,
-            output,
+            presentation,
             sink.warnings(),
         ),
         kind => {
             let obj = repo
                 .read_object_raw_for_display(&resolved.oid)
                 .with_context(|| format!("read object {}", resolved.oid.to_hex()))?;
-            let (content, human_raw) = build_content_for_kind(kind, &obj, output)?;
+            let (content, human_raw) = build_content_for_kind(kind, &obj, presentation)?;
             Ok(CatOutcome {
                 warnings: sink.warnings(),
                 spec,
@@ -179,12 +66,11 @@ fn run_blob(
     spec: String,
     oid: grit_lib::objects::ObjectId,
     size: u64,
-    output: OutputMode,
+    presentation: CatPresentationOptions,
     warnings: Vec<crate::diagnostics::WarningRecord>,
 ) -> Result<CatOutcome> {
-    let large = size >= JSON_INLINE_BLOB_MAX;
-    let stream_human = matches!(output, OutputMode::Human) && large;
-    if stream_human {
+    let plan = CatBlobDisplayPlan::for_blob(size, presentation);
+    if plan.streams_on_human_stdout() {
         repo.with_object_stream_for_display(&oid, |mut stream| {
             std::io::copy(&mut stream.reader, &mut io::stdout()).map_err(grit_lib::error::Error::Io)
         })?
@@ -200,16 +86,18 @@ fn run_blob(
         })
     };
 
-    let (content, human_raw) = if large && (stream_human || !matches!(output, OutputMode::Human)) {
-        (omitted_blob(), None)
-    } else {
-        let data = repo
-            .read_object_raw_for_display(&oid)
-            .with_context(|| format!("read object {}", oid.to_hex()))?
-            .data;
-        let json = blob_payload_json(&data, size);
-        let raw = matches!(output, OutputMode::Human).then(|| data);
-        (CatContentJson::Blob(json), raw)
+    let (content, human_raw) = match plan.disposition {
+        CatBlobDisposition::StreamHumanStdout => (omitted_blob(), None),
+        CatBlobDisposition::OmitInline => (omitted_blob(), None),
+        CatBlobDisposition::Inline => {
+            let data = repo
+                .read_object_raw_for_display(&oid)
+                .with_context(|| format!("read object {}", oid.to_hex()))?
+                .data;
+            let json = blob_payload_json(&data, size);
+            let raw = matches!(presentation.format, CatStdoutFormat::Human).then_some(data);
+            (CatContentJson::Blob(json), raw)
+        }
     };
 
     Ok(CatOutcome {
@@ -226,44 +114,42 @@ fn run_blob(
 fn build_content_for_kind(
     kind: ObjectKind,
     obj: &Object,
-    output: OutputMode,
+    presentation: CatPresentationOptions,
 ) -> Result<(CatContentJson, Option<Vec<u8>>)> {
+    let human = matches!(presentation.format, CatStdoutFormat::Human);
     match kind {
         ObjectKind::Blob => {
             let json =
                 blob_payload_json(&obj.data, u64::try_from(obj.data.len()).unwrap_or(u64::MAX));
-            let raw = matches!(output, OutputMode::Human).then(|| obj.data.clone());
+            let raw = human.then(|| obj.data.clone());
             Ok((CatContentJson::Blob(json), raw))
         }
         ObjectKind::Tree => {
             let parsed = grit_lib::objects::parse_tree(&obj.data)?;
-            match output {
-                OutputMode::Human => {
-                    let human = format_tree_entries_cat_file_p(&parsed);
-                    Ok((CatContentJson::Tree { entries: vec![] }, Some(human)))
-                }
-                OutputMode::Json | OutputMode::Markdown => {
-                    let entries = parsed
-                        .iter()
-                        .map(|e| TreeLineJson {
-                            mode: tree_entry_mode_cat_file_p(e.mode),
-                            object_type: tree_entry_cat_file_type(e.mode).to_owned(),
-                            oid: e.oid.to_hex(),
-                            path: String::from_utf8_lossy(&e.name).into_owned(),
-                        })
-                        .collect();
-                    Ok((CatContentJson::Tree { entries }, None))
-                }
+            if human {
+                let human = format_tree_entries_cat_file_p(&parsed);
+                Ok((CatContentJson::Tree { entries: vec![] }, Some(human)))
+            } else {
+                let entries = parsed
+                    .iter()
+                    .map(|e| TreeLineJson {
+                        mode: tree_entry_mode_cat_file_p(e.mode),
+                        object_type: tree_entry_cat_file_type(e.mode).to_owned(),
+                        oid: e.oid.to_hex(),
+                        path: String::from_utf8_lossy(&e.name).into_owned(),
+                    })
+                    .collect();
+                Ok((CatContentJson::Tree { entries }, None))
             }
         }
         ObjectKind::Commit => {
             let json = CatContentJson::Commit(text_object_json(&obj.data));
-            let raw = matches!(output, OutputMode::Human).then(|| obj.data.clone());
+            let raw = human.then(|| obj.data.clone());
             Ok((json, raw))
         }
         ObjectKind::Tag => {
             let json = CatContentJson::Tag(text_object_json(&obj.data));
-            let raw = matches!(output, OutputMode::Human).then(|| obj.data.clone());
+            let raw = human.then(|| obj.data.clone());
             Ok((json, raw))
         }
     }
@@ -336,5 +222,9 @@ pub fn dispatch(
         process_env: _,
     } = env;
     let CatArgs { spec } = args;
-    emit_success(commands::cat::run(spec, opts.mode)?, opts, ctx)
+    emit_success(
+        commands::cat::run(spec, presentation_from_mode(opts.mode))?,
+        opts,
+        ctx,
+    )
 }

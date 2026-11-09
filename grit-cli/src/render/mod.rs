@@ -1,10 +1,13 @@
 //! Presentation layer: format typed command outcomes for humans, agents, and scripts.
 
+pub mod blame;
 pub mod branch;
 pub mod bundle;
+pub mod cat;
 pub mod clone;
 pub mod config;
 pub mod conflict;
+pub mod describe;
 pub mod diff;
 pub mod diff_stream;
 pub mod error;
@@ -16,15 +19,22 @@ pub mod hooks;
 pub mod ignore;
 pub mod init;
 pub mod list;
+pub mod log;
 pub mod merge;
+pub mod merge_base;
+pub mod notes;
 pub mod operation;
+pub mod patch_id;
 pub mod pick;
 pub mod promisor;
 pub mod pull;
 pub mod push;
 pub mod rebase;
+pub mod reflog;
 pub mod remote;
 pub mod repack;
+pub mod resolve;
+pub mod revs;
 pub mod revert;
 pub mod shared_branch;
 pub mod shortlog;

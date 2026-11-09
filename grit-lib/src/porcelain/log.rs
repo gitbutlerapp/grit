@@ -693,3 +693,113 @@ pub fn current_branch_decoration_index(
         .iter()
         .position(|it| it.kind == DecorationKind::Branch && it.refname.as_deref() == Some(refname))
 }
+
+/// stdout format for log-style porcelain (independent of the CLI crate).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogStdoutFormat {
+    /// Human-readable terminal output.
+    Human,
+    /// Machine-readable JSON on stdout.
+    Json,
+    /// Agent-oriented Markdown on stdout.
+    Markdown,
+}
+
+/// Log presentation at the CLI boundary (format + `--count` / group-by flags).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogPresentationOptions {
+    /// Selected stdout format.
+    pub format: LogStdoutFormat,
+    /// When true with `--group-by`, JSON lists counts only.
+    pub group_count_only: bool,
+}
+
+impl LogPresentationOptions {
+    /// Policy for whether group-by paths include commit JSON rows.
+    #[must_use]
+    pub fn json_policy(self) -> LogCommitJsonPolicy {
+        LogCommitJsonPolicy::new(self.format == LogStdoutFormat::Json, self.group_count_only)
+    }
+
+    /// Whether stdout is JSON for this invocation.
+    #[must_use]
+    pub fn json_output(self) -> bool {
+        self.format == LogStdoutFormat::Json
+    }
+
+    /// Whether stdout is human text for this invocation.
+    #[must_use]
+    pub fn human_output(self) -> bool {
+        self.format == LogStdoutFormat::Human
+    }
+
+    /// Whether stdout is Markdown for this invocation.
+    #[must_use]
+    pub fn markdown_output(self) -> bool {
+        self.format == LogStdoutFormat::Markdown
+    }
+}
+
+/// Whether author group-by paths need full commit JSON rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogCommitJsonPolicy {
+    json_output: bool,
+    group_count_only: bool,
+}
+
+impl LogCommitJsonPolicy {
+    /// Build from JSON mode and `--count` (group count only).
+    #[must_use]
+    pub fn new(json_output: bool, group_count_only: bool) -> Self {
+        Self {
+            json_output,
+            group_count_only,
+        }
+    }
+
+    /// Load commits for JSON when grouping by author and not count-only.
+    #[must_use]
+    pub fn need_commit_json(self) -> bool {
+        self.json_output && !self.group_count_only
+    }
+
+    /// Include per-commit rows inside author groups in JSON.
+    #[must_use]
+    pub fn include_commits_in_groups(self) -> bool {
+        self.need_commit_json()
+    }
+
+    /// Pass `count_only` to library group-by helpers.
+    #[must_use]
+    pub fn group_by_count_only(self) -> bool {
+        !self.need_commit_json()
+    }
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::*;
+
+    #[test]
+    fn json_policy_count_only_skips_commits() {
+        let opts = LogPresentationOptions {
+            format: LogStdoutFormat::Json,
+            group_count_only: true,
+        };
+        let policy = opts.json_policy();
+        assert!(!policy.need_commit_json());
+        assert!(policy.group_by_count_only());
+    }
+
+    #[test]
+    fn json_policy_with_commits() {
+        let opts = LogPresentationOptions {
+            format: LogStdoutFormat::Json,
+            group_count_only: false,
+        };
+        let policy = opts.json_policy();
+        assert!(policy.need_commit_json());
+        assert!(policy.include_commits_in_groups());
+        assert!(!policy.group_by_count_only());
+    }
+}

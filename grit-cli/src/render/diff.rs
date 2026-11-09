@@ -52,6 +52,24 @@ impl From<LineStatJson> for LineStat {
     }
 }
 
+/// Aggregate line counts for log/show JSON when stat modes are active.
+#[derive(Serialize, JsonSchema, Clone, Copy)]
+pub struct DiffTotalsJson {
+    pub files_changed: usize,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
+impl From<DiffTotals> for DiffTotalsJson {
+    fn from(totals: DiffTotals) -> Self {
+        Self {
+            files_changed: totals.files_changed,
+            insertions: totals.insertions,
+            deletions: totals.deletions,
+        }
+    }
+}
+
 /// One changed file.
 #[derive(Clone, Serialize, JsonSchema)]
 pub struct FileDiff {

@@ -2,16 +2,18 @@
 
 use anyhow::{bail, Result};
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::log::LogStdoutFormat;
 use grit_lib::revwalk::rev_list::RevListResult;
-use grit_lib::revwalk::{CommitExtent, LeftRightCounts};
-use schemars::JsonSchema;
-use serde::Serialize;
+use grit_lib::revwalk::{CommitExtent, LeftRightCounts, RevListPresentationOptions};
 use std::io::Write;
 
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context;
-use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::output::{outln, CommitJson, RenderContext};
 use crate::pathspec_args::{promote_long_magic_pathspecs_from_revs, TrailingPathspecArgs};
+pub use crate::render::revs::{RevsCommit, RevsLeftRightCount, RevsOutcome, RevsSide};
+use crate::render::revs::{RevsLine, RevsMarks};
+use crate::render::OutputMode;
 use crate::rev_select::RevSelectArgs;
 use crate::stream_commit_list::{
     begin_commits_json_document, finish_commits_json_document, flush_or_broken_pipe,
@@ -19,196 +21,38 @@ use crate::stream_commit_list::{
     write_json_array_element, BATCH, FIRST_BATCH,
 };
 
-/// Left/right counts for a symmetric range (`--left-right --count`).
-#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
-pub struct RevsLeftRightCount {
-    pub left: usize,
-    pub right: usize,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RevsPresentationOptions {
+    pub format: LogStdoutFormat,
 }
 
-impl From<LeftRightCounts> for RevsLeftRightCount {
-    fn from(c: LeftRightCounts) -> Self {
-        Self {
-            left: c.left,
-            right: c.right,
-        }
-    }
-}
-
-/// Which side of a symmetric range (`A...B`) a listed commit is on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum RevsSide {
-    /// Reachable from the left tip only.
-    Left,
-    /// Reachable from the right tip only.
-    Right,
-}
-
-/// One listed commit: the shared commit shape plus `--left-right` / `--cherry-mark` marks.
-#[derive(Serialize, JsonSchema)]
-pub struct RevsCommit {
-    #[serde(flatten)]
-    pub commit: CommitJson,
-    /// Side of the symmetric range, with `--left-right` or `--cherry-mark`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub side: Option<RevsSide>,
-    /// With `--cherry-mark`: a commit on the other side has the same patch-id.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub equivalent: Option<bool>,
-    /// With `--cherry-mark`, for a one-to-one equivalent pair: the other side's commit.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub equivalent_to: Option<String>,
-    /// With `--cherry-mark`, for a one-to-one equivalent pair: whether the messages differ.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message_changed: Option<bool>,
-}
-
-/// `--left-right` / `--cherry-mark` annotations of one listed commit.
-#[derive(Debug, Default)]
-struct RevsMarks {
-    side: Option<RevsSide>,
-    equivalent: Option<bool>,
-    equivalent_to: Option<String>,
-    message_changed: Option<bool>,
-}
-
-impl RevsMarks {
-    fn marker(&self) -> Option<char> {
-        match (self.equivalent, self.side?) {
-            (Some(true), _) => Some('='),
-            (_, RevsSide::Left) => Some('<'),
-            (_, RevsSide::Right) => Some('>'),
-        }
+impl RevsPresentationOptions {
+    #[must_use]
+    pub fn json_output(self) -> bool {
+        self.format == LogStdoutFormat::Json
     }
 
-    fn note(&self) -> Option<String> {
-        let other = self.equivalent_to.as_deref()?;
-        let short = other.get(..12).unwrap_or(other);
-        Some(if self.message_changed == Some(true) {
-            format!("message changed, pairs with {short}")
-        } else {
-            format!("pairs with {short}")
-        })
+    #[must_use]
+    pub fn list_extent(self) -> CommitExtent {
+        RevListPresentationOptions::default().commit_extent_for_full_json(self.json_output())
     }
-}
 
-impl RevsCommit {
-    fn new(commit: CommitJson, marks: RevsMarks) -> Self {
-        Self {
-            commit,
-            side: marks.side,
-            equivalent: marks.equivalent,
-            equivalent_to: marks.equivalent_to,
-            message_changed: marks.message_changed,
-        }
+    #[must_use]
+    pub fn markdown_output(self) -> bool {
+        self.format == LogStdoutFormat::Markdown
     }
-}
 
-/// One listed commit as human and Markdown output show it.
-#[derive(Debug)]
-struct RevsLine {
-    oid: ObjectId,
-    subject: String,
-    marks: RevsMarks,
-}
-
-/// Result of `grit revs`.
-#[derive(Serialize, JsonSchema)]
-pub struct RevsOutcome {
-    /// Listed commits in `rev-list` order (empty when `--count` is set).
-    pub commits: Vec<RevsCommit>,
-    /// The listed commits for human and Markdown output, which need only the id, subject
-    /// and marks; [`Self::commits`] stays empty then.
-    #[serde(skip)]
-    #[schemars(skip)]
-    lines: Vec<RevsLine>,
-    /// Total reachable commits when `--count` is set without `--left-right`; otherwise `null`.
-    pub count: Option<usize>,
-    /// Left/right counts when `--count` and `--left-right` are set; otherwise `null`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub left_right: Option<RevsLeftRightCount>,
-    /// True when more commits matched than returned (`-n`).
-    pub truncated: bool,
-    /// Continuation cursor when the list is resumable; always `null` for `revs` today.
-    pub next: Option<String>,
-}
-
-impl HumanRender for RevsOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        if let Some(lr) = self.left_right {
-            outln!(w, "{}\t{}", lr.left, lr.right);
-            return Ok(());
-        }
-        if let Some(n) = self.count {
-            outln!(w, "{n}");
-            return Ok(());
-        }
-        for row in &self.lines {
-            let oid = &row.oid;
-            let subject = &row.subject;
-            match (row.marks.marker(), row.marks.note()) {
-                (Some(m), Some(note)) => outln!(w, "{m} {oid}  {subject}  ({note})"),
-                (Some(m), None) => outln!(w, "{m} {oid}  {subject}"),
-                (None, _) => outln!(w, "{oid}  {subject}"),
-            }
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for RevsOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        if let Some(lr) = self.left_right {
-            outln!(w, "# Symmetric range counts");
-            outln!(w);
-            outln!(
-                w,
-                "**Left:** {left} · **Right:** {right}",
-                left = lr.left,
-                right = lr.right
-            );
-            return Ok(());
-        }
-        if let Some(n) = self.count {
-            outln!(w, "# Revision count");
-            outln!(w);
-            outln!(w, "**{n}** commits reachable.");
-            return Ok(());
-        }
-        outln!(w, "# Commits");
-        outln!(w);
-        if self.lines.is_empty() {
-            outln!(w, "_No commits._");
-            return Ok(());
-        }
-        for row in &self.lines {
-            let oid = &row.oid;
-            let subject = &row.subject;
-            let side = match (row.marks.side, row.marks.equivalent) {
-                (Some(RevsSide::Left), Some(true)) => "**left, equivalent** ",
-                (Some(RevsSide::Right), Some(true)) => "**right, equivalent** ",
-                (Some(RevsSide::Left), _) => "**left** ",
-                (Some(RevsSide::Right), _) => "**right** ",
-                (None, _) => "",
-            };
-            match row.marks.note() {
-                Some(note) => outln!(w, "- {side}`{oid}` {subject} _({note})_"),
-                None => outln!(w, "- {side}`{oid}` {subject}"),
-            }
-        }
-        Ok(())
+    #[must_use]
+    pub fn human_output(self) -> bool {
+        self.format == LogStdoutFormat::Human
     }
 }
 
 /// Counting and side-marking switches for [`run`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RevsMode {
-    /// `--count`: print counts instead of commits.
     pub count: bool,
-    /// `--left-right`: mark sides when listing, or count each side with `--count`.
     pub left_right: bool,
-    /// `--cherry-mark`: pair the sides by patch-id when listing.
     pub cherry_mark: bool,
 }
 
@@ -258,20 +102,25 @@ pub fn listing_can_stream(
     Ok(crate::stream_commit_list::plain_walk_streamable(&opts))
 }
 
-/// List commits incrementally on a plain date-order walk (see [`listing_can_stream`]).
-///
-/// # Errors
-///
-/// Propagates walk, load, and write errors other than a closed stdout pipe.
+pub(crate) fn revs_presentation_from_mode(mode: OutputMode) -> RevsPresentationOptions {
+    RevsPresentationOptions {
+        format: match mode {
+            OutputMode::Human => LogStdoutFormat::Human,
+            OutputMode::Json => LogStdoutFormat::Json,
+            OutputMode::Markdown => LogStdoutFormat::Markdown,
+        },
+    }
+}
+
 pub fn stream_listing(
     mut rev: RevSelectArgs,
     mut pathspecs: TrailingPathspecArgs,
-    output_mode: OutputMode,
+    presentation: RevsPresentationOptions,
     _ctx: &RenderContext,
     w: &mut dyn Write,
 ) -> Result<()> {
     if rev.max_count() == Some(0) {
-        return write_empty_streaming_document(w, output_mode);
+        return write_empty_streaming_document(w, presentation);
     }
     let repo = context::discover()?;
     let env = repo.environment();
@@ -280,11 +129,7 @@ pub fn stream_listing(
     let opts = rev.to_rev_walk_options(&repo, env, &[], walk_pathspec)?;
     let token_refs = rev.rev_tokens(&[]);
     let fetch_cap = fetch_limit_plus_one(rev.max_count());
-    let extent = if output_mode == OutputMode::Json {
-        CommitExtent::Whole
-    } else {
-        CommitExtent::ThroughSubject
-    };
+    let extent = presentation.list_extent();
     let mut stream = open_plain_stream(&repo, &token_refs, &opts, fetch_cap, extent)?;
     let loader = CommitJsonLoader::for_listed_commits();
     let now = context::wall_clock_now(env).unix_timestamp();
@@ -294,9 +139,9 @@ pub fn stream_listing(
     let mut pulled_from_stream = 0usize;
     let mut first_json = true;
     let mut first_batch = true;
-    if output_mode == OutputMode::Json {
+    if presentation.json_output() {
         begin_commits_json_document(w)?;
-    } else if output_mode == OutputMode::Markdown {
+    } else if presentation.markdown_output() {
         outln!(w, "# Commits");
         outln!(w);
     }
@@ -321,8 +166,8 @@ pub fn stream_listing(
         if batch.oids.is_empty() {
             break;
         }
-        match output_mode {
-            OutputMode::Human => {
+        match presentation.format {
+            LogStdoutFormat::Human => {
                 let summaries = load_batch_summaries(&repo, &mut batch)?;
                 let mut buf = Vec::new();
                 for row in summaries {
@@ -332,7 +177,7 @@ pub fn stream_listing(
                     return Ok(());
                 }
             }
-            OutputMode::Markdown => {
+            LogStdoutFormat::Markdown => {
                 let summaries = load_batch_summaries(&repo, &mut batch)?;
                 let mut buf = Vec::new();
                 for row in summaries {
@@ -342,7 +187,7 @@ pub fn stream_listing(
                     return Ok(());
                 }
             }
-            OutputMode::Json => {
+            LogStdoutFormat::Json => {
                 let commits = repo.odb().with_pack_read_context(|| {
                     loader.load_reusing(&repo, &batch.oids, now, batch.walked)
                 })?;
@@ -360,24 +205,27 @@ pub fn stream_listing(
             break;
         }
     }
-    if output_mode == OutputMode::Json {
+    if presentation.json_output() {
         finish_commits_json_document(w, truncated, ",\"count\":null")?;
     }
     Ok(())
 }
 
-fn write_empty_streaming_document(w: &mut dyn Write, output_mode: OutputMode) -> Result<()> {
-    match output_mode {
-        OutputMode::Json => {
+fn write_empty_streaming_document(
+    w: &mut dyn Write,
+    presentation: RevsPresentationOptions,
+) -> Result<()> {
+    match presentation.format {
+        LogStdoutFormat::Json => {
             begin_commits_json_document(w)?;
             finish_commits_json_document(w, false, ",\"count\":null")?;
         }
-        OutputMode::Markdown => {
+        LogStdoutFormat::Markdown => {
             outln!(w, "# Commits");
             outln!(w);
             outln!(w, "_No commits._");
         }
-        OutputMode::Human => {}
+        LogStdoutFormat::Human => {}
     }
     Ok(())
 }
@@ -386,7 +234,7 @@ pub fn run(
     mut rev: RevSelectArgs,
     mut pathspecs: TrailingPathspecArgs,
     mode: RevsMode,
-    output_mode: OutputMode,
+    presentation: RevsPresentationOptions,
 ) -> Result<RevsOutcome> {
     let RevsMode {
         count, left_right, ..
@@ -473,7 +321,7 @@ pub fn run(
         truncated,
         next: None,
     };
-    if output_mode == OutputMode::Json {
+    if presentation.json_output() {
         let now = context::wall_clock_now(env).unix_timestamp();
         let commits = repo
             .odb()
@@ -540,14 +388,25 @@ pub fn dispatch(
         if opts.filter.is_none() && commands::revs::listing_can_stream(&rev, &pathspecs, mode)? {
             let stdout = std::io::stdout();
             let mut lock = stdout.lock();
-            match commands::revs::stream_listing(rev, pathspecs, opts.mode, ctx, &mut lock) {
+            match commands::revs::stream_listing(
+                rev,
+                pathspecs,
+                commands::revs::revs_presentation_from_mode(opts.mode),
+                ctx,
+                &mut lock,
+            ) {
                 Ok(()) => return Ok(ExitStatus::Success),
                 Err(e) if is_broken_pipe(&e) => return Ok(ExitStatus::Success),
                 Err(e) => return Err(e),
             }
         }
         emit_success(
-            commands::revs::run(rev, pathspecs, mode, opts.mode)?,
+            commands::revs::run(
+                rev,
+                pathspecs,
+                mode,
+                commands::revs::revs_presentation_from_mode(opts.mode),
+            )?,
             opts,
             ctx,
         )

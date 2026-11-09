@@ -8,7 +8,9 @@ use anyhow::{bail, Context, Result};
 use grit_lib::diff::{CommitFilesManyOptions, DiffOptions};
 use grit_lib::gitbutler::GitButlerWorkspace;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::log::CommitReuse;
+use grit_lib::porcelain::log::{
+    CommitReuse, LogCommitJsonPolicy, LogPresentationOptions, LogStdoutFormat,
+};
 use grit_lib::revwalk::group_by::GroupByAuthorOptions;
 use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
 use grit_lib::revwalk::object_inspect::OidAbbrevBatch;
@@ -79,28 +81,20 @@ impl LogPage {
     }
 }
 
-/// Group commits for summary output.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LogGroupBy {
-    Author,
-}
+pub use crate::render::log::{LogDisplayOptions, LogGroupBy};
 
-/// Display flags for human / Markdown rendering (not part of `--json`).
-#[derive(Clone, Copy, Debug, Default)]
-pub struct LogDisplayOptions {
-    pub oneline: bool,
-    pub decorate: bool,
-    pub group_by: Option<LogGroupBy>,
-    pub group_count_only: bool,
-    pub graph: bool,
-    /// When set with `--graph`, draw the graph with ASCII `*|` instead of Unicode box-drawing.
-    pub graph_ascii: bool,
-    /// End each default human row with a `+added -removed` line summary (on a terminal).
-    pub line_counts: bool,
-    /// Author and date column widths to keep, so streamed batches line up.
-    pub columns: Option<ui::CommitColumns>,
-    /// The repository has no commits (`HEAD` unset); an empty page is not "no history".
-    pub no_commits_in_repo: bool,
+pub(crate) fn log_presentation(
+    mode: OutputMode,
+    display: LogDisplayOptions,
+) -> LogPresentationOptions {
+    LogPresentationOptions {
+        format: match mode {
+            OutputMode::Human => LogStdoutFormat::Human,
+            OutputMode::Json => LogStdoutFormat::Json,
+            OutputMode::Markdown => LogStdoutFormat::Markdown,
+        },
+        group_count_only: display.group_count_only,
+    }
 }
 
 /// Result of `grit log`: one page of commits, plus the next page's start (if any).
@@ -944,9 +938,10 @@ fn run_log_group_by_author(
     let max_count = rev.max_count();
     let reverse = rev.reverse;
     let mailmap = repo.revwalk().mailmap_for_grouping(use_mailmap)?;
-    let need_commit_json = output_mode == OutputMode::Json && !display.group_count_only;
+    let policy = log_presentation(output_mode, display).json_policy();
+    let need_commit_json = policy.need_commit_json();
     let group_options = GroupByAuthorOptions {
-        count_only: !need_commit_json,
+        count_only: policy.group_by_count_only(),
     };
 
     if need_commit_json {
@@ -1015,7 +1010,9 @@ fn build_author_group_outcome_from_groups(
     display: LogDisplayOptions,
     output_mode: OutputMode,
 ) -> Result<LogOutcome> {
-    let include_commits = output_mode == OutputMode::Json && !display.group_count_only;
+    let include_commits = log_presentation(output_mode, display)
+        .json_policy()
+        .include_commits_in_groups();
     let loader = if include_commits {
         Some(CommitJsonLoader::new(repo)?)
     } else {
@@ -1570,47 +1567,17 @@ fn graph_blocks(
     parent_map: &HashMap<ObjectId, Vec<ObjectId>>,
     display: LogDisplayOptions,
 ) -> Vec<Vec<GraphRenderedLine>> {
-    let charset = if display.graph_ascii {
-        GraphCharset::ASCII
-    } else {
-        GraphCharset::UNICODE
-    };
-    let inputs: Vec<GraphCommitInput> = oids
-        .iter()
-        .map(|&id| GraphCommitInput {
-            id,
-            parents: parent_map.get(&id).cloned().unwrap_or_default(),
-        })
-        .collect();
-    GraphLayout::new_without_topology_recording(charset).render(&inputs)
+    crate::render::log::graph_blocks(oids, parent_map, display)
 }
 
 /// Columns the commit line's graph prefix takes in each block.
 fn commit_prefix_widths(blocks: &[Vec<GraphRenderedLine>]) -> Vec<usize> {
-    blocks
-        .iter()
-        .map(|block| {
-            block
-                .iter()
-                .find(|line| line.kind != GraphLineKind::Padding)
-                .map_or(0, |line| ui::display_width(&line.prefix))
-        })
-        .collect()
+    crate::render::log::commit_prefix_widths(blocks)
 }
 
 /// Join each block's graph prefixes to its commit text.
 fn join_graph_blocks(blocks: Vec<Vec<GraphRenderedLine>>, texts: Vec<String>) -> Vec<String> {
-    let mut out = Vec::with_capacity(blocks.len() * 2);
-    for (block, text) in blocks.into_iter().zip(texts) {
-        for graph_line in block {
-            if graph_line.kind == GraphLineKind::Padding {
-                out.push(graph_line.prefix.trim_end().to_owned());
-            } else {
-                out.push(format!("{}{text}", graph_line.prefix));
-            }
-        }
-    }
-    out
+    crate::render::log::join_graph_blocks(blocks, texts)
 }
 
 fn build_graph_oneline_stream(
