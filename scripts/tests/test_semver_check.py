@@ -143,13 +143,21 @@ class SemverCheckBaselineTests(unittest.TestCase):
             _tag(repo, "v0.6.0-rc.1")
             self.assertEqual(_run_script(repo, "baseline"), "v0.6.0")
 
-    def test_baseline_ignores_missing_pin_commit(self) -> None:
+    def test_baseline_fails_when_pin_commit_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             pin = "0000000000000000000000000000000000000000"
             _init_repo(repo, pin=pin)
             _tag(repo, "v0.5.31")
-            self.assertEqual(_run_script(repo, "baseline"), "v0.5.31")
+            script = repo / "scripts" / "semver-check.sh"
+            proc = subprocess.run(
+                [str(script), "baseline"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("semver_baseline", proc.stderr)
 
     def test_check_cmd_no_release_type_minor_with_only_rc(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

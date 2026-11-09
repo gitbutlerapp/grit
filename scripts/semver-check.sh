@@ -116,11 +116,13 @@ baseline_rev() {
 	local pinned=""
 	pinned="$(read_ratchet_semver_baseline || true)"
 	if [[ -n "${pinned}" ]]; then
-		if ! is_full_object_name "${pinned}" || git_object_exists "${pinned}"; then
-			printf '%s\n' "${pinned}"
-			return 0
+		if is_full_object_name "${pinned}" && ! git_object_exists "${pinned}"; then
+			echo "error: semver_baseline ${pinned} from api-ratchet.toml is not in this repository" >&2
+			echo "Update semver_baseline to the commit where public-api.txt was last ratified (see TESTING.md)." >&2
+			exit 1
 		fi
-		echo "warning: semver_baseline ${pinned} is not in this repository; ignoring pin" >&2
+		printf '%s\n' "${pinned}"
+		return 0
 	fi
 	git -C "${REPO}" describe --tags --abbrev=0 --match 'v*'
 }
