@@ -57,6 +57,7 @@ The program opens the repository with [`RepositoryOptions::from_process`](rustdo
 
 ## Next steps
 
+- [grit-lib 0.6 API overview](../library/api-0.6/) — handles, options, errors, and the 0.6.x stability promise in one page.
 - [Library guide overview](../library/) — longer-form guides for objects, refs, diff, and network code.
 - [grit-lib on docs.rs](https://docs.rs/grit-lib) — API reference for `Repository` and the rest of the public surface.
 - [Tutorial](../tutorial/) — the same repository operations from the `grit` CLI.

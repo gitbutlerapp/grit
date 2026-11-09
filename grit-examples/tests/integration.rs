@@ -12,6 +12,8 @@
 #[cfg(feature = "full-tests")]
 #[path = "custom_object_store.rs"]
 mod custom_object_store;
+#[path = "api_overview.rs"]
+mod api_overview;
 #[path = "custom_ref_store.rs"]
 mod custom_ref_store;
 #[cfg(feature = "full-tests")]
