@@ -67,13 +67,13 @@ Add the dependency:
 
 ```toml
 [dependencies]
-grit-lib = "0.5"
+grit-lib = "0.6"
 ```
 
 For smart-HTTP remotes:
 
 ```toml
-grit-lib = { version = "0.5", features = ["http-ureq"] }
+grit-lib = { version = "0.6", features = ["http-ureq"] }
 ```
 
 ### Open a repository and read HEAD

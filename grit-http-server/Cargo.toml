@@ -24,8 +24,8 @@ name = "grit-http-server"
 path = "src/main.rs"
 
 [dependencies]
-grit-lib = { version = "0.5", path = "../grit-lib" }
-grit-protocol = { version = "0.5", path = "../grit-protocol" }
+grit-lib = { version = "0.6", path = "../grit-lib" }
+grit-protocol = { version = "0.6", path = "../grit-protocol" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 anyhow.workspace = true
@@ -49,7 +49,7 @@ time.workspace = true
 
 [dev-dependencies]
 # The ureq client, to sign in against the server the way `grit auth <url>` does.
-grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq"] }
+grit-lib = { version = "0.6", path = "../grit-lib", features = ["http-ureq"] }
 tempfile.workspace = true
 flate2.workspace = true
 

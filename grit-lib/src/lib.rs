@@ -63,7 +63,7 @@
 //!
 //! # API stability
 //!
-//! This documentation is for **grit-lib** 0.5 (major.minor tracks the published crate).
+//! This documentation is for **grit-lib** 0.6 (major.minor tracks the published crate).
 //!
 //! Conventions, semver policy, and a checklist for new public items are in
 //! [`API.md`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/API.md).
@@ -122,7 +122,7 @@
 //! Enable HTTP in `Cargo.toml`:
 //!
 //! ```toml
-//! grit-lib = { version = "0.5", features = ["http-ureq"] }
+//! grit-lib = { version = "0.6", features = ["http-ureq"] }
 //! ```
 //!
 //! # Errors and progress
