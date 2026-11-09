@@ -5,9 +5,9 @@ use crate::error::Result;
 use crate::index::Index;
 use crate::pathspec::Pathspec;
 use crate::porcelain::status::{
-    collect_untracked_and_ignored_inner, status as status_impl,
+    assemble_status_summary, collect_untracked_and_ignored_inner, status as status_impl,
     status_diff_entry_matches_pathspec_typed, status_options_from_config, IgnoredMode, StatusModel,
-    StatusOptions, UntrackedCollectMeta, UntrackedScan,
+    StatusOptions, StatusSummary, StatusSummaryOptions, UntrackedCollectMeta, UntrackedScan,
 };
 use crate::progress::{CancelToken, ProgressSink};
 use crate::repo::Repository;
@@ -137,6 +137,40 @@ impl<'repo> Status<'repo> {
         cancel: &CancelToken,
     ) -> Result<StatusModel> {
         status_impl(self.repo, options, progress, cancel)
+    }
+
+    /// Dashboard summary: branch standing, guidance, and conflict grouping for a [`StatusModel`].
+    ///
+    /// Call after [`Self::run`] when the CLI or an embedder needs header and integration hints
+    /// without rescanning the worktree.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`crate::branch_tracking::BranchStanding::compute`] failures.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grit_lib::progress::{CancelToken, NullProgress};
+    /// use grit_lib::repo::{InitOptions, Repository};
+    /// use grit_lib::status::{StatusOptions, StatusSummaryOptions};
+    ///
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// let dir = tempfile::tempdir()?;
+    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+    /// let status = repo.status();
+    /// let model = status.run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never())?;
+    /// let summary = status.assemble_summary(model, StatusSummaryOptions::default())?;
+    /// assert!(summary.conflict_groups.is_empty());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn assemble_summary(
+        &self,
+        model: StatusModel,
+        options: StatusSummaryOptions,
+    ) -> Result<StatusSummary> {
+        assemble_status_summary(self.repo, model, options)
     }
 
     /// Walk the work tree and collect untracked and ignored paths into sorted lists.

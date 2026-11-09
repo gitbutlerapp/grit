@@ -7,8 +7,8 @@ use grit_lib::gitbutler::{GitButlerWorkspace, WorkspaceStanding};
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::status::{
-    assemble_status_summary, short_status_lines, ConflictGroup, IgnoredMode, InterruptedRewrite,
-    StatusAction, StatusGuidance, StatusSummaryOptions, UntrackedMode,
+    short_status_lines, ConflictGroup, IgnoredMode, InterruptedRewrite, StatusAction,
+    StatusGuidance, StatusSummaryOptions, UntrackedMode,
 };
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -17,7 +17,7 @@ use grit_lib::refs::branch_tracking::{
     StatusHeader, StatusIntegrationAction, StatusIntegrationHint, TrackedComparison,
 };
 use grit_lib::revwalk::AbbrevLength;
-use grit_lib::state::{HeadState, NextStep};
+use grit_lib::state::{HeadState, InProgressOperation, NextStep};
 use grit_lib::status::StatusOptions;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -251,7 +251,7 @@ fn conflict_json(c: &Conflict) -> ConflictJson {
 
 fn operation_json(op: &grit_lib::state::Operation) -> OperationJson {
     OperationJson {
-        kind: op.kind.status_json_kind().to_owned(),
+        kind: in_progress_snapshot_kind(op.kind).to_owned(),
         next_steps: op.next_steps.iter().filter_map(NextStep::command).collect(),
         alternatives: op
             .alternatives
@@ -1101,17 +1101,16 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         .run(&status_opts, &mut NullProgress, &CancelToken::never())
         .context("could not compute status")?;
 
-    let summary = assemble_status_summary(
-        &repo,
-        model,
-        StatusSummaryOptions {
-            standing: StandingOptions {
+    let summary = repo
+        .status()
+        .assemble_summary(
+            model,
+            StatusSummaryOptions::default().standing(StandingOptions {
                 newest_ahead_limit: SHORTLOG_LIMIT,
                 counts: show_counts,
-            },
-        },
-    )
-    .context("could not assemble status summary")?;
+            }),
+        )
+        .context("could not assemble status summary")?;
     let model = summary.model;
     let operations = summary.in_progress;
     let merging = model.state.merge_in_progress;
@@ -1217,7 +1216,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         merging,
         in_progress: operations
             .into_iter()
-            .map(|op| op.status_json_kind().to_owned())
+            .map(|op| in_progress_snapshot_kind(op).to_owned())
             .collect(),
         conflicts,
         operation,
@@ -1301,6 +1300,20 @@ fn format_short_lines(
             })
         })
         .collect()
+}
+
+/// Stable ids for status `--json` (`operation.kind`, `in_progress` entries).
+fn in_progress_snapshot_kind(op: InProgressOperation) -> &'static str {
+    match op {
+        InProgressOperation::Merge => "merge",
+        InProgressOperation::RebaseInteractive => "rebase-interactive",
+        InProgressOperation::Rebase => "rebase",
+        InProgressOperation::CherryPick => "cherry-pick",
+        InProgressOperation::Revert => "revert",
+        InProgressOperation::Bisect => "bisect",
+        InProgressOperation::Am => "am",
+        InProgressOperation::RewriteApply => "rewrite-apply",
+    }
 }
 
 fn tracked_to_upstream_json(tracked: &TrackedComparison) -> StatusUpstreamJson {

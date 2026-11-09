@@ -162,21 +162,6 @@ impl InProgressOperation {
             Self::RewriteApply => "rewrite apply",
         }
     }
-
-    /// Stable snake_case id for status JSON (`operation.kind`, `in_progress` entries).
-    #[must_use]
-    pub fn status_json_kind(self) -> &'static str {
-        match self {
-            Self::Merge => "merge",
-            Self::RebaseInteractive => "rebase-interactive",
-            Self::Rebase => "rebase",
-            Self::CherryPick => "cherry-pick",
-            Self::Revert => "revert",
-            Self::Bisect => "bisect",
-            Self::Am => "am",
-            Self::RewriteApply => "rewrite-apply",
-        }
-    }
 }
 
 /// A suggested follow-up action while an operation is paused.

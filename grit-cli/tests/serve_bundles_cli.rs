@@ -349,7 +349,15 @@ fn clones_start_from_the_server_bundle_and_resume_its_download() {
         &mut NoProgress,
         &CancelToken::never(),
     );
-    assert!(first.is_err(), "{first:?}");
+    assert!(
+        matches!(
+            first,
+            Err(grit_lib::prelude::Error::Remote(grit_lib::remote::RemoteError::Resumable(
+                r
+            ))) if matches!(r.as_ref(), ResumableError::Exhausted { .. })
+        ),
+        "{first:?}"
+    );
     let part = dest.with_file_name(format!(
         "{}.part",
         dest.file_name().and_then(|n| n.to_str()).expect("name")

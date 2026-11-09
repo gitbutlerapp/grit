@@ -373,8 +373,9 @@ pub enum StatusAction {
     },
 }
 
-/// Options for [`assemble_status_summary`].
+/// Options for [`Status::assemble_summary`](crate::status::Status::assemble_summary).
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct StatusSummaryOptions {
     /// How far ahead to walk and whether to compute ahead/behind counts.
     pub standing: StandingOptions,
@@ -402,7 +403,8 @@ impl Default for StatusSummaryOptions {
 
 /// Typed dashboard outcome: worktree model plus branch standing and follow-up guidance.
 ///
-/// Call [`assemble_status_summary`] after [`Repository::status`] returns a [`StatusModel`].
+/// Built by [`Status::assemble_summary`](crate::status::Status::assemble_summary) after
+/// [`Status::run`](crate::status::Status::run).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct StatusSummary {
@@ -424,27 +426,10 @@ pub struct StatusSummary {
 
 /// Derive dashboard fields from a [`StatusModel`] without re-scanning the worktree.
 ///
-/// # Examples
-///
-/// ```
-/// use grit_lib::progress::{CancelToken, NullProgress};
-/// use grit_lib::porcelain::status::{assemble_status_summary, StatusOptions, StatusSummaryOptions};
-/// use grit_lib::repo::{InitOptions, Repository};
-///
-/// # fn main() -> grit_lib::error::Result<()> {
-/// let dir = tempfile::tempdir()?;
-/// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-/// let model = repo.status().run(&StatusOptions::default(), &mut NullProgress, &CancelToken::never())?;
-/// let summary = assemble_status_summary(&repo, model, StatusSummaryOptions::default())?;
-/// assert!(summary.conflict_groups.is_empty());
-/// # Ok(())
-/// # }
-/// ```
-///
 /// # Errors
 ///
 /// Propagates [`BranchStanding::compute`] failures (invalid refs, object load errors).
-pub fn assemble_status_summary(
+pub(crate) fn assemble_status_summary(
     repo: &Repository,
     model: StatusModel,
     options: StatusSummaryOptions,

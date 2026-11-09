@@ -883,6 +883,11 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ),
         ("repack", &["repack", "--dry-run"]),
         ("status", &["status"]),
+        ("status_merge_in_progress", &["status"]),
+        ("status_no_ahead_behind", &["status", "--no-ahead-behind"]),
+        ("status_ignored", &["status", "--ignored"]),
+        ("status_upstream", &["status"]),
+        ("status_workspace", &["status"]),
         ("log", &["log"]),
         ("log_oneline", &["log", "--oneline", "--limit", "3"]),
         (
@@ -1034,6 +1039,7 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("remote_refs_tags", &["remote", "refs", "origin", "--tags"]),
         ("stash_push", &["stash", "push", "-m", "wip"]),
         ("stash_list", &["stash", "list"]),
+        ("stash_list_multiple", &["stash", "list"]),
         ("stash_show", &["stash", "show"]),
         ("stash_apply", &["stash", "apply"]),
         ("stash_pop", &["stash", "pop"]),
@@ -1048,6 +1054,7 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ),
         ("ignore_check_json", &["ignore", "check", "keep.txt"]),
         ("worktree_list", &["worktree", "list"]),
+        ("worktree_list_multiple", &["worktree", "list"]),
         (
             "worktree_add",
             &["worktree", "add", "linked-wt", "-b", "wt-new"],
