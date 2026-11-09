@@ -3,9 +3,9 @@
 use grit_lib::diff::structured::StructuredLineKind;
 use grit_lib::diff::DiffOptions;
 use grit_lib::diff::{
-    annotate_structured_hunks, line_stat_for_target_file, presentation_hunks_from_file_change,
-    presentation_hunks_from_listed, presentation_hunks_from_tree, AnnotatedStructuredHunk,
-    DiffDetail, DiffSide, FileChange, ListedFileDiff, TreeDiffStructured,
+    annotate_structured_hunks, line_stat_for_target_file, presentation_hunks_from_listed,
+    presentation_hunks_from_tree, AnnotatedStructuredHunk, DiffDetail, DiffSide, FileChange,
+    ListedFileDiff, TreeDiffStructured,
 };
 
 use super::{FileDiff, Hunk, Line, LineKind, LineStatJson, Segment};
@@ -134,11 +134,11 @@ pub fn cli_file_from_file_change(
     peer_hunks: &[grit_lib::diff::structured::StructuredHunk],
     assign_hunk_ids: bool,
 ) -> FileDiff {
-    let structured = fc.structured(diff_options.clone());
-    let hunks = cli_hunks_from_annotated(presentation_hunks_from_file_change(
-        fc,
-        diff_options,
+    let structured = fc.structured(diff_options);
+    let hunks = cli_hunks_from_annotated(annotate_structured_hunks(
         side,
+        &fc.path,
+        structured.hunks,
         peer_hunks,
         assign_hunk_ids,
     ));

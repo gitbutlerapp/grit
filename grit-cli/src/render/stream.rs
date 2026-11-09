@@ -79,8 +79,7 @@ pub fn finish_diff_json_document(
             .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
         stdio::io_result(w.write_all(&buf)).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
     }
-    stdio::io_result(writeln!(w, ",\"next\":null}}"))
-        .map_err(|e| anyhow::anyhow!("writing output: {e}"))
+    stdio::io_result(writeln!(w, "}}")).map_err(|e| anyhow::anyhow!("writing output: {e}"))
 }
 
 pub fn write_json_array_element<T: serde::Serialize>(

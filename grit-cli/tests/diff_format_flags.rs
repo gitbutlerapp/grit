@@ -182,6 +182,11 @@ fn diff_commit_stat_same_files_as_commit_diff() {
     stat_paths.sort();
     assert_eq!(patch_paths, stat_paths);
     assert_eq!(patch_paths, ["f.txt"]);
+
+    let value: serde_json::Value =
+        serde_json::from_str(patch_json.stdout.trim()).expect("commit diff json");
+    let keys: Vec<_> = value.as_object().expect("object").keys().cloned().collect();
+    assert_eq!(keys, ["changed", "files"], "unexpected keys: {keys:?}");
 }
 
 /// Regression for issue #1655: default list formats must include staged and unstaged paths.
