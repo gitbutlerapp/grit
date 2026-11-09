@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Checked 1204 objects.\n\nIssues:\n  badTree (1):\n    7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1: tree entry not sorted\n  missingTaggerEntry (1):\n    538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8: tagger entry is missing\n\nDangling objects (1):\n  blob 9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b\n\nIntegrity check failed.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"ok\":false,\"objects_checked\":1204,\"issues\":[{\"kind\":\"badTree\",\"severity\":\"error\",\"oid\":\"7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1\",\"detail\":\"tree entry not sorted\"},{\"kind\":\"missingTaggerEntry\",\"severity\":\"info\",\"oid\":\"538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8\",\"detail\":\"tagger entry is missing\"}],\"dangling\":[{\"kind\":\"blob\",\"oid\":\"9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Fsck\n\n- **ok:** false\n- **objects_checked:** 1204\n\n### Issues\n\n| Kind | Severity | OID | Path | Detail |\n| --- | --- | --- | --- | --- |\n| `badTree` | error | 7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1 | — | tree entry not sorted |\n| `missingTaggerEntry` | info | 538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8 | — | tagger entry is missing |\n\n### Dangling\n\n- `blob` `9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b`\n\n**Integrity check failed.**\n",
+    "stderr": ""
+  }
+}

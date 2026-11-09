@@ -9076,6 +9076,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::repository_
 pub grit_lib::maintenance::repository_fsck::FsckSummary::diagnostics: alloc::vec::Vec<grit_lib::maintenance::repository_fsck::FsckDiagnostic<'a>>
 pub grit_lib::maintenance::repository_fsck::FsckSummary::has_warnings: bool
 pub grit_lib::maintenance::repository_fsck::FsckSummary::ok: bool
+impl<'a> grit_lib::maintenance::repository_fsck::FsckSummary<'a>
+pub fn grit_lib::maintenance::repository_fsck::FsckSummary<'a>::visible_issue_groups(&self) -> alloc::collections::btree_map::BTreeMap<alloc::string::String, alloc::vec::Vec<usize>>
 impl<'a> core::clone::Clone for grit_lib::maintenance::repository_fsck::FsckSummary<'a>
 pub fn grit_lib::maintenance::repository_fsck::FsckSummary<'a>::clone(&self) -> Self
 impl<'a> core::fmt::Debug for grit_lib::maintenance::repository_fsck::FsckSummary<'a>
@@ -9525,6 +9527,27 @@ impl core::marker::Unpin for grit_lib::maintenance::GcPhaseTimings
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::GcPhaseTimings
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::GcPhaseTimings
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::GcPhaseTimings
+#[non_exhaustive] pub enum grit_lib::maintenance::GcPhaseReport
+pub grit_lib::maintenance::GcPhaseReport::CommitGraph { commit_count: usize, duration_ms: u64, path: std::path::PathBuf, removed_chain: bool, skipped: core::option::Option<grit_lib::maintenance::CommitGraphSkipReason> }
+pub grit_lib::maintenance::GcPhaseReport::DropLargeBlobs { duration_ms: u64, report: grit_lib::maintenance::DropPromisedBlobsReport }
+pub grit_lib::maintenance::GcPhaseReport::PackRefs { duration_ms: u64, path: std::path::PathBuf, refs_packed: usize, refs_pruned: usize }
+pub grit_lib::maintenance::GcPhaseReport::Prune { duration_ms: u64, kept: usize, pruned: usize }
+pub grit_lib::maintenance::GcPhaseReport::ReflogExpire { duration_ms: u64, entries_pruned: usize }
+pub grit_lib::maintenance::GcPhaseReport::Repack { duration_ms: u64, stats: grit_lib::maintenance::RepackStats }
+impl core::clone::Clone for grit_lib::maintenance::GcPhaseReport
+pub fn grit_lib::maintenance::GcPhaseReport::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::GcPhaseReport
+impl core::cmp::PartialEq for grit_lib::maintenance::GcPhaseReport
+pub fn grit_lib::maintenance::GcPhaseReport::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::GcPhaseReport
+pub fn grit_lib::maintenance::GcPhaseReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::maintenance::GcPhaseReport
+impl core::marker::Send for grit_lib::maintenance::GcPhaseReport
+impl core::marker::Sync for grit_lib::maintenance::GcPhaseReport
+impl core::marker::Unpin for grit_lib::maintenance::GcPhaseReport
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::GcPhaseReport
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::GcPhaseReport
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::GcPhaseReport
 pub struct grit_lib::maintenance::GcStats
 pub grit_lib::maintenance::GcStats::commit_graph: core::option::Option<grit_lib::maintenance::CommitGraphWriteReport>
 pub grit_lib::maintenance::GcStats::drop_large_blobs: core::option::Option<grit_lib::maintenance::DropPromisedBlobsReport>
@@ -9534,6 +9557,8 @@ pub grit_lib::maintenance::GcStats::prune: grit_lib::refs::gc::PruneStats
 pub grit_lib::maintenance::GcStats::prune_ran: bool
 pub grit_lib::maintenance::GcStats::reflog_entries_pruned: usize
 pub grit_lib::maintenance::GcStats::repack: grit_lib::maintenance::RepackStats
+impl grit_lib::maintenance::GcStats
+pub fn grit_lib::maintenance::GcStats::phase_reports(&self) -> alloc::vec::Vec<grit_lib::maintenance::GcPhaseReport>
 impl core::clone::Clone for grit_lib::maintenance::GcStats
 pub fn grit_lib::maintenance::GcStats::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::maintenance::GcStats

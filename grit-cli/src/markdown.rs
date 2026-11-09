@@ -1,8 +1,6 @@
 //! Shared Markdown formatters for `--markdown` command output.
 
-pub use crate::render::list::{
-    diff_code_fence, format_inline_code, print_fenced_text, render_hook_output,
-};
+pub use crate::render::list::{diff_code_fence, format_inline_code, print_fenced_text};
 pub use crate::render::table::escape_table_cell;
 
 use std::io::Write;

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "auto: nothing to do (below gc.auto and gc.autoPackLimit).\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"dry_run\":false,\"auto\":{\"status\":\"not-needed\"},\"tasks\":[]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Garbage collection\n\n- **dry_run:** false\n- **auto:** not-needed\n\n### Tasks\n\n",
+    "stderr": ""
+  }
+}

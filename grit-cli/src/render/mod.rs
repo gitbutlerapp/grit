@@ -3,12 +3,18 @@
 pub mod branch;
 pub mod bundle;
 pub mod clone;
+pub mod config;
 pub mod conflict;
 pub mod diff;
 pub mod diff_stream;
 pub mod error;
 pub mod fetch;
+pub mod fsck;
+pub mod gc;
 pub mod history;
+pub mod hooks;
+pub mod ignore;
+pub mod init;
 pub mod list;
 pub mod merge;
 pub mod operation;
@@ -18,9 +24,11 @@ pub mod pull;
 pub mod push;
 pub mod rebase;
 pub mod remote;
+pub mod repack;
 pub mod revert;
 pub mod shared_branch;
 pub mod shortlog;
+pub mod skill;
 pub mod status;
 pub mod stream;
 pub mod style;
@@ -28,6 +36,7 @@ pub mod switch;
 pub mod table;
 pub mod tag;
 
+use anyhow::Result;
 #[allow(unused_imports)]
 pub use operation::{
     conflict_json, conflict_paths, format_conflict_human_line, render_conflicts_human,
@@ -39,8 +48,6 @@ pub use operation::{
     render_revert_conflict_footer_human, rerere_events_json, ConflictJson, OperationConflictBlock,
     RerereEventJson,
 };
-
-use anyhow::Result;
 use serde::Serialize;
 use std::io::Write;
 use time::OffsetDateTime;

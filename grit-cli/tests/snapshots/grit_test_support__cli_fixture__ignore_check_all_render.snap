@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "build/output.o  ← .gitignore:4 /build/\nsrc/main.rs\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"any_ignored\":true,\"entries\":[{\"path\":\"build/output.o\",\"ignored\":true,\"matched\":{\"source\":{\"kind\":\"per_directory\",\"path\":\".gitignore\"},\"line_number\":4,\"pattern_text\":\"/build/\",\"negative\":false}},{\"path\":\"src/main.rs\",\"ignored\":false}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Ignore check\n\n- **any_ignored:** true\n\n- `build/output.o` ← `.gitignore:4` `/build/`\n- `src/main.rs` (not ignored)\n",
+    "stderr": ""
+  }
+}

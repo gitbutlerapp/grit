@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "user.name=alice\nuser.email=alice@example.net\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"list\",\"entries\":[{\"key\":\"user.name\",\"value\":\"alice\",\"scope\":\"local\",\"file\":\".git/config\"},{\"key\":\"user.email\",\"value\":\"alice@example.net\",\"scope\":\"global\",\"file\":\"/home/alice/.gitconfig\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "| Key | Value |\n| --- | --- |\n| `user.name` | alice |\n| `user.email` | alice@example.net |\n",
+    "stderr": ""
+  }
+}

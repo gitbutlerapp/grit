@@ -1,7 +1,10 @@
 //! Classification and visibility policy for repository integrity findings.
 
+use std::collections::BTreeMap;
+
 use super::{
-    issue_severity, issue_visible_at_severity, FsckIssue, FsckOptions, FsckReport, FsckSeverity,
+    issue_msg_id, issue_severity, issue_visible_at_severity, FsckIssue, FsckOptions, FsckReport,
+    FsckSeverity,
 };
 use crate::config::ConfigSet;
 
@@ -77,6 +80,24 @@ impl FsckReport {
             ok,
             has_warnings,
         }
+    }
+}
+
+impl<'a> FsckSummary<'a> {
+    /// Indices into [`Self::diagnostics`] for visible findings, grouped by message id.
+    ///
+    /// Group order follows message id order; indices within a group follow discovery order.
+    #[must_use]
+    pub fn visible_issue_groups(&self) -> BTreeMap<String, Vec<usize>> {
+        let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (idx, diagnostic) in self.diagnostics.iter().enumerate() {
+            if !diagnostic.visible {
+                continue;
+            }
+            let kind = issue_msg_id(diagnostic.issue).to_owned();
+            groups.entry(kind).or_default().push(idx);
+        }
+        groups
     }
 }
 
@@ -158,6 +179,18 @@ mod tests {
                 .iter()
                 .all(|d| d.severity == FsckSeverity::Info));
         }
+    }
+
+    #[test]
+    fn visible_issue_groups_skip_hidden_and_group_by_kind() {
+        let report = report(&["badFilemode", "missingTaggerEntry", "hasDot"]);
+        let config = ConfigSet::new();
+        let options = FsckOptions::default();
+        let summary = report.summary(&config, &options, false);
+        let groups = summary.visible_issue_groups();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups["hasDot"], vec![2]);
+        assert_eq!(groups["missingTaggerEntry"], vec![1]);
     }
 
     #[test]

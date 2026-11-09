@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Dry run: no changes written.\noffload: would move 12 blobs (45.8 MiB) to lop; 2 already there ([DURATION]).\n  wrote lop pack pack-a.pack (10 objects, 38.1 MiB)\n  wrote promisor pack pack-b.pack (500 objects, 7.63 MiB)\n  hint: clients are not told about lop; set promisor.advertise = true (and promisor.sendFields = partialCloneFilter).\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"dry_run\":true,\"tasks\":[{\"task\":\"offload\",\"duration_ms\": 0,\"remote\":\"lop\",\"lop_git_dir\":\".git/lop\",\"filter\":\"blob:limit=1048576\",\"candidates\":12,\"candidate_bytes\":48000000,\"copied_to_lop\":10,\"already_in_lop\":2,\"dropped_from_main\":10,\"skipped_checked_out\":0,\"skipped_kept_pack\":0,\"lop_pack\":\"objects/pack/pack-lop.pack\",\"main_pack\":\"objects/pack/pack-main.pack\",\"packs\":[{\"role\":\"lop\",\"path\":\"lop/objects/pack/pack-a.pack\",\"objects\":10,\"bytes\":40000000},{\"role\":\"main-promisor\",\"path\":\"objects/pack/pack-b.pack\",\"objects\":500,\"bytes\":8000000}],\"main_bytes_before\":52000000,\"main_bytes_after\":8500000,\"config_changes\":[],\"lop_ready\":{\"allow_filter\":true,\"allow_any_sha1_in_want\":true},\"advertised\":false}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Garbage collection\n\n- **dry_run:** true\n\n### Tasks\n\n#### offload\n\n- **duration_ms:** 0\n- **remote:** lop\n- **lop_git_dir:** `.git/lop`\n- **filter:** `blob:limit=1048576`\n- **candidates:** 12\n- **candidate_bytes:** 48000000\n- **copied_to_lop:** 10\n- **already_in_lop:** 2\n- **dropped_from_main:** 10\n- **skipped_checked_out:** 0\n- **skipped_kept_pack:** 0\n- **lop_pack:** `objects/pack/pack-lop.pack`\n- **main_pack:** `objects/pack/pack-main.pack`\n- **pack:** `lop/objects/pack/pack-a.pack` (lop, 10 objects, 40000000 bytes)\n- **pack:** `objects/pack/pack-b.pack` (main-promisor, 500 objects, 8000000 bytes)\n- **main_bytes_before:** 52000000\n- **main_bytes_after:** 8500000\n- **lop_allow_filter:** true\n- **lop_allow_any_sha1_in_want:** true\n- **advertised:** false\n\n",
+    "stderr": ""
+  }
+}

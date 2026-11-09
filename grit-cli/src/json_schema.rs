@@ -795,6 +795,13 @@ pub const SNAPSHOT_JSON_SCHEMA_SKIP: &[&str] = &[
     "sync_render",
     "serve_render",
     "update_render",
+    "gc_auto_skip_render",
+    "gc_offload_render",
+    "repack_dry_run_render",
+    "fsck_problems_render",
+    "config_list_scopes_render",
+    "hooks_run_failure_render",
+    "ignore_check_all_render",
 ];
 
 /// Snapshot stems (insta name) for every `*.snap` in `dir`.

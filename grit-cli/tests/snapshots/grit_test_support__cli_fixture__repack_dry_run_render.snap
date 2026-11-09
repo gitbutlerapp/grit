@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Would pack 307 objects (307 loose, 2 pack files now).\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"dry_run\":true,\"loose_before\":307,\"packs_before\":2,\"objects_packed\":307,\"pack_bytes\":null,\"pack_path\":null,\"removed_pack_files\":0,\"pruned_loose\":0}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Repack\n\n- **dry_run:** true\n- **loose_before:** 307\n- **packs_before:** 2\n- **objects_packed:** 307\n- **removed_pack_files:** 0\n- **pruned_loose:** 0\n",
+    "stderr": ""
+  }
+}

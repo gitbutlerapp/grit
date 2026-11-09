@@ -1,6 +1,5 @@
 //! `grit init` — create a new, empty repository.
 
-use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -9,82 +8,8 @@ use grit_lib::objects::HashAlgo;
 use grit_lib::prelude::RepositoryOptions;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use schemars::JsonSchema;
-use serde::Serialize;
 
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-
-/// Result of `grit init`.
-#[derive(Serialize, JsonSchema)]
-pub struct InitOutcome {
-    /// `true` when a new repository was created.
-    pub initialized: bool,
-    /// `true` when an existing repository was reinitialized in place.
-    #[serde(default, skip_serializing_if = "is_false")]
-    #[schemars(default)]
-    pub reinitialized: bool,
-    /// The created `.git` directory.
-    pub path: String,
-    pub bare: bool,
-    pub branch: String,
-    /// Ref storage backend (`files` or `reftable`).
-    pub ref_format: String,
-    /// Object hash algorithm (`sha1` or `sha256`).
-    pub object_format: String,
-    /// Separate git directory when `--separate-git-dir` was used (omitted when co-located).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<String>")]
-    pub git_dir: Option<String>,
-}
-
-impl HumanRender for InitOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let kind = if self.bare {
-            "bare repository"
-        } else {
-            "repository"
-        };
-        if self.reinitialized {
-            outln!(
-                w,
-                "Reinitialized existing {kind} in {} (ref-format: {})",
-                self.path,
-                self.ref_format
-            );
-        } else {
-            outln!(
-                w,
-                "Initialized empty {kind} in {} (ref-format: {})",
-                self.path,
-                self.ref_format
-            );
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for InitOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let kind = if self.bare {
-            "bare repository"
-        } else {
-            "repository"
-        };
-        outln!(
-            w,
-            "Initialized empty {kind} at `{}` (default branch `{}`, ref-format `{}`, object format `{}`).",
-            self.path,
-            self.branch,
-            self.ref_format,
-            self.object_format
-        );
-        Ok(())
-    }
-}
+pub use crate::render::init::InitOutcome;
 
 pub fn run(
     path: Option<String>,

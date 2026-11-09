@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"run\",\"name\":\"pre-commit\",\"exit_code\":1,\"executed\":true,\"stdout\":\"\",\"stderr\":\"hook declined the commit\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Hook run\n\n- **name:** `pre-commit`\n- **executed:** true\n- **exit_code:** 1\n\n**Hook stderr:**\n\n```text\nhook declined the commit\n```\n",
+    "stderr": ""
+  }
+}

@@ -915,6 +915,120 @@ pub struct GcStats {
     pub phase_timings: GcPhaseTimings,
 }
 
+/// One maintenance phase from a full [`Maintenance::gc`](crate::maintenance::Maintenance::gc) run.
+///
+/// Paths are repository-relative filesystem locations; callers format them for display.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GcPhaseReport {
+    /// Loose refs packed into `packed-refs` or a reftable directory.
+    PackRefs {
+        /// Wall time for the pack-refs phase.
+        duration_ms: u64,
+        /// Loose refs merged into the packed store.
+        refs_packed: usize,
+        /// Loose ref files removed or tables merged.
+        refs_pruned: usize,
+        /// `packed-refs` path or the `reftable/` directory.
+        path: PathBuf,
+    },
+    /// Reflog expiry before repack.
+    ReflogExpire {
+        /// Wall time for reflog expiry.
+        duration_ms: u64,
+        /// Reflog lines removed by expiry.
+        entries_pruned: usize,
+    },
+    /// Repack work excluding embedded unreachable prune.
+    Repack {
+        /// Wall time for repack work.
+        duration_ms: u64,
+        /// Counters from the repack phase.
+        stats: RepackStats,
+    },
+    /// Unreachable loose-object prune during full gc.
+    Prune {
+        /// Wall time for unreachable loose-object pruning.
+        duration_ms: u64,
+        /// Loose objects removed.
+        pruned: usize,
+        /// Loose objects kept.
+        kept: usize,
+    },
+    /// Optional drop-large-blobs phase after repack.
+    DropLargeBlobs {
+        /// Wall time for the drop-large-blobs phase.
+        duration_ms: u64,
+        /// Drop phase counters and blob list.
+        report: DropPromisedBlobsReport,
+    },
+    /// Commit-graph write after repack/prune.
+    CommitGraph {
+        /// Wall time for commit-graph generation.
+        duration_ms: u64,
+        /// Commits encoded in the graph (`0` when skipped).
+        commit_count: usize,
+        /// Path to the monolithic commit-graph file.
+        path: PathBuf,
+        /// Whether a split `commit-graphs/` chain was removed.
+        removed_chain: bool,
+        /// Why no graph was written, when applicable.
+        skipped: Option<CommitGraphSkipReason>,
+    },
+}
+
+impl GcStats {
+    /// Ordered phase reports for a full gc run, using [`Self::phase_timings`].
+    #[must_use]
+    pub fn phase_reports(&self) -> Vec<GcPhaseReport> {
+        let timings = self.phase_timings;
+        let mut phases = Vec::new();
+        if let Some(pack) = &self.pack_refs {
+            phases.push(GcPhaseReport::PackRefs {
+                duration_ms: timings.pack_refs_ms,
+                refs_packed: pack.refs_packed,
+                refs_pruned: pack.refs_pruned,
+                path: pack.path.clone(),
+            });
+        }
+        phases.push(GcPhaseReport::ReflogExpire {
+            duration_ms: timings.reflog_ms,
+            entries_pruned: self.reflog_entries_pruned,
+        });
+        phases.push(GcPhaseReport::Repack {
+            duration_ms: timings.repack_ms,
+            stats: self.repack.clone(),
+        });
+        if self.prune_ran {
+            phases.push(GcPhaseReport::Prune {
+                duration_ms: timings.prune_ms,
+                pruned: self.prune.pruned,
+                kept: self.prune.kept,
+            });
+        }
+        if let Some(report) = self
+            .drop_large_blobs
+            .as_ref()
+            .filter(|r| r.skipped != Some(DropPromisedBlobsSkip::Disabled))
+        {
+            phases.push(GcPhaseReport::DropLargeBlobs {
+                duration_ms: timings.drop_large_blobs_ms,
+                report: report.clone(),
+            });
+        }
+        if let Some(graph) = &self.commit_graph {
+            phases.push(GcPhaseReport::CommitGraph {
+                duration_ms: timings.commit_graph_ms,
+                commit_count: graph.commit_count,
+                path: graph.path.clone(),
+                removed_chain: graph.removed_chain,
+                skipped: graph.skipped,
+            });
+        }
+        phases
+    }
+}
+
 /// Repack local objects into a single new pack and drop redundant storage.
 ///
 /// Mirrors a minimal `git repack -ad`: one pack for [`reachability_roots`](crate::maintenance::Maintenance::reachability_roots), optional `.rev` /
@@ -3628,6 +3742,13 @@ mod tests {
         );
         // Cached ref/config paths can finish pack-refs or commit-graph in under 1 ms (0 in
         // millisecond buckets). Require repack timing plus evidence the other phases ran.
+        let phases = stats.phase_reports();
+        assert!(phases
+            .iter()
+            .any(|p| matches!(p, GcPhaseReport::Repack { .. })));
+        assert!(phases
+            .iter()
+            .any(|p| matches!(p, GcPhaseReport::PackRefs { .. })));
         assert!(
             t.repack_ms > 0 && stats.pack_refs.is_some() && stats.commit_graph.is_some(),
             "full gc must time repack and run pack-refs + commit-graph, got {t:?}"

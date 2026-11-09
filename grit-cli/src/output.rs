@@ -51,6 +51,12 @@ pub struct OutputOptions {
 }
 
 impl OutputOptions {
+    /// Whether this invocation should emit human progress lines to stderr.
+    #[must_use]
+    pub fn show_progress(&self) -> bool {
+        self.mode == OutputMode::Human
+    }
+
     /// Reject incompatible output flag combinations.
     pub fn validate(&self) -> Result<()> {
         if self.filter.is_some() && self.mode != OutputMode::Json {

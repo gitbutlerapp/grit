@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use grit_test_support::CliFixture;
@@ -786,4 +787,184 @@ fn share_render() {
         ..pushed_again
     };
     snapshot_modes("share_resolve_renamed_render", &renamed);
+}
+
+#[test]
+fn maintenance_render() {
+    use crate::render::config::{ConfigEntry, ConfigOutcome};
+    use crate::render::fsck::{DanglingJson, FsckIssueJson, FsckOutcome};
+    use crate::render::gc::{
+        GcAutoReport, GcOutcome, GcTaskReport, OffloadPackJson, OffloadPackRoleJson, OffloadSummary,
+    };
+    use crate::render::hooks::HooksOutcome;
+    use crate::render::ignore::{
+        IgnoreCheckEntryJson, IgnoreCheckOutcome, IgnoreMatchJson, IgnoreSourceJson,
+    };
+    use crate::render::repack::RepackOutcome;
+    use grit_lib::maintenance::repository_fsck::FsckSeverity;
+
+    snapshot_modes(
+        "gc_auto_skip_render",
+        &GcOutcome {
+            quiet: false,
+            dry_run: false,
+            auto: Some(GcAutoReport::NotNeeded),
+            tasks: Vec::new(),
+        },
+    );
+
+    snapshot_modes(
+        "gc_offload_render",
+        &GcOutcome {
+            quiet: false,
+            dry_run: true,
+            auto: None,
+            tasks: vec![GcTaskReport::Offload {
+                duration_ms: 1204,
+                report: OffloadSummary {
+                    remote: "lop".to_owned(),
+                    lop_git_dir: ".git/lop".to_owned(),
+                    filter: "blob:limit=1048576".to_owned(),
+                    candidates: 12,
+                    candidate_bytes: 48_000_000,
+                    copied_to_lop: 10,
+                    already_in_lop: 2,
+                    dropped_from_main: 10,
+                    skipped_checked_out: 0,
+                    skipped_kept_pack: 0,
+                    lop_pack: Some("objects/pack/pack-lop.pack".to_owned()),
+                    main_pack: Some("objects/pack/pack-main.pack".to_owned()),
+                    packs: vec![
+                        OffloadPackJson {
+                            role: OffloadPackRoleJson::Lop,
+                            path: "lop/objects/pack/pack-a.pack".to_owned(),
+                            objects: 10,
+                            bytes: 40_000_000,
+                        },
+                        OffloadPackJson {
+                            role: OffloadPackRoleJson::MainPromisor,
+                            path: "objects/pack/pack-b.pack".to_owned(),
+                            objects: 500,
+                            bytes: 8_000_000,
+                        },
+                    ],
+                    main_bytes_before: 52_000_000,
+                    main_bytes_after: 8_500_000,
+                    config_changes: Vec::new(),
+                    lop_ready: crate::render::gc::LopReadyJson {
+                        allow_filter: true,
+                        allow_any_sha1_in_want: true,
+                    },
+                    advertised: false,
+                },
+            }],
+        },
+    );
+
+    snapshot_modes(
+        "repack_dry_run_render",
+        &RepackOutcome {
+            quiet: false,
+            dry_run: true,
+            loose_before: 307,
+            packs_before: 2,
+            objects_packed: Some(307),
+            pack_bytes: None,
+            pack_path: None,
+            removed_pack_files: 0,
+            pruned_loose: 0,
+        },
+    );
+
+    snapshot_modes(
+        "fsck_problems_render",
+        &FsckOutcome {
+            ok: false,
+            objects_checked: 1204,
+            has_warnings: true,
+            issues: vec![
+                FsckIssueJson {
+                    kind: "badTree".to_owned(),
+                    severity: FsckSeverity::Error,
+                    oid: Some("7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1".to_owned()),
+                    path: None,
+                    detail: "tree entry not sorted".to_owned(),
+                    visible: true,
+                },
+                FsckIssueJson {
+                    kind: "missingTaggerEntry".to_owned(),
+                    severity: FsckSeverity::Info,
+                    oid: Some("538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8".to_owned()),
+                    path: None,
+                    detail: "tagger entry is missing".to_owned(),
+                    visible: true,
+                },
+            ],
+            dangling: vec![DanglingJson {
+                kind: "blob".to_owned(),
+                oid: "9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b".to_owned(),
+            }],
+            visible_issue_groups: BTreeMap::from([
+                ("badTree".to_owned(), vec![0]),
+                ("missingTaggerEntry".to_owned(), vec![1]),
+            ]),
+        },
+    );
+
+    snapshot_modes(
+        "config_list_scopes_render",
+        &ConfigOutcome::List {
+            entries: vec![
+                ConfigEntry {
+                    key: "user.name".to_owned(),
+                    value: Some("alice".to_owned()),
+                    scope: "local".to_owned(),
+                    file: Some(".git/config".to_owned()),
+                },
+                ConfigEntry {
+                    key: "user.email".to_owned(),
+                    value: Some("alice@example.net".to_owned()),
+                    scope: "global".to_owned(),
+                    file: Some("/home/alice/.gitconfig".to_owned()),
+                },
+            ],
+        },
+    );
+
+    snapshot_modes(
+        "hooks_run_failure_render",
+        &HooksOutcome::Run {
+            name: "pre-commit".to_owned(),
+            exit_code: 1,
+            executed: true,
+            stdout: String::new(),
+            stderr: "hook declined the commit".to_owned(),
+        },
+    );
+
+    snapshot_modes(
+        "ignore_check_all_render",
+        &IgnoreCheckOutcome {
+            any_ignored: true,
+            entries: vec![
+                IgnoreCheckEntryJson {
+                    path: "build/output.o".to_owned(),
+                    ignored: true,
+                    matched: Some(IgnoreMatchJson {
+                        source: IgnoreSourceJson::PerDirectory {
+                            path: ".gitignore".to_owned(),
+                        },
+                        line_number: 4,
+                        pattern_text: "/build/".to_owned(),
+                        negative: false,
+                    }),
+                },
+                IgnoreCheckEntryJson {
+                    path: "src/main.rs".to_owned(),
+                    ignored: false,
+                    matched: None,
+                },
+            ],
+        },
+    );
 }

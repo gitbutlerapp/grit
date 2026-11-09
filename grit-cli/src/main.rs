@@ -236,7 +236,9 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
     };
     match result {
         Ok(ExitStatus::Success) if auto_maintenance => {
-            commands::gc::run_auto_after_command(opts.mode, render_ctx.now);
+            let show_stderr = opts.show_progress();
+            let mut progress = progress::TerminalProgress::new(show_stderr);
+            commands::gc::run_auto_after_command(&mut progress, show_stderr, render_ctx.now);
             Ok(ExitStatus::Success)
         }
         Ok(status) => Ok(status),
