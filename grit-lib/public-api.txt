@@ -9077,7 +9077,7 @@ pub grit_lib::maintenance::repository_fsck::FsckSummary::diagnostics: alloc::vec
 pub grit_lib::maintenance::repository_fsck::FsckSummary::has_warnings: bool
 pub grit_lib::maintenance::repository_fsck::FsckSummary::ok: bool
 impl<'a> grit_lib::maintenance::repository_fsck::FsckSummary<'a>
-pub fn grit_lib::maintenance::repository_fsck::FsckSummary<'a>::visible_issue_groups(&self) -> alloc::collections::btree_map::BTreeMap<alloc::string::String, alloc::vec::Vec<usize>>
+pub fn grit_lib::maintenance::repository_fsck::FsckSummary<'a>::visible_issue_groups(&self) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<usize>>
 impl<'a> core::clone::Clone for grit_lib::maintenance::repository_fsck::FsckSummary<'a>
 pub fn grit_lib::maintenance::repository_fsck::FsckSummary<'a>::clone(&self) -> Self
 impl<'a> core::fmt::Debug for grit_lib::maintenance::repository_fsck::FsckSummary<'a>
