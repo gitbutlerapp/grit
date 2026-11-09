@@ -70,6 +70,12 @@ mod purity {
         SkippingCfgTestItem { brace_depth: i32 },
     }
 
+    #[derive(Clone, Copy, Debug, Default)]
+    struct BraceLexerState {
+        /// When set, the scanner is inside a raw string continued from a previous line.
+        raw_string_hashes: Option<usize>,
+    }
+
     fn line_is_ignorable(line: &str) -> bool {
         let trimmed = line.trim();
         trimmed.is_empty()
@@ -80,16 +86,165 @@ mod purity {
             || trimmed.starts_with("*/")
     }
 
-    fn brace_delta(line: &str) -> i32 {
+    fn close_raw_string_on_line(bytes: &[u8], start: usize, hashes: usize) -> (usize, bool) {
+        let mut i = start;
+        while i < bytes.len() {
+            if bytes[i] == b'"' {
+                let close = i + 1;
+                if close + hashes <= bytes.len()
+                    && bytes[close..close + hashes].iter().all(|&b| b == b'#')
+                {
+                    return (close + hashes, true);
+                }
+            }
+            i += 1;
+        }
+        (bytes.len(), false)
+    }
+
+    /// Brace depth change outside strings, char literals, and comments.
+    fn brace_delta(line: &str, lex: &mut BraceLexerState) -> i32 {
+        let bytes = line.as_bytes();
         let mut delta = 0i32;
-        for ch in line.chars() {
-            match ch {
-                '{' => delta += 1,
-                '}' => delta -= 1,
+        let mut i = 0usize;
+        if let Some(hashes) = lex.raw_string_hashes {
+            let (next, closed) = close_raw_string_on_line(bytes, 0, hashes);
+            if !closed {
+                return 0;
+            }
+            lex.raw_string_hashes = None;
+            i = next;
+        }
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b == b'/' && i + 1 < bytes.len() {
+                if bytes[i + 1] == b'/' {
+                    break;
+                }
+                if bytes[i + 1] == b'*' {
+                    i += 2;
+                    while i + 1 < bytes.len() {
+                        if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                            i += 2;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    continue;
+                }
+            }
+            if b == b'"' || b == b'\'' {
+                i = skip_string_or_char(bytes, i);
+                continue;
+            }
+            if b == b'r' && i + 1 < bytes.len() && (bytes[i + 1] == b'"' || bytes[i + 1] == b'#') {
+                let (next, closed, hashes) = scan_raw_string(bytes, i);
+                if !closed {
+                    lex.raw_string_hashes = Some(hashes);
+                    break;
+                }
+                i = next;
+                continue;
+            }
+            if b == b'b' && i + 1 < bytes.len() && matches!(bytes[i + 1], b'"' | b'\'') {
+                i = skip_string_or_char(bytes, i + 1);
+                continue;
+            }
+            match b {
+                b'{' => delta += 1,
+                b'}' => delta -= 1,
                 _ => {}
             }
+            i += 1;
         }
         delta
+    }
+
+    fn skip_string_or_char(bytes: &[u8], start: usize) -> usize {
+        let quote = bytes[start];
+        let mut i = start + 1;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b == b'\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            if b == quote {
+                return i + 1;
+            }
+            i += 1;
+        }
+        bytes.len()
+    }
+
+    /// Returns `(next_index, closed, hash_delimiter_count)`.
+    fn scan_raw_string(bytes: &[u8], start: usize) -> (usize, bool, usize) {
+        let mut i = start + 1;
+        let mut hashes = 0usize;
+        while i < bytes.len() && bytes[i] == b'#' {
+            hashes += 1;
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b'"' {
+            return (start + 1, true, hashes);
+        }
+        i += 1;
+        let (next, closed) = close_raw_string_on_line(bytes, i, hashes);
+        (next, closed, hashes)
+    }
+
+    fn line_has_code_brace(line: &str, lex: &mut BraceLexerState) -> bool {
+        let bytes = line.as_bytes();
+        let mut i = 0usize;
+        if let Some(hashes) = lex.raw_string_hashes {
+            let (next, closed) = close_raw_string_on_line(bytes, 0, hashes);
+            if !closed {
+                return false;
+            }
+            lex.raw_string_hashes = None;
+            i = next;
+        }
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b == b'/' && i + 1 < bytes.len() {
+                if bytes[i + 1] == b'/' {
+                    break;
+                }
+                if bytes[i + 1] == b'*' {
+                    i += 2;
+                    while i + 1 < bytes.len() {
+                        if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                            i += 2;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    continue;
+                }
+            }
+            if b == b'"' || b == b'\'' {
+                i = skip_string_or_char(bytes, i);
+                continue;
+            }
+            if b == b'r' && i + 1 < bytes.len() && (bytes[i + 1] == b'"' || bytes[i + 1] == b'#') {
+                let (next, closed, hashes) = scan_raw_string(bytes, i);
+                if !closed {
+                    lex.raw_string_hashes = Some(hashes);
+                    return false;
+                }
+                i = next;
+                continue;
+            }
+            if b == b'b' && i + 1 < bytes.len() && matches!(bytes[i + 1], b'"' | b'\'') {
+                i = skip_string_or_char(bytes, i + 1);
+                continue;
+            }
+            if b == b'{' {
+                return true;
+            }
+            i += 1;
+        }
+        false
     }
 
     fn is_use_line(line: &str) -> bool {
@@ -153,13 +308,14 @@ mod purity {
         let mut state = ScanState::Production;
         let mut pending_cfg_test = false;
         let mut env_aliases: Vec<String> = Vec::new();
+        let mut brace_lex = BraceLexerState::default();
 
         for line in source.lines() {
             match state {
                 ScanState::SkippingCfgTestItem {
                     ref mut brace_depth,
                 } => {
-                    *brace_depth += brace_delta(line);
+                    *brace_depth += brace_delta(line, &mut brace_lex);
                     if *brace_depth <= 0 {
                         state = ScanState::Production;
                     }
@@ -176,8 +332,8 @@ mod purity {
 
             if pending_cfg_test {
                 pending_cfg_test = false;
-                if trimmed.contains('{') {
-                    let open = brace_delta(line);
+                if line_has_code_brace(line, &mut brace_lex) {
+                    let open = brace_delta(line, &mut brace_lex);
                     if open > 0 {
                         state = ScanState::SkippingCfgTestItem { brace_depth: open };
                     }
@@ -315,6 +471,30 @@ pub fn still_production() {
         );
         assert!(
             !v.iter().any(|line| line.contains('X')),
+            "cfg(test) body must stay ignored: {v:?}"
+        );
+    }
+
+    #[test]
+    fn purity_regression_scans_production_after_cfg_test_with_brace_in_string() {
+        let src = r#"
+#[cfg(test)]
+mod tests {
+    const OPEN: &str = "{";
+}
+
+pub fn still_production() {
+    let _ = std::env::var_os("Y");
+}
+"#;
+        let v = scan_render_source("render/fixture.rs", src);
+        assert!(
+            v.iter()
+                .any(|line| line.contains("std::env") && line.contains('Y')),
+            "production code after #[cfg(test)] with brace literal in test body must be scanned: {v:?}"
+        );
+        assert!(
+            !v.iter().any(|line| line.contains("OPEN")),
             "cfg(test) body must stay ignored: {v:?}"
         );
     }
