@@ -488,7 +488,7 @@ fn patch_text_outcome(
     })
 }
 
-fn run_patch_text(opts: DiffRunOptions, ctx: super::DiffRunContext) -> Result<DiffOutcome> {
+fn run_patch_text(opts: DiffRunOptions, _ctx: super::DiffRunContext) -> Result<DiffOutcome> {
     let quiet = opts.quiet;
     let repo = context::discover()?;
     let config = repo.config().snapshot().context("could not load config")?;
@@ -757,22 +757,6 @@ pub fn outcome_from_tree_entries(
             false,
         ),
     ))
-}
-
-fn outcome_from_tree_structured(
-    items: Vec<TreeDiffStructured>,
-    format: DiffFormatArgs,
-) -> DiffOutcome {
-    let files: Vec<FileDiff> = items.into_iter().map(cli_file_from_tree).collect();
-    DiffOutcome {
-        changed: !files.is_empty(),
-        files,
-        totals: None,
-        format,
-        path_display: None,
-        body_streamed: false,
-        preserve_changed: false,
-    }
 }
 
 fn uncommitted_diff(repo: &grit_lib::repo::Repository) -> Result<UncommittedDiff<'_>> {
