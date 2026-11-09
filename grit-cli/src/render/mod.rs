@@ -74,44 +74,49 @@ mod purity {
     struct BraceLexerState {
         /// When set, the scanner is inside a raw string continued from a previous line.
         raw_string_hashes: Option<usize>,
-        /// Block comment open across the previous line boundary (`/*` without a same-line `*/`).
-        in_block_comment: bool,
+        /// Nesting depth for block comments continued from a previous line (Rust allows nested `/* */`).
+        block_comment_depth: u32,
     }
 
-    fn skip_to_block_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
-        let mut i = start;
-        while i + 1 < bytes.len() {
-            if bytes[i] == b'*' && bytes[i + 1] == b'/' {
-                return Some(i + 2);
+    /// Scan block-comment bytes; updates `block_comment_depth`. Returns the next code index when depth returns to zero.
+    fn scan_block_comments(bytes: &[u8], mut i: usize, lex: &mut BraceLexerState) -> Option<usize> {
+        let mut depth = lex.block_comment_depth;
+        while i < bytes.len() {
+            if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                depth += 1;
+                i += 2;
+                continue;
+            }
+            if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                if depth == 0 {
+                    i += 2;
+                    continue;
+                }
+                depth -= 1;
+                i += 2;
+                if depth == 0 {
+                    lex.block_comment_depth = 0;
+                    return Some(i);
+                }
+                continue;
             }
             i += 1;
         }
+        lex.block_comment_depth = depth;
         None
     }
 
     /// Resume scanning after a multiline block comment; `None` if the line is still comment-only.
     fn resume_block_comment(bytes: &[u8], lex: &mut BraceLexerState) -> Option<usize> {
-        if !lex.in_block_comment {
+        if lex.block_comment_depth == 0 {
             return Some(0);
         }
-        match skip_to_block_comment_end(bytes, 0) {
-            Some(end) => {
-                lex.in_block_comment = false;
-                Some(end)
-            }
-            None => None,
-        }
+        scan_block_comments(bytes, 0, lex)
     }
 
     fn enter_block_comment(bytes: &[u8], start: usize, lex: &mut BraceLexerState) -> Option<usize> {
-        lex.in_block_comment = true;
-        match skip_to_block_comment_end(bytes, start) {
-            Some(end) => {
-                lex.in_block_comment = false;
-                Some(end)
-            }
-            None => None,
-        }
+        lex.block_comment_depth += 1;
+        scan_block_comments(bytes, start, lex)
     }
 
     fn line_is_ignorable(line: &str) -> bool {
@@ -561,6 +566,28 @@ pub fn still_production() {
             v.iter()
                 .any(|line| line.contains("std::env") && line.contains('Y')),
             "production code after #[cfg(test)] with brace in multiline block comment must be scanned: {v:?}"
+        );
+    }
+
+    #[test]
+    fn purity_regression_scans_production_after_cfg_test_with_nested_block_comment() {
+        let src = r#"
+#[cfg(test)]
+mod tests { /*
+/* nested */
+{
+*/
+}
+
+pub fn still_production() {
+    let _ = std::env::var_os("NESTED");
+}
+"#;
+        let v = scan_render_source("render/fixture.rs", src);
+        assert!(
+            v.iter()
+                .any(|line| line.contains("std::env") && line.contains("NESTED")),
+            "production code after nested multiline block comments must be scanned: {v:?}"
         );
     }
 
