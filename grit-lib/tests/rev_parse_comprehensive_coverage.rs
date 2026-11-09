@@ -7,7 +7,6 @@ use std::path::Path;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::{
-    abbreviate_ref_name, load_graft_parents, parse_index_colon_spec, parse_peel_suffix,
     reflog_date_selector_timestamp, reflog_date_selector_timestamp_at,
     revision_spec_contains_ancestry_navigation, spec_has_parent_shorthand_suffix,
     split_double_dot_range, split_treeish_colon, split_triple_dot_range, to_relative_path,
@@ -201,7 +200,6 @@ fn discovery_upstream_and_parser_helpers() {
     let _ = repo.revwalk().upstream_symbolic_name("dev@{push}");
     assert!(reflog_date_selector_timestamp("1.day.ago").is_some());
     assert!(reflog_date_selector_timestamp_at("now", 1_700_000_000).is_some());
-    let _ = load_graft_parents(repo.git_dir());
     assert!(revision_spec_contains_ancestry_navigation("HEAD~3"));
     assert!(spec_has_parent_shorthand_suffix("main^!"));
     let (base, peel) = parse_peel_suffix("v1^{tree}");

@@ -182,6 +182,7 @@ When a handle method or options struct replaces a function:
 - If internal hot paths still call the old function, it becomes `pub(crate)` and stays as the implementation.
 - Otherwise it is deleted.
 - Before 0.6.0, neither case gets a deprecated public shim. From 0.6.0 the [stability policy](#stability-policy) applies.
+- `make api-ratchet` tracks `pub_deprecated_items` in [`api-ratchet.toml`](api-ratchet.toml). The baseline is **0** after the pre-0.6 shim removal; intentional deprecations during 0.6.x raise the count only when a maintainer updates the baseline.
 - Measure before and after. A consolidation may not make anything slower.
 
 ### Errors pass through

@@ -4,7 +4,6 @@
 //! interpreter, the real exit status and output must come back, and a hook that cannot start
 //! must be reported as [`HookError::Spawn`] rather than a made-up exit status.
 
-use grit_lib::command_runner::hooks::run_hook_opts;
 use grit_lib::command_runner::hooks::{
     CommitHookEnv, HookError, HookName, HookResult, RewriteKind, RunHookOptions,
 };
@@ -66,12 +65,9 @@ fn process_environment(cwd: &Path) -> Environment {
 }
 
 fn run_captured(repo: &Repository, hook: &str) -> (grit_lib::error::Result<HookResult>, String) {
-    let config = repo.config().snapshot().expect("config");
-    let result = run_hook_opts(
-        Some(repo),
+    let result = repo.hooks().run_with_options(
         hook,
         &[],
-        config.as_ref(),
         RunHookOptions {
             stdout_to_stderr: true,
             ..RunHookOptions::default()

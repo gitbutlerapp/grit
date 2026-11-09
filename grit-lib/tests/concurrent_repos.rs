@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use grit_lib::command_runner::hooks::{run_hook_opts, RunHookOptions};
+use grit_lib::command_runner::hooks::RunHookOptions;
 use grit_lib::command_runner::{RecordingRunner, ShellInvocation};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
@@ -547,22 +547,12 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
         let rerere_preimage = rerere_events
             .iter()
             .any(|e| e.path == "shared.txt" && e.kind == RerereEventKind::RecordedPreimage);
-        run_hook_opts(
-            Some(&repo),
-            fx.hook_event,
-            &[],
-            cfg.as_ref(),
-            RunHookOptions::default(),
-        )
-        .expect("configured hook");
-        run_hook_opts(
-            Some(&repo),
-            fx.traditional_hook,
-            &[],
-            cfg.as_ref(),
-            RunHookOptions::default(),
-        )
-        .expect("traditional hook scan");
+        repo.hooks()
+            .run_with_options(fx.hook_event, &[], RunHookOptions::default())
+            .expect("configured hook");
+        repo.hooks()
+            .run_with_options(fx.traditional_hook, &[], RunHookOptions::default())
+            .expect("traditional hook scan");
         repo.notes()
             .write_tree_commit(
                 "refs/notes/commits",

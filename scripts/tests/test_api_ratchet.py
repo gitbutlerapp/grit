@@ -63,8 +63,37 @@ class ErrorRatchetMetricTests(unittest.TestCase):
             "pub_error_enum_not_non_exhaustive",
             "pub_area_error_wraps_umbrella",
             "error_message_construction_sites",
+            "pub_deprecated_items",
         ):
             self.assertIn(key, snap.metrics)
+
+    def test_pub_deprecated_items_counts_rustdoc_deprecation_attrs(self) -> None:
+        index = {
+            "1": {
+                "id": 1,
+                "crate_id": 0,
+                "visibility": "public",
+                "name": "old_fn",
+                "attrs": [{"deprecation": {"note": "use new_fn"}}],
+                "inner": {"function": {"sig": {}, "header": {}}},
+            },
+            "2": {
+                "id": 2,
+                "crate_id": 0,
+                "visibility": "public",
+                "name": "fresh_fn",
+                "inner": {"function": {"sig": {}, "header": {}}},
+            },
+            "3": {
+                "id": 3,
+                "crate_id": 0,
+                "visibility": "crate",
+                "name": "internal",
+                "attrs": [{"deprecation": {"note": "hidden"}}],
+                "inner": {"function": {"sig": {}, "header": {}}},
+            },
+        }
+        self.assertEqual(ar.count_pub_deprecated_items(index), 1)
 
     def test_variant_field_types_modern_tuple_encoding(self) -> None:
         """rustdoc encodes `Message(String)` as kind: {\"tuple\": [field_id]}."""

@@ -1193,8 +1193,7 @@ pub(crate) fn indent_heuristic_from_config(config: &ConfigSet) -> bool {
 
 /// Resolve indent heuristic: `--no-indent-heuristic` and `--indent-heuristic` override config.
 #[must_use]
-#[deprecated(since = "0.6.0", note = "use `DiffOptions::resolve_indent_heuristic`")]
-pub fn resolve_indent_heuristic(
+pub(crate) fn resolve_indent_heuristic(
     config: &ConfigSet,
     cli_indent_heuristic: bool,
     cli_no_indent_heuristic: bool,

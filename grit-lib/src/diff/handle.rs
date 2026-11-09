@@ -1,7 +1,5 @@
 //! Repository-scoped tree, index and work-tree diffs via [`Diff`].
 
-#![allow(deprecated)]
-
 use std::path::Path;
 
 use crate::diff::targets::{collect_files_for_target, limit_target_entries, stored_target_entries};

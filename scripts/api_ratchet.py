@@ -63,6 +63,7 @@ METRIC_KEYS = (
     "pub_area_error_wraps_umbrella",
     "error_message_construction_sites",
     "doc_example_free_fn_calls",
+    "pub_deprecated_items",
 )
 
 # Metrics `report` groups by top-level public module (the API 0.6 consolidation targets).
@@ -824,6 +825,30 @@ def is_method(fn: dict[str, Any]) -> bool:
 def is_unsafe_fn(fn: dict[str, Any]) -> bool:
     header = fn.get("header") or {}
     return bool(header.get("is_unsafe"))
+
+
+def item_has_deprecation(item: dict[str, Any]) -> bool:
+    for attr in item.get("attrs") or []:
+        if not isinstance(attr, dict):
+            continue
+        if attr.get("deprecation") is not None:
+            return True
+        text = str(attr.get("text") or "")
+        if "deprecated" in text.lower():
+            return True
+    return False
+
+
+def count_pub_deprecated_items(index: dict[str, Any]) -> int:
+    total = 0
+    for item in index.values():
+        if not isinstance(item, dict):
+            continue
+        if item.get("crate_id") != 0 or item.get("visibility") != "public":
+            continue
+        if item_has_deprecation(item):
+            total += 1
+    return total
 
 
 def attrs_contain_too_many_args(attrs: Iterable[Any]) -> bool:
@@ -1988,6 +2013,9 @@ def compute_metrics(
         "pub_repo_constructor_offenders": MetricResult(
             len(sorted(set(repo_constructor_offenders))),
             sorted(set(repo_constructor_offenders)),
+        ),
+        "pub_deprecated_items": MetricResult(
+            count_pub_deprecated_items(index),
         ),
         **collect_error_ratchet_metrics(index, paths_map),
     }

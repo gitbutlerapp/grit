@@ -7,11 +7,9 @@ use std::path::Path;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::{
-    abbreviate_ref_name, load_graft_parents, parse_index_colon_spec, parse_peel_suffix,
     reflog_date_selector_timestamp, reflog_date_selector_timestamp_at,
     revision_spec_contains_ancestry_navigation, spec_has_parent_shorthand_suffix,
-    split_treeish_colon, superproject_work_tree_from_nested_git_modules, to_relative_path,
-    upstream_suffix_info,
+    split_treeish_colon, to_relative_path, upstream_suffix_info,
 };
 
 use support::{build_commit_dag, commit_file, git, HistoryRepo};
@@ -33,7 +31,6 @@ fn discovery_and_path_helpers() {
         .expect("discover")
         .is_some());
     let _ = to_relative_path(wt, wt);
-    assert!(superproject_work_tree_from_nested_git_modules(&wt.join(".git")).is_none());
 }
 
 #[test]
@@ -182,7 +179,6 @@ fn abbrev_and_reflog_helpers() {
         .expect("hints");
     assert!(reflog_date_selector_timestamp("1.day.ago").is_some());
     assert!(reflog_date_selector_timestamp_at("now", 1_700_000_000).is_some());
-    let _ = load_graft_parents(repo.git_dir());
     let _ = repo.revwalk().upstream_symbolic_name("main@{push}");
     let _ = repo.revwalk().upstream_symbolic_name("main@{u}");
 }

@@ -50,13 +50,6 @@ pub struct BranchCreateOptions {
     pub dry_run: bool,
 }
 
-/// Deprecated alias for [`BranchCreateOptions`].
-#[deprecated(
-    since = "0.6.0",
-    note = "renamed to BranchCreateOptions; use repo.branches().create"
-)]
-pub type CreateBranchOptions = BranchCreateOptions;
-
 impl BranchCreateOptions {
     /// Convenience for `grit branch <name>` (start at `HEAD`, no force, auto track, live).
     #[must_use]
@@ -70,13 +63,6 @@ impl BranchCreateOptions {
         }
     }
 }
-
-/// Deprecated alias for [`BranchRenameOptions`].
-#[deprecated(
-    since = "0.6.0",
-    note = "renamed to BranchRenameOptions; use repo.branches().rename"
-)]
-pub type RenameBranchOptions = BranchRenameOptions;
 
 /// Options for [`Branches::rename`](crate::repo_handles::Branches::rename).
 #[derive(Debug, Clone, PartialEq, Eq)]

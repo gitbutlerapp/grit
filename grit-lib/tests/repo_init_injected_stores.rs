@@ -502,34 +502,3 @@ fn repository_options_reach_the_returned_handle() {
         Some("from-env")
     );
 }
-
-#[test]
-#[allow(deprecated)]
-fn deprecated_with_environment_still_sets_the_environment() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let global = dir.path().join("global.cfg");
-    fs::write(&global, "[init]\n\tdefaultBranch = legacy\n").expect("global");
-    let environment = grit_lib::config::environment::Environment::from_vars(
-        [
-            ("HOME", dir.path().as_os_str()),
-            ("GIT_CONFIG_NOSYSTEM", "1".as_ref()),
-            ("GIT_CONFIG_GLOBAL", global.as_os_str()),
-        ]
-        .map(|(k, v)| (std::ffi::OsString::from(k), v.to_owned())),
-        dir.path().to_path_buf(),
-    );
-    let stores = Stores::new(HashAlgo::Sha1);
-    let (_, outcome) = Repository::init(
-        &dir.path().join("legacy.git"),
-        &InitOptions::new()
-            .with_bare(true)
-            .with_repository_options(stores.options())
-            .with_environment(environment),
-    )
-    .expect("init");
-    assert_eq!(outcome.initial_branch, "legacy");
-    assert_eq!(
-        head(stores.refs.as_ref()),
-        Some(RawRef::Symbolic("refs/heads/legacy".to_owned()))
-    );
-}
