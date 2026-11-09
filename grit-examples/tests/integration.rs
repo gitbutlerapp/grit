@@ -9,11 +9,11 @@
 //! Modules marked `full-tests` start the system `git` or build heavy fixtures;
 //! they build only with `--features full-tests` (`make test-full`).
 
+#[path = "api_overview.rs"]
+mod api_overview;
 #[cfg(feature = "full-tests")]
 #[path = "custom_object_store.rs"]
 mod custom_object_store;
-#[path = "api_overview.rs"]
-mod api_overview;
 #[path = "custom_ref_store.rs"]
 mod custom_ref_store;
 #[cfg(feature = "full-tests")]
