@@ -190,7 +190,7 @@ pub(crate) fn api_view(paths: Vec<String>) -> grit_lib::remote::grit_server_shar
 ///
 /// In the binary, each subcommand's arguments are built only when that subcommand is parsed,
 /// so startup does not pay for the whole tree. Help output and completions go through
-/// [`cli_command::full_cli_command`] so deferred building cannot replace a subcommand's
+/// [`crate::cli_command::full_cli_command`] so deferred building cannot replace a subcommand's
 /// description. Unit tests keep the tree eager: the contract, docs and schema checks walk each
 /// command's declared arguments, which `Command::build` would mix with globals inherited from
 /// the parent.

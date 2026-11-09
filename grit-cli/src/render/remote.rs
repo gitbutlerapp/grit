@@ -68,7 +68,7 @@ pub enum RemoteOutcome {
     },
 }
 
-/// JSON view of [`RemoteSummary`] for `grit remote show --json`.
+/// JSON view of a remote configuration summary for `grit remote show --json`.
 #[derive(Serialize, JsonSchema, Clone)]
 pub struct RemoteShowJson {
     pub name: String,
