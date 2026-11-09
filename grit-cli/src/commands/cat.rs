@@ -327,25 +327,13 @@ pub fn dispatch(
 ) -> anyhow::Result<crate::exit_status::ExitStatus> {
     use crate::args::*;
     use crate::commands;
-    use crate::context;
-    use crate::dispatch::{
-        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
-        CommandEnv,
-    };
-    use crate::exit_status::ExitStatus;
-    use crate::json_error;
-    use crate::message_input;
-    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
-    use crate::pager;
-    use crate::patch_selection;
-    use crate::progress;
-    use crate::quiet_args;
-    use crate::stdio;
-    use anyhow::{bail, Result};
+
+    use crate::dispatch::{emit_success, CommandEnv};
+
     let CommandEnv {
         opts,
         ctx,
-        process_env,
+        process_env: _,
     } = env;
     let CatArgs { spec } = args;
     emit_success(commands::cat::run(spec, opts.mode)?, opts, ctx)

@@ -139,25 +139,13 @@ pub(crate) use stash::StashAction;
 pub(crate) use worktree::WorktreeAction;
 
 use clap::{Parser, Subcommand};
-use clap_complete::Shell;
 
-use crate::branch_list_args;
-use crate::clap_value_args;
-use crate::diff_args;
-use crate::diff_format;
 use crate::global_args;
-use crate::limit_args;
-use crate::merge_strategy_args;
-use crate::message_input;
-use crate::pathspec_args;
-use crate::quiet_args;
-use crate::rev_select;
 
 fn parse_init_object_format(value: &str) -> Result<grit_lib::objects::HashAlgo, String> {
     grit_lib::objects::HashAlgo::from_name(value)
         .ok_or_else(|| format!("unknown object format '{value}' (expected sha1 or sha256)"))
 }
-
 
 /// A small, opinionated Git client built on `grit-lib`.
 #[derive(Debug, Parser)]
@@ -193,36 +181,10 @@ pub(crate) struct Cli {
     pub(crate) command: Option<Command>,
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /// The snapshot view `grit share add --no-history --path …` asks for.
 pub(crate) fn api_view(paths: Vec<String>) -> grit_lib::remote::grit_server_share::ShareView {
     grit_lib::remote::grit_server_share::ShareView { paths }
 }
-
-
 
 /// Top-level `grit` commands.
 ///
