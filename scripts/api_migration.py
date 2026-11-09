@@ -31,7 +31,6 @@ _EXACT: dict[str, str] = {
     "grit_lib::blame::blame_file": "grit_lib::diff::Diff::blame",
     "grit_lib::blame::resolve_blame_line_range": "grit_lib::diff::Diff::resolve_blame_line_range",
     "grit_lib::blame::resolve_blame_line_range_with_options": "grit_lib::diff::Diff::resolve_blame_line_range_with_options",
-    "grit_lib::command_runner::hooks::RunHookOptions<'_": "grit_lib::command_runner::hooks::RunHookOptions",
     "grit_lib::command_runner::hooks::resolve_hooks_dir": "grit_lib::repo_handles::RepositoryHooks::hooks_dir",
     "grit_lib::command_runner::hooks::run_commit_hook": "grit_lib::repo_handles::RepositoryHooks::run_commit",
     "grit_lib::command_runner::hooks::run_commit_hook_checked": "grit_lib::repo_handles::RepositoryHooks::run_commit_checked",
@@ -69,7 +68,9 @@ _EXACT: dict[str, str] = {
     "grit_lib::notes::write_notes_commit": "grit_lib::repo_handles::RepositoryNotes::write_tree_commit",
     "grit_lib::repo::InitOptions::environment": "grit_lib::config::environment::RepositoryOptions::environment",
     "grit_lib::repo::InitOptions::with_environment": "grit_lib::repo::InitOptions::with_repository_options",
-    "grit_lib::revwalk::rev_list::shallow_boundary_oids": "grit_lib::revwalk::RevWalk::shallow_boundary_oids",
+    "grit_lib::revwalk::rev_list::shallow_boundary_oids": (
+        "grit_lib::revwalk::handle::RevWalk::shallow_boundary_oids"
+    ),
     "grit_lib::revwalk::rev_parse::load_graft_parents": "removed (crate-internal graft helpers)",
     "grit_lib::revwalk::rev_parse::superproject_work_tree_from_nested_git_modules": "removed (crate-internal submodule helper)",
     "grit_lib::worktree::add_linked_worktree": "grit_lib::repo_handles::RepositoryWorktrees::add",
@@ -145,16 +146,20 @@ _PORCELAIN_FN_REMAP: dict[str, str] = {
     "delete_branch": "delete",
     "list_branches": "list_simple",
     "rename_branch": "rename",
-    "resolve_create_tracking": "resolve_create_for_switch",
+    "resolve_create_tracking": "resolve_create_tracking",
     "stage_tracked_modifications_in_index": "stage_tracked_modifications_on",
     "stage_tracked_modifications_in_index_with_thresholds": "stage_tracked_modifications_on",
     "stage_tracked_modifications_with_thresholds": "stage_tracked_modifications",
     "stage_worktree_changes": "stage_worktree_paths",
-    "list_unstaged_hunk_ids": "hunk_bundle",
+    "list_unstaged_hunk_ids": "list_unstaged_hunk_ids",
+    "resolve_selection": "resolve_hunk_selection",
+    "checkout_between_trees": "checkout",
+    "clean_untracked": "clean",
+    "restore_paths": "restore",
     "diff_options_for_hunk_select": "removed (use DiffOptions)",
     "reverse_apply_patches_to_worktree": "removed (use IndexFile::restore_hunks)",
     "switch_repository": "switch",
-    "resolve_create_branch": "resolve_create_for_switch",
+    "resolve_create_branch": "resolve_create_branch",
     "create_tag": "create",
     "delete_tag": "delete",
     "list_tags": "list",
@@ -215,6 +220,83 @@ def apply_type_renames(path: str) -> str:
     return out
 
 
+_GENERIC_FRAGMENT = re.compile(r"<[^>]+>")
+
+
+def canonical_api_path(path: str) -> str:
+    """Strip lifetime/generic fragments so snapshot paths compare to migration map paths."""
+    return _GENERIC_FRAGMENT.sub("", path)
+
+
+def is_prose_replacement(replacement: str) -> bool:
+    """True when the replacement is intentional prose, not a rustdoc path."""
+    if replacement in {"", "removed, no replacement", "—"}:
+        return True
+    if replacement.startswith("removed "):
+        return True
+    if not replacement.startswith("grit_lib::"):
+        return True
+    if " (" in replacement:
+        return True
+    return False
+
+
+_DECLARED_FN = re.compile(r"^pub (?:async )?fn (grit_lib::.+?)(?:\(|\s+->)")
+
+
+def declared_public_paths(text: str) -> set[str]:
+    """Collect declared ``grit_lib::…`` item paths from snapshot lines (incl. lifetimes)."""
+    out: set[str] = set()
+    for line in text.splitlines():
+        s = line.strip()
+        fn_match = _DECLARED_FN.match(s)
+        if fn_match:
+            out.add(canonical_api_path(fn_match.group(1).strip()))
+            continue
+        for kind in ("struct", "enum", "type", "const", "trait", "mod", "static"):
+            m = re.match(rf"^pub {kind} (grit_lib::\S+)", s)
+            if m:
+                raw = m.group(1).split(":")[0]
+                out.add(canonical_api_path(raw.rstrip(":")))
+                break
+    return out
+
+
+def current_public_api_paths() -> set[str]:
+    text = SNAPSHOT.read_text(encoding="utf-8")
+    paths = declared_public_paths(text)
+    for path in paths_in_snapshot(text):
+        if path.startswith("grit_lib::"):
+            paths.add(canonical_api_path(path))
+    return paths
+
+
+def replacement_exists(replacement: str, snapshot_paths: set[str] | None = None) -> bool:
+    """Return whether a replacement names a path in the working-tree public API."""
+    if is_prose_replacement(replacement):
+        return True
+    paths = snapshot_paths if snapshot_paths is not None else current_public_api_paths()
+    target = canonical_api_path(replacement)
+    for path in paths:
+        if canonical_api_path(path) == target:
+            return True
+    return False
+
+
+def invalid_replacements(
+    mapping: dict[str, str],
+    snapshot_paths: set[str] | None = None,
+) -> list[tuple[str, str]]:
+    paths = snapshot_paths if snapshot_paths is not None else current_public_api_paths()
+    bad: list[tuple[str, str]] = []
+    for old, replacement in mapping.items():
+        if replacement in ("removed, no replacement",):
+            continue
+        if not replacement_exists(replacement, paths):
+            bad.append((old, replacement))
+    return bad
+
+
 def suggest_replacement(old: str) -> str | None:
     """Return the 0.6 replacement for one removed path when rules cover it."""
     if old in _EXACT:
@@ -269,6 +351,7 @@ def load_map(path: Path = MAP_PATH) -> dict[str, str]:
 def write_map(path: Path = MAP_PATH) -> dict[str, str]:
     """Regenerate the hand-maintained map from rules plus explicit overrides."""
     removed = removed_paths()
+    snapshot_paths = current_public_api_paths()
     mapping: dict[str, str] = dict(_EXACT)
     for old in removed:
         if old in mapping:
@@ -276,6 +359,15 @@ def write_map(path: Path = MAP_PATH) -> dict[str, str]:
         suggestion = suggest_replacement(old)
         if suggestion is not None:
             mapping[old] = suggestion
+    invalid = invalid_replacements(
+        {old: mapping[old] for old in removed if old in mapping},
+        snapshot_paths,
+    )
+    if invalid:
+        sys.stderr.write("replacement paths missing from current public API:\n")
+        for old, replacement in invalid:
+            sys.stderr.write(f"  {old} -> {replacement}\n")
+        raise SystemExit(1)
     lines = [
         "# Hand-maintained grit-lib public API path migrations (0.5.31 → 0.6).",
         "# Regenerate with: python3 scripts/api_migration.py write-map",
@@ -292,36 +384,69 @@ def write_map(path: Path = MAP_PATH) -> dict[str, str]:
     return {old: mapping.get(old, "removed, no replacement") for old in removed}
 
 
-def deprecation_notes_at(ref: str) -> dict[str, str]:
-    """Scan grit-lib sources at ref for #[deprecated(note = …)] on public items."""
-    raw = subprocess.check_output(
-        ["git", "grep", "-n", r"#\[deprecated", ref, "--", "grit-lib/src"],
-        text=True,
-        cwd=ROOT,
-        stderr=subprocess.DEVNULL,
-    )
-    notes: dict[str, str] = {}
-    current_note: str | None = None
-    for line in raw.splitlines():
-        if "#[deprecated" in line:
-            m = re.search(r'note\s*=\s*"([^"]+)"', line)
-            current_note = m.group(1) if m else None
+def _deprecated_note_from_lines(lines: list[str], start: int) -> str:
+    """Read a #[deprecated(note = …)] that may span multiple lines (1-based start)."""
+    chunk = "\n".join(lines[max(0, start - 1) : min(len(lines), start + 8)])
+    match = re.search(r'note\s*=\s*"([^"]+)"', chunk, re.DOTALL)
+    return match.group(1) if match else ""
+
+
+def _scan_deprecated_fn_notes(ref: str) -> dict[str, str]:
+    """Map bare item names at ref to their deprecated note text."""
+    try:
+        raw = subprocess.check_output(
+            ["git", "grep", "-n", r"#\[deprecated", ref, "--", "grit-lib/src"],
+            text=True,
+            cwd=ROOT,
+            stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError:
+        return {}
+    file_cache: dict[str, list[str]] = {}
+    out: dict[str, str] = {}
+    for grep_line in raw.splitlines():
+        match = re.match(r"^(?:[^:]+:)?grit-lib/src/(.+\.rs):(\d+):", grep_line)
+        if not match:
             continue
-        if current_note is None:
+        rel, lineno = match.group(1), int(match.group(2))
+        if rel not in file_cache:
+            file_cache[rel] = subprocess.check_output(
+                ["git", "show", f"{ref}:grit-lib/src/{rel}"],
+                text=True,
+                cwd=ROOT,
+            ).splitlines()
+        body = file_cache[rel]
+        note = _deprecated_note_from_lines(body, lineno)
+        for i in range(lineno, min(lineno + 24, len(body) + 1)):
+            decl = body[i - 1]
+            item = re.search(
+                r"pub\s+(?:async\s+)?(?:fn|struct|enum|type|const)\s+(\w+)",
+                decl,
+            )
+            if item:
+                out[item.group(1)] = note
+                break
+    return out
+
+
+def deprecation_notes_at(ref: str, removed: list[str] | None = None) -> dict[str, str]:
+    """Attach v0.5.31 deprecated notes to removed public API paths by item name."""
+    old_paths = paths_in_snapshot(snapshot_text_at(ref))
+    by_suffix: dict[str, list[str]] = {}
+    for path in old_paths:
+        by_suffix.setdefault(path.split("::")[-1], []).append(path)
+
+    fn_notes = _scan_deprecated_fn_notes(ref)
+    matched: dict[str, str] = {}
+    for fn_name, note in fn_notes.items():
+        if not note:
             continue
-        path_m = re.search(r"grit-lib/src/(.+\.rs):\d+:", line)
-        if not path_m:
-            continue
-        src = path_m.group(1)
-        rust_path = "grit_lib::" + src.removesuffix(".rs").replace("/", "::")
-        for item_m in re.finditer(r"pub(?:\(crate\))?\s+(?:fn|struct|enum|type|const)\s+(\w+)", line):
-            notes[f"{rust_path}::{item_m.group(1)}"] = current_note
-        if "pub use" in line:
-            use_m = re.search(r"pub use .+::(\w+)", line)
-            if use_m:
-                notes[f"{rust_path}::{use_m.group(1)}"] = current_note
-        current_note = None
-    return notes
+        for path in by_suffix.get(fn_name, []):
+            matched[path] = note
+
+    if removed is None:
+        return matched
+    return {path: matched.get(path, "") for path in removed}
 
 
 def render_table(mapping: dict[str, str], notes: dict[str, str]) -> str:
@@ -342,7 +467,7 @@ def update_doc(*, check: bool = False) -> tuple[bool, str]:
     if unmapped and check:
         return False, "unmapped removals:\n" + "\n".join(f"  {p}" for p in unmapped)
 
-    notes = deprecation_notes_at(BASE_REF)
+    notes = deprecation_notes_at(BASE_REF, removed)
     table = render_table({p: mapping.get(p, "removed, no replacement") for p in removed}, notes)
 
     if not DOC_PATH.is_file():
@@ -405,10 +530,19 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("api_migration_map.toml is missing entries:\n")
             for path in unmapped:
                 sys.stderr.write(f"  {path}\n")
+        bad_replacements = invalid_replacements(
+            {p: mapping[p] for p in removed if p in mapping},
+        )
+        if bad_replacements:
+            ok_map = False
+            sys.stderr.write("api_migration_map.toml has invalid replacement paths:\n")
+            for old, replacement in bad_replacements:
+                sys.stderr.write(f"  {old} -> {replacement}\n")
         ok_doc, msg = update_doc(check=True)
-        if not ok_map or not ok_doc:
-            if not ok_doc:
-                sys.stderr.write(msg + "\n")
+        if not ok_doc:
+            ok_map = False
+            sys.stderr.write(msg + "\n")
+        if not ok_map:
             return 1
         print("api migration check passed")
         return 0

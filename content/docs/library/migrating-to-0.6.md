@@ -75,11 +75,11 @@ Cancellation and progress are always the last parameters, in that order: `progre
 // 0.5.x
 worktree::add_linked_worktree_with_cancel(&repo, &opts, &cancel)?;
 
-// 0.6
+// 0.6 — linked worktrees still expose `add` and `add_with_cancel`; progress/cancel are trailing args
 repo.worktrees().add_with_cancel(&opts, &cancel)?;
 ```
 
-There are no `_with_cancel` / `_with_progress` duplicates of an operation on the public API.
+Many porcelain calls dropped separate `_with_progress` / `_with_cancel` free functions in favour of one method with trailing `progress` and `cancel`. Some handles still keep a dedicated `_with_cancel` when the default entry point does not take cancellation (for example [`RepositoryWorktrees::add`](rustdoc:grit_lib::repo_handles::RepositoryWorktrees::add) vs [`add_with_cancel`](rustdoc:grit_lib::repo_handles::RepositoryWorktrees::add_with_cancel)). Prefer the plain method when it already accepts [`CancelToken`](rustdoc:grit_lib::progress::CancelToken).
 
 ### `RefName` and `Pathspec` instead of bare strings
 
@@ -140,12 +140,12 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::command_runner::hooks::run_post_rewrite` | `grit_lib::repo_handles::RepositoryHooks::run_post_rewrite` |  |
 | `grit_lib::command_runner::hooks::run_pre_push_hook` | `grit_lib::repo_handles::RepositoryHooks::run_pre_push` |  |
 | `grit_lib::command_runner::hooks::run_pre_rebase` | `grit_lib::repo_handles::RepositoryHooks::run_pre_rebase` |  |
-| `grit_lib::config::add_config_value` | `grit_lib::config::ConfigEditor::add_value` |  |
-| `grit_lib::config::remove_config_section` | `grit_lib::config::ConfigEditor::remove_section` |  |
-| `grit_lib::config::rename_config_section` | `grit_lib::config::ConfigEditor::rename_section` |  |
-| `grit_lib::config::set_config_value` | `grit_lib::config::ConfigEditor::set` |  |
-| `grit_lib::config::unset_all_config_values` | `grit_lib::config::ConfigEditor::unset_all` |  |
-| `grit_lib::config::unset_config_value` | `grit_lib::config::ConfigEditor::unset` |  |
+| `grit_lib::config::add_config_value` | `grit_lib::config::ConfigEditor::add_value` | use ConfigEditor on a repository config snapshot |
+| `grit_lib::config::remove_config_section` | `grit_lib::config::ConfigEditor::remove_section` | use ConfigEditor on a repository config snapshot |
+| `grit_lib::config::rename_config_section` | `grit_lib::config::ConfigEditor::rename_section` | use ConfigEditor on a repository config snapshot |
+| `grit_lib::config::set_config_value` | `grit_lib::config::ConfigEditor::set` | use ConfigEditor on a repository config snapshot |
+| `grit_lib::config::unset_all_config_values` | `grit_lib::config::ConfigEditor::unset_all` | use ConfigEditor on a repository config snapshot |
+| `grit_lib::config::unset_config_value` | `grit_lib::config::ConfigEditor::unset` | use ConfigEditor on a repository config snapshot |
 | `grit_lib::diff::DiffAlgorithm::similar_algorithm` | `core::str::FromStr::from_str (DiffAlgorithm)` |  |
 | `grit_lib::diff::anchored_unified_diff` | `grit_lib::diff::unified_diff` |  |
 | `grit_lib::diff::annotate_unified_diff_no_newline_at_eof` | `grit_lib::diff::structured (hunk metadata)` |  |
@@ -195,11 +195,11 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::porcelain::branch::list_branches` | `grit_lib::repo_handles::Branches::list_simple` |  |
 | `grit_lib::porcelain::branch::preview_unset_upstream` | `grit_lib::repo_handles::Branches::preview_unset_upstream` |  |
 | `grit_lib::porcelain::branch::rename_branch` | `grit_lib::repo_handles::Branches::rename` |  |
-| `grit_lib::porcelain::branch::resolve_create_tracking` | `grit_lib::repo_handles::Branches::resolve_create_for_switch` |  |
+| `grit_lib::porcelain::branch::resolve_create_tracking` | `grit_lib::repo_handles::Branches::resolve_create_tracking` |  |
 | `grit_lib::porcelain::branch::set_upstream` | `grit_lib::repo_handles::Branches::set_upstream` |  |
 | `grit_lib::porcelain::branch::unset_upstream` | `grit_lib::repo_handles::Branches::unset_upstream` |  |
 | `grit_lib::porcelain::branch::validate_set_upstream` | `grit_lib::repo_handles::Branches::validate_set_upstream` |  |
-| `grit_lib::porcelain::checkout::checkout_between_trees` | `grit_lib::repo_handles::Checkout::checkout_between_trees` |  |
+| `grit_lib::porcelain::checkout::checkout_between_trees` | `grit_lib::repo_handles::Checkout::checkout` |  |
 | `grit_lib::porcelain::checkout::checkout_between_trees_with_progress` | `grit_lib::repo_handles::Checkout::checkout` |  |
 | `grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree` | `grit_lib::repo_handles::Checkout::checkout_hard_to_tree` |  |
 | `grit_lib::porcelain::checkout::checkout_tree_changes` | `grit_lib::repo_handles::Checkout::checkout_tree_changes` |  |
@@ -209,7 +209,7 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::porcelain::checkout_reflog::finish_switch_ref_updates` | `removed (used by Checkout::switch)` |  |
 | `grit_lib::porcelain::checkout_reflog::is_already_detached_at` | `removed (used by Checkout::switch)` |  |
 | `grit_lib::porcelain::checkout_reflog::is_already_on_branch` | `removed (used by Checkout::switch)` |  |
-| `grit_lib::porcelain::clean::clean_untracked` | `grit_lib::repo_handles::Checkout::clean_untracked` |  |
+| `grit_lib::porcelain::clean::clean_untracked` | `grit_lib::repo_handles::Checkout::clean` |  |
 | `grit_lib::porcelain::clean::clean_untracked_with_cancel` | `grit_lib::repo_handles::Checkout::clean` |  |
 | `grit_lib::porcelain::commit::commit_with_patch` | `grit_lib::commits::Commits::create` |  |
 | `grit_lib::porcelain::commit::commit_with_scope` | `grit_lib::commits::Commits::create` |  |
@@ -221,8 +221,8 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::porcelain::commit::prepare_commit_bytes` | `grit_lib::commits::Commits::prepare_bytes` |  |
 | `grit_lib::porcelain::commit::write_commit_object` | `grit_lib::commits::Commits::write_object` |  |
 | `grit_lib::porcelain::hunk_select::diff_options_for_hunk_select` | `removed (use DiffOptions)` |  |
-| `grit_lib::porcelain::hunk_select::list_unstaged_hunk_ids` | `grit_lib::index::IndexFile::hunk_bundle` |  |
-| `grit_lib::porcelain::hunk_select::resolve_selection` | `grit_lib::index::IndexFile::resolve_selection` |  |
+| `grit_lib::porcelain::hunk_select::list_unstaged_hunk_ids` | `grit_lib::index::IndexFile::list_unstaged_hunk_ids` |  |
+| `grit_lib::porcelain::hunk_select::resolve_selection` | `grit_lib::index::IndexFile::resolve_hunk_selection` |  |
 | `grit_lib::porcelain::hunk_select::restore_hunks` | `grit_lib::index::IndexFile::restore_hunks` |  |
 | `grit_lib::porcelain::hunk_select::reverse_apply_patches_to_worktree` | `removed (use IndexFile::restore_hunks)` |  |
 | `grit_lib::porcelain::hunk_select::stage_hunks` | `grit_lib::index::IndexFile::stage_hunks` |  |
@@ -235,7 +235,7 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::porcelain::reset::preview_reset` | `grit_lib::repo_handles::Checkout::preview_reset` |  |
 | `grit_lib::porcelain::reset::reset_to_commit` | `grit_lib::repo_handles::Checkout::reset` |  |
 | `grit_lib::porcelain::restore::conflict_style_from_config` | `grit_lib::repo_handles::Checkout::conflict_style` |  |
-| `grit_lib::porcelain::restore::restore_paths` | `grit_lib::repo_handles::Checkout::restore_paths` |  |
+| `grit_lib::porcelain::restore::restore_paths` | `grit_lib::repo_handles::Checkout::restore` |  |
 | `grit_lib::porcelain::stage_tracked::stage_tracked_modifications` | `grit_lib::index::IndexFile::stage_tracked_modifications` |  |
 | `grit_lib::porcelain::stage_tracked::stage_tracked_modifications_in_index` | `grit_lib::index::IndexFile::stage_tracked_modifications_on` |  |
 | `grit_lib::porcelain::stage_tracked::stage_tracked_modifications_in_index_with_thresholds` | `grit_lib::index::IndexFile::stage_tracked_modifications_on` |  |
@@ -249,11 +249,11 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::porcelain::status::expand_untracked_for_staging_with_rules` | `grit_lib::status::Status::expand_untracked_for_staging` |  |
 | `grit_lib::porcelain::status::status` | `grit_lib::status::Status::run` |  |
 | `grit_lib::porcelain::status::status_diff_entry_matches_pathspec_typed` | `grit_lib::status::Status::diff_entry_matches_pathspec` |  |
-| `grit_lib::porcelain::switch::resolve_create_branch` | `grit_lib::repo_handles::Checkout::resolve_create_for_switch` |  |
+| `grit_lib::porcelain::switch::resolve_create_branch` | `grit_lib::repo_handles::Checkout::resolve_create_branch` |  |
 | `grit_lib::porcelain::switch::resolve_revision_spec` | `grit_lib::repo_handles::Checkout::resolve_revision_spec` |  |
 | `grit_lib::porcelain::switch::resolve_switch_target` | `grit_lib::repo_handles::Checkout::resolve_switch_target` |  |
 | `grit_lib::porcelain::switch::switch_repository` | `grit_lib::repo_handles::Checkout::switch` |  |
-| `grit_lib::porcelain::tag::TagInfo` | `grit_lib::porcelain::tag::TagSummary` |  |
+| `grit_lib::porcelain::tag::TagInfo` | `grit_lib::porcelain::tag::TagSummary` | use TagSummary instead |
 | `grit_lib::porcelain::tag::create_tag` | `grit_lib::repo_handles::Tags::create` |  |
 | `grit_lib::porcelain::tag::creator_date` | `grit_lib::repo_handles::Tags::creator_date` |  |
 | `grit_lib::porcelain::tag::delete_tag` | `grit_lib::repo_handles::Tags::delete` |  |
@@ -271,8 +271,8 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::refs::branch_tracking::upstream_status` | `grit_lib::repo_handles::Branches::upstream_status` |  |
 | `grit_lib::refs::branch_tracking::upstream_tracking_full_ref` | `grit_lib::repo_handles::Branches::upstream_tracking_full_ref` |  |
 | `grit_lib::repo::InitOptions::environment` | `grit_lib::config::environment::RepositoryOptions::environment` |  |
-| `grit_lib::repo::InitOptions::with_environment` | `grit_lib::repo::InitOptions::with_repository_options` |  |
-| `grit_lib::revwalk::rev_list::shallow_boundary_oids` | `grit_lib::revwalk::RevWalk::shallow_boundary_oids` |  |
+| `grit_lib::repo::InitOptions::with_environment` | `grit_lib::repo::InitOptions::with_repository_options` | use `InitOptions::with_repository_options(RepositoryOptions::with_environment(env))` |
+| `grit_lib::revwalk::rev_list::shallow_boundary_oids` | `grit_lib::revwalk::handle::RevWalk::shallow_boundary_oids` |  |
 | `grit_lib::revwalk::rev_parse::load_graft_parents` | `removed (crate-internal graft helpers)` |  |
 | `grit_lib::revwalk::rev_parse::superproject_work_tree_from_nested_git_modules` | `removed (crate-internal submodule helper)` |  |
 | `grit_lib::worktree::add_linked_worktree` | `grit_lib::repo_handles::RepositoryWorktrees::add` |  |
