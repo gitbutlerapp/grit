@@ -490,3 +490,61 @@ impl std::fmt::Display for MissingPrerequisites {
 }
 
 impl std::error::Error for MissingPrerequisites {}
+
+/// Dispatch parsed CLI args for `Bundle`.
+pub fn dispatch(
+    args: crate::args::BundleArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let BundleArgs { action } = args;
+    match action {
+        BundleAction::Create {
+            file,
+            revs,
+            all,
+            dry_run,
+        } => emit_success(
+            commands::bundle::run_create(file.into(), revs, all, dry_run)?,
+            opts,
+            ctx,
+        ),
+        BundleAction::Verify { file } => {
+            let outcome = commands::bundle::run_verify(file.into())?;
+            let ok = outcome.ok;
+            emit_success(outcome, opts, ctx)?;
+            Ok(ExitStatus::from_bundle_verify_ok(ok))
+        }
+        BundleAction::List { file, limit } => emit_success(
+            commands::bundle::run_list(file.into(), limit.get())?,
+            opts,
+            ctx,
+        ),
+        BundleAction::Unbundle { file, dry_run } => emit_success(
+            commands::bundle::run_unbundle(file.into(), dry_run)?,
+            opts,
+            ctx,
+        ),
+    }
+}

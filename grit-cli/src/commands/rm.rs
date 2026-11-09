@@ -131,3 +131,44 @@ fn rm(
         .remove_paths(&opts, cancel)
         .map_err(|err| crate::error_map::map_remove_paths_error(err, cached, path_display))
 }
+
+/// Dispatch parsed CLI args for `Rm`.
+pub fn dispatch(
+    args: crate::args::RmArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let RmArgs {
+        pathspecs,
+        cached,
+        force,
+        dry_run,
+        ignore_unmatch,
+    } = args;
+    emit_success(
+        commands::rm::run(&pathspecs, cached, force, dry_run, ignore_unmatch)?,
+        opts,
+        ctx,
+    )
+}

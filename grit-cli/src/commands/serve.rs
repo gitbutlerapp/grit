@@ -110,3 +110,183 @@ pub fn run(
     stdio::io_result(output.flush()).context("writing the response")?;
     Ok(())
 }
+
+/// Dispatch parsed CLI args for `Serve`.
+pub fn dispatch(
+    args: crate::args::ServeCommandArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let ServeCommandArgs {
+        action,
+        root,
+        db,
+        bind,
+        setup,
+        email,
+        bundle_interval,
+        no_bundles,
+        header_timeout,
+        idle_timeout,
+        max_git_requests,
+        shutdown_timeout,
+    } = args;
+    {
+        let db = db.as_deref();
+        match action {
+            Some(ServeAction::AddUser { email, admin }) => {
+                let password = commands::serve_http::read_new_password(&email)?;
+                emit_success(
+                    commands::serve_http::add_user(&root, db, &email, admin, password)?,
+                    opts,
+                    ctx,
+                )
+            }
+            Some(ServeAction::Token { email }) => {
+                emit_success(commands::serve_http::token(&root, db, &email)?, opts, ctx)
+            }
+            Some(ServeAction::Grant {
+                user,
+                repository,
+                write,
+            }) => emit_success(
+                commands::serve_http::grant(&root, db, &user, &repository, write)?,
+                opts,
+                ctx,
+            ),
+            Some(ServeAction::Users) => {
+                emit_success(commands::serve_http::users(&root, db)?, opts, ctx)
+            }
+            None if setup => {
+                let email = commands::serve_http::read_admin_email(email)?;
+                let password = commands::serve_http::read_new_password(&email)?;
+                emit_success(
+                    commands::serve_http::setup(&root, db, &email, password)?,
+                    opts,
+                    ctx,
+                )
+            }
+            // The running server logs to stderr; it has no stdout result.
+            None => {
+                let bundles = grit_http_server::bundles::BundleSettings {
+                    enabled: !no_bundles,
+                    interval: bundle_interval,
+                    ..Default::default()
+                };
+                let limits = grit_http_server::server::ServeLimits {
+                    header_timeout,
+                    idle_timeout,
+                    max_git_requests,
+                };
+                commands::serve_http::run(
+                    &root,
+                    db,
+                    &bind,
+                    bundles,
+                    limits,
+                    grit_http_server::server::Shutdown::grace(shutdown_timeout),
+                )?;
+                Ok(ExitStatus::Success)
+            }
+        }
+    }
+}
+
+/// Dispatch parsed CLI args for `UploadPack`.
+pub fn dispatch_upload_pack(
+    args: crate::args::UploadPackArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let args = args.inner;
+    {
+        commands::serve::run(
+            commands::serve::Service::UploadPack,
+            &args.directory,
+            args.stateless_rpc,
+            args.advertise_refs,
+        )?;
+        Ok(ExitStatus::Success)
+    }
+}
+
+/// Dispatch parsed CLI args for `ReceivePack`.
+pub fn dispatch_receive_pack(
+    args: crate::args::ReceivePackArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let args = args.inner;
+    {
+        commands::serve::run(
+            commands::serve::Service::ReceivePack,
+            &args.directory,
+            args.stateless_rpc,
+            args.advertise_refs,
+        )?;
+        Ok(ExitStatus::Success)
+    }
+}

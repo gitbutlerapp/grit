@@ -285,3 +285,63 @@ fn kind_label(kind: ObjectKind) -> &'static str {
         ObjectKind::Tag => "tag",
     }
 }
+
+/// Dispatch parsed CLI args for `Resolve`.
+pub fn dispatch(
+    args: crate::args::ResolveArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let ResolveArgs {
+        specs,
+        short,
+        abbrev_ref,
+        symbolic_full_name,
+        verify_spec,
+        quiet,
+    } = args;
+    {
+        use commands::resolve::RefNameOutput;
+        if let Some(spec) = verify_spec {
+            let outcome = commands::resolve::run_verify(spec, short, quiet);
+            let code = commands::resolve::verify_exit_code(&outcome);
+            if quiet {
+                std::process::exit(code);
+            }
+            emit_success(outcome?, opts, ctx)
+        } else {
+            if quiet {
+                anyhow::bail!("--quiet requires --verify");
+            }
+            let ref_output = if abbrev_ref {
+                RefNameOutput::AbbrevRef
+            } else if symbolic_full_name {
+                RefNameOutput::SymbolicFullName
+            } else {
+                RefNameOutput::ObjectIds
+            };
+            emit_success(commands::resolve::run(specs, short, ref_output)?, opts, ctx)
+        }
+    }
+}

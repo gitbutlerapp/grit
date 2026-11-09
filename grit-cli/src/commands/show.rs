@@ -761,3 +761,61 @@ fn message_body(full: &str, subject: &str) -> String {
         full.trim().to_owned()
     }
 }
+
+/// Dispatch parsed CLI args for `Show`.
+pub fn dispatch(
+    args: crate::args::ShowArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let ShowArgs {
+        objects,
+        diff_merges,
+        pathspecs,
+        format,
+    } = args;
+    {
+        if format.patch_text && opts.mode != OutputMode::Human {
+            bail!("`--patch-text` cannot be used with --json or --markdown");
+        }
+        let diff_merges = grit_lib::diff::DiffMerges::parse(&diff_merges).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown --diff-merges mode '{diff_merges}' (expected first-parent or combined)"
+            )
+        })?;
+        emit_success(
+            commands::show::run(commands::show::ShowRunOptions {
+                objects,
+                pathspecs,
+                format,
+                word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
+                    && commands::diff::diff_word_level_inline_for_output(),
+                diff_merges,
+                include_refs: matches!(opts.mode, crate::output::OutputMode::Json),
+            })?,
+            opts,
+            ctx,
+        )
+    }
+}

@@ -403,3 +403,65 @@ mod tests {
         assert_eq!(normalize_blame_line_content("z"), "z");
     }
 }
+
+/// Dispatch parsed CLI args for `Blame`.
+pub fn dispatch(
+    args: crate::args::BlameArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let BlameArgs {
+        rev_pos,
+        file,
+        rev,
+        line_range,
+        first_parent,
+        ignore_rev,
+        ignore_revs_file,
+        group,
+        ignore_all_space,
+        copy_detection,
+        move_detection,
+        contents,
+    } = args;
+    emit_success(
+        commands::blame::run(
+            rev_pos,
+            file,
+            rev,
+            line_range,
+            first_parent,
+            ignore_rev,
+            ignore_revs_file,
+            group,
+            ignore_all_space,
+            copy_detection,
+            move_detection,
+            contents,
+            ctx.now,
+        )?,
+        opts,
+        ctx,
+    )
+}

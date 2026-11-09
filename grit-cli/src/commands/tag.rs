@@ -997,3 +997,106 @@ fn map_tag_error(err: Error) -> anyhow::Error {
         other => anyhow::Error::msg(other.to_string()),
     }
 }
+
+/// Dispatch parsed CLI args for `Tag`.
+pub fn dispatch(
+    args: crate::args::TagArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let TagArgs {
+        name,
+        target,
+        list,
+        sort,
+        reverse,
+        contains,
+        points_at,
+        limit,
+        delete,
+        message,
+        annotate,
+        legacy_message_file,
+        object,
+        force,
+        dry_run,
+        sign,
+        no_sign,
+        signing_key,
+        verify,
+        verify_names,
+        no_signature,
+        tree_sha256,
+        exclude_submodule,
+    } = args;
+    {
+        let sign_override = if sign {
+            Some(true)
+        } else if no_sign {
+            Some(false)
+        } else {
+            None
+        };
+        let message = message_input::merge_tag_legacy_file(message, legacy_message_file);
+        let message_flag = message_input::joined_message_from_flags(&message.message);
+        let message_file = message.message_file.clone();
+        let outcome = commands::tag::run(commands::tag::TagRunOptions {
+            name,
+            target,
+            object,
+            delete,
+            message: message_flag,
+            message_file,
+            annotate,
+            force,
+            dry_run,
+            sign: sign_override,
+            signing_key,
+            now: ctx.now,
+            verify,
+            verify_names,
+            no_signature,
+            list,
+            sort,
+            reverse,
+            contains,
+            points_at,
+            limit: limit.get(),
+            tree_sha256,
+            exclude_submodule,
+            list_detail: if opts.mode == OutputMode::Human {
+                grit_lib::porcelain::tag::TagDetail::Names
+            } else {
+                grit_lib::porcelain::tag::TagDetail::Annotation
+            },
+        })?;
+        let status = if verify {
+            ExitStatus::from_tag_verify(&outcome)
+        } else {
+            ExitStatus::Success
+        };
+        emit_success(outcome, opts, ctx)?;
+        Ok(status)
+    }
+}

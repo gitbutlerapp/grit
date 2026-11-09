@@ -2061,3 +2061,176 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
         other => anyhow::anyhow!("{other}"),
     }
 }
+
+/// Dispatch parsed CLI args for `History`.
+pub fn dispatch(
+    args: crate::args::HistoryArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let HistoryArgs { action } = args;
+    match action {
+        HistoryAction::Drop { commit, shared } => {
+            emit_success(commands::history::run_drop(&commit, &shared)?, opts, ctx)
+        }
+        HistoryAction::Move {
+            commit,
+            before,
+            after,
+            shared,
+        } => emit_success(
+            commands::history::run_move(&commit, before, after, &shared)?,
+            opts,
+            ctx,
+        ),
+        HistoryAction::Reword {
+            commit,
+            message,
+            author,
+            shared,
+        } => emit_success(
+            commands::history::run_reword(&commit, &message, &author, &shared)?,
+            opts,
+            ctx,
+        ),
+        HistoryAction::Fixup {
+            commit,
+            message,
+            hunks,
+            lines,
+            pathspecs,
+            shared,
+        } => {
+            let outcome = commands::history::run_fixup(
+                &commit, &message, &hunks, &lines, &pathspecs, &shared,
+            );
+            match outcome {
+                Ok(out) => emit_success(out, opts, ctx),
+                Err(err) => {
+                    let code = commands::add::hunks_exit_code(&err);
+                    Ok(finish_hunk_error(err, opts, code))
+                }
+            }
+        }
+        HistoryAction::Rebase {
+            upstream,
+            onto,
+            continue_rebase,
+            abort,
+            skip,
+            rebase_flags,
+            shared,
+        } => {
+            let outcome = commands::history::run_rebase(&commands::history::RebaseRunOptions {
+                upstream,
+                onto,
+                continue_rebase,
+                abort,
+                skip,
+                flags: &rebase_flags,
+                shared: &shared,
+            })?;
+            emit_rebase_outcome(outcome, opts, ctx)
+        }
+        HistoryAction::Absorb { base, shared } => emit_success(
+            commands::history::run_absorb(base.as_deref(), &shared)?,
+            opts,
+            ctx,
+        ),
+        HistoryAction::Undo { shared } => {
+            emit_success(commands::history::run_undo(&shared)?, opts, ctx)
+        }
+        HistoryAction::Squash {
+            range,
+            message,
+            combine,
+            shared,
+        } => emit_success(
+            commands::history::run_squash(&range, &message, combine, &shared)?,
+            opts,
+            ctx,
+        ),
+        HistoryAction::Split {
+            commit,
+            message,
+            rest_message,
+            paths,
+            shared,
+        } => emit_success(
+            commands::history::run_split(&commit, &message, rest_message, &paths, &shared)?,
+            opts,
+            ctx,
+        ),
+    }
+}
+
+/// Dispatch parsed CLI args for `Rebase`.
+pub fn dispatch_rebase(
+    args: crate::args::RebaseArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let RebaseArgs {
+        upstream,
+        onto,
+        continue_rebase,
+        abort,
+        skip,
+        rebase_flags,
+        shared,
+    } = args;
+    {
+        let outcome = commands::history::run_rebase(&commands::history::RebaseRunOptions {
+            upstream,
+            onto,
+            continue_rebase,
+            abort,
+            skip,
+            flags: &rebase_flags,
+            shared: &shared,
+        })?;
+        emit_rebase_outcome(outcome, opts, ctx)
+    }
+}

@@ -161,3 +161,47 @@ pub fn run_exit_code(outcome: &HooksOutcome) -> i32 {
         HooksOutcome::List { .. } => 0,
     }
 }
+
+/// Dispatch parsed CLI args for `Hooks`.
+pub fn dispatch(
+    args: crate::args::HooksArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let HooksArgs { limit, action } = args;
+    match action {
+        None => emit_success(commands::hooks::run_list(limit.get())?, opts, ctx),
+        Some(HooksAction::List { limit: sub_limit }) => emit_success(
+            commands::hooks::run_list(sub_limit.get().or(limit.get()))?,
+            opts,
+            ctx,
+        ),
+        Some(HooksAction::Run { name, hook_args }) => {
+            let outcome = commands::hooks::run_hook_by_name(&name, &hook_args)?;
+            let status = ExitStatus::from_hooks(&outcome);
+            emit_success(outcome, opts, ctx)?;
+            Ok(status)
+        }
+    }
+}

@@ -71,9 +71,7 @@ mod render_outcome_snapshots;
 
 pub(crate) use args::Cli;
 pub(crate) use args::RemoteRefSortArg;
-pub(crate) use args::{
-    normalize_log_limit_argv, normalize_tag_verify_argv, parse_cli,
-};
+pub(crate) use args::{normalize_log_limit_argv, normalize_tag_verify_argv, parse_cli};
 
 use std::ffi::OsString;
 

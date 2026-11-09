@@ -730,3 +730,84 @@ mod tests {
         }
     }
 }
+
+/// Dispatch parsed CLI args for `Auth`.
+pub fn dispatch(
+    args: crate::args::AuthArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let AuthArgs {
+        url,
+        token,
+        username,
+        action,
+    } = args;
+    match action {
+        None => {
+            let outcome = if let (Some(url), Some(token), Some(username)) =
+                (url.as_deref(), token.as_deref(), username.as_deref())
+            {
+                commands::auth::store_token(url, username, token)?
+            } else {
+                let server = url
+                    .as_deref()
+                    .map(commands::auth::grit_server)
+                    .transpose()?;
+                match (server.flatten(), token) {
+                    (Some(server), Some(token)) => {
+                        commands::auth::run_server_token(&server, &token)?
+                    }
+                    (Some(server), None) => commands::auth::run_server_login(&server)?,
+                    (None, Some(_)) if url.is_some() => {
+                        anyhow::bail!("--token is for `grit serve` hosts; GitHub signs in with the browser, or store a personal access token with `--username <user> --token <token>`")
+                    }
+                    (None, token) => match (commands::auth::default_host()?, token) {
+                        (commands::auth::DefaultHost::Grit(server), Some(token)) => {
+                            commands::auth::run_server_token(&server, &token)?
+                        }
+                        (commands::auth::DefaultHost::Grit(server), None) => {
+                            commands::auth::run_server_login(&server)?
+                        }
+                        (commands::auth::DefaultHost::GitHub, Some(_)) => {
+                            anyhow::bail!("--token is for `grit serve` hosts; GitHub signs in with the browser, or store a personal access token with `--username <user> --token <token>`")
+                        }
+                        (commands::auth::DefaultHost::GitHub, None) => commands::auth::run()?,
+                    },
+                }
+            };
+            emit_success(outcome, opts, ctx)
+        }
+        Some(AuthAction::Logout { url, dry_run }) => {
+            let server = match url.as_deref() {
+                Some(url) => commands::auth::grit_server(url)?,
+                None => match commands::auth::default_host()? {
+                    commands::auth::DefaultHost::Grit(server) => Some(server),
+                    commands::auth::DefaultHost::GitHub => None,
+                },
+            };
+            emit_success(commands::auth::logout(server.as_ref(), dry_run)?, opts, ctx)
+        }
+    }
+}

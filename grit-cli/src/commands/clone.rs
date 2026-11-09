@@ -1074,3 +1074,78 @@ mod tests {
         assert!(text.contains("refs"), "{text}");
     }
 }
+
+/// Dispatch parsed CLI args for `Clone`.
+pub fn dispatch(
+    args: crate::args::CloneArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let CloneArgs {
+        url,
+        dir,
+        depth,
+        branch,
+        shallow,
+        single_branch,
+        no_single_branch,
+        no_tags,
+        origin,
+        blobs,
+        config,
+        bare,
+        no_checkout,
+        quiet,
+    } = args;
+    {
+        let single_branch = if single_branch {
+            Some(true)
+        } else if no_single_branch {
+            Some(false)
+        } else {
+            None
+        };
+        let show_outcome = quiet.shows_outcome(opts.mode);
+        let outcome = commands::clone::run(commands::clone::CloneRunOptions {
+            url,
+            dir,
+            depth,
+            branch,
+            shallow,
+            single_branch,
+            no_tags,
+            origin,
+            blobs,
+            config,
+            bare,
+            no_checkout,
+            quiet,
+            mode: opts.mode,
+        })?;
+        if show_outcome {
+            emit_success(outcome, opts, ctx)?;
+        }
+        Ok(ExitStatus::Success)
+    }
+}

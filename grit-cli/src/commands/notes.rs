@@ -434,3 +434,67 @@ fn map_notes_error(err: Error) -> anyhow::Error {
         other => anyhow::Error::new(other),
     }
 }
+
+/// Dispatch parsed CLI args for `Notes`.
+pub fn dispatch(
+    args: crate::args::NotesArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let NotesArgs {
+        notes_ref,
+        dry_run,
+        limit,
+        action,
+    } = args;
+    {
+        use commands::notes::NotesRunAction::*;
+        let (run_action, list_limit) = match action {
+            None => (List, limit.get()),
+            Some(NotesAction::List { limit: sub_limit }) => (List, sub_limit.get().or(limit.get())),
+            Some(NotesAction::Show { rev }) => (Show { rev }, None),
+            Some(NotesAction::Add {
+                rev,
+                message,
+                force,
+            }) => {
+                let message = message_input::read_required_normalized_message(&message)?;
+                (
+                    Add {
+                        rev,
+                        message,
+                        force,
+                    },
+                    None,
+                )
+            }
+            Some(NotesAction::Remove { revs }) => (Remove { revs }, None),
+        };
+        emit_success(
+            commands::notes::run(notes_ref, run_action, dry_run, list_limit, ctx.now)?,
+            opts,
+            ctx,
+        )
+    }
+}

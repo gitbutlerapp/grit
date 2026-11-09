@@ -380,3 +380,56 @@ fn refresh_error(err: grit_lib::error::Error) -> anyhow::Error {
         other => anyhow::Error::new(grit_lib::error::Error::from(other)),
     }
 }
+
+/// Dispatch parsed CLI args for `Pull`.
+pub fn dispatch(
+    args: crate::args::PullArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let PullArgs {
+        fetch,
+        ff_only,
+        no_rebase,
+        rebase,
+        autostash,
+        check,
+    } = args;
+    {
+        let args = commands::pull::PullRunArgs {
+            fetch,
+            ff_only,
+            no_rebase,
+            rebase,
+            autostash,
+            check,
+        };
+        let outcome = commands::pull::run(&args, opts.mode)?;
+        let status = ExitStatus::from_pull(&outcome);
+        if args.fetch.quiet.shows_outcome(opts.mode) {
+            emit_success(outcome, opts, ctx)?;
+        }
+        Ok(status)
+    }
+}

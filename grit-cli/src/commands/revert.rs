@@ -457,3 +457,63 @@ fn map_merge_replay_error(
         other => anyhow::Error::new(other),
     }
 }
+
+/// Dispatch parsed CLI args for `Revert`.
+pub fn dispatch(
+    args: crate::args::RevertArgs,
+    env: crate::dispatch::CommandEnv<'_>,
+) -> anyhow::Result<crate::exit_status::ExitStatus> {
+    use crate::args::*;
+    use crate::commands;
+    use crate::context;
+    use crate::dispatch::{
+        emit_rebase_outcome, emit_success, emit_success_quiet, finish_hunk_error, is_broken_pipe,
+        CommandEnv,
+    };
+    use crate::exit_status::ExitStatus;
+    use crate::json_error;
+    use crate::message_input;
+    use crate::output::{self, emit, OutputMode, OutputOptions, RenderContext};
+    use crate::pager;
+    use crate::patch_selection;
+    use crate::progress;
+    use crate::quiet_args;
+    use crate::stdio;
+    use anyhow::{bail, Result};
+    let CommandEnv {
+        opts,
+        ctx,
+        process_env,
+    } = env;
+    let RevertArgs {
+        commits,
+        mainline,
+        continue_revert,
+        abort,
+        skip,
+        no_commit,
+        empty,
+        message,
+        check,
+        dry_run,
+        replay_merge,
+    } = args;
+    {
+        let outcome = commands::revert::run(&commands::revert::RevertRunOptions {
+            commits,
+            mainline,
+            continue_revert,
+            abort,
+            skip,
+            no_commit,
+            empty,
+            message,
+            check,
+            dry_run,
+            replay_merge,
+        })?;
+        let result = outcome.result;
+        emit_success(outcome, opts, ctx)?;
+        Ok(ExitStatus::from_revert_result(result))
+    }
+}
