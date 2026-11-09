@@ -30,7 +30,7 @@ GRIT_PROFILE ?= dist
 LLVM_COV_TARGET ?= target/llvm-cov-target
 GRIT_COV_BIN := $(CURDIR)/$(LLVM_COV_TARGET)/debug/grit
 
-.PHONY: all build debug test test-full clippy fmt doc gate clean docs docs-check coverage public-api public-api-check api-ratchet api-ratchet-check api-ratchet-report semver-check bench-lib bench-scenarios
+.PHONY: all build debug test test-full clippy fmt doc gate clean docs docs-check coverage public-api public-api-check api-ratchet api-ratchet-check api-ratchet-report cli-layer-ratchet cli-layer-ratchet-check semver-check bench-lib bench-scenarios
 
 BENCH_DIR := target/bench
 CRITERION_DIR := target/criterion
@@ -109,6 +109,12 @@ api-ratchet:
 
 api-ratchet-check:
 	python3 scripts/api_ratchet.py check
+
+cli-layer-ratchet:
+	python3 scripts/cli_layer_stats.py update
+
+cli-layer-ratchet-check:
+	python3 scripts/cli_layer_stats.py check
 
 api-ratchet-report:
 	python3 scripts/api_ratchet.py report $(if $(MODULE),--module $(MODULE))

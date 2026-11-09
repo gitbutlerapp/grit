@@ -1,12 +1,13 @@
 //! Small output-formatting helpers shared by `grit` commands.
 
 use std::borrow::Cow;
-use std::io::{IsTerminal, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
 use crate::output::outln;
+use crate::render::style::{self, truncate};
 
 use grit_lib::config::git_path::{relative_path_for_display, user_display_path};
 use grit_lib::diff::{DiffEntry, DiffStatus};
@@ -140,8 +141,6 @@ pub fn format_diff_file_header(
 /// (`"type changed"`) so the paths after it line up.
 const LABEL_WIDTH: usize = 12;
 
-/// ANSI reset.
-const RESET: &str = "\x1b[0m";
 /// Dim gray for the abbreviated sha.
 const FG_DIM: &str = "38;5;244";
 /// Soft blue for the author column.
@@ -154,23 +153,6 @@ const FG_DATE: &str = "38;5;179";
 const FG_ADDED: &str = "32";
 /// Red for the deletions of a line summary.
 const FG_REMOVED: &str = "31";
-
-/// Whether to emit ANSI color: only when stdout is a TTY and `NO_COLOR` is unset
-/// (the de-facto standard for opting out — <https://no-color.org>).
-fn use_color() -> bool {
-    std::io::stdout().is_terminal()
-        && grit_lib::porcelain::terminal::ansi_supported()
-        && std::env::var_os("NO_COLOR").is_none()
-}
-
-/// Wrap `text` in the SGR `code` (e.g. `"32"`) when `color` is enabled.
-fn paint(color: bool, code: &str, text: &str) -> String {
-    if color {
-        format!("\x1b[{code}m{text}{RESET}")
-    } else {
-        text.to_owned()
-    }
-}
 
 /// Longest author shown before truncation.
 const AUTHOR_MAX: usize = 15;
@@ -258,8 +240,8 @@ pub fn commit_rows_with(
     now: i64,
     opts: &CommitRowOptions<'_>,
 ) -> Vec<String> {
-    let color = use_color();
-    let term_width = terminal_width();
+    let color = style::use_color();
+    let term_width = style::terminal_width();
     let columns = opts
         .columns
         .unwrap_or_else(|| CommitColumns::measure(commits, now));
@@ -329,10 +311,10 @@ pub fn commit_rows_with(
             };
             let mut row = format!(
                 "  {}  {}  {}  {}  {subject}",
-                paint(color, FG_DIM, sha),
-                paint(color, FG_CHANGE, &format!("{change:<change_w$}")),
-                paint(color, FG_AUTHOR, &format!("{author:<author_w$}")),
-                paint(color, FG_DATE, &format!("{date:<date_w$}")),
+                style::paint(color, FG_DIM, sha),
+                style::paint(color, FG_CHANGE, &format!("{change:<change_w$}")),
+                style::paint(color, FG_AUTHOR, &format!("{author:<author_w$}")),
+                style::paint(color, FG_DATE, &format!("{date:<date_w$}")),
             );
             if let Some(counts) = counts {
                 let fill =
@@ -340,13 +322,13 @@ pub fn commit_rows_with(
                 row.push_str(&" ".repeat(fill + 2));
                 let added = format!("+{}", counts.added);
                 let removed = format!("-{}", counts.removed);
-                row.push_str(&paint(
+                row.push_str(&style::paint(
                     color,
                     FG_ADDED,
                     &format!("{added:>0$}", added_w + 1),
                 ));
                 row.push(' ');
-                row.push_str(&paint(
+                row.push_str(&style::paint(
                     color,
                     FG_REMOVED,
                     &format!("{removed:>0$}", removed_w + 1),
@@ -357,55 +339,7 @@ pub fn commit_rows_with(
         .collect()
 }
 
-/// Width of the terminal stdout is attached to, or `None` when it is not a terminal.
-#[must_use]
-pub fn terminal_width() -> Option<usize> {
-    terminal_size::terminal_size().map(|(w, _)| usize::from(w.0))
-}
-
-/// Columns `s` takes on screen: its characters, not counting ANSI SGR color sequences.
-#[must_use]
-pub fn display_width(s: &str) -> usize {
-    let mut width = 0;
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip `ESC [ … m`.
-            for c in chars.by_ref() {
-                if c == 'm' {
-                    break;
-                }
-            }
-        } else {
-            width += 1;
-        }
-    }
-    width
-}
-
-/// Cut `s` to `max` columns with a trailing `…`; `None` leaves it whole, and so does color
-/// in `s` (cutting could split an escape sequence).
-#[must_use]
-pub fn fit_width(s: &str, max: Option<usize>) -> String {
-    match max {
-        Some(max) if max > 0 && !s.contains('\x1b') => truncate(s, max),
-        _ => s.to_owned(),
-    }
-}
-
-/// Truncate `s` to at most `max` display columns, using `…` for the last cell
-/// when shortened.
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_owned();
-    }
-    if max == 0 {
-        return String::new();
-    }
-    let mut out: String = s.chars().take(max - 1).collect();
-    out.push('…');
-    out
-}
+pub use crate::render::style::{display_width, fit_width, terminal_width};
 
 /// The path a diff entry refers to (prefers the new side, falls back to old).
 pub fn entry_path(entry: &DiffEntry) -> &str {
@@ -484,8 +418,8 @@ pub fn print_change_group(
     if entries.is_empty() {
         return Ok(());
     }
-    let color = use_color();
-    outln!(w, "{}", paint(color, "1", title));
+    let color = style::use_color();
+    outln!(w, "{}", style::paint(color, "1", title));
     for entry in entries {
         let g = glyph(&entry.status);
         let l = label(entry);
@@ -494,7 +428,7 @@ pub fn print_change_group(
         outln!(
             w,
             "  {}  {}",
-            paint(color, status_color(&entry.status), &marker),
+            style::paint(color, status_color(&entry.status), &marker),
             shown
         );
     }
@@ -511,14 +445,14 @@ pub fn print_untracked(
     if paths.is_empty() {
         return Ok(());
     }
-    let color = use_color();
-    outln!(w, "{}", paint(color, "1", "Untracked"));
+    let color = style::use_color();
+    outln!(w, "{}", style::paint(color, "1", "Untracked"));
     for path in paths {
         let shown = path_opts
             .map(|opts| opts.format_path_for_human(path))
             .unwrap_or_else(|| path.clone());
         let marker = format!("?  {l:<width$}", l = "untracked", width = LABEL_WIDTH);
-        outln!(w, "  {}  {shown}", paint(color, "31", &marker));
+        outln!(w, "  {}  {shown}", style::paint(color, "31", &marker));
     }
     outln!(w);
     Ok(())
@@ -533,14 +467,14 @@ pub fn print_ignored(
     if paths.is_empty() {
         return Ok(());
     }
-    let color = use_color();
-    outln!(w, "{}", paint(color, "1", "Ignored"));
+    let color = style::use_color();
+    outln!(w, "{}", style::paint(color, "1", "Ignored"));
     for path in paths {
         let shown = path_opts
             .map(|opts| opts.format_path_for_human(path))
             .unwrap_or_else(|| path.clone());
         let marker = format!("!  {l:<width$}", l = "ignored", width = LABEL_WIDTH);
-        outln!(w, "  {}  {shown}", paint(color, "90", &marker));
+        outln!(w, "  {}  {shown}", style::paint(color, "90", &marker));
     }
     outln!(w);
     Ok(())

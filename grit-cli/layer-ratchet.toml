@@ -1,0 +1,12 @@
+# grit-cli layer line counts — ratchet baseline
+# Regenerate with: make cli-layer-ratchet
+
+[meta]
+updated = "2026-11-09"
+
+[counts]
+render = 1135
+args = 0
+dispatch = 5167
+other = 49178
+total = 55480

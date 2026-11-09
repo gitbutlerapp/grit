@@ -14,31 +14,24 @@
 //!   exit code *or* the presence of an `error` key.
 //! * progress / prompts / diagnostics go to **stderr** and never pollute stdout.
 
-use anyhow::{bail, Result};
-use grit_lib::command_runner::hooks::HookError;
-use grit_lib::diff::{DiffEntry, DiffStatus};
-use schemars::JsonSchema;
-use serde::Serialize;
-use std::io::{ErrorKind, IsTerminal, Write};
-use std::path::Path;
-use time::OffsetDateTime;
-
 use crate::cli_messages::human_error_message;
 use crate::json_error::structured_json_payload;
 use crate::json_filter::{apply_json_filter, write_json_filter_val};
 use crate::json_to_jaq;
 use crate::stdio;
 use crate::ui::entry_path;
+use anyhow::{bail, Result};
+use grit_lib::command_runner::hooks::HookError;
+use grit_lib::diff::{DiffEntry, DiffStatus};
 use grit_lib::porcelain::log::DecorationKind;
+use schemars::JsonSchema;
+use serde::Serialize;
+use std::io::{ErrorKind, IsTerminal, Write};
+use std::path::Path;
+#[cfg(test)]
+use time::OffsetDateTime;
 
-/// Wall-clock instant captured once per process invocation for relative dates.
-#[derive(Clone, Copy, Debug)]
-pub struct RenderContext {
-    /// Current time with repository timezone semantics applied at capture.
-    pub now: OffsetDateTime,
-    /// Selected stdout format for this invocation.
-    pub mode: OutputMode,
-}
+pub use crate::render::{HumanRender, MarkdownRender, OutputMode, RenderContext};
 
 /// Write one line to `w`, treating a closed pipe as success.
 #[macro_export]
@@ -50,17 +43,6 @@ macro_rules! outln {
 }
 
 pub(crate) use outln;
-
-/// How a command's outcome should be rendered.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum OutputMode {
-    /// Human-readable text (the default).
-    Human,
-    /// A single machine-readable JSON object on stdout.
-    Json,
-    /// Agent-friendly Markdown on stdout.
-    Markdown,
-}
 
 /// Rendering options for a command outcome.
 #[derive(Clone, Debug)]
@@ -82,17 +64,6 @@ impl OutputOptions {
         }
         Ok(())
     }
-}
-
-/// Render a value as the command's human-readable output.
-pub trait HumanRender {
-    /// Write human-oriented text to `w`.
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()>;
-}
-
-/// Render a command outcome as agent-friendly Markdown on stdout.
-pub trait MarkdownRender: Serialize {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()>;
 }
 
 /// Render a command outcome to stdout in the chosen mode.
@@ -258,7 +229,7 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
                 let _ = stdio::io_result(writeln!(lock, "\n**Hint:** {hint}"));
             }
             if let Some(output) = hook_output {
-                let _ = crate::markdown::render_hook_output(
+                let _ = crate::render::list::render_hook_output(
                     &mut lock,
                     &String::from_utf8_lossy(&output.stdout),
                     &String::from_utf8_lossy(&output.stderr),

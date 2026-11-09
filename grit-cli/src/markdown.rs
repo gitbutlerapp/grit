@@ -1,5 +1,10 @@
 //! Shared Markdown formatters for `--markdown` command output.
 
+pub use crate::render::list::{
+    diff_code_fence, format_inline_code, print_fenced_text, render_hook_output,
+};
+pub use crate::render::table::escape_table_cell;
+
 use std::io::Write;
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
@@ -210,47 +215,6 @@ fn print_file_diff_metadata(w: &mut dyn Write, file: &FileDiff) -> anyhow::Resul
     Ok(())
 }
 
-/// Pick a fence delimiter longer than any run of backticks appearing in `body`.
-#[must_use]
-pub fn diff_code_fence(body: &str) -> (String, String) {
-    code_fence(body, "diff")
-}
-
-/// Opening (with `lang`) and closing fence longer than any run of backticks in `body`.
-fn code_fence(body: &str, lang: &str) -> (String, String) {
-    let mut ticks = 3usize;
-    loop {
-        let marker = "`".repeat(ticks);
-        if !body.contains(&marker) {
-            return (format!("{marker}{lang}"), marker);
-        }
-        ticks += 1;
-    }
-}
-
-/// Write `body` inside a closed `text` fence whose delimiter is longer than any run of
-/// backticks in `body`, so untrusted text cannot break out into headings or tables.
-pub fn print_fenced_text(w: &mut dyn Write, body: &str) -> anyhow::Result<()> {
-    let body = body.strip_suffix('\n').unwrap_or(body);
-    let (open, close) = code_fence(body, "text");
-    outln!(w, "{open}");
-    stdio::io_result(writeln!(w, "{body}")).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
-    outln!(w, "{close}");
-    Ok(())
-}
-
-/// Render captured hook output as labelled `text` code blocks; empty streams are skipped.
-pub fn render_hook_output(w: &mut dyn Write, stdout: &str, stderr: &str) -> anyhow::Result<()> {
-    for (label, body) in [("stdout", stdout), ("stderr", stderr)] {
-        if body.is_empty() {
-            continue;
-        }
-        outln!(w, "\n**Hook {label}:**\n");
-        print_fenced_text(w, body)?;
-    }
-    Ok(())
-}
-
 fn print_fenced_diff(w: &mut dyn Write, body: &str) -> anyhow::Result<()> {
     let (open, close) = diff_code_fence(body);
     outln!(w, "{open}");
@@ -415,42 +379,6 @@ pub fn print_config_entries(
         outln!(w, "| `{}` | {} |", entry.key, escape_table_cell(value));
     }
     Ok(())
-}
-
-/// Wrap `content` in a Markdown inline code span.
-///
-/// Picks a backtick delimiter longer than any run of backticks in `content` (CommonMark
-/// code spans do not treat backslash as escape inside single-backtick spans).
-#[must_use]
-pub fn format_inline_code(content: &str) -> String {
-    let mut ticks = 1usize;
-    loop {
-        let marker = "`".repeat(ticks);
-        if !content.contains(&marker) {
-            let pad = content.starts_with(' ')
-                || content.ends_with(' ')
-                || content.starts_with('`')
-                || content.ends_with('`');
-            if pad {
-                return format!("{marker} {content} {marker}");
-            }
-            return format!("{marker}{content}{marker}");
-        }
-        ticks += 1;
-    }
-}
-
-/// Escape cell text so it stays on one Markdown table row.
-///
-/// Trims trailing line terminators (common in blame content on CRLF files), replaces
-/// any remaining `\r`/`\n` with visible escapes, and escapes `|`.
-#[must_use]
-pub fn escape_table_cell(s: &str) -> String {
-    let trimmed = s.trim_end_matches(['\n', '\r']);
-    trimmed
-        .replace('|', "\\|")
-        .replace('\r', "\\r")
-        .replace('\n', "\\n")
 }
 
 /// Remotes as a two-column table.
@@ -2214,9 +2142,8 @@ pub fn print_push_results(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        code_fence, diff_code_fence, escape_table_cell, format_inline_code, print_fenced_text,
-    };
+    use super::{diff_code_fence, escape_table_cell, format_inline_code, print_fenced_text};
+    use crate::render::list::code_fence;
 
     #[test]
     fn print_fenced_text_closes_fence_when_body_contains_triple_backticks() {

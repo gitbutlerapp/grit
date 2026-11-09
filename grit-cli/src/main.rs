@@ -50,6 +50,7 @@ mod pathspec_args;
 mod progress;
 mod quiet_args;
 mod ref_name_messages;
+mod render;
 mod rev_select;
 mod revision_errors;
 mod stdio;

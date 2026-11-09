@@ -11,7 +11,7 @@ use grit_lib::revwalk::{
 use std::io::Write;
 
 use crate::commits_json::CommitJsonLoader;
-use crate::output::json_write;
+use crate::render::stream::{begin_json_array_field, finish_json_array_document};
 use crate::stdio;
 
 /// First batch size so `| head` returns quickly.
@@ -65,8 +65,7 @@ pub fn pull_batch(
 
 /// Write a JSON array prefix for outcomes shaped like `{"commits":[...], "truncated": bool, "next": null}`.
 pub fn begin_commits_json_document(w: &mut dyn Write) -> Result<()> {
-    stdio::io_result(write!(w, "{{\"commits\":["))
-        .map_err(|e| anyhow::anyhow!("writing output: {e}"))
+    begin_json_array_field(w, "commits")
 }
 
 /// Finish a commits JSON document; `extra` is inserted after `truncated` (for example `,"groups":null`).
@@ -75,14 +74,7 @@ pub fn finish_commits_json_document(
     truncated: bool,
     extra_fields: &str,
 ) -> Result<()> {
-    stdio::io_result(write!(w, "],\"truncated\":{}", truncated))
-        .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
-    stdio::io_result(writeln!(
-        w,
-        "{extra_fields},\"next\":null}}",
-        extra_fields = extra_fields
-    ))
-    .map_err(|e| anyhow::anyhow!("writing output: {e}"))
+    finish_json_array_document(w, "commits", truncated, extra_fields)
 }
 
 /// Serialize one commit value into a JSON array, with a leading comma when `first` is false.
@@ -94,14 +86,7 @@ pub fn write_json_array_element<T: serde::Serialize>(
     first: &mut bool,
     value: &T,
 ) -> Result<()> {
-    let mut buf = Vec::with_capacity(1024);
-    if !*first {
-        buf.push(b',');
-    } else {
-        *first = false;
-    }
-    json_write(serde_json::to_writer(&mut buf, value))?;
-    stdio::io_result(w.write_all(&buf)).map_err(|e| anyhow::anyhow!("writing output: {e}"))
+    crate::render::stream::write_json_array_element(w, first, value)
 }
 
 /// Load human summaries for one batch, reusing walk bytes when present.

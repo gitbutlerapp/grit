@@ -49,5 +49,7 @@ else
 	run_stage "test" cargo test --workspace "${WORKSPACE_TEST_FEATURES[@]}"
 fi
 
+run_stage "cli-layer-ratchet" make cli-layer-ratchet-check
+
 echo ""
 echo "Gate passed."

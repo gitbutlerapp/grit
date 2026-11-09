@@ -70,6 +70,20 @@ Exception rows name an **owner** (a later plan step such as `s4 limit`, `s5 dry-
 
 Adding a command requires a new row in `COMMAND_CONTRACTS` inside `grit-cli/src/cli_contract.rs`. CI fails with a message that names the path and the rule if you omit it.
 
+## Three layers
+
+Each `grit` command is split into three layers. Later roadmap steps move command logic into this shape; the render layer landed first.
+
+| Layer | Location (today) | Responsibility |
+| --- | --- | --- |
+| **Parse** | `grit-cli/src/main.rs` (per-command args land in step 2) | Clap parsing, global flags, revision/pathspec helpers. Produces plain Rust input structs — no I/O. |
+| **Outcome** | Command modules under `grit-cli/src/commands/` and small `*_args.rs` helpers | Open `grit_lib::repo::Repository` handles, call library APIs, map errors. Returns a typed **outcome** (structs with `Serialize` for `--json`). |
+| **Render** | `grit-cli/src/render/` | Turn outcomes into human text, Markdown, or filtered JSON. **No** `Repository`, `context`, or `commands::` imports (see `render_layer_is_repository_free` in `grit-cli`). |
+
+**JSON DTO rule:** serde shapes on outcomes stay in the CLI. They are `From<&LibOutcome>` field mappings (or thin wrappers), not new public `grit-lib` types. The committed v1 JSON schemas remain the contract.
+
+`make cli-layer-ratchet-check` tracks line counts for `render/`, `args/`, `dispatch` (`main.rs`), and the rest of `grit-cli/src`. Non-render layers may not grow without updating `grit-cli/layer-ratchet.toml`.
+
 ## See also
 
 - [Scripting with grit](../scripting/) — `--json`, exit codes, and stdout discipline.
