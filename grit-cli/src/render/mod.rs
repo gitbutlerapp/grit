@@ -1,7 +1,11 @@
 //! Presentation layer: format typed command outcomes for humans, agents, and scripts.
 
+pub mod config;
 pub mod diff;
+pub mod fsck;
+pub mod gc;
 pub mod list;
+pub mod repack;
 pub mod stream;
 pub mod style;
 pub mod table;

@@ -1,6 +1,5 @@
 //! `grit config` — read, set, and list configuration values.
 
-use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
@@ -12,12 +11,11 @@ use grit_lib::config::{
     ConfigWritePreview,
 };
 use grit_lib::repo::Repository;
-use schemars::JsonSchema;
-use serde::Serialize;
 
 use crate::context;
-use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::output::OutputMode;
+
+pub use crate::render::config::*;
 
 /// CLI mapping for `--type`.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -34,285 +32,6 @@ impl From<ConfigTypeArg> for ConfigValueType {
             ConfigTypeArg::Int => Self::Int,
             ConfigTypeArg::Path => Self::Path,
         }
-    }
-}
-
-/// One value in a `get_all` outcome.
-#[derive(Serialize, JsonSchema, Clone)]
-pub struct ConfigValueWithOrigin {
-    pub value: Option<String>,
-    pub scope: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub line: Option<u64>,
-}
-
-/// Result of `grit config`, tagged by `action`.
-#[derive(Serialize, JsonSchema)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub enum ConfigOutcome {
-    Get {
-        key: String,
-        value: Option<String>,
-        scope: Option<String>,
-        file: Option<String>,
-        line: Option<u64>,
-    },
-    GetAll {
-        key: String,
-        values: Vec<ConfigValueWithOrigin>,
-    },
-    List {
-        entries: Vec<ConfigEntry>,
-    },
-    Set {
-        key: String,
-        value: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        dry_run: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        preview: Option<String>,
-    },
-    Add {
-        key: String,
-        value: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        dry_run: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        preview: Option<String>,
-    },
-    Unset {
-        key: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        dry_run: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        preview: Option<String>,
-    },
-    UnsetAll {
-        key: String,
-        removed: u64,
-        #[serde(default, skip_serializing_if = "is_false")]
-        dry_run: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        preview: Option<String>,
-    },
-    RenameSection {
-        old_name: String,
-        new_name: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        dry_run: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        preview: Option<String>,
-    },
-    RemoveSection {
-        section: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        dry_run: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[schemars(skip_serializing_if = "Option::is_none")]
-        preview: Option<String>,
-    },
-}
-
-fn is_false(v: &bool) -> bool {
-    !*v
-}
-
-/// One entry in a `list` outcome. `value` is `null` for a bare/valueless key.
-#[derive(Serialize, JsonSchema)]
-pub struct ConfigEntry {
-    pub key: String,
-    pub value: Option<String>,
-    pub scope: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
-}
-
-impl HumanRender for ConfigOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        match self {
-            ConfigOutcome::Get {
-                value: Some(value), ..
-            } => outln!(w, "{value}"),
-            ConfigOutcome::Get { value: None, .. } => {}
-            ConfigOutcome::GetAll { values, .. } => {
-                for v in values {
-                    if let Some(value) = &v.value {
-                        outln!(w, "{value}");
-                    }
-                }
-            }
-            ConfigOutcome::List { entries } => {
-                for entry in entries {
-                    match &entry.value {
-                        Some(value) => outln!(w, "{}={value}", entry.key),
-                        None => outln!(w, "{}", entry.key),
-                    }
-                }
-            }
-            ConfigOutcome::Set {
-                preview, dry_run, ..
-            }
-            | ConfigOutcome::Add {
-                preview, dry_run, ..
-            }
-            | ConfigOutcome::Unset {
-                preview, dry_run, ..
-            }
-            | ConfigOutcome::UnsetAll {
-                preview, dry_run, ..
-            }
-            | ConfigOutcome::RenameSection {
-                preview, dry_run, ..
-            }
-            | ConfigOutcome::RemoveSection {
-                preview, dry_run, ..
-            } => {
-                if *dry_run {
-                    if let Some(p) = preview {
-                        outln!(w, "{p}");
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl MarkdownRender for ConfigOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        match self {
-            ConfigOutcome::Get {
-                key,
-                value,
-                scope,
-                file,
-                line,
-            } => {
-                outln!(w, "# Config `{key}`");
-                outln!(w);
-                match value {
-                    Some(v) => outln!(w, "**Value:** `{v}`"),
-                    None => outln!(w, "**Value:** _not set_"),
-                }
-                if let Some(scope) = scope {
-                    outln!(w, "**Scope:** `{scope}`");
-                }
-                if let Some(file) = file {
-                    outln!(w, "**File:** `{file}`");
-                }
-                if let Some(line) = line {
-                    outln!(w, "**Line:** {line}");
-                }
-            }
-            ConfigOutcome::GetAll { key, values } => {
-                outln!(w, "# Config `{key}` (all values)");
-                outln!(w);
-                for v in values {
-                    outln!(
-                        w,
-                        "- `{}` ({})",
-                        v.value.as_deref().unwrap_or("true"),
-                        v.scope
-                    );
-                }
-            }
-            ConfigOutcome::List { entries } => markdown::print_config_entries(w, entries)?,
-            ConfigOutcome::Set {
-                key,
-                value,
-                dry_run,
-                preview,
-            }
-            | ConfigOutcome::Add {
-                key,
-                value,
-                dry_run,
-                preview,
-            } => {
-                if *dry_run {
-                    outln!(
-                        w,
-                        "Dry-run: would set `{key}` = {value}. {}",
-                        preview.as_deref().unwrap_or("")
-                    );
-                } else {
-                    outln!(w, "Set `{key}` = {value}.");
-                }
-            }
-            ConfigOutcome::Unset {
-                key,
-                dry_run,
-                preview,
-            } => {
-                if *dry_run {
-                    outln!(
-                        w,
-                        "Dry-run: would unset `{key}`. {}",
-                        preview.as_deref().unwrap_or("")
-                    );
-                } else {
-                    outln!(w, "Unset `{key}`.");
-                }
-            }
-            ConfigOutcome::UnsetAll {
-                key,
-                removed,
-                dry_run,
-                preview,
-            } => {
-                if *dry_run {
-                    outln!(
-                        w,
-                        "Dry-run: would unset-all `{key}` ({removed} values). {}",
-                        preview.as_deref().unwrap_or("")
-                    );
-                } else {
-                    outln!(w, "Unset all `{key}` ({removed} values).");
-                }
-            }
-            ConfigOutcome::RenameSection {
-                old_name,
-                new_name,
-                dry_run,
-                preview,
-            } => {
-                if *dry_run {
-                    outln!(
-                        w,
-                        "Dry-run: rename `{old_name}` → `{new_name}`. {}",
-                        preview.as_deref().unwrap_or("")
-                    );
-                } else {
-                    outln!(w, "Renamed section `{old_name}` → `{new_name}`.");
-                }
-            }
-            ConfigOutcome::RemoveSection {
-                section,
-                dry_run,
-                preview,
-            } => {
-                if *dry_run {
-                    outln!(
-                        w,
-                        "Dry-run: remove section `{section}`. {}",
-                        preview.as_deref().unwrap_or("")
-                    );
-                } else {
-                    outln!(w, "Removed section `{section}`.");
-                }
-            }
-        }
-        Ok(())
     }
 }
 
@@ -347,7 +66,7 @@ pub fn run(
     dry_run: bool,
     key: Option<String>,
     value: Option<String>,
-    mode: OutputMode,
+    human: bool,
 ) -> Result<ConfigOutcome> {
     let write_action = unset
         || unset_all
@@ -396,7 +115,7 @@ pub fn run(
         system,
         worktree,
         file.as_ref(),
-        mode,
+        human,
         dry_run,
     ) && !get_all
         && !unset_all
@@ -429,7 +148,7 @@ pub fn run(
         if value.is_some() {
             bail!("--all does not take a value");
         }
-        return get_all_values(read_location, &env, &key, value_type, default_value, mode);
+        return get_all_values(read_location, &env, &key, value_type, default_value);
     }
 
     if unset_all {
@@ -459,7 +178,7 @@ pub fn run(
         return set_value(write_location, &env, &key, &stored, dry_run);
     }
 
-    get_value(read_location, &env, &key, value_type, default_value, mode)
+    get_value(read_location, &env, &key, value_type, default_value, human)
 }
 
 fn preview_text(preview: &Option<ConfigWritePreview>) -> Option<String> {
@@ -485,16 +204,10 @@ fn default_repo_hot_path(
     system: bool,
     worktree: bool,
     file: Option<&PathBuf>,
-    mode: OutputMode,
+    human: bool,
     dry_run: bool,
 ) -> bool {
-    !dry_run
-        && !global
-        && !local
-        && !system
-        && !worktree
-        && file.is_none()
-        && matches!(mode, OutputMode::Human)
+    !dry_run && !global && !local && !system && !worktree && file.is_none() && human
 }
 
 fn hot_get_in_repo(
@@ -635,7 +348,7 @@ fn get_value(
     key: &str,
     value_type: Option<ConfigTypeArg>,
     default_value: Option<String>,
-    mode: OutputMode,
+    human: bool,
 ) -> Result<ConfigOutcome> {
     canonical_key(key).with_context(|| format!("invalid config key {key}"))?;
     let config = load_for_read(read_location, env)?;
@@ -653,7 +366,7 @@ fn get_value(
         };
         let typed = grit_lib::config::parse_typed_value(key, ty.into(), &raw, env)?;
         let value = typed.to_canonical_string();
-        if matches!(mode, OutputMode::Human) {
+        if human {
             return Ok(ConfigOutcome::Get {
                 key: key.to_owned(),
                 value: Some(value),
@@ -683,7 +396,7 @@ fn get_value(
         });
     }
 
-    if matches!(mode, OutputMode::Human) {
+    if human {
         match crate::context::config_string(&config, key) {
             Some(value) => {
                 return Ok(ConfigOutcome::Get {
@@ -753,7 +466,6 @@ fn get_all_values(
     key: &str,
     value_type: Option<ConfigTypeArg>,
     default_value: Option<String>,
-    _mode: OutputMode,
 ) -> Result<ConfigOutcome> {
     let config = load_for_read(read_location, env)?;
     let mut origins = config.origins_of(key)?;
@@ -1086,6 +798,7 @@ pub fn dispatch(
                 bail!("--rename-section requires both OLD and --rename-section-new NEW");
             }
         };
+        let show_progress = opts.mode == OutputMode::Human;
         let outcome = commands::config::run(
             process_env,
             global,
@@ -1105,7 +818,7 @@ pub fn dispatch(
             dry_run,
             key,
             value,
-            opts.mode,
+            show_progress,
         )?;
         let code = commands::config::exit_code(&outcome);
         emit(outcome, opts, ctx)?;

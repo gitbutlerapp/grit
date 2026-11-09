@@ -280,7 +280,13 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
     };
     match result {
         Ok(ExitStatus::Success) if auto_maintenance => {
-            commands::gc::run_auto_after_command(opts.mode, render_ctx.now);
+            use crate::output::OutputMode;
+            let mut progress = progress::TerminalProgress::new(opts.mode);
+            commands::gc::run_auto_after_command(
+                &mut progress,
+                opts.mode == OutputMode::Human,
+                render_ctx.now,
+            );
             Ok(ExitStatus::Success)
         }
         Ok(status) => Ok(status),
