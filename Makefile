@@ -102,6 +102,7 @@ public-api:
 
 public-api-check:
 	./scripts/public-api.sh check
+	./scripts/public-api.sh check-api-migration
 	./scripts/public-api.sh check-test-items
 
 api-ratchet:

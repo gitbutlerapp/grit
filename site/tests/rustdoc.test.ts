@@ -91,6 +91,16 @@ describe("unresolvedGritLibPaths", () => {
     expect(unresolvedGritLibPaths(markdown)).toEqual([]);
   });
 
+  it("skips generated api-migration tables listing removed 0.5 paths", () => {
+    const markdown = [
+      "Guide text uses `grit_lib::repo::Repository`.",
+      "<!-- api-migration:begin -->",
+      "| `grit_lib::config::set_config_value` | gone |",
+      "<!-- api-migration:end -->",
+    ].join("\n");
+    expect(unresolvedGritLibPaths(markdown)).toEqual([]);
+  });
+
   it("reports private and missing paths", () => {
     const markdown = [
       "Accepts `grit_lib::transfer::FetchOptions`.",

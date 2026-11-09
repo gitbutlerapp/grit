@@ -19,6 +19,7 @@ Usage: $(basename "$0") <generate|check|check-test-items|ensure-deps>
 
   generate     Write ${SNAPSHOT#"$REPO"/} from cargo public-api
   check        Regenerate to a temp file and diff against the committed snapshot
+  check-api-migration  Verify 0.5.31→0.6 migration map and doc table
   check-test-items  Ratchet test/bench/fixture/probe names in public + hidden API
   ensure-deps              Install pinned nightly + cargo-public-api (for tests)
   ensure-toolchain         Install pinned nightly only (rustdoc JSON / coverage gate)
@@ -116,7 +117,10 @@ check)
 		exit 1
 	fi
 	;;
-check-test-items)
+	check-api-migration)
+	python3 "${REPO}/scripts/api_migration.py" check
+	;;
+	check-test-items)
 	ensure_toolchain
 	# `check` runs cargo-public-api first, which writes target/doc/grit_lib.json.
 	# check-test-items uses its own JSON under target/public-api-test-items-doc/;
