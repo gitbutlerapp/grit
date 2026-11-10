@@ -92,6 +92,8 @@ $ grit stash show
  1 file changed, 1 insertion(+), 1 deletion(-)
 ```
 
+Human and `--markdown` diffstat output C-quotes C0 control characters in path names (including ESC, tab, and newline), the same as [`grit status`](status.md) and other diffstat commands; `--json` `stat.files[].path` values stay raw UTF-8 strings (JSON escapes controls as `\uXXXX`).
+
 Pop the newest entry:
 
 ```console

@@ -13,6 +13,7 @@ use crate::diff_render;
 use crate::markdown;
 use crate::output::outln;
 use crate::render::{HumanRender, MarkdownRender, RenderContext};
+use crate::ui::path_display_for_discovered_repo;
 
 impl HumanRender for StashPushOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
@@ -97,7 +98,8 @@ impl HumanRender for StashShowOutcome {
             return Ok(());
         }
         if let Some(stat) = &self.stat {
-            diff_render::render_stat_with_leading_blank(w, stat, ctx.color, None)?;
+            let path_opts = path_display_for_discovered_repo();
+            diff_render::render_stat_with_leading_blank(w, stat, ctx.color, path_opts.as_ref())?;
         }
         Ok(())
     }
@@ -109,7 +111,8 @@ impl MarkdownRender for StashShowOutcome {
             return Ok(());
         }
         if let Some(stat) = &self.stat {
-            diff_render::render_markdown_stat(w, stat, None)?;
+            let path_opts = path_display_for_discovered_repo();
+            diff_render::render_markdown_stat(w, stat, path_opts.as_ref())?;
         }
         Ok(())
     }
