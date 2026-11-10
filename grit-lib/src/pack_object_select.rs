@@ -986,22 +986,20 @@ fn rev_list_filtered_objects(
         no_object_names: false,
         quiet: true,
         filter: Some(filter.clone()),
-        cancel: Some(crate::progress::CancelToken::from_shared_flag(
-            stop.watch_arc(),
-        )),
         missing_action: match missing_mode {
             MissingBlobMode::Fail => MissingAction::Error,
             MissingBlobMode::Probe => MissingAction::Allow,
         },
         ..Default::default()
     };
+    let cancel = crate::progress::CancelToken::from_shared_flag(stop.watch_arc());
     let result = crate::rev_list::rev_list(
         &repo,
         &wants,
         &haves,
         &opts,
         &mut crate::progress::NullProgress,
-        crate::progress::CancelToken::never_ref(),
+        &cancel,
     )?;
     stop.poll()?;
     let mut ordered = Vec::new();

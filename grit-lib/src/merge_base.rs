@@ -19,7 +19,6 @@ use crate::objects::{
     OidHashSet,
 };
 use crate::pack_bitmap::BitmapIndex;
-use crate::progress::{CancelToken, NullProgress};
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
 use crate::repo::Repository;

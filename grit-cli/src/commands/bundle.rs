@@ -1,6 +1,5 @@
 //! `grit bundle` — create, verify, list, and unbundle git bundle files.
 
-use grit_lib::progress::{CancelToken, NullProgress};
 
 use std::path::{Path, PathBuf};
 

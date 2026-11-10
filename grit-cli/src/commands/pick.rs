@@ -1,6 +1,5 @@
 //! `grit pick` — cherry-pick one or more commits onto the current branch.
 
-use grit_lib::progress::{CancelToken, NullProgress};
 
 use crate::commands::replay_merge_args::{mainline_parent, EmptyStepArg, ReplayMergeArgs};
 use crate::context;

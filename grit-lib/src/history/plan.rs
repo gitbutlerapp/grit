@@ -30,7 +30,6 @@ use super::types::{
 use crate::refs::store::RefName;
 
 use super::PlanningError;
-use crate::progress::{CancelToken, NullProgress};
 use crate::replay_merge_session::ReplayMergeSession;
 
 // hygiene: resumable replay control (thread-local for parallel tests)

@@ -36,7 +36,6 @@ use crate::commit_graph_file::CommitGraphChain;
 use crate::error::{Error, Result};
 use crate::objects::{tag_object_line_oid, CommitRef, Object, ObjectId, ObjectKind, TreeRefIter};
 use crate::odb::Odb;
-use crate::progress::{CancelToken, NullProgress};
 
 const GITLINK_MODE: u32 = 0o160000;
 const TYPE_MASK: u32 = 0o170000;

@@ -1,6 +1,6 @@
 //! `grit describe` — nearest tag and distance for a commit.
 
-use grit_lib::progress::{CancelToken, NullProgress};
+use grit_lib::progress::NullProgress;
 
 use anyhow::Result;
 use grit_lib::revwalk::{DescribeOptions, DescribedCommit};

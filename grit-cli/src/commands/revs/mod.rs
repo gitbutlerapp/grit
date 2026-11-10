@@ -1,6 +1,6 @@
 //! `grit revs` — list or count commits matching revision ranges.
 
-use grit_lib::progress::{CancelToken, NullProgress};
+use grit_lib::progress::NullProgress;
 
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context;

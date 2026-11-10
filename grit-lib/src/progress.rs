@@ -281,7 +281,7 @@ impl HistoryWalkStride {
             state.started = true;
         }
         state.steps += 1;
-        if state.steps as usize % CANCEL_POLL_STRIDE == 0 {
+        if state.steps.is_multiple_of(CANCEL_POLL_STRIDE as u64) {
             poll_cancel(sink, cancel)?;
         }
         report_object_progress_stride(sink, state.steps, &mut state.last_reported, None);

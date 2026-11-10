@@ -1,6 +1,6 @@
 //! `grit blame` — show who last modified each line of a file.
 
-use grit_lib::progress::{CancelToken, NullProgress};
+use grit_lib::progress::NullProgress;
 
 use std::collections::BTreeMap;
 

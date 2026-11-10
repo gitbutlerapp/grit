@@ -669,9 +669,6 @@ pub struct RevListOptions {
     /// Follow renames when history is limited to a single literal file path (Git `log --follow`).
     /// Requires exactly one plain file pathspec in [`Self::paths`].
     pub follow: bool,
-    /// When set, filtered object walks stop with [`Error::Cancelled`] once cancelled.
-    #[doc(hidden)]
-    pub cancel: Option<crate::progress::CancelToken>,
 }
 
 impl RevListOptions {
@@ -760,7 +757,6 @@ impl Default for RevListOptions {
             pickaxe: None,
             retain_commit_data: false,
             follow: false,
-            cancel: None,
         }
     }
 }
@@ -2933,6 +2929,7 @@ fn walk_closure_ordered_with_missing(
 /// (e.g. merges) without emitting them, and emits only commits in `emit`. Unlike [`date_order_walk`]
 /// this imposes no topological gating, so a tip that is also an ancestor (and has a later date than
 /// its descendants) is emitted in date order — matching `git rev-list --all --no-merges` (t6009).
+#[expect(clippy::too_many_arguments)]
 fn date_order_walk_through_dropped(
     graph: &mut CommitGraph<'_>,
     tips: &[ObjectId],
@@ -6502,6 +6499,7 @@ fn retain_commit_payload_standalone(
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn streaming_date_walk<'r>(
     graph: &mut CommitGraph<'r>,
     include: &[ObjectId],
@@ -6611,7 +6609,6 @@ pub(crate) struct CommitStream<'repo> {
     emitted: usize,
     errored: Option<Error>,
     cancel: CancelToken,
-    walk_stride: HistoryWalkStrideState,
     _pack: crate::pack_store::PackReadContextGuard,
 }
 
@@ -6651,10 +6648,10 @@ impl Iterator for CommitStream<'_> {
             return Some(Err(err));
         }
         loop {
-            if self.emitted % crate::progress::CANCEL_POLL_STRIDE == 0 {
-                if self.cancel.poll().is_err() {
-                    return Some(Err(Error::Cancelled));
-                }
+            if self.emitted.is_multiple_of(crate::progress::CANCEL_POLL_STRIDE)
+                && self.cancel.poll().is_err()
+            {
+                return Some(Err(Error::Cancelled));
             }
             let CommitDateKey { oid, date, .. } = self.heap.pop()?;
             if self
@@ -6734,7 +6731,6 @@ pub(crate) fn open_commit_stream<'repo>(
             emitted: 0,
             errored: None,
             cancel,
-            walk_stride: HistoryWalkStrideState::default(),
             _pack: repo.odb().pack_read_context_guard(),
         });
     }
@@ -6760,7 +6756,6 @@ pub(crate) fn open_commit_stream<'repo>(
         emitted: 0,
         errored: None,
         cancel,
-        walk_stride: HistoryWalkStrideState::default(),
         _pack: pack,
     };
     for &tip in include {
@@ -6785,6 +6780,7 @@ fn can_use_bounded_commit_filter_list(options: &RevListOptions) -> bool {
         && plain_commit_walk(&stripped, false)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn try_bounded_commit_filter_limit_list(
     repo: &Repository,
     include: &[ObjectId],

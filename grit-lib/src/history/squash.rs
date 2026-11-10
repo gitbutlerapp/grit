@@ -22,7 +22,6 @@ use super::reword::normalize_rewrite_message;
 use super::types::RefScope;
 use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
 use super::PlanningError;
-use crate::progress::{CancelToken, NullProgress};
 
 /// How to choose the message on the squashed commit.
 #[derive(Debug, Clone, PartialEq, Eq)]

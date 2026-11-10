@@ -1,6 +1,5 @@
 //! `grit history` — stateless history rewrite helpers.
 
-use grit_lib::progress::{CancelToken, NullProgress};
 
 use std::io::{self, Write};
 

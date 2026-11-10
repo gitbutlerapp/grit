@@ -1,6 +1,5 @@
 //! Render `grit gc` outcomes.
 
-use grit_lib::progress::{CancelToken, NullProgress};
 
 use std::io::Write;
 use std::path::Path;

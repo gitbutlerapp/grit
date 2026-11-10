@@ -20,7 +20,6 @@
 use crate::commit_pretty::format_reference_line;
 use crate::error::Result;
 use crate::objects::{CommitData, ObjectId};
-use crate::progress::{CancelToken, NullProgress};
 use crate::repo::Repository;
 use crate::rev_list::{resolve_revision_specs_to_commits, rev_list, OrderingMode, RevListOptions};
 use crate::rev_parse::resolve_revision_as_commit;

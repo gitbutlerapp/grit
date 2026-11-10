@@ -628,7 +628,7 @@ fn run_log_group_by_author(
             fetch_opts.limit = fetch_limit_plus_one(Some(limit));
             let oids = repo
                 .revwalk()
-                .commits(token_refs, &fetch_opts, &mut NullProgress, &cancel)
+                .commits(token_refs, &fetch_opts, &mut NullProgress, cancel)
                 .context("could not list commits")?;
             let (oids, truncated) = truncate_oid_list(oids, Some(limit), reverse);
             let grouped = repo
@@ -671,7 +671,7 @@ fn run_log_group_by_author(
     fetch_opts.limit = fetch_limit_plus_one(max_count);
     let oids = repo
         .revwalk()
-        .commits(token_refs, &fetch_opts, &mut NullProgress, &cancel)
+        .commits(token_refs, &fetch_opts, &mut NullProgress, cancel)
         .context("could not list commits")?;
     let (oids, truncated) = truncate_oid_list(oids, max_count, reverse);
     let grouped = repo

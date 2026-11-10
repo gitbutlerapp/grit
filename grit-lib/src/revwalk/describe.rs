@@ -249,6 +249,7 @@ fn nearest_tag_by_walk(
     )
 }
 
+#[expect(clippy::too_many_arguments)]
 fn nearest_tag_heap_walk(
     repo: &Repository,
     cache: &mut CommitGraphCache<'_>,

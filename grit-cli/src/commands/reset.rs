@@ -1,6 +1,5 @@
 //! `grit reset` — move the branch tip and optionally the index or worktree.
 
-use grit_lib::progress::{CancelToken, NullProgress};
 
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;

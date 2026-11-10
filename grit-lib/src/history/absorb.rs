@@ -27,7 +27,6 @@ use super::plan::{conflict_error, plan_rewrite};
 use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
 use super::PlanningError;
 use super::{commit_tree, load_commit};
-use crate::progress::{CancelToken, NullProgress};
 
 /// Default maximum number of commits considered when `--base` is omitted.
 pub const DEFAULT_ABSORB_STACK_LIMIT: usize = 10;

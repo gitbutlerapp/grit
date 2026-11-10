@@ -25,7 +25,6 @@ use crate::history::error::{
     HistoryError,
 };
 use crate::history::types::{ApplyOptions, HeadEffect, PlannedRefUpdate, RewritePlan};
-use crate::progress::{CancelToken, NullProgress};
 
 const FORMAT_VERSION: u32 = 2;
 const META: &str = "meta";
