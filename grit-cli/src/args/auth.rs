@@ -5,7 +5,7 @@ use clap::{Args, Subcommand};
 /// Subcommands of `grit auth`.
 #[derive(Debug, Subcommand)]
 pub(crate) enum AuthAction {
-    /// Forget the stored token (sign out) for grithub (GitHub inside a github.com repository), or for a `grit serve` URL.
+    /// Forget the stored token (sign out) for GitButler Code (GitHub inside a github.com repository), or for a `grit serve` URL.
     Logout {
         /// A host to sign out of instead of the default one.
         #[arg(value_name = "URL")]
@@ -16,13 +16,13 @@ pub(crate) enum AuthAction {
     },
 }
 
-/// Sign in to grithub (GitHub inside a github.com repository), a `grit serve` host, or store a username and token for any HTTPS host.
+/// Sign in to GitButler Code (GitHub inside a github.com repository), a `grit serve` host, or store a username and token for any HTTPS host.
 #[derive(Debug, Args)]
 pub(crate) struct AuthArgs {
-    /// The host (or one of its repository URLs) to sign in to; without it, grithub.dev, or GitHub when `origin` is on github.com.
+    /// The host (or one of its repository URLs) to sign in to; without it, code.gitbutler.com, or GitHub when `origin` is on github.com.
     #[arg(value_name = "URL")]
     pub(crate) url: Option<String>,
-    /// Store this access token: with `--username`, for any HTTP(S) host; alone, a `grit serve` or grithub token, checked with the server.
+    /// Store this access token: with `--username`, for any HTTP(S) host; alone, a `grit serve` or GitButler Code token, checked with the server.
     #[arg(long, value_name = "TOKEN")]
     pub(crate) token: Option<String>,
     /// Store `--token` for this user name on any HTTP(S) host, without signing in.

@@ -19,7 +19,7 @@ grit share revoke <branch> <link-id>
 
 ## Description
 
-On a grit hosting server such as [grithub](https://grithub.dev), your branches are private to your space. `grit share` lets other people work on one of them with you. A shared branch is in every member's space, and **each member has their own head of it**: only you move yours. Nobody's push can overwrite anyone else's work, so there is nothing to force, and every head anyone pushes is kept in the share's log on the server.
+On a grit hosting server such as [GitButler Code](https://code.gitbutler.com), your branches are private to your space. `grit share` lets other people work on one of them with you. A shared branch is in every member's space, and **each member has their own head of it**: only you move yours. Nobody's push can overwrite anyone else's work, so there is nothing to force, and every head anyone pushes is kept in the share's log on the server.
 
 The other members' heads are fetched beside yours as `<remote>/shared/<branch>/<user>` (from the server's `refs/shared/<branch>/<user>`, which nobody pushes to). [`grit status`](../status/) shows them under your branch, [`grit sync`](../sync/) fast-forwards your branch to a member's head that builds on yours, and [`grit push`](../push/) replaces your head after an amend or rebase without `--force` (it still checks that the server's head is the one you last fetched).
 
@@ -146,7 +146,7 @@ $ grit share add feature bob --link
 · pushed feature to alice/widget first
 ✓ shared with bob, who is emailed
 ✓ share link (1 use, until 2026-11-11T12:00:00Z):
-  https://grithub.dev/share/0f3a9c
+  https://code.gitbutler.com/share/0f3a9c
 feature, shared with bob
   you    538e7ad
   bob    -        hasn't fetched it yet
@@ -156,7 +156,7 @@ feature, shared with bob
 Accept a link outside any clone:
 
 ```console
-$ grit share accept https://grithub.dev/share/0f3a9c
+$ grit share accept https://code.gitbutler.com/share/0f3a9c
 ✓ Joined feature, shared by alice
   your copy  bob/widget
   cloned to  /home/bob/widget
@@ -209,7 +209,7 @@ Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/s
         { "user": "alice", "sharer": true, "you": true, "head": "538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8", "project": "alice/widget" },
         { "user": "bob", "sharer": false, "you": false, "head": "1c3e9a0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c", "project": "bob/widget", "relation": "ahead" }
       ],
-      "url": "https://grithub.dev/alice/widget"
+      "url": "https://code.gitbutler.com/alice/widget"
     }
   ]
 }
@@ -237,7 +237,7 @@ Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/s
   "sharer": "alice",
   "origin": "alice/widget",
   "project": "bob/widget",
-  "url": "https://grithub.dev/bob/widget.git",
+  "url": "https://code.gitbutler.com/bob/widget.git",
   "path": "/home/bob/widget",
   "cloned": true
 }

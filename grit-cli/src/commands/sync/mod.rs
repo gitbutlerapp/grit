@@ -1,7 +1,7 @@
 //! `grit sync` — keep a clone of a hosted project and your space on the
 //! server in step.
 //!
-//! On a grit hosting server such as grithub, your work on a project lives in
+//! On a grit hosting server such as GitButler Code, your work on a project lives in
 //! your space (`<you>/<project>`). For a clone of an organization's project,
 //! the server keeps a copy there that follows the organization's branches;
 //! sync sets the clone up to push to it (`remote.origin.pushurl`, and a
@@ -172,7 +172,7 @@ fn space_error(server: &ServerUrl, e: ServerAuthError) -> anyhow::Error {
             server.root_url()
         ),
         ServerAuthError::NotGritServer { .. } => anyhow::anyhow!(
-            "{} has no space for this project: sync works with projects on a grit hosting server such as grithub, that you can read",
+            "{} has no space for this project: sync works with projects on a grit hosting server such as GitButler Code, that you can read",
             server.host()
         ),
         other => anyhow::anyhow!("{other}"),
@@ -501,7 +501,7 @@ pub fn run(interaction: CommandInteraction) -> Result<SyncOutcome> {
     )
     .context("could not load config")?;
     let Some(setup) = ensure_space(&repo, &config, "origin")? else {
-        bail!("origin is not a project on a grit hosting server; sync needs a clone of one, such as `grit clone https://grithub.dev/<owner>/<project>`");
+        bail!("origin is not a project on a grit hosting server; sync needs a clone of one, such as `grit clone https://code.gitbutler.com/<owner>/<project>`");
     };
 
     fetch("origin", human_progress)?;

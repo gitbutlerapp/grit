@@ -1,6 +1,6 @@
-//! Your space on a grit hosting server, such as grithub.
+//! Your space on a grit hosting server, such as GitButler Code.
 //!
-//! On grithub, an organization's projects (`<domain>/<project>`) are read-only:
+//! On GitButler Code, an organization's projects (`<domain>/<project>`) are read-only:
 //! everyone works in a private copy in their own space (`<you>/<project>`) and
 //! integrates from there. A clone of either can ask the server two things:
 //!
@@ -143,7 +143,7 @@ pub struct IntegrateBranchReply {
 }
 
 /// The server and project (`<owner>/<project>`) a hosted repository URL names,
-/// such as `https://grithub.dev/gitbutler.com/grit.git`.
+/// such as `https://code.gitbutler.com/gitbutler.com/grit.git`.
 ///
 /// `None` when the URL is not `http(s)` or its path is not exactly two
 /// segments.
@@ -220,14 +220,14 @@ mod tests {
     #[test]
     fn hosted_projects_are_two_segments() {
         let (server, project) =
-            hosted_project("https://grithub.dev/gitbutler.com/grit.git").unwrap();
-        assert_eq!(server.root_url(), "https://grithub.dev/");
+            hosted_project("https://code.gitbutler.com/gitbutler.com/grit.git").unwrap();
+        assert_eq!(server.root_url(), "https://code.gitbutler.com/");
         assert_eq!(project, "gitbutler.com/grit");
         let (server, project) = hosted_project("http://127.0.0.1:8080/alice/proj/").unwrap();
         assert_eq!(server.root_url(), "http://127.0.0.1:8080/");
         assert_eq!(project, "alice/proj");
-        assert!(hosted_project("https://grithub.dev/alice").is_none());
-        assert!(hosted_project("https://grithub.dev/a/b/c").is_none());
+        assert!(hosted_project("https://code.gitbutler.com/alice").is_none());
+        assert!(hosted_project("https://code.gitbutler.com/a/b/c").is_none());
         assert!(hosted_project("git@github.com:a/b.git").is_none());
         assert!(hosted_project("/local/path/a/b").is_none());
     }
@@ -298,8 +298,8 @@ mod tests {
 
     #[test]
     fn spaces_are_asked_for_by_project() {
-        let http = Canned::new(Ok(br#"{"project":"alice/widget","url":"https://grithub.dev/alice/widget.git","upstream":"example.com/widget","target_branch":"main","followed":["main"],"can_integrate":true,"created":true}"#.to_vec()));
-        let server = ServerUrl::parse("https://grithub.dev").unwrap();
+        let http = Canned::new(Ok(br#"{"project":"alice/widget","url":"https://code.gitbutler.com/alice/widget.git","upstream":"example.com/widget","target_branch":"main","followed":["main"],"can_integrate":true,"created":true}"#.to_vec()));
+        let server = ServerUrl::parse("https://code.gitbutler.com").unwrap();
         let space = fetch_space(&http, &server, "example.com/widget").unwrap();
         assert_eq!(space.project, "alice/widget");
         assert_eq!(space.upstream.as_deref(), Some("example.com/widget"));
@@ -308,11 +308,11 @@ mod tests {
         let seen = http.seen.lock().unwrap();
         assert_eq!(
             seen[0].0,
-            "https://grithub.dev/.grit/space/example.com/widget"
+            "https://code.gitbutler.com/.grit/space/example.com/widget"
         );
 
         let refused = Canned::new(Err(Error::Remote(RemoteError::Auth {
-            url: "https://grithub.dev".to_owned(),
+            url: "https://code.gitbutler.com".to_owned(),
             reason: crate::error::AuthFailure::Rejected,
         })));
         assert!(matches!(
@@ -323,8 +323,8 @@ mod tests {
 
     #[test]
     fn integrating_sends_the_branch() {
-        let http = Canned::new(Ok(br#"{"status":"refused","project":"example.com/widget","target_branch":"main","url":"https://grithub.dev/bob/widget/pulls/new/fix","message":"only members integrate"}"#.to_vec()));
-        let server = ServerUrl::parse("https://grithub.dev").unwrap();
+        let http = Canned::new(Ok(br#"{"status":"refused","project":"example.com/widget","target_branch":"main","url":"https://code.gitbutler.com/bob/widget/pulls/new/fix","message":"only members integrate"}"#.to_vec()));
+        let server = ServerUrl::parse("https://code.gitbutler.com").unwrap();
         let reply = integrate_branch(
             &http,
             &server,
@@ -338,7 +338,10 @@ mod tests {
         assert_eq!(reply.status, IntegrateBranchStatus::Refused);
         assert_eq!(reply.message.as_deref(), Some("only members integrate"));
         let seen = http.seen.lock().unwrap();
-        assert_eq!(seen[0].0, "https://grithub.dev/.grit/integrate/bob/widget");
+        assert_eq!(
+            seen[0].0,
+            "https://code.gitbutler.com/.grit/integrate/bob/widget"
+        );
         assert_eq!(seen[0].1, br#"{"branch":"fix"}"#);
     }
 }

@@ -13,11 +13,11 @@ grit sync
 
 ## Description
 
-On a grit hosting server such as [grithub](https://grithub.dev), your work on a project lives in your space, `<you>/<project>`, private to you. An organization's projects (`<domain>/<project>`) are read-only: you work in a copy of one in your space, which follows the organization's branches, and [integrate](../integrate/) from there.
+On a grit hosting server such as [GitButler Code](https://code.gitbutler.com), your work on a project lives in your space, `<you>/<project>`, private to you. An organization's projects (`<domain>/<project>`) are read-only: you work in a copy of one in your space, which follows the organization's branches, and [integrate](../integrate/) from there.
 
 `grit sync`, in a clone of a project on such a server:
 
-1. **asks the server where your work goes**: the project in your space for the one `origin` names. For an organization's project, the server makes your copy when you have none yet. The clone is then set up to push there: a `space` remote fetches from it, and `remote.origin.pushurl` points at it, so a plain [`grit push`](../push/) (or `git push`) sends branches to your space while fetches still come from the organization. [`grit clone`](../clone/) of a grithub project does this setup too, when you are signed in;
+1. **asks the server where your work goes**: the project in your space for the one `origin` names. For an organization's project, the server makes your copy when you have none yet. The clone is then set up to push there: a `space` remote fetches from it, and `remote.origin.pushurl` points at it, so a plain [`grit push`](../push/) (or `git push`) sends branches to your space while fetches still come from the organization. [`grit clone`](../clone/) of a GitButler Code project does this setup too, when you are signed in;
 2. **fetches** `origin` and your space;
 3. **fast-forwards the target branch** (the branch work is integrated into, usually `main`) to the project's. A target with commits of its own is left alone: it changes only by integrating;
 4. **brings down your space's branches**: one you don't have here is made, tracking your space's; one that is behind is fast-forwarded (when it is checked out, the working tree follows, as `grit merge --ff-only` would);
@@ -45,7 +45,7 @@ Sync works in a clone. In a [snapshot checkout](../checkout/), send branches wit
 A clone of an organization's project, the first time:
 
 ```console
-$ grit clone https://grithub.dev/example.com/widget
+$ grit clone https://code.gitbutler.com/example.com/widget
 $ cd widget
 $ grit switch -c feature
 $ grit commit -am "Make widgets faster"

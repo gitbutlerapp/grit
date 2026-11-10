@@ -359,7 +359,7 @@ fn clone_into(
 }
 
 /// For a clone of an organization's project on the default grit host
-/// (grithub): set the clone up to push to your space
+/// (GitButler Code): set the clone up to push to your space
 /// ([`crate::commands::sync::ensure_space`]) and name it. Best effort: when
 /// you aren't signed in, or anything else fails, the clone stays as it is and
 /// `grit sync` sets it up later.

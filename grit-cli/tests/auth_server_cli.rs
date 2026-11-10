@@ -396,7 +396,7 @@ fn signing_in_in_the_browser_stores_a_token_that_clone_uses() {
 fn a_token_without_a_url_goes_to_the_default_host_and_github_urls_use_the_device_flow() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let home: PathBuf = tmp.path().to_path_buf();
-    // Without a URL the token is checked with the default host (grithub, here
+    // Without a URL the token is checked with the default host (GitButler Code, here
     // a port nothing listens on), not refused as a usage error.
     let no_url = grit(&home, &home, &["auth", "--token", "grit_x"])
         .env("GRIT_DEFAULT_HOST", "http://127.0.0.1:1")

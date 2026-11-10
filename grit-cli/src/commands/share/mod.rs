@@ -1,5 +1,5 @@
 //! `grit share` — work on a branch together with other users of a grit
-//! hosting server such as grithub.
+//! hosting server such as GitButler Code.
 //!
 //! A shared branch is in every member's space, and each member has their
 //! own head of it: only you move yours, so nobody's push can overwrite

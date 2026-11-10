@@ -1,4 +1,4 @@
-//! Shared branches on a grit hosting server, such as grithub.
+//! Shared branches on a grit hosting server, such as GitButler Code.
 //!
 //! A branch in your space can be shared with other users. Each member works
 //! on it in their own space and has their own head: only they move their
@@ -445,7 +445,7 @@ pub struct ShareAcceptReply {
 }
 
 /// The server and token a share link names, such as
-/// `https://grithub.dev/share/7Kq2…`.
+/// `https://code.gitbutler.com/share/7Kq2…`.
 ///
 /// `None` when the URL is not `http(s)` or its path is not `share/<token>`.
 #[must_use]
@@ -525,13 +525,13 @@ mod tests {
 
     #[test]
     fn share_links_name_a_server_and_token() {
-        let (server, token) = share_link("https://grithub.dev/share/7Kq2-x_9").unwrap();
-        assert_eq!(server.root_url(), "https://grithub.dev/");
+        let (server, token) = share_link("https://code.gitbutler.com/share/7Kq2-x_9").unwrap();
+        assert_eq!(server.root_url(), "https://code.gitbutler.com/");
         assert_eq!(token, "7Kq2-x_9");
-        assert!(share_link("https://grithub.dev/share/").is_none());
-        assert!(share_link("https://grithub.dev/shares/abc").is_none());
-        assert!(share_link("https://grithub.dev/share/a/b").is_none());
-        assert!(share_link("https://grithub.dev/alice/proj").is_none());
+        assert!(share_link("https://code.gitbutler.com/share/").is_none());
+        assert!(share_link("https://code.gitbutler.com/shares/abc").is_none());
+        assert!(share_link("https://code.gitbutler.com/share/a/b").is_none());
+        assert!(share_link("https://code.gitbutler.com/alice/proj").is_none());
     }
 
     #[test]

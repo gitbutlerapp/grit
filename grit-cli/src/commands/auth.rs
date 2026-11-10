@@ -1,4 +1,4 @@
-//! `grit auth` — sign in to grithub or GitHub (with the OAuth **Device Flow**)
+//! `grit auth` — sign in to GitButler Code or GitHub (with the OAuth **Device Flow**)
 //! and store the resulting token in Git's credential store.
 //!
 //! The protocol lives in [`grit_lib::remote::github_auth`]: `grit` asks GitHub
@@ -14,7 +14,7 @@
 //!
 //! Without a URL, `grit auth` signs in to GitHub only when the current
 //! repository's `origin` is on github.com; everywhere else it signs in to
-//! grithub ([`GRITHUB_URL`]), a `grit serve`-style host, as below
+//! GitButler Code ([`GITBUTLER_CODE_URL`]), a `grit serve`-style host, as below
 //! ([`default_host`]). `grit auth https://github.com` always means GitHub.
 //!
 //! ## `grit serve` hosts
@@ -78,21 +78,21 @@ pub use crate::render::auth::*;
 /// `grit.githubClientId` config key.
 const DEFAULT_GITHUB_CLIENT_ID: &str = "Ov23lin6WOpOsGuXSupZ";
 
-/// The host `grit auth` signs in to when no URL is given: grithub.
-pub const GRITHUB_URL: &str = "https://grithub.dev";
+/// The host `grit auth` signs in to when no URL is given: GitButler Code.
+pub const GITBUTLER_CODE_URL: &str = "https://code.gitbutler.com";
 
 /// Where `grit auth` (or `grit auth logout`) without a URL goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefaultHost {
     /// GitHub, with its device flow: the current repository's `origin` is on github.com.
     GitHub,
-    /// A grit server: grithub, or `$GRIT_DEFAULT_HOST` when set.
+    /// A grit server: GitButler Code, or `$GRIT_DEFAULT_HOST` when set.
     Grit(ServerUrl),
 }
 
 /// Pick the host for `grit auth` without a URL: GitHub when the current
-/// repository's `origin` is a github.com URL, otherwise grithub
-/// ([`GRITHUB_URL`], or the `GRIT_DEFAULT_HOST` environment variable).
+/// repository's `origin` is a github.com URL, otherwise GitButler Code
+/// ([`GITBUTLER_CODE_URL`], or the `GRIT_DEFAULT_HOST` environment variable).
 ///
 /// # Errors
 ///
@@ -111,12 +111,12 @@ pub fn default_host() -> Result<DefaultHost> {
     }
 }
 
-/// The grit server used when none is named: `$GRIT_DEFAULT_HOST`, else [`GRITHUB_URL`].
+/// The grit server used when none is named: `$GRIT_DEFAULT_HOST`, else [`GITBUTLER_CODE_URL`].
 pub fn default_grit_host_url() -> String {
     crate::context::environment()
         .var("GRIT_DEFAULT_HOST")
         .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| GRITHUB_URL.to_owned())
+        .unwrap_or_else(|| GITBUTLER_CODE_URL.to_owned())
 }
 
 /// Whether `url` (HTTPS, `ssh://` or scp-style `git@github.com:owner/repo`) is on github.com.
@@ -602,7 +602,7 @@ mod tests {
             assert!(is_github_url(url), "{url}");
         }
         for url in [
-            "https://grithub.dev/o/r.git",
+            "https://code.gitbutler.com/o/r.git",
             "git@gitlab.com:o/r.git",
             "/srv/repos/r.git",
             "https://github.com.evil.example/o/r",

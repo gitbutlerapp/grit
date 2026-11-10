@@ -319,7 +319,7 @@ fn integrate_hosted(
     )?;
     let Some(setup) = ensure_space(&repo, &config, "origin")? else {
         bail!(
-            "grit integrate works in a snapshot checkout (`grit checkout`), or in a clone of a project on a grit hosting server such as grithub"
+            "grit integrate works in a snapshot checkout (`grit checkout`), or in a clone of a project on a grit hosting server such as GitButler Code"
         );
     };
     let target = setup

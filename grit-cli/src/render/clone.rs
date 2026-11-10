@@ -209,7 +209,7 @@ pub struct CloneOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle: Option<CloneBundleJson>,
     /// Your space's project, `<you>/<project>`, when this is a clone of an
-    /// organization's project on grithub (the default grit host): pushes from
+    /// organization's project on GitButler Code (the default grit host): pushes from
     /// the clone go there (`remote.<remote>.pushurl`), and the `space` remote
     /// fetches from it.
     #[serde(skip_serializing_if = "Option::is_none")]

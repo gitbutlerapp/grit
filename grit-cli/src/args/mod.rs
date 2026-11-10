@@ -217,7 +217,7 @@ pub(crate) enum Command {
         #[command(flatten)]
         args: IntegrateArgs,
     },
-    /// Push and pull every active branch between this clone and your space on the server (grithub).
+    /// Push and pull every active branch between this clone and your space on the server (GitButler Code).
     Sync {
         #[command(flatten)]
         args: SyncArgs,
@@ -457,7 +457,7 @@ pub(crate) enum Command {
         #[command(flatten)]
         args: WorktreeArgs,
     },
-    /// Sign in to grithub (GitHub inside a github.com repository), a `grit serve` host, or store a username and token for any HTTPS host.
+    /// Sign in to GitButler Code (GitHub inside a github.com repository), a `grit serve` host, or store a username and token for any HTTPS host.
     #[command(args_conflicts_with_subcommands = true, visible_alias = "login")]
     Auth {
         #[command(flatten)]

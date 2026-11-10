@@ -259,7 +259,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `no_checkout_reason` | string or omitted | When no files were checked out: `empty_remote`, `unborn_default_branch`, `bare`, or `no_checkout`. Omitted when checkout succeeded. |
 | `branches_with_commits` | array of strings | Remote branch names that have commits when `no_checkout_reason` is `unborn_default_branch`. Omitted when empty. |
 | `bundle` | object or omitted | The server's prebuilt bundle the clone started from: `uri` (credentials stripped like `url`), `bytes` (its size) and `resumed_from` (bytes an earlier, interrupted clone had already downloaded). `objects` and `bytes` above include what it brought. Omitted when no bundle was used. |
-| `space` | string or omitted | For a clone of an organization's project on grithub (the default grit host): your space's project, `<you>/<project>`. Pushes from the clone go there (`remote.origin.pushurl`), and a `space` remote fetches from it; see [`grit sync`](../sync/). Omitted otherwise, or when you aren't signed in. |
+| `space` | string or omitted | For a clone of an organization's project on GitButler Code (the default grit host): your space's project, `<you>/<project>`. Pushes from the clone go there (`remote.origin.pushurl`), and a `space` remote fetches from it; see [`grit sync`](../sync/). Omitted otherwise, or when you aren't signed in. |
 
 Example (repository with commits):
 

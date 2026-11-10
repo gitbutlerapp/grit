@@ -2098,11 +2098,11 @@ mod tests {
         let config = config_from("[remote \"team/app\"]\n\turl = /srv/app.git\n");
         let expand = |args: &[&str]| {
             let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
-            expand_repository_shorthand(&config, &args, "https://grithub.dev/")
+            expand_repository_shorthand(&config, &args, "https://code.gitbutler.com/")
         };
         assert_eq!(
             expand(&["me/proj", "main"]).as_deref(),
-            Some("https://grithub.dev/me/proj.git")
+            Some("https://code.gitbutler.com/me/proj.git")
         );
         // A lone positional is a refspec, not a repository.
         assert_eq!(expand(&["topic/x"]), None);

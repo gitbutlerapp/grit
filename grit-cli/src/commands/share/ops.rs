@@ -115,7 +115,7 @@ fn server_error(server: &ServerUrl, e: ServerAuthError) -> anyhow::Error {
             server.root_url()
         ),
         ServerAuthError::NotGritServer { .. } => anyhow::anyhow!(
-            "{} doesn't share branches: sharing needs a grit hosting server such as grithub",
+            "{} doesn't share branches: sharing needs a grit hosting server such as GitButler Code",
             server.host()
         ),
         other => anyhow::anyhow!("{other}"),
@@ -164,7 +164,7 @@ fn here() -> Result<Here> {
     )
     .context("could not load config")?;
     let Some(setup) = ensure_space(&repo, &config, "origin")? else {
-        bail!("origin is not a project on a grit hosting server; sharing needs a clone of one, such as `grit clone https://grithub.dev/<owner>/<project>`");
+        bail!("origin is not a project on a grit hosting server; sharing needs a clone of one, such as `grit clone https://code.gitbutler.com/<owner>/<project>`");
     };
     let config = ConfigSet::load(
         &context::environment(),
@@ -485,7 +485,7 @@ pub fn resolve(
 }
 pub fn accept(link: &str, interaction: CommandInteraction) -> Result<ShareAcceptOutcome> {
     let Some((server, _token)) = api::share_link(link) else {
-        bail!("{link} isn't a share link: they look like https://grithub.dev/share/<token>");
+        bail!("{link} isn't a share link: they look like https://code.gitbutler.com/share/<token>");
     };
     let repo = context::discover().ok();
     let env = context::environment();

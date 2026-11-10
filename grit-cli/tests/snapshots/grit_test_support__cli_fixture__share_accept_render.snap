@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"status\":\"accepted\",\"branch\":\"feature\",\"sharer\":\"alice\",\"origin\":\"alice/widget\",\"project\":\"bob/widget\",\"url\":\"https://grithub.dev/bob/widget.git\",\"path\":\"/home/bob/widget\",\"cloned\":true}\n",
+    "stdout": "{\"status\":\"accepted\",\"branch\":\"feature\",\"sharer\":\"alice\",\"origin\":\"alice/widget\",\"project\":\"bob/widget\",\"url\":\"https://code.gitbutler.com/bob/widget.git\",\"path\":\"/home/bob/widget\",\"cloned\":true}\n",
     "stderr": ""
   },
   "markdown": {

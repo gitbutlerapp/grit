@@ -534,7 +534,7 @@ fn sample_integrated() -> crate::commands::share::IntegratedJson {
         into: "example.com/widget".to_owned(),
         target_branch: "main".to_owned(),
         pull: Some(31),
-        url: Some("https://grithub.dev/example.com/widget/pulls/31".to_owned()),
+        url: Some("https://code.gitbutler.com/example.com/widget/pulls/31".to_owned()),
         integrated: 3,
         new: 1,
         options: vec![
@@ -745,7 +745,7 @@ fn share_render() {
             expires_at: "2026-11-11T12:00:00Z".to_owned(),
             snapshot: None,
         }],
-        url: "https://grithub.dev/alice/widget".to_owned(),
+        url: "https://code.gitbutler.com/alice/widget".to_owned(),
     };
     let added = ShareOutcome {
         action: "add".to_owned(),
@@ -753,7 +753,7 @@ fn share_render() {
         shares: vec![share.clone()],
         link: Some(ShareLinkJson {
             id: "12".to_owned(),
-            url: Some("https://grithub.dev/share/0f3a9c".to_owned()),
+            url: Some("https://code.gitbutler.com/share/0f3a9c".to_owned()),
             uses_left: Some(1),
             expires_at: "2026-11-11T12:00:00Z".to_owned(),
             snapshot: Some(vec!["src/rpc".to_owned()]),
@@ -789,7 +789,7 @@ fn share_render() {
         sharer: "alice".to_owned(),
         origin: "alice/widget".to_owned(),
         project: "bob/widget".to_owned(),
-        url: "https://grithub.dev/bob/widget.git".to_owned(),
+        url: "https://code.gitbutler.com/bob/widget.git".to_owned(),
         path: Some("/home/bob/widget".to_owned()),
         cloned: true,
     };

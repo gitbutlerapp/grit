@@ -41,7 +41,7 @@ Integrations, and [slice](../slice/) changes, take turns on the server: several 
 
 ### In a clone of a hosted project
 
-In a clone (not a snapshot checkout) of a project on a grit hosting server such as [grithub](https://grithub.dev), `grit integrate <branch>`:
+In a clone (not a snapshot checkout) of a project on a grit hosting server such as [GitButler Code](https://code.gitbutler.com), `grit integrate <branch>`:
 
 1. **pushes the branch to your space** (`<you>/<project>`), as [`grit sync`](../sync/) would, setting the clone up for it first when it isn't yet;
 2. **asks the server to merge it into the target**. For your copy of an organization's project, that is the organization's target branch (usually `main`): the server opens a pull request from the branch, or uses the open one, and integrates it at once. Only members of the organization may; anyone else is told to propose the branch instead, with the link. For a project of your own, it is the project's own target branch. A branch that conflicts is refused with the conflicting files, and nothing changes;
