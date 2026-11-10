@@ -266,13 +266,13 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | Module | Lines | External files | Offenders | repo-first | `_with_` |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `apply` | 214 | 13 | 2 | 2 | 0 |
-| `blame` | 283 | 26 | 2 | 2 | 0 |
+| `blame` | 283 | 27 | 2 | 2 | 0 |
 | `bundle` | 325 | 17 | 0 | 0 | 0 |
 | `change_id` | 139 | 25 | 2 | 2 | 0 |
 | `command_runner` | 484 | 90 | 1 | 0 | 1 |
 | `commit` | 305 | 77 | 3 | 0 | 2 |
 | `commits` | 270 | 59 | 0 | 0 | 0 |
-| `config` | 1,030 | 775 | 0 | 0 | 0 |
+| `config` | 1,030 | 776 | 0 | 0 | 0 |
 | `diagnostics` | 132 | 17 | 0 | 0 | 0 |
 | `diff` | 2,345 | 182 | 10 | 5 | 4 |
 | `divergence` | 243 | 5 | 0 | 0 | 0 |
@@ -286,7 +286,7 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `maintenance` | 1,169 | 57 | 0 | 0 | 0 |
 | `merge` | 1,116 | 61 | 16 | 3 | 1 |
 | `notes` | 129 | 15 | 0 | 0 | 0 |
-| `objects` | 2,472 | 710 | 2 | 4 | 1 |
+| `objects` | 2,472 | 711 | 2 | 4 | 1 |
 | `operation` | 215 | 27 | 0 | 0 | 0 |
 | `ownership_check` | 79 | 4 | 0 | 0 | 0 |
 | `parallel` | 130 | 33 | 1 | 0 | 0 |
@@ -296,7 +296,7 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `progress` | 230 | 439 | 0 | 0 | 3 |
 | `refs` | 2,193 | 248 | 8 | 5 | 3 |
 | `remote` | 4,947 | 225 | 1 | 3 | 1 |
-| `repo` | 451 | 845 | 11 | 2 | 2 |
+| `repo` | 451 | 846 | 11 | 2 | 2 |
 | `repo_handles` | 867 | 53 | 4 | 0 | 4 |
 | `revwalk` | 2,968 | 209 | 2 | 2 | 2 |
 | `stash` | 339 | 28 | 0 | 3 | 0 |
@@ -317,7 +317,7 @@ Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.t
 | `commits` | `grit_lib::commits::Commits<'_>` | 25 | 131 |
 | `config` | `grit_lib::config::Config<'_>` | 567 | 98 |
 | `diagnostics` | `grit_lib::diagnostics::DiagnosticsHandle` | 18 | 1 |
-| `diff` | `grit_lib::diff::Diff<'_>` | 513 | 88 |
+| `diff` | `grit_lib::diff::Diff<'_>` | 513 | 89 |
 | `history` | `grit_lib::revwalk::history::History<'_>` | 213 | 40 |
 | `hooks` | `grit_lib::repo_handles::RepositoryHooks<'_>` | 28 | 10 |
 | `index` | `grit_lib::index::IndexFile<'_>` | 41 | 196 |
