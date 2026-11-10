@@ -261,16 +261,73 @@ fn repository_ref_object_ids(repo: &Repository) -> Result<HashSet<ObjectId>> {
     Ok(ids)
 }
 
+/// Whether every peeled want target is a commit (no tree/blob closure needed).
+fn targets_are_all_commits(repo: &Repository, targets: &HashSet<ObjectId>) -> Result<bool> {
+    for target in targets {
+        let Ok(obj) = repo.odb().read(target) else {
+            return Ok(false);
+        };
+        if obj.kind != ObjectKind::Commit {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Which of `targets` appear in the object closure reachable from `tips`.
 fn reachable_targets_from_tip_closure(
     repo: &Repository,
     tips: &HashSet<ObjectId>,
     targets: &HashSet<ObjectId>,
 ) -> Result<HashSet<ObjectId>> {
-    let mut found = HashSet::new();
     if targets.is_empty() {
-        return Ok(found);
+        return Ok(HashSet::new());
     }
+    if targets_are_all_commits(repo, targets)? {
+        return reachable_commit_targets_from_tips(repo, tips, targets);
+    }
+    reachable_object_targets_from_tip_closure(repo, tips, targets)
+}
+
+/// Commit wants (including tags peeled to commits): parent walk only, no trees.
+fn reachable_commit_targets_from_tips(
+    repo: &Repository,
+    tips: &HashSet<ObjectId>,
+    targets: &HashSet<ObjectId>,
+) -> Result<HashSet<ObjectId>> {
+    let mut found = HashSet::new();
+    let mut seen = HashSet::new();
+    let mut queue: VecDeque<ObjectId> = tips.iter().copied().collect();
+    while let Some(oid) = queue.pop_front() {
+        if targets.contains(&oid) {
+            found.insert(oid);
+            if found.len() == targets.len() {
+                return Ok(found);
+            }
+        }
+        if !seen.insert(oid) {
+            continue;
+        }
+        let Ok(obj) = repo.odb().read(&oid) else {
+            continue;
+        };
+        if obj.kind != ObjectKind::Commit {
+            continue;
+        }
+        if let Ok(c) = crate::objects::parse_commit(&obj.data) {
+            queue.extend(c.parents);
+        }
+    }
+    Ok(found)
+}
+
+/// Tree/blob wants: walk commits, trees, and tags from tips until each target appears.
+fn reachable_object_targets_from_tip_closure(
+    repo: &Repository,
+    tips: &HashSet<ObjectId>,
+    targets: &HashSet<ObjectId>,
+) -> Result<HashSet<ObjectId>> {
+    let mut found = HashSet::new();
     let mut seen = HashSet::new();
     let mut queue: VecDeque<ObjectId> = tips.iter().copied().collect();
     while let Some(oid) = queue.pop_front() {
@@ -519,6 +576,34 @@ mod tests {
         let b = ObjectId::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
         let ids = vec![a, b, a, a, b];
         assert_eq!(dedupe_object_ids(&ids), vec![a, b]);
+    }
+
+    /// Issue #2587: one reachable commit want must not walk trees from every commit.
+    #[test]
+    fn validate_wants_stateless_single_reachable_ancestor_is_fast() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("main"),
+        )
+        .expect("init");
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+        let chain = seed_linear_commits(&repo, 2_000);
+        let tip = chain[chain.len() - 1];
+        let root = chain[0];
+        let advertised: HashSet<ObjectId> = [tip].into_iter().collect();
+        let config = repo.config().snapshot().expect("config");
+        let policy = UploadPackPolicy::from_config(config.as_ref());
+
+        let t0 = Instant::now();
+        validate_wants(&repo, &advertised, Some(tip), &[root], &policy, true).expect("ancestor");
+        let elapsed = t0.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "single ancestor want took {elapsed:?}; expected commit-only walk"
+        );
     }
 
     /// Issue #2587: duplicate stateless wants must not repeat reachability work.
