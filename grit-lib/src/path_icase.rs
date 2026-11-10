@@ -821,6 +821,10 @@ impl IcaseIndexCollisionGroups {
         }
     }
 
+    pub(crate) fn member_groups(&self) -> &[Vec<String>] {
+        &self.members_by_group
+    }
+
     pub(crate) fn has_collision_sibling(&self, index_rel: &str) -> bool {
         self.path_to_group.contains_key(index_rel.as_bytes())
     }

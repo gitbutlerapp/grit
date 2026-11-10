@@ -204,6 +204,8 @@ mod commit_timezone;
 #[cfg(feature = "full-tests")]
 #[path = "commit_unmerged_merge.rs"]
 mod commit_unmerged_merge;
+#[path = "commit_worktree_case_collision.rs"]
+mod commit_worktree_case_collision;
 #[path = "completions.rs"]
 mod completions;
 #[cfg(feature = "full-tests")]

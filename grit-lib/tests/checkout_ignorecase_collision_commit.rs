@@ -13,6 +13,7 @@ use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::porcelain::CommitError;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
@@ -354,7 +355,7 @@ fn collision_loser_path_commit_leaves_index_and_head_unchanged() {
     assert!(
         matches!(
             err,
-            CommitError::NothingToCommit | CommitError::NothingStagedToCommit { .. }
+            grit_lib::error::Error::Commit(CommitError::WorktreeCaseCollision { .. })
         ),
         "{err:?}"
     );
@@ -397,7 +398,7 @@ fn collision_loser_auto_stage_commit_is_noop() {
     assert!(
         matches!(
             err,
-            grit_lib::error::Error::Commit(CommitError::NothingStagedToCommit { .. })
+            grit_lib::error::Error::Commit(CommitError::WorktreeCaseCollision { .. })
         ),
         "collision drift must not read as a clean worktree: {err:?}"
     );
@@ -598,6 +599,93 @@ fn build_flat_name_collision_tree(repo: &Repository, dest: &Path) -> grit_lib::o
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
     tree
+}
+
+#[test]
+fn issue_2581_colliding_tracked_names_block_commit_without_staged_hint() {
+    let fx = init_collision_repo();
+    let _tree = build_flat_readme_collision_head(&fx);
+    let index = fx
+        .repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .expect("index");
+
+    let groups = fx
+        .repo
+        .status()
+        .worktree_case_collisions(&index)
+        .expect("collisions");
+    assert!(
+        groups
+            .iter()
+            .any(|g| g.paths.contains(&"Readme.TXT".to_owned())),
+        "expected active collision group, got {groups:?}"
+    );
+
+    let err = fx
+        .repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_request("x"), CommitScope::AutoStage),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect_err("auto-stage commit");
+    match &err {
+        grit_lib::error::Error::Commit(CommitError::WorktreeCaseCollision { paths }) => {
+            assert!(paths.iter().any(|p| p == "Readme.TXT" || p == "readme.txt"));
+        }
+        other => panic!("expected WorktreeCaseCollision, got {other:?}"),
+    }
+}
+
+fn build_flat_readme_collision_head(fx: &TestRepo) -> grit_lib::objects::ObjectId {
+    let oid_upper = fx
+        .repo
+        .odb()
+        .write(ObjectKind::Blob, b"UPPER\n")
+        .expect("upper");
+    let oid_lower = fx
+        .repo
+        .odb()
+        .write(ObjectKind::Blob, b"lower\n")
+        .expect("lower");
+    fs::write(fx.dest.join("readme.txt"), b"lower\n").expect("dentry");
+    let mut index = Index::new();
+    index.add_or_replace(
+        entry_from_stat(
+            &fx.dest.join("readme.txt"),
+            b"Readme.TXT",
+            oid_upper,
+            MODE_REGULAR,
+        )
+        .expect("upper entry"),
+    );
+    index.add_or_replace(
+        entry_from_stat(
+            &fx.dest.join("readme.txt"),
+            b"readme.txt",
+            oid_lower,
+            MODE_REGULAR,
+        )
+        .expect("lower entry"),
+    );
+    index.sort();
+    write_tree_update_index(fx.repo.odb(), &mut index, "", WriteTreeFlags::silent()).expect("tree");
+    fx.repo
+        .index()
+        .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
+        .expect("index");
+    fx.repo
+        .commits()
+        .create(
+            &grit_lib::commits::CommitOptions::new(commit_request("collide"), CommitScope::Staged),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("head commit");
+    fx.repo.references().resolve("HEAD").expect("head")
 }
 
 #[test]

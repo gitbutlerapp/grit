@@ -84,6 +84,7 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "partial_commit_during_replay",
     "nothing_to_commit",
     "nothing_staged_to_commit",
+    "worktree_case_collision",
     "amend_unborn",
     "invalid_identity",
     "identity",

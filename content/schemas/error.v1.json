@@ -314,6 +314,13 @@
           "type": "string"
         },
         {
+          "description": "Tracked paths collide on a case-insensitive filesystem and cannot be staged or committed.",
+          "enum": [
+            "worktree_case_collision"
+          ],
+          "type": "string"
+        },
+        {
           "description": "Not inside a Git repository (or any parent directory is one).",
           "enum": [
             "not_a_repository"

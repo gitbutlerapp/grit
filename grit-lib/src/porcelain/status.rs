@@ -540,6 +540,14 @@ pub(crate) fn collect_untracked_and_ignored_with_cache(
     .map(|(untracked, ignored, _)| (untracked, ignored))
 }
 
+fn diff_entry_worktree_status_path(entry: &DiffEntry) -> Option<&str> {
+    entry
+        .new_path
+        .as_deref()
+        .or(entry.old_path.as_deref())
+        .map(str::as_ref)
+}
+
 /// Count unstaged (index vs work tree) and untracked paths for an index that already matches `HEAD`.
 ///
 /// Used when an index-only commit is refused so callers can tell a clean tree from dirty worktree
@@ -566,9 +574,15 @@ pub(crate) fn count_unstaged_and_untracked_paths(
     };
     let (unstaged, _) =
         diff_index_to_worktree_with_options(repo.odb(), index, work_tree, diff_opts)?;
+    let collision_paths = crate::status::worktree_case_collision_paths(
+        &crate::status::worktree_case_collision_groups(repo, index)?,
+    );
     let unstaged_count = unstaged
         .iter()
         .filter(|e| e.status != DiffStatus::Unmerged)
+        .filter(|e| {
+            diff_entry_worktree_status_path(e).is_none_or(|path| !collision_paths.contains(path))
+        })
         .count();
     let untracked_count = if matches!(
         untracked_mode_from_config(repo.config().snapshot()?.as_ref())?,

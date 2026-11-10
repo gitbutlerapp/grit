@@ -346,7 +346,24 @@ impl StatusOutcome {
             &self.embedded_repositories,
         );
         ui::print_ignored(w, ignored, display)?;
+        self.render_worktree_case_collision_notice(w, crate::output::OutputMode::Human)?;
         Ok(())
+    }
+
+    fn render_worktree_case_collision_notice(
+        &self,
+        w: &mut dyn Write,
+        mode: crate::output::OutputMode,
+    ) -> Result<()> {
+        if self.worktree_case_collision_paths.is_empty() {
+            return Ok(());
+        }
+        outln!(w);
+        crate::render::clone::render_worktree_case_collision_guidance(
+            w,
+            mode,
+            &self.worktree_case_collision_paths,
+        )
     }
 
     pub(crate) fn render_conflicts_by_kind(
@@ -711,6 +728,7 @@ impl StatusOutcome {
             &self.embedded_repositories,
         );
         markdown::print_ignored(w, ignored, display)?;
+        self.render_worktree_case_collision_notice(w, crate::output::OutputMode::Markdown)?;
         Ok(())
     }
 

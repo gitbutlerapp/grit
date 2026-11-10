@@ -110,6 +110,7 @@ Pass `--json` for stable, scripting-friendly output.
 | `staged_hunks` | object | Path → hunk ids when `--hunks` staged something (empty object when unused). |
 | `staged_lines` | object | Path → line ranges when `--lines` staged something (empty object when unused). |
 | `embedded_gitlinks` | array | Nested repositories newly recorded as gitlinks. Omitted when empty. |
+| `worktree_case_collisions` | array | Case-insensitive path groups that block staging (`[{ "paths": [...] }, …]`). Omitted when empty. |
 
 ```json
 {
@@ -145,6 +146,8 @@ When there is nothing to stage and you ran `grit add` with no paths:
 ```text
 Nothing to stage — working tree clean.
 ```
+
+On a case-insensitive volume, when tracked paths collide (for example `Readme.TXT` and `readme.txt` sharing one file), `grit add` with no paths does **not** print “working tree clean”. Human and `--markdown` output show the same path-collision warning as [`grit switch`](switch.md) and a hint to use a case-sensitive volume or [`grit reset --hard`](reset.md). `--json` includes `worktree_case_collisions` (`[{ "paths": [...] }, …]`) when any group blocks staging.
 
 ## Exit status
 

@@ -877,6 +877,24 @@ static CONTRACT: &[ContractRow] = &[
         hint: None,
     },
     ContractRow {
+        label: "worktree_case_collision",
+        build: || {
+            structured(
+                ErrorKind::WorktreeCaseCollision,
+                "tracked paths collide on this filesystem and cannot be staged or committed",
+                Some("use a case-sensitive volume, or run `grit reset --hard` to match the index to HEAD"),
+            )
+        },
+        kind: Some(ErrorKind::WorktreeCaseCollision),
+        exit: ExitStatus::Failure,
+        human: || {
+            "tracked paths collide on this filesystem and cannot be staged or committed".to_owned()
+        },
+        hint: Some(
+            "use a case-sensitive volume, or run `grit reset --hard` to match the index to HEAD",
+        ),
+    },
+    ContractRow {
         label: "branch_invalid_name",
         build: || {
             map_branch_error(LibError::Branch(BranchError::InvalidName {

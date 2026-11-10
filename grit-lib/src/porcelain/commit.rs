@@ -1075,21 +1075,7 @@ pub(crate) fn commit_worktree(
         repo.write_index(&mut index)?;
     }
     if matches!(result, Err(Error::Commit(CommitError::NothingToCommit))) && staged_count == 0 {
-        let mut worktree_index = match repo.load_index() {
-            Ok(real) => real,
-            Err(_) => index.clone(),
-        };
-        if let Ok((unstaged, untracked)) =
-            crate::porcelain::status::count_unstaged_and_untracked_paths(repo, &mut worktree_index)
-        {
-            if unstaged + untracked > 0 {
-                return Err(CommitError::NothingStagedToCommit {
-                    unstaged,
-                    untracked,
-                }
-                .into());
-            }
-        }
+        return Err(refine_nothing_to_commit_error(repo, &index));
     }
     result
 }
@@ -2113,6 +2099,35 @@ fn empty_commit_error(repo: &Repository, index: &mut Index, req: &CommitRequest)
                 }
                 .into();
             }
+        }
+        return refine_nothing_to_commit_error(repo, index);
+    }
+    CommitError::NothingToCommit.into()
+}
+
+/// Upgrade [`CommitError::NothingToCommit`] when the work tree has real or collision-only drift.
+fn refine_nothing_to_commit_error(repo: &Repository, index: &Index) -> Error {
+    let mut worktree_index = index.clone();
+    let (unstaged, untracked) = match crate::porcelain::status::count_unstaged_and_untracked_paths(
+        repo,
+        &mut worktree_index,
+    ) {
+        Ok(counts) => counts,
+        Err(_) => return CommitError::NothingToCommit.into(),
+    };
+    if unstaged + untracked > 0 {
+        return CommitError::NothingStagedToCommit {
+            unstaged,
+            untracked,
+        }
+        .into();
+    }
+    if let Ok(groups) = crate::status::worktree_case_collision_groups(repo, index) {
+        if !groups.is_empty() {
+            let mut paths: Vec<String> = groups.into_iter().flat_map(|g| g.paths).collect();
+            paths.sort();
+            paths.dedup();
+            return CommitError::WorktreeCaseCollision { paths }.into();
         }
     }
     CommitError::NothingToCommit.into()
