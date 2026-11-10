@@ -1037,7 +1037,7 @@ impl CommandRunner for RecordingRunner {
 }
 
 /// Run `sh -c script` and collect stdout (common helper for textconv/trailers).
-pub fn run_sh_dash_c(
+pub(crate) fn run_sh_dash_c(
     runner: &dyn CommandRunner,
     script: &str,
     cwd: Option<&Path>,
@@ -1075,7 +1075,11 @@ pub fn run_program(
 
 /// Git hook execution helpers (legacy free functions; prefer [`crate::repo_handles::RepositoryHooks`]).
 pub mod hooks {
-    pub use crate::hooks::*;
+
+    pub use crate::hooks::{
+        CommitHookEnv, HookError, HookName, HookOutput, HookResult, HookStdio, PostOperationHooks,
+        PrePushRef, RewriteKind, RunHookOptions,
+    };
 }
 
 #[cfg(test)]

@@ -2908,7 +2908,7 @@ pub fn worktree_config_enabled(git_directory: &Path) -> bool {
 }
 
 /// Like [`worktree_config_enabled`] when `config` body is already in memory.
-pub fn worktree_config_enabled_for_text(content: Option<&str>) -> bool {
+pub(crate) fn worktree_config_enabled_for_text(content: Option<&str>) -> bool {
     let Some(content) = content else {
         return false;
     };
@@ -3025,7 +3025,7 @@ pub fn early_config_ignore_repo_reason(git_directory: &Path) -> Option<String> {
 }
 
 /// Like [`early_config_ignore_repo_reason`] when `config` body is already in memory.
-pub fn early_config_ignore_repo_reason_for_text(content: Option<&str>) -> Option<String> {
+pub(crate) fn early_config_ignore_repo_reason_for_text(content: Option<&str>) -> Option<String> {
     const GIT_REPO_VERSION_READ: u32 = 1;
     let content = content?;
     let mut version = 0u32;
@@ -4663,7 +4663,7 @@ pub fn validate_repo_config(config_text: &str) -> std::result::Result<(), Config
 
 /// Per-repository caches shared across open handles.
 pub mod caches {
-    pub use crate::repo_caches::*;
+    pub use crate::repo_caches::RepoCaches;
 }
 
 #[cfg(any(test, feature = "test-support"))]

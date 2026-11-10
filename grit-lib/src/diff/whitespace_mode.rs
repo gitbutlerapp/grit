@@ -83,7 +83,7 @@ impl WhitespaceMode {
 
 /// Normalise one line like Git's `-b` / `--ignore-space-change` (ASCII ws only).
 #[must_use]
-pub fn normalize_ignore_space_change_line(line: &str) -> String {
+pub(crate) fn normalize_ignore_space_change_line(line: &str) -> String {
     let bytes = line.as_bytes();
     let mut result = String::with_capacity(line.len());
     let mut in_space = false;

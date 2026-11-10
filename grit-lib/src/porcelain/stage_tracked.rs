@@ -249,7 +249,10 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
 ///
 /// Required before writing the index when [`StageTrackedSummary::untracked_invalidation_deferred`]
 /// is true (see [`stage_tracked_modifications_in_index`]).
-pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &StageTrackedSummary) {
+pub(crate) fn replay_deferred_untracked_invalidations(
+    index: &mut Index,
+    summary: &StageTrackedSummary,
+) {
     if !summary.untracked_invalidation_deferred {
         return;
     }

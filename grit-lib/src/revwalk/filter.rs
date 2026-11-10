@@ -3,7 +3,7 @@
 //! Patterns use Git's default POSIX basic regular expression (BRE) syntax unless
 //! [`CommitFilterBuilder::fixed_strings`] is set. Callers supply an optional
 //! [`MailmapTable`] loaded explicitly
-//! (for example via [`load_mailmap_table`](crate::config::mailmap::load_mailmap_table));
+//! (for example via `load_mailmap_table`);
 //! the filter never reads repository config on its own.
 //!
 //! ```
@@ -735,7 +735,7 @@ mod tests {
     #[test]
     fn mailmap_applied_to_author_match() {
         let mut table = MailmapTable::default();
-        crate::config::mailmap::read_mailmap_string(
+        crate::mailmap::read_mailmap_string(
             &mut table,
             "Proper Name <proper@email.com> <old@email.com>",
         );

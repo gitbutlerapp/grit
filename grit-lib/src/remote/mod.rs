@@ -24,8 +24,18 @@ pub mod push_plan;
 
 pub use error::RemoteError;
 
-pub(crate) use core::is_valid_remote_name;
-pub use core::*;
+#[cfg(feature = "http-ureq")]
+pub use core::http_client;
+#[cfg(feature = "http-ureq")]
+pub use core::DefaultHttpClientFactory;
+pub use core::{
+    fold_peeled_refs, HttpClientFactory, ListRefsOptions, PeeledRemoteRef, Remote, RemoteRef,
+    RemoteUrl, DEFAULT_REMOTE,
+};
+pub(crate) use core::{
+    is_valid_remote_name, list_refs_from_git_dir, list_refs_from_git_dir_for_fetch,
+    PreflightHttpClientFactory,
+};
 pub(crate) use inspect::inspect_remote;
 pub use inspect::{
     InspectOptions, RemoteBranchState, RemoteBranchStateKind, RemotePullBranch, RemoteSummary,
@@ -33,7 +43,8 @@ pub use inspect::{
 
 pub mod fetch {
     //! fetch API (re-exported at this path).
-    pub use crate::fetch::*;
+
+    pub use crate::fetch::{FetchMilestone, NoProgress, Progress};
 }
 pub mod fetch_request {
     //! Explicit fetch refspec resolution.
@@ -65,7 +76,27 @@ pub mod push_bundle {
 }
 pub mod snapshot_checkout {
     //! snapshot checkout API (re-exported at this path).
-    pub use crate::snapshot_checkout::*;
+
+    pub use crate::snapshot_checkout::BranchSet;
+    pub use crate::snapshot_checkout::CheckoutUrl;
+    pub use crate::snapshot_checkout::GraftError;
+    pub use crate::snapshot_checkout::Materialized;
+    pub use crate::snapshot_checkout::ProjectedCommit;
+    pub use crate::snapshot_checkout::Projection;
+    pub use crate::snapshot_checkout::ReservedName;
+    pub use crate::snapshot_checkout::{
+        materialize, normalize_paths, out_ref, same_branch_name, suggest_work_branch, target_ref,
+        upstream_ref, valid_branch_name, valid_checkout_id, BranchInfo, BranchRefresh,
+        BranchRefreshResult, BranchRequest, CheckinBranch, CheckinRefusal, CheckinRequest,
+        CheckinResponse, CheckinResult, CheckinRule, CheckinStatus, CheckinUpdate, CheckoutClient,
+        CheckoutError, CheckoutErrorBody, CheckoutInfo, CheckoutMarker, CheckoutRecord,
+        CheckoutRequest, CheckoutServerInfo, CheckoutState, CheckoutStore, GraftLog, Grafted,
+        Ident, IntegrateRequest, IntegrateResponse, IntegrateStatus, Integration, Landing,
+        MaterializeRequest, ProjectError, RefreshOutcome, RefreshedHead, Slice, SliceChange,
+        SliceDeleteRequest, SliceEdit, SliceRequest, SlicesEdited, SlicesResponse, Snapshot,
+        SnapshotRoot, StoredCheckout, TargetChange, TargetGuard, TargetRefusal, WorkBranchRequest,
+        WorkBranchResponse, CHECKOUT_API, SLICES_PATH,
+    };
 }
 pub mod resumable {
     //! Resumable HTTP downloads and TUS uploads.
@@ -82,7 +113,12 @@ pub mod bundle_uri {
 }
 pub mod grit_server_auth {
     //! grit_server_auth API (re-exported at this path).
-    pub use crate::grit_server_auth::*;
+
+    pub use crate::grit_server_auth::{
+        credential_for_url, fetch_identity, LoginFlow, LoginGrant, LoginPoll, LoginPollRequest,
+        LoginStart, ServerAuthError, ServerIdentity, ServerUrl, TokenCredentialProvider,
+        AUTHORIZE_PATH, IDENTITY_PATH, LOGIN_PATH, LOGIN_POLL_PATH,
+    };
 }
 pub mod grit_server_share {
     //! grit_server_share API (re-exported at this path).
@@ -111,12 +147,22 @@ pub mod grit_server_space {
 }
 pub mod transfer {
     //! transfer API (re-exported at this path).
-    pub use crate::transfer::*;
+
+    pub use crate::transfer::{
+        build_pack, build_pack_from_send_list, reachable_closure, resolve_fetch_prune,
+        resolve_fetch_tags, CloneReflog, FetchAllOptions, FetchDepth, FetchOptions, FetchOutcome,
+        PackBuildOptions, PackObjects, PackObjectsOptions, PackStats, PushOptions, PushOutcome,
+        PushRefSpec, RefUpdate, TagMode, TransferEndpoint, TransferStats, UpdateKind, UpdateMode,
+    };
 }
 pub mod transport {
     //! transport API (re-exported at this path).
     pub use crate::transport::http::http_client_arc;
-    pub use crate::transport::*;
+
+    pub use crate::transport::{
+        http, read_advertisement, resolve_effective_ssh_command, Advertisement, ConnectOptions,
+        Connection, GitDaemonTransport, Service, SshCommand, SshTransport, Transport,
+    };
 }
 pub mod transport_path {
     //! transport_path API (re-exported at this path).
@@ -137,11 +183,17 @@ pub mod shallow {
 }
 pub mod push_report {
     //! push_report API (re-exported at this path).
-    pub use crate::push_report::*;
+    pub use crate::push_report::{PushRefResult, PushRefStatus};
 }
 pub mod clone {
     //! clone API (re-exported at this path).
-    pub use crate::clone::*;
+
+    pub use crate::clone::CloneIntoOutcome;
+    pub use crate::clone::{
+        cleanup_failed_clone, clone, clone_effective_single_branch, clone_into, derive_clone_dir,
+        dest_preexisted_empty, should_cleanup_failed_clone, CloneCheckout, CloneError, CloneHead,
+        CloneIntoOptions, CloneOptions, CloneOutcome, CloneTags,
+    };
 }
 pub mod partial_clone {
     //! Partial-clone filter specs and promisor-remote config.
@@ -149,7 +201,13 @@ pub mod partial_clone {
 }
 pub mod serve {
     //! serve API (re-exported at this path).
-    pub use crate::serve::*;
+
+    pub use crate::serve::{
+        io_error_is_request_body_limit, DeepenNotError, MissingObjectReason, ProtocolVersion,
+        ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePack, ReceivePolicy, RefCommand,
+        RefUpdateRefusal, RefUpdateResult, RequestBodyLimitExceeded, Result, ServeError,
+        ServeOptions, UnpackError, UploadOutcome, UploadPack,
+    };
 }
 pub mod pkt_line {
     //! pkt-line framing for the wire protocol.
@@ -157,7 +215,7 @@ pub mod pkt_line {
 }
 pub mod sideband_lines {
     //! sideband_lines API (re-exported at this path).
-    pub use crate::sideband_lines::*;
+    pub use crate::sideband_lines::{RemoteLine, SidebandLines};
 }
 
 pub use crate::transport_path::redact_url_for_display;

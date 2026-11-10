@@ -968,7 +968,7 @@ pub fn bloom_lookup_prefix(spec: &str) -> Option<String> {
 
 /// Whether every pathspec can participate in Bloom precomputation (Git `forbid_bloom_filters`).
 #[must_use]
-pub fn pathspecs_allow_bloom(specs: &[String]) -> bool {
+pub(crate) fn pathspecs_allow_bloom(specs: &[String]) -> bool {
     specs.iter().all(|s| {
         !s.is_empty() && !pathspec_is_exclude(s) && bloom_lookup_prefix_with_cwd(s, None).is_some()
     })
@@ -1987,7 +1987,7 @@ fn ls_tree_literal_match(pattern: &str, path: &str, ctx: PathspecMatchContext) -
 /// Git treats `dir/` as “directory or git submodule only”: a regular file `dir`
 /// does not match, but a tree entry `dir` or gitlink `dir` does.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PathspecMatchContext {
+pub(crate) struct PathspecMatchContext {
     /// The index/tree entry is a directory (mode `040000`).
     pub is_directory: bool,
     /// The entry is a git submodule / gitlink (`160000`).

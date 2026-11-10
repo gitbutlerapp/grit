@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
-use crate::midx::{load_midx_reuse_tables, load_midx_reuse_tables_from_path};
+use crate::midx::load_midx_reuse_tables_from_path;
 use crate::objects::ObjectId;
 use crate::pack::PackIndex;
 use crate::pack_rev::{rev_path_for_index, try_rev_positions_in_pack_order};
@@ -160,14 +160,6 @@ impl BitmapOrder {
             Self::Pack { index, .. } => Some(Arc::clone(index)),
             Self::Midx { .. } => None,
         }
-    }
-
-    pub(crate) fn load_midx(objects_dir: &Path) -> Result<Option<Self>> {
-        let tables = match load_midx_reuse_tables(objects_dir)? {
-            Some(t) => t,
-            None => return Ok(None),
-        };
-        Ok(Some(Self::from_midx_tables(tables)))
     }
 
     pub(crate) fn load_midx_file(midx_path: &Path) -> Result<Option<Self>> {

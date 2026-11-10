@@ -35,7 +35,7 @@ fn rename_threshold(opts: &DiffOptions) -> u32 {
 
 /// Whether two text sides differ under whitespace options in `opts`.
 #[must_use]
-pub fn text_sides_differ(old: &str, new: &str, opts: &DiffOptions) -> bool {
+pub(crate) fn text_sides_differ(old: &str, new: &str, opts: &DiffOptions) -> bool {
     if old == new {
         return false;
     }

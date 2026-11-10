@@ -3,7 +3,7 @@
 //! End-to-end single-commit replay (three-way merge, checkout, commit, and ref
 //! update) lives in [`crate::porcelain::replay`]. What lives here is directory-rename
 //! detection over index data: exact (same-blob) rename pairing and
-//! [`directory_renames_from_file_renames`], which aggregates file renames into
+//! `directory_renames_from_file_renames`, which aggregates file renames into
 //! directory renames.
 
 use std::collections::HashMap;
@@ -41,7 +41,7 @@ pub(crate) fn same_blob_renames_from_entries<'a>(
 /// Aggregate file renames into directory renames: for each source directory, the destination
 /// directory chosen by the most file renames (ties drop the directory rename entirely).
 #[must_use]
-pub fn directory_renames_from_file_renames(
+pub(crate) fn directory_renames_from_file_renames(
     renames: &[(Vec<u8>, Vec<u8>)],
 ) -> HashMap<Vec<u8>, Vec<u8>> {
     let mut counts: HashMap<Vec<u8>, HashMap<Vec<u8>, usize>> = HashMap::new();

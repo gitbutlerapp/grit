@@ -6149,7 +6149,7 @@ fn write_worktree_content(
 }
 
 /// Remove empty parent directories up to (but not including) `work_tree`.
-pub fn remove_empty_parent_dirs(work_tree: &Path, path: &Path) {
+pub(crate) fn remove_empty_parent_dirs(work_tree: &Path, path: &Path) {
     remove_empty_parent_dirs_batch(work_tree, &[path.to_path_buf()]);
 }
 

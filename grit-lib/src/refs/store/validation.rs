@@ -137,7 +137,7 @@ where
 
 /// Verify that each *new* ref in `updates` can be created without conflicting with `existing`
 /// or other batch items. Deletes in the batch do not suppress conflicts (Git t1404).
-pub fn verify_create_conflicts(
+pub(crate) fn verify_create_conflicts(
     existing: &BTreeMap<String, RawRef>,
     updates: &[RefUpdate],
 ) -> Result<(), RefnameUnavailable> {
@@ -192,7 +192,7 @@ pub(crate) fn ascii_casefold_ref_paths_collide(a: &str, b: &str) -> bool {
 /// # Errors
 ///
 /// [`RefStoreError::CreateExists`] when a conflicting stored name is found.
-pub fn verify_create_casefold_against_existing(
+pub(crate) fn verify_create_casefold_against_existing(
     ignore_case: bool,
     existing: &BTreeMap<String, RawRef>,
     updates: &[RefUpdate],
@@ -229,7 +229,7 @@ pub fn verify_create_casefold_against_existing(
 ///
 /// [`RefStoreError::CreateExists`] when a conflicting stored name is found.
 /// [`RefStoreError::CaseConflict`] when two creates in `updates` differ only by case.
-pub fn verify_create_casefold_conflicts(
+pub(crate) fn verify_create_casefold_conflicts(
     ignore_case: bool,
     existing: &BTreeMap<String, RawRef>,
     updates: &[RefUpdate],
@@ -246,7 +246,9 @@ pub fn verify_create_casefold_conflicts(
 /// # Errors
 ///
 /// [`RefStoreError::CaseConflict`] when two creates in `updates` differ only by case.
-pub fn verify_create_casefold_same_batch(updates: &[RefUpdate]) -> Result<(), RefStoreError> {
+pub(crate) fn verify_create_casefold_same_batch(
+    updates: &[RefUpdate],
+) -> Result<(), RefStoreError> {
     let extras: BTreeSet<&str> = updates.iter().map(|u| u.name.as_str()).collect();
     for update in updates {
         if update.new_value.is_none() || update.flags.log_only {

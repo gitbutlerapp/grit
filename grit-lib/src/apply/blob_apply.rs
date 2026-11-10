@@ -8,7 +8,7 @@ use crate::error::{ApplyError, Error};
 
 /// Options for [`apply_patch_to_blob`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct BlobApplyOptions {
+pub(crate) struct BlobApplyOptions {
     /// When true, allow `Binary files … differ` markers with no payload (result unchanged).
     pub allow_binary_marker_only: bool,
     /// When true, apply hunks in reverse (`git apply -R` semantics).
@@ -19,7 +19,7 @@ pub struct BlobApplyOptions {
 ///
 /// Binary patches use [`super::materialize_binary_patch_forward`]. Text patches apply
 /// unified-diff hunks in reverse line order so hunk headers stay anchored to the preimage.
-pub fn apply_patch_to_blob(
+pub(crate) fn apply_patch_to_blob(
     base: &[u8],
     patch: &FilePatch,
     opts: &BlobApplyOptions,

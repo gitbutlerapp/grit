@@ -381,7 +381,10 @@ pub trait RefStore: Send + Sync + Debug {
 }
 
 /// Resolve `name` through `store`, following symbolic refs.
-pub fn resolve_store<S: RefStore + ?Sized>(store: &S, name: &RefNameRef) -> Result<ObjectId> {
+pub(crate) fn resolve_store<S: RefStore + ?Sized>(
+    store: &S,
+    name: &RefNameRef,
+) -> Result<ObjectId> {
     resolve_via_raw(store, name, 0).map_err(Into::into)
 }
 

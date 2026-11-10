@@ -78,7 +78,7 @@ pub fn ref_points_at(
 }
 
 /// Whether `ref_oid` matches any oid in `points_at` ([`ref_points_at`]).
-pub fn ref_points_at_any(
+pub(crate) fn ref_points_at_any(
     odb: &Odb,
     ref_oid: ObjectId,
     points_at: &[ObjectId],

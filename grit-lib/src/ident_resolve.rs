@@ -276,7 +276,7 @@ pub fn resolve_name_with<E: IdentityEnv>(
 /// Resolve the full identity line (`Name <email> <epoch> <offset>`) for `role` when
 /// creating a commit, tag or notes commit.
 ///
-/// Name and email come from [`resolve_name_with`] and [`resolve_email_with`], so this fails
+/// Name and email come from `resolve_name_with` and [`resolve_email_with`], so this fails
 /// exactly when they do. The timestamp is the role's [`IdentRole::env_date_key`] variable
 /// when set and non-blank, otherwise `now`.
 ///

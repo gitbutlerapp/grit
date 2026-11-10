@@ -3,10 +3,7 @@
 use std::path::Path;
 
 use crate::config::ConfigSet;
-use crate::diff::combined_diff_patch::{
-    format_combined_structured_body, structured_combined_diff_body, CombinedDiffWsOptions,
-    CombinedStructuredTextDiff,
-};
+use crate::diff::combined_diff_patch::{structured_combined_diff_body, CombinedDiffWsOptions};
 use crate::diff::combined_tree_diff::{
     combined_diff_paths_trees, combined_parent_status_char, CombinedDiffPath,
     CombinedTreeDiffOptions,
@@ -453,10 +450,4 @@ fn combined_path_is_binary_from_blobs(
     parent_blobs
         .iter()
         .any(|blob| !blob.is_empty() && is_binary_for_diff(git_dir, path, blob))
-}
-
-/// Format a [`CombinedStructuredTextDiff`] as Git combined patch body bytes.
-#[must_use]
-pub fn combined_structured_patch_body(diff: &CombinedStructuredTextDiff) -> String {
-    format_combined_structured_body(diff)
 }

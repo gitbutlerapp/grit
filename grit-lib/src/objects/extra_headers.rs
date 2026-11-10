@@ -9,7 +9,7 @@
 /// `start` must be the offset of a header line within `extra` (not past its end). Returns
 /// `(key, end_offset, _continued)` where `key` is empty for orphan continuation lines.
 #[must_use]
-pub fn next_header_block(extra: &[u8], start: usize) -> (&[u8], usize, bool) {
+pub(crate) fn next_header_block(extra: &[u8], start: usize) -> (&[u8], usize, bool) {
     let pos = start;
     let line_start = pos;
     let mut line_end = pos;
@@ -42,7 +42,7 @@ pub fn next_header_block(extra: &[u8], start: usize) -> (&[u8], usize, bool) {
 
 /// Iterator over `(name, value)` pairs in a raw extra-header blob.
 #[derive(Debug, Clone)]
-pub struct ExtraHeaderIter<'a> {
+pub(crate) struct ExtraHeaderIter<'a> {
     extra: &'a [u8],
     pos: usize,
 }
@@ -57,7 +57,7 @@ impl<'a> ExtraHeaderIter<'a> {
 
 /// Iterate `(name, value)` pairs in a raw extra-header blob.
 #[must_use]
-pub fn iter_extra_headers(extra: &[u8]) -> ExtraHeaderIter<'_> {
+pub(crate) fn iter_extra_headers(extra: &[u8]) -> ExtraHeaderIter<'_> {
     ExtraHeaderIter::new(extra)
 }
 
@@ -112,7 +112,7 @@ pub fn extra_header_values<'a>(extra: &'a [u8], name: &str) -> Vec<&'a [u8]> {
 
 /// Remove every header block whose name satisfies `drop_key`.
 #[must_use]
-pub fn remove_header_lines(extra: &[u8], drop_key: impl Fn(&[u8]) -> bool) -> Vec<u8> {
+pub(crate) fn remove_header_lines(extra: &[u8], drop_key: impl Fn(&[u8]) -> bool) -> Vec<u8> {
     let mut out = Vec::new();
     let mut pos = 0usize;
     while pos < extra.len() {
@@ -141,7 +141,7 @@ pub fn set_extra_header(extra: &mut Vec<u8>, name: &str, line: &[u8]) {
 /// Insert `line` before the first `gpgsig` / `gpgsig-sha256` block, dropping existing blocks
 /// whose names satisfy `drop_key`.
 #[must_use]
-pub fn insert_header_before_signature(
+pub(crate) fn insert_header_before_signature(
     extra: &[u8],
     line: &[u8],
     drop_key: impl Fn(&[u8]) -> bool,

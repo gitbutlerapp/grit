@@ -245,21 +245,35 @@ pub(crate) fn assemble_identity(
 
 /// Commit encoding helpers for non-UTF-8 commit messages.
 pub mod encoding {
-    pub use crate::commit_encoding::*;
+
+    pub use crate::commit_encoding::{
+        finalize_stored_commit_message, identity_raw_for_serialized_commit, resolve,
+    };
 }
 
 /// Commit trailers and interpretation helpers.
 pub mod trailers {
-    pub use crate::commit_trailers::*;
+
+    pub use crate::commit_trailers::{
+        append_signoff_trailer, append_signoff_trailer_with_dedup, finalize_cherry_pick_message,
+        finalize_cherry_pick_message_with_options, format_signoff_line, CherryPickMessageOptions,
+    };
     /// Parse and apply trailer commands.
     pub mod interpret {
-        pub use crate::interpret_trailers::*;
+        pub use crate::interpret_trailers::{
+            complete_line, process_trailers, trailer_if_exists_from_str,
+            trailer_if_missing_from_str, trailer_where_from_str, NewTrailerArg,
+            ProcessTrailerOptions, TrailerIfExists, TrailerIfMissing, TrailerWhere,
+        };
     }
 }
 
 /// OpenPGP / SSH signature verification.
 pub mod signing {
-    pub use crate::signing::*;
+    pub(crate) use crate::signing::extra_headers_without_commit_signatures;
+    pub use crate::signing::GpgFormat;
+    pub use crate::signing::SignatureCheck;
+    pub use crate::signing::{should_sign_tag, verify_commit, verify_tag, GpgConfig, TrustLevel};
 }
 
 #[cfg(test)]

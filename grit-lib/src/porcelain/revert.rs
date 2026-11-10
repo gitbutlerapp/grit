@@ -13,7 +13,7 @@
 //! - [`revision_range_apply_order`] — order the commits of a revert revision set
 //!   (`<include> --not <exclude>`) tip-first, the order `git revert` replays a
 //!   range in.
-//! - [`merge_commit_message_for_revert`] — build the `Revert "..."` /
+//! - `merge_commit_message_for_revert` — build the `Revert "..."` /
 //!   `Reapply "..."` subject and the `This reverts commit ...` body for the
 //!   revert commit message (plain or `--reference` form).
 
@@ -105,7 +105,7 @@ pub(crate) fn revision_range_apply_order(
 /// `format_reference_line` in the commit helper module; `comment_char` is the
 /// configured comment character used to prefix the placeholder title.
 #[must_use]
-pub fn merge_commit_message_for_revert(
+pub(crate) fn merge_commit_message_for_revert(
     commit: &CommitData,
     commit_oid: ObjectId,
     use_reference: bool,
@@ -148,7 +148,7 @@ pub fn merge_commit_message_for_revert(
 
 /// Extra body line when reverting a merge with `--mainline` (grit-specific wording).
 #[must_use]
-pub fn revert_mainline_extra_body(_reverted: ObjectId, mainline_parent: ObjectId) -> String {
+pub(crate) fn revert_mainline_extra_body(_reverted: ObjectId, mainline_parent: ObjectId) -> String {
     format!(
         "Mainline parent {} was used when building the revert tree.\n",
         mainline_parent.to_hex()

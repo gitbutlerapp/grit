@@ -1367,7 +1367,7 @@ fn commit_worktree_reverse(
 
 /// Options for [`reverse_apply_patches_to_worktree`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct WorktreeReverseApplyOptions {
+pub(crate) struct WorktreeReverseApplyOptions {
     /// When true, validate patches without writing the worktree or new blobs.
     pub dry_run: bool,
 }

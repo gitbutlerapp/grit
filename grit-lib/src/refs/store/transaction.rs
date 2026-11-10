@@ -226,7 +226,7 @@ impl RefTransaction {
 
 /// Whether `actual` satisfies `expected`.
 #[must_use]
-pub fn expected_matches(actual: Option<&RawRef>, expected: &Expected) -> bool {
+pub(crate) fn expected_matches(actual: Option<&RawRef>, expected: &Expected) -> bool {
     match expected {
         Expected::Any => true,
         Expected::Missing => actual.is_none(),

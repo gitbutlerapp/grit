@@ -1473,7 +1473,7 @@ fn parse_range(s: &str) -> Option<(usize, usize)> {
 mod blob_apply;
 mod index_apply;
 
-pub use blob_apply::{apply_patch_to_blob, BlobApplyOptions};
+pub(crate) use blob_apply::{apply_patch_to_blob, BlobApplyOptions};
 pub use index_apply::{
     apply_patch_to_index, apply_patch_to_index_and_write, IndexApplyOptions, IndexApplyOutcome,
 };

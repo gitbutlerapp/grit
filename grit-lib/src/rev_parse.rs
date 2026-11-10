@@ -3386,17 +3386,6 @@ pub fn parse_index_colon_spec(spec: &str) -> Option<IndexColonSpec<'_>> {
     })
 }
 
-/// One index entry resolved from a `:path` / `:N:path` revision string.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IndexPathEntry {
-    /// Repository-relative path using `/` separators (normalized from the spec).
-    pub path: String,
-    /// Blob OID stored for this index entry.
-    pub oid: ObjectId,
-    /// Index entry mode (e.g. `0o100644`).
-    pub mode: u32,
-}
-
 /// Look up a path in the index at a given stage and return its OID.
 fn resolve_index_path_at_stage(repo: &Repository, path: &str, stage: u8) -> Result<ObjectId> {
     use crate::index::Index;

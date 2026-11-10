@@ -331,7 +331,7 @@ impl TreeEntryNameAudit {
 
 /// Returns `true` when `name` should trigger fsck `hasDotgit` for a tree entry.
 #[must_use]
-pub fn component_is_dotgit_alias(name: &[u8], opts: ProtectOptions) -> bool {
+pub(crate) fn component_is_dotgit_alias(name: &[u8], opts: ProtectOptions) -> bool {
     if name.eq_ignore_ascii_case(b".git") {
         return true;
     }

@@ -141,42 +141,6 @@
 pub mod porcelain;
 pub mod progress;
 
-/// The types most callers need, re-exported for `use grit_lib::prelude::*;`.
-///
-/// Library guide: [embedding](https://grit-scm.com/docs/library/embedding)
-///
-/// ```rust
-/// use grit_lib::prelude::*;
-/// use grit_lib::refs::store::RefNameRef;
-/// use grit_lib::repo::InitOptions;
-///
-/// # fn main() -> Result<()> {
-/// let dir = tempfile::tempdir()?;
-/// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-/// let _cfg = repo.config().snapshot()?;
-/// assert!(repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
-/// # Ok(())
-/// # }
-/// ```
-pub mod prelude {
-    pub use crate::command_runner::{CommandRunner, RecordingRunner, SystemCommandRunner};
-    pub use crate::config::ConfigSet;
-    pub use crate::diagnostics::{
-        CollectingDiagnostics, DiagnosticSink, NullDiagnostics, Trace, Warning,
-    };
-    pub use crate::environment::{Environment, RepositoryOptions};
-    pub use crate::error::{Error, MidxError, RepositoryError, Result};
-    pub use crate::index::Index;
-    pub use crate::objects::odb::Odb;
-    pub use crate::objects::{Object, ObjectId, ObjectInfo, ObjectKind};
-    pub use crate::ownership_check::{
-        OwnershipCheck, OwnershipContext, OwnershipError, OwnershipStatus, SystemOwnershipCheck,
-    };
-    pub use crate::repo::{
-        resolve_initial_branch, DiscoveryInfo, InitOptions, InitOutcome, Repository,
-    };
-}
-
 pub mod revwalk;
 pub mod stash;
 
@@ -407,6 +371,42 @@ pub(crate) mod test_probe_hooks;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+
+/// The types most callers need, re-exported for `use grit_lib::prelude::*;`.
+///
+/// Library guide: [embedding](https://grit-scm.com/docs/library/embedding)
+///
+/// ```rust
+/// use grit_lib::prelude::*;
+/// use grit_lib::refs::store::RefNameRef;
+/// use grit_lib::repo::InitOptions;
+///
+/// # fn main() -> Result<()> {
+/// let dir = tempfile::tempdir()?;
+/// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+/// let _cfg = repo.config().snapshot()?;
+/// assert!(repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
+/// # Ok(())
+/// # }
+/// ```
+pub mod prelude {
+    pub use crate::command_runner::{CommandRunner, RecordingRunner, SystemCommandRunner};
+    pub use crate::config::ConfigSet;
+    pub use crate::diagnostics::{
+        CollectingDiagnostics, DiagnosticSink, NullDiagnostics, Trace, Warning,
+    };
+    pub use crate::environment::{Environment, RepositoryOptions};
+    pub use crate::error::{Error, MidxError, RepositoryError, Result};
+    pub use crate::index::Index;
+    pub use crate::objects::odb::Odb;
+    pub use crate::objects::{Object, ObjectId, ObjectInfo, ObjectKind};
+    pub use crate::ownership_check::{
+        OwnershipCheck, OwnershipContext, OwnershipError, OwnershipStatus, SystemOwnershipCheck,
+    };
+    pub use crate::repo::{
+        resolve_initial_branch, DiscoveryInfo, InitOptions, InitOutcome, Repository,
+    };
+}
 
 pub(crate) use crate::oid_abbrev::OidAbbrevBatch;
 pub(crate) use objects::pack_reuse;

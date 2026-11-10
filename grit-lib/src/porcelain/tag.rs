@@ -4,7 +4,7 @@
 //! what lives here is presentation-free tag logic: creating lightweight and
 //! annotated tags ([`create_tag`]), listing ([`list_tags`]), deleting
 //! ([`delete_tag`]) and verifying ([`verify_tag_by_name`]) tag refs, filter/sort
-//! predicates, and `-m`/`-F` message cleanup ([`strip_comments`]).
+//! predicates, and `-m`/`-F` message cleanup (`strip_comments`).
 //!
 //! # What this module owns
 //!
@@ -15,8 +15,8 @@
 //! - Ref list sort/filter helpers live in [`crate::refs::listing`] (`compare_version_names`,
 //!   [`crate::refs::listing::pattern_matches_short_name`], [`creator_date`],
 //!   [`crate::refs::listing::epoch_from_identity`], [`crate::refs::listing::ref_query_options_for_repo`]).
-//! - Tag message cleanup: [`strip_comments`] then [`crate::porcelain::commit::normalize_commit_message`]
-//!   via [`normalize_tag_message`].
+//! - Tag message cleanup: `strip_comments` then [`crate::porcelain::commit::normalize_commit_message`]
+//!   via `normalize_tag_message`.
 
 use std::cell::OnceCell;
 use std::sync::Arc;
@@ -266,7 +266,7 @@ pub struct CreateTagRequest {
     pub name: String,
     /// Object the tag should point at (usually a commit).
     pub target: ObjectId,
-    /// When set, build an annotated tag object with this message (after [`strip_comments`]).
+    /// When set, build an annotated tag object with this message (after `strip_comments`).
     pub message: Option<String>,
     /// Tagger identity line (`Name <email> <epoch> <tz>`); required for annotated tags.
     pub tagger: Option<String>,
@@ -837,7 +837,7 @@ pub(crate) fn creator_date(repo: &Repository, oid: &ObjectId) -> i64 {
 /// to one, and drop leading/trailing blank lines. This is the `whitespace`
 /// cleanup `git tag` applies to `-m`/`-F` messages (anything but `--cleanup=verbatim`).
 #[must_use]
-pub fn strip_comments(s: &str) -> String {
+pub(crate) fn strip_comments(s: &str) -> String {
     let mut lines: Vec<String> = Vec::new();
     for line in s.lines() {
         if line.starts_with('#') {
@@ -873,7 +873,7 @@ pub fn strip_comments(s: &str) -> String {
 ///
 /// Returns the same errors as [`crate::porcelain::commit::normalize_commit_message`] when the
 /// body is empty after cleanup.
-pub fn normalize_tag_message(raw: &str) -> Result<String> {
+pub(crate) fn normalize_tag_message(raw: &str) -> Result<String> {
     let stripped = strip_comments(raw);
     crate::porcelain::commit::normalize_commit_message(&stripped)
 }

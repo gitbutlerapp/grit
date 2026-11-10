@@ -39,11 +39,8 @@ pub(crate) type CasefoldLookup<'a> =
     Option<&'a dyn Fn(&str) -> std::result::Result<Option<String>, RefStoreError>>;
 
 pub use super::apply::RefBatchState;
-pub use super::transaction::expected_matches;
-pub use super::validation::{
-    verify_create_casefold_against_existing, verify_create_casefold_conflicts,
-    verify_create_casefold_same_batch, verify_create_casefold_with_lookup, verify_create_conflicts,
-};
+pub use super::validation::verify_create_casefold_with_lookup;
+pub(crate) use super::validation::{verify_create_casefold_same_batch, verify_create_conflicts};
 
 /// Reject `name` when Git refuses to store it (path traversal, illegal components, a
 /// `.lock` suffix, an empty `refs/` name, …).

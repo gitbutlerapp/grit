@@ -1015,7 +1015,7 @@ impl PromisorHandshake {
 /// A malformed client `promisor-remote=` reply.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum PromisorReplyError {
+pub(crate) enum PromisorReplyError {
     /// The reply carried no remote names.
     #[error("empty promisor-remote reply")]
     Empty,

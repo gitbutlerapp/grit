@@ -12,5 +12,11 @@
 //! # Ok(())
 //! # }
 //! ```
-pub use crate::porcelain::stash::*;
+pub use crate::porcelain::stash::FlatTreeEntry;
+pub use crate::porcelain::stash::{
+    check_stash_apply_would_overwrite_local_changes, flatten_tree_full, parse_stash_reference,
+    stash_index_for_oid, worktree_bytes_for_index_mode, StashApplyOptions, StashApplyOutcome,
+    StashBranchOutcome, StashDiffOptions, StashEntry, StashMode, StashPreview, StashPushOptions,
+    StashPushResult, StashReference,
+};
 pub use crate::porcelain::stash_error::{CorruptStashReason, StashError, StashPushValidationError};

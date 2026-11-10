@@ -98,9 +98,12 @@ pub mod worktree_guard;
 
 /// Terminal capability probes for porcelain output.
 pub mod terminal {
-    pub use crate::terminal::*;
+    pub use crate::terminal::{ansi_supported, stderr_supports_color, stdout_supports_color};
 }
 pub mod quote_path {
     //! Shell-style path quoting for display.
-    pub use crate::quote_path_root::*;
+    pub(crate) use crate::quote_path_root::quote_c_style_bytes;
+    pub use crate::quote_path_root::{
+        format_diff_path_with_prefix, quote_c_style, quote_path_for_display,
+    };
 }

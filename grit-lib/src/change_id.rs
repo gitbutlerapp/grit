@@ -85,7 +85,7 @@ pub trait ChangeIdGenerator: Send + Sync {
 
 /// Default generator backed by the OS CSPRNG (`getrandom`).
 #[derive(Debug, Clone, Copy, Default)]
-pub struct OsChangeIdGenerator;
+pub(crate) struct OsChangeIdGenerator;
 
 impl ChangeIdGenerator for OsChangeIdGenerator {
     fn random_bytes(&self) -> std::result::Result<[u8; 16], ChangeIdError> {

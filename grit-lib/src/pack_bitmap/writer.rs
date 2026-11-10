@@ -173,7 +173,7 @@ impl PackBitmapWriteError {
 }
 
 /// Writes `.bitmap` sidecars for multi-pack-index files (MIDX checksum in header).
-pub struct MidxBitmapWriter;
+pub(crate) struct MidxBitmapWriter;
 
 impl MidxBitmapWriter {
     /// Write a reachability bitmap for a MIDX layer that was just serialized to `midx_bytes`.
@@ -190,39 +190,6 @@ impl MidxBitmapWriter {
                 PackBitmapWriteError::Object {
                     detail: e.to_string(),
                 }
-            })?;
-        write_bitmap_for_order(repo, &order, midx_checksum, bitmap_path, options)
-    }
-
-    /// Write a reachability bitmap for the tip MIDX under `pack_dir`.
-    ///
-    /// The bitmap header checksum must match the MIDX file checksum (`midx_checksum`).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PackBitmapWriteError::NotClosed`] when objects reachable from ref
-    /// tips are missing from the MIDX pseudo-pack order.
-    pub fn write(
-        repo: &Repository,
-        _pack_dir: &Path,
-        midx_checksum: &[u8],
-        bitmap_path: &Path,
-        options: &PackBitmapWriteOptions,
-        _now: SystemTime,
-    ) -> Result<PathBuf, PackBitmapWriteError> {
-        if !repo.odb().uses_files_primary() {
-            return Err(PackBitmapWriteError::NotFilesBacked);
-        }
-        let objects_dir = repo
-            .odb()
-            .files_objects_dir()
-            .ok_or(PackBitmapWriteError::NotFilesBacked)?;
-        let order = BitmapOrder::load_midx(objects_dir)
-            .map_err(|e| PackBitmapWriteError::Object {
-                detail: e.to_string(),
-            })?
-            .ok_or_else(|| PackBitmapWriteError::InvalidPackPath {
-                path: "no MIDX loaded".into(),
             })?;
         write_bitmap_for_order(repo, &order, midx_checksum, bitmap_path, options)
     }

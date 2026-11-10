@@ -59,7 +59,8 @@ pub(crate) fn staged_mode_with_hint(base: u32, hint: StageExecutableHint) -> u32
 /// # Errors
 ///
 /// Returns [`IndexError::Chmod`] when the path is not a regular file entry or is unmerged.
-pub fn set_stage0_file_mode(
+#[cfg(test)]
+pub(crate) fn set_stage0_file_mode(
     index: &mut Index,
     path: &[u8],
     mode: u32,

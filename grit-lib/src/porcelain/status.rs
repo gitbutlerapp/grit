@@ -117,7 +117,7 @@ pub struct StatusOptions {
 /// synonyms (since Git 2.45), and integer booleans via [`parse_git_config_maybe_bool`]
 /// (same rules as Git's `parse_untracked_setting_name`).
 /// When the key is missing, returns [`UntrackedMode::Normal`].
-pub fn untracked_mode_from_config(
+pub(crate) fn untracked_mode_from_config(
     config: &ConfigSet,
 ) -> std::result::Result<UntrackedMode, ConfigError> {
     let raw = config.value("status.showUntrackedFiles");
@@ -186,7 +186,7 @@ pub fn status_options_from_config(
 /// When both keys are absent, rename detection is **on** (Git default). Either key set to
 /// `false`/`no`/`off`/`0` disables detection.
 #[must_use]
-pub fn status_renames_from_config(config: &ConfigSet) -> Option<RenameDetection> {
+pub(crate) fn status_renames_from_config(config: &ConfigSet) -> Option<RenameDetection> {
     if let Some(v) = config.value("status.renames") {
         return parse_status_renames_config_value(&v);
     }
@@ -213,15 +213,6 @@ fn parse_status_renames_config_value(raw: &str) -> Option<RenameDetection> {
         threshold: STATUS_RENAME_DEFAULT_THRESHOLD,
         copies,
     })
-}
-
-/// Whether a diff entry's primary path matches a pathspec list (pre-rename-detection filter).
-#[must_use]
-pub fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String]) -> bool {
-    if pathspecs.is_empty() {
-        return true;
-    }
-    status_path_matches(entry.path(), pathspecs)
 }
 
 /// Whether a diff entry matches `pathspec` using typed pathspec evaluation (rename-aware).
@@ -2353,7 +2344,7 @@ fn named_entries_sorted(entries: ReadDir) -> Vec<(Vec<u8>, DirEntry)> {
 ///
 /// Each conflict path appears once under staged as [`DiffStatus::Unmerged`]; redundant
 /// unstaged rows (duplicate unmerged or worktree modified) are dropped.
-pub fn normalize_status_conflicts(
+pub(crate) fn normalize_status_conflicts(
     staged: &mut Vec<DiffEntry>,
     unstaged: &mut Vec<DiffEntry>,
     conflicts: &[String],

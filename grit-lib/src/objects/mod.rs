@@ -25,16 +25,32 @@ mod write;
 
 pub(crate) use commit_ref::commit_author_and_message_lenient;
 pub use commit_ref::CommitRef;
-pub use core::*;
-pub use extra_headers::{
-    extra_header_values, insert_header_before_signature, iter_extra_headers, next_header_block,
-    remove_header_lines, set_extra_header, ExtraHeaderIter,
+#[cfg(feature = "test-support")]
+pub(crate) use core::find_tree_entry_by_name_in_data;
+pub use core::HashVersionError;
+pub use core::SHORT_HEX_LEN;
+pub(crate) use core::{
+    collect_tree_with_oid_len, commit_through_subject_len,
+    find_tree_entry_by_name_dir_or_file_in_data, parse_commit_tree_and_parents_lenient,
+    parse_commit_tree_and_parents_prefix, parse_oid_field, read_commit_subject_pretty,
+    tree_entry_span, tree_name_cmp,
+};
+pub use core::{
+    parse_commit, parse_tag, parse_tree, parse_tree_for_algo, read_commit_subject_line,
+    serialize_commit, serialize_tag, serialize_tree, short_hex, tag_object_line_oid,
+    tree_entry_cmp, CommitData, FileMode, HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo,
+    ObjectKind, ObjectRef, TagData, TreeEntry, TreeEntryRef, TreeRefIter,
+};
+pub use extra_headers::{extra_header_values, set_extra_header};
+pub(crate) use extra_headers::{
+    insert_header_before_signature, iter_extra_headers, remove_header_lines,
 };
 pub use handle::Objects;
+pub(crate) use oid_hashtable::{
+    empty_object_id_hash_set, empty_oid_set, oid_hash_map_from, oid_hash_set_from,
+};
 pub use oid_hashtable::{
-    empty_object_id_hash_set, empty_oid_byte_filter_map, empty_oid_set, oid_hash_map,
-    oid_hash_map_from, oid_hash_set, oid_hash_set_from, OidBuildHasher, OidHashMap, OidHashSet,
-    OidHasher,
+    oid_hash_map, oid_hash_set, OidBuildHasher, OidHashMap, OidHashSet, OidHasher,
 };
 pub(crate) use oid_hashtable::{oid_hash_map_with_capacity, oid_hash_set_with_capacity};
 pub use write::{NewCommit, TreeEntryError, WriteTreeOptions};
@@ -51,15 +67,14 @@ pub mod odb {
 
 pub mod pack {
     //! Pack files, indexes, and packfile I/O.
+    pub use crate::pack::PackIndexEntryRef;
     pub use crate::pack::{
         clear_pack_cache, hash_object_bytes, oid_bytes_to_hex, read_alternates_recursive,
         read_idx_object_ids, read_local_pack_indexes, read_object_from_pack_at_offset,
         read_object_from_packs, read_pack_index, read_pack_index_cached,
         read_packed_delta_dependency, skip_one_pack_object, write_v2_pack_index,
-        write_v2_pack_index_from_trailer, PackIndex, PackIndexEntryRef, SingleLocalPackReader,
-        DEFAULT_PACK_DEPTH,
+        write_v2_pack_index_from_trailer, PackIndex, SingleLocalPackReader, DEFAULT_PACK_DEPTH,
     };
-    pub use crate::pack_reuse_root::*;
 }
 
 pub(crate) mod pack_reuse {
@@ -101,8 +116,8 @@ pub mod bitmap {
         BitmapWalkError, BitmapWalkUnsupported, ReachabilityQuery, ReachableSet,
     };
     pub use crate::pack_bitmap::{
-        BitmapError, BitmapIndex, BitmapIndexCache, CommitReachabilityBitmap, MidxBitmapWriter,
-        PackBitmapWriteError, PackBitmapWriteOptions, PackBitmapWriter, TypeBitmap,
+        BitmapError, BitmapIndex, CommitReachabilityBitmap, PackBitmapWriteError,
+        PackBitmapWriteOptions, PackBitmapWriter, TypeBitmap,
     };
 }
 
@@ -149,10 +164,11 @@ pub mod promisor {
 
 pub mod promisor_remote {
     //! Promisor remote configuration for partial clones.
+
     pub use crate::promisor_remote::{
         configured_promisor_remotes, lazy_fetch_order, PromisorAcceptPolicy, PromisorAdvertisement,
         PromisorConfigWarning, PromisorDecision, PromisorField, PromisorHandshake,
-        PromisorHandshakeOptions, PromisorRejection, PromisorReplyError,
+        PromisorHandshakeOptions, PromisorRejection,
     };
 }
 

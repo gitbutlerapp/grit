@@ -709,7 +709,7 @@ fn write_parsed_commit_log_patch<W: Write>(
 }
 
 /// Write commit header (author, date, indented message) after the `commit` line.
-pub fn write_commit_header_and_message<W: Write>(
+pub(crate) fn write_commit_header_and_message<W: Write>(
     out: &mut W,
     author_ident: &str,
     message: &str,
@@ -792,7 +792,8 @@ fn format_log_date(ident: &str) -> String {
 /// # Errors
 ///
 /// Propagates ODB reads and I/O errors.
-pub fn write_diff_entry_log_patch<W: Write>(
+#[cfg(test)]
+pub(crate) fn write_diff_entry_log_patch<W: Write>(
     out: &mut W,
     repo: &Repository,
     odb: &Odb,

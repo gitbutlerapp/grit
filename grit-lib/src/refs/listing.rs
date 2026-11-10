@@ -6,7 +6,7 @@
 //! - **Local lists** (`query_refs`, `query_listings_from_pairs`): patterns follow
 //!   `git for-each-ref` / `git branch --list` on the **short** ref name (suffix after
 //!   `refs/heads/`, `refs/tags/`, etc.), and a trailing `/` selects a directory prefix.
-//! - **Remote advertisements** ([`pattern_matches_ls_remote_pattern`]): patterns follow
+//! - **Remote advertisements** (`pattern_matches_ls_remote_pattern`): patterns follow
 //!   `git ls-remote` tail-match rules on the **full** ref name (`main` matches
 //!   `refs/heads/main`; `refs/tags/v1*` also matches `refs/tags/v1^{}`).
 //!
@@ -195,7 +195,7 @@ pub fn short_name_in_namespace(full_name: &str, namespace: &RefNamespace) -> Str
 
 /// Whether `full_ref_name` matches `pattern` using `git ls-remote` tail-match rules.
 #[must_use]
-pub fn pattern_matches_ls_remote_pattern(full_ref_name: &str, pattern: &str) -> bool {
+pub(crate) fn pattern_matches_ls_remote_pattern(full_ref_name: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
         return false;
     }
@@ -209,7 +209,7 @@ pub fn pattern_matches_ls_remote_pattern(full_ref_name: &str, pattern: &str) -> 
 /// An empty `patterns` slice means no pattern filter (all ref names pass). An explicit
 /// empty-string pattern (`patterns == [""]`) matches nothing, like `git ls-remote`.
 #[must_use]
-pub fn patterns_match_ls_remote(full_ref_name: &str, patterns: &[String]) -> bool {
+pub(crate) fn patterns_match_ls_remote(full_ref_name: &str, patterns: &[String]) -> bool {
     if patterns.is_empty() {
         return true;
     }

@@ -236,7 +236,7 @@ pub(crate) fn tree_diff_stat_parallel(
 /// # Errors
 ///
 /// Propagates object database read failures.
-pub fn tree_diff_structured_entry(
+pub(crate) fn tree_diff_structured_entry(
     odb: &Odb,
     entry: &DiffEntry,
     diff_options: &DiffOptions,
@@ -492,7 +492,7 @@ pub(crate) fn side_bytes_after_blob_read(
 /// # Errors
 ///
 /// Propagates object database and config errors.
-pub fn load_odb_blob_side_for_diff(
+pub(crate) fn load_odb_blob_side_for_diff(
     odb: &Odb,
     oid: &ObjectId,
     path: Option<&str>,
@@ -514,17 +514,6 @@ pub fn load_odb_blob_side_for_diff(
     odb.hot_path_metrics().record_blob_content_read();
     let data = odb.read(oid)?.data;
     Ok(side_bytes_after_blob_read(data, force_read_content))
-}
-
-/// Classify raw blob bytes for line diffs (NUL in the first 8 KiB ⇒ binary).
-#[must_use]
-pub fn bytes_for_diff(data: Vec<u8>) -> (SideBytes, bool) {
-    let size = data.len() as u64;
-    if crate::crlf::is_binary(&data) {
-        (SideBytes::unread(size), true)
-    } else {
-        (SideBytes::from_bytes(data), false)
-    }
 }
 
 #[cfg(test)]

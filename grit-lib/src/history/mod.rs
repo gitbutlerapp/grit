@@ -72,7 +72,7 @@ mod undo_work;
 
 pub use absorb::{
     format_hunk_range_header, AbsorbExcludedRef, AbsorbOptions, AbsorbPlan, HunkAssignment,
-    HunkRange, UnassignedHunk, UnassignedReason, DEFAULT_ABSORB_STACK_LIMIT,
+    HunkRange, UnassignedHunk, UnassignedReason,
 };
 pub use apply::RewriteApplyRecovery;
 pub(crate) use apply::{
@@ -88,17 +88,13 @@ pub use last::HistoryLastRecord;
 pub use planning_error::PlanningError;
 pub use r#move::Placement;
 pub(crate) use rebase::{plan_rebase_check, rebase_request_after_fetch};
-pub use rebase::{
-    resolve_rebase_use_fork_point, PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebasePlan,
-    RebaseRequest,
-};
+pub use rebase::{PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebasePlan, RebaseRequest};
 pub(crate) use rebase_session::{persist_rebase_stopped_head_if_missing, start_rebase};
 pub use rebase_session::{
     RebaseAbort, RebaseOutcome, RebaseSessionError, RebaseStop, StartRebaseOptions,
 };
 pub use reword::{normalize_rewrite_message, RewordOptions};
 pub use squash::{SquashMessage, SquashOptions};
-pub use subject::commit_message_subject_line;
 pub use types::{
     AppliedRewrite, ApplyOptions, CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, NewCommit,
     Pathspec, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,

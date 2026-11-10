@@ -1016,53 +1016,6 @@ impl std::fmt::Display for FilterPhase {
     }
 }
 
-/// Sparse-checkout cone pattern parse warnings (non-fatal).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SparseCheckoutWarning {
-    /// A cone pattern line was not recognized.
-    UnrecognizedPattern {
-        /// Raw pattern text from the sparse-checkout file.
-        pattern: String,
-    },
-    /// A negative cone pattern line was not recognized.
-    UnrecognizedNegativePattern {
-        /// Raw negative pattern text from the sparse-checkout file.
-        pattern: String,
-    },
-    /// The same cone pattern appears more than once in the sparse-checkout file.
-    RepeatedPattern {
-        /// Duplicated pattern text.
-        pattern: String,
-    },
-    /// Cone pattern matching was disabled due to invalid sparse-checkout contents.
-    DisablingConePatternMatching,
-}
-
-impl SparseCheckoutWarning {
-    /// Human-readable body without a `warning:` prefix.
-    #[must_use]
-    pub fn body(&self) -> String {
-        match self {
-            Self::UnrecognizedPattern { pattern } => {
-                format!("unrecognized pattern: '{pattern}'")
-            }
-            Self::UnrecognizedNegativePattern { pattern } => {
-                format!("unrecognized negative pattern: '{pattern}'")
-            }
-            Self::RepeatedPattern { pattern } => format!(
-                "your sparse-checkout file may have issues: pattern '{pattern}' is repeated"
-            ),
-            Self::DisablingConePatternMatching => "disabling cone pattern matching".to_owned(),
-        }
-    }
-
-    /// Git-style `warning: …` line.
-    #[must_use]
-    pub fn format_line(&self) -> String {
-        crate::diagnostics::warning_line(&self.body())
-    }
-}
-
 /// Unified diff / patch application errors.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]

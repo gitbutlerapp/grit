@@ -21,12 +21,6 @@ pub struct CaseCollisionGroup {
     pub paths: Vec<String>,
 }
 
-/// Whether `path` is listed in any [`CaseCollisionGroup`].
-#[must_use]
-pub fn path_in_worktree_case_collision(path: &str, groups: &[CaseCollisionGroup]) -> bool {
-    groups.iter().any(|g| g.paths.iter().any(|p| p == path))
-}
-
 /// All paths belonging to active work-tree case-collision groups.
 #[must_use]
 pub fn worktree_case_collision_paths(groups: &[CaseCollisionGroup]) -> HashSet<String> {
@@ -44,7 +38,7 @@ pub fn worktree_case_collision_paths(groups: &[CaseCollisionGroup]) -> HashSet<S
 /// # Errors
 ///
 /// Propagates repository, config, and work-tree hash failures.
-pub fn worktree_case_collision_groups(
+pub(crate) fn worktree_case_collision_groups(
     repo: &Repository,
     index: &Index,
 ) -> Result<Vec<CaseCollisionGroup>> {

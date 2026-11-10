@@ -31,7 +31,7 @@ use crate::state::resolve_head_for_repository;
 use crate::worktree_rules::WorktreeRules;
 
 /// Loaded index and HEAD tree for worktree mutation guards.
-pub struct WorktreeSnapshot {
+pub(crate) struct WorktreeSnapshot {
     /// Index with sparse-directory placeholders expanded.
     pub index: Index,
     /// Tree OID of the current HEAD commit, if any.
@@ -1652,7 +1652,7 @@ pub(crate) fn ensure_worktree_clean_for_rebase_exec(repo: &Repository) -> Result
 }
 
 /// Inputs for a branch switch or fast-forward checkout after cleanliness checks.
-pub struct TreeSwitchPlan {
+pub(crate) struct TreeSwitchPlan {
     /// Untracked paths under the work tree (normal untracked mode).
     pub untracked: Vec<String>,
     /// Tree diff from `from_tree` to `to_tree`.

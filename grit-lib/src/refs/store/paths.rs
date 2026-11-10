@@ -7,7 +7,7 @@ pub const PACKED_REFS: &str = "packed-refs";
 
 /// Relative path to `packed-refs` under a common directory.
 #[must_use]
-pub const fn packed_refs_rel() -> &'static str {
+pub(crate) const fn packed_refs_rel() -> &'static str {
     PACKED_REFS
 }
 

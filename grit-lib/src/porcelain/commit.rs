@@ -392,7 +392,7 @@ pub(crate) fn default_commit_scope(repo: &Repository) -> Result<CommitScope> {
 
 /// Read `commit.autoStage` (default true).
 #[must_use]
-pub fn default_commit_scope_from_config(config: &ConfigSet) -> CommitScope {
+pub(crate) fn default_commit_scope_from_config(config: &ConfigSet) -> CommitScope {
     let auto_stage = config
         .get_bool("commit.autoStage")
         .ok()

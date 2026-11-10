@@ -864,7 +864,7 @@ impl StatusHeader {
 
     /// Ref name for a `grit pull` hint: upstream when configured, otherwise target.
     ///
-    /// Prefer [`status_integration_hint`] for status footers; pull is not always the right action.
+    /// Prefer `status_integration_hint` for status footers; pull is not always the right action.
     #[must_use]
     pub fn pull_integration_ref(standing: &BranchStanding) -> Option<&str> {
         if let Some(up) = &standing.upstream {

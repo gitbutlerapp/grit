@@ -287,7 +287,7 @@ impl<'repo> Status<'repo> {
     /// # Errors
     ///
     /// Propagates repository, config, and work-tree failures from
-    /// [`crate::status::worktree_case_collision_groups`].
+    /// `crate::status::worktree_case_collision_groups`.
     ///
     /// # Examples
     ///

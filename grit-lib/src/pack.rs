@@ -5,7 +5,8 @@
 
 #![allow(dead_code)]
 
-pub use crate::pack_index::{PackIndex, PackIndexEntryRef};
+pub use crate::pack_index::PackIndex;
+pub use crate::pack_index::PackIndexEntryRef;
 
 use crate::error::ObjectError;
 #[cfg(test)]

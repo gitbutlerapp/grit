@@ -353,8 +353,9 @@ fn ipc_send_query(ipc_path: &Path, message: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Git `initialize_pipe_name` for fsmonitor IPC (testable on all platforms).
+#[cfg(any(windows, test))]
 #[must_use]
-pub fn git_style_windows_pipe_name_from_absolute_ipc(absolute_ipc_path: &str) -> String {
+pub(crate) fn git_style_windows_pipe_name_from_absolute_ipc(absolute_ipc_path: &str) -> String {
     let mut body = absolute_ipc_path.replace('\\', "/");
     if body.starts_with("//") {
         body = body[2..].to_string();

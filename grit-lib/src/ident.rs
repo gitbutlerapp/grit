@@ -318,7 +318,7 @@ impl std::str::FromStr for Signature {
 
 /// Successful parse of the trailing `<unix> <+HHMM>` portion of a signature.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedSignatureTimes {
+pub(crate) struct ParsedSignatureTimes {
     /// Seconds in the author/committer field (before tz offset).
     pub unix_seconds: i64,
     /// Signed offset in seconds (from `+HHMM` / `-HHMM`).
@@ -372,7 +372,7 @@ fn parse_tz_hhmm_offset(offset: &str) -> Option<i64> {
 
 /// Parse `<unix> <+HHMM>` after the closing `>` of the email (Git commit author/committer line).
 #[must_use]
-pub fn parse_signature_times(ident: &str) -> Option<ParsedSignatureTimes> {
+pub(crate) fn parse_signature_times(ident: &str) -> Option<ParsedSignatureTimes> {
     match parse_signature_tail(ident)? {
         SignatureTail::Valid(p) => Some(p),
         SignatureTail::Overflow | SignatureTail::NonNumeric => None,
@@ -381,7 +381,7 @@ pub fn parse_signature_times(ident: &str) -> Option<ParsedSignatureTimes> {
 
 /// Distinguishes a non-numeric date field from a numeric field that fails Git's overflow rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SignatureTail {
+pub(crate) enum SignatureTail {
     /// Well-formed timestamp and timezone.
     Valid(ParsedSignatureTimes),
     /// Digits and timezone present, but the number does not fit Git's `date_overflows` rules.
@@ -393,7 +393,7 @@ pub enum SignatureTail {
 
 /// Parse the date/time tail like [`parse_signature_times`], but preserve overflow vs non-numeric.
 #[must_use]
-pub fn parse_signature_tail(ident: &str) -> Option<SignatureTail> {
+pub(crate) fn parse_signature_tail(ident: &str) -> Option<SignatureTail> {
     let bytes = ident.as_bytes();
     let gt = ident.rfind('>')?;
     let mut i = skip_fsck_date_leading_ws(bytes, gt + 1);
@@ -457,7 +457,7 @@ fn parse_identity_name_email(ident: &str) -> Option<(String, String)> {
 }
 
 /// Classify the date field for pretty-print / `%at` (t4212 whitespace commits).
-pub fn signature_timestamp_for_pretty(ident: &str) -> SignatureTimestamp {
+pub(crate) fn signature_timestamp_for_pretty(ident: &str) -> SignatureTimestamp {
     match parse_signature_times(ident) {
         Some(p) => SignatureTimestamp::Valid(p.unix_seconds),
         None => SignatureTimestamp::Sentinel,
@@ -468,7 +468,7 @@ pub fn signature_timestamp_for_pretty(ident: &str) -> SignatureTimestamp {
 /// Sentinel timestamps (whitespace dates, overflow, etc.) behave like `0` for cutoff comparisons
 /// (see t4212 `rev-list --until`).
 #[must_use]
-pub fn committer_timestamp_for_until_filter(ident: &str) -> i64 {
+pub(crate) fn committer_timestamp_for_until_filter(ident: &str) -> i64 {
     match signature_timestamp_for_pretty(ident) {
         SignatureTimestamp::Valid(ts) => ts,
         SignatureTimestamp::Sentinel => 0,
@@ -512,7 +512,7 @@ pub fn committer_unix_seconds_for_ordering(ident: &str) -> i64 {
 
 /// Like [`committer_unix_seconds_for_ordering`] on raw identity bytes (ASCII commit headers).
 #[must_use]
-pub fn committer_unix_seconds_for_ordering_bytes(ident: &[u8]) -> i64 {
+pub(crate) fn committer_unix_seconds_for_ordering_bytes(ident: &[u8]) -> i64 {
     let Ok(ident) = std::str::from_utf8(ident) else {
         return 0;
     };
@@ -521,7 +521,7 @@ pub fn committer_unix_seconds_for_ordering_bytes(ident: &[u8]) -> i64 {
 
 /// Like [`committer_timestamp_for_until_filter`] on raw identity bytes (ASCII commit headers).
 #[must_use]
-pub fn committer_timestamp_for_until_filter_bytes(ident: &[u8]) -> i64 {
+pub(crate) fn committer_timestamp_for_until_filter_bytes(ident: &[u8]) -> i64 {
     let Ok(ident) = std::str::from_utf8(ident) else {
         return 0;
     };
@@ -619,7 +619,7 @@ pub fn parse_author_arg(raw: &str) -> Result<AuthorContact, AuthorArgError> {
 
 /// Build a full author/committer header line from a parsed contact and timestamp inputs.
 #[must_use]
-pub fn author_identity_line(
+pub(crate) fn author_identity_line(
     contact: &AuthorContact,
     date_override: Option<&str>,
     now: OffsetDateTime,
@@ -649,7 +649,7 @@ fn identity_contains_embedded_control(raw: &str) -> bool {
 
 /// Replace the `<unix> <±HHMM>` suffix on a full or contact-style identity line.
 #[must_use]
-pub fn replace_identity_date_suffix(identity: &str, date_suffix: &str) -> String {
+pub(crate) fn replace_identity_date_suffix(identity: &str, date_suffix: &str) -> String {
     let suffix = date_suffix.trim();
     if let Some((name, email)) = parse_identity_name_email(identity) {
         if email.is_empty() && !name.is_empty() && name.contains('@') {
@@ -673,7 +673,7 @@ pub fn replace_identity_date_suffix(identity: &str, date_suffix: &str) -> String
 ///
 /// Returns [`CommitIdentityError`] when the string is empty, contains embedded controls,
 /// or cannot be interpreted as a valid identity.
-pub fn prepare_commit_identity_line(
+pub(crate) fn prepare_commit_identity_line(
     raw: &str,
     date_override: Option<&str>,
     now: OffsetDateTime,

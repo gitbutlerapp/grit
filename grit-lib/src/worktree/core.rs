@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use crate::branch_tracking::write_branch_upstream_config;
 use crate::check_ref_format::RefName;
-use crate::config::ConfigSet;
 #[cfg(test)]
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
@@ -99,8 +98,9 @@ pub(crate) fn common_git_dir(git_dir: &Path) -> PathBuf {
 }
 
 /// Number of registered worktrees (main + linked entries under `worktrees/`).
+#[cfg(test)]
 #[must_use]
-pub fn registered_worktree_count(common: &Path) -> usize {
+fn registered_worktree_count(common: &Path) -> usize {
     let worktrees_dir = common.join("worktrees");
     if !worktrees_dir.is_dir() {
         return 1;
@@ -115,9 +115,10 @@ pub fn registered_worktree_count(common: &Path) -> usize {
 }
 
 /// Whether `common` is configured as a bare repository (`core.bare=true`).
+#[cfg(test)]
 #[must_use]
-pub fn is_bare_repository(common: &Path) -> bool {
-    ConfigSet::load(
+fn is_bare_repository(common: &Path) -> bool {
+    crate::config::ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(common),
         &crate::config::LoadConfigOptions::standard(

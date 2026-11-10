@@ -161,7 +161,7 @@ pub(crate) fn oid_hash_set_with_capacity(capacity: usize) -> OidHashSet {
 
 /// Shared empty OID set for borrow-only call sites (avoids per-call allocation).
 #[must_use]
-pub fn empty_oid_set() -> &'static OidHashSet {
+pub(crate) fn empty_oid_set() -> &'static OidHashSet {
     // hygiene: shared empty OID set singleton for borrow-only APIs
     static EMPTY: OnceLock<OidHashSet> = OnceLock::new();
     EMPTY.get_or_init(oid_hash_set)
@@ -169,7 +169,7 @@ pub fn empty_oid_set() -> &'static OidHashSet {
 
 /// Copy a standard OID set into an [`OidHashSet`].
 #[inline]
-pub fn oid_hash_set_from(set: &std::collections::HashSet<ObjectId>) -> OidHashSet {
+pub(crate) fn oid_hash_set_from(set: &std::collections::HashSet<ObjectId>) -> OidHashSet {
     let mut out = oid_hash_set_with_capacity(set.len());
     out.extend(set.iter().copied());
     out
@@ -177,7 +177,9 @@ pub fn oid_hash_set_from(set: &std::collections::HashSet<ObjectId>) -> OidHashSe
 
 /// Copy a standard OID map into an [`OidHashMap`].
 #[inline]
-pub fn oid_hash_map_from<V: Clone>(map: &std::collections::HashMap<ObjectId, V>) -> OidHashMap<V> {
+pub(crate) fn oid_hash_map_from<V: Clone>(
+    map: &std::collections::HashMap<ObjectId, V>,
+) -> OidHashMap<V> {
     let mut out = oid_hash_map_with_capacity(map.len());
     for (k, v) in map {
         out.insert(*k, v.clone());
@@ -187,18 +189,10 @@ pub fn oid_hash_map_from<V: Clone>(map: &std::collections::HashMap<ObjectId, V>)
 
 /// Shared empty standard OID set for public API boundaries (avoids per-call allocation).
 #[must_use]
-pub fn empty_object_id_hash_set() -> &'static std::collections::HashSet<ObjectId> {
+pub(crate) fn empty_object_id_hash_set() -> &'static std::collections::HashSet<ObjectId> {
     // hygiene: shared empty standard OID set for API boundaries
     static EMPTY: OnceLock<std::collections::HashSet<ObjectId>> = OnceLock::new();
     EMPTY.get_or_init(std::collections::HashSet::new)
-}
-
-/// Shared empty OID → bytes map for commit-graph filter tests and call sites.
-#[must_use]
-pub fn empty_oid_byte_filter_map() -> &'static OidHashMap<Vec<u8>> {
-    // hygiene: shared empty OID byte map for filter call sites
-    static EMPTY: OnceLock<OidHashMap<Vec<u8>>> = OnceLock::new();
-    EMPTY.get_or_init(oid_hash_map)
 }
 
 fn random_odd_multiplier() -> u64 {

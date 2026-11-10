@@ -119,25 +119,6 @@ pub fn presentation_hunks_from_tree(t: &TreeDiffStructured) -> Vec<AnnotatedStru
     )
 }
 
-/// Map a worktree [`FileChange`] into annotated hunks.
-#[must_use]
-pub fn presentation_hunks_from_file_change(
-    change: &FileChange,
-    options: DiffOptions,
-    side: DiffSide,
-    peer_hunks: &[StructuredHunk],
-    assign_hunk_ids: bool,
-) -> Vec<AnnotatedStructuredHunk> {
-    let structured = change.structured(options);
-    annotate_structured_hunks(
-        side,
-        &change.path,
-        structured.hunks,
-        peer_hunks,
-        assign_hunk_ids,
-    )
-}
-
 /// Line stat for a targets [`super::targets::FileDiff`] row under a given detail mode.
 #[must_use]
 pub fn line_stat_for_target_file(

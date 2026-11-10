@@ -1673,7 +1673,7 @@ pub fn parse_signed_buffer(buf: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
 
 /// Verify a raw tag object's appended signature.
 ///
-/// Mirrors [`verify_commit`] but uses [`parse_signed_buffer`] (tag signatures are
+/// Mirrors [`verify_commit`] but uses `parse_signed_buffer` (tag signatures are
 /// appended, not stored in a `gpgsig` header).  The verifier is chosen from the
 /// signature armor (`get_format_by_sig`), reusing the internal `verify_ssh_signed_buffer` helper
 /// for ssh and the gpg/gpgsm path otherwise.  Returns the "no signature" result

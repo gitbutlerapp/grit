@@ -52,7 +52,10 @@ pub(crate) use shorten::{
 
 mod domain_reexports;
 mod on_store;
-pub use domain_reexports::*;
+pub use domain_reexports::{
+    branch_tracking, check_ref_format, hide_refs, ref_namespace, ref_storage, reflog, refs_fsck,
+    refspec, reftable,
+};
 pub use handle::{DwimMatch, References};
 pub use on_store::update_branch_for_commit_on_store;
 pub(crate) use on_store::{
@@ -62,7 +65,11 @@ pub(crate) use on_store::{
 
 /// In-process ref-transaction and loose-object prune helpers.
 pub mod gc {
-    pub use crate::gc::*;
+
+    pub use crate::gc::{
+        prune_loose_unreachable, prune_loose_unreachable_with_dry_run, remote_default_branch_local,
+        update_refs, PruneStats, RefTransactionItem,
+    };
 }
 
 use crate::error::ObjectError;

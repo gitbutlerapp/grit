@@ -477,7 +477,7 @@ impl Ident {
     /// them (an integration's merge, a slice change): the author identity a
     /// commit gets, from `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, then
     /// `author.*`, then `user.*` (see
-    /// [`crate::config::ident_resolve::resolve_name_with`]).
+    /// the crate-internal `resolve_name_with` helper).
     ///
     /// # Parameters
     ///

@@ -33,7 +33,7 @@ pub fn error_line(body: &str) -> String {
 
 /// Prefix a body with Git's `fatal: ` diagnostic marker.
 #[must_use]
-pub fn fatal_line(body: &str) -> String {
+pub(crate) fn fatal_line(body: &str) -> String {
     ["fatal", ": ", body].concat()
 }
 

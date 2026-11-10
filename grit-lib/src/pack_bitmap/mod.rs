@@ -8,7 +8,7 @@ mod order;
 mod writer;
 
 pub use error::BitmapError;
-pub use index::{BitmapIndex, BitmapIndexCache, CommitReachabilityBitmap, TypeBitmap};
-pub use writer::{
-    MidxBitmapWriter, PackBitmapWriteError, PackBitmapWriteOptions, PackBitmapWriter,
-};
+pub(crate) use index::BitmapIndexCache;
+pub use index::{BitmapIndex, CommitReachabilityBitmap, TypeBitmap};
+pub(crate) use writer::MidxBitmapWriter;
+pub use writer::{PackBitmapWriteError, PackBitmapWriteOptions, PackBitmapWriter};

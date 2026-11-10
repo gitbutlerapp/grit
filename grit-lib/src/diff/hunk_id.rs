@@ -365,7 +365,7 @@ fn hunk_body_digest(hunk: &StructuredHunk) -> Vec<u8> {
 ///
 /// Used to limit opposite-side peer loading to paths that can affect duplicate hunk ids.
 #[must_use]
-pub fn peer_scope_includes_path(
+pub(crate) fn peer_scope_includes_path(
     display_path: &str,
     old_path: Option<&str>,
     primary: &HashSet<&str>,

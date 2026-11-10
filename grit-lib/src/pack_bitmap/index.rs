@@ -692,7 +692,7 @@ fn lookup_triplet_by_row(table: &[u8], row: u32) -> Option<LookupTriplet> {
 
 /// Repository-scoped cache slot for [`BitmapIndex::open`].
 #[derive(Default)]
-pub struct BitmapIndexCache {
+pub(crate) struct BitmapIndexCache {
     inner: std::sync::OnceLock<Option<Arc<BitmapIndex>>>,
 }
 

@@ -954,13 +954,13 @@ fn refs_to_delete_for_remote(
 
 /// Whether `remote.<name>.skipFetchAll` disables [`RepositoryRemotes::fetch_all`].
 #[must_use]
-pub fn remote_skip_fetch_all(config: &ConfigSet, remote: &str) -> bool {
+pub(crate) fn remote_skip_fetch_all(config: &ConfigSet, remote: &str) -> bool {
     config.bool_with_default(&format!("remote.{remote}.skipFetchAll"), false)
 }
 
 /// Remote names in merged config load order (first `remote.<name>.url` wins ordering).
 #[must_use]
-pub fn configured_remote_names_in_config_order(config: &ConfigSet) -> Vec<String> {
+pub(crate) fn configured_remote_names_in_config_order(config: &ConfigSet) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut names = Vec::new();
     for entry in config.entries() {
@@ -1060,7 +1060,7 @@ fn configured_remote_from_config(config: &ConfigSet, name: String) -> Configured
 /// This is the set Git treats as configured remotes (for listing and for refusing to
 /// add a duplicate), which is wider than [`configured_remote_names`].
 #[must_use]
-pub fn configured_remotes(config: &ConfigSet) -> Vec<ConfiguredRemote> {
+pub(crate) fn configured_remotes(config: &ConfigSet) -> Vec<ConfiguredRemote> {
     let mut names = BTreeSet::new();
     for entry in config.entries() {
         let Some(rest) = entry.key.strip_prefix("remote.") else {
@@ -1076,7 +1076,7 @@ pub fn configured_remotes(config: &ConfigSet) -> Vec<ConfiguredRemote> {
         .collect()
 }
 
-/// Whether any `remote.<name>.*` key exists (membership in [`configured_remotes`]).
+/// Whether any `remote.<name>.*` key exists (membership in `configured_remotes`).
 pub fn has_remote_section(config: &ConfigSet, name: &str) -> bool {
     config.entries().iter().any(|entry| {
         entry
@@ -1101,7 +1101,7 @@ pub(crate) fn has_local_remote_section(config: &ConfigSet, name: &str) -> bool {
 
 /// Collect remote subsection names that declare a `url` key.
 #[must_use]
-pub fn configured_remote_names(config: &ConfigSet) -> Vec<String> {
+pub(crate) fn configured_remote_names(config: &ConfigSet) -> Vec<String> {
     let mut names = BTreeSet::new();
     for entry in config.entries() {
         let Some(rest) = entry.key.strip_prefix("remote.") else {

@@ -738,7 +738,7 @@ pub fn path_matches_glob(path: &str, pattern: &str) -> bool {
 
 /// Like [`path_matches_glob`], but `path` and `pattern` are raw bytes (`pattern` trailing `/` trimmed).
 #[must_use]
-pub fn path_matches_glob_bytes(path: &[u8], pattern: &[u8]) -> bool {
+pub(crate) fn path_matches_glob_bytes(path: &[u8], pattern: &[u8]) -> bool {
     glob_match(path, trim_trailing_slash_bytes(pattern))
 }
 

@@ -154,7 +154,7 @@ where
 
 /// Legacy helper: returns true when parallel hashing is expected to beat a serial loop.
 #[must_use]
-pub fn parallel_worthwhile(
+pub(crate) fn parallel_worthwhile(
     item_count: usize,
     total_bytes: usize,
     threads: NonZeroUsize,

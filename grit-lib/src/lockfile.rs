@@ -194,7 +194,7 @@ impl LockJitter for SystemLockJitter {
 
 /// Wall-clock backoff using [`std::thread::sleep`].
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SystemLockClock;
+pub(crate) struct SystemLockClock;
 
 impl LockClock for SystemLockClock {
     fn now(&self) -> Instant {

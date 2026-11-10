@@ -73,7 +73,7 @@ pub struct WorkspaceRestoreOptions {}
 /// # Errors
 ///
 /// Returns [`crate::error::RefError::Invalid`] when `caller_id` produces an invalid refname.
-pub fn workspace_snapshot_pin_ref_name(caller_id: &str) -> Result<String> {
+pub(crate) fn workspace_snapshot_pin_ref_name(caller_id: &str) -> Result<String> {
     let name = format!("{WORKSPACE_SNAPSHOT_PIN_REF_PREFIX}{caller_id}");
     RefName::try_from(name.as_str()).map_err(|err| {
         Error::Ref(RefError::Invalid {

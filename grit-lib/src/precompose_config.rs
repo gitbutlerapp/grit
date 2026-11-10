@@ -242,7 +242,7 @@ pub fn argv_precompose_enabled(git_dir: Option<&Path>) -> bool {
 
 /// NFC-normalize for pathspec comparisons when the repo opts into precomposed Unicode storage.
 ///
-/// Prefer [`PathspecMatchContext::precompose_paths`](crate::pathspec::PathspecMatchContext::precompose_paths)
+/// Prefer `PathspecMatchContext::precompose_paths`
 /// on hot paths after opening a [`Repository`](crate::repo::Repository).
 #[must_use]
 pub fn pathspec_precompose_enabled() -> bool {

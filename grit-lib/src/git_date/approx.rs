@@ -272,11 +272,11 @@ fn approxidate_digit(date: &[u8], tm: &mut tm, num: &mut i32, now_sec: i64) -> u
 }
 
 /// Git `approxidate_careful` — returns Unix timestamp; on parse failure uses fuzzy parser.
-pub fn approxidate_careful(date: &str, error_ret: Option<&mut i32>) -> u64 {
+pub(crate) fn approxidate_careful(date: &str, error_ret: Option<&mut i32>) -> u64 {
     approxidate_careful_at(date, process_wall_clock_sec(), error_ret)
 }
 
-/// Like [`approxidate_careful`] but uses `now_sec` for relative fields.
+/// Like `approxidate_careful` but uses `now_sec` for relative fields.
 pub fn approxidate_careful_at(date: &str, now_sec: i64, error_ret: Option<&mut i32>) -> u64 {
     let mut dummy = 0;
     let er: &mut i32 = match error_ret {

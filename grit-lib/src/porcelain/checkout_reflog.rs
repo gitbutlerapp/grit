@@ -30,7 +30,7 @@ pub(crate) fn checkout_reflog_identity(repo: &Repository) -> String {
 
 /// `from` side of `checkout: moving from … to …` for the current `HEAD` state.
 #[must_use]
-pub fn checkout_reflog_from_label(head: &HeadState) -> Option<String> {
+pub(crate) fn checkout_reflog_from_label(head: &HeadState) -> Option<String> {
     match head {
         HeadState::Branch { short_name, .. } => Some(short_name.clone()),
         HeadState::Detached { oid } => Some(oid.to_hex()),
@@ -40,7 +40,7 @@ pub fn checkout_reflog_from_label(head: &HeadState) -> Option<String> {
 
 /// Source label for `branch: Created from …` after `grit branch` (implicit start at `HEAD`).
 #[must_use]
-pub fn branch_create_reflog_source_label(head: &HeadState) -> String {
+pub(crate) fn branch_create_reflog_source_label(head: &HeadState) -> String {
     match head {
         HeadState::Branch {
             short_name,
@@ -54,7 +54,7 @@ pub fn branch_create_reflog_source_label(head: &HeadState) -> String {
 
 /// Source label for `branch: Created from …` when `grit switch -c` supplies an explicit start point.
 #[must_use]
-pub fn switch_create_reflog_source_label(start_point: Option<&str>) -> String {
+pub(crate) fn switch_create_reflog_source_label(start_point: Option<&str>) -> String {
     match start_point {
         None => "HEAD".to_owned(),
         Some(spec) => spec.to_owned(),
