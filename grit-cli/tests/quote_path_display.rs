@@ -413,6 +413,94 @@ fn add_embedded_gitlink_warning_quotes_control_bytes_in_paths() {
 }
 
 #[test]
+fn stash_show_quotes_control_bytes_in_paths() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    config_repo(dir.path());
+
+    std::fs::write(dir.path().join("a"), "a\n").unwrap();
+    assert!(Command::new(GRIT)
+        .args(["commit", "-m", "a"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap()
+        .success());
+
+    let esc = "esc\x1b[31mred.txt";
+    let newline = "new\nline.txt";
+    let tab = "tab\there.txt";
+    std::fs::write(dir.path().join(esc), "x").unwrap();
+    std::fs::write(dir.path().join(newline), "x").unwrap();
+    std::fs::write(dir.path().join(tab), "x").unwrap();
+
+    assert!(Command::new(GRIT)
+        .args(["add"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new(GRIT)
+        .args(["stash"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap()
+        .success());
+
+    for args in [&["stash", "show"][..], &["stash", "show", "--markdown"][..]] {
+        let out = Command::new(GRIT)
+            .args(args)
+            .current_dir(dir.path())
+            .output()
+            .expect("grit stash show");
+        assert!(
+            out.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_no_raw_esc(&out.stdout, &format!("stash show {args:?}"));
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert_quoted_esc(&text, &format!("stash show {args:?}"));
+        assert!(
+            text.contains("\\n") || text.contains("new\\nline"),
+            "expected newline quoting in {args:?}:\n{text}"
+        );
+        assert!(
+            text.contains("\\t") || text.contains("tab\\there"),
+            "expected tab quoting in {args:?}:\n{text}"
+        );
+        assert!(
+            text.lines().filter(|l| l.contains("line.txt")).count() <= 1,
+            "newline in path must not split diffstat row in {args:?}:\n{text}"
+        );
+    }
+
+    let json = Command::new(GRIT)
+        .args(["stash", "show", "--json"])
+        .current_dir(dir.path())
+        .output()
+        .expect("stash show json");
+    assert!(json.status.success());
+    assert_no_raw_esc(&json.stdout, "stash show json");
+    let v: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
+    let paths: Vec<&str> = v["stat"]["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .filter_map(|f| f["path"].as_str())
+        .collect();
+    assert!(
+        paths.iter().any(|p| p.contains('\x1b')),
+        "json keeps raw esc"
+    );
+    assert!(paths.iter().any(|p| p.contains('\n')), "json keeps raw nl");
+    assert!(paths.iter().any(|p| p.contains('\t')), "json keeps raw tab");
+    assert!(
+        !paths.iter().any(|p| p.contains("\\033")),
+        "json paths must not be C-quoted: {paths:?}"
+    );
+}
+
+#[test]
 fn pull_markdown_merge_conflict_quotes_control_bytes_in_paths() {
     let root = tempfile::tempdir().expect("tempdir");
     let upstream = root.path().join("upstream");
