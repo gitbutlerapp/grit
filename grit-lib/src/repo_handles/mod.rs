@@ -30,6 +30,7 @@ mod workspace_snapshot;
 mod worktree;
 
 pub use crate::reflog::MessageMatcher;
+#[cfg(feature = "unstable-hosting")]
 pub use crate::snapshot_checkout::handle::RepositorySnapshotCheckouts;
 pub use branches::Branches;
 pub use bundle::RepositoryBundles;
@@ -57,6 +58,7 @@ pub use worktree::{LockWorktreeOptions, RepositoryWorktrees};
 /// Short alias for [`RepositoryBundles`].
 pub type Bundles<'repo> = RepositoryBundles<'repo>;
 /// Short alias for [`RepositorySnapshotCheckouts`].
+#[cfg(feature = "unstable-hosting")]
 pub type SnapshotCheckouts<'repo> = RepositorySnapshotCheckouts<'repo>;
 /// Short alias for [`RepositoryRemotes`].
 pub type Remotes<'repo> = RepositoryRemotes<'repo>;

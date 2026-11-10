@@ -62,7 +62,7 @@ Larger subsystems use [`repo_handles`](rustdoc:grit_lib::repo_handles):
 | `Repository::stash` | `RepositoryStash` | Stash list/push/apply/pop/drop/branch/clear (the one stash API) |
 | `Repository::notes` | `RepositoryNotes` | Notes list/read/add/remove via `NotesRef` |
 | `Repository::bundles` | `Bundles` | Bundle write/verify/list-heads/unbundle/fetch |
-| `Repository::snapshot_checkouts` | `SnapshotCheckouts` | Snapshot checkouts: make and project snapshots (server), refresh and check in (checkout) |
+| `Repository::snapshot_checkouts` | `SnapshotCheckouts` | Snapshot checkouts: make and project snapshots (server), refresh and check in (checkout). Only with the `unstable-hosting` feature, which is outside the semver promise |
 
 Transport options, the stash identity, and notes authors and committers are passed in as arguments on those methods (no hidden wall-clock reads in the handle layer).
 

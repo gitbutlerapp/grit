@@ -1126,6 +1126,9 @@ impl Repository {
 
     /// Snapshot-checkout operations for this repository: making and projecting snapshots
     /// on a server, and refreshing and checking in from a checkout.
+    ///
+    /// Only with the `unstable-hosting` feature, which is outside the semver promise.
+    #[cfg(feature = "unstable-hosting")]
     #[must_use]
     pub fn snapshot_checkouts(&self) -> crate::repo_handles::RepositorySnapshotCheckouts<'_> {
         crate::repo_handles::RepositorySnapshotCheckouts::new(self)

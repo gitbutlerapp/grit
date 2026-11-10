@@ -24,7 +24,8 @@ name = "grit-http-server"
 path = "src/main.rs"
 
 [dependencies]
-grit-lib = { version = "0.6", path = "../grit-lib" }
+# `unstable-hosting`: snapshot checkouts and server login are outside grit-lib's semver promise.
+grit-lib = { version = "0.6", path = "../grit-lib", features = ["unstable-hosting"] }
 grit-protocol = { version = "0.6", path = "../grit-protocol" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }

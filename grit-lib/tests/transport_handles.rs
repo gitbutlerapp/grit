@@ -600,6 +600,7 @@ fn upload_pack_stream_writes_the_objects_a_client_lacks() {
     assert_eq!(stats.object_count, 3);
 }
 
+#[cfg(feature = "unstable-hosting")]
 #[test]
 fn snapshot_checkouts_make_a_snapshot_of_the_target_branch() {
     let tmp = tempfile::tempdir().expect("tempdir");

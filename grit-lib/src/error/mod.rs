@@ -2139,6 +2139,7 @@ impl From<crate::serve::ServeError> for Error {
     }
 }
 
+#[cfg(feature = "unstable-hosting")]
 impl From<crate::snapshot_checkout::CheckoutError> for Error {
     fn from(err: crate::snapshot_checkout::CheckoutError) -> Self {
         Self::Remote(crate::remote::RemoteError::Snapshot(err))

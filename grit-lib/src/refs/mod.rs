@@ -2623,6 +2623,8 @@ pub(crate) fn test_commit(git_dir: &Path, message: &str) -> ObjectId {
 ///
 /// Returns [`crate::error::RefError::Invalid`] when `refname` is not safe for ref storage (e.g. path
 /// traversal under `refs/`), on a namespace conflict, or [`Error::Io`] on filesystem errors.
+// Only the snapshot-checkout code and unit tests write symbolic refs this way.
+#[cfg(any(test, feature = "unstable-hosting"))]
 pub(crate) fn write_symbolic_ref(
     git_dir: &Path,
     refname: impl AsRef<RefNameRef>,

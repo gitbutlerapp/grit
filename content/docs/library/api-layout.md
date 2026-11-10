@@ -35,7 +35,7 @@ Each [`Repository`](rustdoc:grit_lib::repo::Repository) accessor returns a handl
 | [`remotes`](rustdoc:grit_lib::repo::Repository::remotes) | [`Remotes`](rustdoc:grit_lib::repo_handles::Remotes) |
 | [`worktrees`](rustdoc:grit_lib::repo::Repository::worktrees) | [`Worktrees`](rustdoc:grit_lib::repo_handles::Worktrees) |
 | [`bundles`](rustdoc:grit_lib::repo::Repository::bundles) | [`Bundles`](rustdoc:grit_lib::repo_handles::Bundles) |
-| [`snapshot_checkouts`](rustdoc:grit_lib::repo::Repository::snapshot_checkouts) | [`SnapshotCheckouts`](rustdoc:grit_lib::repo_handles::SnapshotCheckouts) |
+| `snapshot_checkouts` (`unstable-hosting` feature only, outside semver) | `SnapshotCheckouts` |
 
 Use [`references`](rustdoc:grit_lib::repo::Repository::references) for resolve/list/update; the raw backend is [`references().store()`](rustdoc:grit_lib::refs::References::store) (same trait object as [`ref_store`](rustdoc:grit_lib::repo::Repository::ref_store)).
 

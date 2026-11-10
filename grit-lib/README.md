@@ -51,6 +51,7 @@ where noted). Highlights:
 | I/O helpers | `tempfile`, `memmap2`, `filetime` |
 | Errors | `thiserror` |
 | Optional HTTP (`http-ureq` feature) | `ureq`, `base64` |
+| Optional hosting (`unstable-hosting` feature) | `toml` |
 | Unix-only | `nix`, `rustix` |
 | Windows-only | `windows-sys` |
 
@@ -75,6 +76,14 @@ For smart-HTTP remotes:
 ```toml
 grit-lib = { version = "0.6", features = ["http-ureq"] }
 ```
+
+The `unstable-hosting` feature (off by default) adds the clients and server engine
+for grit hosting services: snapshot checkouts (`remote::snapshot_checkout`,
+`Repository::snapshot_checkouts`), grit-server login, share, space and sync
+(`remote::grit_server_*`) and GitHub device-flow sign-in (`remote::github_auth`).
+It is **unstable and outside semver**: these items may change or disappear in any
+release, including a patch release, so pin an exact `grit-lib` version if you
+enable it.
 
 ### Open a repository and read HEAD
 

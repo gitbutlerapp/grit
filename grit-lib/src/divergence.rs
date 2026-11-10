@@ -1,7 +1,8 @@
 //! What happened when two heads of one shared branch diverged.
 //!
 //! On a grit hosting server, every member of a shared branch has their own
-//! head of it ([`crate::remote::grit_server_share`]). When two heads have
+//! head of it (`remote::grit_server_share`, with the `unstable-hosting`
+//! feature). When two heads have
 //! each moved on from the last version both had (their **base**), this
 //! module works out, commit by commit, what each side did, and names the
 //! situation with one of a fixed set of [`Scenario`]s, so a person or an

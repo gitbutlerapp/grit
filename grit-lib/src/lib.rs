@@ -118,6 +118,7 @@
 //! | `http-ureq` | disabled | [`ureq`](https://docs.rs/ureq) HTTP client for smart-HTTP fetch/push (rustls) |
 //! | `http-ureq-native-tls` | disabled | Platform TLS for `http-ureq` (Secure Transport on macOS); use instead of rustls on Apple targets |
 //! | `test-support` | disabled | Unstable test_support module for workspace tests and internal tooling only (outside semver) |
+//! | `unstable-hosting` | disabled | **Unstable, outside semver.** Clients and server engine for grit hosting services: `remote::snapshot_checkout`, `remote::grit_server_{auth,share,space,sync}`, `remote::github_auth` and `Repository::snapshot_checkouts`. May change in any release, including patch releases; pin an exact version if you enable it |
 //!
 //! Enable HTTP in `Cargo.toml`:
 //!
@@ -184,10 +185,15 @@ pub mod error;
 mod ewah_bitmap;
 pub(crate) mod git_dir;
 pub mod gitbutler;
+#[cfg(feature = "unstable-hosting")]
 pub(crate) mod github_auth;
+#[cfg(feature = "unstable-hosting")]
 pub(crate) mod grit_server_auth;
+#[cfg(feature = "unstable-hosting")]
 pub(crate) mod grit_server_share;
+#[cfg(feature = "unstable-hosting")]
 pub(crate) mod grit_server_space;
+#[cfg(feature = "unstable-hosting")]
 pub(crate) mod grit_server_sync;
 mod heap;
 pub(crate) mod line_interner;
@@ -333,6 +339,7 @@ pub(crate) mod shared_repo;
 pub(crate) mod sideband_lines;
 pub(crate) mod signing;
 pub(crate) mod sigpipe;
+#[cfg(feature = "unstable-hosting")]
 pub(crate) mod snapshot_checkout;
 pub(crate) mod sparse_checkout;
 pub(crate) mod split_index;

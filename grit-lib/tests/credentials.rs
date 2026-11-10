@@ -29,6 +29,7 @@ use grit_lib::remote::credentials::{
     helper_config_value, Credential, CredentialProvider, HelperCredentialProvider,
     NON_INTERACTIVE_MESSAGE,
 };
+#[cfg(feature = "unstable-hosting")]
 use grit_lib::remote::github_auth::{github_token_credential, TOKEN_USERNAME};
 
 /// Run `git` in `dir`; returns `None` if git is unavailable.
@@ -319,6 +320,7 @@ fn git_config_add(dir: &Path, key: &str, value: &str) {
     );
 }
 
+#[cfg(feature = "unstable-hosting")]
 #[test]
 fn helpers_for_lists_applicable_helpers_in_load_order_with_reset() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -358,6 +360,7 @@ fn helpers_for_lists_applicable_helpers_in_load_order_with_reset() {
     );
 }
 
+#[cfg(feature = "unstable-hosting")]
 #[test]
 fn github_token_stored_by_grit_is_filled_and_erased_for_system_git() {
     let tmp = tempfile::tempdir().expect("tempdir");

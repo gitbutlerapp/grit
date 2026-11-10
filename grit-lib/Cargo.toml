@@ -38,6 +38,12 @@ http-ureq = ["dep:ureq", "dep:base64", "ureq?/rustls"]
 http-ureq-native-tls = ["http-ureq", "ureq?/native-tls"]
 # Unstable test hooks for the workspace; outside semver — dev-dependencies and internal crates only.
 test-support = []
+# Client and server-engine APIs for grit hosting services (`remote::snapshot_checkout`,
+# `remote::grit_server_{auth,share,space,sync}`, `remote::github_auth`,
+# `Repository::snapshot_checkouts`). Off by default and OUTSIDE the semver promise: these
+# items may change or disappear in any release, including patch releases. For grit's own
+# crates; pin an exact grit-lib version if you enable it.
+unstable-hosting = ["dep:toml"]
 # Forward `trace_span!` to the `tracing` crate (zero cost when disabled).
 tracing = ["dep:tracing"]
 # Derive or implement `serde::Serialize` on result models (`StatusModel`, `DiffEntry`,
@@ -56,7 +62,7 @@ tracing = { version = "0.1", optional = true, default-features = false, features
 thiserror.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-toml.workspace = true
+toml = { workspace = true, optional = true }
 sha1 = "0.11"
 sha1dc.workspace = true
 sha2 = "0.11"

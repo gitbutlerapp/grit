@@ -62,6 +62,7 @@ pub mod credentials {
         HelperCredentialProvider, HelperValueError, NON_INTERACTIVE_MESSAGE,
     };
 }
+#[cfg(feature = "unstable-hosting")]
 pub mod github_auth {
     //! GitHub device-flow authentication helpers.
     pub use crate::github_auth::{
@@ -74,6 +75,7 @@ pub mod push_bundle {
     //! Resumable push bundle upload path suffix (smart HTTP servers).
     pub use crate::push_bundle::RECEIVE_SUFFIX;
 }
+#[cfg(feature = "unstable-hosting")]
 pub mod snapshot_checkout {
     //! snapshot checkout API (re-exported at this path).
 
@@ -111,6 +113,7 @@ pub mod bundle_uri {
         bundle_cache_path, BundleList, BundleListEntry, BundleListMode, BundleSeed,
     };
 }
+#[cfg(feature = "unstable-hosting")]
 pub mod grit_server_auth {
     //! grit_server_auth API (re-exported at this path).
 
@@ -120,6 +123,7 @@ pub mod grit_server_auth {
         AUTHORIZE_PATH, IDENTITY_PATH, LOGIN_PATH, LOGIN_POLL_PATH,
     };
 }
+#[cfg(feature = "unstable-hosting")]
 pub mod grit_server_share {
     //! grit_server_share API (re-exported at this path).
     pub use crate::grit_server_share::{
@@ -130,6 +134,7 @@ pub mod grit_server_share {
     };
 }
 
+#[cfg(feature = "unstable-hosting")]
 pub mod grit_server_sync {
     //! Sync report flags for a grit hosting space.
     pub use crate::grit_server_sync::{
@@ -138,6 +143,7 @@ pub mod grit_server_sync {
     };
 }
 
+#[cfg(feature = "unstable-hosting")]
 pub mod grit_server_space {
     //! grit_server_space API (re-exported at this path).
     pub use crate::grit_server_space::{

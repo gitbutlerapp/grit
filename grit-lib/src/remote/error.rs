@@ -191,6 +191,9 @@ pub enum RemoteError {
         detail: String,
     },
     /// A snapshot checkout from a grit server failed for a server-specific reason.
+    ///
+    /// Only with the `unstable-hosting` feature, which is outside the semver promise.
+    #[cfg(feature = "unstable-hosting")]
     #[error(transparent)]
     Snapshot(crate::snapshot_checkout::CheckoutError),
     /// Clone-specific failure (destination not empty, missing `--branch` ref, failed checkout).
@@ -256,6 +259,7 @@ impl RemoteError {
             Self::Credential { .. } => "credential",
             Self::Bundle(_) => "bundle",
             Self::Clone(_) => "clone",
+            #[cfg(feature = "unstable-hosting")]
             Self::Snapshot(_) => "snapshot",
         }
     }
