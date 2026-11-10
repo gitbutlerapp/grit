@@ -1060,22 +1060,62 @@ fn lookup_or_create_child<'a>(
     &mut parent.dirs[n]
 }
 
-pub(crate) fn valid_cached_dir(ucd: &UntrackedCacheDir, abs: &Path, check_only: bool) -> bool {
-    if !ucd.valid {
+#[cfg(windows)]
+fn stat_data_from_parent_listing(
+    listing_cache: &crate::windows_dir_listing::WorktreeListingCache,
+    abs: &Path,
+) -> Option<StatDataDisk> {
+    let parent = abs.parent()?;
+    let file_name = abs.file_name()?;
+    let name_bytes = file_name.as_encoded_bytes();
+    let listing = listing_cache.listing(parent, 0).ok()?;
+    let entry = crate::worktree_scan::matching_listed_entry(&listing, &name_bytes)?;
+    if !entry.stat.is_dir {
+        return None;
+    }
+    Some(StatDataDisk {
+        mtime_sec: entry.stat.fields.untr_cache_mtime_sec(),
+        size: entry.stat.fields.index_size(),
+        ..Default::default()
+    })
+}
+
+pub(crate) fn valid_cached_dir(
+    ucd: &UntrackedCacheDir,
+    abs: &Path,
+    check_only: bool,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
+) -> bool {
+    if !ucd.valid || ucd.check_only != check_only {
         return false;
+    }
+    #[cfg(not(windows))]
+    let _ = listing_cache;
+    #[cfg(windows)]
+    if let Some(cache) = listing_cache {
+        if let Some(listed) = stat_data_from_parent_listing(cache, abs) {
+            if listed == ucd.stat_data {
+                return true;
+            }
+        }
     }
     let meta = match fs::symlink_metadata(abs) {
         Ok(m) => m,
         Err(_) => return false,
     };
-    stat_data_from_meta(&meta) == ucd.stat_data && ucd.check_only == check_only
+    stat_data_from_meta(&meta) == ucd.stat_data
 }
 
 /// Every cached directory node used on the UNTR fast path must still match on-disk stat data.
 ///
 /// Matches [`collect_untracked_from_cache`] and Git `read_cached_dir`: do not recurse into
 /// `check_only` subtrees (only validate each `check_only` entry at its boundary).
-fn cached_untr_tree_still_valid(work_tree: &Path, ucd: &UntrackedCacheDir, rel: &str) -> bool {
+fn cached_untr_tree_still_valid(
+    work_tree: &Path,
+    ucd: &UntrackedCacheDir,
+    rel: &str,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
+) -> bool {
     if !ucd.valid {
         return false;
     }
@@ -1084,7 +1124,7 @@ fn cached_untr_tree_still_valid(work_tree: &Path, ucd: &UntrackedCacheDir, rel: 
     } else {
         work_tree.join(rel)
     };
-    if !valid_cached_dir(ucd, &abs, ucd.check_only) {
+    if !valid_cached_dir(ucd, &abs, ucd.check_only, listing_cache) {
         return false;
     }
     for child in &ucd.dirs {
@@ -1095,12 +1135,14 @@ fn cached_untr_tree_still_valid(work_tree: &Path, ucd: &UntrackedCacheDir, rel: 
         };
         let child_abs = work_tree.join(&child_rel);
         if child.check_only {
-            if !valid_cached_dir(child, &child_abs, true) {
+            if !valid_cached_dir(child, &child_abs, true, listing_cache) {
                 return false;
             }
             continue;
         }
-        if child.recurse && !cached_untr_tree_still_valid(work_tree, child, &child_rel) {
+        if child.recurse
+            && !cached_untr_tree_still_valid(work_tree, child, &child_rel, listing_cache)
+        {
             return false;
         }
     }
@@ -1131,6 +1173,7 @@ pub(crate) fn try_untracked_from_valid_cache(
     config: &ConfigSet,
     uc: &mut UntrackedCache,
     show_all_untracked: bool,
+    listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
 ) -> Result<Option<Vec<String>>> {
     let requested_flags = if show_all_untracked {
         0u32
@@ -1143,7 +1186,7 @@ pub(crate) fn try_untracked_from_valid_cache(
     let Some(root) = uc.root.as_ref() else {
         return Ok(None);
     };
-    if !cached_untr_tree_still_valid(work_tree, root, "") {
+    if !cached_untr_tree_still_valid(work_tree, root, "", listing_cache) {
         return Ok(None);
     }
     let gitignore_gen = uc.gitignore_invalidated;
@@ -1346,7 +1389,7 @@ fn read_directory_recursive(
         do_invalidate_gitignore(ucd);
     }
 
-    let use_disk = !valid_cached_dir(ucd, abs, check_only);
+    let use_disk = !valid_cached_dir(ucd, abs, check_only, listing_cache);
     let mut src = if use_disk {
         invalidate_directory(uc, ucd);
         uc.dir_opened += 1;
@@ -1651,7 +1694,7 @@ fn visit_untracked_directory_uc(
             .iter()
             .find(|d| d.name == name && d.check_only)
             .and_then(|target| parent_ucd.dirs.iter().position(|d| std::ptr::eq(d, target)))
-            .filter(|&idx| valid_cached_dir(&parent_ucd.dirs[idx], abs, true));
+            .filter(|&idx| valid_cached_dir(&parent_ucd.dirs[idx], abs, true, listing_cache));
         if let Some(idx) = reuse_collapsed_index {
             let candidate = &parent_ucd.dirs[idx];
             let has_visible =

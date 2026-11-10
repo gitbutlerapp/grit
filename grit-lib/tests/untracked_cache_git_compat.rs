@@ -218,8 +218,8 @@ fn try_untracked_from_valid_cache_rejects_invalid_root() {
     .expect("refresh");
     uc.root.as_mut().expect("root").valid = false;
 
-    let fast =
-        try_untracked_from_valid_cache(&repo, wt, cfg.as_ref(), &mut uc, false).expect("try cache");
+    let fast = try_untracked_from_valid_cache(&repo, wt, cfg.as_ref(), &mut uc, false, None)
+        .expect("try cache");
     assert!(
         fast.is_none(),
         "invalid UNTR root must decline cache reuse, got {fast:?}"

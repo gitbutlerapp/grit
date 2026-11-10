@@ -143,6 +143,32 @@ pub(crate) enum AncestorKind {
     Other,
 }
 
+/// Classify one path component using its parent's cached `FindFirstFileEx` listing (#2584).
+#[cfg(windows)]
+pub(crate) fn ancestor_kind_from_parent_listing(
+    listing_cache: &crate::windows_dir_listing::WorktreeListingCache,
+    abs_parent: &Path,
+    component: &[u8],
+) -> AncestorKind {
+    use crate::windows_dir_listing::read_listing_cached;
+
+    match read_listing_cached(Some(listing_cache), abs_parent, 0) {
+        Ok(listing) => {
+            let Some(entry) = matching_listed_entry(&listing, component) else {
+                return AncestorKind::Other;
+            };
+            if entry.stat.reparse_point {
+                AncestorKind::Symlink
+            } else if entry.stat.is_dir {
+                AncestorKind::Directory
+            } else {
+                AncestorKind::Other
+            }
+        }
+        Err(_) => AncestorKind::Other,
+    }
+}
+
 /// Classify `path` with one metadata query, without following a final symlink.
 ///
 /// On Windows, `symlink_metadata` opens a handle per call, which dominates status on large
@@ -1644,7 +1670,7 @@ fn dir_entry_name_matches(index_file_name: &[u8], entry: &fs::DirEntry) -> bool 
 }
 
 #[cfg(windows)]
-fn listed_name_matches(index_file_name: &[u8], disk_name: &[u8]) -> bool {
+pub(crate) fn listed_name_matches(index_file_name: &[u8], disk_name: &[u8]) -> bool {
     if disk_name == index_file_name {
         return true;
     }
@@ -1659,7 +1685,7 @@ fn listed_name_matches(index_file_name: &[u8], disk_name: &[u8]) -> bool {
 
 /// Resolve a directory listing entry for `index_file_name`, including case-insensitive matches.
 #[cfg(windows)]
-fn matching_listed_entry<'a>(
+pub(crate) fn matching_listed_entry<'a>(
     on_disk: &'a crate::windows_dir_listing::WindowsDirListing,
     index_file_name: &[u8],
 ) -> Option<&'a crate::windows_dir_listing::WindowsListedEntry> {
