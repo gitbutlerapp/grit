@@ -570,6 +570,75 @@ pub(crate) fn path_without_verbatim_prefix(path: &Path) -> Cow<'_, Path> {
 #[cfg(any(windows, test))]
 const WIN32_MAX_PATH_UNITS: usize = 259;
 
+/// Whether `path` looks like an absolute Win32 path (including on non-Windows test hosts).
+#[cfg(any(windows, test))]
+fn looks_like_windows_absolute(path: &str) -> bool {
+    if path.starts_with(r"\\") {
+        return true;
+    }
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+}
+
+/// Whether an absolute path exceeds [`WIN32_MAX_PATH_UNITS`] in UTF-16 units (without counting a
+/// `\\?\` prefix toward the limit).
+#[cfg(any(windows, test))]
+pub(crate) fn win32_absolute_path_exceeds_max_path(path: &Path) -> bool {
+    let Some(s) = path.to_str() else {
+        return false;
+    };
+    let plain = strip_verbatim_path_prefix_str(s);
+    if !path.is_absolute() && !looks_like_windows_absolute(&plain) {
+        return false;
+    }
+    plain.replace('/', "\\").encode_utf16().count() > WIN32_MAX_PATH_UNITS
+}
+
+/// String form of [`win32_file_api_path`] (unit-tested on every host).
+#[cfg(any(windows, test))]
+#[must_use]
+fn win32_file_api_path_str(path: &str) -> Cow<'_, str> {
+    if path.starts_with(r"\\?\") {
+        return Cow::Borrowed(path);
+    }
+    if !Path::new(path).is_absolute() && !looks_like_windows_absolute(path) {
+        return Cow::Borrowed(path);
+    }
+    let normalized = path.replace('/', "\\");
+    if normalized.encode_utf16().count() <= WIN32_MAX_PATH_UNITS {
+        return Cow::Owned(normalized);
+    }
+    if let Some(rest) = normalized.strip_prefix(r"\\") {
+        return Cow::Owned(format!(r"\\?\UNC\{rest}"));
+    }
+    Cow::Owned(format!(r"\\?\{normalized}"))
+}
+
+/// Absolute path spelling for Win32 file APIs (`FindFirstFileExW`, `GetFileAttributesW`, …).
+///
+/// Relative paths and paths that already use `\\?\` or `\\?\UNC\` are unchanged (aside from slash
+/// normalization when an extended prefix is added). Only absolute paths whose UTF-16 length
+/// exceeds [`WIN32_MAX_PATH_UNITS`] gain the extended-length prefix, with `/` turned into `\`
+/// because `\\?\` disables `.` / `..` normalization.
+#[cfg(any(windows, test))]
+#[must_use]
+pub(crate) fn win32_file_api_path(path: &Path) -> PathBuf {
+    #[cfg(not(windows))]
+    {
+        return path.to_path_buf();
+    }
+    #[cfg(windows)]
+    {
+        let Some(s) = path.to_str() else {
+            return path.to_path_buf();
+        };
+        PathBuf::from(win32_file_api_path_str(s).into_owned())
+    }
+}
+
 /// Win32 spelling of a verbatim drive (`\\?\C:\…`) or UNC (`\\?\UNC\server\share\…`) path.
 ///
 /// Returns `None` when `path` is not one of those forms, or when dropping the prefix would
@@ -1012,6 +1081,56 @@ mod git_path_component_tests {
             r"\\server\share\dir"
         );
         assert_eq!(strip_verbatim_path_prefix_str(r"C:\tmp\p"), r"C:\tmp\p");
+    }
+
+    #[test]
+    fn win32_file_api_path_leaves_short_and_relative_paths() {
+        assert_eq!(win32_file_api_path_str("rel.txt").as_ref(), "rel.txt");
+        assert_eq!(
+            win32_file_api_path_str(r"C:\srv\file.txt").as_ref(),
+            r"C:\srv\file.txt"
+        );
+        assert_eq!(
+            win32_file_api_path_str(r"\\?\C:\srv\file.txt").as_ref(),
+            r"\\?\C:\srv\file.txt"
+        );
+    }
+
+    #[test]
+    fn win32_file_api_path_adds_verbatim_prefix_when_too_long() {
+        let tail = "d".repeat(WIN32_MAX_PATH_UNITS - r"C:\".len() + 1);
+        let drive = format!(r"C:\{tail}\file.txt");
+        assert_eq!(
+            win32_file_api_path_str(&drive).as_ref(),
+            format!(r"\\?\{drive}")
+        );
+        let unc_tail = "d".repeat(WIN32_MAX_PATH_UNITS - r"\\srv\share\".len() + 1);
+        let unc = format!(r"\\srv\share\{unc_tail}\file.txt");
+        assert_eq!(
+            win32_file_api_path_str(&unc).as_ref(),
+            format!(r"\\?\UNC\srv\share\{unc_tail}\file.txt")
+        );
+    }
+
+    #[test]
+    fn win32_file_api_path_normalizes_slashes_for_verbatim_paths() {
+        let tail = "d".repeat(WIN32_MAX_PATH_UNITS - r"C:\".len() + 1);
+        let drive = format!("C:/{tail}/file.txt");
+        assert_eq!(
+            win32_file_api_path_str(&drive).as_ref(),
+            format!(r"\\?\C:\{tail}\file.txt")
+        );
+    }
+
+    #[test]
+    fn win32_absolute_path_exceeds_max_path_detects_length() {
+        let short = Path::new(r"C:\short\file.txt");
+        assert!(!win32_absolute_path_exceeds_max_path(short));
+        let tail = "d".repeat(WIN32_MAX_PATH_UNITS - r"C:\".len() + 1);
+        let long = PathBuf::from(format!(r"C:\{tail}\file.txt"));
+        assert!(win32_absolute_path_exceeds_max_path(&long));
+        let verbatim = PathBuf::from(format!(r"\\?\C:\{tail}\file.txt"));
+        assert!(win32_absolute_path_exceeds_max_path(&verbatim));
     }
 
     #[test]

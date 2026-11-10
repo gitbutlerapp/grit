@@ -2058,6 +2058,8 @@ mod status_guidance_git_compat;
 mod status_ignored_collapse_git_compat;
 #[path = "status_index_refresh_race.rs"]
 mod status_index_refresh_race;
+#[path = "status_long_path_windows_2586.rs"]
+mod status_long_path_windows_2586;
 #[cfg(feature = "full-tests")]
 #[path = "status_merge_conflicts_git_compat.rs"]
 mod status_merge_conflicts_git_compat;
