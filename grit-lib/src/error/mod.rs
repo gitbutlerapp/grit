@@ -161,6 +161,7 @@ impl PathIoError {
 
 /// Why a Git config numeric value was rejected (`git config int` strict parsing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BadNumericSource {
     /// Suffix unit letter is invalid or missing where required.
     InvalidUnit,
@@ -185,6 +186,7 @@ impl std::fmt::Display for BadNumericSource {
 
 /// Why a tree transition would overwrite existing worktree content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum OverwriteReason {
     /// Staged or unstaged edits on paths that differ between trees.
     LocalChanges,

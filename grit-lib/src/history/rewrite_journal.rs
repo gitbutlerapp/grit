@@ -66,6 +66,7 @@ impl RewriteApplyKind {
 
 /// Outcome of [`History::recover_interrupted_apply`](crate::history::History::recover_interrupted_apply).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RewriteApplyRecovery {
     /// Ref tips already matched the planned result; the worktree checkout was completed.
     FinishedCheckout,

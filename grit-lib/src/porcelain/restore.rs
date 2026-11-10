@@ -49,6 +49,7 @@ pub enum ConflictSide {
 
 /// Where explicit `--source` content comes from; default targets use the index or `HEAD`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RestoreSource {
     /// Restore the working tree from the index (default when `--source` is omitted).
     Index,

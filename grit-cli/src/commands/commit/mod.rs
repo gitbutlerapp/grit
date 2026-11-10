@@ -497,6 +497,8 @@ fn scope_json(scope: &CommitScope) -> CommitScopeJson {
         CommitScope::Staged => CommitScopeJson::Staged,
         CommitScope::Paths(_) => CommitScopeJson::Paths,
         CommitScope::Patch { .. } => CommitScopeJson::Patch,
+        // The CLI only builds the scopes above.
+        _ => CommitScopeJson::Staged,
     }
 }
 

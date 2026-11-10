@@ -64,6 +64,7 @@ impl fmt::Debug for PackObjectSelection {
 
 /// How client `haves` bound the want-side object walk.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HaveBoundary {
     /// Pre-walk all commits reachable from every `have` before the want walk.
     #[default]

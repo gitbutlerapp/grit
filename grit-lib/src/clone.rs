@@ -281,6 +281,7 @@ impl CloneOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum CloneHead {
     /// Checked out on a local branch that tracks the remote.
     Branch(String),
@@ -323,6 +324,7 @@ impl CloneHead {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum CloneCheckout {
     /// The default branch tip was fetched and should be checked out.
     CheckedOut(ObjectId),

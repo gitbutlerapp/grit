@@ -232,6 +232,7 @@ pub enum FastForwardPolicy {
 
 /// Whether integration stops before creating a commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum MergeCommitMode {
     /// Create a merge commit (or fast-forward) on success without conflicts.
     #[default]
@@ -345,12 +346,14 @@ impl Default for MergePredictionOptions {
 
 /// In-memory prediction of merging `other_oid` into the commit `into_oid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MergePrediction {
     /// The current tip already contains the other side.
     UpToDate,
     /// The current tip could fast-forward to the other side.
     FastForward,
     /// A three-way merge would succeed; `tree` is the merged result tree OID.
+    #[non_exhaustive]
     Clean {
         /// Merged tree OID: the same id `git merge-tree --write-tree` prints.
         ///
@@ -360,6 +363,7 @@ pub enum MergePrediction {
         tree: ObjectId,
     },
     /// A three-way merge would stop with conflicts.
+    #[non_exhaustive]
     Conflicts {
         /// Conflicted paths and kinds (same classification as a real merge).
         conflicts: Vec<Conflict>,
@@ -549,10 +553,12 @@ fn merge_commit_trees(
 /// Planned merge of `other_oid` into `into_oid` without touching refs, the index, merge state,
 /// or the working tree (same in-memory three-way merge as [`predict_merge`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MergeDryRunPlan {
     /// The current tip already contains the other side.
     UpToDate,
     /// The branch ref would move to `tip` (fast-forward).
+    #[non_exhaustive]
     FastForward {
         /// Tip commit the current branch would become.
         tip: ObjectId,
@@ -562,11 +568,13 @@ pub enum MergeDryRunPlan {
     /// `--ff-only` would refuse because histories diverged.
     RefusedNotFf,
     /// A two-parent merge commit would be recorded (tree merge already succeeded).
+    #[non_exhaustive]
     MergeCommit {
         /// Parent commits of the merge commit (current tip, then merged branch).
         parents: Vec<ObjectId>,
     },
     /// The three-way merge would stop with conflicts.
+    #[non_exhaustive]
     Conflicts {
         /// Conflicted paths and kinds (same classification as a real merge).
         conflicts: Vec<Conflict>,
@@ -628,6 +636,7 @@ pub(crate) fn plan_branch_merge(
 
 /// What kind of name a merge source was given by ([`resolve_merge_source`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MergeSourceKind {
     /// A local branch (`refs/heads/<name>`).
     LocalBranch,
@@ -878,10 +887,12 @@ impl From<IntegrateBranchOptions> for MergeOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum IntegrateBranchOutcome {
     /// The current branch already contains the other tip.
     UpToDate,
     /// The current branch fast-forwarded to the other tip.
+    #[non_exhaustive]
     FastForward {
         /// New branch tip after the fast-forward.
         oid: ObjectId,
@@ -889,6 +900,7 @@ pub enum IntegrateBranchOutcome {
         change_id: Option<ChangeId>,
     },
     /// A merge commit was created without conflicts.
+    #[non_exhaustive]
     Merged {
         /// New merge commit OID.
         oid: ObjectId,
@@ -896,6 +908,7 @@ pub enum IntegrateBranchOutcome {
         change_id: Option<ChangeId>,
     },
     /// The merge has conflicts; the repository is left in a merge-in-progress state.
+    #[non_exhaustive]
     Conflicts {
         /// Conflicted paths in repository-relative form, sorted and deduplicated.
         paths: Vec<String>,

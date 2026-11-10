@@ -64,6 +64,7 @@ pub(crate) fn is_valid_remote_name(name: &str) -> bool {
 
 /// A parsed remote URL by transport kind.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RemoteUrl {
     /// Scheme-less or relative filesystem path (not `file://`).
     Local(PathBuf),

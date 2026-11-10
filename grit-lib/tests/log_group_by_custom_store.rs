@@ -259,6 +259,7 @@ fn memory_store_author_groups_match_the_files_backend() {
     {
         CommitGraphBuild::Built(graph) => graph,
         CommitGraphBuild::Skipped(reason) => panic!("graph skipped: {reason:?}"),
+        other => panic!("unexpected commit-graph result: {other:?}"),
     };
     let chain = Arc::new(graph.to_chain().expect("graph chain"));
     let memory_with_graph = fixture.open_memory(|odb| odb.commit_graph(chain));

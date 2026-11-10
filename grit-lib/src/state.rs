@@ -127,6 +127,7 @@ impl HeadState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum InProgressOperation {
     /// A merge is in progress (`MERGE_HEAD` exists).
     Merge,
@@ -168,6 +169,7 @@ impl InProgressOperation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum NextStep {
     /// Edit conflicted files in the worktree (inspect with `grit diff`).
     ResolveConflicts,

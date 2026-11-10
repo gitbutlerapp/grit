@@ -111,6 +111,7 @@ use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum ConfigScope {
     /// System-wide configuration (`/etc/gitconfig`).
     System,
@@ -169,6 +170,7 @@ pub struct ConfigEntry {
 
 /// Where a [`ConfigFile`] was loaded from for Git include semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConfigIncludeOrigin {
     /// Normal path on disk (`-f`, global/local config files, etc.).
     Disk,

@@ -33,6 +33,7 @@ pub use crate::remote::DEFAULT_REMOTE;
 
 /// How non-fast-forward updates are allowed during a push.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ForceMode {
     /// Reject non-fast-forward updates (default).
     #[default]
@@ -45,6 +46,7 @@ pub enum ForceMode {
 
 /// What a force-with-lease push compares the remote ref against.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LeaseExpectation {
     /// Use the local remote-tracking ref mapped from the push destination.
     Tracking,
@@ -102,6 +104,7 @@ pub struct ResolvedPush {
 
 /// JSON / CLI classification of what was pushed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PushPlanKind {
     /// Default push of the current branch (or a single mapped branch).
     Branch,

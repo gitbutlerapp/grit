@@ -84,8 +84,10 @@ pub struct RebaseStop {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum RebaseOutcome {
     /// Every commit was replayed and ref updates were applied.
+    #[non_exhaustive]
     Done {
         /// Ref movements performed on completion.
         applied: AppliedRewrite,
@@ -104,6 +106,7 @@ pub enum RebaseOutcome {
     /// `--exec` commands ran at every replayed commit (from
     /// [`History::start_rebase`](super::History::start_rebase) with
     /// [`StartRebaseOptions::exec`], or a resumed exec stop) and the atomic plan was applied.
+    #[non_exhaustive]
     ExecDone {
         /// Ref movements performed on completion.
         applied: AppliedRewrite,

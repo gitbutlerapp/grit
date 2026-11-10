@@ -41,6 +41,7 @@ use crate::wildmatch::{wildmatch, WM_CASEFOLD};
 
 /// Which ref namespace to include in a [`RefQuery`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RefNamespace {
     /// `refs/heads/*`
     Heads,
@@ -65,6 +66,7 @@ impl RefNamespace {
 
 /// Primary sort key for [`RefQuery`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum SortKey {
     /// Full ref name (`refname`), byte order.
     #[default]
@@ -120,6 +122,7 @@ pub struct RefQuery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum RefKind {
     /// Local branch (`refs/heads/`).
     Head,

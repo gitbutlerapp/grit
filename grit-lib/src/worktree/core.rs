@@ -37,6 +37,7 @@ use super::error::WorktreeError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum PrunableReason {
     /// Admin path is not a directory (`not a valid directory`).
     AdminNotValidDirectory,
@@ -530,6 +531,7 @@ fn strip_worktree_config_keys(path: &Path, keys: &[&str]) -> Result<()> {
 
 /// How [`add_linked_worktree`] attaches `HEAD` to a branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WorktreeBranch {
     /// Check out an existing local branch (its tip must match the start commit).
     Existing(String),

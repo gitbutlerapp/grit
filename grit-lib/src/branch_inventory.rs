@@ -19,6 +19,7 @@ use crate::worktree::list_worktrees;
 
 /// Which branches to include in [`list_branches`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum BranchScope {
     /// Local branches only (`refs/heads/*`).
     #[default]
@@ -31,6 +32,7 @@ pub enum BranchScope {
 
 /// How much object data [`list_branches`] loads per branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum BranchDetail {
     /// Ref names and oids only; no commit objects read for branch fields.
     #[default]

@@ -324,6 +324,11 @@ impl StatusOutcome {
                 outln!(w, "On {branch}  ·  operation in progress");
                 outln!(w);
             }
+            // Header states this CLI does not know yet.
+            _ => {
+                outln!(w, "On {branch}");
+                outln!(w);
+            }
         }
         Ok(())
     }
@@ -387,7 +392,9 @@ impl StatusOutcome {
 
     pub(crate) fn render_hints(&self, w: &mut dyn Write) -> Result<()> {
         match &self.guidance {
-            StatusGuidance::Operation { steps, alternative } => {
+            StatusGuidance::Operation {
+                steps, alternative, ..
+            } => {
                 let steps: Vec<_> = steps.iter().filter_map(NextStep::command).collect();
                 outln!(w, "→ {}", steps.join("  ·  "));
                 if let Some(alt) = alternative.as_ref().and_then(NextStep::command) {
@@ -423,13 +430,15 @@ impl StatusOutcome {
                         StatusAction::Pull { .. } => self
                             .integration_update_hint()
                             .map(|hint| integration_hint_command(hint, false)),
+                        _ => None,
                     })
                     .collect();
                 if !hints.is_empty() {
                     outln!(w, "→ {}", hints.join("  ·  "));
                 }
             }
-            StatusGuidance::Actions(_) => {}
+            // Empty action lists and guidance this CLI does not know yet.
+            _ => {}
         }
         Ok(())
     }
@@ -547,7 +556,9 @@ impl StatusOutcome {
 
     pub(crate) fn render_markdown_hints(&self, w: &mut dyn Write) -> Result<()> {
         match &self.guidance {
-            StatusGuidance::Operation { steps, alternative } => {
+            StatusGuidance::Operation {
+                steps, alternative, ..
+            } => {
                 let steps: Vec<_> = steps.iter().filter_map(NextStep::command).collect();
                 outln!(w, "→ `{}`", steps.join("`  ·  `"));
                 if let Some(alt) = alternative.as_ref().and_then(NextStep::command) {
@@ -581,12 +592,14 @@ impl StatusOutcome {
                         StatusAction::Pull { .. } => self
                             .integration_update_hint()
                             .map(|hint| integration_hint_command(hint, true)),
+                        _ => None,
                     })
                     .collect();
                 if !hints.is_empty() {
                     outln!(w, "→ {}", hints.join("  ·  "));
                 }
             }
+            _ => {}
         }
         Ok(())
     }
@@ -679,6 +692,11 @@ impl StatusOutcome {
             }
             StatusHeader::OtherInProgress => {
                 outln!(w, "On **`{branch}`** · operation in progress");
+                outln!(w);
+            }
+            // Header states this CLI does not know yet.
+            _ => {
+                outln!(w, "On **`{branch}`**");
                 outln!(w);
             }
         }
@@ -779,5 +797,6 @@ fn integration_hint_command(hint: &StatusIntegrationHint, markdown: bool) -> Str
     match hint.action {
         StatusIntegrationAction::Pull => format!("grit pull to update from {ref_name}"),
         StatusIntegrationAction::Merge => format!("grit merge {ref_name}"),
+        _ => format!("grit pull to update from {ref_name}"),
     }
 }

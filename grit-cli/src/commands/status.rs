@@ -226,6 +226,8 @@ impl From<InterruptedRewrite> for InterruptedRewriteJson {
             InterruptedRewrite::FinishedCheckout => Self::FinishedCheckout,
             InterruptedRewrite::RolledBack => Self::RolledBack,
             InterruptedRewrite::Pending => Self::Pending,
+            // Treat recovery states this CLI does not know yet as still pending.
+            _ => Self::Pending,
         }
     }
 }
@@ -362,6 +364,7 @@ fn in_progress_snapshot_kind(op: InProgressOperation) -> &'static str {
         InProgressOperation::Bisect => "bisect",
         InProgressOperation::Am => "am",
         InProgressOperation::RewriteApply => "rewrite-apply",
+        _ => "other",
     }
 }
 

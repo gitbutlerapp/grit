@@ -59,6 +59,7 @@ use crate::worktree_rules::WorktreeRules;
 
 /// What paths [`stage`] should update (`git add` vs `git add -u`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum StageMode {
     /// Stage tracked changes and untracked files (default `git add`).
     #[default]

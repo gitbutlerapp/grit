@@ -39,6 +39,7 @@ pub enum MergeFavor {
 
 /// Conflict-marker output style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ConflictStyle {
     /// Standard two-section markers (`<<<<<<<`, `=======`, `>>>>>>>`).
     #[default]

@@ -29,6 +29,7 @@ use super::RevWalk;
 
 /// Parent-count filter for commit lists (Git `--merges` / `--no-merges`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MergeFilter {
     /// Include commits with any parent count.
     #[default]
@@ -45,6 +46,7 @@ pub enum MergeFilter {
 /// replace any implicit default tip (for example `HEAD`); they do not add to it. If a selection
 /// matches nothing, the walk is empty (count `0`, no commits), not an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RefSelection {
     /// All refs, including `HEAD` when it points at a commit (`--all`).
     All,

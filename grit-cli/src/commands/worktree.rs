@@ -189,6 +189,7 @@ fn repair_kind_label(kind: WorktreeRepairKind) -> &'static str {
         WorktreeRepairKind::GitdirWorktreePath => "gitdir_worktree_path",
         WorktreeRepairKind::GitFilePathStyle => "git_file_path_style",
         WorktreeRepairKind::GitdirPathStyle => "gitdir_path_style",
+        _ => "other",
     }
 }
 

@@ -618,6 +618,7 @@ impl BuiltCommitGraph {
 
 /// Outcome of [`Maintenance::build_commit_graph`](crate::maintenance::Maintenance::build_commit_graph).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CommitGraphBuild {
     /// The graph of every commit reachable from the repository's refs.
     Built(BuiltCommitGraph),
@@ -2097,6 +2098,7 @@ pub struct GcLockHolder {
 /// Outcome of [`Maintenance::try_lock`](crate::maintenance::Maintenance::try_lock).
 #[derive(Debug)]
 #[must_use]
+#[non_exhaustive]
 pub enum GcLockAttempt {
     /// This process now owns `gc.pid`.
     Acquired(GcLock),

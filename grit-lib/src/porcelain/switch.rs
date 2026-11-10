@@ -44,6 +44,7 @@ use crate::state::{resolve_head_for_repository, HeadState};
 
 /// Resolved switch target after DWIM and revision parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SwitchMode {
     /// Check out an existing local branch.
     Existing {

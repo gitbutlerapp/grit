@@ -141,6 +141,7 @@ pub fn run(
     let (bundle, _lock) = match slot {
         ResumableDownloadDest::Shared { dest, lock } => (dest, Some(lock)),
         ResumableDownloadDest::Private(dest) => (dest, None),
+        _ => anyhow::bail!("unsupported download destination for the checkout bundle"),
     };
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let downloaded = download_resumable(

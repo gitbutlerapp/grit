@@ -43,6 +43,7 @@ use std::collections::{BTreeMap, HashMap};
     feature = "serde-models",
     serde(tag = "kind", rename_all = "snake_case")
 )]
+#[non_exhaustive]
 pub enum ConflictKind {
     /// Both sides changed the file (stages 1, 2 and 3; porcelain `UU`).
     BothModified,

@@ -33,6 +33,7 @@ const PATCH_ID_DIGEST_MAX: usize = 32;
 
 /// How to compute a patch-ID from unified diff text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PatchIdMode {
     /// Accumulate file diffs into one rolling SHA-1; file order affects the
     /// result.  Compatible with Git 1.9 and older.  This is the default.

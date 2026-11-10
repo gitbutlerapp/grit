@@ -368,6 +368,7 @@ fn map_remote_show(summary: &RemoteSummary) -> RemoteShowJson {
                     RemoteBranchStateKind::Tracked => RemoteShowBranchStateJson::Tracked,
                     RemoteBranchStateKind::New => RemoteShowBranchStateJson::New,
                     RemoteBranchStateKind::Stale => RemoteShowBranchStateJson::Stale,
+                    _ => RemoteShowBranchStateJson::Tracked,
                 },
             })
             .collect(),

@@ -837,6 +837,7 @@ pub(crate) struct ReflogExpireParams {
 
 /// What happened to one reflog entry during `expire_reflog_git`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReflogExpireActionKind {
     /// Entry was kept in the reflog.
     Keep,

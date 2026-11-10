@@ -34,10 +34,12 @@ impl std::fmt::Display for CloneUsageError {
 impl std::error::Error for CloneUsageError {}
 
 impl CloneBlobsJson {
-    fn from_spec(spec: &ObjectFilterSpec) -> Self {
+    /// `None` for filter kinds `--blobs` cannot express.
+    fn from_spec(spec: &ObjectFilterSpec) -> Option<Self> {
         match spec {
-            ObjectFilterSpec::BlobNone => Self::None,
-            ObjectFilterSpec::BlobLimit(n) => Self::Limit(*n),
+            ObjectFilterSpec::BlobNone => Some(Self::None),
+            ObjectFilterSpec::BlobLimit(n) => Some(Self::Limit(*n)),
+            _ => None,
         }
     }
 }
@@ -78,6 +80,7 @@ fn unit_json_name(unit: ProgressUnit) -> &'static str {
         ProgressUnit::Bytes => "bytes",
         ProgressUnit::Objects => "objects",
         ProgressUnit::Files => "files",
+        _ => "items",
     }
 }
 
@@ -257,7 +260,7 @@ fn clone_into(
             bytes: seeded.bytes,
             resumed_from: seeded.resumed_from,
         }),
-        BundleSeed::Failed { uri, reason } => {
+        BundleSeed::Failed { uri, reason, .. } => {
             bundle_failure = Some(CloneBundleFailure {
                 uri: uri.as_deref().map(redact_url_for_display),
                 reason: reason.to_string(),
@@ -265,6 +268,7 @@ fn clone_into(
             None
         }
         BundleSeed::NotOffered => None,
+        _ => None,
     };
 
     let files = outcome.files;
@@ -294,6 +298,8 @@ fn clone_into(
                 .then(|| outcome.branches_with_commits.clone());
             (Some(reason.to_owned()), tips, Some(note))
         }
+        // Checkout states this CLI does not know yet: report no reason.
+        _ => (None, None, None),
     };
     let elapsed = started.elapsed();
     let transfer = TransferSummary::new(outcome.transfer, term_progress.phases().to_vec(), elapsed)
@@ -302,6 +308,7 @@ fn clone_into(
     let (branch, detached, tag) = match &outcome.head {
         CloneHead::Branch(name) => (Some(name.clone()), false, None),
         CloneHead::Detached { tag, .. } => (None, true, Some(tag.clone())),
+        _ => (None, false, None),
     };
 
     let space = if outcome.bare {
@@ -319,7 +326,7 @@ fn clone_into(
         detached,
         tag,
         depth: run.depth,
-        blobs: outcome.filter.as_ref().map(CloneBlobsJson::from_spec),
+        blobs: outcome.filter.as_ref().and_then(CloneBlobsJson::from_spec),
         partial: outcome.filter_sent,
         filter_auto: auto_filter,
         filter_ignored: outcome.filter_ignored(),

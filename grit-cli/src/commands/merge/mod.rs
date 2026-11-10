@@ -253,16 +253,17 @@ fn dry_run_merge(
         .plan_integration(into_oid, other_oid, label, options)?
     {
         MergeDryRunPlan::UpToDate => Ok(MergeOutcome::up_to_date_dry_run(label)),
-        MergeDryRunPlan::FastForward { tip, change_id } => Ok(MergeOutcome::fast_forward_dry_run(
-            label, head_short, tip, change_id,
-        )),
+        MergeDryRunPlan::FastForward { tip, change_id, .. } => Ok(
+            MergeOutcome::fast_forward_dry_run(label, head_short, tip, change_id),
+        ),
         MergeDryRunPlan::RefusedNotFf => Ok(MergeOutcome::refused_not_ff_dry_run(label)),
-        MergeDryRunPlan::MergeCommit { parents } => {
+        MergeDryRunPlan::MergeCommit { parents, .. } => {
             Ok(MergeOutcome::merged_dry_run(label, parents))
         }
-        MergeDryRunPlan::Conflicts { conflicts } => {
+        MergeDryRunPlan::Conflicts { conflicts, .. } => {
             Ok(MergeOutcome::conflicts_dry_run(label, conflicts))
         }
+        _ => bail!("merge --dry-run returned a plan this version of grit cannot display"),
     }
 }
 
@@ -288,13 +289,14 @@ fn check_merge(
             other_oid,
             stored_change_id(repo, other_oid)?,
         )),
-        MergePrediction::Clean { tree } => Ok(MergeOutcome::clean_check(label, tree)),
-        MergePrediction::Conflicts { conflicts } => {
+        MergePrediction::Clean { tree, .. } => Ok(MergeOutcome::clean_check(label, tree)),
+        MergePrediction::Conflicts { conflicts, .. } => {
             Ok(MergeOutcome::conflicts_check(label, conflicts))
         }
         MergePrediction::Unrelated => {
             bail!("'{label}' has no common history with the current branch")
         }
+        _ => bail!("merge --check returned a prediction this version of grit cannot display"),
     }
 }
 
@@ -320,7 +322,7 @@ fn integrate_with_options(
         .integrate(source, label, options, progress, cancel)
     {
         Ok(outcome) => {
-            let mut mapped = map_integrate_outcome(outcome, label, head_short);
+            let mut mapped = map_integrate_outcome(outcome, label, head_short)?;
             if detached {
                 mapped = mapped.for_detached_head();
             }
@@ -345,13 +347,13 @@ fn map_integrate_outcome(
     outcome: IntegrateBranchOutcome,
     label: &str,
     head_short: &str,
-) -> MergeOutcome {
-    match outcome {
+) -> Result<MergeOutcome> {
+    Ok(match outcome {
         IntegrateBranchOutcome::UpToDate => MergeOutcome::up_to_date(label),
-        IntegrateBranchOutcome::FastForward { oid, change_id } => {
+        IntegrateBranchOutcome::FastForward { oid, change_id, .. } => {
             MergeOutcome::fast_forward(label, head_short, oid, change_id)
         }
-        IntegrateBranchOutcome::Merged { oid, change_id } => {
+        IntegrateBranchOutcome::Merged { oid, change_id, .. } => {
             MergeOutcome::merged(label, oid, change_id)
         }
         IntegrateBranchOutcome::Squashed => MergeOutcome::squashed(label),
@@ -359,7 +361,8 @@ fn map_integrate_outcome(
         IntegrateBranchOutcome::Conflicts {
             details, rerere, ..
         } => MergeOutcome::conflicts(label, details, rerere),
-    }
+        _ => bail!("merge finished with an outcome this version of grit cannot display"),
+    })
 }
 
 #[cfg(test)]

@@ -58,6 +58,7 @@ use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
 /// How to handle a replay step whose merged tree matches `HEAD` (empty patch).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ReplayEmptyPolicy {
     /// Stop the sequence and leave sequencer state for `--continue` / `--skip`.
     #[default]
@@ -129,8 +130,10 @@ pub struct ReplayCreated {
 
 /// In-memory prediction of [`start_replay_sequence`] (no refs, index, worktree, or on-disk object writes).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SequencePrediction {
     /// Every step would apply cleanly; `tree` is the final tree after all commits.
+    #[non_exhaustive]
     Clean {
         /// Resulting tree OID after replaying the full sequence.
         tree: ObjectId,
@@ -138,6 +141,7 @@ pub enum SequencePrediction {
         dropped: Vec<ObjectId>,
     },
     /// The sequence would stop on merge conflicts at this commit.
+    #[non_exhaustive]
     Conflicts {
         /// Source commit that would conflict.
         commit: ObjectId,
@@ -147,6 +151,7 @@ pub enum SequencePrediction {
         conflicts: Vec<Conflict>,
     },
     /// The sequence would stop on an empty step when `empty` is [`ReplayEmptyPolicy::Stop`].
+    #[non_exhaustive]
     Empty {
         /// Source commit that would be empty.
         commit: ObjectId,
@@ -194,8 +199,10 @@ pub(crate) fn predict_replay_sequence(
 
 /// Result of starting or advancing a replay sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SequenceOutcome {
     /// Every requested step finished (commits may have been dropped per `empty`).
+    #[non_exhaustive]
     Completed {
         /// New commits created during this call, each paired with its source.
         created: Vec<ReplayCreated>,
@@ -205,6 +212,7 @@ pub enum SequenceOutcome {
         rerere: Vec<crate::rerere::RerereEvent>,
     },
     /// The current step stopped on merge conflicts.
+    #[non_exhaustive]
     Conflicts {
         /// Source commit being replayed.
         current: ObjectId,
@@ -220,6 +228,7 @@ pub enum SequenceOutcome {
         rerere: Vec<crate::rerere::RerereEvent>,
     },
     /// The current step is empty relative to `HEAD` and `empty` is [`ReplayEmptyPolicy::Stop`].
+    #[non_exhaustive]
     Empty {
         /// Source commit that would be empty.
         current: ObjectId,
@@ -611,6 +620,7 @@ pub(crate) fn skip_replay_step(
 
 /// Whether [`abort_replay_sequence`] rewound the branch or only cleared replay metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReplayAbortOutcome {
     /// Branch, index, and worktree were reset to the saved pre-replay head.
     Rewound,

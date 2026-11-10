@@ -69,6 +69,7 @@ pub struct RemoveOutcome {
 
 /// Why [`remove_paths`] refused to remove a path without [`RemoveOptions::force`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum RemoveBlockReason {
     /// The index entry differs from `HEAD` (or there is no `HEAD` commit yet) while the work
     /// tree file matches the index. Deleting the file would lose the staged content;

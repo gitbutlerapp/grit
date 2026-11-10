@@ -218,6 +218,7 @@ impl serde::Serialize for TagAnnotation {
 
 /// Amount of tag metadata requested from [`list_tags`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TagDetail {
     /// Return only short tag names without classifying their target objects.
     Names,
@@ -232,6 +233,7 @@ pub enum TagDetail {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum TagList {
     /// Short tag names requested with [`TagDetail::Names`].
     Names(Vec<String>),

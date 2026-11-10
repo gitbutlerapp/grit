@@ -24,6 +24,7 @@ pub struct MoveWorktreeOptions {
 
 /// What [`repair_worktrees`] fixed for one worktree path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WorktreeRepairKind {
     /// The worktree `.git` gitfile pointed at the wrong admin directory.
     GitFileAdminDir,

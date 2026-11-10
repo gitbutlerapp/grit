@@ -84,6 +84,7 @@ fn severity_label(severity: FsckSeverity) -> &'static str {
         FsckSeverity::Error => "error",
         FsckSeverity::Warning => "warning",
         FsckSeverity::Info => "info",
+        _ => "unknown",
     }
 }
 

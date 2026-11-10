@@ -25,6 +25,7 @@ use super::PlanningError;
 
 /// How to choose the message on the squashed commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SquashMessage {
     /// Keep the oldest commit's message (after `amend!` handling in the range).
     Oldest,

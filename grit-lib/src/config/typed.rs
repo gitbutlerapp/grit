@@ -10,6 +10,7 @@ use super::{
 
 /// Value type for typed config operations (Git `--type` subset).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConfigValueType {
     /// Boolean (`true` / `false`).
     Bool,
@@ -21,6 +22,7 @@ pub enum ConfigValueType {
 
 /// A config value after typed parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TypedConfigValue {
     /// Parsed boolean.
     Bool(bool),

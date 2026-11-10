@@ -62,6 +62,7 @@ struct PullIntegration {
 
 /// How [`pull`] integrates upstream commits when a fast-forward is not possible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PullMode {
     /// Refuse when diverged history would require a merge commit.
     FfOnly,
@@ -142,6 +143,7 @@ pub struct PullCheck {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum PullResult {
     /// The branch already contained the upstream tip.
     UpToDate,

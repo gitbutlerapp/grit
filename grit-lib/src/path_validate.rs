@@ -45,6 +45,7 @@ impl EntryMode {
 
 /// Which Git path rules to apply ([`validate_component`] / [`validate_path`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
 pub enum PathValidationKind {
     /// Object fsck: all symlink dot-file rules; NTFS spellings when [`ProtectOptions`] say so.
     Fsck,

@@ -30,6 +30,8 @@ impl From<LibPullResult> for PullResult {
             LibPullResult::AutostashConflict => Self::AutostashConflict,
             LibPullResult::RebaseStopped => Self::RebaseStopped,
             LibPullResult::Landed => Self::Landed,
+            // A result this CLI does not know yet: report the branch as updated.
+            _ => Self::Merged,
         }
     }
 }

@@ -291,7 +291,8 @@ fn list(repo: &Repository, opts: &BranchRunOptions) -> Result<BranchOutcome> {
     let list_scope = match scope {
         BranchScope::Local => BranchListScope::Local,
         BranchScope::Remote => BranchListScope::Remote,
-        BranchScope::All => BranchListScope::All,
+        // `All` and scopes this CLI does not know list everything.
+        _ => BranchListScope::All,
     };
     Ok(BranchOutcome::List {
         current,

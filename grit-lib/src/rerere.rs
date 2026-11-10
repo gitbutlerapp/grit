@@ -31,6 +31,7 @@ pub enum RerereAutoupdate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum RerereEventKind {
     /// Recorded a new conflict preimage under `rr-cache/`.
     RecordedPreimage,

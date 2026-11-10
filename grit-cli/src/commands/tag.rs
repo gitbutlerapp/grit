@@ -400,6 +400,7 @@ fn list_with_query(repo: &Repository, query: RefQuery, detail: TagDetail) -> Res
                 names: Vec::new(),
             })
         }
+        _ => anyhow::bail!("tag listing returned a shape this version of grit cannot display"),
     }
 }
 
@@ -561,6 +562,12 @@ fn signature_json(verdict: &SignatureVerdict) -> TagSignatureJson {
         },
         SignatureVerdict::NotChecked => TagSignatureJson {
             verdict: "not_checked".to_owned(),
+            signer: None,
+            key: None,
+            trust: None,
+        },
+        _ => TagSignatureJson {
+            verdict: "unknown".to_owned(),
             signer: None,
             key: None,
             trust: None,

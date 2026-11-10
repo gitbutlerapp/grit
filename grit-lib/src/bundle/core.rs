@@ -32,6 +32,7 @@ const V3_SIGNATURE: &str = "# v3 git bundle\n";
 
 /// Supported on-disk bundle header versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BundleVersion {
     /// Legacy header (SHA-1 repositories without filter capabilities).
     V2,

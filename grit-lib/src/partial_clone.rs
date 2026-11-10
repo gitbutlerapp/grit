@@ -15,6 +15,7 @@ use crate::rev_list::{expand_object_filter_for_protocol, ObjectFilter, ObjectFil
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum ObjectFilterSpec {
     /// Omit all blob objects (`blob:none`).
     BlobNone,

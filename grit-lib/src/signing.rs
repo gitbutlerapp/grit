@@ -103,6 +103,7 @@ impl TrustLevel {
 
 /// The signature format selected via `gpg.format`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum GpgFormat {
     /// `OpenPgp` variant.
     OpenPgp,

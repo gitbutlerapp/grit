@@ -33,6 +33,7 @@ impl Default for InspectOptions {
 
 /// Whether a remote branch is tracked locally, new on the remote, or stale locally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum RemoteBranchStateKind {
     /// A remote-tracking ref exists for this branch.
     Tracked,

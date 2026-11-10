@@ -63,6 +63,7 @@ pub struct TreeMergeOutput {
 /// other side added to the old directory, or renamed into it, then most likely belong in the new
 /// one. Read from the `merge.directoryRenames` config with [`Self::from_config`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum DirectoryRenameMode {
     /// Leave such files where the adding side put them (`merge.directoryRenames=false`).
     Off,
@@ -142,6 +143,7 @@ impl MergeSide {
 
 /// A directory rename that a merge could not settle on its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DirectoryRenameConflict {
     /// A file was moved into the renamed directory and left unmerged
     /// ([`DirectoryRenameMode::Conflict`]) so the user can confirm its new location.
@@ -218,6 +220,7 @@ pub struct WhitespaceMergeOptions {
 
 /// How to label the "theirs" side in textual conflict markers.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub enum TheirsConflictLabel<'a> {
     /// Use the UTF-8 file path (matches cherry-pick / revert).
     PathUtf8,

@@ -304,6 +304,7 @@ pub(crate) fn upstream_ref_for_merge(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum BaseSource {
     /// The branch's configured upstream (`branch.<name>.remote` / `branch.<name>.merge`).
     Upstream,
@@ -772,6 +773,7 @@ pub struct TrackedComparison {
 
 /// How the status header summarizes branch vs target/upstream (before merge/rebase overrides).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StandingHeader {
     /// On a branch that has no commits yet.
     Unborn,
@@ -802,6 +804,7 @@ pub struct BranchStanding {
 
 /// Status header after branch standing and in-progress operation overrides.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StatusHeader {
     /// Normal branch vs target/upstream summary.
     Branch(StandingHeader),
@@ -885,6 +888,7 @@ impl StatusHeader {
 
 /// Whether status should suggest `grit pull` or `grit merge` to catch up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StatusIntegrationAction {
     /// Integrate via configured upstream (`grit pull`).
     Pull,

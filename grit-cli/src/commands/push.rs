@@ -31,7 +31,8 @@ impl From<PushPlanKind> for PushKind {
             PushPlanKind::Branch => Self::Branch,
             PushPlanKind::Tags => Self::Tags,
             PushPlanKind::Delete => Self::Delete,
-            PushPlanKind::Refspecs => Self::Refspecs,
+            // `Refspecs` and plan kinds this CLI does not know yet.
+            _ => Self::Refspecs,
         }
     }
 }

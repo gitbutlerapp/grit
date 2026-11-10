@@ -865,6 +865,7 @@ pub(crate) fn common_dir(git_dir: &Path) -> Option<PathBuf> {
 /// DWIM rules. A symbolic ref is considered to exist if its ref file (or
 /// reftable record) is present, even when the target is missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RawRefLookup {
     /// A loose ref file, packed ref line, or reftable record exists for this name.
     Exists,
@@ -1015,6 +1016,7 @@ pub(crate) fn packed_refs_entry_exists(
 
 /// Why a reference name cannot be created (Git `refs_verify_refname_available` style).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RefnameUnavailable {
     /// An ancestor ref already exists in the store (e.g. `refs/foo` blocks `refs/foo/bar`).
     AncestorExists {

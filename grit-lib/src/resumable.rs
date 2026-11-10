@@ -54,6 +54,7 @@ pub enum TransferDirection {
 /// Progress of a resumable transfer, reported through
 /// [`Progress::resumable_transfer`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ResumableEvent {
     /// The transfer began. `resumed_from` is how many bytes an earlier attempt
     /// had already moved (zero for a fresh transfer).
@@ -197,6 +198,7 @@ fn save_state(path: &Path, state: &DownloadState) -> Result<()> {
 
 /// Where to download when several processes share one resumable cache slot.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ResumableDownloadDest {
     /// The shared `dest`; hold `lock` until [`discard_download`] on it finishes.
     Shared {

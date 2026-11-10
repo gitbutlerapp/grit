@@ -114,6 +114,7 @@ struct StagedRemoval {
 
 /// What [`RepositoryNotes::add`] did to the annotated object's note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NoteAddOutcome {
     /// The object had no note; one was attached.
     Added,

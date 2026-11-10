@@ -58,6 +58,7 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
                     "warning: branch tip moved during the revert; replay state cleared without moving the branch"
                 );
             }
+            _ => {}
         }
         return Ok(RevertOutcome::new(RevertResult::Aborted));
     }
@@ -78,7 +79,7 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
                 &crate::interrupt::process_cancel_token(),
             )
             .map_err(|e| map_replay_error(&repo, e))?;
-        return Ok(map_sequence_outcome(outcome));
+        return map_sequence_outcome(outcome);
     }
     if opts.skip {
         let outcome = repo
@@ -89,7 +90,7 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
                 &crate::interrupt::process_cancel_token(),
             )
             .map_err(|e| map_replay_error(&repo, e))?;
-        return Ok(map_sequence_outcome(outcome));
+        return map_sequence_outcome(outcome);
     }
 
     if opts.commits.is_empty() {
@@ -129,7 +130,7 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
             .merge()
             .predict_sequence(&req)
             .map_err(|e| map_replay_error(&repo, e))?;
-        return Ok(map_prediction_outcome(prediction));
+        return map_prediction_outcome(prediction);
     }
     let outcome = repo
         .merge()
@@ -139,12 +140,12 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
             &crate::interrupt::process_cancel_token(),
         )
         .map_err(|e| map_replay_error(&repo, e))?;
-    Ok(map_sequence_outcome(outcome))
+    map_sequence_outcome(outcome)
 }
 
-fn map_prediction_outcome(prediction: SequencePrediction) -> RevertOutcome {
+fn map_prediction_outcome(prediction: SequencePrediction) -> Result<RevertOutcome> {
     let outcome = match prediction {
-        SequencePrediction::Clean { tree, dropped } => RevertOutcome {
+        SequencePrediction::Clean { tree, dropped, .. } => RevertOutcome {
             oid: Some(tree.to_hex()),
             dropped: dropped.iter().map(ObjectId::to_hex).collect(),
             ..RevertOutcome::new(RevertResult::Clean)
@@ -161,19 +162,21 @@ fn map_prediction_outcome(prediction: SequencePrediction) -> RevertOutcome {
             source: Some(commit.to_hex()),
             ..RevertOutcome::new(RevertResult::Empty)
         },
+        _ => bail!("revert --check returned a prediction this version of grit cannot display"),
     };
-    RevertOutcome {
+    Ok(RevertOutcome {
         check: true,
         ..outcome
-    }
+    })
 }
 
-fn map_sequence_outcome(outcome: SequenceOutcome) -> RevertOutcome {
-    match outcome {
+fn map_sequence_outcome(outcome: SequenceOutcome) -> Result<RevertOutcome> {
+    Ok(match outcome {
         SequenceOutcome::Completed {
             created,
             dropped,
             rerere,
+            ..
         } => {
             let commits: Vec<RevertCommitEntry> =
                 created.iter().map(RevertCommitEntry::from).collect();
@@ -215,7 +218,8 @@ fn map_sequence_outcome(outcome: SequenceOutcome) -> RevertOutcome {
                 ..RevertOutcome::new(RevertResult::Empty)
             }
         }
-    }
+        _ => bail!("revert finished with an outcome this version of grit cannot display"),
+    })
 }
 
 fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Error {

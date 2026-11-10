@@ -78,6 +78,7 @@ impl CommandEnvironment {
 
 /// Stdio disposition for a child stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum CommandStdio {
     #[default]
     /// Inherit this process's corresponding stream.
@@ -92,6 +93,7 @@ pub enum CommandStdio {
 
 /// Stdin source for the child.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub enum CommandStdin {
     #[default]
     /// Inherit this process's stdin.
@@ -104,6 +106,7 @@ pub enum CommandStdin {
 
 /// Shell invocation mode (Git `sh -c` hooks and filters).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ShellInvocation {
     /// `program` is `sh`: `-c script`, optional `argv0` positional (`hook`), then `args`.
     DashC {
@@ -911,6 +914,7 @@ pub fn system_command_runner() -> Arc<dyn CommandRunner> {
 
 /// Scripted responses for [`RecordingRunner`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum RecordedResponse {
     /// Exit status 0 with empty stdout/stderr.
     Success,

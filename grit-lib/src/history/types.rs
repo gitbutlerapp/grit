@@ -20,6 +20,7 @@ pub struct NewCommit {
 
 /// Per-commit edit applied during planning.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CommitEdit {
     /// Replace fields on the commit, then replay descendants.
     Rewrite {
@@ -79,6 +80,7 @@ pub type HistoryEdits = BTreeMap<ObjectId, CommitEdit>;
 
 /// Which local refs may move when a plan is applied later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum RefScope {
     /// Every local branch whose tip descends from the oldest edited commit, plus `HEAD`.
     ///
@@ -94,6 +96,7 @@ pub enum RefScope {
 
 /// Behavior when a replayed commit's tree matches its new parent's tree but did not before.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum EmptyPolicy {
     /// Skip creating a commit; map to the new parent OID.
     #[default]

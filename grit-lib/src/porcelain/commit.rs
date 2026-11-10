@@ -317,6 +317,7 @@ pub struct CommitPlan {
 
 /// Which paths are included when recording a commit ([`commit_with_scope`]).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum CommitScope {
     /// Stage worktree changes, then commit (default `grit commit` behavior).
     ///
@@ -373,6 +374,7 @@ fn patch_input_same_kind(a: &CommitPatchInput, b: &CommitPatchInput) -> bool {
 
 /// Hunk ids or parsed patches for [`CommitScope::Patch`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum CommitPatchInput {
     /// Stable ids from `grit diff --json`.
     Hunks(HunkSelection),

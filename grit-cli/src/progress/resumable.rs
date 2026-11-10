@@ -138,6 +138,8 @@ impl ResumableDisplay {
                 let line = done_line(&record, self.color);
                 self.print_line(&line);
             }
+            // Events this display does not know yet change nothing on screen.
+            _ => {}
         }
     }
 

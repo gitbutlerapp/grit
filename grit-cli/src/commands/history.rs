@@ -772,6 +772,7 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
                     HistoryRewriteOutcome::new("rebase", &plan, true),
                 )))
             }
+            _ => bail!("rebase planned an outcome this version of grit cannot handle"),
         };
     }
 
@@ -835,6 +836,7 @@ fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
             &stop.conflicts,
             &stop.rerere,
         )),
+        _ => bail!("rebase finished with an outcome this version of grit cannot display"),
     }
 }
 
@@ -901,7 +903,7 @@ fn run_rebase_check(
         .map_err(on_err)?
     {
         RebaseCheckPlan::UpToDate => Ok(RebaseRunOutcome::Check(RebaseCheckOutcome::up_to_date())),
-        RebaseCheckPlan::Clean { commits } => {
+        RebaseCheckPlan::Clean { commits, .. } => {
             Ok(RebaseRunOutcome::Check(RebaseCheckOutcome::clean(commits)))
         }
         RebaseCheckPlan::Conflict {
@@ -912,6 +914,7 @@ fn run_rebase_check(
         } => Ok(RebaseRunOutcome::Check(RebaseCheckOutcome::conflicts(
             commit, &conflicts, refs,
         ))),
+        _ => bail!("rebase --check returned a result this version of grit cannot display"),
     }
 }
 

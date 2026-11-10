@@ -44,6 +44,7 @@ pub use parallel::{
 /// SHA-NI or portable code (AVX2 is used for SHA-512, not SHA-256, so there is no
 /// separate AVX2 backend variant here).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Backend {
     /// x86_64 SHA-NI (`sha` target feature) — used for SHA-1 and SHA-256 when available.
     X86ShaNi,

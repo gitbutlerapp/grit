@@ -16,6 +16,7 @@ fn scope_label(scope: CleanScope) -> &'static str {
         CleanScope::Untracked => "untracked",
         CleanScope::UntrackedAndIgnored => "untracked_and_ignored",
         CleanScope::OnlyIgnored => "only_ignored",
+        _ => "other",
     }
 }
 

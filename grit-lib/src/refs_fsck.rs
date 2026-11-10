@@ -35,6 +35,7 @@ struct LooseRefFsckCtx<'a> {
 
 /// Severity of a refs-fsck diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RefsFsckSeverity {
     /// `Error` variant.
     Error,

@@ -68,6 +68,7 @@ pub(crate) mod stateless_http;
 
 /// The Git service a [`Connection`] speaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Service {
     /// `git-upload-pack` — the server side of a fetch/clone.
     UploadPack,
@@ -1111,6 +1112,7 @@ fn openssh_sendenv_option_fragment() -> &'static str {
 /// depend on process-global env can pin a [`SshCommand::Program`] or
 /// [`SshCommand::ShellCommand`] explicitly.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub enum SshCommand {
     /// Resolve from the environment and optional config (see
     /// [`resolve_effective_ssh_command`]).

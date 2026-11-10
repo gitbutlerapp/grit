@@ -174,6 +174,7 @@ pub enum ObjectContents {
 /// The label describes how a name was supplied, rather than the kind of object
 /// it resolves to. A tag can, for example, point to a blob or another tag.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum RevisionLabel {
     /// A local branch, including the branch named by symbolic `HEAD`.
     Branch {

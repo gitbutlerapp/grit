@@ -389,6 +389,7 @@ pub fn rerere_events_json(events: &[grit_lib::diff::rerere::RerereEvent]) -> Vec
                 RerereEventKind::UpdatedPreimage => "updated_preimage",
                 RerereEventKind::Forgot => "forgot",
                 RerereEventKind::NoRemembered => "no_remembered",
+                _ => "other",
             };
             RerereEventJson {
                 path: e.path.clone(),

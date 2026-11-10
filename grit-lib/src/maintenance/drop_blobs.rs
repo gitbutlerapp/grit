@@ -183,6 +183,7 @@ impl DropPromisedBlobsOptions {
 /// How long recently needed blobs are kept: the value of
 /// `maintenance.drop-large-blobs.expire`, or of a command line's `--older-than`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DropExpiry {
     /// `never` or `false`: nothing is dropped, and `gc` skips the phase.
     Never,

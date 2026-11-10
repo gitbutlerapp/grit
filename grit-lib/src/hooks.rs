@@ -44,6 +44,7 @@ fn is_not_an_executable(err: &std::io::Error) -> bool {
 /// The library never writes hook output itself: it either hands the bytes back to the caller
 /// or lets the child write straight to this process's standard streams.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HookStdio {
     /// Pipe both streams and return them in [`HookResult`] and [`HookError::Failed`].
     ///
@@ -646,6 +647,7 @@ impl HookSpawnContext<'_> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "kebab-case"))]
+#[non_exhaustive]
 pub enum HookName {
     /// `.git/hooks/pre-commit` or `hook.pre-commit.*`.
     PreCommit,

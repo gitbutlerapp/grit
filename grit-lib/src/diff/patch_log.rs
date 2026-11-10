@@ -35,6 +35,7 @@ use super::{empty_blob_oid, load_worktree_side_for_diff, zero_oid, DiffEntry, Di
 
 /// How much commit metadata precedes each patch in [`write_commit_log_patch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum LogPatchCommitHeader {
     /// `git log -p` default (commit line, author, date, indented message, then patch).
     #[default]
@@ -45,6 +46,7 @@ pub enum LogPatchCommitHeader {
 
 /// Binary file encoding inside a log/show patch (`git log -p` vs `git diff --binary`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum LogPatchBinaryFormat {
     /// `Binary files a/... and b/... differ` (default for `git log -p`).
     #[default]
@@ -1101,6 +1103,7 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
 /// file. A side whose mode in [`PatchResolvedSide::entry`] is `000000` is empty whatever
 /// variant is given.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PatchSide {
     /// Content the caller already loaded, in repository form.
     Bytes(Vec<u8>),

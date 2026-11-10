@@ -817,6 +817,7 @@ pub fn would_overwrite_hint(reason: OverwriteReason) -> &'static str {
             "commit them with `grit commit`, or set them aside with `grit stash`, then try again"
         }
         OverwriteReason::Untracked => "move or remove those files, then try again",
+        _ => "commit, stash, move or remove those files, then try again",
     }
 }
 

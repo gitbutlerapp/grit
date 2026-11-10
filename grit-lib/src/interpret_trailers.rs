@@ -15,6 +15,7 @@ const TRAILER_ARG_PLACEHOLDER: &str = "$ARG";
 
 /// Placement of a new trailer relative to an anchor trailer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum TrailerWhere {
     #[default]
     /// `Default` variant.
@@ -31,6 +32,7 @@ pub enum TrailerWhere {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 /// `TrailerIfExists` enum.
+#[non_exhaustive]
 pub enum TrailerIfExists {
     #[default]
     /// `Default` variant.
@@ -49,6 +51,7 @@ pub enum TrailerIfExists {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 /// `TrailerIfMissing` enum.
+#[non_exhaustive]
 pub enum TrailerIfMissing {
     #[default]
     /// `Default` variant.

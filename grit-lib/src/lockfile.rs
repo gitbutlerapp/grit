@@ -25,6 +25,7 @@ use crate::environment::Environment;
 
 /// Whether to wait for an existing lock, and for how long.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LockWait {
     /// Fail immediately when the lock file already exists.
     Immediately,

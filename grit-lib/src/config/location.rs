@@ -12,6 +12,7 @@ use super::{
 
 /// Which config file(s) to read or write.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConfigLocation {
     /// Repository `.git/config` (or `commondir/config` for linked worktrees).
     Local,

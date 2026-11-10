@@ -97,6 +97,7 @@ impl Default for RevListWalkContext {
 
 /// Behavior when reachable objects are missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MissingAction {
     /// Fail traversal when a referenced object is missing.
     Error,
@@ -148,6 +149,7 @@ pub enum FilterObjectKind {
 
 /// Object filter specification for `--filter=`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ObjectFilter {
     /// `blob:none` — omit all blobs.
     BlobNone,
@@ -500,6 +502,7 @@ fn url_decode(s: &str) -> String {
 
 /// Ordering mode for commit output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OrderingMode {
     /// Ungated committer-date priority queue (default `rev-list` / `log` when no ordering flags).
     ///
@@ -6604,6 +6607,7 @@ pub(crate) struct CommitStreamParams {
 
 /// How much of each commit object a walk reads and hands back to its caller.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CommitExtent {
     /// The whole commit object payload.
     #[default]

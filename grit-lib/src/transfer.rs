@@ -53,6 +53,7 @@ fn serve_err(e: Error) -> Error {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum UpdateMode {
     /// The local tracking ref did not exist and was created.
     New,
@@ -148,6 +149,7 @@ impl UpdateMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum UpdateKind {
     /// The local ref was created.
     New,
@@ -230,6 +232,7 @@ pub enum TagMode {
 
 /// Shallow-history control for fetch and clone (`--depth`, `--deepen`, `--unshallow`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FetchDepth {
     /// Truncate or establish history at the given absolute depth from each tip
     /// (`git fetch --depth N`).

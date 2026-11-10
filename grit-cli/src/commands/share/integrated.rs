@@ -224,6 +224,7 @@ pub(crate) fn resolve_integrated(
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
+                _ => bail!("rebasing {branch} onto {target} returned a result this version of grit cannot handle"),
             };
             if head != ours {
                 move_branch(&here.repo, branch, head)?;

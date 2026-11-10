@@ -7,6 +7,7 @@ use crate::git_path::user_display_path;
 
 /// Linked worktree mutation that was pointed at the main working tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LinkedWorktreeOperation {
     /// [`remove_linked_worktree`](crate::worktree::remove_linked_worktree).
     Remove,

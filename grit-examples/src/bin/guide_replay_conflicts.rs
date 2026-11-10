@@ -209,6 +209,7 @@ fn main() -> Result<()> {
             SequenceOutcome::Empty { current, .. } => {
                 println!("empty step at {}", current.to_hex());
             }
+            _ => println!("stopped with an outcome this example does not handle"),
         }
     } else {
         println!(

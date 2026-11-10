@@ -302,15 +302,6 @@ fn with_write_target<R>(
             let editor = ConfigEditor::open(env, path, ConfigScope::Local);
             editor_op(&editor)
         }
-        ConfigLocation::Local | ConfigLocation::Worktree => {
-            let repo = crate::error_map::discover_for_config_write()?;
-            let scope = match location {
-                ConfigLocation::Local => ConfigScope::Local,
-                ConfigLocation::Worktree => ConfigScope::Worktree,
-                _ => unreachable!(),
-            };
-            repo_op(&repo, scope)
-        }
         ConfigLocation::Global | ConfigLocation::System => {
             if let Ok(repo) = context::discover() {
                 let scope = match location {
@@ -327,6 +318,15 @@ fn with_write_target<R>(
                 };
                 editor_op(&editor)
             }
+        }
+        // `Local`, `Worktree` and any repository-bound location added later.
+        _ => {
+            let repo = crate::error_map::discover_for_config_write()?;
+            let scope = match location {
+                ConfigLocation::Worktree => ConfigScope::Worktree,
+                _ => ConfigScope::Local,
+            };
+            repo_op(&repo, scope)
         }
     }
 }
@@ -693,21 +693,20 @@ fn load_for_read(
 
 fn git_dir_for_location(location: &ConfigLocation) -> Result<Option<PathBuf>> {
     match location {
-        ConfigLocation::Local | ConfigLocation::Worktree => {
-            Ok(Some(context::locate_repository()?.git_dir().to_path_buf()))
-        }
         ConfigLocation::Global | ConfigLocation::System | ConfigLocation::File(_) => Ok(None),
+        // `Local`, `Worktree` and any repository-bound location added later.
+        _ => Ok(Some(context::locate_repository()?.git_dir().to_path_buf())),
     }
 }
 
 fn optional_git_dir_for_read(location: &ConfigLocation) -> Result<Option<PathBuf>> {
     match location {
-        ConfigLocation::Local | ConfigLocation::Worktree => git_dir_for_location(location),
         ConfigLocation::Global | ConfigLocation::System | ConfigLocation::File(_) => {
             Ok(context::locate_repository()
                 .ok()
                 .map(|r| r.git_dir().to_path_buf()))
         }
+        _ => git_dir_for_location(location),
     }
 }
 

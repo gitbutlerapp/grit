@@ -19,6 +19,7 @@ use super::{ObjectStore, ObjectStream, PackedObjects};
 
 /// Whether [`MidxObjects`] can serve reads for this repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MidxObjectsStatus {
     /// `core.multiPackIndex` was off at construction; this backend is inert.
     Disabled,

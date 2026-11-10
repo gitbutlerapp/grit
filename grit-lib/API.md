@@ -63,6 +63,18 @@ Each functional area exposes its own `#[non_exhaustive]` `thiserror` enum with s
 
 Operations return structured results (counts, classifications, names, conflict state) so callers and the CLI do not re-derive the same facts from logs or side effects.
 
+#### Growable and closed enums
+
+Every public enum is `#[non_exhaustive]` unless its variant set is closed by a Git on-disk or wire format, by config syntax, or by definition. Kinds, modes, statuses, reasons, outcomes, results, refusals, policies, phases, events, operations and strategies all grow as Git grows, and adding `#[non_exhaustive]` after 0.6.0 would itself be a breaking change. Callers outside the crate match these with a trailing `_ =>` arm. Struct-like variants of outcome enums whose fields will grow (`IntegrateBranchOutcome::Merged`, `SequenceOutcome::Conflicts`, `RebaseOutcome::Done`, `ResumableEvent::Started`, …) are `#[non_exhaustive]` too, so patterns on them end in `..`.
+
+The enums below are deliberately **exhaustive** and frozen for 0.6:
+
+- **Git formats:** `objects::ObjectKind` (and `revwalk::rev_list::FilterObjectKind`, `revwalk::object_inspect::ObjectContents`, which mirror it), `objects::HashAlgo` (and `objects::hash::{ObjectHasher, ChecksumHasher}`, one variant per algorithm), `remote::pkt_line::Packet`, `remote::serve::ProtocolVersion`, `refs::{Ref, store::RawRef}`, `refs::reftable::RefValue`, `apply::{HunkLine, BinaryPatchSectionKind}`, `diff::structured::StructuredLineKind`, `diff::combined_diff_patch::CombinedStructuredLineKind`, `worktree::attributes::AttrValue` and the attribute-value enums in `worktree::crlf` (`TextAttr`, `EolAttr`, `CrlfLegacyAttr`, `DiffAttr`, `MergeAttr`), `commit::signing::TrustLevel` (GPG's trust scale), `command_runner::hooks::RewriteKind` and `notes::NotesRewriteCommand` (the `post-rewrite` argument), `remote::sideband_lines::RemoteLine` (a side-band fragment ends in `\r` or `\n`), `worktree::ignore::IgnoreSource` (per-directory `.gitignore`, `info/exclude`, `core.excludesFile`).
+- **Config or option syntax:** `porcelain::reset::ResetMode`, `remote::transfer::TagMode` (and `remote::clone::CloneTags`), `merge::FastForwardPolicy` (`merge.ff`), `merge::RerereAutoupdate`, `maintenance::AutoGcReason` (`gc.auto` and `gc.autoPackLimit`), `refs::LogRefsConfig` (`core.logAllRefUpdates`), `status::{IgnoredMode, UntrackedMode}` and `index::untracked_cache::UntrackedIgnoredMode`, `worktree::crlf::{AutoCrlf, CoreEol, SafeCrlf}`, `remote::bundle_uri::BundleListMode`, `diff::merge_file::MergeFavor`.
+- **Closed by definition:** `state::HeadState` (branch, detached, invalid), `command_runner::hooks::HookResult` (ran and succeeded, ran and failed, not found), `refs::branch_tracking::Standing` (even, ahead, behind, diverged), `porcelain::tag::TagKind`, `ident::{SignatureField, SignatureTimestamp}`, `config::ident_resolve::IdentRole`, `error::FilterPhase`, `porcelain::index_mode::StageExecutableHint`, `ownership_check::OwnershipStatus`, `repo_handles::RemoteUrlKind`, `remote::resumable::TransferDirection`, and the two-sided or run/skip pairs `merge::{MergeSide, ReplayDirection}`, `porcelain::restore::ConflictSide`, `porcelain::branch::BranchDeleteMode`, `revwalk::history::{Placement, PreRebase, UndoMode}`, `command_runner::hooks::PostOperationHooks`, `commits::HookPolicy`.
+
+A new public enum is `#[non_exhaustive]` unless it is closed in one of these ways; when in doubt, mark it. A wrong `non_exhaustive` costs callers one `_` arm, a wrong exhaustive call is permanent.
+
 ### 6. Public means supported
 
 - Default to `pub(crate)`; lift to `pub` only for the supported API.
@@ -226,7 +238,7 @@ Use this checklist before merging a new or widened public API:
 ## Audit
 
 <!-- api-audit:begin -->
-Snapshot: [`api-ratchet.toml`](api-ratchet.toml) `meta.updated` **2026-11-10**; [`public-api.txt`](public-api.txt) **29,325** non-empty lines (`wc -l` on the file: **29,325**).
+Snapshot: [`api-ratchet.toml`](api-ratchet.toml) `meta.updated` **2026-11-11**; [`public-api.txt`](public-api.txt) **29,325** non-empty lines (`wc -l` on the file: **29,325**).
 
 Regenerate this block with `make api-audit`; CI runs `make api-audit-check` in the **public-api** job next to `make api-ratchet-check`.
 
@@ -448,7 +460,7 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_fn_two_plus_bare_bool` | `grit_lib::ignore::IgnorePatternList::last_match :: last_match` |
 | `pub_fn_two_plus_bare_bool` | `grit_lib::index::handle::IndexFile (grit-lib/src/index/handle.rs:363) :: restore_hunks` |
 | `pub_fn_two_plus_bare_bool` | `grit_lib::odb::store::files::FilesSource::open :: open` |
-| `pub_fn_two_plus_bare_bool` | `grit_lib::porcelain::paths::RemoveBlockReason (grit-lib/src/porcelain/paths.rs:98) :: classify` |
+| `pub_fn_two_plus_bare_bool` | `grit_lib::porcelain::paths::RemoveBlockReason (grit-lib/src/porcelain/paths.rs:99) :: classify` |
 | `pub_fn_with_in_name` | `grit_lib::combined_tree_diff::format_combined_raw_line_all_paths_with_options :: format_combined_raw_line_all_paths_with_options` |
 | `pub_fn_with_in_name` | `grit_lib::command_runner::RunningCommand::wait_with_output :: wait_with_output` |
 | `pub_fn_with_in_name` | `grit_lib::commit_trailers::append_signoff_trailer_with_dedup :: append_signoff_trailer_with_dedup` |
@@ -457,14 +469,14 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_fn_with_in_name` | `grit_lib::diff::handle::Diff (grit-lib/src/diff/handle.rs:814) :: resolve_blame_line_range_with_options` |
 | `pub_fn_with_in_name` | `grit_lib::diff::options::DiffOptions (grit-lib/src/diff/options.rs:271) :: resolve_indent_heuristic_with_override` |
 | `pub_fn_with_in_name` | `grit_lib::gc::prune_loose_unreachable_with_dry_run :: prune_loose_unreachable_with_dry_run` |
-| `pub_fn_with_in_name` | `grit_lib::lockfile::LockFile (grit-lib/src/lockfile.rs:244) :: acquire_with_clock` |
+| `pub_fn_with_in_name` | `grit_lib::lockfile::LockFile (grit-lib/src/lockfile.rs:245) :: acquire_with_clock` |
 | `pub_fn_with_in_name` | `grit_lib::log_walk::LogWalkCursor (grit-lib/src/log_walk.rs:290) :: decode_with_git_dir` |
 | `pub_fn_with_in_name` | `grit_lib::merge_diff::blob_text_for_diff_with_oid :: blob_text_for_diff_with_oid` |
 | `pub_fn_with_in_name` | `grit_lib::odb::store::files::FilesSource (grit-lib/src/odb/store/files.rs:96) :: open_with_options` |
 | `pub_fn_with_in_name` | `grit_lib::parallel::map::try_par_map_with_local :: try_par_map_with_local` |
 | `pub_fn_with_in_name` | `grit_lib::pathspec::bloom_lookup_prefix_with_cwd :: bloom_lookup_prefix_with_cwd` |
 | `pub_fn_with_in_name` | `grit_lib::pathspec::resolve_pathspec_with_argv_precompose :: resolve_pathspec_with_argv_precompose` |
-| `pub_fn_with_in_name` | `grit_lib::porcelain::paths::RemoveBlockReason (grit-lib/src/porcelain/paths.rs:109) :: allowed_with_cached` |
+| `pub_fn_with_in_name` | `grit_lib::porcelain::paths::RemoveBlockReason (grit-lib/src/porcelain/paths.rs:110) :: allowed_with_cached` |
 | `pub_fn_with_in_name` | `grit_lib::quote_path_root::format_diff_path_with_prefix :: format_diff_path_with_prefix` |
 | `pub_fn_with_in_name` | `grit_lib::refs::prepare_with_lock_wait :: prepare_with_lock_wait` |
 | `pub_fn_with_in_name` | `grit_lib::refs::store::validation::verify_create_casefold_with_lookup :: verify_create_casefold_with_lookup` |
@@ -474,7 +486,7 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_fn_with_in_name` | `grit_lib::repo_handles::notes::RepositoryNotes::list_with_bodies :: list_with_bodies` |
 | `pub_fn_with_in_name` | `grit_lib::repo_handles::worktree::RepositoryWorktrees (grit-lib/src/repo_handles/worktree.rs:105) :: find_with_branch_checked_out` |
 | `pub_fn_with_in_name` | `grit_lib::repo_handles::worktree::RepositoryWorktrees (grit-lib/src/repo_handles/worktree.rs:90) :: add_with_cancel` |
-| `pub_fn_with_in_name` | `grit_lib::rev_list::RevListResult (grit-lib/src/rev_list.rs:870) :: count_with_objects_total` |
+| `pub_fn_with_in_name` | `grit_lib::rev_list::RevListResult (grit-lib/src/rev_list.rs:873) :: count_with_objects_total` |
 | `pub_fn_with_in_name` | `grit_lib::status::handle::Status (grit-lib/src/status/handle.rs:205) :: untracked_with_meta` |
 | `pub_fn_with_in_name` | `grit_lib::worktree_cwd::cwd_would_be_removed_with_dir :: cwd_would_be_removed_with_dir` |
 | `pub_free_fn_config_write` | `add_value (grit-lib/src/config/write.rs:154) :: add_value` |

@@ -217,6 +217,7 @@ fn status_display(status: &PushRefStatus, message: Option<&str>) -> (&'static st
         PushRefStatus::RemoteRejected => {
             format!("  [remote rejected] ({})", message.unwrap_or("declined"))
         }
+        _ => format!("  [rejected] ({})", message.unwrap_or("unknown reason")),
     };
     (mark, reason)
 }

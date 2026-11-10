@@ -17,6 +17,7 @@ impl From<HookInfo> for HookEntryJson {
             source: match info.source {
                 HookSource::HooksDir => "hooks_dir".to_owned(),
                 HookSource::CoreHooksPath => "core_hooks_path".to_owned(),
+                _ => "other".to_owned(),
             },
         }
     }

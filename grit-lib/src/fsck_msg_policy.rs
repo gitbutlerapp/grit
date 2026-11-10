@@ -19,6 +19,7 @@ use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 
 /// How one fsck message is treated during a transfer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum FsckMsgLevel {
     /// The object is refused.
     Error,

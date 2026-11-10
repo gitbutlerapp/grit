@@ -23,6 +23,7 @@ const HUNK_ID_HEX_LEN: usize = 12;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum DiffSide {
     /// Index compared to worktree (unstaged changes).
     Unstaged,

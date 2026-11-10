@@ -51,6 +51,7 @@ const MAX_COMMITS: usize = 500;
 /// What two diverged heads add up to. The codes are stable: scripts and
 /// agents match on them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum Scenario {
     // Not diverged.
     /// The same commit.
@@ -255,6 +256,7 @@ impl Scenario {
 
 /// What one side did to one commit since the base.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Did {
     /// Left it as it was.
     Unchanged,
@@ -1353,6 +1355,7 @@ pub(crate) fn classify(
 
 /// A way of putting two diverged heads back together. The ids are stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Choice {
     /// Every change from both sides, combined commit by commit: their
     /// commits kept as they are where possible, yours replayed on top.
@@ -2027,6 +2030,7 @@ pub(crate) fn missing_from(
 
 /// Outcome of [`RevWalk::replay_onto`]: either a new tip commit or a conflict list with repository paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReplayOntoOutcome {
     /// Replay finished; `tip` is the resulting commit.
     Ok {

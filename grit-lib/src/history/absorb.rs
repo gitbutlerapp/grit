@@ -89,6 +89,7 @@ pub fn format_hunk_range_header(range: &HunkRange) -> String {
 
 /// Why a staged hunk could not be absorbed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum UnassignedReason {
     /// No commit in range last touched the hunk context.
     NoCandidate,

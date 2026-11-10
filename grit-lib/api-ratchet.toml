@@ -2,7 +2,7 @@
 # Regenerate with: make api-ratchet
 
 [meta]
-updated = "2026-11-10"
+updated = "2026-11-11"
 semver_baseline = "165b90692c68f4976c1db7e32fc28d5e217317b3"
 
 [counts]

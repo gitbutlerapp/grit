@@ -61,8 +61,10 @@ pub struct ReplayRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum ReplayOutcome {
     /// A new commit was created and the branch was advanced.
+    #[non_exhaustive]
     Committed {
         /// OID of the new commit.
         oid: ObjectId,
@@ -72,6 +74,7 @@ pub enum ReplayOutcome {
         change_id: Option<ChangeId>,
     },
     /// The three-way merge had conflicts; repository state is unchanged.
+    #[non_exhaustive]
     Conflicts {
         /// Conflicted paths in repository-relative form, sorted and deduplicated.
         paths: Vec<String>,

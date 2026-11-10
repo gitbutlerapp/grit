@@ -780,6 +780,7 @@ impl<'repo> RepositoryRemotes<'repo> {
 
 /// How [`RepositoryRemotes::set_head`] updates `refs/remotes/<name>/HEAD`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SetHead {
     /// Query the remote and follow its `HEAD` symref.
     Auto,

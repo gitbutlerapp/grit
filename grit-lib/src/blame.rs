@@ -36,6 +36,7 @@ pub use blame_ignore_revs::{IgnoreRevs, IgnoreRevsSources};
 
 /// Diff algorithm used when mapping lines between blob revisions during blame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum BlameDiffAlgorithm {
     /// Default line diff (Myers); used when config does not specify an algorithm.
     Myers,
@@ -5103,6 +5104,7 @@ pub(crate) fn resolve_blame_line_range_with_options(
 /// Any level other than [`Off`](Self::Off) also enables within-file move detection, matching
 /// Git's rule that `-C` implies `-M` (see [`BlameOptions::move_detection_enabled`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum CopyDetection {
     /// No copy detection (default).
     #[default]
@@ -5196,6 +5198,7 @@ impl BlameOptions {
 /// that matches the start revision exactly is blamed like
 /// [`Revision`](Self::Revision). Nothing is written to the object database.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BlameFinalSource {
     /// The file as committed at the start revision (Git's `blame <rev> -- <path>`).
     #[default]

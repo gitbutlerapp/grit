@@ -266,7 +266,8 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
             name,
             annotation: None,
         }) => (ShowKind::Tag, Some(name), None),
-        None => (ShowKind::Commit, None, None),
+        // No label, or a label kind this CLI does not render.
+        _ => (ShowKind::Commit, None, None),
     };
 
     let resolved = repo

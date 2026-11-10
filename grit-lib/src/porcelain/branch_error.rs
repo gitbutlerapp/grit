@@ -138,6 +138,7 @@ pub struct StartPoint {
 
 /// Whether creating a branch should configure `branch.<name>.remote` / `.merge`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum TrackMode {
     /// Follow `branch.autoSetupMerge` and fetch refspec mapping.
     #[default]

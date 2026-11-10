@@ -49,6 +49,8 @@ impl From<UpdateKind> for FetchUpdateStatus {
             UpdateKind::Pruned => Self::Pruned,
             UpdateKind::Rejected => Self::Rejected,
             UpdateKind::UpToDate => Self::UpToDate,
+            // Update kinds this CLI does not know yet still moved the ref.
+            _ => Self::Forced,
         }
     }
 }

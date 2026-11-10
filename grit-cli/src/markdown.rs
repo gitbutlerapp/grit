@@ -101,6 +101,7 @@ fn change_label(status: &DiffStatus) -> &'static str {
         DiffStatus::Renamed => "renamed",
         DiffStatus::Copied => "copied",
         DiffStatus::Unmerged => "conflict",
+        _ => "changed",
     }
 }
 

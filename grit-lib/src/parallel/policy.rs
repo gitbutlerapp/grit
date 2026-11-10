@@ -15,6 +15,7 @@ use super::Parallelism;
 
 /// Git operation that selects which config keys apply to parallelism.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ParallelOp {
     /// Index stat preload and parallel worktree hashing (`index.threads`, `core.preloadIndex`).
     IndexRefresh,

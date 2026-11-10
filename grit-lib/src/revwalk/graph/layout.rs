@@ -50,6 +50,7 @@ pub struct GraphCommitInput {
 
 /// Kind of graph line relative to a commit entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum GraphLineKind {
     /// The line that carries the commit subject (contains the `*` marker).
     Commit,

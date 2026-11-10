@@ -12,6 +12,7 @@ pub struct DiffFilter {
 
 /// Unknown or unsupported `--diff-filter` letter.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum InvalidDiffFilter {
     /// Character is not a recognized diff status letter.
     #[error("unknown diff filter letter `{0}`")]

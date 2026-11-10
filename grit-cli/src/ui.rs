@@ -358,6 +358,7 @@ fn glyph(status: &DiffStatus) -> char {
         DiffStatus::Modified | DiffStatus::TypeChanged => '~',
         DiffStatus::Renamed | DiffStatus::Copied => '»',
         DiffStatus::Unmerged => '!',
+        _ => '~',
     }
 }
 
@@ -371,6 +372,7 @@ fn label(entry: &DiffEntry) -> &'static str {
         DiffStatus::Renamed => "renamed",
         DiffStatus::Copied => "copied",
         DiffStatus::Unmerged => "conflict",
+        _ => "changed",
     }
 }
 
@@ -382,6 +384,7 @@ fn status_color(status: &DiffStatus) -> &'static str {
         DiffStatus::Deleted | DiffStatus::Unmerged => "31",
         DiffStatus::Modified | DiffStatus::TypeChanged => "33",
         DiffStatus::Renamed | DiffStatus::Copied => "36",
+        _ => "33",
     }
 }
 

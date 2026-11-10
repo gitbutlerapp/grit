@@ -17,6 +17,7 @@ use crate::odb::{Odb, WriteOptions};
 
 /// How `cache_tree_update` persists rebuilt tree objects.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WriteTreePersistence {
     /// Write missing tree objects to the object store.
     #[default]

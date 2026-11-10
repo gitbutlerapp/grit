@@ -858,6 +858,7 @@ pub struct ReachableWalkCommitterCutoffs {
 /// How [`RevWalk::reachable_excluding`](crate::revwalk::RevWalk::reachable_excluding) bounds
 /// its output.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReachableWalkLimit {
     /// Emit at most `n` commits and stop (rev-list `--max-count`).
     StopAfter(usize),

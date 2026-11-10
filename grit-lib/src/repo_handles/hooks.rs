@@ -21,6 +21,7 @@ use crate::repo::Repository;
 
 /// Where a traditional hook script was discovered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HookSource {
     /// Default `.git/hooks` (or worktree commondir hooks).
     HooksDir,

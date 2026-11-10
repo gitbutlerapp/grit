@@ -100,6 +100,22 @@ match err {
 }
 ```
 
+### Kind, status and outcome enums are `#[non_exhaustive]`
+
+Enums that will gain variants as Git grows (outcomes such as [`PullResult`](rustdoc:grit_lib::porcelain::pull::PullResult) and [`IntegrateBranchOutcome`](rustdoc:grit_lib::merge::IntegrateBranchOutcome), statuses, reasons, modes, kinds, events) are now `#[non_exhaustive]`, so a `match` on them needs a trailing `_` arm. Multi-field variants of outcome enums (for example `IntegrateBranchOutcome::Merged` or `RebaseOutcome::Done`) are `#[non_exhaustive]` too: bind the fields you need and end the pattern with `..`.
+
+```rust
+use grit_lib::porcelain::pull::PullResult;
+
+let label = match result {
+    PullResult::UpToDate => "up to date",
+    PullResult::FastForward => "fast-forwarded",
+    _ => "updated",
+};
+```
+
+Sets closed by a Git format or by definition (`ObjectKind`, `HashAlgo`, `HeadState`, `ResetMode`, `TagMode`, …) stay exhaustive; `grit-lib/API.md` lists them.
+
 ### Custom object store via `RepositoryOptions`
 
 Injection moved into [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions): use [`with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store) and [`with_ref_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_ref_store) on open/discover/init, not ad hoc parameters on individual calls.

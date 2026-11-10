@@ -7,6 +7,7 @@ use crate::refs::common_dir;
 
 /// How a ref name maps to on-disk storage across worktrees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RefWorktreeType {
     /// `HEAD`, `refs/worktree/*`, `refs/bisect/*`, `refs/rewritten/*` in this checkout's git dir.
     Current,

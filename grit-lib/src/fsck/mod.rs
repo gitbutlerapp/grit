@@ -120,6 +120,7 @@ impl FsckOptions {
 
 /// Where a missing-object diagnostic was discovered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MissingObjectReferrer {
     /// Staged in the index but absent from the object database.
     Index,
@@ -215,6 +216,7 @@ pub enum FsckIssue {
 
 /// Severity for reporting and exit status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FsckSeverity {
     /// Should fail the overall fsck run.
     Error,

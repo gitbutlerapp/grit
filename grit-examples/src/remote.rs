@@ -37,7 +37,8 @@ impl RemoteKind {
             Ok(RemoteUrl::Git(_)) => Self::GitDaemon,
             Ok(RemoteUrl::Ssh(_)) => Self::Ssh,
             Ok(RemoteUrl::Local(_) | RemoteUrl::File(_) | RemoteUrl::Bundle(_)) => Self::Local,
-            Err(_) => Self::Local,
+            // Unknown future URL kinds and parse failures are treated as local paths.
+            Ok(_) | Err(_) => Self::Local,
         }
     }
 
@@ -161,7 +162,8 @@ fn ssh_command() -> String {
         grit_lib::remote::transport::SshCommand::Program(prog) => {
             prog.to_string_lossy().into_owned()
         }
-        grit_lib::remote::transport::SshCommand::Auto => "ssh".to_owned(),
+        // `Auto` and any future variant fall back to plain `ssh`.
+        _ => "ssh".to_owned(),
     }
 }
 

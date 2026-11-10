@@ -2412,6 +2412,7 @@ pub(crate) fn xdiff_new_line_changed_flags(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum DiffStatus {
     /// File was added.
     Added,

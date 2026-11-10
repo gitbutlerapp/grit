@@ -391,6 +391,7 @@ pub fn remove_empty_dirs(
 
 /// Which local changes a stash push saves and how the worktree/index are left afterward.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum StashMode {
     /// Stash staged and unstaged tracked changes (default).
     #[default]
@@ -568,6 +569,7 @@ pub struct StashEntry {
 
 /// How to address a stash entry or a stash-shaped commit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StashReference {
     /// Newest-first reflog index (`stash@{{n}}`).
     Index(usize),

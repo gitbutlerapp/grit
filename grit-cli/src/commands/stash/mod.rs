@@ -80,6 +80,8 @@ impl From<StashMode> for StashPushMode {
             StashMode::All => Self::All,
             StashMode::StagedOnly => Self::StagedOnly,
             StashMode::KeepIndex => Self::KeepIndex,
+            // The CLI only builds the modes above.
+            _ => Self::All,
         }
     }
 }
@@ -528,6 +530,7 @@ fn resolve_stash_index(repo: &grit_lib::repo::Repository, spec: Option<&str>) ->
                 ))
             }
         }
+        _ => anyhow::bail!("unsupported stash reference"),
     }
 }
 
@@ -550,6 +553,7 @@ fn stash_reference_parts(
             Ok((Some(n), oid))
         }
         StashReference::Commit(oid) => Ok((repo.stash().index_for_oid(&oid), oid)),
+        _ => anyhow::bail!("unsupported stash reference"),
     }
 }
 

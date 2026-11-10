@@ -22,6 +22,7 @@ use crate::worktree_rules::WorktreeRules;
 
 /// Which untracked/ignored paths [`Checkout::clean`](crate::repo_handles::Checkout::clean) may remove.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CleanScope {
     /// Untracked non-ignored paths only (default `git clean` without `-x`/`-X`).
     #[default]

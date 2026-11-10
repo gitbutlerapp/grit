@@ -192,7 +192,7 @@ pub fn grit_lib::apply::materialize_binary_patch_reverse(&grit_lib::apply::Binar
 pub fn grit_lib::apply::parse_patch(&str, usize, &str, bool, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::apply::FilePatch>>
 pub fn grit_lib::apply::write_git_binary_patch(&[u8], &[u8], &str, &str) -> grit_lib::error::Result<alloc::string::String>
 pub mod grit_lib::blame
-pub enum grit_lib::blame::BlameDiffAlgorithm
+#[non_exhaustive] pub enum grit_lib::blame::BlameDiffAlgorithm
 pub grit_lib::blame::BlameDiffAlgorithm::Histogram
 pub grit_lib::blame::BlameDiffAlgorithm::Minimal
 pub grit_lib::blame::BlameDiffAlgorithm::Myers
@@ -215,7 +215,7 @@ impl core::marker::Unpin for grit_lib::blame::BlameDiffAlgorithm
 impl core::marker::UnsafeUnpin for grit_lib::blame::BlameDiffAlgorithm
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameDiffAlgorithm
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameDiffAlgorithm
-pub enum grit_lib::blame::BlameFinalSource
+#[non_exhaustive] pub enum grit_lib::blame::BlameFinalSource
 pub grit_lib::blame::BlameFinalSource::Contents(alloc::vec::Vec<u8>)
 pub grit_lib::blame::BlameFinalSource::Revision
 pub grit_lib::blame::BlameFinalSource::Worktree
@@ -238,7 +238,7 @@ impl core::marker::Unpin for grit_lib::blame::BlameFinalSource
 impl core::marker::UnsafeUnpin for grit_lib::blame::BlameFinalSource
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameFinalSource
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameFinalSource
-pub enum grit_lib::blame::CopyDetection
+#[non_exhaustive] pub enum grit_lib::blame::CopyDetection
 pub grit_lib::blame::CopyDetection::FromAnyCommit
 pub grit_lib::blame::CopyDetection::FromCreatingCommit
 pub grit_lib::blame::CopyDetection::FromModifiedFiles
@@ -547,7 +547,7 @@ impl core::marker::Unpin for grit_lib::bundle::BundleError
 impl core::marker::UnsafeUnpin for grit_lib::bundle::BundleError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::bundle::BundleError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::bundle::BundleError
-pub enum grit_lib::bundle::BundleVersion
+#[non_exhaustive] pub enum grit_lib::bundle::BundleVersion
 pub grit_lib::bundle::BundleVersion::V2
 pub grit_lib::bundle::BundleVersion::V3
 impl core::clone::Clone for grit_lib::bundle::BundleVersion
@@ -949,7 +949,7 @@ impl core::marker::Unpin for grit_lib::command_runner::hooks::HookError
 impl core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::HookError
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::HookError
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::HookError
-pub enum grit_lib::command_runner::hooks::HookName
+#[non_exhaustive] pub enum grit_lib::command_runner::hooks::HookName
 pub grit_lib::command_runner::hooks::HookName::CommitMsg
 pub grit_lib::command_runner::hooks::HookName::PostCheckout
 pub grit_lib::command_runner::hooks::HookName::PostCommit
@@ -1005,7 +1005,7 @@ impl core::marker::Unpin for grit_lib::command_runner::hooks::HookResult
 impl core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::HookResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::HookResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::HookResult
-pub enum grit_lib::command_runner::hooks::HookStdio
+#[non_exhaustive] pub enum grit_lib::command_runner::hooks::HookStdio
 pub grit_lib::command_runner::hooks::HookStdio::Capture
 pub grit_lib::command_runner::hooks::HookStdio::Inherit
 impl core::clone::Clone for grit_lib::command_runner::hooks::HookStdio
@@ -1155,7 +1155,7 @@ impl<'a> core::marker::Unpin for grit_lib::command_runner::hooks::RunHookOptions
 impl<'a> core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::RunHookOptions<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::RunHookOptions<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::RunHookOptions<'a>
-pub enum grit_lib::command_runner::CommandStdin
+#[non_exhaustive] pub enum grit_lib::command_runner::CommandStdin
 pub grit_lib::command_runner::CommandStdin::Inherit
 pub grit_lib::command_runner::CommandStdin::Null
 pub grit_lib::command_runner::CommandStdin::Pipe(alloc::vec::Vec<u8>)
@@ -1172,7 +1172,7 @@ impl core::marker::Unpin for grit_lib::command_runner::CommandStdin
 impl core::marker::UnsafeUnpin for grit_lib::command_runner::CommandStdin
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::CommandStdin
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::CommandStdin
-pub enum grit_lib::command_runner::CommandStdio
+#[non_exhaustive] pub enum grit_lib::command_runner::CommandStdio
 pub grit_lib::command_runner::CommandStdio::Inherit
 pub grit_lib::command_runner::CommandStdio::Null
 pub grit_lib::command_runner::CommandStdio::ParentStderr
@@ -1195,7 +1195,7 @@ impl core::marker::Unpin for grit_lib::command_runner::CommandStdio
 impl core::marker::UnsafeUnpin for grit_lib::command_runner::CommandStdio
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::CommandStdio
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::CommandStdio
-pub enum grit_lib::command_runner::RecordedResponse
+#[non_exhaustive] pub enum grit_lib::command_runner::RecordedResponse
 pub grit_lib::command_runner::RecordedResponse::Exit(i32)
 pub grit_lib::command_runner::RecordedResponse::Output
 pub grit_lib::command_runner::RecordedResponse::Output::code: i32
@@ -1212,7 +1212,7 @@ impl core::marker::Unpin for grit_lib::command_runner::RecordedResponse
 impl core::marker::UnsafeUnpin for grit_lib::command_runner::RecordedResponse
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::RecordedResponse
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::RecordedResponse
-pub enum grit_lib::command_runner::ShellInvocation
+#[non_exhaustive] pub enum grit_lib::command_runner::ShellInvocation
 pub grit_lib::command_runner::ShellInvocation::DashC
 pub grit_lib::command_runner::ShellInvocation::DashC::args: alloc::vec::Vec<std::ffi::os_str::OsString>
 pub grit_lib::command_runner::ShellInvocation::DashC::argv0: core::option::Option<alloc::string::String>
@@ -1396,7 +1396,7 @@ pub fn grit_lib::commit::encoding::finalize_stored_commit_message(alloc::string:
 pub fn grit_lib::commit::encoding::identity_raw_for_serialized_commit(&core::option::Option<alloc::string::String>, &str, &str) -> (alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)
 pub fn grit_lib::commit::encoding::resolve(&str) -> core::option::Option<&'static encoding_rs::Encoding>
 pub mod grit_lib::commit::signing
-pub enum grit_lib::commit::signing::GpgFormat
+#[non_exhaustive] pub enum grit_lib::commit::signing::GpgFormat
 pub grit_lib::commit::signing::GpgFormat::OpenPgp
 pub grit_lib::commit::signing::GpgFormat::Ssh
 pub grit_lib::commit::signing::GpgFormat::X509
@@ -1512,7 +1512,7 @@ pub fn grit_lib::commit::signing::verify_commit(&grit_lib::commit::signing::GpgC
 pub fn grit_lib::commit::signing::verify_tag(&grit_lib::commit::signing::GpgConfig, &[u8]) -> grit_lib::error::Result<grit_lib::commit::signing::SignatureCheck>
 pub mod grit_lib::commit::trailers
 pub mod grit_lib::commit::trailers::interpret
-pub enum grit_lib::commit::trailers::interpret::TrailerIfExists
+#[non_exhaustive] pub enum grit_lib::commit::trailers::interpret::TrailerIfExists
 pub grit_lib::commit::trailers::interpret::TrailerIfExists::Add
 pub grit_lib::commit::trailers::interpret::TrailerIfExists::AddIfDifferent
 pub grit_lib::commit::trailers::interpret::TrailerIfExists::AddIfDifferentNeighbor
@@ -1537,7 +1537,7 @@ impl core::marker::Unpin for grit_lib::commit::trailers::interpret::TrailerIfExi
 impl core::marker::UnsafeUnpin for grit_lib::commit::trailers::interpret::TrailerIfExists
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::commit::trailers::interpret::TrailerIfExists
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::commit::trailers::interpret::TrailerIfExists
-pub enum grit_lib::commit::trailers::interpret::TrailerIfMissing
+#[non_exhaustive] pub enum grit_lib::commit::trailers::interpret::TrailerIfMissing
 pub grit_lib::commit::trailers::interpret::TrailerIfMissing::Add
 pub grit_lib::commit::trailers::interpret::TrailerIfMissing::Default
 pub grit_lib::commit::trailers::interpret::TrailerIfMissing::DoNothing
@@ -1559,7 +1559,7 @@ impl core::marker::Unpin for grit_lib::commit::trailers::interpret::TrailerIfMis
 impl core::marker::UnsafeUnpin for grit_lib::commit::trailers::interpret::TrailerIfMissing
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::commit::trailers::interpret::TrailerIfMissing
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::commit::trailers::interpret::TrailerIfMissing
-pub enum grit_lib::commit::trailers::interpret::TrailerWhere
+#[non_exhaustive] pub enum grit_lib::commit::trailers::interpret::TrailerWhere
 pub grit_lib::commit::trailers::interpret::TrailerWhere::After
 pub grit_lib::commit::trailers::interpret::TrailerWhere::Before
 pub grit_lib::commit::trailers::interpret::TrailerWhere::Default
@@ -1728,7 +1728,7 @@ impl core::marker::Unpin for grit_lib::porcelain::CommitError
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::CommitError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::CommitError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::CommitError
-pub enum grit_lib::commits::CommitPatchInput
+#[non_exhaustive] pub enum grit_lib::commits::CommitPatchInput
 pub grit_lib::commits::CommitPatchInput::Hunks(grit_lib::porcelain::hunk_select::HunkSelection)
 pub grit_lib::commits::CommitPatchInput::Patches(alloc::vec::Vec<grit_lib::apply::FilePatch>)
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitPatchInput
@@ -1742,7 +1742,7 @@ impl core::marker::Unpin for grit_lib::porcelain::commit::CommitPatchInput
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitPatchInput
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitPatchInput
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitPatchInput
-pub enum grit_lib::commits::CommitScope
+#[non_exhaustive] pub enum grit_lib::commits::CommitScope
 pub grit_lib::commits::CommitScope::AutoStage
 pub grit_lib::commits::CommitScope::Patch
 pub grit_lib::commits::CommitScope::Patch::input: grit_lib::porcelain::commit::CommitPatchInput
@@ -2115,7 +2115,7 @@ pub fn grit_lib::config::environment::offset_from_epoch_and_tz(i64, core::option
 pub mod grit_lib::config::git_date
 pub mod grit_lib::config::git_date::approx
 pub fn grit_lib::config::git_date::approx::approxidate_careful_at(&str, i64, core::option::Option<&mut i32>) -> u64
-pub enum grit_lib::config::git_date::DateModeType
+#[non_exhaustive] pub enum grit_lib::config::git_date::DateModeType
 pub grit_lib::config::git_date::DateModeType::Human
 pub grit_lib::config::git_date::DateModeType::Iso8601
 pub grit_lib::config::git_date::DateModeType::Iso8601Strict
@@ -2229,7 +2229,7 @@ pub fn grit_lib::config::gitmodules::gitdir::submodule_gitdir_filesystem_path(&s
 pub fn grit_lib::config::gitmodules::gitdir::validate_encoded_submodule_git_dir(&std::path::Path, &grit_lib::config::ConfigFile, &std::path::Path, &str, &std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::gitmodules::gitdir::validate_submodule_path(&std::path::Path, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::gitmodules::gitdir::write_submodule_gitfile(&std::path::Path, &std::path::Path) -> grit_lib::error::Result<()>
-pub enum grit_lib::config::gitmodules::DotFsckIssue
+#[non_exhaustive] pub enum grit_lib::config::gitmodules::DotFsckIssue
 pub grit_lib::config::gitmodules::DotFsckIssue::BlobGitattributes
 pub grit_lib::config::gitmodules::DotFsckIssue::BlobGitattributes::blob_oid: grit_lib::objects::ObjectId
 pub grit_lib::config::gitmodules::DotFsckIssue::BlobGitattributes::detail: &'static str
@@ -2468,7 +2468,7 @@ pub fn grit_lib::config::precompose_config::argv_precompose_enabled(core::option
 pub fn grit_lib::config::precompose_config::effective_core_precomposeunicode(core::option::Option<&std::path::Path>) -> bool
 pub fn grit_lib::config::precompose_config::locate_git_dir_from_environment(&grit_lib::prelude::Environment) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::config::precompose_config::pathspec_precompose_enabled() -> bool
-pub enum grit_lib::config::ConfigIncludeOrigin
+#[non_exhaustive] pub enum grit_lib::config::ConfigIncludeOrigin
 pub grit_lib::config::ConfigIncludeOrigin::Blob
 pub grit_lib::config::ConfigIncludeOrigin::CommandLine
 pub grit_lib::config::ConfigIncludeOrigin::Disk
@@ -2489,7 +2489,7 @@ impl core::marker::Unpin for grit_lib::config::ConfigIncludeOrigin
 impl core::marker::UnsafeUnpin for grit_lib::config::ConfigIncludeOrigin
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::ConfigIncludeOrigin
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::ConfigIncludeOrigin
-pub enum grit_lib::config::ConfigLocation
+#[non_exhaustive] pub enum grit_lib::config::ConfigLocation
 pub grit_lib::config::ConfigLocation::File(std::path::PathBuf)
 pub grit_lib::config::ConfigLocation::Global
 pub grit_lib::config::ConfigLocation::Local
@@ -2514,7 +2514,7 @@ impl core::marker::Unpin for grit_lib::config::ConfigLocation
 impl core::marker::UnsafeUnpin for grit_lib::config::ConfigLocation
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::ConfigLocation
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::ConfigLocation
-pub enum grit_lib::config::ConfigScope
+#[non_exhaustive] pub enum grit_lib::config::ConfigScope
 pub grit_lib::config::ConfigScope::Command
 pub grit_lib::config::ConfigScope::Global
 pub grit_lib::config::ConfigScope::Local
@@ -2544,7 +2544,7 @@ impl core::marker::Unpin for grit_lib::config::ConfigScope
 impl core::marker::UnsafeUnpin for grit_lib::config::ConfigScope
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::ConfigScope
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::ConfigScope
-pub enum grit_lib::config::ConfigValueType
+#[non_exhaustive] pub enum grit_lib::config::ConfigValueType
 pub grit_lib::config::ConfigValueType::Bool
 pub grit_lib::config::ConfigValueType::Int
 pub grit_lib::config::ConfigValueType::Path
@@ -2606,7 +2606,7 @@ impl core::marker::Unpin for grit_lib::config::IncludeMode
 impl core::marker::UnsafeUnpin for grit_lib::config::IncludeMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::IncludeMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::IncludeMode
-pub enum grit_lib::config::TypedConfigValue
+#[non_exhaustive] pub enum grit_lib::config::TypedConfigValue
 pub grit_lib::config::TypedConfigValue::Bool(bool)
 pub grit_lib::config::TypedConfigValue::Int(i64)
 pub grit_lib::config::TypedConfigValue::Path(alloc::string::String)
@@ -3185,7 +3185,7 @@ pub fn grit_lib::diff::combined_diff_patch::format_combined_diff_body(&[alloc::s
 pub fn grit_lib::diff::combined_diff_patch::format_combined_structured_body(&grit_lib::diff::combined_diff_patch::CombinedStructuredTextDiff) -> alloc::string::String
 pub fn grit_lib::diff::combined_diff_patch::structured_combined_diff_body(&[alloc::string::String], &str, usize, bool, grit_lib::diff::combined_diff_patch::CombinedDiffWsOptions) -> grit_lib::diff::combined_diff_patch::CombinedStructuredTextDiff
 pub mod grit_lib::diff::combined_tree_diff
-pub enum grit_lib::diff::combined_tree_diff::CombinedParentStatus
+#[non_exhaustive] pub enum grit_lib::diff::combined_tree_diff::CombinedParentStatus
 pub grit_lib::diff::combined_tree_diff::CombinedParentStatus::Added
 pub grit_lib::diff::combined_tree_diff::CombinedParentStatus::Deleted
 pub grit_lib::diff::combined_tree_diff::CombinedParentStatus::Modified
@@ -3443,7 +3443,7 @@ pub fn grit_lib::diff::merge_diff::read_blob_at_path(&grit_lib::prelude::Odb, &g
 pub fn grit_lib::diff::merge_diff::run_textconv(&std::path::Path, &grit_lib::config::ConfigSet, &str, &[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::diff::merge_diff::run_textconv_raw(&std::path::Path, &grit_lib::config::ConfigSet, &str, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
 pub mod grit_lib::diff::merge_file
-pub enum grit_lib::diff::merge_file::ConflictStyle
+#[non_exhaustive] pub enum grit_lib::diff::merge_file::ConflictStyle
 pub grit_lib::diff::merge_file::ConflictStyle::Diff3
 pub grit_lib::diff::merge_file::ConflictStyle::Merge
 pub grit_lib::diff::merge_file::ConflictStyle::ZealousDiff3
@@ -3527,7 +3527,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_file::MergeO
 pub fn grit_lib::diff::merge_file::is_binary(&[u8]) -> bool
 pub fn grit_lib::diff::merge_file::merge(&grit_lib::diff::merge_file::MergeInput<'_>) -> grit_lib::error::Result<grit_lib::diff::merge_file::MergeOutput>
 pub mod grit_lib::diff::merge_trees
-pub enum grit_lib::diff::merge_trees::DirectoryRenameConflict
+#[non_exhaustive] pub enum grit_lib::diff::merge_trees::DirectoryRenameConflict
 pub grit_lib::diff::merge_trees::DirectoryRenameConflict::Blocked
 pub grit_lib::diff::merge_trees::DirectoryRenameConflict::Blocked::existing: bool
 pub grit_lib::diff::merge_trees::DirectoryRenameConflict::Blocked::path: alloc::vec::Vec<u8>
@@ -3556,7 +3556,7 @@ impl core::marker::Unpin for grit_lib::diff::merge_trees::DirectoryRenameConflic
 impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::DirectoryRenameConflict
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::DirectoryRenameConflict
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::DirectoryRenameConflict
-pub enum grit_lib::diff::merge_trees::DirectoryRenameMode
+#[non_exhaustive] pub enum grit_lib::diff::merge_trees::DirectoryRenameMode
 pub grit_lib::diff::merge_trees::DirectoryRenameMode::Apply
 pub grit_lib::diff::merge_trees::DirectoryRenameMode::Conflict
 pub grit_lib::diff::merge_trees::DirectoryRenameMode::Off
@@ -3608,7 +3608,7 @@ impl core::marker::Unpin for grit_lib::diff::merge_trees::MergeSide
 impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::MergeSide
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::MergeSide
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::MergeSide
-pub enum grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+#[non_exhaustive] pub enum grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
 pub grit_lib::diff::merge_trees::TheirsConflictLabel::Fixed(&'a str)
 pub grit_lib::diff::merge_trees::TheirsConflictLabel::PathUtf8
 impl<'a> core::clone::Clone for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
@@ -3706,7 +3706,7 @@ pub fn grit_lib::diff::merge_trees::materialized_merge_result_tree(&grit_lib::pr
 pub fn grit_lib::diff::merge_trees::merge_trees_three_way(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, grit_lib::diff::merge_file::MergeFavor, grit_lib::diff::merge_trees::WhitespaceMergeOptions, core::option::Option<&str>, grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'_>, grit_lib::diff::merge_trees::DirectoryRenameMode) -> grit_lib::error::Result<grit_lib::diff::merge_trees::TreeMergeOutput>
 pub fn grit_lib::diff::merge_trees::refresh_tree_merge_index_stat_cache(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &grit_lib::diff::merge_trees::TreeMergeOutput) -> grit_lib::error::Result<()>
 pub mod grit_lib::diff::patch_ids
-pub enum grit_lib::diff::patch_ids::PatchIdMode
+#[non_exhaustive] pub enum grit_lib::diff::patch_ids::PatchIdMode
 pub grit_lib::diff::patch_ids::PatchIdMode::Stable
 pub grit_lib::diff::patch_ids::PatchIdMode::Unstable
 pub grit_lib::diff::patch_ids::PatchIdMode::Verbatim
@@ -3752,7 +3752,7 @@ impl core::marker::Unpin for grit_lib::merge::RerereAutoupdate
 impl core::marker::UnsafeUnpin for grit_lib::merge::RerereAutoupdate
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::merge::RerereAutoupdate
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::merge::RerereAutoupdate
-pub enum grit_lib::diff::rerere::RerereEventKind
+#[non_exhaustive] pub enum grit_lib::diff::rerere::RerereEventKind
 pub grit_lib::diff::rerere::RerereEventKind::Forgot
 pub grit_lib::diff::rerere::RerereEventKind::NoRemembered
 pub grit_lib::diff::rerere::RerereEventKind::RecordedPreimage
@@ -4139,7 +4139,7 @@ impl core::marker::Unpin for grit_lib::diff::DiffMerges
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffMerges
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffMerges
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffMerges
-pub enum grit_lib::diff::DiffSide
+#[non_exhaustive] pub enum grit_lib::diff::DiffSide
 pub grit_lib::diff::DiffSide::Other
 pub grit_lib::diff::DiffSide::Staged
 pub grit_lib::diff::DiffSide::Unstaged
@@ -4163,7 +4163,7 @@ impl core::marker::Unpin for grit_lib::diff::DiffSide
 impl core::marker::UnsafeUnpin for grit_lib::diff::DiffSide
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffSide
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffSide
-pub enum grit_lib::diff::DiffStatus
+#[non_exhaustive] pub enum grit_lib::diff::DiffStatus
 pub grit_lib::diff::DiffStatus::Added
 pub grit_lib::diff::DiffStatus::Copied
 pub grit_lib::diff::DiffStatus::Deleted
@@ -4295,7 +4295,7 @@ impl core::marker::Unpin for grit_lib::diff::IndentHeuristicOverride
 impl core::marker::UnsafeUnpin for grit_lib::diff::IndentHeuristicOverride
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::IndentHeuristicOverride
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::IndentHeuristicOverride
-pub enum grit_lib::diff::InvalidDiffFilter
+#[non_exhaustive] pub enum grit_lib::diff::InvalidDiffFilter
 pub grit_lib::diff::InvalidDiffFilter::Unknown(char)
 pub grit_lib::diff::InvalidDiffFilter::Unsupported(char)
 impl core::clone::Clone for grit_lib::diff::InvalidDiffFilter
@@ -4316,7 +4316,7 @@ impl core::marker::Unpin for grit_lib::diff::InvalidDiffFilter
 impl core::marker::UnsafeUnpin for grit_lib::diff::InvalidDiffFilter
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::InvalidDiffFilter
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::InvalidDiffFilter
-pub enum grit_lib::diff::LogPatchBinaryFormat
+#[non_exhaustive] pub enum grit_lib::diff::LogPatchBinaryFormat
 pub grit_lib::diff::LogPatchBinaryFormat::GitApplyBinaryPatch
 pub grit_lib::diff::LogPatchBinaryFormat::LogShortMessage
 impl core::clone::Clone for grit_lib::diff::LogPatchBinaryFormat
@@ -4337,7 +4337,7 @@ impl core::marker::Unpin for grit_lib::diff::LogPatchBinaryFormat
 impl core::marker::UnsafeUnpin for grit_lib::diff::LogPatchBinaryFormat
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::LogPatchBinaryFormat
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::LogPatchBinaryFormat
-pub enum grit_lib::diff::LogPatchCommitHeader
+#[non_exhaustive] pub enum grit_lib::diff::LogPatchCommitHeader
 pub grit_lib::diff::LogPatchCommitHeader::FormatPercentH
 pub grit_lib::diff::LogPatchCommitHeader::Full
 impl core::clone::Clone for grit_lib::diff::LogPatchCommitHeader
@@ -4403,7 +4403,7 @@ impl core::marker::Unpin for grit_lib::diff::NoNewlineMarker
 impl core::marker::UnsafeUnpin for grit_lib::diff::NoNewlineMarker
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::NoNewlineMarker
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::NoNewlineMarker
-pub enum grit_lib::diff::PatchSide
+#[non_exhaustive] pub enum grit_lib::diff::PatchSide
 pub grit_lib::diff::PatchSide::Blob
 pub grit_lib::diff::PatchSide::Bytes(alloc::vec::Vec<u8>)
 pub grit_lib::diff::PatchSide::Worktree
@@ -4463,7 +4463,7 @@ impl core::marker::Unpin for grit_lib::revwalk::PickaxeError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::PickaxeError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::PickaxeError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::PickaxeError
-pub enum grit_lib::diff::PickaxeKind
+#[non_exhaustive] pub enum grit_lib::diff::PickaxeKind
 pub grit_lib::diff::PickaxeKind::LineGrep
 pub grit_lib::diff::PickaxeKind::Occurrences
 pub grit_lib::diff::PickaxeKind::Occurrences::needle: alloc::string::String
@@ -5414,7 +5414,7 @@ pub fn grit_lib::diff::write_patch_structured<W: core::io::write::Write>(&grit_l
 pub fn grit_lib::diff::write_paths_patch<W: core::io::write::Write>(&std::path::Path, &std::path::Path, &grit_lib::diff::DiffOptions, &mut W) -> core::result::Result<bool, grit_lib::diff::NoIndexError>
 pub fn grit_lib::diff::zero_oid() -> grit_lib::objects::ObjectId
 pub mod grit_lib::divergence
-pub enum grit_lib::divergence::Choice
+#[non_exhaustive] pub enum grit_lib::divergence::Choice
 pub grit_lib::divergence::Choice::Combine
 pub grit_lib::divergence::Choice::Drop
 pub grit_lib::divergence::Choice::KeepAmended
@@ -5446,7 +5446,7 @@ impl core::marker::Unpin for grit_lib::divergence::Choice
 impl core::marker::UnsafeUnpin for grit_lib::divergence::Choice
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Choice
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Choice
-pub enum grit_lib::divergence::Did
+#[non_exhaustive] pub enum grit_lib::divergence::Did
 pub grit_lib::divergence::Did::Absent
 pub grit_lib::divergence::Did::Amended
 pub grit_lib::divergence::Did::Dropped
@@ -5474,7 +5474,7 @@ impl core::marker::Unpin for grit_lib::divergence::Did
 impl core::marker::UnsafeUnpin for grit_lib::divergence::Did
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Did
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Did
-pub enum grit_lib::divergence::ReplayOntoOutcome
+#[non_exhaustive] pub enum grit_lib::divergence::ReplayOntoOutcome
 pub grit_lib::divergence::ReplayOntoOutcome::Conflict
 pub grit_lib::divergence::ReplayOntoOutcome::Conflict::paths: alloc::vec::Vec<crate::repo_relpath::StoredRelPath>
 pub grit_lib::divergence::ReplayOntoOutcome::Ok
@@ -5494,7 +5494,7 @@ impl core::marker::Unpin for grit_lib::divergence::ReplayOntoOutcome
 impl core::marker::UnsafeUnpin for grit_lib::divergence::ReplayOntoOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::ReplayOntoOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::ReplayOntoOutcome
-pub enum grit_lib::divergence::Scenario
+#[non_exhaustive] pub enum grit_lib::divergence::Scenario
 pub grit_lib::divergence::Scenario::AddedBoth
 pub grit_lib::divergence::Scenario::AddedBothConflict
 pub grit_lib::divergence::Scenario::Ahead
@@ -5777,7 +5777,7 @@ impl core::marker::Unpin for grit_lib::error::AuthFailure
 impl core::marker::UnsafeUnpin for grit_lib::error::AuthFailure
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::AuthFailure
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::AuthFailure
-pub enum grit_lib::error::BadNumericSource
+#[non_exhaustive] pub enum grit_lib::error::BadNumericSource
 pub grit_lib::error::BadNumericSource::InvalidUnit
 pub grit_lib::error::BadNumericSource::OutOfRange
 impl core::clone::Clone for grit_lib::error::BadNumericSource
@@ -6556,7 +6556,7 @@ impl core::marker::Unpin for grit_lib::error::ObjectReadFailure
 impl core::marker::UnsafeUnpin for grit_lib::error::ObjectReadFailure
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::ObjectReadFailure
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::error::ObjectReadFailure
-pub enum grit_lib::error::OverwriteReason
+#[non_exhaustive] pub enum grit_lib::error::OverwriteReason
 pub grit_lib::error::OverwriteReason::LocalChanges
 pub grit_lib::error::OverwriteReason::Untracked
 impl core::clone::Clone for grit_lib::error::OverwriteReason
@@ -7761,7 +7761,7 @@ pub const grit_lib::index::untracked_cache::DIR_HIDE_EMPTY_DIRECTORIES: u32
 pub const grit_lib::index::untracked_cache::DIR_SHOW_OTHER_DIRECTORIES: u32
 pub fn grit_lib::index::untracked_cache::write_untracked_extension(&grit_lib::index::untracked_cache::UntrackedCache) -> alloc::vec::Vec<u8>
 pub mod grit_lib::index::write_tree
-pub enum grit_lib::index::write_tree::WriteTreePersistence
+#[non_exhaustive] pub enum grit_lib::index::write_tree::WriteTreePersistence
 pub grit_lib::index::write_tree::WriteTreePersistence::DryRun
 pub grit_lib::index::write_tree::WriteTreePersistence::Repair
 pub grit_lib::index::write_tree::WriteTreePersistence::Write
@@ -8443,7 +8443,7 @@ impl core::marker::Unpin for grit_lib::lockfile::LockError
 impl core::marker::UnsafeUnpin for grit_lib::lockfile::LockError
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::lockfile::LockError
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::lockfile::LockError
-pub enum grit_lib::lockfile::LockWait
+#[non_exhaustive] pub enum grit_lib::lockfile::LockWait
 pub grit_lib::lockfile::LockWait::Backoff
 pub grit_lib::lockfile::LockWait::Backoff::budget: core::time::Duration
 pub grit_lib::lockfile::LockWait::Immediately
@@ -8548,7 +8548,7 @@ pub fn grit_lib::lockfile::grit_lockfile_pid_enabled(core::option::Option<&grit_
 pub fn grit_lib::lockfile::pid_path_for_lock(&std::path::Path) -> std::path::PathBuf
 pub mod grit_lib::maintenance
 pub mod grit_lib::maintenance::fsck
-pub enum grit_lib::maintenance::fsck::FsckMsgLevel
+#[non_exhaustive] pub enum grit_lib::maintenance::fsck::FsckMsgLevel
 pub grit_lib::maintenance::fsck::FsckMsgLevel::Error
 pub grit_lib::maintenance::fsck::FsckMsgLevel::Ignore
 pub grit_lib::maintenance::fsck::FsckMsgLevel::Warn
@@ -8717,7 +8717,7 @@ impl core::marker::Unpin for grit_lib::maintenance::repository_fsck::FsckIssue
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::repository_fsck::FsckIssue
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::repository_fsck::FsckIssue
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::repository_fsck::FsckIssue
-pub enum grit_lib::maintenance::repository_fsck::FsckSeverity
+#[non_exhaustive] pub enum grit_lib::maintenance::repository_fsck::FsckSeverity
 pub grit_lib::maintenance::repository_fsck::FsckSeverity::Error
 pub grit_lib::maintenance::repository_fsck::FsckSeverity::Info
 pub grit_lib::maintenance::repository_fsck::FsckSeverity::Warning
@@ -8737,7 +8737,7 @@ impl core::marker::Unpin for grit_lib::maintenance::repository_fsck::FsckSeverit
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::repository_fsck::FsckSeverity
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::repository_fsck::FsckSeverity
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::repository_fsck::FsckSeverity
-pub enum grit_lib::maintenance::repository_fsck::MissingObjectReferrer
+#[non_exhaustive] pub enum grit_lib::maintenance::repository_fsck::MissingObjectReferrer
 pub grit_lib::maintenance::repository_fsck::MissingObjectReferrer::Index
 pub grit_lib::maintenance::repository_fsck::MissingObjectReferrer::Object(grit_lib::objects::ObjectId)
 pub grit_lib::maintenance::repository_fsck::MissingObjectReferrer::Pack
@@ -8887,7 +8887,7 @@ impl core::marker::Unpin for grit_lib::maintenance::AutoGcReason
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::AutoGcReason
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::AutoGcReason
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::AutoGcReason
-pub enum grit_lib::maintenance::CommitGraphBuild
+#[non_exhaustive] pub enum grit_lib::maintenance::CommitGraphBuild
 pub grit_lib::maintenance::CommitGraphBuild::Built(grit_lib::maintenance::BuiltCommitGraph)
 pub grit_lib::maintenance::CommitGraphBuild::Skipped(grit_lib::maintenance::CommitGraphSkipReason)
 impl core::clone::Clone for grit_lib::maintenance::CommitGraphBuild
@@ -8927,7 +8927,7 @@ impl core::marker::Unpin for grit_lib::maintenance::CommitGraphSkipReason
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::CommitGraphSkipReason
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::CommitGraphSkipReason
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::CommitGraphSkipReason
-pub enum grit_lib::maintenance::DropExpiry
+#[non_exhaustive] pub enum grit_lib::maintenance::DropExpiry
 pub grit_lib::maintenance::DropExpiry::Immediately
 pub grit_lib::maintenance::DropExpiry::KeepNewerThan(time::offset_date_time::OffsetDateTime)
 pub grit_lib::maintenance::DropExpiry::Never
@@ -8971,7 +8971,7 @@ impl core::marker::Unpin for grit_lib::maintenance::DropPromisedBlobsSkip
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::DropPromisedBlobsSkip
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::DropPromisedBlobsSkip
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::DropPromisedBlobsSkip
-pub enum grit_lib::maintenance::GcLockAttempt
+#[non_exhaustive] pub enum grit_lib::maintenance::GcLockAttempt
 pub grit_lib::maintenance::GcLockAttempt::Acquired(grit_lib::maintenance::GcLock)
 pub grit_lib::maintenance::GcLockAttempt::Held(grit_lib::maintenance::GcLockHolder)
 impl core::fmt::Debug for grit_lib::maintenance::GcLockAttempt
@@ -9859,7 +9859,7 @@ pub fn grit_lib::merge::merge_diff::read_blob_at_path(&grit_lib::prelude::Odb, &
 pub fn grit_lib::merge::merge_diff::run_textconv(&std::path::Path, &grit_lib::config::ConfigSet, &str, &[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::merge::merge_diff::run_textconv_raw(&std::path::Path, &grit_lib::config::ConfigSet, &str, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
 pub mod grit_lib::merge::merge_file
-pub enum grit_lib::merge::merge_file::ConflictStyle
+#[non_exhaustive] pub enum grit_lib::merge::merge_file::ConflictStyle
 pub grit_lib::merge::merge_file::ConflictStyle::Diff3
 pub grit_lib::merge::merge_file::ConflictStyle::Merge
 pub grit_lib::merge::merge_file::ConflictStyle::ZealousDiff3
@@ -9943,7 +9943,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_file::MergeO
 pub fn grit_lib::merge::merge_file::is_binary(&[u8]) -> bool
 pub fn grit_lib::merge::merge_file::merge(&grit_lib::diff::merge_file::MergeInput<'_>) -> grit_lib::error::Result<grit_lib::diff::merge_file::MergeOutput>
 pub mod grit_lib::merge::merge_trees
-pub enum grit_lib::merge::merge_trees::DirectoryRenameConflict
+#[non_exhaustive] pub enum grit_lib::merge::merge_trees::DirectoryRenameConflict
 pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Blocked
 pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Blocked::existing: bool
 pub grit_lib::merge::merge_trees::DirectoryRenameConflict::Blocked::path: alloc::vec::Vec<u8>
@@ -9972,7 +9972,7 @@ impl core::marker::Unpin for grit_lib::diff::merge_trees::DirectoryRenameConflic
 impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::DirectoryRenameConflict
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::DirectoryRenameConflict
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::DirectoryRenameConflict
-pub enum grit_lib::merge::merge_trees::DirectoryRenameMode
+#[non_exhaustive] pub enum grit_lib::merge::merge_trees::DirectoryRenameMode
 pub grit_lib::merge::merge_trees::DirectoryRenameMode::Apply
 pub grit_lib::merge::merge_trees::DirectoryRenameMode::Conflict
 pub grit_lib::merge::merge_trees::DirectoryRenameMode::Off
@@ -10024,7 +10024,7 @@ impl core::marker::Unpin for grit_lib::diff::merge_trees::MergeSide
 impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::MergeSide
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::MergeSide
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::MergeSide
-pub enum grit_lib::merge::merge_trees::TheirsConflictLabel<'a>
+#[non_exhaustive] pub enum grit_lib::merge::merge_trees::TheirsConflictLabel<'a>
 pub grit_lib::merge::merge_trees::TheirsConflictLabel::Fixed(&'a str)
 pub grit_lib::merge::merge_trees::TheirsConflictLabel::PathUtf8
 impl<'a> core::clone::Clone for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
@@ -10143,15 +10143,15 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::FastForwardPolicy
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::FastForwardPolicy
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::FastForwardPolicy
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::FastForwardPolicy
-pub enum grit_lib::merge::IntegrateBranchOutcome
-pub grit_lib::merge::IntegrateBranchOutcome::Conflicts
+#[non_exhaustive] pub enum grit_lib::merge::IntegrateBranchOutcome
+#[non_exhaustive] pub grit_lib::merge::IntegrateBranchOutcome::Conflicts
 pub grit_lib::merge::IntegrateBranchOutcome::Conflicts::details: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::merge::IntegrateBranchOutcome::Conflicts::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::merge::IntegrateBranchOutcome::Conflicts::rerere: alloc::vec::Vec<grit_lib::merge::RerereEvent>
-pub grit_lib::merge::IntegrateBranchOutcome::FastForward
+#[non_exhaustive] pub grit_lib::merge::IntegrateBranchOutcome::FastForward
 pub grit_lib::merge::IntegrateBranchOutcome::FastForward::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::merge::IntegrateBranchOutcome::FastForward::oid: grit_lib::objects::ObjectId
-pub grit_lib::merge::IntegrateBranchOutcome::Merged
+#[non_exhaustive] pub grit_lib::merge::IntegrateBranchOutcome::Merged
 pub grit_lib::merge::IntegrateBranchOutcome::Merged::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::merge::IntegrateBranchOutcome::Merged::oid: grit_lib::objects::ObjectId
 pub grit_lib::merge::IntegrateBranchOutcome::Squashed
@@ -10172,7 +10172,7 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::IntegrateBranchOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::IntegrateBranchOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOutcome
-pub enum grit_lib::merge::MergeCommitMode
+#[non_exhaustive] pub enum grit_lib::merge::MergeCommitMode
 pub grit_lib::merge::MergeCommitMode::Commit
 pub grit_lib::merge::MergeCommitMode::NoCommit
 pub grit_lib::merge::MergeCommitMode::Squash
@@ -10194,13 +10194,13 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::MergeCommitMode
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeCommitMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeCommitMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeCommitMode
-pub enum grit_lib::merge::MergeDryRunPlan
-pub grit_lib::merge::MergeDryRunPlan::Conflicts
+#[non_exhaustive] pub enum grit_lib::merge::MergeDryRunPlan
+#[non_exhaustive] pub grit_lib::merge::MergeDryRunPlan::Conflicts
 pub grit_lib::merge::MergeDryRunPlan::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
-pub grit_lib::merge::MergeDryRunPlan::FastForward
+#[non_exhaustive] pub grit_lib::merge::MergeDryRunPlan::FastForward
 pub grit_lib::merge::MergeDryRunPlan::FastForward::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::merge::MergeDryRunPlan::FastForward::tip: grit_lib::objects::ObjectId
-pub grit_lib::merge::MergeDryRunPlan::MergeCommit
+#[non_exhaustive] pub grit_lib::merge::MergeDryRunPlan::MergeCommit
 pub grit_lib::merge::MergeDryRunPlan::MergeCommit::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::merge::MergeDryRunPlan::RefusedNotFf
 pub grit_lib::merge::MergeDryRunPlan::UpToDate
@@ -10266,10 +10266,10 @@ impl core::marker::Unpin for grit_lib::porcelain::MergeError
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::MergeError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::MergeError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::MergeError
-pub enum grit_lib::merge::MergePrediction
-pub grit_lib::merge::MergePrediction::Clean
+#[non_exhaustive] pub enum grit_lib::merge::MergePrediction
+#[non_exhaustive] pub grit_lib::merge::MergePrediction::Clean
 pub grit_lib::merge::MergePrediction::Clean::tree: grit_lib::objects::ObjectId
-pub grit_lib::merge::MergePrediction::Conflicts
+#[non_exhaustive] pub grit_lib::merge::MergePrediction::Conflicts
 pub grit_lib::merge::MergePrediction::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::merge::MergePrediction::FastForward
 pub grit_lib::merge::MergePrediction::Unrelated
@@ -10289,7 +10289,7 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::MergePrediction
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergePrediction
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergePrediction
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergePrediction
-pub enum grit_lib::merge::MergeSourceKind
+#[non_exhaustive] pub enum grit_lib::merge::MergeSourceKind
 pub grit_lib::merge::MergeSourceKind::Commit
 pub grit_lib::merge::MergeSourceKind::LocalBranch
 pub grit_lib::merge::MergeSourceKind::RemoteBranch
@@ -10310,7 +10310,7 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::MergeSourceKind
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeSourceKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeSourceKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeSourceKind
-pub enum grit_lib::merge::ReplayAbortOutcome
+#[non_exhaustive] pub enum grit_lib::merge::ReplayAbortOutcome
 pub grit_lib::merge::ReplayAbortOutcome::ClearedInPlace
 pub grit_lib::merge::ReplayAbortOutcome::Rewound
 impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
@@ -10348,7 +10348,7 @@ impl core::marker::Unpin for grit_lib::porcelain::replay::ReplayDirection
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay::ReplayDirection
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::ReplayDirection
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayDirection
-pub enum grit_lib::merge::ReplayEmptyPolicy
+#[non_exhaustive] pub enum grit_lib::merge::ReplayEmptyPolicy
 pub grit_lib::merge::ReplayEmptyPolicy::Drop
 pub grit_lib::merge::ReplayEmptyPolicy::Keep
 pub grit_lib::merge::ReplayEmptyPolicy::Stop
@@ -10370,13 +10370,13 @@ impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayEmptyPo
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
-pub enum grit_lib::merge::ReplayOutcome
+#[non_exhaustive] pub enum grit_lib::merge::ReplayOutcome
 pub grit_lib::merge::ReplayOutcome::AlreadyApplied
-pub grit_lib::merge::ReplayOutcome::Committed
+#[non_exhaustive] pub grit_lib::merge::ReplayOutcome::Committed
 pub grit_lib::merge::ReplayOutcome::Committed::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::merge::ReplayOutcome::Committed::oid: grit_lib::objects::ObjectId
 pub grit_lib::merge::ReplayOutcome::Committed::tree: grit_lib::objects::ObjectId
-pub grit_lib::merge::ReplayOutcome::Conflicts
+#[non_exhaustive] pub grit_lib::merge::ReplayOutcome::Conflicts
 pub grit_lib::merge::ReplayOutcome::Conflicts::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::merge::ReplayOutcome::Empty
 impl core::clone::Clone for grit_lib::porcelain::replay::ReplayOutcome
@@ -10416,7 +10416,7 @@ impl core::marker::Unpin for grit_lib::merge::RerereAutoupdate
 impl core::marker::UnsafeUnpin for grit_lib::merge::RerereAutoupdate
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::merge::RerereAutoupdate
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::merge::RerereAutoupdate
-pub enum grit_lib::merge::RerereEventKind
+#[non_exhaustive] pub enum grit_lib::merge::RerereEventKind
 pub grit_lib::merge::RerereEventKind::Forgot
 pub grit_lib::merge::RerereEventKind::NoRemembered
 pub grit_lib::merge::RerereEventKind::RecordedPreimage
@@ -10440,19 +10440,19 @@ impl core::marker::Unpin for grit_lib::merge::RerereEventKind
 impl core::marker::UnsafeUnpin for grit_lib::merge::RerereEventKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::merge::RerereEventKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::merge::RerereEventKind
-pub enum grit_lib::merge::SequenceOutcome
-pub grit_lib::merge::SequenceOutcome::Completed
+#[non_exhaustive] pub enum grit_lib::merge::SequenceOutcome
+#[non_exhaustive] pub grit_lib::merge::SequenceOutcome::Completed
 pub grit_lib::merge::SequenceOutcome::Completed::created: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::merge::SequenceOutcome::Completed::dropped: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::merge::SequenceOutcome::Completed::rerere: alloc::vec::Vec<grit_lib::merge::RerereEvent>
-pub grit_lib::merge::SequenceOutcome::Conflicts
+#[non_exhaustive] pub grit_lib::merge::SequenceOutcome::Conflicts
 pub grit_lib::merge::SequenceOutcome::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::merge::SequenceOutcome::Conflicts::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::merge::SequenceOutcome::Conflicts::current: grit_lib::objects::ObjectId
 pub grit_lib::merge::SequenceOutcome::Conflicts::current_subject: alloc::string::String
 pub grit_lib::merge::SequenceOutcome::Conflicts::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::merge::SequenceOutcome::Conflicts::rerere: alloc::vec::Vec<grit_lib::merge::RerereEvent>
-pub grit_lib::merge::SequenceOutcome::Empty
+#[non_exhaustive] pub grit_lib::merge::SequenceOutcome::Empty
 pub grit_lib::merge::SequenceOutcome::Empty::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::merge::SequenceOutcome::Empty::current: grit_lib::objects::ObjectId
 pub grit_lib::merge::SequenceOutcome::Empty::current_subject: alloc::string::String
@@ -10472,15 +10472,15 @@ impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::SequenceOutco
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::SequenceOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
-pub enum grit_lib::merge::SequencePrediction
-pub grit_lib::merge::SequencePrediction::Clean
+#[non_exhaustive] pub enum grit_lib::merge::SequencePrediction
+#[non_exhaustive] pub grit_lib::merge::SequencePrediction::Clean
 pub grit_lib::merge::SequencePrediction::Clean::dropped: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::merge::SequencePrediction::Clean::tree: grit_lib::objects::ObjectId
-pub grit_lib::merge::SequencePrediction::Conflicts
+#[non_exhaustive] pub grit_lib::merge::SequencePrediction::Conflicts
 pub grit_lib::merge::SequencePrediction::Conflicts::commit: grit_lib::objects::ObjectId
 pub grit_lib::merge::SequencePrediction::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::merge::SequencePrediction::Conflicts::subject: alloc::string::String
-pub grit_lib::merge::SequencePrediction::Empty
+#[non_exhaustive] pub grit_lib::merge::SequencePrediction::Empty
 pub grit_lib::merge::SequencePrediction::Empty::commit: grit_lib::objects::ObjectId
 pub grit_lib::merge::SequencePrediction::Empty::subject: alloc::string::String
 impl core::clone::Clone for grit_lib::porcelain::replay_sequence::SequencePrediction
@@ -10832,7 +10832,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::WrittenMergeTree
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
 pub mod grit_lib::notes
-pub enum grit_lib::notes::NotesMergeStrategy
+#[non_exhaustive] pub enum grit_lib::notes::NotesMergeStrategy
 pub grit_lib::notes::NotesMergeStrategy::CatSortUniq
 pub grit_lib::notes::NotesMergeStrategy::Manual
 pub grit_lib::notes::NotesMergeStrategy::Ours
@@ -10873,7 +10873,7 @@ impl core::marker::Unpin for grit_lib::notes::NotesRewriteCommand
 impl core::marker::UnsafeUnpin for grit_lib::notes::NotesRewriteCommand
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::notes::NotesRewriteCommand
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::notes::NotesRewriteCommand
-pub enum grit_lib::notes::NotesRewriteMode
+#[non_exhaustive] pub enum grit_lib::notes::NotesRewriteMode
 pub grit_lib::notes::NotesRewriteMode::CatSortUniq
 pub grit_lib::notes::NotesRewriteMode::Concatenate
 pub grit_lib::notes::NotesRewriteMode::Ignore
@@ -11209,7 +11209,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::delta_encode::D
 pub fn grit_lib::objects::delta_encode::encode_delta(&[u8], &[u8], usize) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::delta_encode::encode_lcp_delta(&[u8], &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub mod grit_lib::objects::hash
-pub enum grit_lib::objects::hash::Backend
+#[non_exhaustive] pub enum grit_lib::objects::hash::Backend
 pub grit_lib::objects::hash::Backend::Aarch64Sha
 pub grit_lib::objects::hash::Backend::Portable
 pub grit_lib::objects::hash::Backend::X86ShaNi
@@ -11477,7 +11477,7 @@ pub fn grit_lib::objects::midx::try_read_object_via_midx(&std::path::Path, &grit
 pub fn grit_lib::objects::midx::write_multi_pack_index(&std::path::Path, &grit_lib::objects::midx::WriteMultiPackIndexOptions) -> grit_lib::error::Result<grit_lib::midx::WriteMultiPackIndexResult>
 pub mod grit_lib::objects::odb
 pub mod grit_lib::objects::odb::store
-pub enum grit_lib::objects::odb::store::MidxObjectsStatus
+#[non_exhaustive] pub enum grit_lib::objects::odb::store::MidxObjectsStatus
 pub grit_lib::objects::odb::store::MidxObjectsStatus::Active
 pub grit_lib::objects::odb::store::MidxObjectsStatus::Disabled
 pub grit_lib::objects::odb::store::MidxObjectsStatus::Unusable
@@ -12318,7 +12318,7 @@ pub fn grit_lib::objects::pack::skip_one_pack_object(&[u8], &mut usize, u64, usi
 pub fn grit_lib::objects::pack::write_v2_pack_index(&std::path::Path, &std::path::Path, &[(grit_lib::objects::ObjectId, u64, u32)], usize) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::pack::write_v2_pack_index_from_trailer(&std::path::Path, &[(grit_lib::objects::ObjectId, u64, u32)], &[u8], usize, core::option::Option<usize>) -> grit_lib::error::Result<()>
 pub mod grit_lib::objects::pack_object_select
-pub enum grit_lib::objects::pack_object_select::HaveBoundary
+#[non_exhaustive] pub enum grit_lib::objects::pack_object_select::HaveBoundary
 pub grit_lib::objects::pack_object_select::HaveBoundary::CommitClosure
 pub grit_lib::objects::pack_object_select::HaveBoundary::TipsOnly
 impl core::clone::Clone for grit_lib::objects::pack_object_select::HaveBoundary
@@ -13332,7 +13332,7 @@ pub fn grit_lib::objects::tree_entry_cmp(&[u8], u32, &[u8], u32) -> core::cmp::O
 pub type grit_lib::objects::OidHashMap<V> = hashbrown::map::HashMap<grit_lib::objects::ObjectId, V, grit_lib::objects::OidBuildHasher>
 pub type grit_lib::objects::OidHashSet = hashbrown::set::HashSet<grit_lib::objects::ObjectId, grit_lib::objects::OidBuildHasher>
 pub mod grit_lib::operation
-pub enum grit_lib::operation::ConflictKind
+#[non_exhaustive] pub enum grit_lib::operation::ConflictKind
 pub grit_lib::operation::ConflictKind::AddedByThem
 pub grit_lib::operation::ConflictKind::AddedByUs
 pub grit_lib::operation::ConflictKind::BothAdded
@@ -13646,7 +13646,7 @@ impl<E> core::marker::Unpin for grit_lib::parallel::ParallelHashError<E> where E
 impl<E> core::marker::UnsafeUnpin for grit_lib::parallel::ParallelHashError<E> where E: core::marker::UnsafeUnpin
 impl<E> core::panic::unwind_safe::RefUnwindSafe for grit_lib::parallel::ParallelHashError<E> where E: core::panic::unwind_safe::RefUnwindSafe
 impl<E> core::panic::unwind_safe::UnwindSafe for grit_lib::parallel::ParallelHashError<E> where E: core::panic::unwind_safe::UnwindSafe
-pub enum grit_lib::parallel::ParallelOp
+#[non_exhaustive] pub enum grit_lib::parallel::ParallelOp
 pub grit_lib::parallel::ParallelOp::Checkout
 pub grit_lib::parallel::ParallelOp::DiffContent
 pub grit_lib::parallel::ParallelOp::DiffRename
@@ -13793,7 +13793,7 @@ impl core::marker::Unpin for grit_lib::path_validate::PathComponentError
 impl core::marker::UnsafeUnpin for grit_lib::path_validate::PathComponentError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::path_validate::PathComponentError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::path_validate::PathComponentError
-pub enum grit_lib::path_validate::PathValidationKind
+#[non_exhaustive] pub enum grit_lib::path_validate::PathValidationKind
 pub grit_lib::path_validate::PathValidationKind::Fsck
 pub grit_lib::path_validate::PathValidationKind::Worktree
 impl core::clone::Clone for grit_lib::path_validate::PathValidationKind
@@ -13898,7 +13898,7 @@ pub fn grit_lib::path_validate::validate_component(&[u8], grit_lib::path_validat
 pub fn grit_lib::path_validate::validate_path(&[u8], grit_lib::path_validate::EntryMode, grit_lib::path_validate::ProtectOptions, grit_lib::path_validate::PathValidationKind) -> core::result::Result<(), grit_lib::path_validate::PathComponentError>
 pub mod grit_lib::porcelain
 pub mod grit_lib::porcelain::add
-pub enum grit_lib::porcelain::add::StageMode
+#[non_exhaustive] pub enum grit_lib::porcelain::add::StageMode
 pub grit_lib::porcelain::add::StageMode::All
 pub grit_lib::porcelain::add::StageMode::Update
 impl core::clone::Clone for grit_lib::porcelain::add::StageMode
@@ -14039,7 +14039,7 @@ impl core::marker::Unpin for grit_lib::porcelain::branch::BranchError
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch::BranchError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch::BranchError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::BranchError
-pub enum grit_lib::porcelain::branch::TrackMode
+#[non_exhaustive] pub enum grit_lib::porcelain::branch::TrackMode
 pub grit_lib::porcelain::branch::TrackMode::Always
 pub grit_lib::porcelain::branch::TrackMode::Auto
 pub grit_lib::porcelain::branch::TrackMode::Never
@@ -14266,7 +14266,7 @@ pub fn grit_lib::porcelain::checkout::apply_index_file_mode(&std::path::Path, u3
 pub mod grit_lib::porcelain::checkout_reflog
 pub mod grit_lib::porcelain::cherry_pick
 pub mod grit_lib::porcelain::clean
-pub enum grit_lib::porcelain::clean::CleanScope
+#[non_exhaustive] pub enum grit_lib::porcelain::clean::CleanScope
 pub grit_lib::porcelain::clean::CleanScope::OnlyIgnored
 pub grit_lib::porcelain::clean::CleanScope::Untracked
 pub grit_lib::porcelain::clean::CleanScope::UntrackedAndIgnored
@@ -14328,7 +14328,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::clean::CleanOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::clean::CleanOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::clean::CleanOutcome
 pub mod grit_lib::porcelain::commit
-pub enum grit_lib::porcelain::commit::CommitPatchInput
+#[non_exhaustive] pub enum grit_lib::porcelain::commit::CommitPatchInput
 pub grit_lib::porcelain::commit::CommitPatchInput::Hunks(grit_lib::porcelain::hunk_select::HunkSelection)
 pub grit_lib::porcelain::commit::CommitPatchInput::Patches(alloc::vec::Vec<grit_lib::apply::FilePatch>)
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitPatchInput
@@ -14342,7 +14342,7 @@ impl core::marker::Unpin for grit_lib::porcelain::commit::CommitPatchInput
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitPatchInput
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitPatchInput
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitPatchInput
-pub enum grit_lib::porcelain::commit::CommitScope
+#[non_exhaustive] pub enum grit_lib::porcelain::commit::CommitScope
 pub grit_lib::porcelain::commit::CommitScope::AutoStage
 pub grit_lib::porcelain::commit::CommitScope::Patch
 pub grit_lib::porcelain::commit::CommitScope::Patch::input: grit_lib::porcelain::commit::CommitPatchInput
@@ -14672,7 +14672,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::index_mode::StageExecuta
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::index_mode::StageExecutableHint
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::index_mode::StageExecutableHint
 pub mod grit_lib::porcelain::log
-pub enum grit_lib::porcelain::log::DecorationKind
+#[non_exhaustive] pub enum grit_lib::porcelain::log::DecorationKind
 pub grit_lib::porcelain::log::DecorationKind::Branch
 pub grit_lib::porcelain::log::DecorationKind::Grafted
 pub grit_lib::porcelain::log::DecorationKind::Head
@@ -14836,15 +14836,15 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::FastForwardPolicy
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::FastForwardPolicy
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::FastForwardPolicy
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::FastForwardPolicy
-pub enum grit_lib::porcelain::merge::IntegrateBranchOutcome
-pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts
+#[non_exhaustive] pub enum grit_lib::porcelain::merge::IntegrateBranchOutcome
+#[non_exhaustive] pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts::details: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Conflicts::rerere: alloc::vec::Vec<grit_lib::merge::RerereEvent>
-pub grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward
+#[non_exhaustive] pub grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::FastForward::oid: grit_lib::objects::ObjectId
-pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Merged
+#[non_exhaustive] pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Merged
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Merged::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Merged::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::merge::IntegrateBranchOutcome::Squashed
@@ -14865,7 +14865,7 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::IntegrateBranchOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::IntegrateBranchOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOutcome
-pub enum grit_lib::porcelain::merge::MergeCommitMode
+#[non_exhaustive] pub enum grit_lib::porcelain::merge::MergeCommitMode
 pub grit_lib::porcelain::merge::MergeCommitMode::Commit
 pub grit_lib::porcelain::merge::MergeCommitMode::NoCommit
 pub grit_lib::porcelain::merge::MergeCommitMode::Squash
@@ -14887,13 +14887,13 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::MergeCommitMode
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeCommitMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeCommitMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeCommitMode
-pub enum grit_lib::porcelain::merge::MergeDryRunPlan
-pub grit_lib::porcelain::merge::MergeDryRunPlan::Conflicts
+#[non_exhaustive] pub enum grit_lib::porcelain::merge::MergeDryRunPlan
+#[non_exhaustive] pub grit_lib::porcelain::merge::MergeDryRunPlan::Conflicts
 pub grit_lib::porcelain::merge::MergeDryRunPlan::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
-pub grit_lib::porcelain::merge::MergeDryRunPlan::FastForward
+#[non_exhaustive] pub grit_lib::porcelain::merge::MergeDryRunPlan::FastForward
 pub grit_lib::porcelain::merge::MergeDryRunPlan::FastForward::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::merge::MergeDryRunPlan::FastForward::tip: grit_lib::objects::ObjectId
-pub grit_lib::porcelain::merge::MergeDryRunPlan::MergeCommit
+#[non_exhaustive] pub grit_lib::porcelain::merge::MergeDryRunPlan::MergeCommit
 pub grit_lib::porcelain::merge::MergeDryRunPlan::MergeCommit::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::merge::MergeDryRunPlan::RefusedNotFf
 pub grit_lib::porcelain::merge::MergeDryRunPlan::UpToDate
@@ -14912,10 +14912,10 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::MergeDryRunPlan
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergeDryRunPlan
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergeDryRunPlan
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergeDryRunPlan
-pub enum grit_lib::porcelain::merge::MergePrediction
-pub grit_lib::porcelain::merge::MergePrediction::Clean
+#[non_exhaustive] pub enum grit_lib::porcelain::merge::MergePrediction
+#[non_exhaustive] pub grit_lib::porcelain::merge::MergePrediction::Clean
 pub grit_lib::porcelain::merge::MergePrediction::Clean::tree: grit_lib::objects::ObjectId
-pub grit_lib::porcelain::merge::MergePrediction::Conflicts
+#[non_exhaustive] pub grit_lib::porcelain::merge::MergePrediction::Conflicts
 pub grit_lib::porcelain::merge::MergePrediction::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::porcelain::merge::MergePrediction::FastForward
 pub grit_lib::porcelain::merge::MergePrediction::Unrelated
@@ -14935,7 +14935,7 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::MergePrediction
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergePrediction
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergePrediction
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergePrediction
-pub enum grit_lib::porcelain::merge::MergeSourceKind
+#[non_exhaustive] pub enum grit_lib::porcelain::merge::MergeSourceKind
 pub grit_lib::porcelain::merge::MergeSourceKind::Commit
 pub grit_lib::porcelain::merge::MergeSourceKind::LocalBranch
 pub grit_lib::porcelain::merge::MergeSourceKind::RemoteBranch
@@ -15124,7 +15124,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::Wri
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
 pub fn grit_lib::porcelain::merge::squash_conflict_merge_in_progress(&std::path::Path) -> bool
 pub mod grit_lib::porcelain::paths
-pub enum grit_lib::porcelain::paths::RemoveBlockReason
+#[non_exhaustive] pub enum grit_lib::porcelain::paths::RemoveBlockReason
 pub grit_lib::porcelain::paths::RemoveBlockReason::LocalModifications
 pub grit_lib::porcelain::paths::RemoveBlockReason::StagedAndLocal
 pub grit_lib::porcelain::paths::RemoveBlockReason::StagedChanges
@@ -15289,7 +15289,7 @@ impl core::marker::Unpin for grit_lib::porcelain::pull::PullError
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::pull::PullError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::pull::PullError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::pull::PullError
-pub enum grit_lib::porcelain::pull::PullMode
+#[non_exhaustive] pub enum grit_lib::porcelain::pull::PullMode
 pub grit_lib::porcelain::pull::PullMode::FfOnly
 pub grit_lib::porcelain::pull::PullMode::Merge
 pub grit_lib::porcelain::pull::PullMode::Rebase
@@ -15309,7 +15309,7 @@ impl core::marker::Unpin for grit_lib::porcelain::pull::PullMode
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::pull::PullMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::pull::PullMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::pull::PullMode
-pub enum grit_lib::porcelain::pull::PullResult
+#[non_exhaustive] pub enum grit_lib::porcelain::pull::PullResult
 pub grit_lib::porcelain::pull::PullResult::AutostashConflict
 pub grit_lib::porcelain::pull::PullResult::Conflicts
 pub grit_lib::porcelain::pull::PullResult::FastForward
@@ -15455,13 +15455,13 @@ impl core::marker::Unpin for grit_lib::porcelain::replay::ReplayDirection
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay::ReplayDirection
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::ReplayDirection
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayDirection
-pub enum grit_lib::porcelain::replay::ReplayOutcome
+#[non_exhaustive] pub enum grit_lib::porcelain::replay::ReplayOutcome
 pub grit_lib::porcelain::replay::ReplayOutcome::AlreadyApplied
-pub grit_lib::porcelain::replay::ReplayOutcome::Committed
+#[non_exhaustive] pub grit_lib::porcelain::replay::ReplayOutcome::Committed
 pub grit_lib::porcelain::replay::ReplayOutcome::Committed::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::replay::ReplayOutcome::Committed::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay::ReplayOutcome::Committed::tree: grit_lib::objects::ObjectId
-pub grit_lib::porcelain::replay::ReplayOutcome::Conflicts
+#[non_exhaustive] pub grit_lib::porcelain::replay::ReplayOutcome::Conflicts
 pub grit_lib::porcelain::replay::ReplayOutcome::Conflicts::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::replay::ReplayOutcome::Empty
 impl core::clone::Clone for grit_lib::porcelain::replay::ReplayOutcome
@@ -15496,7 +15496,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay::ReplayRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::ReplayRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayRequest
 pub mod grit_lib::porcelain::replay_sequence
-pub enum grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
+#[non_exhaustive] pub enum grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
 pub grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::ClearedInPlace
 pub grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::Rewound
 impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
@@ -15515,7 +15515,7 @@ impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayAbortOu
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
-pub enum grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
+#[non_exhaustive] pub enum grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
 pub grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::Drop
 pub grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::Keep
 pub grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy::Stop
@@ -15537,19 +15537,19 @@ impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::ReplayEmptyPo
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy
-pub enum grit_lib::porcelain::replay_sequence::SequenceOutcome
-pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed
+#[non_exhaustive] pub enum grit_lib::porcelain::replay_sequence::SequenceOutcome
+#[non_exhaustive] pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed::created: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed::dropped: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Completed::rerere: alloc::vec::Vec<grit_lib::merge::RerereEvent>
-pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts
+#[non_exhaustive] pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::current: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::current_subject: alloc::string::String
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::rerere: alloc::vec::Vec<grit_lib::merge::RerereEvent>
-pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty
+#[non_exhaustive] pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::current: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::current_subject: alloc::string::String
@@ -15569,15 +15569,15 @@ impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::SequenceOutco
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::SequenceOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
-pub enum grit_lib::porcelain::replay_sequence::SequencePrediction
-pub grit_lib::porcelain::replay_sequence::SequencePrediction::Clean
+#[non_exhaustive] pub enum grit_lib::porcelain::replay_sequence::SequencePrediction
+#[non_exhaustive] pub grit_lib::porcelain::replay_sequence::SequencePrediction::Clean
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Clean::dropped: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Clean::tree: grit_lib::objects::ObjectId
-pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts
+#[non_exhaustive] pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts::commit: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts::subject: alloc::string::String
-pub grit_lib::porcelain::replay_sequence::SequencePrediction::Empty
+#[non_exhaustive] pub grit_lib::porcelain::replay_sequence::SequencePrediction::Empty
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Empty::commit: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Empty::subject: alloc::string::String
 impl core::clone::Clone for grit_lib::porcelain::replay_sequence::SequencePrediction
@@ -15786,7 +15786,7 @@ impl core::marker::Unpin for grit_lib::porcelain::restore::ConflictSide
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::restore::ConflictSide
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::restore::ConflictSide
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::restore::ConflictSide
-pub enum grit_lib::porcelain::restore::RestoreSource
+#[non_exhaustive] pub enum grit_lib::porcelain::restore::RestoreSource
 pub grit_lib::porcelain::restore::RestoreSource::Index
 pub grit_lib::porcelain::restore::RestoreSource::Tree(grit_lib::objects::ObjectId)
 impl core::clone::Clone for grit_lib::porcelain::restore::RestoreSource
@@ -15934,7 +15934,7 @@ impl core::marker::Unpin for grit_lib::porcelain::status::IgnoredMode
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::IgnoredMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::IgnoredMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::IgnoredMode
-pub enum grit_lib::porcelain::status::InterruptedRewrite
+#[non_exhaustive] pub enum grit_lib::porcelain::status::InterruptedRewrite
 pub grit_lib::porcelain::status::InterruptedRewrite::FinishedCheckout
 pub grit_lib::porcelain::status::InterruptedRewrite::Pending
 pub grit_lib::porcelain::status::InterruptedRewrite::RolledBack
@@ -15956,7 +15956,7 @@ impl core::marker::Unpin for grit_lib::porcelain::status::InterruptedRewrite
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::InterruptedRewrite
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::InterruptedRewrite
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::InterruptedRewrite
-pub enum grit_lib::porcelain::status::StatusAction
+#[non_exhaustive] pub enum grit_lib::porcelain::status::StatusAction
 pub grit_lib::porcelain::status::StatusAction::Commit
 pub grit_lib::porcelain::status::StatusAction::DiscardWorktreeChanges
 pub grit_lib::porcelain::status::StatusAction::Pull
@@ -15977,10 +15977,10 @@ impl core::marker::Unpin for grit_lib::porcelain::status::StatusAction
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusAction
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusAction
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusAction
-pub enum grit_lib::porcelain::status::StatusGuidance
+#[non_exhaustive] pub enum grit_lib::porcelain::status::StatusGuidance
 pub grit_lib::porcelain::status::StatusGuidance::Actions(alloc::vec::Vec<grit_lib::porcelain::status::StatusAction>)
 pub grit_lib::porcelain::status::StatusGuidance::ContinueMerge
-pub grit_lib::porcelain::status::StatusGuidance::Operation
+#[non_exhaustive] pub grit_lib::porcelain::status::StatusGuidance::Operation
 pub grit_lib::porcelain::status::StatusGuidance::Operation::alternative: core::option::Option<grit_lib::state::NextStep>
 pub grit_lib::porcelain::status::StatusGuidance::Operation::steps: alloc::vec::Vec<grit_lib::state::NextStep>
 pub grit_lib::porcelain::status::StatusGuidance::ResolveConflictsThenContinueMerge
@@ -16000,7 +16000,7 @@ impl core::marker::Unpin for grit_lib::porcelain::status::StatusGuidance
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusGuidance
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusGuidance
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusGuidance
-pub enum grit_lib::porcelain::status::StatusShortLine
+#[non_exhaustive] pub enum grit_lib::porcelain::status::StatusShortLine
 pub grit_lib::porcelain::status::StatusShortLine::Ignored(alloc::string::String)
 pub grit_lib::porcelain::status::StatusShortLine::Tracked
 pub grit_lib::porcelain::status::StatusShortLine::Tracked::path: grit_lib::porcelain::status::StatusShortPath
@@ -16028,7 +16028,7 @@ impl core::marker::Unpin for grit_lib::porcelain::status::StatusShortLine
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusShortLine
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusShortLine
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusShortLine
-pub enum grit_lib::porcelain::status::StatusShortPath
+#[non_exhaustive] pub enum grit_lib::porcelain::status::StatusShortPath
 pub grit_lib::porcelain::status::StatusShortPath::Rename
 pub grit_lib::porcelain::status::StatusShortPath::Rename::new: alloc::string::String
 pub grit_lib::porcelain::status::StatusShortPath::Rename::old: alloc::string::String
@@ -16182,7 +16182,7 @@ pub fn grit_lib::porcelain::status::format_porcelain_v2(&grit_lib::porcelain::st
 pub fn grit_lib::porcelain::status::short_status_lines(&grit_lib::porcelain::status::StatusModel) -> alloc::vec::Vec<grit_lib::porcelain::status::StatusShortLine>
 pub fn grit_lib::porcelain::status::status_options_from_config(&grit_lib::config::ConfigSet) -> core::result::Result<grit_lib::porcelain::status::StatusOptions, grit_lib::error::ConfigError>
 pub mod grit_lib::porcelain::switch
-pub enum grit_lib::porcelain::switch::SwitchMode
+#[non_exhaustive] pub enum grit_lib::porcelain::switch::SwitchMode
 pub grit_lib::porcelain::switch::SwitchMode::Create
 pub grit_lib::porcelain::switch::SwitchMode::Create::branch: alloc::string::String
 pub grit_lib::porcelain::switch::SwitchMode::Create::create_source_label: alloc::string::String
@@ -16253,7 +16253,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::switch::SwitchOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::switch::SwitchOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::switch::SwitchOutcome
 pub mod grit_lib::porcelain::tag
-pub enum grit_lib::porcelain::tag::TagDetail
+#[non_exhaustive] pub enum grit_lib::porcelain::tag::TagDetail
 pub grit_lib::porcelain::tag::TagDetail::Annotation
 pub grit_lib::porcelain::tag::TagDetail::Kind
 pub grit_lib::porcelain::tag::TagDetail::Names
@@ -16342,7 +16342,7 @@ impl core::marker::Unpin for grit_lib::porcelain::tag::TagKind
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::tag::TagKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::tag::TagKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::tag::TagKind
-pub enum grit_lib::porcelain::tag::TagList
+#[non_exhaustive] pub enum grit_lib::porcelain::tag::TagList
 pub grit_lib::porcelain::tag::TagList::Names(alloc::vec::Vec<alloc::string::String>)
 pub grit_lib::porcelain::tag::TagList::Summaries(alloc::vec::Vec<grit_lib::porcelain::tag::TagSummary>)
 impl grit_lib::porcelain::tag::TagList
@@ -17858,7 +17858,7 @@ impl core::marker::Unpin for grit_lib::progress::ProgressPhase
 impl core::marker::UnsafeUnpin for grit_lib::progress::ProgressPhase
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::progress::ProgressPhase
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::progress::ProgressPhase
-pub enum grit_lib::progress::ProgressUnit
+#[non_exhaustive] pub enum grit_lib::progress::ProgressUnit
 pub grit_lib::progress::ProgressUnit::Bytes
 pub grit_lib::progress::ProgressUnit::Files
 pub grit_lib::progress::ProgressUnit::Objects
@@ -18057,7 +18057,7 @@ pub fn grit_lib::progress::poll_cancel(&mut dyn grit_lib::progress::ProgressSink
 pub type grit_lib::progress::Token = grit_lib::progress::CancelToken
 pub mod grit_lib::refs
 pub mod grit_lib::refs::branch_tracking
-pub enum grit_lib::refs::branch_tracking::BaseSource
+#[non_exhaustive] pub enum grit_lib::refs::branch_tracking::BaseSource
 pub grit_lib::refs::branch_tracking::BaseSource::ConfiguredTarget
 pub grit_lib::refs::branch_tracking::BaseSource::DefaultTarget
 pub grit_lib::refs::branch_tracking::BaseSource::Explicit
@@ -18079,7 +18079,7 @@ impl core::marker::Unpin for grit_lib::refs::branch_tracking::BaseSource
 impl core::marker::UnsafeUnpin for grit_lib::refs::branch_tracking::BaseSource
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::branch_tracking::BaseSource
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::branch_tracking::BaseSource
-pub enum grit_lib::refs::branch_tracking::BranchDetail
+#[non_exhaustive] pub enum grit_lib::refs::branch_tracking::BranchDetail
 pub grit_lib::refs::branch_tracking::BranchDetail::Full
 pub grit_lib::refs::branch_tracking::BranchDetail::Names
 impl core::clone::Clone for grit_lib::refs::branch_tracking::BranchDetail
@@ -18100,7 +18100,7 @@ impl core::marker::Unpin for grit_lib::refs::branch_tracking::BranchDetail
 impl core::marker::UnsafeUnpin for grit_lib::refs::branch_tracking::BranchDetail
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::branch_tracking::BranchDetail
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::branch_tracking::BranchDetail
-pub enum grit_lib::refs::branch_tracking::BranchScope
+#[non_exhaustive] pub enum grit_lib::refs::branch_tracking::BranchScope
 pub grit_lib::refs::branch_tracking::BranchScope::All
 pub grit_lib::refs::branch_tracking::BranchScope::Local
 pub grit_lib::refs::branch_tracking::BranchScope::Remote
@@ -18145,7 +18145,7 @@ impl core::marker::Unpin for grit_lib::refs::branch_tracking::Standing
 impl core::marker::UnsafeUnpin for grit_lib::refs::branch_tracking::Standing
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::branch_tracking::Standing
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::branch_tracking::Standing
-pub enum grit_lib::refs::branch_tracking::StandingHeader
+#[non_exhaustive] pub enum grit_lib::refs::branch_tracking::StandingHeader
 pub grit_lib::refs::branch_tracking::StandingHeader::Compared(grit_lib::refs::branch_tracking::Standing)
 pub grit_lib::refs::branch_tracking::StandingHeader::ComparedNoCounts
 pub grit_lib::refs::branch_tracking::StandingHeader::Detached
@@ -18168,7 +18168,7 @@ impl core::marker::Unpin for grit_lib::refs::branch_tracking::StandingHeader
 impl core::marker::UnsafeUnpin for grit_lib::refs::branch_tracking::StandingHeader
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::branch_tracking::StandingHeader
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::branch_tracking::StandingHeader
-pub enum grit_lib::refs::branch_tracking::StatusHeader
+#[non_exhaustive] pub enum grit_lib::refs::branch_tracking::StatusHeader
 pub grit_lib::refs::branch_tracking::StatusHeader::Branch(grit_lib::refs::branch_tracking::StandingHeader)
 pub grit_lib::refs::branch_tracking::StatusHeader::MergeInProgress
 pub grit_lib::refs::branch_tracking::StatusHeader::OtherInProgress
@@ -18194,7 +18194,7 @@ impl core::marker::Unpin for grit_lib::refs::branch_tracking::StatusHeader
 impl core::marker::UnsafeUnpin for grit_lib::refs::branch_tracking::StatusHeader
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::branch_tracking::StatusHeader
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::branch_tracking::StatusHeader
-pub enum grit_lib::refs::branch_tracking::StatusIntegrationAction
+#[non_exhaustive] pub enum grit_lib::refs::branch_tracking::StatusIntegrationAction
 pub grit_lib::refs::branch_tracking::StatusIntegrationAction::Merge
 pub grit_lib::refs::branch_tracking::StatusIntegrationAction::Pull
 impl core::clone::Clone for grit_lib::refs::branch_tracking::StatusIntegrationAction
@@ -18672,7 +18672,7 @@ pub mod grit_lib::refs::hide_refs
 pub fn grit_lib::refs::hide_refs::hide_ref_patterns_receive(&grit_lib::config::ConfigSet) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::refs::hide_refs::hide_ref_patterns_uploadpack(&grit_lib::config::ConfigSet) -> alloc::vec::Vec<alloc::string::String>
 pub mod grit_lib::refs::listing
-pub enum grit_lib::refs::listing::RefKind
+#[non_exhaustive] pub enum grit_lib::refs::listing::RefKind
 pub grit_lib::refs::listing::RefKind::Head
 pub grit_lib::refs::listing::RefKind::Other
 pub grit_lib::refs::listing::RefKind::Remote
@@ -18693,7 +18693,7 @@ impl core::marker::Unpin for grit_lib::refs::listing::RefKind
 impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefKind
-pub enum grit_lib::refs::listing::RefNamespace
+#[non_exhaustive] pub enum grit_lib::refs::listing::RefNamespace
 pub grit_lib::refs::listing::RefNamespace::Custom(alloc::string::String)
 pub grit_lib::refs::listing::RefNamespace::Heads
 pub grit_lib::refs::listing::RefNamespace::Remotes
@@ -18713,7 +18713,7 @@ impl core::marker::Unpin for grit_lib::refs::listing::RefNamespace
 impl core::marker::UnsafeUnpin for grit_lib::refs::listing::RefNamespace
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::listing::RefNamespace
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::listing::RefNamespace
-pub enum grit_lib::refs::listing::SortKey
+#[non_exhaustive] pub enum grit_lib::refs::listing::SortKey
 pub grit_lib::refs::listing::SortKey::Date
 pub grit_lib::refs::listing::SortKey::Name
 pub grit_lib::refs::listing::SortKey::Version
@@ -18872,7 +18872,7 @@ impl core::marker::UnsafeUnpin for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
 pub mod grit_lib::refs::reflog
-pub enum grit_lib::refs::reflog::ReflogExpireActionKind
+#[non_exhaustive] pub enum grit_lib::refs::reflog::ReflogExpireActionKind
 pub grit_lib::refs::reflog::ReflogExpireActionKind::Keep
 pub grit_lib::refs::reflog::ReflogExpireActionKind::Prune
 pub grit_lib::refs::reflog::ReflogExpireActionKind::WouldPrune
@@ -18958,7 +18958,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::reflog::ReflogSele
 pub fn grit_lib::refs::reflog::parse_reflog_ref(&str) -> grit_lib::error::Result<grit_lib::refs::store::RefName>
 pub fn grit_lib::refs::reflog::reflog_identity_timestamp(&str) -> core::option::Option<i64>
 pub mod grit_lib::refs::refs_fsck
-pub enum grit_lib::refs::refs_fsck::RefsFsckSeverity
+#[non_exhaustive] pub enum grit_lib::refs::refs_fsck::RefsFsckSeverity
 pub grit_lib::refs::refs_fsck::RefsFsckSeverity::Error
 pub grit_lib::refs::refs_fsck::RefsFsckSeverity::Warning
 impl core::clone::Clone for grit_lib::refs::refs_fsck::RefsFsckSeverity
@@ -20028,7 +20028,7 @@ impl core::marker::Unpin for grit_lib::refs::LogRefsConfig
 impl core::marker::UnsafeUnpin for grit_lib::refs::LogRefsConfig
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::LogRefsConfig
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::LogRefsConfig
-pub enum grit_lib::refs::RawRefLookup
+#[non_exhaustive] pub enum grit_lib::refs::RawRefLookup
 pub grit_lib::refs::RawRefLookup::Exists
 pub grit_lib::refs::RawRefLookup::IsDirectory
 pub grit_lib::refs::RawRefLookup::NotFound
@@ -20066,7 +20066,7 @@ impl core::marker::Unpin for grit_lib::refs::Ref
 impl core::marker::UnsafeUnpin for grit_lib::refs::Ref
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::Ref
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::Ref
-pub enum grit_lib::refs::RefnameUnavailable
+#[non_exhaustive] pub enum grit_lib::refs::RefnameUnavailable
 pub grit_lib::refs::RefnameUnavailable::AncestorExists
 pub grit_lib::refs::RefnameUnavailable::AncestorExists::blocking: alloc::string::String
 pub grit_lib::refs::RefnameUnavailable::AncestorExists::new_ref: alloc::string::String
@@ -20259,8 +20259,8 @@ impl core::marker::Unpin for grit_lib::remote::bundle_uri::BundleListMode
 impl core::marker::UnsafeUnpin for grit_lib::remote::bundle_uri::BundleListMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::bundle_uri::BundleListMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::bundle_uri::BundleListMode
-pub enum grit_lib::remote::bundle_uri::BundleSeed
-pub grit_lib::remote::bundle_uri::BundleSeed::Failed
+#[non_exhaustive] pub enum grit_lib::remote::bundle_uri::BundleSeed
+#[non_exhaustive] pub grit_lib::remote::bundle_uri::BundleSeed::Failed
 pub grit_lib::remote::bundle_uri::BundleSeed::Failed::reason: alloc::string::String
 pub grit_lib::remote::bundle_uri::BundleSeed::Failed::uri: core::option::Option<alloc::string::String>
 pub grit_lib::remote::bundle_uri::BundleSeed::NotOffered
@@ -20325,7 +20325,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::bundle_uri::B
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::bundle_uri::BundleListEntry
 pub fn grit_lib::remote::bundle_uri::bundle_cache_path(&std::path::Path, &str) -> std::path::PathBuf
 pub mod grit_lib::remote::clone
-pub enum grit_lib::remote::clone::CloneCheckout
+#[non_exhaustive] pub enum grit_lib::remote::clone::CloneCheckout
 pub grit_lib::remote::clone::CloneCheckout::CheckedOut(grit_lib::objects::ObjectId)
 pub grit_lib::remote::clone::CloneCheckout::EmptyRemote
 pub grit_lib::remote::clone::CloneCheckout::Skipped
@@ -20379,7 +20379,7 @@ impl core::marker::Unpin for grit_lib::remote::clone::CloneError
 impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneError
-pub enum grit_lib::remote::clone::CloneHead
+#[non_exhaustive] pub enum grit_lib::remote::clone::CloneHead
 pub grit_lib::remote::clone::CloneHead::Branch(alloc::string::String)
 pub grit_lib::remote::clone::CloneHead::Detached
 pub grit_lib::remote::clone::CloneHead::Detached::oid: grit_lib::objects::ObjectId
@@ -20826,7 +20826,7 @@ pub fn alloc::rcs::arc::Arc<C>::send(&self, &grit_lib::remote::transport::http::
 pub fn alloc::rcs::arc::Arc<C>::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<grit_lib::progress::CancelToken>>)
 pub fn alloc::rcs::arc::Arc<C>::smart_http_enabled(&self) -> bool
 pub mod grit_lib::remote::partial_clone
-pub enum grit_lib::remote::partial_clone::ObjectFilterSpec
+#[non_exhaustive] pub enum grit_lib::remote::partial_clone::ObjectFilterSpec
 pub grit_lib::remote::partial_clone::ObjectFilterSpec::BlobLimit(u64)
 pub grit_lib::remote::partial_clone::ObjectFilterSpec::BlobNone
 impl grit_lib::remote::partial_clone::ObjectFilterSpec
@@ -20950,7 +20950,7 @@ pub fn grit_lib::remote::protocol::try_effective_client_protocol_version_from_co
 pub mod grit_lib::remote::push_bundle
 pub const grit_lib::remote::push_bundle::RECEIVE_SUFFIX: &str
 pub mod grit_lib::remote::push_plan
-pub enum grit_lib::remote::push_plan::ForceMode
+#[non_exhaustive] pub enum grit_lib::remote::push_plan::ForceMode
 pub grit_lib::remote::push_plan::ForceMode::Force
 pub grit_lib::remote::push_plan::ForceMode::Lease(grit_lib::remote::push_plan::LeaseExpectation)
 pub grit_lib::remote::push_plan::ForceMode::None
@@ -20971,7 +20971,7 @@ impl core::marker::Unpin for grit_lib::remote::push_plan::ForceMode
 impl core::marker::UnsafeUnpin for grit_lib::remote::push_plan::ForceMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::push_plan::ForceMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::push_plan::ForceMode
-pub enum grit_lib::remote::push_plan::LeaseExpectation
+#[non_exhaustive] pub enum grit_lib::remote::push_plan::LeaseExpectation
 pub grit_lib::remote::push_plan::LeaseExpectation::Tracking
 pub grit_lib::remote::push_plan::LeaseExpectation::Value(grit_lib::objects::ObjectId)
 impl core::clone::Clone for grit_lib::remote::push_plan::LeaseExpectation
@@ -21031,7 +21031,7 @@ impl core::marker::Unpin for grit_lib::remote::push_plan::PushPlanError
 impl core::marker::UnsafeUnpin for grit_lib::remote::push_plan::PushPlanError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::push_plan::PushPlanError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::push_plan::PushPlanError
-pub enum grit_lib::remote::push_plan::PushPlanKind
+#[non_exhaustive] pub enum grit_lib::remote::push_plan::PushPlanKind
 pub grit_lib::remote::push_plan::PushPlanKind::Branch
 pub grit_lib::remote::push_plan::PushPlanKind::Delete
 pub grit_lib::remote::push_plan::PushPlanKind::Refspecs
@@ -21142,7 +21142,7 @@ pub fn grit_lib::remote::push_plan::open_push_destination(&grit_lib::config::Con
 pub fn grit_lib::remote::push_plan::push_follow_tags_config(&grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::remote::push_plan::resolve_push_invocation(&grit_lib::config::ConfigSet, core::option::Option<&str>, &[alloc::string::String]) -> grit_lib::error::Result<grit_lib::remote::push_plan::PushInvocation>
 pub mod grit_lib::remote::push_report
-pub enum grit_lib::remote::push_report::PushRefStatus
+#[non_exhaustive] pub enum grit_lib::remote::push_report::PushRefStatus
 pub grit_lib::remote::push_report::PushRefStatus::AtomicPushFailed
 pub grit_lib::remote::push_report::PushRefStatus::Ok
 pub grit_lib::remote::push_report::PushRefStatus::RejectAlreadyExists
@@ -21191,7 +21191,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::push_report::PushRefResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::push_report::PushRefResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::push_report::PushRefResult
 pub mod grit_lib::remote::resumable
-pub enum grit_lib::remote::resumable::ResumableDownloadDest
+#[non_exhaustive] pub enum grit_lib::remote::resumable::ResumableDownloadDest
 pub grit_lib::remote::resumable::ResumableDownloadDest::Private(std::path::PathBuf)
 pub grit_lib::remote::resumable::ResumableDownloadDest::Shared
 pub grit_lib::remote::resumable::ResumableDownloadDest::Shared::dest: std::path::PathBuf
@@ -21232,7 +21232,7 @@ impl core::marker::Unpin for grit_lib::remote::resumable::ResumableError
 impl core::marker::UnsafeUnpin for grit_lib::remote::resumable::ResumableError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::resumable::ResumableError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::resumable::ResumableError
-pub enum grit_lib::remote::resumable::ResumableEvent
+#[non_exhaustive] pub enum grit_lib::remote::resumable::ResumableEvent
 pub grit_lib::remote::resumable::ResumableEvent::Advanced
 pub grit_lib::remote::resumable::ResumableEvent::Advanced::done: u64
 pub grit_lib::remote::resumable::ResumableEvent::Advanced::total: core::option::Option<u64>
@@ -21725,7 +21725,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::sideband_lines::SidebandLin
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::sideband_lines::SidebandLines
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::sideband_lines::SidebandLines
 pub mod grit_lib::remote::transfer
-pub enum grit_lib::remote::transfer::FetchDepth
+#[non_exhaustive] pub enum grit_lib::remote::transfer::FetchDepth
 pub grit_lib::remote::transfer::FetchDepth::Deepen(core::num::nonzero::NonZeroU32)
 pub grit_lib::remote::transfer::FetchDepth::Depth(core::num::nonzero::NonZeroU32)
 pub grit_lib::remote::transfer::FetchDepth::Unshallow
@@ -21785,7 +21785,7 @@ impl<'a> core::marker::Unpin for grit_lib::remote::transfer::TransferEndpoint<'a
 impl<'a> core::marker::UnsafeUnpin for grit_lib::remote::transfer::TransferEndpoint<'a>
 impl<'a> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transfer::TransferEndpoint<'a>
 impl<'a> !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transfer::TransferEndpoint<'a>
-pub enum grit_lib::remote::transfer::UpdateKind
+#[non_exhaustive] pub enum grit_lib::remote::transfer::UpdateKind
 pub grit_lib::remote::transfer::UpdateKind::FastForward
 pub grit_lib::remote::transfer::UpdateKind::Forced
 pub grit_lib::remote::transfer::UpdateKind::New
@@ -21812,7 +21812,7 @@ impl core::marker::Unpin for grit_lib::remote::transfer::UpdateKind
 impl core::marker::UnsafeUnpin for grit_lib::remote::transfer::UpdateKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transfer::UpdateKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transfer::UpdateKind
-pub enum grit_lib::remote::transfer::UpdateMode
+#[non_exhaustive] pub enum grit_lib::remote::transfer::UpdateMode
 pub grit_lib::remote::transfer::UpdateMode::DeletedMissing
 pub grit_lib::remote::transfer::UpdateMode::FastForward
 pub grit_lib::remote::transfer::UpdateMode::Forced
@@ -22183,7 +22183,7 @@ impl core::marker::Unpin for grit_lib::remote::http_client::UreqHttpClient
 impl core::marker::UnsafeUnpin for grit_lib::remote::http_client::UreqHttpClient
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::http_client::UreqHttpClient
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::http_client::UreqHttpClient
-pub enum grit_lib::remote::transport::http::HttpMethod
+#[non_exhaustive] pub enum grit_lib::remote::transport::http::HttpMethod
 pub grit_lib::remote::transport::http::HttpMethod::Delete
 pub grit_lib::remote::transport::http::HttpMethod::Get
 pub grit_lib::remote::transport::http::HttpMethod::Head
@@ -22310,7 +22310,7 @@ pub fn alloc::rcs::arc::Arc<C>::set_operation_cancel(&self, core::option::Option
 pub fn alloc::rcs::arc::Arc<C>::smart_http_enabled(&self) -> bool
 pub fn grit_lib::remote::transport::http::http_client_arc(impl grit_lib::remote::http_client::HttpClient + 'static) -> alloc::rcs::arc::Arc<dyn grit_lib::remote::http_client::HttpClient>
 pub type grit_lib::remote::transport::http::UploadPackDiscovery = (u8, alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>, alloc::vec::Vec<alloc::string::String>, core::option::Option<alloc::string::String>)
-pub enum grit_lib::remote::transport::Service
+#[non_exhaustive] pub enum grit_lib::remote::transport::Service
 pub grit_lib::remote::transport::Service::ReceivePack
 pub grit_lib::remote::transport::Service::UploadPack
 impl grit_lib::remote::transport::Service
@@ -22331,7 +22331,7 @@ impl core::marker::Unpin for grit_lib::remote::transport::Service
 impl core::marker::UnsafeUnpin for grit_lib::remote::transport::Service
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transport::Service
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transport::Service
-pub enum grit_lib::remote::transport::SshCommand
+#[non_exhaustive] pub enum grit_lib::remote::transport::SshCommand
 pub grit_lib::remote::transport::SshCommand::Auto
 pub grit_lib::remote::transport::SshCommand::Program(std::ffi::os_str::OsString)
 pub grit_lib::remote::transport::SshCommand::ShellCommand(std::ffi::os_str::OsString)
@@ -22478,7 +22478,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transport_pat
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transport_path::NoDirectoryName
 pub fn grit_lib::remote::transport_path::redact_url_for_display(&str) -> alloc::string::String
 pub fn grit_lib::remote::transport_path::resolve_local_remote_git_dir(&str, &std::path::Path, core::option::Option<&std::path::Path>) -> std::path::PathBuf
-pub enum grit_lib::remote::RemoteBranchStateKind
+#[non_exhaustive] pub enum grit_lib::remote::RemoteBranchStateKind
 pub grit_lib::remote::RemoteBranchStateKind::New
 pub grit_lib::remote::RemoteBranchStateKind::Stale
 pub grit_lib::remote::RemoteBranchStateKind::Tracked
@@ -22593,7 +22593,7 @@ impl core::marker::Unpin for grit_lib::remote::RemoteError
 impl core::marker::UnsafeUnpin for grit_lib::remote::RemoteError
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::RemoteError
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::RemoteError
-pub enum grit_lib::remote::RemoteUrl
+#[non_exhaustive] pub enum grit_lib::remote::RemoteUrl
 pub grit_lib::remote::RemoteUrl::Bundle(std::path::PathBuf)
 pub grit_lib::remote::RemoteUrl::File(std::path::PathBuf)
 pub grit_lib::remote::RemoteUrl::Git(alloc::string::String)
@@ -23268,7 +23268,7 @@ pub fn grit_lib::repo::validate_repo_format(&std::path::Path) -> grit_lib::error
 pub fn grit_lib::repo::worktree_config_enabled(&std::path::Path) -> bool
 pub type grit_lib::repo::RepositoryResult<T> = core::result::Result<T, grit_lib::repo::error::RepositoryError>
 pub mod grit_lib::repo_handles
-pub enum grit_lib::repo_handles::HookSource
+#[non_exhaustive] pub enum grit_lib::repo_handles::HookSource
 pub grit_lib::repo_handles::HookSource::CoreHooksPath
 pub grit_lib::repo_handles::HookSource::HooksDir
 impl core::clone::Clone for grit_lib::repo_handles::HookSource
@@ -23287,7 +23287,7 @@ impl core::marker::Unpin for grit_lib::repo_handles::HookSource
 impl core::marker::UnsafeUnpin for grit_lib::repo_handles::HookSource
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::HookSource
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::HookSource
-pub enum grit_lib::repo_handles::NoteAddOutcome
+#[non_exhaustive] pub enum grit_lib::repo_handles::NoteAddOutcome
 pub grit_lib::repo_handles::NoteAddOutcome::Added
 pub grit_lib::repo_handles::NoteAddOutcome::Replaced
 impl core::clone::Clone for grit_lib::repo_handles::NoteAddOutcome
@@ -23346,7 +23346,7 @@ impl core::marker::Unpin for grit_lib::repo_handles::RemoteUrlKind
 impl core::marker::UnsafeUnpin for grit_lib::repo_handles::RemoteUrlKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::RemoteUrlKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RemoteUrlKind
-pub enum grit_lib::repo_handles::SetHead
+#[non_exhaustive] pub enum grit_lib::repo_handles::SetHead
 pub grit_lib::repo_handles::SetHead::Auto
 pub grit_lib::repo_handles::SetHead::Branch(alloc::string::String)
 pub grit_lib::repo_handles::SetHead::Delete
@@ -24293,7 +24293,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::handle::StdinRevisionSpecs
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::handle::StdinRevisionSpecs
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::handle::StdinRevisionSpecs
 pub mod grit_lib::revwalk::history
-pub enum grit_lib::revwalk::history::CommitEdit
+#[non_exhaustive] pub enum grit_lib::revwalk::history::CommitEdit
 pub grit_lib::revwalk::history::CommitEdit::Drop
 pub grit_lib::revwalk::history::CommitEdit::InsertBefore(grit_lib::revwalk::history::NewCommit)
 pub grit_lib::revwalk::history::CommitEdit::Reparent
@@ -24324,7 +24324,7 @@ impl core::marker::Unpin for grit_lib::revwalk::history::CommitEdit
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::CommitEdit
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::CommitEdit
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::CommitEdit
-pub enum grit_lib::revwalk::history::EmptyPolicy
+#[non_exhaustive] pub enum grit_lib::revwalk::history::EmptyPolicy
 pub grit_lib::revwalk::history::EmptyPolicy::Abort
 pub grit_lib::revwalk::history::EmptyPolicy::Drop
 pub grit_lib::revwalk::history::EmptyPolicy::Keep
@@ -24574,10 +24574,10 @@ impl core::marker::Unpin for grit_lib::revwalk::history::PreRebase
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::PreRebase
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::PreRebase
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::PreRebase
-pub enum grit_lib::revwalk::history::RebaseCheckPlan
-pub grit_lib::revwalk::history::RebaseCheckPlan::Clean
+#[non_exhaustive] pub enum grit_lib::revwalk::history::RebaseCheckPlan
+#[non_exhaustive] pub grit_lib::revwalk::history::RebaseCheckPlan::Clean
 pub grit_lib::revwalk::history::RebaseCheckPlan::Clean::commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
-pub grit_lib::revwalk::history::RebaseCheckPlan::Conflict
+#[non_exhaustive] pub grit_lib::revwalk::history::RebaseCheckPlan::Conflict
 pub grit_lib::revwalk::history::RebaseCheckPlan::Conflict::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::RebaseCheckPlan::Conflict::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::revwalk::history::RebaseCheckPlan::Conflict::refs: alloc::vec::Vec<alloc::string::String>
@@ -24598,13 +24598,13 @@ impl core::marker::Unpin for grit_lib::revwalk::history::RebaseCheckPlan
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::RebaseCheckPlan
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::RebaseCheckPlan
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::RebaseCheckPlan
-pub enum grit_lib::revwalk::history::RebaseOutcome
-pub grit_lib::revwalk::history::RebaseOutcome::Done
+#[non_exhaustive] pub enum grit_lib::revwalk::history::RebaseOutcome
+#[non_exhaustive] pub grit_lib::revwalk::history::RebaseOutcome::Done
 pub grit_lib::revwalk::history::RebaseOutcome::Done::applied: grit_lib::revwalk::history::AppliedRewrite
 pub grit_lib::revwalk::history::RebaseOutcome::Done::head_change: core::option::Option<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)>
 pub grit_lib::revwalk::history::RebaseOutcome::Done::plan: alloc::boxed::Box<grit_lib::revwalk::history::RewritePlan>
 pub grit_lib::revwalk::history::RebaseOutcome::Done::rerere: alloc::vec::Vec<grit_lib::merge::RerereEvent>
-pub grit_lib::revwalk::history::RebaseOutcome::ExecDone
+#[non_exhaustive] pub grit_lib::revwalk::history::RebaseOutcome::ExecDone
 pub grit_lib::revwalk::history::RebaseOutcome::ExecDone::applied: grit_lib::revwalk::history::AppliedRewrite
 pub grit_lib::revwalk::history::RebaseOutcome::ExecDone::exec: grit_lib::revwalk::history::ExecReport
 pub grit_lib::revwalk::history::RebaseOutcome::ExecDone::plan: alloc::boxed::Box<grit_lib::revwalk::history::RewritePlan>
@@ -24624,8 +24624,8 @@ impl core::marker::Unpin for grit_lib::revwalk::history::RebaseOutcome
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::RebaseOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::RebaseOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::RebaseOutcome
-pub enum grit_lib::revwalk::history::RebasePlan
-pub grit_lib::revwalk::history::RebasePlan::Conflict
+#[non_exhaustive] pub enum grit_lib::revwalk::history::RebasePlan
+#[non_exhaustive] pub grit_lib::revwalk::history::RebasePlan::Conflict
 pub grit_lib::revwalk::history::RebasePlan::Conflict::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::RebasePlan::Conflict::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::revwalk::history::RebasePlan::Conflict::refs: alloc::vec::Vec<alloc::string::String>
@@ -24680,7 +24680,7 @@ impl core::marker::Unpin for grit_lib::revwalk::history::RebaseSessionError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::RebaseSessionError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::RebaseSessionError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::RebaseSessionError
-pub enum grit_lib::revwalk::history::RefScope
+#[non_exhaustive] pub enum grit_lib::revwalk::history::RefScope
 pub grit_lib::revwalk::history::RefScope::Branches
 pub grit_lib::revwalk::history::RefScope::Head
 impl core::clone::Clone for grit_lib::revwalk::history::RefScope
@@ -24705,7 +24705,7 @@ impl core::marker::Unpin for grit_lib::revwalk::history::RefScope
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::RefScope
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::RefScope
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::RefScope
-pub enum grit_lib::revwalk::history::RewriteApplyRecovery
+#[non_exhaustive] pub enum grit_lib::revwalk::history::RewriteApplyRecovery
 pub grit_lib::revwalk::history::RewriteApplyRecovery::FinishedCheckout
 pub grit_lib::revwalk::history::RewriteApplyRecovery::RolledBack
 impl core::clone::Clone for grit_lib::revwalk::history::RewriteApplyRecovery
@@ -24725,7 +24725,7 @@ impl core::marker::Unpin for grit_lib::revwalk::history::RewriteApplyRecovery
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::RewriteApplyRecovery
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::RewriteApplyRecovery
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::RewriteApplyRecovery
-pub enum grit_lib::revwalk::history::SquashMessage
+#[non_exhaustive] pub enum grit_lib::revwalk::history::SquashMessage
 pub grit_lib::revwalk::history::SquashMessage::Combine
 pub grit_lib::revwalk::history::SquashMessage::Custom(alloc::string::String)
 pub grit_lib::revwalk::history::SquashMessage::Oldest
@@ -24744,7 +24744,7 @@ impl core::marker::Unpin for grit_lib::revwalk::history::SquashMessage
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::SquashMessage
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::SquashMessage
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::SquashMessage
-pub enum grit_lib::revwalk::history::UnassignedReason
+#[non_exhaustive] pub enum grit_lib::revwalk::history::UnassignedReason
 pub grit_lib::revwalk::history::UnassignedReason::CommutesWithEntireStack
 pub grit_lib::revwalk::history::UnassignedReason::DoesNotCommute
 pub grit_lib::revwalk::history::UnassignedReason::FileAdded
@@ -25520,7 +25520,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::log_walk::WalkedCommits
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::log_walk::WalkedCommits
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::log_walk::WalkedCommits
 pub mod grit_lib::revwalk::merge_base
-pub enum grit_lib::revwalk::merge_base::ReachableWalkLimit
+#[non_exhaustive] pub enum grit_lib::revwalk::merge_base::ReachableWalkLimit
 pub grit_lib::revwalk::merge_base::ReachableWalkLimit::CountAllRetainNewest(usize)
 pub grit_lib::revwalk::merge_base::ReachableWalkLimit::StopAfter(usize)
 pub grit_lib::revwalk::merge_base::ReachableWalkLimit::Unlimited
@@ -25644,7 +25644,7 @@ impl core::marker::Unpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
-pub enum grit_lib::revwalk::object_inspect::RevisionLabel
+#[non_exhaustive] pub enum grit_lib::revwalk::object_inspect::RevisionLabel
 pub grit_lib::revwalk::object_inspect::RevisionLabel::Branch
 pub grit_lib::revwalk::object_inspect::RevisionLabel::Branch::name: alloc::string::String
 pub grit_lib::revwalk::object_inspect::RevisionLabel::Tag
@@ -25720,7 +25720,7 @@ pub fn grit_lib::revwalk::object_inspect::format_tree_entries_cat_file_p(&[grit_
 pub fn grit_lib::revwalk::object_inspect::tree_entry_cat_file_type(u32) -> &'static str
 pub fn grit_lib::revwalk::object_inspect::tree_entry_mode_cat_file_p(u32) -> alloc::string::String
 pub mod grit_lib::revwalk::rev_list
-pub enum grit_lib::revwalk::rev_list::CommitExtent
+#[non_exhaustive] pub enum grit_lib::revwalk::rev_list::CommitExtent
 pub grit_lib::revwalk::rev_list::CommitExtent::ThroughSubject
 pub grit_lib::revwalk::rev_list::CommitExtent::Whole
 impl core::clone::Clone for grit_lib::revwalk::CommitExtent
@@ -25762,7 +25762,7 @@ impl core::marker::Unpin for grit_lib::revwalk::rev_list::FilterObjectKind
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::FilterObjectKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::FilterObjectKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_list::FilterObjectKind
-pub enum grit_lib::revwalk::rev_list::MissingAction
+#[non_exhaustive] pub enum grit_lib::revwalk::rev_list::MissingAction
 pub grit_lib::revwalk::rev_list::MissingAction::Allow
 pub grit_lib::revwalk::rev_list::MissingAction::Error
 pub grit_lib::revwalk::rev_list::MissingAction::Print
@@ -25783,7 +25783,7 @@ impl core::marker::Unpin for grit_lib::revwalk::rev_list::MissingAction
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::MissingAction
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::MissingAction
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_list::MissingAction
-pub enum grit_lib::revwalk::rev_list::ObjectFilter
+#[non_exhaustive] pub enum grit_lib::revwalk::rev_list::ObjectFilter
 pub grit_lib::revwalk::rev_list::ObjectFilter::BlobLimit(u64)
 pub grit_lib::revwalk::rev_list::ObjectFilter::BlobNone
 pub grit_lib::revwalk::rev_list::ObjectFilter::Combine(alloc::vec::Vec<grit_lib::revwalk::rev_list::ObjectFilter>)
@@ -25843,7 +25843,7 @@ impl core::marker::Unpin for grit_lib::revwalk::rev_list::ObjectFilterError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::ObjectFilterError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::ObjectFilterError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_list::ObjectFilterError
-pub enum grit_lib::revwalk::rev_list::OrderingMode
+#[non_exhaustive] pub enum grit_lib::revwalk::rev_list::OrderingMode
 pub grit_lib::revwalk::rev_list::OrderingMode::AuthorDateTopo
 pub grit_lib::revwalk::rev_list::OrderingMode::AuthorDateWalk
 pub grit_lib::revwalk::rev_list::OrderingMode::DateOrderWalk
@@ -26246,7 +26246,7 @@ impl core::marker::Unpin for grit_lib::revwalk::AbbrevLength
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::AbbrevLength
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::AbbrevLength
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::AbbrevLength
-pub enum grit_lib::revwalk::CommitExtent
+#[non_exhaustive] pub enum grit_lib::revwalk::CommitExtent
 pub grit_lib::revwalk::CommitExtent::ThroughSubject
 pub grit_lib::revwalk::CommitExtent::Whole
 impl core::clone::Clone for grit_lib::revwalk::CommitExtent
@@ -26283,7 +26283,7 @@ impl core::marker::Unpin for grit_lib::revwalk::filter::CommitFilterError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::filter::CommitFilterError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::filter::CommitFilterError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::filter::CommitFilterError
-pub enum grit_lib::revwalk::GraphLineKind
+#[non_exhaustive] pub enum grit_lib::revwalk::GraphLineKind
 pub grit_lib::revwalk::GraphLineKind::Commit
 pub grit_lib::revwalk::GraphLineKind::Padding
 impl core::clone::Clone for grit_lib::revwalk::GraphLineKind
@@ -26349,7 +26349,7 @@ impl core::marker::Unpin for grit_lib::revwalk::MergeBaseMode
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::MergeBaseMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::MergeBaseMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::MergeBaseMode
-pub enum grit_lib::revwalk::MergeFilter
+#[non_exhaustive] pub enum grit_lib::revwalk::MergeFilter
 pub grit_lib::revwalk::MergeFilter::Any
 pub grit_lib::revwalk::MergeFilter::NoMerges
 pub grit_lib::revwalk::MergeFilter::OnlyMerges
@@ -26416,7 +26416,7 @@ impl core::marker::Unpin for grit_lib::revwalk::PickaxeError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::PickaxeError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::PickaxeError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::PickaxeError
-pub enum grit_lib::revwalk::PickaxeKind
+#[non_exhaustive] pub enum grit_lib::revwalk::PickaxeKind
 pub grit_lib::revwalk::PickaxeKind::LineGrep
 pub grit_lib::revwalk::PickaxeKind::Occurrences
 pub grit_lib::revwalk::PickaxeKind::Occurrences::needle: alloc::string::String
@@ -26431,7 +26431,7 @@ impl core::marker::Unpin for grit_lib::revwalk::PickaxeKind
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::PickaxeKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::PickaxeKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::PickaxeKind
-pub enum grit_lib::revwalk::RefSelection
+#[non_exhaustive] pub enum grit_lib::revwalk::RefSelection
 pub grit_lib::revwalk::RefSelection::All
 pub grit_lib::revwalk::RefSelection::Branches(core::option::Option<alloc::string::String>)
 pub grit_lib::revwalk::RefSelection::Remotes(core::option::Option<alloc::string::String>)
@@ -27113,7 +27113,7 @@ impl core::marker::Unpin for grit_lib::stash::StashError
 impl core::marker::UnsafeUnpin for grit_lib::stash::StashError
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashError
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashError
-pub enum grit_lib::stash::StashMode
+#[non_exhaustive] pub enum grit_lib::stash::StashMode
 pub grit_lib::stash::StashMode::All
 pub grit_lib::stash::StashMode::KeepIndex
 pub grit_lib::stash::StashMode::StagedOnly
@@ -27169,7 +27169,7 @@ impl core::marker::Unpin for grit_lib::stash::StashPushValidationError
 impl core::marker::UnsafeUnpin for grit_lib::stash::StashPushValidationError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPushValidationError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPushValidationError
-pub enum grit_lib::stash::StashReference
+#[non_exhaustive] pub enum grit_lib::stash::StashReference
 pub grit_lib::stash::StashReference::Commit(grit_lib::objects::ObjectId)
 pub grit_lib::stash::StashReference::Index(usize)
 impl core::clone::Clone for grit_lib::stash::StashReference
@@ -27403,7 +27403,7 @@ impl core::marker::Unpin for grit_lib::state::HeadState
 impl core::marker::UnsafeUnpin for grit_lib::state::HeadState
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::state::HeadState
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::state::HeadState
-pub enum grit_lib::state::InProgressOperation
+#[non_exhaustive] pub enum grit_lib::state::InProgressOperation
 pub grit_lib::state::InProgressOperation::Am
 pub grit_lib::state::InProgressOperation::Bisect
 pub grit_lib::state::InProgressOperation::CherryPick
@@ -27430,7 +27430,7 @@ impl core::marker::Unpin for grit_lib::state::InProgressOperation
 impl core::marker::UnsafeUnpin for grit_lib::state::InProgressOperation
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::state::InProgressOperation
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::state::InProgressOperation
-pub enum grit_lib::state::NextStep
+#[non_exhaustive] pub enum grit_lib::state::NextStep
 pub grit_lib::state::NextStep::Abort(grit_lib::state::InProgressOperation)
 pub grit_lib::state::NextStep::Commit
 pub grit_lib::state::NextStep::Continue(grit_lib::state::InProgressOperation)
@@ -27536,7 +27536,7 @@ impl core::marker::Unpin for grit_lib::porcelain::status::IgnoredMode
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::IgnoredMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::IgnoredMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::IgnoredMode
-pub enum grit_lib::status::InterruptedRewrite
+#[non_exhaustive] pub enum grit_lib::status::InterruptedRewrite
 pub grit_lib::status::InterruptedRewrite::FinishedCheckout
 pub grit_lib::status::InterruptedRewrite::Pending
 pub grit_lib::status::InterruptedRewrite::RolledBack
@@ -27558,7 +27558,7 @@ impl core::marker::Unpin for grit_lib::porcelain::status::InterruptedRewrite
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::InterruptedRewrite
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::InterruptedRewrite
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::InterruptedRewrite
-pub enum grit_lib::status::StatusAction
+#[non_exhaustive] pub enum grit_lib::status::StatusAction
 pub grit_lib::status::StatusAction::Commit
 pub grit_lib::status::StatusAction::DiscardWorktreeChanges
 pub grit_lib::status::StatusAction::Pull
@@ -27579,10 +27579,10 @@ impl core::marker::Unpin for grit_lib::porcelain::status::StatusAction
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusAction
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusAction
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusAction
-pub enum grit_lib::status::StatusGuidance
+#[non_exhaustive] pub enum grit_lib::status::StatusGuidance
 pub grit_lib::status::StatusGuidance::Actions(alloc::vec::Vec<grit_lib::porcelain::status::StatusAction>)
 pub grit_lib::status::StatusGuidance::ContinueMerge
-pub grit_lib::status::StatusGuidance::Operation
+#[non_exhaustive] pub grit_lib::status::StatusGuidance::Operation
 pub grit_lib::status::StatusGuidance::Operation::alternative: core::option::Option<grit_lib::state::NextStep>
 pub grit_lib::status::StatusGuidance::Operation::steps: alloc::vec::Vec<grit_lib::state::NextStep>
 pub grit_lib::status::StatusGuidance::ResolveConflictsThenContinueMerge
@@ -27874,7 +27874,7 @@ impl core::marker::Unpin for grit_lib::tree_sha256::MissingSubmoduleReason
 impl core::marker::UnsafeUnpin for grit_lib::tree_sha256::MissingSubmoduleReason
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::tree_sha256::MissingSubmoduleReason
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::tree_sha256::MissingSubmoduleReason
-pub enum grit_lib::tree_sha256::SignatureVerdict
+#[non_exhaustive] pub enum grit_lib::tree_sha256::SignatureVerdict
 pub grit_lib::tree_sha256::SignatureVerdict::Bad
 pub grit_lib::tree_sha256::SignatureVerdict::Good
 pub grit_lib::tree_sha256::SignatureVerdict::Good::key: core::option::Option<alloc::string::String>
@@ -28877,7 +28877,7 @@ pub fn grit_lib::worktree::wildmatch::wildmatch(&[u8], &[u8], u32) -> bool
 pub mod grit_lib::worktree::worktree_cwd
 pub fn grit_lib::worktree::worktree_cwd::cwd_would_be_removed_with_dir(&std::path::Path, &std::path::Path, &str) -> bool
 pub mod grit_lib::worktree::worktree_ref
-pub enum grit_lib::worktree::worktree_ref::RefWorktreeType
+#[non_exhaustive] pub enum grit_lib::worktree::worktree_ref::RefWorktreeType
 pub grit_lib::worktree::worktree_ref::RefWorktreeType::Current
 pub grit_lib::worktree::worktree_ref::RefWorktreeType::Main
 pub grit_lib::worktree::worktree_ref::RefWorktreeType::Other
@@ -28980,7 +28980,7 @@ impl core::marker::Unpin for grit_lib::worktree::LinkedWorktreeError
 impl core::marker::UnsafeUnpin for grit_lib::worktree::LinkedWorktreeError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::LinkedWorktreeError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::LinkedWorktreeError
-pub enum grit_lib::worktree::LinkedWorktreeOperation
+#[non_exhaustive] pub enum grit_lib::worktree::LinkedWorktreeOperation
 pub grit_lib::worktree::LinkedWorktreeOperation::Lock
 pub grit_lib::worktree::LinkedWorktreeOperation::Move
 pub grit_lib::worktree::LinkedWorktreeOperation::Remove
@@ -29005,7 +29005,7 @@ impl core::marker::Unpin for grit_lib::worktree::LinkedWorktreeOperation
 impl core::marker::UnsafeUnpin for grit_lib::worktree::LinkedWorktreeOperation
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::LinkedWorktreeOperation
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::LinkedWorktreeOperation
-pub enum grit_lib::worktree::PrunableReason
+#[non_exhaustive] pub enum grit_lib::worktree::PrunableReason
 pub grit_lib::worktree::PrunableReason::AdminNotValidDirectory
 pub grit_lib::worktree::PrunableReason::ExplicitMarker
 pub grit_lib::worktree::PrunableReason::GitdirFileMissing
@@ -29030,7 +29030,7 @@ impl core::marker::Unpin for grit_lib::worktree::PrunableReason
 impl core::marker::UnsafeUnpin for grit_lib::worktree::PrunableReason
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::PrunableReason
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::PrunableReason
-pub enum grit_lib::worktree::WorktreeBranch
+#[non_exhaustive] pub enum grit_lib::worktree::WorktreeBranch
 pub grit_lib::worktree::WorktreeBranch::Create(alloc::string::String)
 pub grit_lib::worktree::WorktreeBranch::CreateOrReset(alloc::string::String)
 pub grit_lib::worktree::WorktreeBranch::Detach
@@ -29168,7 +29168,7 @@ impl core::marker::Unpin for grit_lib::worktree::WorktreeError
 impl core::marker::UnsafeUnpin for grit_lib::worktree::WorktreeError
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::WorktreeError
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::WorktreeError
-pub enum grit_lib::worktree::WorktreeRepairKind
+#[non_exhaustive] pub enum grit_lib::worktree::WorktreeRepairKind
 pub grit_lib::worktree::WorktreeRepairKind::GitFileAdminDir
 pub grit_lib::worktree::WorktreeRepairKind::GitFilePathStyle
 pub grit_lib::worktree::WorktreeRepairKind::GitdirPathStyle

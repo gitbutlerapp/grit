@@ -287,7 +287,8 @@ impl From<DecorationKind> for CommitRefKind {
             DecorationKind::Stash => Self::Stash,
             DecorationKind::Head => Self::Head,
             DecorationKind::Grafted => Self::Grafted,
-            DecorationKind::Other => Self::Other,
+            // `Other` and decoration kinds this CLI does not know yet.
+            _ => Self::Other,
         }
     }
 }
@@ -358,6 +359,8 @@ impl From<DiffStatus> for ChangeStatus {
             DiffStatus::Renamed => Self::Renamed,
             DiffStatus::Copied => Self::Copied,
             DiffStatus::Unmerged => Self::Unmerged,
+            // Status letters this CLI does not know yet render as a modification.
+            _ => Self::Modified,
         }
     }
 }

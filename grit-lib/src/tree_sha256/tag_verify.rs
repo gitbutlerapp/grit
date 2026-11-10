@@ -62,6 +62,7 @@ impl TagVerification {
 
 /// Signature verification outcome for a tag object.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SignatureVerdict {
     /// Signature verified and meets configured minimum trust.
     Good {

@@ -40,6 +40,7 @@ const WEEKDAY_NAMES: [&str; 7] = [
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 /// `DateModeType` enum.
+#[non_exhaustive]
 pub enum DateModeType {
     /// `Normal` variant.
     Normal,

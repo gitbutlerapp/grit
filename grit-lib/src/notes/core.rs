@@ -1055,6 +1055,7 @@ fn notes_ident<E: IdentityEnv>(
 
 /// How to combine conflicting note blobs during a notes merge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NotesMergeStrategy {
     /// Leave conflicts for the user to resolve in the worktree.
     Manual,
@@ -1769,6 +1770,7 @@ pub enum NotesRewriteCommand {
 
 /// How to combine note blobs when several rewritten commits map onto one target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NotesRewriteMode {
     /// Append the source note after the destination with a blank line between (Git default).
     Concatenate,

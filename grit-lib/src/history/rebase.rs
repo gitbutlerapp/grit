@@ -215,12 +215,14 @@ fn rebase_upstream_reflog_ref(
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum RebasePlan {
     /// The branch is already based on the effective onto commit with nothing to replay.
     UpToDate,
     /// Commits to replay and ref updates to apply.
     Plan(RewritePlan),
     /// Replay of a commit would conflict; the repository is unchanged.
+    #[non_exhaustive]
     Conflict {
         /// Original commit that could not be replayed cleanly.
         commit: ObjectId,
@@ -294,15 +296,18 @@ impl RebaseOntoOptions {
 
 /// Predicted outcome of [`plan_rebase_check`] (no ref, index, or worktree updates).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RebaseCheckPlan {
     /// Nothing would be replayed.
     UpToDate,
     /// Every commit would replay cleanly; lists replacement commit OIDs in replay order.
+    #[non_exhaustive]
     Clean {
         /// New commit object ids that would become branch tips after apply.
         commits: Vec<ObjectId>,
     },
     /// Replay would stop on this commit.
+    #[non_exhaustive]
     Conflict {
         /// Original commit that could not be replayed cleanly.
         commit: ObjectId,

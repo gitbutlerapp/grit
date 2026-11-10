@@ -169,6 +169,7 @@ pub(crate) fn fsck_dot_special_tree_pass(
 
 /// Problems reported while walking trees / blobs for `.gitmodules` / `.gitattributes` fsck.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum DotFsckIssue {
     /// A `.gitmodules` / `.gitattributes`-related path appears as a symlink in a tree.
     TreeSymlink {

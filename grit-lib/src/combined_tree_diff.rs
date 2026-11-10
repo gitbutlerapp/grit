@@ -141,6 +141,7 @@ pub fn combined_raw_meta(p: &CombinedDiffPath, abbrev_len: Option<usize>) -> Str
 
 /// Per-parent coarse status in a combined diff (`A` / `M` / `D`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CombinedParentStatus {
     /// Parent lacks the path; merge tree added it.
     Added,

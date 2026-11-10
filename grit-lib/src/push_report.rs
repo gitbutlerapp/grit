@@ -11,6 +11,7 @@ use crate::objects::ObjectId;
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum PushRefStatus {
     /// The reference was already at the requested value (`=`, `[up to date]`).
     UpToDate,

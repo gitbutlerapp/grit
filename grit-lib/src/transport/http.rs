@@ -215,6 +215,7 @@ pub trait HttpClient: Send + Sync {
 
 /// Method of an [`HttpRequest`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HttpMethod {
     /// `GET`.
     Get,

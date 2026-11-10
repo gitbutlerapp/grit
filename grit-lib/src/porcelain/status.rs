@@ -294,6 +294,7 @@ pub struct StatusModel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
+#[non_exhaustive]
 pub enum InterruptedRewrite {
     /// Refs had already moved; the work-tree checkout was completed and the rewrite stands.
     FinishedCheckout,
@@ -327,8 +328,10 @@ pub struct ConflictGroup {
 /// The variants are ordered by precedence: a paused operation with runnable steps wins, then
 /// unresolved conflicts, then an unfinished merge, then everyday actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StatusGuidance {
     /// A paused operation that grit (or `git`) can advance.
+    #[non_exhaustive]
     Operation {
         /// Ordered follow-ups. Every step has a [`NextStep::command`].
         steps: Vec<NextStep>,
@@ -348,6 +351,7 @@ pub enum StatusGuidance {
 
 /// An everyday follow-up suggested by [`StatusGuidance::Actions`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StatusAction {
     /// Unstaged worktree changes exist and can be discarded.
     DiscardWorktreeChanges,
@@ -2866,6 +2870,7 @@ pub fn format_porcelain_v2(
 
 /// Path half of a [`StatusShortLine`] (single path or rename/copy endpoints).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StatusShortPath {
     /// One repository-relative path.
     Single(String),
@@ -2896,6 +2901,7 @@ impl StatusShortPath {
 
 /// One line of compact status output before terminal path quoting.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StatusShortLine {
     /// Ordinary tracked change (`XY path`).
     Tracked {

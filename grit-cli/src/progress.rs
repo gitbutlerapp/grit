@@ -520,6 +520,7 @@ fn unit_noun(phase: ProgressPhase, unit: ProgressUnit) -> &'static str {
         ProgressUnit::Files => "files",
         ProgressUnit::Objects if phase == ProgressPhase::ResolvingDeltas => "deltas",
         ProgressUnit::Objects => "objects",
+        _ => "items",
     }
 }
 

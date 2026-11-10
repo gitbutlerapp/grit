@@ -247,6 +247,7 @@ pub(crate) fn fetch_bundle_list(
 
 /// What [`seed_from_bundle_uri`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BundleSeed {
     /// The server offers no bundle; the clone fetches everything.
     NotOffered,
@@ -254,6 +255,7 @@ pub enum BundleSeed {
     Seeded(SeededBundle),
     /// The bundle could not be used; the clone fetches everything. A partial
     /// download is kept so the next clone resumes it.
+    #[non_exhaustive]
     Failed {
         /// The bundle URL, when the failure came after the list was read.
         uri: Option<String>,

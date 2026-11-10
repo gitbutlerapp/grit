@@ -58,6 +58,7 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
                     "warning: branch tip moved during the pick; replay state cleared without moving the branch"
                 );
             }
+            _ => {}
         }
         return Ok(PickOutcome::new(PickResult::Aborted));
     }
@@ -74,7 +75,7 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
                 &crate::interrupt::process_cancel_token(),
             )
             .map_err(|e| map_replay_error(&repo, e))?;
-        return Ok(map_sequence_outcome(outcome, PickResult::Picked));
+        return map_sequence_outcome(outcome, PickResult::Picked);
     }
 
     if opts.skip {
@@ -86,7 +87,7 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
                 &crate::interrupt::process_cancel_token(),
             )
             .map_err(|e| map_replay_error(&repo, e))?;
-        return Ok(map_sequence_outcome(outcome, PickResult::Skipped));
+        return map_sequence_outcome(outcome, PickResult::Skipped);
     }
 
     if opts.commits.is_empty() {
@@ -141,7 +142,7 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
             .merge()
             .predict_sequence(&req)
             .map_err(|e| map_replay_error(&repo, e))?;
-        return Ok(map_prediction_outcome(prediction));
+        return map_prediction_outcome(prediction);
     }
     let outcome = repo
         .merge()
@@ -151,7 +152,7 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
             &crate::interrupt::process_cancel_token(),
         )
         .map_err(|e| map_replay_error(&repo, e))?;
-    Ok(map_sequence_outcome(outcome, PickResult::Picked))
+    map_sequence_outcome(outcome, PickResult::Picked)
 }
 
 impl From<&ReplayCreated> for PickCommitRecord {
@@ -174,12 +175,13 @@ fn source_record(source: ObjectId, subject: &str) -> PickCommitRecord {
     }
 }
 
-fn map_sequence_outcome(outcome: SequenceOutcome, ok_result: PickResult) -> PickOutcome {
-    match outcome {
+fn map_sequence_outcome(outcome: SequenceOutcome, ok_result: PickResult) -> Result<PickOutcome> {
+    Ok(match outcome {
         SequenceOutcome::Completed {
             created,
             dropped,
             rerere,
+            ..
         } => PickOutcome {
             commits: created.iter().map(PickCommitRecord::from).collect(),
             dropped: dropped.iter().map(ObjectId::to_hex).collect(),
@@ -224,12 +226,13 @@ fn map_sequence_outcome(outcome: SequenceOutcome, ok_result: PickResult) -> Pick
                 ..PickOutcome::new(PickResult::Empty)
             }
         }
-    }
+        _ => bail!("pick finished with an outcome this version of grit cannot display"),
+    })
 }
 
-fn map_prediction_outcome(prediction: SequencePrediction) -> PickOutcome {
+fn map_prediction_outcome(prediction: SequencePrediction) -> Result<PickOutcome> {
     let outcome = match prediction {
-        SequencePrediction::Clean { tree, dropped } => PickOutcome {
+        SequencePrediction::Clean { tree, dropped, .. } => PickOutcome {
             dropped: dropped.iter().map(ObjectId::to_hex).collect(),
             oid: Some(tree.to_hex()),
             ..PickOutcome::new(PickResult::Clean)
@@ -238,21 +241,25 @@ fn map_prediction_outcome(prediction: SequencePrediction) -> PickOutcome {
             commit,
             subject,
             conflicts,
+            ..
         } => PickOutcome {
             commits: vec![source_record(commit, &subject)],
             conflicts: Some(OperationConflictBlock::for_pick(&conflicts).conflicts),
             conflict_sources: Some(conflicts),
             ..PickOutcome::new(PickResult::Conflicts)
         },
-        SequencePrediction::Empty { commit, subject } => PickOutcome {
+        SequencePrediction::Empty {
+            commit, subject, ..
+        } => PickOutcome {
             commits: vec![source_record(commit, &subject)],
             ..PickOutcome::new(PickResult::Empty)
         },
+        _ => bail!("pick --check returned a prediction this version of grit cannot display"),
     };
-    PickOutcome {
+    Ok(PickOutcome {
         check: true,
         ..outcome
-    }
+    })
 }
 
 fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Error {

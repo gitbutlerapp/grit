@@ -91,6 +91,7 @@ impl ProgressPhase {
 
 /// Unit for [`ProgressSink::inc`] / [`ProgressSink::set`] during a phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ProgressUnit {
     /// Git objects (commits, trees, blobs, tags).
     Objects,

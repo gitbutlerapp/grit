@@ -50,6 +50,7 @@ impl<'a> PickaxeRenames<'a> {
 
 /// Which pickaxe mode is active (`-S` or `-G`).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum PickaxeKind {
     /// Occurrence count change (`git log -S` / `git diff -S`).
     Occurrences {
