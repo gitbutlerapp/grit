@@ -1,7 +1,9 @@
 //! Optional Linux host hygiene for fair peak-RSS measurements.
 
 use std::fs;
+#[cfg(target_os = "linux")]
 use std::io::Write;
+#[cfg(target_os = "linux")]
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
@@ -9,6 +11,7 @@ use anyhow::{bail, Context, Result};
 /// Environment variable: when set, [`drop_page_caches_if_requested`] runs between daily scenarios.
 pub const DROP_CACHES_ENV: &str = "GRIT_BENCH_DROP_CACHES";
 
+#[cfg(target_os = "linux")]
 const DROP_CACHES_PROC: &str = "/proc/sys/vm/drop_caches";
 const MEMINFO: &str = "/proc/meminfo";
 
@@ -59,6 +62,7 @@ pub fn drop_linux_page_caches() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn run_sync() -> Result<()> {
     let status = Command::new("sync").status().context("spawn sync")?;
     if !status.success() {
@@ -67,6 +71,7 @@ fn run_sync() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn write_drop_caches_direct() -> Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -77,12 +82,14 @@ fn write_drop_caches_direct() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn verify_drop(cached_before_kib: u64, method: &str) -> Result<()> {
     let cached_after_kib = meminfo_cached_kib().context("read Cached after drop_caches")?;
     verify_cached_shrank(cached_before_kib, cached_after_kib, method)
 }
 
 /// Returns `Ok(())` when `after_kib` is below `before_kib`, or `before_kib` is zero.
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn verify_cached_shrank(before_kib: u64, after_kib: u64, method: &str) -> Result<()> {
     if after_kib < before_kib || before_kib == 0 {
         return Ok(());
