@@ -2523,6 +2523,45 @@ fn merge_handoff_to_parent(
     (handed, next_remaining)
 }
 
+/// Run [`merge_handoff_to_parent`] per hand-off origin so unrelated pending lines do not
+/// share one parent line stamp pass (whole-file vs line-range parity at merges).
+#[allow(clippy::too_many_arguments)]
+fn merge_handoff_to_parent_by_origin(
+    ws: crate::diff::WhitespaceMode,
+    stamp: &mut LineUseStamp,
+    par_lines: &BlobLines,
+    cur_lines: &BlobLines,
+    map: &[Option<usize>],
+    same_blob: bool,
+    remaining: Vec<TrackedLine>,
+    renamed_parent: bool,
+    parent_path: &str,
+) -> (Vec<TrackedLine>, Vec<TrackedLine>) {
+    let mut groups: std::collections::BTreeMap<u32, Vec<TrackedLine>> =
+        std::collections::BTreeMap::new();
+    for t in remaining {
+        groups.entry(t.origin).or_default().push(t);
+    }
+    let mut handed = Vec::new();
+    let mut next_remaining = Vec::new();
+    for group in groups.into_values() {
+        let (h, nr) = merge_handoff_to_parent(
+            ws,
+            stamp,
+            par_lines,
+            cur_lines,
+            map,
+            same_blob,
+            group,
+            renamed_parent,
+            parent_path,
+        );
+        handed.extend(h);
+        next_remaining.extend(nr);
+    }
+    (handed, next_remaining)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PathCacheKey {
     tree: ObjectId,
@@ -3584,13 +3623,16 @@ fn compute_blame_with_session(
                 let renamed_parent = parent_path != current_path;
                 if !seen_parent_blobs.insert(blob) {
                     if let Some(&first_i) = first_parent_for_blob.get(&blob) {
-                        let (par_lines, map, first_path) =
-                            match (parent_blobs[first_i].as_ref(), par_lines_vec[first_i].as_deref(), maps[first_i].as_deref()) {
-                                (Some((_, _, _, path)), Some(lines), Some(map)) => (lines, map, path),
-                                _ => continue,
-                            };
+                        let (par_lines, map, first_path) = match (
+                            parent_blobs[first_i].as_ref(),
+                            par_lines_vec[first_i].as_deref(),
+                            maps[first_i].as_deref(),
+                        ) {
+                            (Some((_, _, _, path)), Some(lines), Some(map)) => (lines, map, path),
+                            _ => continue,
+                        };
                         let same_blob = blob == current_blob_oid;
-                        let (handed, next_remaining) = merge_handoff_to_parent(
+                        let (handed, next_remaining) = merge_handoff_to_parent_by_origin(
                             session.whitespace,
                             &mut session.merge_line_stamps[first_i],
                             par_lines,
@@ -3613,7 +3655,7 @@ fn compute_blame_with_session(
                     par_lines_vec[i] = Some(Arc::clone(&cur_lines_arc));
                     let id_map = session.identity_line_map(line_count);
                     maps[i] = Some(Arc::clone(&id_map));
-                    let (handed, next_remaining) = merge_handoff_to_parent(
+                    let (handed, next_remaining) = merge_handoff_to_parent_by_origin(
                         session.whitespace,
                         &mut session.merge_line_stamps[i],
                         cur_lines_arc.as_ref(),
@@ -3668,7 +3710,7 @@ fn compute_blame_with_session(
                 par_lines_vec[i] = Some(pl_arc);
                 maps[i] = Some(Arc::clone(&map_arc));
 
-                let (handed, next_remaining) = merge_handoff_to_parent(
+                let (handed, next_remaining) = merge_handoff_to_parent_by_origin(
                     session.whitespace,
                     &mut session.merge_line_stamps[i],
                     par_lines_arc.as_ref(),

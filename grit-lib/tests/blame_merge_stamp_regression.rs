@@ -240,3 +240,99 @@ fn blame_merge_whole_file_matches_line_range_on_padded_blank() {
         "whole-file and ranged blame must match on repeated blank at merge"
     );
 }
+
+/// Whole-file merge blame on a repeated closing brace must match `git blame` (issue #2574).
+#[test]
+fn blame_merge_repeated_brace_whole_file_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    let mut body = String::new();
+    for i in 1..=80 {
+        body.push_str(&format!("head-{i}\n"));
+    }
+    body.push_str("\t}\n");
+    for i in 1..=80 {
+        body.push_str(&format!("tail-{i}\n"));
+    }
+    std::fs::write(root.join("commit.c"), &body).unwrap();
+    git_run(root, &["add", "commit.c"]);
+    git_commit(root, "1600000100 +0000", "base brace");
+
+    git_run(root, &["checkout", "-qb", "side"]);
+    let side = body.replace("head-10\n", "HEAD-10\n");
+    std::fs::write(root.join("commit.c"), &side).unwrap();
+    git_run(root, &["add", "commit.c"]);
+    git_commit(root, "1600000200 +0000", "side edit");
+
+    git_run(root, &["checkout", "main"]);
+    let main = body.replace("tail-10\n", "TAIL-10\n");
+    std::fs::write(root.join("commit.c"), &main).unwrap();
+    git_run(root, &["add", "commit.c"]);
+    git_commit(root, "1600000250 +0000", "main edit");
+    git_run(
+        root,
+        &["merge", "--no-ff", "side", "-m", "merge brace lines"],
+    );
+
+    assert_blame_matches_git(root, "commit.c");
+
+    let brace_line = 81usize;
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let head = git_output(root, &["rev-parse", "HEAD"]).trim().to_string();
+    let head_oid = head.parse::<ObjectId>().expect("head");
+    let policy = ThreadPolicy::default();
+    let ignore_revs = HashSet::new();
+    let grafts = HashMap::new();
+    let whole = compute_blame(
+        repo.odb(),
+        head_oid,
+        "commit.c",
+        &ignore_revs,
+        BlameDiffAlgorithm::Myers,
+        None,
+        false,
+        0,
+        false,
+        false,
+        &grafts,
+        false,
+        None,
+        WhitespaceMode::default(),
+        &policy,
+    )
+    .expect("whole blame");
+    let ranged = compute_blame(
+        repo.odb(),
+        head_oid,
+        "commit.c",
+        &ignore_revs,
+        BlameDiffAlgorithm::Myers,
+        None,
+        false,
+        0,
+        false,
+        false,
+        &grafts,
+        false,
+        Some(brace_line..=brace_line),
+        WhitespaceMode::default(),
+        &policy,
+    )
+    .expect("range blame");
+    let whole_line = whole
+        .iter()
+        .find(|l| l.final_lineno == brace_line)
+        .expect("whole brace line");
+    let range_line = ranged
+        .iter()
+        .find(|l| l.final_lineno == brace_line)
+        .expect("range brace line");
+    assert_eq!(
+        whole_line.oid, range_line.oid,
+        "whole-file and ranged blame must match on repeated brace at merge"
+    );
+}
