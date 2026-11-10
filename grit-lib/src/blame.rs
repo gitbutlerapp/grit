@@ -2455,6 +2455,113 @@ impl LineUseStamp {
     }
 }
 
+/// Pass suspect lines to one merge parent using Git's per-parent line stamp (`pass_blame_to_parent`).
+#[allow(clippy::too_many_arguments)]
+fn merge_handoff_to_parent(
+    ws: crate::diff::WhitespaceMode,
+    stamp: &mut LineUseStamp,
+    par_lines: &BlobLines,
+    cur_lines: &BlobLines,
+    map: &[Option<usize>],
+    same_blob: bool,
+    remaining: Vec<TrackedLine>,
+    renamed_parent: bool,
+    parent_path: &str,
+) -> (Vec<TrackedLine>, Vec<TrackedLine>) {
+    let parent_line_count = par_lines.len();
+    stamp.begin_pass(if same_blob {
+        cur_lines.len()
+    } else {
+        parent_line_count
+    });
+    let mut handed = Vec::new();
+    let mut next_remaining = Vec::new();
+    for t in remaining {
+        let idx = t.current_idx;
+        if same_blob {
+            if idx < cur_lines.len() && stamp.is_unused(idx) {
+                stamp.mark(idx);
+                let source_path = if renamed_parent {
+                    Some(parent_path.to_owned())
+                } else {
+                    t.source_path.clone()
+                };
+                handed.push(TrackedLine {
+                    final_lineno: t.final_lineno,
+                    current_idx: idx,
+                    ignored: t.ignored,
+                    source_path,
+                    origin: t.origin,
+                });
+            } else {
+                next_remaining.push(t);
+            }
+            continue;
+        }
+        let cur_line = cur_lines.comparison_line(idx, ws);
+        if let Some(p_idx) = map.get(idx).copied().flatten() {
+            let text_ok = blame_lines_equal(par_lines.comparison_line(p_idx, ws), cur_line, ws);
+            if text_ok && p_idx < parent_line_count && stamp.is_unused(p_idx) {
+                stamp.mark(p_idx);
+                let source_path = if renamed_parent {
+                    Some(parent_path.to_owned())
+                } else {
+                    t.source_path.clone()
+                };
+                handed.push(TrackedLine {
+                    final_lineno: t.final_lineno,
+                    current_idx: p_idx,
+                    ignored: t.ignored,
+                    source_path,
+                    origin: t.origin,
+                });
+                continue;
+            }
+        }
+        next_remaining.push(t);
+    }
+    (handed, next_remaining)
+}
+
+/// Run [`merge_handoff_to_parent`] per hand-off origin so unrelated pending lines do not
+/// share one parent line stamp pass (whole-file vs line-range parity at merges).
+#[allow(clippy::too_many_arguments)]
+fn merge_handoff_to_parent_by_origin(
+    ws: crate::diff::WhitespaceMode,
+    stamp: &mut LineUseStamp,
+    par_lines: &BlobLines,
+    cur_lines: &BlobLines,
+    map: &[Option<usize>],
+    same_blob: bool,
+    remaining: Vec<TrackedLine>,
+    renamed_parent: bool,
+    parent_path: &str,
+) -> (Vec<TrackedLine>, Vec<TrackedLine>) {
+    let mut groups: std::collections::BTreeMap<u32, Vec<TrackedLine>> =
+        std::collections::BTreeMap::new();
+    for t in remaining {
+        groups.entry(t.origin).or_default().push(t);
+    }
+    let mut handed = Vec::new();
+    let mut next_remaining = Vec::new();
+    for group in groups.into_values() {
+        let (h, nr) = merge_handoff_to_parent(
+            ws,
+            stamp,
+            par_lines,
+            cur_lines,
+            map,
+            same_blob,
+            group,
+            renamed_parent,
+            parent_path,
+        );
+        handed.extend(h);
+        next_remaining.extend(nr);
+    }
+    (handed, next_remaining)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PathCacheKey {
     tree: ObjectId,
@@ -3460,9 +3567,16 @@ fn compute_blame_with_session(
             }
 
             let mut remaining = std::mem::take(&mut pending);
+            remaining.sort_by(|a, b| {
+                a.current_idx
+                    .cmp(&b.current_idx)
+                    .then(a.final_lineno.cmp(&b.final_lineno))
+            });
             let mut any_parent_has_path = false;
             let mut seen_parent_blobs: std::collections::HashSet<ObjectId> =
                 std::collections::HashSet::new();
+            let mut first_parent_for_blob: std::collections::HashMap<ObjectId, usize> =
+                std::collections::HashMap::new();
             for i in 0..parents.len() {
                 if remaining.is_empty() {
                     break;
@@ -3506,42 +3620,76 @@ fn compute_blame_with_session(
                 let Some((blob, mode)) = resolved else {
                     continue;
                 };
+                let renamed_parent = parent_path != current_path;
                 if !seen_parent_blobs.insert(blob) {
+                    if let Some(&first_i) = first_parent_for_blob.get(&blob) {
+                        let (par_lines, map, first_path) = match (
+                            parent_blobs[first_i].as_ref(),
+                            par_lines_vec[first_i].as_deref(),
+                            maps[first_i].as_deref(),
+                        ) {
+                            (Some((_, _, _, path)), Some(lines), Some(map)) => (lines, map, path),
+                            _ => continue,
+                        };
+                        let same_blob = blob == current_blob_oid;
+                        let (handed, next_remaining) = merge_handoff_to_parent_by_origin(
+                            session.whitespace,
+                            &mut session.merge_line_stamps[first_i],
+                            par_lines,
+                            cur_lines_arc.as_ref(),
+                            map,
+                            same_blob,
+                            remaining,
+                            first_path != &current_path,
+                            first_path,
+                        );
+                        buckets[first_i].extend(handed);
+                        remaining = next_remaining;
+                    }
                     continue;
                 }
-                let renamed_parent = parent_path != current_path;
+                first_parent_for_blob.insert(blob, i);
                 any_parent_has_path = true;
                 parent_blobs[i] = Some((p, blob, mode, parent_path.clone()));
                 if blob == current_blob_oid {
                     par_lines_vec[i] = Some(Arc::clone(&cur_lines_arc));
-                    maps[i] = Some(session.identity_line_map(line_count));
-                    session.merge_line_stamps[i].begin_pass(line_count);
-                    let mut next_remaining: Vec<TrackedLine> = Vec::new();
-                    for t in remaining {
-                        if t.current_idx < line_count
-                            && session.merge_line_stamps[i].is_unused(t.current_idx)
-                        {
-                            session.merge_line_stamps[i].mark(t.current_idx);
-                            let source_path = if renamed_parent {
-                                Some(parent_path.clone())
-                            } else {
-                                t.source_path.clone()
-                            };
-                            buckets[i].push(TrackedLine {
-                                final_lineno: t.final_lineno,
-                                current_idx: t.current_idx,
-                                ignored: t.ignored,
-                                source_path,
-                                origin: t.origin,
-                            });
-                        } else {
-                            next_remaining.push(t);
-                        }
-                    }
+                    let id_map = session.identity_line_map(line_count);
+                    maps[i] = Some(Arc::clone(&id_map));
+                    let (handed, next_remaining) = merge_handoff_to_parent_by_origin(
+                        session.whitespace,
+                        &mut session.merge_line_stamps[i],
+                        cur_lines_arc.as_ref(),
+                        cur_lines_arc.as_ref(),
+                        id_map.as_slice(),
+                        true,
+                        remaining,
+                        renamed_parent,
+                        &parent_path,
+                    );
+                    buckets[i].extend(handed);
                     remaining = next_remaining;
                     continue;
                 }
                 let pl_arc = session.load_blob_lines(blob, &parent_path, mode)?;
+                let par_lines_arc = Arc::clone(&pl_arc);
+                let affix =
+                    slide_safe_affix(pl_arc.as_ref(), cur_lines_arc.as_ref(), session.whitespace);
+                let (affix_mapped, need_diff) = partition_pending_by_affix(
+                    affix,
+                    par_lines_arc.len(),
+                    cur_lines_arc.len(),
+                    remaining,
+                );
+                if !affix_mapped.is_empty() {
+                    let mut handed = affix_mapped;
+                    for t in &mut handed {
+                        if renamed_parent {
+                            t.source_path = Some(parent_path.clone());
+                        }
+                    }
+                    buckets[i].extend(handed);
+                }
+                remaining = need_diff;
                 let map_algo = diff_algorithm;
                 let pair = session.parent_child_line_maps(
                     blob,
@@ -3552,56 +3700,28 @@ fn compute_blame_with_session(
                     current_blob_mode,
                     pl_arc.as_ref(),
                     cur_lines_arc.as_ref(),
-                    slide_safe_affix(pl_arc.as_ref(), cur_lines_arc.as_ref(), session.whitespace),
+                    affix,
                     map_algo,
                     indent_heuristic,
                     false,
                     true,
                 );
                 let map_arc = Arc::clone(&pair.diff_line_map);
-                let par_lines_arc = Arc::clone(&pl_arc);
                 par_lines_vec[i] = Some(pl_arc);
                 maps[i] = Some(Arc::clone(&map_arc));
 
-                let mut next_remaining: Vec<TrackedLine> = Vec::new();
-                let map = &map_arc;
-                let par_lines = &par_lines_arc;
-                let parent_line_count = par_lines.len();
-                session.merge_line_stamps[i].begin_pass(parent_line_count);
-                for t in remaining {
-                    let idx = t.current_idx;
-                    let cur_line = cur_lines_arc.comparison_line(idx, session.whitespace);
-                    let m = map.get(idx).copied().flatten();
-                    if let Some(p_idx) = m {
-                        let text_ok = blame_lines_equal(
-                            par_lines.comparison_line(p_idx, session.whitespace),
-                            cur_line,
-                            session.whitespace,
-                        );
-                        if text_ok
-                            && p_idx < parent_line_count
-                            && session.merge_line_stamps[i].is_unused(p_idx)
-                        {
-                            session.merge_line_stamps[i].mark(p_idx);
-                            let source_path = if renamed_parent {
-                                Some(parent_path.clone())
-                            } else {
-                                t.source_path.clone()
-                            };
-                            buckets[i].push(TrackedLine {
-                                final_lineno: t.final_lineno,
-                                current_idx: p_idx,
-                                ignored: t.ignored,
-                                source_path,
-                                origin: t.origin,
-                            });
-                        } else {
-                            next_remaining.push(t);
-                        }
-                    } else {
-                        next_remaining.push(t);
-                    }
-                }
+                let (handed, next_remaining) = merge_handoff_to_parent_by_origin(
+                    session.whitespace,
+                    &mut session.merge_line_stamps[i],
+                    par_lines_arc.as_ref(),
+                    cur_lines_arc.as_ref(),
+                    map_arc.as_slice(),
+                    false,
+                    remaining,
+                    renamed_parent,
+                    &parent_path,
+                );
+                buckets[i].extend(handed);
                 remaining = next_remaining;
             }
 
