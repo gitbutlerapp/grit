@@ -867,17 +867,14 @@ fn fill_exact_text_relocate_blob(
 ) {
     let new_len = cur.len();
     if ws.normalizes_line_compare() {
-        let mut by_content_norm: hashbrown::HashMap<String, Vec<usize>> =
-            hashbrown::HashMap::new();
+        let mut by_content_norm: hashbrown::HashMap<String, Vec<usize>> = hashbrown::HashMap::new();
         for idx in 0..par.len() {
             let key = ws
                 .normalize_line_for_compare(par.comparison_line(idx, ws))
                 .into_owned();
             by_content_norm.entry(key).or_default().push(idx);
         }
-        let new_lines: Vec<&str> = (0..new_len)
-            .map(|i| cur.comparison_line(i, ws))
-            .collect();
+        let new_lines: Vec<&str> = (0..new_len).map(|i| cur.comparison_line(i, ws)).collect();
         fill_exact_text_relocate_with_lookup(&[], &new_lines, map, used_old, |line| {
             let key = ws.normalize_line_for_compare(line).into_owned();
             by_content_norm.get(&key).map(Vec::as_slice)
