@@ -76,6 +76,16 @@ impl<'a> LineInterner<'a> {
     pub fn intern_all(&mut self, lines: &[&'a str]) -> Vec<u32> {
         lines.iter().map(|line| self.intern(line)).collect()
     }
+
+}
+
+#[cfg(test)]
+impl<'a> LineInterner<'a> {
+    /// Drop all interned lines so the table can be reused for another window with fresh borrows.
+    pub fn clear(&mut self) {
+        self.lines.clear();
+        self.table.clear();
+    }
 }
 
 /// Intern byte line slices to dense `u32` ids (equal id iff equal bytes).

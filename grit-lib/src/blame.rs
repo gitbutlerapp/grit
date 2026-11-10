@@ -425,12 +425,18 @@ fn blame_compacted_line_ops<'s>(
     let new_mid = &new_cmp[prefix..new_cmp.len() - suffix];
     if diff_algorithm == BlameDiffAlgorithm::Myers {
         use crate::line_interner::LineInterner;
-        let mut interner = LineInterner::with_capacity(old_cmp.len() + new_cmp.len());
+        let window_lines = old_cmp.len() + new_cmp.len();
+        let interner_cap = scratch
+            .as_ref()
+            .map(|s| s.interner_classes_hint.max(window_lines))
+            .unwrap_or(window_lines);
+        let mut interner = LineInterner::with_capacity(interner_cap);
         let ids1 = interner.intern_all(old_cmp);
         let ids2 = interner.intern_all(new_cmp);
         let nclasses = interner.len();
         let mut local_shared_counts;
         let shared_counts: &mut [u32] = if let Some(scratch) = scratch {
+            scratch.interner_classes_hint = scratch.interner_classes_hint.max(nclasses);
             scratch.shared_counts.clear();
             scratch.shared_counts.resize(nclasses, 0);
             &mut scratch.shared_counts
@@ -633,7 +639,7 @@ fn windowed_line_map<L: BlameLines + ?Sized>(
     indent_heuristic: bool,
     with_changed_flags: bool,
     ws: crate::diff::WhitespaceMode,
-    scratch: Option<&mut BlamePairDiffScratch>,
+    mut scratch: Option<&mut BlamePairDiffScratch>,
 ) -> (Vec<Option<usize>>, Vec<bool>) {
     let trimmed_tail = blame_trimmed_tail_lines(old, new, affix, ws);
     let (safe_prefix, safe_suffix) = (affix.safe_prefix, affix.safe_suffix);
@@ -645,8 +651,18 @@ fn windowed_line_map<L: BlameLines + ?Sized>(
         .saturating_sub(COMPACTION_CONTEXT)
         .min(old_hi)
         .min(new_hi);
-    let old_w: Vec<&str> = (lo..old_hi).map(|i| old.comparison_line(i, ws)).collect();
-    let new_w: Vec<&str> = (lo..new_hi).map(|i| new.comparison_line(i, ws)).collect();
+    let window_lines = (old_hi - lo).max(new_hi - lo);
+    let window_cap = scratch
+        .as_ref()
+        .map(|s| s.window_lines_hint.max(window_lines))
+        .unwrap_or(window_lines);
+    let mut old_w = Vec::with_capacity(window_cap);
+    old_w.extend((lo..old_hi).map(|i| old.comparison_line(i, ws)));
+    let mut new_w = Vec::with_capacity(window_cap);
+    new_w.extend((lo..new_hi).map(|i| new.comparison_line(i, ws)));
+    if let Some(scratch) = scratch.as_mut() {
+        scratch.window_lines_hint = scratch.window_lines_hint.max(old_w.len().max(new_w.len()));
+    }
     let shared_tail = new_hi..new.len() - trimmed_tail;
     let shared_records = lo + shared_tail.len();
     // Only the counts of lines in the edited middle are read, so without whitespace rules a
@@ -804,6 +820,7 @@ fn fill_exact_text_relocate_with_lookup<'a>(
 /// Recover line mappings by exact text match when Myers left a line unresolved.
 ///
 /// Used during blame to follow moved but unchanged lines without pairing rewrites.
+#[cfg_attr(not(test), allow(dead_code))]
 fn build_exact_relocate_line_map_ws(
     old: &[&str],
     new: &[&str],
@@ -821,6 +838,81 @@ fn build_exact_relocate_line_map_ws(
     fill_exact_text_relocate(old, new, &mut fuzzy_map, &mut used_old, ws);
 
     fuzzy_map
+}
+
+/// Like [`build_exact_relocate_line_map_ws`] without building full comparison-ref vectors.
+fn build_exact_relocate_line_map_ws_blob(
+    par: &BlobLines,
+    cur: &BlobLines,
+    exact_map: &[Option<usize>],
+    ws: crate::diff::WhitespaceMode,
+) -> Vec<Option<usize>> {
+    let mut fuzzy_map = exact_map.to_vec();
+    let mut used_old = vec![0usize; par.len()];
+    for old_idx in fuzzy_map.iter().flatten() {
+        if *old_idx < used_old.len() {
+            used_old[*old_idx] += 1;
+        }
+    }
+    fill_exact_text_relocate_blob(par, cur, &mut fuzzy_map, &mut used_old, ws);
+    fuzzy_map
+}
+
+fn fill_exact_text_relocate_blob(
+    par: &BlobLines,
+    cur: &BlobLines,
+    map: &mut [Option<usize>],
+    used_old: &mut [usize],
+    ws: crate::diff::WhitespaceMode,
+) {
+    let new_len = cur.len();
+    if ws.normalizes_line_compare() {
+        let mut by_content_norm: hashbrown::HashMap<String, Vec<usize>> =
+            hashbrown::HashMap::new();
+        for idx in 0..par.len() {
+            let key = ws
+                .normalize_line_for_compare(par.comparison_line(idx, ws))
+                .into_owned();
+            by_content_norm.entry(key).or_default().push(idx);
+        }
+        let new_lines: Vec<&str> = (0..new_len)
+            .map(|i| cur.comparison_line(i, ws))
+            .collect();
+        fill_exact_text_relocate_with_lookup(&[], &new_lines, map, used_old, |line| {
+            let key = ws.normalize_line_for_compare(line).into_owned();
+            by_content_norm.get(&key).map(Vec::as_slice)
+        });
+        return;
+    }
+    let mut by_content: hashbrown::HashMap<&str, Vec<usize>> = map
+        .iter()
+        .enumerate()
+        .filter(|(new_idx, slot)| slot.is_none() && *new_idx < new_len)
+        .map(|(new_idx, _)| (cur.comparison_line(new_idx, ws), Vec::new()))
+        .collect();
+    if by_content.is_empty() {
+        return;
+    }
+    let mut lens: Vec<usize> = by_content.keys().map(|line| line.len()).collect();
+    lens.sort_unstable();
+    lens.dedup();
+    for idx in 0..par.len() {
+        let line = par.comparison_line(idx, ws);
+        if lens.binary_search(&line.len()).is_ok() {
+            if let Some(indices) = by_content.get_mut(line) {
+                indices.push(idx);
+            }
+        }
+    }
+    let new_lines: Vec<&str> = (0..new_len)
+        .map(|i| cur.comparison_line(i, ws))
+        .collect();
+    fill_exact_text_relocate_with_lookup(&[], &new_lines, map, used_old, |line| {
+        by_content
+            .get(line)
+            .filter(|indices| !indices.is_empty())
+            .map(Vec::as_slice)
+    });
 }
 
 /// Decide which child lines stop blame on the current commit (system `git blame` parity).
@@ -2064,6 +2156,10 @@ fn blame_line_lookup_hash(line: &str, ws: crate::diff::WhitespaceMode) -> u64 {
 #[derive(Default)]
 struct BlamePairDiffScratch {
     shared_counts: Vec<u32>,
+    /// High-water mark for distinct lines in the last windowed Myers interner.
+    interner_classes_hint: usize,
+    /// High-water mark for the larger blame diff window side.
+    window_lines_hint: usize,
 }
 
 /// Blob bytes split into lines without per-line `String` allocations.
@@ -2228,36 +2324,97 @@ impl BlobLines {
     }
 
     fn parent_has_matching_line(
-        parent: &BlobLineTextIndex,
+        parent: &BlobLines,
+        index: &BlobLineTextIndex,
         child_line: &str,
         ws: crate::diff::WhitespaceMode,
     ) -> bool {
-        parent
+        let Some(candidates) = index
             .by_line_hash
-            .contains_key(&blame_line_lookup_hash(child_line, ws))
+            .get(&blame_line_lookup_hash(child_line, ws))
+        else {
+            return false;
+        };
+        candidates.iter().any(|&idx| {
+            blame_lines_equal(parent.comparison_line(idx, ws), child_line, ws)
+        })
     }
 
     fn first_parent_index_with_text(
-        parent: &BlobLineTextIndex,
+        parent: &BlobLines,
+        index: &BlobLineTextIndex,
         child_line: &str,
         ws: crate::diff::WhitespaceMode,
     ) -> Option<usize> {
-        parent
-            .by_line_hash
-            .get(&blame_line_lookup_hash(child_line, ws))
-            .and_then(|i| i.first().copied())
+        let candidates = index.by_line_hash.get(&blame_line_lookup_hash(child_line, ws))?;
+        candidates.iter().copied().find(|&idx| {
+            blame_lines_equal(parent.comparison_line(idx, ws), child_line, ws)
+        })
+    }
+
+    fn first_parent_index_linear(
+        parent: &BlobLines,
+        child_line: &str,
+        ws: crate::diff::WhitespaceMode,
+    ) -> Option<usize> {
+        let child_len = if ws.normalizes_line_compare() {
+            None
+        } else {
+            Some(child_line.len())
+        };
+        for idx in 0..parent.len() {
+            if child_len.is_some_and(|len| parent.comparison_line(idx, ws).len() != len) {
+                continue;
+            }
+            if blame_lines_equal(parent.comparison_line(idx, ws), child_line, ws) {
+                return Some(idx);
+            }
+        }
+        None
     }
 
     fn parent_has_other_line_with_text(
-        parent: &BlobLineTextIndex,
+        parent: &BlobLines,
+        index: &BlobLineTextIndex,
         child_line: &str,
         ws: crate::diff::WhitespaceMode,
         exclude_parent_idx: usize,
     ) -> bool {
-        parent
+        let Some(candidates) = index
             .by_line_hash
             .get(&blame_line_lookup_hash(child_line, ws))
-            .is_some_and(|indices| indices.iter().any(|&i| i != exclude_parent_idx))
+        else {
+            return false;
+        };
+        candidates.iter().any(|&idx| {
+            idx != exclude_parent_idx
+                && blame_lines_equal(parent.comparison_line(idx, ws), child_line, ws)
+        })
+    }
+
+    fn parent_has_other_line_linear(
+        parent: &BlobLines,
+        child_line: &str,
+        ws: crate::diff::WhitespaceMode,
+        exclude_parent_idx: usize,
+    ) -> bool {
+        let child_len = if ws.normalizes_line_compare() {
+            None
+        } else {
+            Some(child_line.len())
+        };
+        for idx in 0..parent.len() {
+            if idx == exclude_parent_idx {
+                continue;
+            }
+            if child_len.is_some_and(|len| parent.comparison_line(idx, ws).len() != len) {
+                continue;
+            }
+            if blame_lines_equal(parent.comparison_line(idx, ws), child_line, ws) {
+                return true;
+            }
+        }
+        false
     }
 
     fn to_vec(&self) -> Vec<String> {
@@ -2617,10 +2774,8 @@ impl<'a> BlameSession<'a> {
             {
                 (diff_line_map.clone(), vec![false; cur_lines.len()])
             } else {
-                let par_refs = par_lines.comparison_refs(ws);
-                let cur_refs = cur_lines.comparison_refs(ws);
                 let mut line_map =
-                    build_exact_relocate_line_map_ws(&par_refs, &cur_refs, &diff_line_map, ws);
+                    build_exact_relocate_line_map_ws_blob(par_lines, cur_lines, &diff_line_map, ws);
                 if is_ignored {
                     // Ignored revisions deliberately recover rewritten bodies by similarity.
                     line_map = build_fuzzy_line_map_ws(
@@ -3702,13 +3857,14 @@ fn compute_blame_with_session(
                 let stop_blame_on_current = maps.stop_blame_on_current.as_slice();
                 let ws = session.whitespace;
                 let mut par_index: Option<Arc<BlobLineTextIndex>> = None;
-                let mut parent_line_index =
-                    || par_index.get_or_insert_with(|| par_lines_arc.text_index(ws)).clone();
-                let inserted_line_duplicates_parent = if copy_depth > 0 || move_detection {
+                let copy_lookup = copy_depth > 0 || move_detection;
+                let inserted_line_duplicates_parent = if copy_lookup {
+                    let index = par_index.get_or_insert_with(|| par_lines_arc.text_index(ws));
                     pending.iter().any(|t| {
                         t.current_idx < cur_lines_arc.len()
                             && BlobLines::parent_has_matching_line(
-                                &parent_line_index(),
+                                par_lines_arc.as_ref(),
+                                index,
                                 cur_lines_arc.comparison_line(t.current_idx, ws),
                                 ws,
                             )
@@ -3763,13 +3919,26 @@ fn compute_blame_with_session(
                                 .unwrap_or(false)
                                 && !is_ignored
                             {
-                                let duplicates_earlier_parent_line =
+                                let child_line =
+                                    cur_lines_arc.comparison_line(t.current_idx, ws);
+                                let duplicates_earlier_parent_line = if copy_lookup {
+                                    let index =
+                                        par_index.get_or_insert_with(|| par_lines_arc.text_index(ws));
                                     BlobLines::parent_has_other_line_with_text(
-                                        &parent_line_index(),
-                                        cur_lines_arc.comparison_line(t.current_idx, ws),
+                                        par_lines_arc.as_ref(),
+                                        index,
+                                        child_line,
                                         ws,
                                         t.current_idx,
-                                    );
+                                    )
+                                } else {
+                                    BlobLines::parent_has_other_line_linear(
+                                        par_lines_arc.as_ref(),
+                                        child_line,
+                                        ws,
+                                        t.current_idx,
+                                    )
+                                };
                                 if duplicates_earlier_parent_line {
                                     still_pending.push(TrackedLine {
                                         final_lineno: t.final_lineno,
@@ -3828,11 +3997,22 @@ fn compute_blame_with_session(
                                 ));
                             }
                         } else {
-                            if let Some(parent_idx) = BlobLines::first_parent_index_with_text(
-                                &parent_line_index(),
-                                cur_lines_arc.comparison_line(t.current_idx, ws),
-                                ws,
-                            ) {
+                            if let Some(parent_idx) = if copy_lookup {
+                                let index =
+                                    par_index.get_or_insert_with(|| par_lines_arc.text_index(ws));
+                                BlobLines::first_parent_index_with_text(
+                                    par_lines_arc.as_ref(),
+                                    index,
+                                    cur_lines_arc.comparison_line(t.current_idx, ws),
+                                    ws,
+                                )
+                            } else {
+                                BlobLines::first_parent_index_linear(
+                                    par_lines_arc.as_ref(),
+                                    cur_lines_arc.comparison_line(t.current_idx, ws),
+                                    ws,
+                                )
+                            } {
                                 still_pending.push(TrackedLine {
                                     final_lineno: t.final_lineno,
                                     current_idx: parent_idx,
@@ -5631,6 +5811,46 @@ mod tests {
                 .collect();
             assert_eq!(blob.to_vec(), expected, "content={content:?}");
         }
+    }
+
+    #[test]
+    fn parent_line_text_index_matches_exact_and_ws_duplicates() {
+        let exact = crate::diff::WhitespaceMode::default();
+        let ws = crate::diff::WhitespaceMode::ignore_all_space();
+        let parent = BlobLines::from_content("alpha\n\nbeta\n".to_owned());
+        let index = parent.text_index(exact);
+        let alpha = parent.comparison_line(0, exact);
+        let beta = parent.comparison_line(2, exact);
+        assert!(BlobLines::parent_has_matching_line(&parent, &index, alpha, exact));
+        assert!(!BlobLines::parent_has_matching_line(
+            &parent,
+            &index,
+            "gamma",
+            exact
+        ));
+        assert_eq!(
+            BlobLines::first_parent_index_with_text(&parent, &index, beta, exact),
+            Some(2)
+        );
+        assert_eq!(
+            BlobLines::first_parent_index_linear(&parent, beta, exact),
+            Some(2)
+        );
+        let parent_ws = BlobLines::from_content("  hello \nhello\n".to_owned());
+        let ws_index = parent_ws.text_index(ws);
+        assert!(BlobLines::parent_has_matching_line(
+            &parent_ws,
+            &ws_index,
+            "hello",
+            ws
+        ));
+        assert!(BlobLines::parent_has_other_line_with_text(
+            &parent_ws,
+            &ws_index,
+            "hello",
+            ws,
+            0,
+        ));
     }
 
     #[test]
