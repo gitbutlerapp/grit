@@ -35,6 +35,7 @@ pub use selector::{parse_reflog_ref, ReflogSelector};
 
 /// A single reflog entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct ReflogEntry {
     /// Previous object ID.
     pub old_oid: ObjectId,

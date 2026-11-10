@@ -21,6 +21,8 @@ const HUNK_ID_HEX_LEN: usize = 12;
 
 /// Which tree/index/worktree sides a hunk was produced from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum DiffSide {
     /// Index compared to worktree (unstaged changes).
     Unstaged,
@@ -90,6 +92,16 @@ impl fmt::Display for HunkId {
             write!(f, "{b:02x}")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for HunkId {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
     }
 }
 

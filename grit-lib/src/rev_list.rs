@@ -828,6 +828,36 @@ pub struct RevListResult {
     pub commit_data: WalkedCommits,
 }
 
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for RevListResult {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut out = serializer.serialize_struct("RevListResult", 11)?;
+        out.serialize_field("commits", &self.commits)?;
+        out.serialize_field("objects", &self.objects)?;
+        out.serialize_field("omitted_objects", &self.omitted_objects)?;
+        out.serialize_field("missing_objects", &self.missing_objects)?;
+        out.serialize_field("boundary_commits", &self.boundary_commits)?;
+        out.serialize_field("left_right_map", &self.left_right_map)?;
+        out.serialize_field("cherry_equivalent", &self.cherry_equivalent)?;
+        out.serialize_field("cherry_matches", &self.cherry_matches)?;
+        out.serialize_field("reachable_commit_count", &self.reachable_commit_count)?;
+        out.serialize_field(
+            "reachable_non_commit_object_count",
+            &self.reachable_non_commit_object_count,
+        )?;
+        out.serialize_field(
+            "tip_annotated_tag_by_commit",
+            &self.tip_annotated_tag_by_commit,
+        )?;
+        out.end()
+    }
+}
+
 impl RevListResult {
     /// Commit count for `--count` (fast path or [`Self::commits`] length).
     #[must_use]
@@ -869,6 +899,7 @@ impl RevListResult {
 /// commits on one side share the patch-id, the group stays many-to-many: no commit is
 /// paired with a particular counterpart.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct CherryMatch {
     /// The shared stable patch-id (path-limited when the walk has paths).
     pub patch_id: ObjectId,

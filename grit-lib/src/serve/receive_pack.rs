@@ -334,6 +334,8 @@ impl RefCommand {
 /// the rejected ref.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum RefUpdateRefusal {
     /// The ref name is outside `refs/` or not a valid ref name.
     #[error("funny refname")]
@@ -438,6 +440,7 @@ pub enum RefUpdateRefusal {
 
 /// The result of one requested ref update.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct RefUpdateResult {
     /// Full name of the ref the client asked to change.
     pub refname: String,
@@ -493,6 +496,78 @@ impl From<crate::error::Error> for UnpackError {
         match err {
             crate::error::Error::Cancelled => Self::Cancelled,
             other => Self::Ingest(crate::error::ErrorSummary::from(other)),
+        }
+    }
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for UnpackError {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let kind = match self {
+            Self::Truncated => "truncated",
+            Self::TooLarge { .. } => "too_large",
+            Self::Malformed(_) => "malformed",
+            Self::Ingest(_) => "ingest",
+            Self::Rejected(_) => "rejected",
+            Self::FsckSkipList(_) => "fsck_skip_list",
+            Self::Io(_) => "io",
+            Self::Cancelled => "cancelled",
+        };
+        let message = self.to_string();
+        let mut fields = 3;
+        let extra_too_large = matches!(self, Self::TooLarge { .. });
+        let extra_malformed = matches!(self, Self::Malformed(_));
+        let extra_ingest = matches!(self, Self::Ingest(_));
+        let extra_rejected = matches!(self, Self::Rejected(_));
+        if extra_too_large {
+            fields += 1;
+        }
+        if extra_malformed {
+            fields += 1;
+        }
+        if extra_ingest {
+            fields += 1;
+        }
+        if extra_rejected {
+            fields += 1;
+        }
+        let mut out = serializer.serialize_struct("UnpackError", fields)?;
+        out.serialize_field("kind", &kind)?;
+        out.serialize_field("message", &message)?;
+        match self {
+            Self::TooLarge { limit } => out.serialize_field("limit", limit)?,
+            Self::Malformed(err) => out.serialize_field("detail", &err.to_string())?,
+            Self::Ingest(summary) => out.serialize_field("ingest", summary)?,
+            Self::Rejected(obj) => {
+                out.serialize_field("rejected", &RejectedObjectSerde::from(obj))?
+            }
+            Self::FsckSkipList(err) => out.serialize_field("detail", &err.to_string())?,
+            _ => {}
+        }
+        out.end()
+    }
+}
+
+#[cfg(feature = "serde-models")]
+#[derive(serde::Serialize)]
+struct RejectedObjectSerde {
+    oid: crate::objects::ObjectId,
+    kind: crate::objects::ObjectKind,
+    error: String,
+}
+
+#[cfg(feature = "serde-models")]
+impl From<&RejectedObject> for RejectedObjectSerde {
+    fn from(obj: &RejectedObject) -> Self {
+        Self {
+            oid: obj.oid,
+            kind: obj.kind,
+            error: obj.error.report_line().to_string(),
         }
     }
 }
@@ -647,6 +722,7 @@ where
 
 /// One server-side hook invocation during receive-pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct HookRunRecord {
     /// Hook name (`pre-receive`, `update`, `post-receive`, or `post-update`).
     pub name: String,
@@ -658,6 +734,7 @@ pub struct HookRunRecord {
 
 /// What a push session did.
 #[derive(Debug, Default)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct ReceiveOutcome {
     /// Why the pushed pack could not be stored, when it could not.
     pub unpack_error: Option<UnpackError>,

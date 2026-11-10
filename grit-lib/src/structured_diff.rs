@@ -70,6 +70,7 @@ impl SideBytes {
 
 /// One run of text within a line, with optional intra-line emphasis.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct StructuredSegment {
     /// Visible characters for this run (may be a substring of the line).
     pub text: String,
@@ -79,6 +80,8 @@ pub struct StructuredSegment {
 
 /// Kind of line in a structured hunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum StructuredLineKind {
     /// Unchanged context line present on both sides.
     Context,
@@ -90,6 +93,7 @@ pub enum StructuredLineKind {
 
 /// One rendered line in a structured hunk.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct StructuredLine {
     /// Whether this line is context, an addition, or a deletion.
     pub kind: StructuredLineKind,
@@ -105,6 +109,7 @@ pub struct StructuredLine {
 
 /// A contiguous run of changes plus surrounding context.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct StructuredHunk {
     /// 1-based starting line on the old side (unified hunk header).
     pub old_start: usize,

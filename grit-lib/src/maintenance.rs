@@ -192,6 +192,7 @@ pub struct RepackReport {
 /// Extended counters and paths produced by [`Maintenance::repack_all`](crate::maintenance::Maintenance::repack_all).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct RepackStats {
     /// Loose object files before repack.
     pub loose_before: usize,
@@ -252,6 +253,7 @@ impl CommitGraphOptions {
 /// Result of writing `objects/info/commit-graph`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct CommitGraphWriteReport {
     /// Path to the monolithic commit-graph file.
     pub path: PathBuf,
@@ -273,6 +275,8 @@ pub struct CommitGraphWriteReport {
 /// neither writes nor reads a graph in that state, and `git fsck` rejects one that exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "kebab-case"))]
 pub enum CommitGraphSkipReason {
     /// `.git/shallow` lists boundary commits whose parents are cut off.
     Shallow,
@@ -403,6 +407,7 @@ impl PackRefsOptions {
 /// Result of packing refs (files `packed-refs` or reftable compaction).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct PackRefsReport {
     /// `packed-refs` path or the `reftable/` directory.
     pub path: PathBuf,
@@ -877,6 +882,7 @@ pub struct PruneOptions {
 /// Wall-clock milliseconds for each phase of [`Maintenance::gc`](crate::maintenance::Maintenance::gc).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct GcPhaseTimings {
     /// [`Maintenance::pack_refs`](crate::maintenance::Maintenance::pack_refs) when run as part of gc.
     pub pack_refs_ms: u64,
@@ -894,6 +900,7 @@ pub struct GcPhaseTimings {
 
 /// Result of [`Maintenance::gc`](crate::maintenance::Maintenance::gc).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct GcStats {
     /// Loose refs packed during gc (`None` when skipped).
     pub pack_refs: Option<PackRefsReport>,

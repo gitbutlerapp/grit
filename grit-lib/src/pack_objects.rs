@@ -214,6 +214,7 @@ impl From<PackBuildOptions> for PackObjectsOptions {
 
 /// Counters reported after a successful pack write.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct PackStats {
     /// Number of objects in the pack header.
     pub object_count: u32,

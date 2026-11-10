@@ -72,6 +72,7 @@ pub enum DiffTarget {
 /// from [`Diff::files_for_entries`](crate::diff::Diff::files_for_entries), use [`ListedFileDiff`](crate::diff::ListedFileDiff)
 /// instead (structured hunks and line counts are optional there).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct FileDiff {
     /// Display path (new path, or old path for a deletion).
     pub path: String,

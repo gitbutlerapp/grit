@@ -43,6 +43,7 @@ impl NotesWriteOptions {
 
 /// One `(annotated object, note blob)` pair from a notes tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct NoteListing {
     /// Object the note is attached to.
     pub object: ObjectId,

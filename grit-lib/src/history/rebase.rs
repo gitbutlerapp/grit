@@ -213,6 +213,8 @@ fn rebase_upstream_reflog_ref(
 
 /// Result of [`History::plan_rebase`](super::History::plan_rebase): already current, a rewrite plan, or a conflict report (not an error).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum RebasePlan {
     /// The branch is already based on the effective onto commit with nothing to replay.
     UpToDate,

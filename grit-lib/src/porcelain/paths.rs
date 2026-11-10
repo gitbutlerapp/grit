@@ -61,6 +61,7 @@ impl RemoveOptions {
 
 /// Result of [`remove_paths`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct RemoveOutcome {
     /// Repository-relative paths removed from the index (and usually the work tree).
     pub removed: Vec<String>,
@@ -137,6 +138,7 @@ impl std::fmt::Display for BlockedRemoval {
 
 /// One tracked path rename performed by [`move_paths`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct PathMove {
     /// Source path before the move.
     pub from: String,
@@ -159,6 +161,7 @@ pub struct MoveOptions {
 
 /// Result of [`move_paths`] and [`move_path`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct MoveOutcome {
     /// Individual renames applied (or that would be applied when `dry_run`).
     pub moves: Vec<PathMove>,

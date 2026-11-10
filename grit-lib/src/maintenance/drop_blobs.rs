@@ -284,6 +284,7 @@ fn configured_min_size(config: &ConfigSet) -> Result<u64> {
 /// One blob [`Maintenance::drop_promised_blobs`](crate::maintenance::Maintenance::drop_promised_blobs) dropped (or, on a dry run, would drop).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct DroppedBlob {
     /// The blob.
     pub oid: ObjectId,
@@ -297,6 +298,7 @@ pub struct DroppedBlob {
 /// reason that applies, in the order of the fields.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct KeptBlobCounts {
     /// A promisor pack holding it has a `.keep` marker.
     pub kept_pack: usize,
@@ -343,6 +345,8 @@ impl KeptBlobCounts {
 /// Why `gc` did not run its drop phase ([`DropPromisedBlobsReport::skipped`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum DropPromisedBlobsSkip {
     /// `maintenance.drop-large-blobs.enabled` is not true, or `expire` is `never`.
     Disabled,
@@ -361,10 +365,15 @@ pub enum DropPromisedBlobsSkip {
 /// would do.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct DropPromisedBlobsReport {
     /// The size threshold used.
     pub min_size: u64,
     /// The recency cutoff used (`None`: no recency protection).
+    #[cfg_attr(
+        feature = "serde-models",
+        serde(serialize_with = "serialize_keep_newer_than")
+    )]
     pub keep_newer_than: Option<OffsetDateTime>,
     /// Blobs stored in promisor packs at or above [`Self::min_size`].
     pub candidates: usize,
@@ -381,6 +390,17 @@ pub struct DropPromisedBlobsReport {
     pub packs_removed: usize,
     /// Set when `gc` skipped the phase; the counts are then zero.
     pub skipped: Option<DropPromisedBlobsSkip>,
+}
+
+#[cfg(feature = "serde-models")]
+fn serialize_keep_newer_than<S>(
+    time: &Option<OffsetDateTime>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    crate::serde_format::serialize_optional_offset_date_time(time, serializer)
 }
 
 impl DropPromisedBlobsReport {

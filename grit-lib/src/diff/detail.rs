@@ -39,6 +39,7 @@ pub enum DiffDetail {
 
 /// Line insertion/deletion counts for one file (`--numstat`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct LineStat {
     /// Lines added on the new side.
     pub insertions: usize,
@@ -48,6 +49,7 @@ pub struct LineStat {
 
 /// Summary across all files in a stat-style diff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct DiffTotals {
     /// Number of changed paths.
     pub files_changed: usize,

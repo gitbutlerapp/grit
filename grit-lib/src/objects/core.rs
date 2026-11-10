@@ -910,6 +910,7 @@ impl FromStr for ObjectKind {
 
 /// Kind and uncompressed size of a Git object without loading its payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct ObjectInfo {
     /// Object type after resolving any pack delta chain.
     pub kind: ObjectKind,
@@ -973,6 +974,25 @@ pub struct TreeEntry {
     pub name: Vec<u8>,
     /// The object ID of the blob or sub-tree.
     pub oid: ObjectId,
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for TreeEntry {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut out = serializer.serialize_struct("TreeEntry", 3)?;
+        out.serialize_field("mode", &self.mode_str())?;
+        out.serialize_field(
+            "name",
+            &crate::serde_format::path_bytes_for_json(&self.name),
+        )?;
+        out.serialize_field("oid", &self.oid)?;
+        out.end()
+    }
 }
 
 impl TreeEntry {

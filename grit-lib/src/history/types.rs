@@ -279,6 +279,7 @@ pub enum UndoMode {
 
 /// Result of [`History::undo_last`](super::History::undo_last).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct UndoOutcome {
     /// Ref updates that were applied or would be applied (`--dry-run`).
     pub ref_updates: Vec<PlannedRefUpdate>,

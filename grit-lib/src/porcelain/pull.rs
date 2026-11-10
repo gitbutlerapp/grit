@@ -126,6 +126,7 @@ pub struct FetchedUpstream {
 
 /// Dry-run result for [`PullOptions::check`].
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct PullCheck {
     /// Commits on the current branch not reachable from the upstream tip.
     pub ahead: usize,
@@ -139,6 +140,8 @@ pub struct PullCheck {
 
 /// High-level result of a successful [`pull`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum PullResult {
     /// The branch already contained the upstream tip.
     UpToDate,
@@ -179,6 +182,7 @@ pub enum PullResult {
 
 /// Structured outcome of [`pull`].
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct PullOutcome {
     /// Integration result.
     pub result: PullResult,

@@ -232,6 +232,7 @@ mod oid_abbrev;
 pub(crate) mod oid_abbrev_cache;
 pub(crate) mod pack_roll_delta;
 pub(crate) mod partial_clone;
+pub(crate) mod serde_format;
 pub mod status;
 
 pub(crate) mod bitmap_walk;
