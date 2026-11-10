@@ -716,13 +716,17 @@ impl CommitGraphLayer {
                         detail: "Bloom header corrupt".to_owned(),
                     })
                 })?;
-                bloom_settings = Some(BloomFilterSettings {
-                    hash_version: u32::from_be_bytes(hash_version),
-                    num_hashes: u32::from_be_bytes(num_hashes),
-                    bits_per_entry: u32::from_be_bytes(bits_per_entry),
-                    max_changed_paths: 512,
-                });
-                chunk_bloom_data = Some((bdat_off, bdat_len));
+                let num_hashes = u32::from_be_bytes(num_hashes);
+                let bits_per_entry = u32::from_be_bytes(bits_per_entry);
+                if crate::bloom::bloom_bdat_header_ok(num_hashes, bits_per_entry, bdat_len as u64) {
+                    bloom_settings = Some(BloomFilterSettings {
+                        hash_version: u32::from_be_bytes(hash_version),
+                        num_hashes,
+                        bits_per_entry,
+                        max_changed_paths: 512,
+                    });
+                    chunk_bloom_data = Some((bdat_off, bdat_len));
+                }
             }
         }
 
@@ -2728,6 +2732,101 @@ mod tests {
         assert!(super::bloom_definitely_not_from_filter(
             &filter, &bloom, &path_keys
         ));
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn corrupt_bloom_num_hashes_disables_bloom_without_abort() {
+        use std::process::Command;
+
+        let git_ok = Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !git_ok {
+            eprintln!("SKIP: git unavailable");
+            return;
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(dir.path())
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .expect("git");
+            assert!(out.status.success(), "git {args:?}");
+        };
+        run(&["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("README"), b"hello\n").expect("write");
+        run(&["add", "README"]);
+        run(&["commit", "-q", "-m", "c"]);
+        run(&["gc", "-q"]);
+        run(&["commit-graph", "write", "--reachable", "--changed-paths"]);
+        let graph_path = dir.path().join(".git/objects/info/commit-graph");
+        let mut data = std::fs::read(&graph_path).expect("read graph");
+        let num_chunks = data[6] as usize;
+        let mut bdat_off = None;
+        for i in 0..num_chunks {
+            let base = 8 + 12 * i;
+            let id = u32::from_be_bytes(data[base..base + 4].try_into().expect("chunk id"));
+            if id == super::CHUNK_BLOOM_DATA {
+                bdat_off = Some(u64::from_be_bytes(
+                    data[base + 4..base + 12].try_into().expect("chunk off"),
+                ) as usize);
+                break;
+            }
+        }
+        let bdat_off = bdat_off.expect("BDAT chunk");
+        data[bdat_off + 4..bdat_off + 8].copy_from_slice(&0xffff_ffffu32.to_be_bytes());
+        let mut perms = std::fs::metadata(&graph_path)
+            .expect("graph meta")
+            .permissions();
+        perms.set_readonly(false);
+        std::fs::set_permissions(&graph_path, perms).expect("chmod graph");
+        std::fs::write(&graph_path, &data).expect("patch bloom header");
+        let objects = dir.path().join(".git/objects");
+        let chain = super::CommitGraphChain::load(&objects).expect("graph load must not abort");
+        assert!(
+            chain.top_layer_bloom_settings().is_none(),
+            "absurd num_hashes must disable bloom"
+        );
+        let head_hex = String::from_utf8(
+            Command::new("git")
+                .current_dir(dir.path())
+                .args(["rev-parse", "HEAD"])
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .expect("rev-parse")
+                .stdout,
+        )
+        .expect("utf8");
+        let head = crate::objects::ObjectId::from_hex(head_hex.trim()).expect("head oid");
+        let pre = chain.bloom_precheck_for_paths(
+            &crate::odb::Odb::new(&objects),
+            head,
+            &["README".to_owned()],
+            None,
+            -1,
+            true,
+        );
+        assert!(
+            matches!(
+                pre,
+                Ok(super::BloomPrecheck::FilterNotPresent | super::BloomPrecheck::Maybe)
+            ),
+            "unexpected bloom precheck: {pre:?}"
+        );
     }
 
     #[cfg_attr(
