@@ -1,6 +1,5 @@
 //! `grit history` — stateless history rewrite helpers.
 
-
 use std::io::{self, Write};
 
 use anyhow::{bail, Context, Result};

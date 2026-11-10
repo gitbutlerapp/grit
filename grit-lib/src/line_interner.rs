@@ -76,7 +76,6 @@ impl<'a> LineInterner<'a> {
     pub fn intern_all(&mut self, lines: &[&'a str]) -> Vec<u32> {
         lines.iter().map(|line| self.intern(line)).collect()
     }
-
 }
 
 #[cfg(test)]

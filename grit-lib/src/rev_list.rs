@@ -6648,7 +6648,9 @@ impl Iterator for CommitStream<'_> {
             return Some(Err(err));
         }
         loop {
-            if self.emitted.is_multiple_of(crate::progress::CANCEL_POLL_STRIDE)
+            if self
+                .emitted
+                .is_multiple_of(crate::progress::CANCEL_POLL_STRIDE)
                 && self.cancel.poll().is_err()
             {
                 return Some(Err(Error::Cancelled));

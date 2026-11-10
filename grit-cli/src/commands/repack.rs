@@ -1,6 +1,5 @@
 //! `grit repack` — pack loose objects and remove redundant packs.
 
-
 use anyhow::Result;
 use grit_lib::maintenance::{RepackOptions, RepackStats};
 

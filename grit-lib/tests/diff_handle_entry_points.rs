@@ -1,7 +1,6 @@
 //! Coverage for the `repo.diff()` entry points: metadata diffs between trees, commits, the
 //! index and the work tree under each `TreeDiffOptions` knob, plus the content methods.
 
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -489,11 +488,7 @@ fn commits_diff_their_trees_and_reject_non_commits() {
         assert_eq!(via_commits, via_trees);
     }
     let err = diff
-        .commits(
-            &fx.base_tree,
-            &fx.tip_commit,
-            &TreeDiffOptions::default(),
-        )
+        .commits(&fx.base_tree, &fx.tip_commit, &TreeDiffOptions::default())
         .expect_err("a tree is not a commit");
     assert!(
         matches!(err, Error::Ref(RefError::Invalid { .. })),

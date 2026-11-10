@@ -901,9 +901,7 @@ fn fill_exact_text_relocate_blob(
             }
         }
     }
-    let new_lines: Vec<&str> = (0..new_len)
-        .map(|i| cur.comparison_line(i, ws))
-        .collect();
+    let new_lines: Vec<&str> = (0..new_len).map(|i| cur.comparison_line(i, ws)).collect();
     fill_exact_text_relocate_with_lookup(&[], &new_lines, map, used_old, |line| {
         by_content
             .get(line)
@@ -2334,9 +2332,9 @@ impl BlobLines {
         else {
             return false;
         };
-        candidates.iter().any(|&idx| {
-            blame_lines_equal(parent.comparison_line(idx, ws), child_line, ws)
-        })
+        candidates
+            .iter()
+            .any(|&idx| blame_lines_equal(parent.comparison_line(idx, ws), child_line, ws))
     }
 
     fn first_parent_index_with_text(
@@ -2345,10 +2343,13 @@ impl BlobLines {
         child_line: &str,
         ws: crate::diff::WhitespaceMode,
     ) -> Option<usize> {
-        let candidates = index.by_line_hash.get(&blame_line_lookup_hash(child_line, ws))?;
-        candidates.iter().copied().find(|&idx| {
-            blame_lines_equal(parent.comparison_line(idx, ws), child_line, ws)
-        })
+        let candidates = index
+            .by_line_hash
+            .get(&blame_line_lookup_hash(child_line, ws))?;
+        candidates
+            .iter()
+            .copied()
+            .find(|&idx| blame_lines_equal(parent.comparison_line(idx, ws), child_line, ws))
     }
 
     fn first_parent_index_linear(
@@ -3933,11 +3934,10 @@ fn compute_blame_with_session(
                                 .unwrap_or(false)
                                 && !is_ignored
                             {
-                                let child_line =
-                                    cur_lines_arc.comparison_line(t.current_idx, ws);
+                                let child_line = cur_lines_arc.comparison_line(t.current_idx, ws);
                                 let duplicates_earlier_parent_line = if copy_lookup {
-                                    let index =
-                                        par_index.get_or_insert_with(|| par_lines_arc.text_index(ws));
+                                    let index = par_index
+                                        .get_or_insert_with(|| par_lines_arc.text_index(ws));
                                     BlobLines::parent_has_other_line_with_text(
                                         par_lines_arc.as_ref(),
                                         index,
@@ -5849,12 +5849,11 @@ mod tests {
         let index = parent.text_index(exact);
         let alpha = parent.comparison_line(0, exact);
         let beta = parent.comparison_line(2, exact);
-        assert!(BlobLines::parent_has_matching_line(&parent, &index, alpha, exact));
+        assert!(BlobLines::parent_has_matching_line(
+            &parent, &index, alpha, exact
+        ));
         assert!(!BlobLines::parent_has_matching_line(
-            &parent,
-            &index,
-            "gamma",
-            exact
+            &parent, &index, "gamma", exact
         ));
         assert_eq!(
             BlobLines::first_parent_index_with_text(&parent, &index, beta, exact),
@@ -5867,17 +5866,10 @@ mod tests {
         let parent_ws = BlobLines::from_content("  hello \nhello\n".to_owned());
         let ws_index = parent_ws.text_index(ws);
         assert!(BlobLines::parent_has_matching_line(
-            &parent_ws,
-            &ws_index,
-            "hello",
-            ws
+            &parent_ws, &ws_index, "hello", ws
         ));
         assert!(BlobLines::parent_has_other_line_with_text(
-            &parent_ws,
-            &ws_index,
-            "hello",
-            ws,
-            0,
+            &parent_ws, &ws_index, "hello", ws, 0,
         ));
     }
 

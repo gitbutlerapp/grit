@@ -17,7 +17,6 @@
 //!
 //! A branch that has diverged from your space's is left alone and reported.
 
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, Context, Result};

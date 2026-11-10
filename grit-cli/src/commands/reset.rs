@@ -1,6 +1,5 @@
 //! `grit reset` — move the branch tip and optionally the index or worktree.
 
-
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;

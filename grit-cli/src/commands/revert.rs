@@ -1,6 +1,5 @@
 //! `grit revert` — undo one or more commits with new inverse commits.
 
-
 use crate::commands::replay_merge_args::{mainline_parent, EmptyStepArg, ReplayMergeArgs};
 use crate::context;
 use crate::message_input::{read_message_input, MessageInputArgs};

@@ -1,6 +1,5 @@
 //! Render `grit gc` outcomes.
 
-
 use std::io::Write;
 use std::path::Path;
 

@@ -1,6 +1,5 @@
 //! `grit restore` — restore working tree and/or index paths.
 
-
 use anyhow::{Context, Result};
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError, RestoreHunksOutcome};
 use grit_lib::porcelain::restore::{ConflictSide, RestoreOptions, RestoreOutcome, RestoreSource};

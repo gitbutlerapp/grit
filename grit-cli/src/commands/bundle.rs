@@ -1,6 +1,5 @@
 //! `grit bundle` — create, verify, list, and unbundle git bundle files.
 
-
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
