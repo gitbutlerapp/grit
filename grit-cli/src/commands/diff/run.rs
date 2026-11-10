@@ -14,9 +14,7 @@
 //! intra-line word highlights — no `+`/`-` patch markers. Color is emitted only
 //! on a TTY (honoring `NO_COLOR`); piped output is plain text with `+`/`-`.
 
-use super::convert::{
-    cli_file_from_file_change, cli_file_from_lib, cli_file_from_tree, map_listed_file,
-};
+use super::convert::{cli_file_from_lib, cli_file_from_target_file_diff, map_listed_file};
 use super::{DiffFormatArgs, DiffOutcome, DiffRunOptions, DiffTotalsJson, PatchBodies};
 use anyhow::{Context, Result};
 use grit_lib::diff::{
@@ -28,7 +26,6 @@ use grit_lib::diff::{
     ResolveDiffArgumentsError, UncommittedDiff,
 };
 use grit_lib::objects::ObjectId;
-use grit_lib::parallel::ParallelOp;
 use grit_lib::worktree::pathspec::pathdiff;
 use std::io::Write;
 
@@ -520,7 +517,6 @@ pub fn run(opts: DiffRunOptions, ctx: super::DiffRunContext) -> Result<DiffOutco
     }
     let repo = context::discover()?;
     let config = repo.config().snapshot().context("could not load config")?;
-    let thread_policy = repo.thread_policy();
     let DiffArguments { target, pathspec } = resolve_diff_target(&repo, &opts)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
@@ -554,15 +550,14 @@ pub fn run(opts: DiffRunOptions, ctx: super::DiffRunContext) -> Result<DiffOutco
                     };
                     drop(uncommitted);
                     outcome_from_changes(
+                        &repo,
                         staged,
                         peer,
-                        &config,
-                        &thread_policy,
                         diff_options,
                         format,
                         DiffSide::Staged,
                         ctx.emit_json_hunk_ids,
-                    )
+                    )?
                 }
             }
         }
@@ -595,15 +590,14 @@ pub fn run(opts: DiffRunOptions, ctx: super::DiffRunContext) -> Result<DiffOutco
                     };
                     drop(uncommitted);
                     outcome_from_changes(
+                        &repo,
                         unstaged,
                         peer,
-                        &config,
-                        &thread_policy,
                         diff_options,
                         format,
                         DiffSide::Unstaged,
                         ctx.emit_json_hunk_ids,
-                    )
+                    )?
                 }
             }
         }
@@ -618,15 +612,14 @@ pub fn run(opts: DiffRunOptions, ctx: super::DiffRunContext) -> Result<DiffOutco
                 }
                 DiffDetail::Stat => outcome_stat_from_changes(changes, diff_options, format),
                 _ => outcome_from_changes(
+                    &repo,
                     changes,
                     Vec::new(),
-                    &config,
-                    &thread_policy,
                     diff_options,
                     format,
                     DiffSide::Other,
                     false,
-                ),
+                )?,
             }
         }
         _ => tree_diff_outcome(
@@ -717,7 +710,6 @@ pub fn outcome_from_tree_entries(
     sort_entries_by_path(&mut entries);
     let changes = repo.diff().object_changes(&entries)?;
     let config = repo.config().snapshot().context("could not load config")?;
-    let thread_policy = repo.thread_policy();
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
     diff_options.word_level_inline = false;
@@ -726,15 +718,14 @@ pub fn outcome_from_tree_entries(
         repo,
         format,
         outcome_from_changes(
+            repo,
             changes,
             Vec::new(),
-            &config,
-            &thread_policy,
             diff_options,
             format,
             DiffSide::Other,
             false,
-        ),
+        )?,
     ))
 }
 
@@ -768,17 +759,15 @@ fn stored_entries(
         .context("could not diff commits")
 }
 
-#[expect(clippy::too_many_arguments)]
 fn outcome_from_changes(
+    repo: &grit_lib::repo::Repository,
     changes: Vec<FileChange>,
     peer_changes: Vec<FileChange>,
-    config: &grit_lib::config::ConfigSet,
-    thread_policy: &grit_lib::parallel::ThreadPolicy,
     diff_options: DiffOptions,
     format: DiffFormatArgs,
     side: DiffSide,
     assign_hunk_ids: bool,
-) -> DiffOutcome {
+) -> Result<DiffOutcome> {
     use std::collections::HashSet;
 
     let changes: Vec<_> = changes
@@ -797,20 +786,20 @@ fn outcome_from_changes(
         } else {
             std::collections::HashMap::new()
         };
-    let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
-    par_opts.min_items = 0;
-    let est_bytes = changes.len().saturating_mul(8192);
-    use grit_lib::parallel::par_map;
-    let files: Vec<FileDiff> = par_map(&changes, par_opts, est_bytes, |fc| {
-        let peer_hunks = peer_hunks_by_path
-            .get(&fc.path)
-            .map(|h| h.as_slice())
-            .unwrap_or(&[]);
-        cli_file_from_file_change(fc, diff_options.clone(), side, peer_hunks, assign_hunk_ids)
-    })
-    .into_iter()
-    .collect();
-    DiffOutcome {
+    let lib_files = repo
+        .diff()
+        .file_diffs_from_changes(&changes, diff_options.clone())?;
+    let files: Vec<FileDiff> = lib_files
+        .into_iter()
+        .map(|f| {
+            let peer_hunks = peer_hunks_by_path
+                .get(&f.path)
+                .map(|h| h.as_slice())
+                .unwrap_or(&[]);
+            cli_file_from_target_file_diff(f, side, peer_hunks, assign_hunk_ids)
+        })
+        .collect();
+    Ok(DiffOutcome {
         changed: !files.is_empty(),
         files,
         totals: None,
@@ -818,7 +807,7 @@ fn outcome_from_changes(
         path_display: None,
         body_streamed: false,
         preserve_changed: false,
-    }
+    })
 }
 
 fn pathspec_prefix_for_repo(repo: &grit_lib::repo::Repository) -> Result<Option<String>> {
@@ -936,8 +925,13 @@ fn tree_diff_outcome(
                 &ctx.render,
             ),
             PatchBodies::Collect => {
-                let structured = repo.diff().structured(entries, &diff_options)?;
-                let files: Vec<FileDiff> = structured.into_iter().map(cli_file_from_tree).collect();
+                let lib_files = repo
+                    .diff()
+                    .file_diffs_from_entries(entries, diff_options.clone())?;
+                let files: Vec<FileDiff> = lib_files
+                    .into_iter()
+                    .map(|f| cli_file_from_target_file_diff(f, DiffSide::Other, &[], false))
+                    .collect();
                 Ok(DiffOutcome {
                     changed: !files.is_empty(),
                     files,

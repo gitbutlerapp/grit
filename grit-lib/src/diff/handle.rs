@@ -371,6 +371,32 @@ impl<'repo> Diff<'repo> {
         collect_files_for_target(self.repo, target, pathspec.specs(), opts.clone())
     }
 
+    /// Patch-style rows from [`FileChange`] values with `.gitattributes` funcname context.
+    ///
+    /// # Errors
+    ///
+    /// Propagates attribute and config errors.
+    pub fn file_diffs_from_changes(
+        &self,
+        changes: &[FileChange],
+        opts: DiffOptions,
+    ) -> Result<Vec<FileDiff>> {
+        crate::diff::targets::file_diffs_from_changes(self.repo, changes, opts)
+    }
+
+    /// Patch-style rows from tree diff entries with `.gitattributes` funcname context.
+    ///
+    /// # Errors
+    ///
+    /// Propagates object database and attribute errors.
+    pub fn file_diffs_from_entries(
+        &self,
+        entries: Vec<DiffEntry>,
+        opts: DiffOptions,
+    ) -> Result<Vec<FileDiff>> {
+        crate::diff::targets::file_diffs_from_entries(self.repo, entries, opts)
+    }
+
     /// Per-file diffs at `detail` for entries from a metadata diff.
     ///
     /// Applies [`DiffOptions::renames`] to the entries first (Git's default `-M50`); pass

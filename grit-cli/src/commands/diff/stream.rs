@@ -3,10 +3,10 @@
 use std::io::Write;
 
 use anyhow::{Context, Result};
-use grit_lib::diff::{DiffEntry, DiffOptions};
+use grit_lib::diff::{DiffEntry, DiffOptions, DiffSide, FileDiffAttributeContext};
 use grit_lib::worktree::WorktreeError;
 
-use super::{convert::cli_file_from_tree, DiffFormatArgs, DiffOutcome, PatchBodies};
+use super::{convert::cli_file_from_target_file_diff, DiffFormatArgs, DiffOutcome, PatchBodies};
 use crate::output::with_streaming_stdout;
 use crate::render::diff_stream::{FileDiffStream, FileDiffStreamSummary};
 use crate::render::stream::{begin_diff_json_document, write_json_array_element, StreamRender};
@@ -50,9 +50,12 @@ pub fn stream_tree_patch_to_stdout(
         } else {
             renderer.begin(w, ctx).map_err(map_cli_err)?;
         }
+        let attr_ctx =
+            FileDiffAttributeContext::load(repo).context("could not load gitattributes")?;
         repo.diff()
             .for_each_structured(entries, &diff_options, |structured| {
-                let file = cli_file_from_tree(structured);
+                let f = attr_ctx.from_tree_structured(repo, structured);
+                let file = cli_file_from_target_file_diff(f, DiffSide::Other, &[], false);
                 match bodies {
                     PatchBodies::Collect => write_json_array_element(w, &mut first_json, &file)
                         .map_err(map_cli_err)

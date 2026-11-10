@@ -288,16 +288,16 @@ fn grit_worktree_patch_hunk_headers(root: &Path) -> Vec<String> {
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::diff::{
         write_patch_resolved, DiffOptions, PatchResolvedSide, PatchSide, PatchTextOptions,
-        RenameDetection, UncommittedDiff,
+        RenameDetection,
     };
     use grit_lib::repo::Repository;
+    use grit_test_support::rev_parse;
 
     let repo = Repository::open(root, &RepositoryOptions::default()).expect("open repo");
-    let index = repo.load_index().expect("index");
-    let mut uncommitted = UncommittedDiff::new(&repo, index);
-    let head = repo.read_head_commit().expect("head");
+    let mut uncommitted = repo.diff().uncommitted().expect("uncommitted");
+    let head_tree = rev_parse(root, "HEAD^{tree}");
     let entries = uncommitted
-        .worktree_entries(Some(&head.tree), RenameDetection::Off)
+        .worktree_entries(Some(&head_tree), RenameDetection::Off)
         .expect("entries");
     let changes = uncommitted
         .load_worktree_changes(entries.clone())

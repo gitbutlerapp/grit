@@ -563,38 +563,136 @@ fn filter_and_map_tree_structured(
     pathspecs: &[String],
     opts: DiffOptions,
 ) -> Result<Vec<FileDiff>> {
+    let config = repo.config().snapshot()?;
+    let funcname_attrs = PatchFuncnameAttrs::load_for_diff(repo)?;
     Ok(filter_tree_diff(items, repo, pathspecs)?
         .into_iter()
-        .map(file_diff_from_tree_structured)
+        .map(|t| file_diff_from_tree_structured(repo, config.as_ref(), &funcname_attrs, t))
         .filter(|f| include_file_in_diff(f, &opts))
         .collect())
 }
 
-fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
-    let e = t.entry;
+pub fn file_diff_from_tree_structured(
+    repo: &Repository,
+    config: &ConfigSet,
+    funcname_attrs: &PatchFuncnameAttrs,
+    t: TreeDiffStructured,
+) -> FileDiff {
+    let e = &t.entry;
     let path = e
         .new_path
         .clone()
         .or_else(|| e.old_path.clone())
         .unwrap_or_default();
-    let old_path = e.old_path.filter(|op| *op != path);
+    let old_path = e.old_path.clone().filter(|op| *op != path);
+    let mut structured = t.structured;
+    if !t.binary {
+        if let Ok((old_bytes, _)) = super::tree_content::load_old_side(repo.odb(), e) {
+            if let Ok(matcher) = funcname_attrs.matcher_for_path(repo, config, &path) {
+                crate::diff::structured::apply_patch_funcname_to_hunks(
+                    &mut structured.hunks,
+                    &old_bytes.text(),
+                    matcher.as_ref(),
+                );
+            }
+        }
+    }
     FileDiff {
         path,
         old_path,
         status: e.status,
-        old_mode: t.structured.old_mode,
-        new_mode: t.structured.new_mode,
+        old_mode: structured.old_mode,
+        new_mode: structured.new_mode,
         old_oid: e.old_oid,
         new_oid: e.new_oid,
         binary: t.binary,
         old_size: t.old_size,
         new_size: t.new_size,
         content_changed: e.old_oid != e.new_oid,
-        old_encoding_lossy: t.structured.old_encoding_lossy,
-        new_encoding_lossy: t.structured.new_encoding_lossy,
-        hunks: t.structured.hunks,
+        old_encoding_lossy: structured.old_encoding_lossy,
+        new_encoding_lossy: structured.new_encoding_lossy,
+        hunks: structured.hunks,
         line_stat: None,
     }
+}
+
+/// Cached `.gitattributes` rules for building many [`FileDiff`] rows in one diff.
+///
+/// Load once per diff, then call [`Self::from_tree_structured`] for each file.
+#[derive(Clone)]
+pub struct FileDiffAttributeContext {
+    config: std::sync::Arc<ConfigSet>,
+    funcname_attrs: PatchFuncnameAttrs,
+}
+
+impl FileDiffAttributeContext {
+    /// Load attribute rules the same way as `git diff`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates config and attribute load failures.
+    pub fn load(repo: &Repository) -> Result<Self> {
+        Ok(Self {
+            config: repo.config().snapshot()?,
+            funcname_attrs: PatchFuncnameAttrs::load_for_diff(repo)?,
+        })
+    }
+
+    /// One tree-structured row with funcname context on hunks.
+    #[must_use]
+    pub fn from_tree_structured(&self, repo: &Repository, t: TreeDiffStructured) -> FileDiff {
+        file_diff_from_tree_structured(repo, self.config.as_ref(), &self.funcname_attrs, t)
+    }
+}
+
+/// Patch-style [`FileDiff`] rows from loaded work-tree or index [`FileChange`] values.
+///
+/// Applies `.gitattributes` `diff` drivers to each hunk's `context`, matching `git diff`.
+///
+/// # Errors
+///
+/// Propagates config and attribute load failures.
+pub fn file_diffs_from_changes(
+    repo: &Repository,
+    changes: &[FileChange],
+    opts: DiffOptions,
+) -> Result<Vec<FileDiff>> {
+    let config = repo.config().snapshot()?;
+    let thread_policy = repo.thread_policy();
+    file_diffs_from_worktree_changes(repo, changes.to_vec(), &config, &thread_policy, opts)
+}
+
+/// Patch-style [`FileDiff`] rows from tree diff entries.
+///
+/// Applies `.gitattributes` `diff` drivers to each hunk's `context`, matching `git diff`.
+///
+/// # Errors
+///
+/// Propagates object database and attribute load failures.
+pub fn file_diffs_from_entries(
+    repo: &Repository,
+    entries: Vec<DiffEntry>,
+    opts: DiffOptions,
+) -> Result<Vec<FileDiff>> {
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let config = repo.config().snapshot()?;
+    let thread_policy = repo.thread_policy();
+    let opts = opts.cap_word_level_inline_for_changed_files(entries.len());
+    let structured = tree_diff_structured_parallel(
+        repo.odb(),
+        entries,
+        config.as_ref(),
+        &thread_policy,
+        opts.clone(),
+    )?;
+    let funcname_attrs = PatchFuncnameAttrs::load_for_diff(repo)?;
+    Ok(structured
+        .into_iter()
+        .map(|t| file_diff_from_tree_structured(repo, config.as_ref(), &funcname_attrs, t))
+        .filter(|f| include_file_in_diff(f, &opts))
+        .collect())
 }
 
 fn file_diffs_from_worktree_changes(

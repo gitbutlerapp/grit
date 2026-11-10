@@ -104,7 +104,10 @@ pub(crate) use targets::{
     collect_files_for_target, include_file_in_diff, unstaged_file_diffs_with_peer_hunks,
     unstaged_raw_changes_with_peer_hunks, unstaged_raw_changes_with_peer_hunks_in,
 };
-pub use targets::{DiffArguments, DiffRequest, DiffTarget, FileDiff, ResolveDiffArgumentsError};
+pub use targets::{
+    file_diffs_from_changes, file_diffs_from_entries, DiffArguments, DiffRequest, DiffTarget,
+    FileDiff, FileDiffAttributeContext, ResolveDiffArgumentsError,
+};
 pub use text::{
     line_change_counts, unified_diff, DiffLabel, HunkExtent, IndentHeuristic, NoNewlineMarker,
     PathQuoting, UnifiedDiffOptions,
