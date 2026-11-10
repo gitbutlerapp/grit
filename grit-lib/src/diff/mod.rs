@@ -24,6 +24,7 @@ pub(crate) use core::{
 mod detail;
 mod files;
 mod filter;
+pub(crate) mod funcname_attrs;
 mod git_histogram;
 pub(crate) mod handle;
 mod has_changes;

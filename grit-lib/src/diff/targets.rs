@@ -12,6 +12,7 @@ use crate::diff::changes::{
     unstaged_entries_in, worktree_entries_in, FileChange, WorktreeSide,
 };
 use crate::diff::detail::LineStat;
+use crate::diff::funcname_attrs::PatchFuncnameAttrs;
 use crate::diff::structured::StructuredHunk;
 use crate::diff::{
     apply_diff_filter, sort_entries_by_path, tree_diff_structured_parallel, DiffEntry, DiffOptions,
@@ -411,7 +412,7 @@ pub(crate) fn collect_files_for_target(
                 repo,
                 pathspecs,
             )?;
-            file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
+            file_diffs_from_worktree_changes(repo, changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::WorktreeVsTree(tree) => {
             let changes = filter_file_changes(
@@ -419,7 +420,7 @@ pub(crate) fn collect_files_for_target(
                 repo,
                 pathspecs,
             )?;
-            file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
+            file_diffs_from_worktree_changes(repo, changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::IndexVsHead => {
             let index = repo.load_index()?;
@@ -431,7 +432,7 @@ pub(crate) fn collect_files_for_target(
                 repo,
                 pathspecs,
             )?;
-            file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
+            file_diffs_from_worktree_changes(repo, changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::WorktreeVsIndex => {
             let changes = filter_file_changes(
@@ -439,7 +440,7 @@ pub(crate) fn collect_files_for_target(
                 repo,
                 pathspecs,
             )?;
-            file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
+            file_diffs_from_worktree_changes(repo, changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::Commit(oid) => {
             let items = commit_changes(
@@ -597,25 +598,42 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
 }
 
 fn file_diffs_from_worktree_changes(
+    repo: &Repository,
     changes: Vec<FileChange>,
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     opts: DiffOptions,
 ) -> Result<Vec<FileDiff>> {
     let opts = opts.cap_word_level_inline_for_changed_files(changes.len());
+    let funcname_attrs = PatchFuncnameAttrs::load_for_diff(repo)?;
     let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
     par_opts.min_items = 0;
     let est_bytes = changes.len().saturating_mul(8192);
     Ok(par_map(&changes, par_opts, est_bytes, |fc| {
-        build_file_diff(fc, opts.clone())
+        build_file_diff(repo, config, &funcname_attrs, fc, opts.clone())
     })
     .into_iter()
     .filter(|f| include_file_in_diff(f, &opts))
     .collect())
 }
 
-fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
-    let structured = fc.structured(diff_options);
+fn build_file_diff(
+    repo: &Repository,
+    config: &ConfigSet,
+    funcname_attrs: &PatchFuncnameAttrs,
+    fc: &FileChange,
+    diff_options: DiffOptions,
+) -> FileDiff {
+    let mut structured = fc.structured(diff_options.clone());
+    if !fc.binary {
+        if let Ok(matcher) = funcname_attrs.matcher_for_path(repo, config, &fc.path) {
+            crate::diff::structured::apply_patch_funcname_to_hunks(
+                &mut structured.hunks,
+                &fc.old_bytes.text(),
+                matcher.as_ref(),
+            );
+        }
+    }
     FileDiff {
         path: fc.path.clone(),
         old_path: fc.old_path.clone(),
@@ -1335,7 +1353,7 @@ pub(crate) fn unstaged_file_diffs_with_peer_hunks(
         repo,
         pathspecs,
     )?;
-    let files = file_diffs_from_worktree_changes(unstaged, &config, &thread_policy, opts)?;
+    let files = file_diffs_from_worktree_changes(repo, unstaged, &config, &thread_policy, opts)?;
     Ok((files, peer_hunks))
 }
 
@@ -1364,7 +1382,8 @@ pub(crate) fn hunk_diff_bundle(
     let thread_policy = repo.thread_policy();
     let (unstaged_fc, peer_hunks) =
         unstaged_raw_changes_with_peer_hunks(repo, pathspec.specs(), opts.clone())?;
-    let unstaged = file_diffs_from_worktree_changes(unstaged_fc, &config, &thread_policy, opts)?;
+    let unstaged =
+        file_diffs_from_worktree_changes(repo, unstaged_fc, &config, &thread_policy, opts)?;
     Ok(HunkDiffBundle {
         unstaged,
         peer_hunks,
