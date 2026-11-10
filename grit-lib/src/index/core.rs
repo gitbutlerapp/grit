@@ -4825,6 +4825,13 @@ impl IndexStatFields {
         self.size
     }
 
+    /// Whole-second mtime for UNTR cache directory validation on Windows listings.
+    #[must_use]
+    #[cfg(windows)]
+    pub(crate) fn untr_cache_mtime_sec(&self) -> u32 {
+        self.mtime_sec
+    }
+
     /// Capture stat fields from filesystem metadata.
     #[must_use]
     pub fn from_metadata(meta: &fs::Metadata) -> Self {

@@ -6294,17 +6294,31 @@ fn diff_index_to_worktree_inner(
     } else {
         group_blob_entries_by_dir(index, honor_fsmonitor_valid)
     };
+    let listing_backed =
+        use_listing_backed_worktree_paths(&options.listing_cache, precompose_unicode);
+    let listing_for_symlink = crate::windows_dir_listing::listing_cache_ref(&options.listing_cache);
     let work_tree_owned = work_tree.to_path_buf();
     let dir_abs = move |dir: &[u8]| {
         if dir.is_empty() {
             work_tree_owned.clone()
+        } else if listing_backed {
+            worktree_abs_bytes_listing_backed(&work_tree_owned, dir)
         } else {
             index_entry_worktree_abs_bytes(&work_tree_owned, dir, precompose_unicode, ignorecase)
         }
     };
     let work_tree_for_files = work_tree.to_path_buf();
     let file_abs = move |rel: &[u8]| {
-        index_entry_worktree_abs_bytes(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+        if listing_backed {
+            worktree_abs_bytes_listing_backed(&work_tree_for_files, rel)
+        } else {
+            index_entry_worktree_abs_bytes(
+                &work_tree_for_files,
+                rel,
+                precompose_unicode,
+                ignorecase,
+            )
+        }
     };
     let blob_count = blob_dirs.len();
     let thread_policy = options.thread_policy.unwrap_or_default();
@@ -6341,12 +6355,14 @@ fn diff_index_to_worktree_inner(
         !precompose_unicode && !ignorecase,
         || {
             let mut dir_symlinks = SymlinkDirCache::default();
+            let cache = listing_for_symlink;
             move |rel_path: &[u8]| {
                 dir_symlinks.has_symlink_in_path_bytes(
                     work_tree,
                     rel_path,
                     precompose_unicode,
                     ignorecase,
+                    cache,
                 )
             }
         },
@@ -6785,6 +6801,23 @@ pub(crate) fn index_entry_worktree_abs_bytes(
     crate::index::worktree_path_from_index_rel(work_tree, index_relpath)
 }
 
+/// When a shared Windows listing cache drives the scan, join index bytes directly.
+///
+/// `FindFirstFileEx` and per-parent listings resolve case and reparse points; avoid a separate
+/// `exists` or `GetFileAttributes` probe per indexed path (#2584).
+#[inline]
+pub(crate) fn worktree_abs_bytes_listing_backed(work_tree: &Path, index_relpath: &[u8]) -> PathBuf {
+    crate::index::worktree_path_from_index_rel(work_tree, index_relpath)
+}
+
+#[inline]
+pub(crate) fn use_listing_backed_worktree_paths(
+    listing_cache: &Option<std::sync::Arc<crate::windows_dir_listing::WorktreeListingCache>>,
+    precompose_unicode: bool,
+) -> bool {
+    cfg!(windows) && listing_cache.is_some() && !precompose_unicode
+}
+
 /// Effective index-file mtime for racy-git checks.
 ///
 /// Uses an explicit override when provided, otherwise [`Index::source_mtime`] from the last
@@ -6805,6 +6838,7 @@ impl SymlinkDirCache {
         rel_path: &[u8],
         precompose_unicode: bool,
         ignorecase: bool,
+        listing_cache: Option<&crate::windows_dir_listing::WorktreeListingCache>,
     ) -> bool {
         use crate::worktree_scan::{ancestor_kind, AncestorKind};
 
@@ -6819,6 +6853,10 @@ impl SymlinkDirCache {
         }
         let verified = common_dir_prefix_len(dir, &self.real_dirs);
         self.real_dirs.truncate(verified);
+        #[cfg(not(windows))]
+        let _ = listing_cache;
+        #[cfg(windows)]
+        let listing_mode = !precompose_unicode && listing_cache.is_some();
         #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
         if !precompose_unicode
             && !ignorecase
@@ -6853,13 +6891,55 @@ impl SymlinkDirCache {
                 .position(|&b| b == b'/')
                 .map_or(dir.len(), |i| start + i);
             let prefix = &dir[..end];
-            let abs =
-                index_entry_worktree_abs_bytes(work_tree, prefix, precompose_unicode, ignorecase);
             #[cfg(test)]
             {
                 self.fs_queries += 1;
             }
-            match ancestor_kind(&abs) {
+            let kind = {
+                #[cfg(windows)]
+                if listing_mode {
+                    if let Some(cache) = listing_cache {
+                        let component = &dir[start..end];
+                        let abs_parent = if self.real_dirs.is_empty() {
+                            work_tree.to_path_buf()
+                        } else {
+                            crate::index::worktree_path_from_index_rel(work_tree, &self.real_dirs)
+                        };
+                        crate::worktree_scan::ancestor_kind_from_parent_listing(
+                            cache,
+                            &abs_parent,
+                            component,
+                        )
+                    } else {
+                        let abs = index_entry_worktree_abs_bytes(
+                            work_tree,
+                            prefix,
+                            precompose_unicode,
+                            ignorecase,
+                        );
+                        ancestor_kind(&abs)
+                    }
+                } else {
+                    let abs = index_entry_worktree_abs_bytes(
+                        work_tree,
+                        prefix,
+                        precompose_unicode,
+                        ignorecase,
+                    );
+                    ancestor_kind(&abs)
+                }
+                #[cfg(not(windows))]
+                {
+                    let abs = index_entry_worktree_abs_bytes(
+                        work_tree,
+                        prefix,
+                        precompose_unicode,
+                        ignorecase,
+                    );
+                    ancestor_kind(&abs)
+                }
+            };
+            match kind {
                 AncestorKind::Directory => {
                     let known = self.real_dirs.len();
                     self.real_dirs.extend_from_slice(&prefix[known..]);
@@ -7563,6 +7643,7 @@ pub(crate) fn refresh_index_stat_content_verified_with_rules(
                     rel_path,
                     precompose_unicode,
                     ignorecase,
+                    None,
                 )
             }
         },
@@ -13145,12 +13226,24 @@ mod smudge_racily_clean_tests {
             for _ in 0..4 {
                 scope.spawn(|| {
                     let mut cache = super::SymlinkDirCache::default();
-                    assert!(!cache.has_symlink_in_path_bytes(wt, b"top.txt", false, false));
-                    assert!(!cache.has_symlink_in_path_bytes(wt, b"linked", false, false));
-                    assert!(!cache.has_symlink_in_path_bytes(wt, b"real/deep/f", false, false));
-                    assert!(cache.has_symlink_in_path_bytes(wt, b"linked/f", false, false));
-                    assert!(cache.has_symlink_in_path_bytes(wt, b"linked/deep/f", false, false));
-                    assert!(!cache.has_symlink_in_path_bytes(wt, b"\xff\xfe", false, false));
+                    assert!(!cache.has_symlink_in_path_bytes(wt, b"top.txt", false, false, None));
+                    assert!(!cache.has_symlink_in_path_bytes(wt, b"linked", false, false, None));
+                    assert!(!cache.has_symlink_in_path_bytes(
+                        wt,
+                        b"real/deep/f",
+                        false,
+                        false,
+                        None
+                    ));
+                    assert!(cache.has_symlink_in_path_bytes(wt, b"linked/f", false, false, None));
+                    assert!(cache.has_symlink_in_path_bytes(
+                        wt,
+                        b"linked/deep/f",
+                        false,
+                        false,
+                        None
+                    ));
+                    assert!(!cache.has_symlink_in_path_bytes(wt, b"\xff\xfe", false, false, None));
                 });
             }
         });
@@ -13167,10 +13260,10 @@ mod smudge_racily_clean_tests {
         let wt = td.path().join("alias");
         std::os::unix::fs::symlink(&real, &wt).expect("symlink");
         let mut cache = super::SymlinkDirCache::default();
-        assert!(!cache.has_symlink_in_path_bytes(&wt, b"a/b/c/f", false, false));
-        assert!(cache.has_symlink_in_path_bytes(&wt, b"l/b/c/f", false, false));
-        assert!(!cache.has_symlink_in_path_bytes(&real, b"a/b/c/f", false, false));
-        assert!(cache.has_symlink_in_path_bytes(&real, b"l/b/c/f", false, false));
+        assert!(!cache.has_symlink_in_path_bytes(&wt, b"a/b/c/f", false, false, None));
+        assert!(cache.has_symlink_in_path_bytes(&wt, b"l/b/c/f", false, false, None));
+        assert!(!cache.has_symlink_in_path_bytes(&real, b"a/b/c/f", false, false, None));
+        assert!(cache.has_symlink_in_path_bytes(&real, b"l/b/c/f", false, false, None));
     }
 
     #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
@@ -13213,7 +13306,7 @@ mod smudge_racily_clean_tests {
         paths.sort();
         let mut cache = super::SymlinkDirCache::default();
         for rel in &paths {
-            assert!(!cache.has_symlink_in_path_bytes(wt, rel.as_bytes(), false, false));
+            assert!(!cache.has_symlink_in_path_bytes(wt, rel.as_bytes(), false, false, None));
         }
         // Each chain's directories are new; `shared` and sibling files are already known.
         let unique_dirs = 1 + chains * depth;
@@ -13311,7 +13404,7 @@ mod smudge_racily_clean_tests {
             let mut cache = super::SymlinkDirCache::default();
             for rel in order {
                 assert_eq!(
-                    cache.has_symlink_in_path_bytes(wt, rel.as_bytes(), false, false),
+                    cache.has_symlink_in_path_bytes(wt, rel.as_bytes(), false, false, None),
                     naive_has_symlink_ancestor(wt, rel),
                     "ancestor symlink answer for {rel}"
                 );

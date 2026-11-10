@@ -760,6 +760,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
                     config.as_ref(),
                     &mut uc,
                     show_all,
+                    crate::windows_dir_listing::listing_cache_ref(&listing_cache),
                 )? {
                     index.untracked_cache = Some(uc);
                     return Ok((untracked, Vec::new(), UntrackedCollectMeta::default()));
@@ -4239,6 +4240,83 @@ mod status_op_tests {
             "status scan metadata calls {calls} exceeded budget {} (tracked {tracked}, dirs {dir_count})",
             tracked + dir_count + 5
         );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn status_mono_tree_metadata_probes_scale_with_directories() {
+        use crate::test_support::counters::{
+            reset_worktree_metadata_probe, worktree_metadata_probe_count,
+        };
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+        grit_test_support::git(root, &["config", "core.untrackedCache", "true"]);
+        const PACKAGES: usize = 20;
+        const MODULES: usize = 10;
+        const FILES: usize = 5;
+        for t in 0..PACKAGES {
+            for m in 0..MODULES {
+                for f in 0..FILES {
+                    let rel = format!("src/pkg{t:03}/mod{m:02}/file{f:02}.rs");
+                    let path = root.join(&rel);
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent).unwrap();
+                    }
+                    fs::write(&path, format!("// {rel}\n")).unwrap();
+                }
+            }
+        }
+        grit_test_support::git(root, &["add", "-A"]);
+        grit_test_support::git(root, &["commit", "-qm", "import"]);
+
+        let tracked = PACKAGES * MODULES * FILES;
+        let dir_count = PACKAGES * MODULES + PACKAGES + 1;
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let _ = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap();
+        let _probe = reset_worktree_metadata_probe(root);
+        let _ = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap();
+        let calls = worktree_metadata_probe_count();
+        #[cfg(windows)]
+        {
+            // Listing-backed UNTR validation and status scan must stay O(directories), not O(files).
+            let metadata_budget = dir_count + 64;
+            assert!(
+                calls <= metadata_budget,
+                "warm mono-tree status metadata calls {calls} exceeded directory budget {metadata_budget} (tracked {tracked}, dirs {dir_count})"
+            );
+            use crate::test_support::counters::worktree_path_resolve_probe_count;
+            let path_probes = worktree_path_resolve_probe_count();
+            assert!(
+                path_probes <= dir_count + 32,
+                "ignorecase path-resolve probes {path_probes} exceeded directory budget (dirs {dir_count})"
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (tracked, calls);
+        }
     }
 
     #[cfg_attr(

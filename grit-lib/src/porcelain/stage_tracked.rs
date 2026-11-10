@@ -466,6 +466,7 @@ fn stage_tracked_modifications_in_index_body(
                     rel_path,
                     precompose_unicode,
                     ignorecase,
+                    None,
                 ) {
                     return true;
                 }

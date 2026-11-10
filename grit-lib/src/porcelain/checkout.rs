@@ -1235,7 +1235,9 @@ fn checkout_hard_to_tree_journaled(
         let mut sparse_parent_symlinks = crate::diff::SymlinkDirCache::default();
         for (path, mode) in sparse_removals {
             crate::progress::poll_cancel(progress, cancel)?;
-            if sparse_parent_symlinks.has_symlink_in_path_bytes(work_tree, &path, false, false) {
+            if sparse_parent_symlinks
+                .has_symlink_in_path_bytes(work_tree, &path, false, false, None)
+            {
                 continue;
             }
             let rel = crate::repo_relpath::storage_string(&path);
@@ -1406,7 +1408,7 @@ fn checkout_hard_to_tree_journaled(
     let mut sparse_parent_symlinks = crate::diff::SymlinkDirCache::default();
     for (path, mode) in sparse_removals {
         crate::progress::poll_cancel(progress, cancel)?;
-        if sparse_parent_symlinks.has_symlink_in_path_bytes(work_tree, &path, false, false) {
+        if sparse_parent_symlinks.has_symlink_in_path_bytes(work_tree, &path, false, false, None) {
             continue;
         }
         let rel = crate::repo_relpath::storage_string(&path);
@@ -2058,7 +2060,7 @@ fn hard_reset_journal_conflict_only_unmerged_paths(
         if sparse.is_some_and(|sparse| !sparse.includes_index_path(path)) {
             continue;
         }
-        if parent_symlinks.has_symlink_in_path_bytes(work_tree, path, false, false) {
+        if parent_symlinks.has_symlink_in_path_bytes(work_tree, path, false, false, None) {
             continue;
         }
         let abs = crate::index::worktree_path_from_index_rel(work_tree, path);
