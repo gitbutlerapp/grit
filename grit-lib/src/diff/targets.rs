@@ -572,7 +572,7 @@ fn filter_and_map_tree_structured(
         .collect())
 }
 
-pub fn file_diff_from_tree_structured(
+pub(crate) fn file_diff_from_tree_structured(
     repo: &Repository,
     config: &ConfigSet,
     funcname_attrs: &PatchFuncnameAttrs,
@@ -616,35 +616,6 @@ pub fn file_diff_from_tree_structured(
     }
 }
 
-/// Cached `.gitattributes` rules for building many [`FileDiff`] rows in one diff.
-///
-/// Load once per diff, then call [`Self::from_tree_structured`] for each file.
-#[derive(Clone)]
-pub struct FileDiffAttributeContext {
-    config: std::sync::Arc<ConfigSet>,
-    funcname_attrs: PatchFuncnameAttrs,
-}
-
-impl FileDiffAttributeContext {
-    /// Load attribute rules the same way as `git diff`.
-    ///
-    /// # Errors
-    ///
-    /// Propagates config and attribute load failures.
-    pub fn load(repo: &Repository) -> Result<Self> {
-        Ok(Self {
-            config: repo.config().snapshot()?,
-            funcname_attrs: PatchFuncnameAttrs::load_for_diff(repo)?,
-        })
-    }
-
-    /// One tree-structured row with funcname context on hunks.
-    #[must_use]
-    pub fn from_tree_structured(&self, repo: &Repository, t: TreeDiffStructured) -> FileDiff {
-        file_diff_from_tree_structured(repo, self.config.as_ref(), &self.funcname_attrs, t)
-    }
-}
-
 /// Patch-style [`FileDiff`] rows from loaded work-tree or index [`FileChange`] values.
 ///
 /// Applies `.gitattributes` `diff` drivers to each hunk's `context`, matching `git diff`.
@@ -652,7 +623,7 @@ impl FileDiffAttributeContext {
 /// # Errors
 ///
 /// Propagates config and attribute load failures.
-pub fn file_diffs_from_changes(
+pub(crate) fn file_diffs_from_changes(
     repo: &Repository,
     changes: &[FileChange],
     opts: DiffOptions,
@@ -669,7 +640,7 @@ pub fn file_diffs_from_changes(
 /// # Errors
 ///
 /// Propagates object database and attribute load failures.
-pub fn file_diffs_from_entries(
+pub(crate) fn file_diffs_from_entries(
     repo: &Repository,
     entries: Vec<DiffEntry>,
     opts: DiffOptions,

@@ -13,7 +13,7 @@ use crate::attributes::{collect_attrs_for_path, AttrValue, MacroTable};
 use crate::config::ConfigSet;
 use regex::{Regex, RegexBuilder};
 use std::collections::BTreeMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Built-in diff driver funcname patterns (same strings as Git's userdiff builtin drivers).
 const BUILTIN_PATTERN_DEFS: &[(&str, &str, bool)] = &[
@@ -175,9 +175,9 @@ struct BuiltinPattern {
     ignore_case: bool,
 }
 
-// hygiene: immutable built-in diff funcname matchers, initialized once
-static BUILTIN_FUNCNAME_MATCHERS: OnceLock<BTreeMap<String, Arc<FuncnameMatcher>>> =
-    OnceLock::new();
+// hygiene: built-in drivers compiled on first use of that driver name only
+static BUILTIN_FUNCNAME_MATCHERS: Mutex<BTreeMap<String, Arc<FuncnameMatcher>>> =
+    Mutex::new(BTreeMap::new());
 
 /// Compiled function-name matcher used for diff hunk headers.
 #[derive(Debug, Clone)]
@@ -281,18 +281,23 @@ pub fn matcher_for_driver(
 }
 
 fn cached_builtin_matcher(driver: &str) -> Option<Arc<FuncnameMatcher>> {
-    let map = BUILTIN_FUNCNAME_MATCHERS.get_or_init(|| {
-        builtin_patterns()
-            .clone()
-            .into_iter()
-            .map(|(name, builtin)| {
-                let matcher = compile_matcher(&builtin.pattern, true, builtin.ignore_case)
-                    .unwrap_or_else(|e| panic!("built-in userdiff driver {name}: {e}"));
-                (name, Arc::new(matcher))
-            })
-            .collect()
-    });
-    map.get(driver).cloned()
+    {
+        let cache = BUILTIN_FUNCNAME_MATCHERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(matcher) = cache.get(driver) {
+            return Some(Arc::clone(matcher));
+        }
+    }
+    let defs = builtin_patterns();
+    let builtin = defs.get(driver)?;
+    let matcher = compile_matcher(&builtin.pattern, true, builtin.ignore_case)
+        .unwrap_or_else(|e| panic!("built-in userdiff driver {driver}: {e}"));
+    let arc = Arc::new(matcher);
+    let mut cache = BUILTIN_FUNCNAME_MATCHERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    Some(cache.entry(driver.to_owned()).or_insert(arc).clone())
 }
 
 fn compile_matcher(

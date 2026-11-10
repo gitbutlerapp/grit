@@ -506,6 +506,40 @@ impl<'repo> Diff<'repo> {
         )
     }
 
+    /// Like [`Self::for_each_structured`], but each visit receives a [`FileDiff`] with
+    /// `.gitattributes` funcname context on hunks.
+    ///
+    /// # Errors
+    ///
+    /// Propagates object database, attribute, parallel diff and `visit` errors.
+    pub fn for_each_file_diff(
+        &self,
+        entries: &[DiffEntry],
+        options: &DiffOptions,
+        mut visit: impl FnMut(FileDiff) -> Result<()>,
+    ) -> Result<()> {
+        use crate::diff::funcname_attrs::PatchFuncnameAttrs;
+        use crate::diff::targets::{file_diff_from_tree_structured, include_file_in_diff};
+
+        let config = self.repo.config().snapshot()?;
+        let funcname_attrs = PatchFuncnameAttrs::load_for_diff(self.repo)?;
+        crate::diff::tree_content::for_each_tree_diff_structured(
+            self.repo.odb(),
+            entries,
+            options.clone(),
+            config.as_ref(),
+            &self.repo.thread_policy(),
+            |t| {
+                let file =
+                    file_diff_from_tree_structured(self.repo, config.as_ref(), &funcname_attrs, t);
+                if include_file_in_diff(&file, options) {
+                    visit(file)?;
+                }
+                Ok(())
+            },
+        )
+    }
+
     /// Per-file diffs for one commit against its parents (Git `show` / `log -p` for a commit).
     ///
     /// A root commit is compared with the empty tree. A merge (two or more effective parents,
