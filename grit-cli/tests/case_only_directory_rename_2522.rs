@@ -235,6 +235,33 @@ fn switch_merge_pick_restore_use_lower_case_directory_spelling() -> TestResult {
     assert_directory_spelled_foo(repo)?;
     assert!(repo.join("foo/a.txt").is_file());
     assert!(repo.join("foo/b.txt").is_file());
+    git_ok(
+        repo,
+        &[
+            "ls-files",
+            "--",
+            "foo/a.txt",
+            "foo/b.txt",
+            "Foo/a.txt",
+            "Foo/b.txt",
+        ],
+    )?;
+    let ls = Command::new("git")
+        .current_dir(repo)
+        .args(["ls-files"])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()?;
+    assert!(ls.status.success());
+    let listed = String::from_utf8_lossy(&ls.stdout);
+    assert!(
+        listed.contains("foo/a.txt") && listed.contains("foo/b.txt"),
+        "index must keep lower-case spellings after restore: {listed}"
+    );
+    assert!(
+        !listed.contains("Foo/a.txt") && !listed.contains("Foo/b.txt"),
+        "old directory spellings must not remain in the index: {listed}"
+    );
 
     Ok(())
 }

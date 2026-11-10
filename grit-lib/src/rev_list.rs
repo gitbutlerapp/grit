@@ -11878,12 +11878,21 @@ mod line_coverage_tests {
             no_object_names: true,
             ..RevListOptions::default()
         };
-        let all = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let all = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         let main_only = rev_list(
             &repo,
             &[String::from("main")],
             &[String::from("side")],
             &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         let excluded: std::collections::HashSet<ObjectId> =
             all.objects.iter().map(|(o, _)| *o).collect();

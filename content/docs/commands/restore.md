@@ -103,6 +103,7 @@ Pass `--json` for scripting:
 | ----- | ---- | ------- |
 | `restored` | array of strings | Paths created or updated (non-UTF-8 names use reversible `grit+pathhex:` encoding, same as [`grit status`](status.md)). |
 | `removed` | array of strings | Paths removed because the source had no entry (same encoding as `restored`). |
+| `path_collisions` | array of strings | On a case-insensitive work tree, index paths that share one dentry (informational; same shape as `grit switch` / `grit clone`). Omitted when empty. |
 | `restored_hunks` | object | When `--hunks` was used: map of path → hunk id strings. |
 | `restored_lines` | object | When `--lines` was used: map of path → range strings (`start` or `start-end`). |
 | `dry_run` | boolean | True when `--dry-run` was passed with hunk/line selection. |

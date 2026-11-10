@@ -83,6 +83,8 @@ pub struct RestoreOutcome {
     pub restored: Vec<String>,
     /// Paths removed from the working tree because the source had no entry.
     pub removed: Vec<String>,
+    /// Index paths that share one dentry on a case-insensitive work tree (informational).
+    pub path_collisions: Vec<String>,
 }
 
 /// Restore paths matching `opts.pathspecs` in the index and/or working tree.
@@ -268,6 +270,10 @@ pub(crate) fn restore_paths_with_lock(
     if !outcome.removed.is_empty() {
         outcome.removed.sort();
         outcome.removed.dedup();
+    }
+    if !outcome.path_collisions.is_empty() {
+        outcome.path_collisions.sort();
+        outcome.path_collisions.dedup();
     }
     Ok(outcome)
 }
@@ -805,6 +811,12 @@ fn index_stage0_paths_under(index: &Index, prefix: &str) -> Vec<String> {
         .collect()
 }
 
+struct WorktreeWriteFromIndex {
+    path: String,
+    oid: ObjectId,
+    mode: u32,
+}
+
 fn build_restore_icase_collision_plan(
     work_tree: &Path,
     index: &Index,
@@ -851,6 +863,9 @@ fn build_restore_icase_collision_plan(
             continue;
         };
         if old_dir == new_dir {
+            continue;
+        }
+        if !old.contains('/') && !dest.contains('/') {
             continue;
         }
         dir_pairs
@@ -901,8 +916,131 @@ fn build_restore_icase_collision_plan(
     plan.file_removals = to_remove
         .into_iter()
         .filter(|path| !dir_renamed_paths.contains(path))
+        .filter(|path| path.contains('/'))
         .collect();
+    if plan.directory_renames.is_empty() && plan.file_removals.is_empty() {
+        plan.enabled = false;
+    }
     plan
+}
+
+#[cfg(test)]
+fn build_restore_icase_collision_plan_with_volume(
+    index: &Index,
+    ignorecase: bool,
+    icase_volume: bool,
+    write_destinations: &[String],
+) -> RestoreIcaseCollisionPlan {
+    let collision_opts = crate::path_icase::WorktreePathCollisionOptions {
+        ignorecase,
+        precompose_unicode: false,
+    };
+    if !collision_opts.active() || write_destinations.is_empty() || !icase_volume {
+        return RestoreIcaseCollisionPlan::default();
+    }
+    let mut plan = RestoreIcaseCollisionPlan::default();
+    plan.enabled = true;
+    let dest_lookup = RestoreDestinationFoldLookup::new(write_destinations);
+    let groups = IcaseIndexCollisionGroups::from_index(index, collision_opts);
+    let mut to_remove = BTreeSet::new();
+    for dest in write_destinations {
+        for member in groups.collision_sibling_paths_except(dest) {
+            to_remove.insert(member);
+        }
+    }
+    for entry in index.entries.iter().filter(|e| e.stage() == 0) {
+        if dest_lookup.is_colliding_index_spelling(&entry.path) {
+            to_remove.insert(String::from_utf8_lossy(&entry.path).into_owned());
+        }
+    }
+    if to_remove.is_empty() {
+        plan.enabled = false;
+        return plan;
+    }
+    let mut dir_pairs: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
+    for old in &to_remove {
+        let Some(old_dir) = old.split('/').next() else {
+            continue;
+        };
+        let Some(dest) = dest_lookup.icase_match(old.as_bytes()) else {
+            continue;
+        };
+        let Some(new_dir) = dest.split('/').next() else {
+            continue;
+        };
+        if old_dir == new_dir {
+            continue;
+        }
+        if !old.contains('/') && !dest.contains('/') {
+            continue;
+        }
+        dir_pairs
+            .entry((old_dir.to_owned(), new_dir.to_owned()))
+            .or_default()
+            .insert(old.clone());
+    }
+    let mut dir_renamed_paths = BTreeSet::new();
+    for ((old_dir, new_dir), paired_old_paths) in dir_pairs {
+        if !paths_equal(old_dir.as_bytes(), new_dir.as_bytes(), true) {
+            continue;
+        }
+        let indexed_under_old = index_stage0_paths_under(index, &old_dir);
+        if indexed_under_old.is_empty()
+            || !indexed_under_old
+                .iter()
+                .all(|path| to_remove.contains(path))
+            || paired_old_paths.len() != indexed_under_old.len()
+        {
+            continue;
+        }
+        let expected_dests: BTreeSet<String> = indexed_under_old
+            .iter()
+            .filter_map(|old_path| {
+                dest_lookup
+                    .icase_match(old_path.as_bytes())
+                    .map(str::to_owned)
+            })
+            .collect();
+        if expected_dests.len() != indexed_under_old.len()
+            || !expected_dests.iter().all(|dest| {
+                dest.starts_with(&format!("{new_dir}/")) || dest == &new_dir
+            })
+        {
+            continue;
+        }
+        plan.directory_renames.push((old_dir, new_dir));
+        dir_renamed_paths.extend(indexed_under_old);
+    }
+    plan.file_removals = to_remove
+        .into_iter()
+        .filter(|path| !dir_renamed_paths.contains(path))
+        .filter(|path| path.contains('/'))
+        .collect();
+    if plan.directory_renames.is_empty() && plan.file_removals.is_empty() {
+        plan.enabled = false;
+    }
+    plan
+}
+
+fn rewrite_index_stage0_dir_spelling(index_out: &mut Index, old_dir: &str, new_dir: &str) {
+    let plen = old_dir.len();
+    let paths = index_stage0_paths_under(index_out, old_dir);
+    for path in paths {
+        let new_path = if path == old_dir {
+            new_dir.to_string()
+        } else if path.len() > plen && path.starts_with(old_dir) && path.as_bytes()[plen] == b'/' {
+            format!("{new_dir}{}", &path[plen..])
+        } else {
+            continue;
+        };
+        let path_bytes = crate::repo_relpath::storage_bytes(&path);
+        let Some(mut entry) = index_out.get(path_bytes.as_ref(), 0).cloned() else {
+            continue;
+        };
+        index_out.remove(path_bytes.as_ref());
+        entry.path = crate::repo_relpath::storage_bytes(&new_path).into_owned();
+        index_out.add_or_replace(entry);
+    }
 }
 
 fn apply_restore_icase_collision_plan(
@@ -922,11 +1060,8 @@ fn apply_restore_icase_collision_plan(
         if from.is_dir() {
             case_only_worktree_rename(&from, &to).map_err(Error::Io)?;
         }
-        for path in index_stage0_paths_under(index_out, old_dir) {
-            index_out.remove_path_all_stages(path.as_bytes());
-            *index_dirty = true;
-            outcome.removed.push(path);
-        }
+        rewrite_index_stage0_dir_spelling(index_out, old_dir, new_dir);
+        *index_dirty = true;
     }
     let mut removed_abs: Vec<PathBuf> = Vec::with_capacity(plan.file_removals.len());
     for path in &plan.file_removals {
@@ -977,8 +1112,8 @@ fn apply_worktree_restore_inner(
         let attr_index = index_out.gitattributes_snapshot();
         let rules = WorktreeRules::from_parts_with_config(repo, &attr_index, Arc::clone(&config))?;
         let index_mtime = index_mtime_for_diff(index_out, None);
-        let mut to_write: Vec<usize> = Vec::new();
-        for (pos, entry) in index_out.entries.iter().enumerate() {
+        let mut to_write: Vec<WorktreeWriteFromIndex> = Vec::new();
+        for entry in index_out.entries.iter() {
             if entry.stage() != 0 || entry.skip_worktree() {
                 continue;
             }
@@ -993,40 +1128,32 @@ fn apply_worktree_restore_inner(
             {
                 continue;
             }
-            to_write.push(pos);
+            to_write.push(WorktreeWriteFromIndex {
+                path,
+                oid: entry.oid,
+                mode: entry.mode,
+            });
         }
-        let write_destinations: Vec<String> = to_write
-            .iter()
-            .map(|&pos| crate::repo_relpath::storage_string(&index_out.entries[pos].path))
-            .collect();
-        let icase_plan = build_restore_icase_collision_plan(
-            work_tree,
-            index_out,
-            collision_opts,
-            &write_destinations,
-        );
-        apply_restore_icase_collision_plan(
-            work_tree,
-            index_out,
-            &icase_plan,
-            journal,
-            outcome,
-            index_dirty,
-        )?;
+        if collision_opts.ignorecase
+            && crate::path_icase::worktree_filesystem_case_insensitive(work_tree)
+        {
+            outcome.path_collisions =
+                crate::path_icase::icase_checkout_collision_paths(index_out, collision_opts);
+        }
         if !to_write.is_empty() {
             outcome.restored.reserve(to_write.len());
         }
         progress.start(ProgressPhase::CheckingOutFiles, Some(to_write.len() as u64));
-        for pos in to_write {
+        for item in &to_write {
             poll_cancel(progress, cancel)?;
             progress.inc(1);
-            let path = crate::repo_relpath::storage_string(&index_out.entries[pos].path);
-            let oid = index_out.entries[pos].oid;
-            let mode = index_out.entries[pos].mode;
+            let path = &item.path;
+            let oid = item.oid;
+            let mode = item.mode;
             restore_worktree_blob_from_index(
                 repo,
                 work_tree,
-                &path,
+                path,
                 oid,
                 mode,
                 &rules,
@@ -1088,6 +1215,12 @@ fn apply_worktree_restore_inner(
         outcome,
         index_dirty,
     )?;
+    if collision_opts.ignorecase
+        && crate::path_icase::worktree_filesystem_case_insensitive(work_tree)
+    {
+        outcome.path_collisions =
+            crate::path_icase::icase_checkout_collision_paths(index_out, collision_opts);
+    }
     progress.start(ProgressPhase::CheckingOutFiles, Some(matched.len() as u64));
     for path in matched {
         poll_cancel(progress, cancel)?;
@@ -1359,6 +1492,135 @@ mod tests {
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");
         (dir, repo)
+    }
+
+    fn index_blob_entry(repo: &Repository, path: &str, data: &[u8]) -> IndexEntry {
+        let oid = repo.odb().write(ObjectKind::Blob, data).expect("blob");
+        let mut entry = staged_entry(repo, path, data, 0);
+        entry.oid = oid;
+        entry
+    }
+
+    #[test]
+    fn restore_from_index_does_not_drop_icase_collision_sibling() {
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().expect("wt");
+        std::fs::write(wt.join("Readme.TXT"), "on disk\n").expect("write upper");
+        std::fs::write(wt.join("readme.txt"), "other\n").expect("write lower");
+        std::fs::write(wt.join("base.txt"), "base\n").expect("write base");
+        let mut index = repo.load_index().expect("index");
+        index
+            .entries
+            .push(index_blob_entry(&repo, "Readme.TXT", b"upper\n"));
+        index
+            .entries
+            .push(index_blob_entry(&repo, "readme.txt", b"lower\n"));
+        index
+            .entries
+            .push(index_blob_entry(&repo, "base.txt", b"base\n"));
+        index.sort();
+        repo.write_index(&mut index).expect("write index");
+
+        let outcome = restore_paths(
+            &repo,
+            &RestoreOptions {
+                pathspecs: vec!["Readme.TXT".into()],
+                pathspec_sources: vec!["Readme.TXT".into()],
+                source: RestoreSource::Index,
+                staged: false,
+                worktree: true,
+                stage: None,
+                remerge: None,
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("restore");
+        assert!(
+            !outcome
+                .removed
+                .iter()
+                .any(|p| p.eq_ignore_ascii_case("readme.txt")),
+            "must not remove collision sibling from work tree outcome: {:?}",
+            outcome.removed
+        );
+        let index = repo.load_index().expect("index");
+        assert!(index.get(b"readme.txt", 0).is_some());
+        assert!(index.get(b"Readme.TXT", 0).is_some());
+        assert_eq!(
+            std::fs::read(wt.join("Readme.TXT")).expect("read"),
+            b"upper\n"
+        );
+    }
+
+    #[test]
+    fn restore_dot_with_icase_index_paths_does_not_panic() {
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().expect("wt");
+        std::fs::write(wt.join("Readme.TXT"), "dirty\n").expect("write upper");
+        std::fs::write(wt.join("readme.txt"), "dirty\n").expect("write lower");
+        std::fs::write(wt.join("base.txt"), "dirty base\n").expect("write base");
+        let upper_oid = repo
+            .odb()
+            .write(ObjectKind::Blob, b"upper\n")
+            .expect("blob");
+        let lower_oid = repo
+            .odb()
+            .write(ObjectKind::Blob, b"lower\n")
+            .expect("blob");
+        let base_oid = repo.odb().write(ObjectKind::Blob, b"base\n").expect("blob");
+        let mut index = repo.load_index().expect("index");
+        let mut upper = staged_entry(&repo, "Readme.TXT", b"upper\n", 0);
+        upper.oid = upper_oid;
+        let mut lower = staged_entry(&repo, "readme.txt", b"lower\n", 0);
+        lower.oid = lower_oid;
+        let mut base = staged_entry(&repo, "base.txt", b"base\n", 0);
+        base.oid = base_oid;
+        index.entries.extend([upper, lower, base]);
+        index.sort();
+        repo.write_index(&mut index).expect("write index");
+
+        restore_paths(&repo, &opts("."), &mut NullProgress, &CancelToken::never())
+            .expect("restore dot");
+        let index = repo.load_index().expect("index");
+        assert_eq!(index.get(b"Readme.TXT", 0).unwrap().oid, upper_oid);
+        assert_eq!(index.get(b"readme.txt", 0).unwrap().oid, lower_oid);
+        assert_eq!(index.get(b"base.txt", 0).unwrap().oid, base_oid);
+        assert_eq!(std::fs::read(wt.join("base.txt")).expect("read"), b"base\n");
+    }
+
+    #[test]
+    fn build_icase_collision_plan_skips_file_only_collisions() {
+        let (_dir, repo) = init_repo();
+        let mut index = repo.load_index().expect("index");
+        index
+            .entries
+            .push(index_blob_entry(&repo, "Readme.TXT", b"a\n"));
+        index
+            .entries
+            .push(index_blob_entry(&repo, "readme.txt", b"b\n"));
+        index.sort();
+        let plan = build_restore_icase_collision_plan_with_volume(
+            &index,
+            true,
+            true,
+            &[
+                "Readme.TXT".to_string(),
+                "readme.txt".to_string(),
+                "base.txt".to_string(),
+            ],
+        );
+        assert!(
+            plan.directory_renames.is_empty(),
+            "file basename collisions are not directory renames: {:?}",
+            plan.directory_renames
+        );
+        assert!(
+            plan.file_removals.is_empty(),
+            "basename collisions must not be staged for index removal: {:?}",
+            plan.file_removals
+        );
+        assert!(!plan.enabled);
     }
 
     #[test]
