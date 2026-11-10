@@ -261,7 +261,7 @@ Regenerate this block with `make api-audit`; CI runs `make api-audit-check` in t
 
 ### Top-level public modules
 
-Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/public-api.txt`. **External files** counts files under consumer trees that reference `grit_lib::<module>` (`rg -l`). **Offenders** is the consolidation-total from `make api-ratchet-report` metrics in that module; **repo-first** / **`_with_`** are approximated from `public-api.txt` in the module span.
+Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/public-api.txt`. **External files** counts files under consumer trees that reference `grit_lib::<module>` (`rg -l` or `grep -Erl` on consumer trees). **Offenders** is the consolidation-total from `make api-ratchet-report` metrics in that module; **repo-first** / **`_with_`** are approximated from `public-api.txt` in the module span.
 
 | Module | Lines | External files | Offenders | repo-first | `_with_` |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -272,7 +272,7 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `command_runner` | 484 | 90 | 1 | 0 | 1 |
 | `commit` | 305 | 77 | 3 | 0 | 2 |
 | `commits` | 270 | 59 | 0 | 0 | 0 |
-| `config` | 1,030 | 775 | 0 | 0 | 0 |
+| `config` | 1,030 | 776 | 0 | 0 | 0 |
 | `diagnostics` | 132 | 17 | 0 | 0 | 0 |
 | `diff` | 2,345 | 183 | 10 | 5 | 4 |
 | `divergence` | 243 | 5 | 0 | 0 | 0 |
@@ -293,13 +293,13 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `path_validate` | 142 | 7 | 0 | 0 | 0 |
 | `porcelain` | 2,807 | 298 | 8 | 2 | 2 |
 | `prelude` | 1,174 | 9 | 0 | 0 | 0 |
-| `progress` | 230 | 438 | 0 | 0 | 3 |
+| `progress` | 230 | 439 | 0 | 0 | 3 |
 | `refs` | 2,193 | 249 | 8 | 5 | 3 |
 | `remote` | 4,947 | 226 | 1 | 3 | 1 |
-| `repo` | 451 | 844 | 11 | 2 | 2 |
+| `repo` | 451 | 845 | 11 | 2 | 2 |
 | `repo_handles` | 867 | 53 | 4 | 0 | 4 |
 | `revwalk` | 2,968 | 210 | 2 | 2 | 2 |
-| `stash` | 339 | 27 | 0 | 3 | 0 |
+| `stash` | 339 | 28 | 0 | 3 | 0 |
 | `state` | 142 | 52 | 0 | 0 | 0 |
 | `status` | 320 | 6 | 1 | 0 | 1 |
 | `tree_sha256` | 277 | 11 | 2 | 2 | 0 |
@@ -307,7 +307,7 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 
 ### `Repository` handle accessors
 
-Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.txt` whose return type is a handle (not `Path`, `str`, or a scalar). **Lines** counts public-api entries mentioning the shortened return type. **External** counts consumer files calling `.<accessor>(` (`rg -l`).
+Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.txt` whose return type is a handle (not `Path`, `str`, or a scalar). **Lines** counts public-api entries mentioning the shortened return type. **External** counts consumer files calling `.<accessor>(` (`rg -l` or `grep -Erl` on consumer trees).
 
 | Accessor | Return type | Lines | External `.accessor()` files |
 | --- | --- | ---: | ---: |
@@ -331,7 +331,7 @@ Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.t
 | `remotes` | `grit_lib::repo_handles::RepositoryRemotes<'_>` | 44 | 89 |
 | `revwalk` | `grit_lib::revwalk::handle::RevWalk<'_>` | 164 | 156 |
 | `snapshot_checkouts` | `grit_lib::repo_handles::RepositorySnapshotCheckouts<'_>` | 39 | 4 |
-| `stash` | `grit_lib::repo_handles::RepositoryStash<'_>` | 34 | 27 |
+| `stash` | `grit_lib::repo_handles::RepositoryStash<'_>` | 34 | 28 |
 | `status` | `grit_lib::status::Status<'_>` | 100 | 341 |
 | `tags` | `grit_lib::repo_handles::Tags<'_>` | 23 | 18 |
 | `workspace_snapshot` | `grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'_>` | 21 | 0 |

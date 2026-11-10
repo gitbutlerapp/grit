@@ -2510,7 +2510,7 @@ def render_audit_markdown(
             "",
             "Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/public-api.txt`. "
             "**External files** counts files under consumer trees that reference "
-            "`grit_lib::<module>` (`rg -l`). **Offenders** is the consolidation-total from "
+            "`grit_lib::<module>` (`rg -l` or `grep -Erl` on consumer trees). **Offenders** is the consolidation-total from "
             "`make api-ratchet-report` metrics in that module; **repo-first** / **`_with_`** "
             "are approximated from `public-api.txt` in the module span.",
             "",
@@ -2535,7 +2535,7 @@ def render_audit_markdown(
             "Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.txt` "
             "whose return type is a handle (not `Path`, `str`, or a scalar). **Lines** counts "
             "public-api entries mentioning the shortened return type. **External** counts consumer "
-            "files calling `.<accessor>(` (`rg -l`).",
+            "files calling `.<accessor>(` (`rg -l` or `grep -Erl` on consumer trees).",
             "",
             "| Accessor | Return type | Lines | External `.accessor()` files |",
             "| --- | --- | ---: | ---: |",
