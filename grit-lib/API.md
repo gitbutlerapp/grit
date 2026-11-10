@@ -222,7 +222,7 @@ Use this checklist before merging a new or widened public API:
 ## Audit
 
 <!-- api-audit:begin -->
-Snapshot: [`api-ratchet.toml`](api-ratchet.toml) `meta.updated` **2026-11-09**; [`public-api.txt`](public-api.txt) **32,266** non-empty lines (`wc -l` on the file: **32,266**).
+Snapshot: [`api-ratchet.toml`](api-ratchet.toml) `meta.updated` **2026-11-09**; [`public-api.txt`](public-api.txt) **32,269** non-empty lines (`wc -l` on the file: **32,269**).
 
 Regenerate this block with `make api-audit`; CI runs `make api-audit-check` in the **public-api** job next to `make api-ratchet-check`.
 
@@ -232,7 +232,7 @@ Regenerate this block with `make api-audit`; CI runs `make api-audit-check` in t
 | --- | ---: |
 | `pub_repo_constructors` | 3 |
 | `pub_repo_constructor_offenders` | 4 |
-| `public_api_lines` | 32,266 |
+| `public_api_lines` | 32,269 |
 | `pub_fn_impl_suffix` | 0 |
 | `pub_fn_with_in_name` | 28 |
 | `pub_fn_too_many_arguments_allow` | 2 |
@@ -272,9 +272,9 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `command_runner` | 484 | 90 | 1 | 0 | 1 |
 | `commit` | 305 | 77 | 3 | 0 | 2 |
 | `commits` | 270 | 59 | 0 | 0 | 0 |
-| `config` | 1,030 | 776 | 0 | 0 | 0 |
+| `config` | 1,030 | 775 | 0 | 0 | 0 |
 | `diagnostics` | 132 | 17 | 0 | 0 | 0 |
-| `diff` | 2,345 | 182 | 10 | 5 | 4 |
+| `diff` | 2,348 | 182 | 10 | 5 | 4 |
 | `divergence` | 243 | 5 | 0 | 0 | 0 |
 | `error` | 1,513 | 382 | 0 | 0 | 0 |
 | `gitbutler` | 62 | 4 | 0 | 1 | 0 |
@@ -289,14 +289,14 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `objects` | 2,472 | 711 | 2 | 4 | 1 |
 | `operation` | 215 | 27 | 0 | 0 | 0 |
 | `ownership_check` | 79 | 4 | 0 | 0 | 0 |
-| `parallel` | 130 | 33 | 1 | 0 | 0 |
+| `parallel` | 130 | 32 | 1 | 0 | 0 |
 | `path_validate` | 142 | 7 | 0 | 0 | 0 |
 | `porcelain` | 2,807 | 298 | 8 | 2 | 2 |
 | `prelude` | 1,174 | 9 | 0 | 0 | 0 |
 | `progress` | 230 | 439 | 0 | 0 | 3 |
 | `refs` | 2,193 | 248 | 8 | 5 | 3 |
 | `remote` | 4,947 | 225 | 1 | 3 | 1 |
-| `repo` | 451 | 846 | 11 | 2 | 2 |
+| `repo` | 451 | 847 | 11 | 2 | 2 |
 | `repo_handles` | 867 | 53 | 4 | 0 | 4 |
 | `revwalk` | 2,968 | 209 | 2 | 2 | 2 |
 | `stash` | 339 | 28 | 0 | 3 | 0 |
@@ -317,7 +317,7 @@ Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.t
 | `commits` | `grit_lib::commits::Commits<'_>` | 25 | 131 |
 | `config` | `grit_lib::config::Config<'_>` | 567 | 98 |
 | `diagnostics` | `grit_lib::diagnostics::DiagnosticsHandle` | 18 | 1 |
-| `diff` | `grit_lib::diff::Diff<'_>` | 513 | 89 |
+| `diff` | `grit_lib::diff::Diff<'_>` | 516 | 90 |
 | `history` | `grit_lib::revwalk::history::History<'_>` | 213 | 40 |
 | `hooks` | `grit_lib::repo_handles::RepositoryHooks<'_>` | 28 | 10 |
 | `index` | `grit_lib::index::IndexFile<'_>` | 41 | 196 |
@@ -445,7 +445,7 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_fn_with_in_name` | `grit_lib::commit_trailers::append_signoff_trailer_with_dedup :: append_signoff_trailer_with_dedup` |
 | `pub_fn_with_in_name` | `grit_lib::commit_trailers::finalize_cherry_pick_message_with_options :: finalize_cherry_pick_message_with_options` |
 | `pub_fn_with_in_name` | `grit_lib::crlf::ConversionConfig (grit-lib/src/crlf.rs:321) :: from_config_with_runner` |
-| `pub_fn_with_in_name` | `grit_lib::diff::handle::Diff (grit-lib/src/diff/handle.rs:752) :: resolve_blame_line_range_with_options` |
+| `pub_fn_with_in_name` | `grit_lib::diff::handle::Diff (grit-lib/src/diff/handle.rs:812) :: resolve_blame_line_range_with_options` |
 | `pub_fn_with_in_name` | `grit_lib::diff::options::DiffOptions (grit-lib/src/diff/options.rs:271) :: resolve_indent_heuristic_with_override` |
 | `pub_fn_with_in_name` | `grit_lib::gc::prune_loose_unreachable_with_dry_run :: prune_loose_unreachable_with_dry_run` |
 | `pub_fn_with_in_name` | `grit_lib::lockfile::LockFile (grit-lib/src/lockfile.rs:244) :: acquire_with_clock` |
@@ -530,10 +530,10 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_items_multiple_paths` | `id 10966: grit_lib::objects::hash::Parallelism | grit_lib::parallel::Parallelism` |
 | `pub_items_multiple_paths` | `id 1137: grit_lib::commits::CommitError | grit_lib::porcelain::CommitError` |
 | `pub_items_multiple_paths` | `id 1211: grit_lib::merge::MergeError | grit_lib::porcelain::MergeError` |
-| `pub_items_multiple_paths` | `id 14196: grit_lib::error::PathspecResolveError | grit_lib::worktree::pathspec::PathspecResolveError` |
-| `pub_items_multiple_paths` | `id 15327: grit_lib::objects::odb::WritableObjectStore | grit_lib::objects::odb::store::WritableObjectStore` |
-| `pub_items_multiple_paths` | `id 15877: grit_lib::index::IndexError | grit_lib::index::error::IndexError` |
-| `pub_items_multiple_paths` | `id 16777: grit_lib::error::PathspecFromFileParseError | grit_lib::worktree::pathspec::PathspecFromFileParseError` |
+| `pub_items_multiple_paths` | `id 14200: grit_lib::error::PathspecResolveError | grit_lib::worktree::pathspec::PathspecResolveError` |
+| `pub_items_multiple_paths` | `id 15331: grit_lib::objects::odb::WritableObjectStore | grit_lib::objects::odb::store::WritableObjectStore` |
+| `pub_items_multiple_paths` | `id 15881: grit_lib::index::IndexError | grit_lib::index::error::IndexError` |
+| `pub_items_multiple_paths` | `id 16781: grit_lib::error::PathspecFromFileParseError | grit_lib::worktree::pathspec::PathspecFromFileParseError` |
 | `pub_items_multiple_paths` | `id 1750: grit_lib::merge::FastForwardPolicy | grit_lib::porcelain::merge::FastForwardPolicy` |
 | `pub_items_multiple_paths` | `id 1785: grit_lib::merge::MergeCommitMode | grit_lib::porcelain::merge::MergeCommitMode` |
 | `pub_items_multiple_paths` | `id 1832: grit_lib::merge::MergeOptions | grit_lib::porcelain::merge::MergeOptions` |
@@ -542,20 +542,20 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_items_multiple_paths` | `id 1941: grit_lib::merge::MergePrediction | grit_lib::porcelain::merge::MergePrediction` |
 | `pub_items_multiple_paths` | `id 1974: grit_lib::merge::WrittenMergeTree | grit_lib::porcelain::merge::WrittenMergeTree` |
 | `pub_items_multiple_paths` | `id 1975: grit_lib::merge::MergeTreeStage | grit_lib::porcelain::merge::MergeTreeStage` |
-| `pub_items_multiple_paths` | `id 20273: grit_lib::objects::hash::ParallelHashError | grit_lib::parallel::ParallelHashError` |
+| `pub_items_multiple_paths` | `id 20277: grit_lib::objects::hash::ParallelHashError | grit_lib::parallel::ParallelHashError` |
 | `pub_items_multiple_paths` | `id 2046: grit_lib::merge::MergeDryRunPlan | grit_lib::porcelain::merge::MergeDryRunPlan` |
 | `pub_items_multiple_paths` | `id 2080: grit_lib::merge::MergeSourceKind | grit_lib::porcelain::merge::MergeSourceKind` |
 | `pub_items_multiple_paths` | `id 2112: grit_lib::merge::MergeSource | grit_lib::porcelain::merge::MergeSource` |
 | `pub_items_multiple_paths` | `id 2156: grit_lib::merge::IntegrateBranchOutcome | grit_lib::porcelain::merge::IntegrateBranchOutcome` |
 | `pub_items_multiple_paths` | `id 2189: grit_lib::merge::ContinueOptions | grit_lib::porcelain::merge::ContinueOptions` |
 | `pub_items_multiple_paths` | `id 2214: grit_lib::merge::ContinueOutcome | grit_lib::porcelain::merge::ContinueOutcome` |
-| `pub_items_multiple_paths` | `id 23764: grit_lib::index::IndexCorruptReason | grit_lib::index::error::IndexCorruptReason` |
-| `pub_items_multiple_paths` | `id 23799: grit_lib::index::IndexCorrupt | grit_lib::index::error::IndexCorrupt` |
-| `pub_items_multiple_paths` | `id 23836: grit_lib::index::IndexChmodReason | grit_lib::index::error::IndexChmodReason` |
+| `pub_items_multiple_paths` | `id 23768: grit_lib::index::IndexCorruptReason | grit_lib::index::error::IndexCorruptReason` |
+| `pub_items_multiple_paths` | `id 23803: grit_lib::index::IndexCorrupt | grit_lib::index::error::IndexCorrupt` |
+| `pub_items_multiple_paths` | `id 23840: grit_lib::index::IndexChmodReason | grit_lib::index::error::IndexChmodReason` |
 | `pub_items_multiple_paths` | `id 2780: grit_lib::merge::ReplayDirection | grit_lib::porcelain::replay::ReplayDirection` |
 | `pub_items_multiple_paths` | `id 2814: grit_lib::merge::ReplayRequest | grit_lib::porcelain::replay::ReplayRequest` |
-| `pub_items_multiple_paths` | `id 28430: grit_lib::objects::odb::ObjectStore | grit_lib::objects::odb::store::ObjectStore` |
-| `pub_items_multiple_paths` | `id 28433: grit_lib::objects::odb::ObjectStream | grit_lib::objects::odb::store::ObjectStream` |
+| `pub_items_multiple_paths` | `id 28434: grit_lib::objects::odb::ObjectStore | grit_lib::objects::odb::store::ObjectStore` |
+| `pub_items_multiple_paths` | `id 28437: grit_lib::objects::odb::ObjectStream | grit_lib::objects::odb::store::ObjectStream` |
 | `pub_items_multiple_paths` | `id 2844: grit_lib::merge::ReplayOutcome | grit_lib::porcelain::replay::ReplayOutcome` |
 | `pub_items_multiple_paths` | `id 2876: grit_lib::merge::ReplayEmptyPolicy | grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy` |
 | `pub_items_multiple_paths` | `id 2916: grit_lib::merge::ReplayOptions | grit_lib::porcelain::replay_sequence::ReplayOptions` |
@@ -564,10 +564,10 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_items_multiple_paths` | `id 3010: grit_lib::merge::SequencePrediction | grit_lib::porcelain::replay_sequence::SequencePrediction` |
 | `pub_items_multiple_paths` | `id 3055: grit_lib::merge::SequenceOutcome | grit_lib::porcelain::replay_sequence::SequenceOutcome` |
 | `pub_items_multiple_paths` | `id 3087: grit_lib::merge::ReplayAbortOutcome | grit_lib::porcelain::replay_sequence::ReplayAbortOutcome` |
-| `pub_items_multiple_paths` | `id 35145: grit_lib::remote::redact_url_for_display | grit_lib::remote::transport_path::redact_url_for_display` |
-| `pub_items_multiple_paths` | `id 35192: grit_lib::repo::UnknownRepositoryExtensions | grit_lib::repo::error::UnknownRepositoryExtensions` |
-| `pub_items_multiple_paths` | `id 35225: grit_lib::repo::V1OnlyExtensionsInFormatZero | grit_lib::repo::error::V1OnlyExtensionsInFormatZero` |
-| `pub_items_multiple_paths` | `id 35360: grit_lib::repo::RepositoryResult | grit_lib::repo::error::RepositoryResult` |
+| `pub_items_multiple_paths` | `id 35149: grit_lib::remote::redact_url_for_display | grit_lib::remote::transport_path::redact_url_for_display` |
+| `pub_items_multiple_paths` | `id 35196: grit_lib::repo::UnknownRepositoryExtensions | grit_lib::repo::error::UnknownRepositoryExtensions` |
+| `pub_items_multiple_paths` | `id 35229: grit_lib::repo::V1OnlyExtensionsInFormatZero | grit_lib::repo::error::V1OnlyExtensionsInFormatZero` |
+| `pub_items_multiple_paths` | `id 35364: grit_lib::repo::RepositoryResult | grit_lib::repo::error::RepositoryResult` |
 | `pub_items_multiple_paths` | `id 4013: grit_lib::porcelain::status::UntrackedMode | grit_lib::status::UntrackedMode` |
 | `pub_items_multiple_paths` | `id 4046: grit_lib::porcelain::status::IgnoredMode | grit_lib::status::IgnoredMode` |
 | `pub_items_multiple_paths` | `id 4078: grit_lib::porcelain::status::RenameDetection | grit_lib::status::RenameDetection` |
