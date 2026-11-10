@@ -49,10 +49,8 @@ pub fn worktree_case_collision_groups(
     index: &Index,
 ) -> Result<Vec<CaseCollisionGroup>> {
     let config = repo.config().snapshot()?;
-    let collision_opts = worktree_path_collision_options(
-        config.ignore_case(),
-        config.precompose_unicode(),
-    );
+    let collision_opts =
+        worktree_path_collision_options(config.ignore_case(), config.precompose_unicode());
     if !collision_opts.active() {
         return Ok(Vec::new());
     }
@@ -72,8 +70,7 @@ pub fn worktree_case_collision_groups(
             if !map.is_auto_stage_loser(path_bytes) {
                 continue;
             }
-            let abs =
-                worktree_path_for_index_entry_with_options(work_tree, member, collision_opts);
+            let abs = worktree_path_for_index_entry_with_options(work_tree, member, collision_opts);
             let Ok(meta) = std::fs::symlink_metadata(&abs) else {
                 active = true;
                 break;

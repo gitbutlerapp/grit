@@ -1002,9 +1002,9 @@ fn build_restore_icase_collision_plan_with_volume(
             })
             .collect();
         if expected_dests.len() != indexed_under_old.len()
-            || !expected_dests.iter().all(|dest| {
-                dest.starts_with(&format!("{new_dir}/")) || dest == &new_dir
-            })
+            || !expected_dests
+                .iter()
+                .all(|dest| dest.starts_with(&format!("{new_dir}/")) || dest == &new_dir)
         {
             continue;
         }
