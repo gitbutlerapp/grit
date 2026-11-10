@@ -2327,7 +2327,9 @@ def rg_file_count(pattern: str, paths: Iterable[str]) -> int:
         if not target.exists():
             continue
         if use_rg:
-            cmd = ["rg", "-l", pattern, str(target)]
+            # Limit to Rust sources so counts match ``grep --include=*.rs`` on CI runners
+            # that do not ship ripgrep (rg would otherwise count Markdown and other paths).
+            cmd = ["rg", "-l", "--glob", "*.rs", pattern, str(target)]
         else:
             # -E: same metacharacters as ripgrep for patterns we emit (``\\.foo\\(``).
             cmd = ["grep", "-Erl", "--include=*.rs", pattern, str(target)]

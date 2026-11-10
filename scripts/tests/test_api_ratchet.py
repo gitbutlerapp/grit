@@ -2035,15 +2035,41 @@ class TestRgFileCount(unittest.TestCase):
                     # Invalid ERE: GNU grep exits 2 instead of reporting zero matches.
                     ar.rg_file_count("(", ("grit-cli",))
 
+    def _grep_parity(self, pattern: str, paths: tuple[str, ...]) -> None:
+        with_rg = ar.rg_file_count(pattern, paths)
+        with mock.patch.object(ar.shutil, "which", return_value=None):
+            with_grep = ar.rg_file_count(pattern, paths)
+        self.assertEqual(with_grep, with_rg)
+
     @unittest.skipUnless(shutil.which("rg"), "ripgrep not installed")
     def test_grep_fallback_parity_with_rg_on_accessor_pattern(self) -> None:
         accessor = "objects"
         pattern = rf"\.{re.escape(accessor)}\("
-        with_rg = ar.rg_file_count(pattern, ar.CONSUMER_PATHS)
+        self._grep_parity(pattern, ar.CONSUMER_PATHS)
+        self.assertGreater(ar.rg_file_count(pattern, ar.CONSUMER_PATHS), 0)
+
+    @unittest.skipUnless(shutil.which("rg"), "ripgrep not installed")
+    def test_grep_fallback_parity_with_rg_on_module_pattern(self) -> None:
+        self._grep_parity("grit_lib::config", ar.CONSUMER_PATHS)
+        self.assertGreater(ar.rg_file_count("grit_lib::config", ar.CONSUMER_PATHS), 0)
+
+
+class TestAuditMarkdownParity(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("rg"), "ripgrep not installed")
+    def test_audit_section_byte_identical_rg_and_grep_backends(self) -> None:
+        """Hosted CI uses grep-only; dev machines often have ripgrep."""
+        args = mock.Mock(rustdoc_json=ar.DEFAULT_RUSTDOC_JSON)
+        snapshot, public_api_lines, file_lines, meta = ar.audit_snapshot(args)
+        kwargs = dict(
+            snapshot=snapshot,
+            public_api_lines=public_api_lines,
+            public_api_file_lines=file_lines,
+            meta=meta,
+        )
+        with_rg = ar.render_audit_markdown(**kwargs)
         with mock.patch.object(ar.shutil, "which", return_value=None):
-            with_grep = ar.rg_file_count(pattern, ar.CONSUMER_PATHS)
+            with_grep = ar.render_audit_markdown(**kwargs)
         self.assertEqual(with_grep, with_rg)
-        self.assertGreater(with_rg, 0)
 
 
 if __name__ == "__main__":
