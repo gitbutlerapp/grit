@@ -120,6 +120,7 @@ mod blame_line_map_regression;
 #[cfg(feature = "full-tests")]
 #[path = "blame_line_range_git_compat.rs"]
 mod blame_line_range_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "blame_merge_stamp_regression.rs"]
 mod blame_merge_stamp_regression;
 #[cfg(feature = "full-tests")]
@@ -271,6 +272,8 @@ mod checkout_populated_index_stat_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "checkout_populated_tree_large.rs"]
 mod checkout_populated_tree_large;
+#[path = "checkout_precompose_collision_commit.rs"]
+mod checkout_precompose_collision_commit;
 #[cfg(feature = "full-tests")]
 #[path = "checkout_replaced_top_level_dir_git_compat.rs"]
 mod checkout_replaced_top_level_dir_git_compat;

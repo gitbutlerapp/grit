@@ -12,6 +12,37 @@ use smallvec::SmallVec;
 use crate::index::{Index, MODE_GITLINK, MODE_TREE};
 use crate::index_name_hash_lazy::memihash;
 use crate::parallel::{par_map, ParallelOptions};
+use crate::unicode_normalization::{
+    has_non_ascii_utf8, precompose_utf8_path, precompose_utf8_segment,
+};
+
+/// Worktree identity rules that can make distinct index paths share one on-disk file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct WorktreePathCollisionOptions {
+    /// `core.ignorecase`: ASCII paths compare case-insensitively.
+    pub ignorecase: bool,
+    /// `core.precomposeunicode`: UTF-8 paths compare in NFC per path segment.
+    pub precompose_unicode: bool,
+}
+
+impl WorktreePathCollisionOptions {
+    /// Whether collision grouping or dentry matching should run.
+    #[must_use]
+    pub const fn active(self) -> bool {
+        self.ignorecase || self.precompose_unicode
+    }
+}
+
+#[must_use]
+pub(crate) fn worktree_path_collision_options(
+    ignorecase: bool,
+    precompose_unicode: bool,
+) -> WorktreePathCollisionOptions {
+    WorktreePathCollisionOptions {
+        ignorecase,
+        precompose_unicode,
+    }
+}
 
 /// Names stored back to back in one buffer, with `(case-folded hash, start, end)` spans
 /// sorted by hash: two allocations however many names, and lookups by binary search.
@@ -359,13 +390,81 @@ impl<'a> ScheduledDeletePathLookup<'a> {
     }
 }
 
-/// Compare two repository-relative paths for identity.
+/// Compare two repository-relative paths for identity on the worktree.
 #[must_use]
 pub fn paths_equal(path_a: &[u8], path_b: &[u8], ignorecase: bool) -> bool {
+    paths_equal_with_options(
+        path_a,
+        path_b,
+        WorktreePathCollisionOptions {
+            ignorecase,
+            precompose_unicode: false,
+        },
+    )
+}
+
+/// Compare two repository-relative paths using `core.ignorecase` and `core.precomposeunicode`.
+#[must_use]
+pub(crate) fn paths_equal_with_options(
+    path_a: &[u8],
+    path_b: &[u8],
+    opts: WorktreePathCollisionOptions,
+) -> bool {
     if path_a == path_b {
         return true;
     }
-    ignorecase && path_a.eq_ignore_ascii_case(path_b)
+    if opts.ignorecase && path_a.eq_ignore_ascii_case(path_b) {
+        return true;
+    }
+    if !opts.precompose_unicode {
+        return false;
+    }
+    let Ok(a) = std::str::from_utf8(path_a) else {
+        return false;
+    };
+    let Ok(b) = std::str::from_utf8(path_b) else {
+        return false;
+    };
+    paths_same_worktree_slot_str(a, b, opts)
+}
+
+#[must_use]
+fn paths_same_worktree_slot_str(
+    path_a: &str,
+    path_b: &str,
+    opts: WorktreePathCollisionOptions,
+) -> bool {
+    if path_a == path_b {
+        return true;
+    }
+    if opts.ignorecase && path_a.eq_ignore_ascii_case(path_b) {
+        return true;
+    }
+    if opts.precompose_unicode {
+        let a = precompose_utf8_path(path_a);
+        let b = precompose_utf8_path(path_b);
+        if a == b {
+            return true;
+        }
+        if opts.ignorecase && a.eq_ignore_ascii_case(b.as_ref()) {
+            return true;
+        }
+    }
+    false
+}
+
+#[must_use]
+fn path_collision_bucket_bytes(path: &str, opts: WorktreePathCollisionOptions) -> Vec<u8> {
+    let canonical: Cow<'_, str> = if opts.precompose_unicode {
+        precompose_utf8_path(path)
+    } else {
+        Cow::Borrowed(path)
+    };
+    if opts.ignorecase {
+        canonical.to_ascii_lowercase().into_bytes()
+    } else {
+        canonical.into_owned().into_bytes()
+    }
 }
 
 /// Repository-relative path using each parent directory entry's on-disk spelling.
@@ -411,17 +510,45 @@ impl DirEntryNames {
             .filter_map(|name| std::str::from_utf8(name).ok())
     }
 
+    fn all_entry_names(&self) -> impl Iterator<Item = &str> {
+        self.0
+            .spans
+            .iter()
+            .filter_map(|&(_, start, end)| std::str::from_utf8(&self.0.bytes[start..end]).ok())
+    }
+
     fn contains(&self, want: &str) -> bool {
         self.bucket(want).any(|name| name == want)
     }
 
-    /// Names equal to `want` ignoring ASCII case: the exact spelling first, then byte order.
-    fn candidates(&self, want: &str) -> SmallVec<[String; 1]> {
-        let mut names: SmallVec<[String; 1]> = self
-            .bucket(want)
-            .filter(|name| name.eq_ignore_ascii_case(want))
-            .map(str::to_owned)
-            .collect();
+    /// Names on disk that match `want` under the configured worktree identity rules.
+    fn candidates(&self, want: &str, opts: WorktreePathCollisionOptions) -> SmallVec<[String; 1]> {
+        let mut names: SmallVec<[String; 1]> = SmallVec::new();
+        let mut seen = HashSet::new();
+        if opts.ignorecase {
+            for name in self
+                .bucket(want)
+                .filter(|name| name.eq_ignore_ascii_case(want))
+            {
+                if seen.insert(name.to_owned()) {
+                    names.push(name.to_owned());
+                }
+            }
+        }
+        if opts.precompose_unicode && has_non_ascii_utf8(want) {
+            let want_nfc = precompose_utf8_segment(want);
+            for name in self.all_entry_names() {
+                if precompose_utf8_segment(name).as_ref() == want_nfc.as_ref() {
+                    let owned = name.to_owned();
+                    if seen.insert(owned.clone()) {
+                        names.push(owned);
+                    }
+                }
+            }
+        }
+        if names.is_empty() && self.contains(want) {
+            names.push(want.to_owned());
+        }
         names.sort_by(|a, b| (b == want).cmp(&(a == want)).then_with(|| a.cmp(b)));
         names
     }
@@ -441,16 +568,32 @@ pub(crate) struct DentrySpellingCache<'w> {
     listings: HashMap<String, Arc<DirEntryNames>>,
     /// Last parent directory whose every component exists with the exact index spelling.
     exact_parent: Option<(String, Arc<DirEntryNames>)>,
+    collision_opts: WorktreePathCollisionOptions,
 }
 
 impl<'w> DentrySpellingCache<'w> {
     /// Cache for paths under `work_tree`; nothing is read until a path is resolved.
     #[must_use]
     pub fn new(work_tree: &'w Path) -> Self {
+        Self::with_collision_options(
+            work_tree,
+            WorktreePathCollisionOptions {
+                ignorecase: true,
+                precompose_unicode: false,
+            },
+        )
+    }
+
+    #[must_use]
+    pub(crate) fn with_collision_options(
+        work_tree: &'w Path,
+        collision_opts: WorktreePathCollisionOptions,
+    ) -> Self {
         Self {
             work_tree,
             listings: HashMap::new(),
             exact_parent: None,
+            collision_opts,
         }
     }
 
@@ -564,7 +707,10 @@ impl<'w> DentrySpellingCache<'w> {
         let [head, tail @ ..] = components else {
             return None;
         };
-        for actual in self.listing(parent, read_dir).candidates(head) {
+        for actual in self
+            .listing(parent, read_dir)
+            .candidates(head, self.collision_opts)
+        {
             let child = if parent.is_empty() {
                 actual
             } else {
@@ -588,8 +734,29 @@ pub fn worktree_path_for_index_entry(
     index_rel: &str,
     ignorecase: bool,
 ) -> PathBuf {
+    worktree_path_for_index_entry_with_options(
+        work_tree,
+        index_rel,
+        WorktreePathCollisionOptions {
+            ignorecase,
+            precompose_unicode: false,
+        },
+    )
+}
+
+pub(crate) fn worktree_path_for_index_entry_with_options(
+    work_tree: &Path,
+    index_rel: &str,
+    opts: WorktreePathCollisionOptions,
+) -> PathBuf {
+    if opts.precompose_unicode && has_non_ascii_utf8(index_rel) {
+        return crate::unicode_normalization::resolve_worktree_path_for_staging(
+            work_tree, index_rel, true,
+        )
+        .abs;
+    }
     let direct = work_tree.join(index_rel);
-    if !ignorecase {
+    if !opts.ignorecase {
         return direct;
     }
     crate::worktree_scan::probe_worktree_path_resolution(&direct);
@@ -602,14 +769,18 @@ pub fn worktree_path_for_index_entry(
     direct
 }
 
-/// Stage-0 blob paths that share a worktree slot under `core.ignorecase` (sorted, unique).
+/// Stage-0 blob paths that share a worktree slot under `core.ignorecase` or
+/// `core.precomposeunicode` (sorted, unique).
 #[must_use]
-pub fn icase_checkout_collision_paths(index: &Index, ignorecase: bool) -> Vec<String> {
-    if !ignorecase {
+pub fn icase_checkout_collision_paths(
+    index: &Index,
+    collision_opts: WorktreePathCollisionOptions,
+) -> Vec<String> {
+    if !collision_opts.active() {
         return Vec::new();
     }
     let paths = stage0_blob_paths(index);
-    let collided: BTreeSet<&str> = icase_collision_sets(&paths)
+    let collided: BTreeSet<&str> = worktree_collision_sets(&paths, collision_opts)
         .into_iter()
         .flatten()
         .map(|i| paths[i])
@@ -629,13 +800,13 @@ pub(crate) struct IcaseIndexCollisionGroups {
 }
 
 impl IcaseIndexCollisionGroups {
-    pub(crate) fn from_index(index: &Index, ignorecase: bool) -> Self {
-        if !ignorecase {
+    pub(crate) fn from_index(index: &Index, collision_opts: WorktreePathCollisionOptions) -> Self {
+        if !collision_opts.active() {
             return Self::default();
         }
         let paths = stage0_blob_paths(index);
         let mut path_to_group = HashMap::new();
-        let members_by_group = icase_collision_sets(&paths)
+        let members_by_group = worktree_collision_sets(&paths, collision_opts)
             .into_iter()
             .enumerate()
             .map(|(key, set)| {
@@ -681,9 +852,13 @@ pub(crate) struct IcaseCheckoutCollisionMap {
 }
 
 impl IcaseCheckoutCollisionMap {
-    pub(crate) fn from_index(work_tree: &Path, index: &Index, ignorecase: bool) -> Self {
-        let groups = IcaseIndexCollisionGroups::from_index(index, ignorecase);
-        let mut dentries = DentrySpellingCache::new(work_tree);
+    pub(crate) fn from_index(
+        work_tree: &Path,
+        index: &Index,
+        collision_opts: WorktreePathCollisionOptions,
+    ) -> Self {
+        let groups = IcaseIndexCollisionGroups::from_index(index, collision_opts);
+        let mut dentries = DentrySpellingCache::with_collision_options(work_tree, collision_opts);
         let mut winner_by_group = Vec::with_capacity(groups.members_by_group.len());
         let mut oids_by_group = Vec::with_capacity(groups.members_by_group.len());
         for members in &groups.members_by_group {
@@ -766,11 +941,12 @@ pub(crate) fn smudge_ignorecase_collision_stat_mismatches(
     config: &crate::config::ConfigSet,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> bool {
-    let ignorecase = config.ignore_case();
-    if !ignorecase {
+    let collision_opts =
+        worktree_path_collision_options(config.ignore_case(), config.precompose_unicode());
+    if !collision_opts.active() {
         return false;
     }
-    let map = IcaseCheckoutCollisionMap::from_index(work_tree, index, true);
+    let map = IcaseCheckoutCollisionMap::from_index(work_tree, index, collision_opts);
     if map.collision_groups().members_by_group.is_empty() {
         return false;
     }
@@ -790,7 +966,7 @@ pub(crate) fn smudge_ignorecase_collision_stat_mismatches(
             if ie.mode != crate::index::MODE_REGULAR && ie.mode != crate::index::MODE_EXECUTABLE {
                 continue;
             }
-            let abs = worktree_path_for_index_entry(work_tree, member, true);
+            let abs = worktree_path_for_index_entry_with_options(work_tree, member, collision_opts);
             let Ok(meta) = std::fs::symlink_metadata(&abs) else {
                 continue;
             };
@@ -889,11 +1065,11 @@ fn compare_icase_spelling_preference(a: &str, b: &str) -> std::cmp::Ordering {
 pub fn icase_worktree_file_stats(
     index: &Index,
     work_tree: Option<&Path>,
-    ignorecase: bool,
+    collision_opts: WorktreePathCollisionOptions,
 ) -> (u64, u64) {
     let mut files = 0u64;
     let mut bytes = 0u64;
-    if !ignorecase {
+    if !collision_opts.active() {
         for e in &index.entries {
             if e.stage() == 0 && e.mode != MODE_TREE && e.mode != MODE_GITLINK {
                 files += 1;
@@ -903,12 +1079,13 @@ pub fn icase_worktree_file_stats(
         return (files, bytes);
     }
     let paths = stage0_blob_paths(index);
-    let sets = icase_collision_sets(&paths);
+    let sets = worktree_collision_sets(&paths, collision_opts);
     let mut in_set = vec![false; paths.len()];
     for &i in sets.iter().flatten() {
         in_set[i] = true;
     }
-    let mut dentries = work_tree.map(DentrySpellingCache::new);
+    let mut dentries =
+        work_tree.map(|wt| DentrySpellingCache::with_collision_options(wt, collision_opts));
     let mut group_bytes = |group: &[&str]| -> u64 {
         let mut group_bytes = 0u64;
         if let (Some(wt), Some(dentries)) = (work_tree, dentries.as_mut()) {
@@ -917,7 +1094,7 @@ pub fn icase_worktree_file_stats(
             } else {
                 group[0].to_owned()
             };
-            let abs = worktree_path_for_index_entry(wt, &probe, true);
+            let abs = worktree_path_for_index_entry_with_options(wt, &probe, collision_opts);
             if abs.is_file() {
                 if let Ok(meta) = std::fs::symlink_metadata(&abs) {
                     group_bytes = meta.len();
@@ -993,23 +1170,23 @@ impl LazyDisjointSets {
     }
 }
 
-/// Positions in `paths` that share a worktree slot under `core.ignorecase`: paths equal
-/// ignoring ASCII case, and a file whose path is a leading directory of another path.
+/// Positions in `paths` that share a worktree slot: ASCII case variants, NFC-normalization
+/// aliases, and a file whose path is a leading directory of another path.
 ///
 /// Only groups with at least two members are returned, each sorted by path bytes.
-fn icase_collision_sets(paths: &[&str]) -> Vec<Vec<usize>> {
+fn worktree_collision_sets(paths: &[&str], opts: WorktreePathCollisionOptions) -> Vec<Vec<usize>> {
     let mut sets = LazyDisjointSets::new(paths.len());
     let mut by_fold: HashMap<u32, SmallVec<[usize; 1]>> = HashMap::with_capacity(paths.len());
     for (i, path) in paths.iter().enumerate() {
         by_fold
-            .entry(memihash(path.as_bytes()))
+            .entry(memihash(&path_collision_bucket_bytes(path, opts)))
             .or_default()
             .push(i);
     }
     for bucket in by_fold.values().filter(|b| b.len() > 1) {
         for (a, &i) in bucket.iter().enumerate() {
             for &j in &bucket[a + 1..] {
-                if paths[i].eq_ignore_ascii_case(paths[j]) {
+                if paths_same_worktree_slot_str(paths[i], paths[j], opts) {
                     sets.union(i, j);
                 }
             }
@@ -1020,14 +1197,15 @@ fn icase_collision_sets(paths: &[&str]) -> Vec<Vec<usize>> {
     for path in paths {
         insert_leading_dirs(&mut dirs, path.as_bytes());
     }
-    let file_at_dir: HashMap<&[u8], usize> = dirs
+    let file_at_dir: HashMap<Vec<u8>, usize> = dirs
         .into_iter()
         .filter_map(|dir| {
-            let bucket = by_fold.get(&memihash(dir))?;
+            let dir_str = std::str::from_utf8(dir).ok()?;
+            let bucket = by_fold.get(&memihash(&path_collision_bucket_bytes(dir_str, opts)))?;
             let file = bucket
                 .iter()
-                .find(|&&j| paths[j].as_bytes().eq_ignore_ascii_case(dir))?;
-            Some((dir, *file))
+                .find(|&&j| paths_same_worktree_slot_str(paths[j], dir_str, opts))?;
+            Some((dir.to_vec(), *file))
         })
         .collect();
     if !file_at_dir.is_empty() {
@@ -1135,45 +1313,71 @@ mod tests {
         }
     }
 
-    fn collision_sets_of<'a>(paths: &[&'a str]) -> Vec<Vec<&'a str>> {
-        icase_collision_sets(paths)
+    fn collision_sets_of<'a>(
+        paths: &[&'a str],
+        opts: WorktreePathCollisionOptions,
+    ) -> Vec<Vec<&'a str>> {
+        worktree_collision_sets(paths, opts)
             .into_iter()
             .map(|set| set.into_iter().map(|i| paths[i]).collect())
             .collect()
     }
 
+    const ICASE: WorktreePathCollisionOptions = WorktreePathCollisionOptions {
+        ignorecase: true,
+        precompose_unicode: false,
+    };
+    const PRECOMPOSE: WorktreePathCollisionOptions = WorktreePathCollisionOptions {
+        ignorecase: false,
+        precompose_unicode: true,
+    };
+
     #[test]
     fn collision_sets_group_case_variants_and_file_dir_overlaps() {
-        assert!(collision_sets_of(&["a/b", "a/c", "b"]).is_empty());
+        assert!(collision_sets_of(&["a/b", "a/c", "b"], ICASE).is_empty());
         assert_eq!(
-            collision_sets_of(&["File.txt", "file.txt", "other"]),
+            collision_sets_of(&["File.txt", "file.txt", "other"], ICASE),
             vec![vec!["File.txt", "file.txt"]]
         );
         assert_eq!(
-            collision_sets_of(&["A/B", "a", "x/y"]),
+            collision_sets_of(&["A/B", "a", "x/y"], ICASE),
             vec![vec!["A/B", "a"]]
         );
         assert_eq!(
-            collision_sets_of(&["Dir/a.txt", "dir/A.txt", "dir/b"]),
+            collision_sets_of(&["Dir/a.txt", "dir/A.txt", "dir/b"], ICASE),
             vec![vec!["Dir/a.txt", "dir/A.txt"]]
         );
         assert_eq!(
-            collision_sets_of(&["a", "A/b", "a/c/d", "z"]),
+            collision_sets_of(&["a", "A/b", "a/c/d", "z"], ICASE),
             vec![vec!["A/b", "a", "a/c/d"]],
             "a file collides with every path under a case variant of its name"
         );
         assert!(
-            collision_sets_of(&["ab/c", "a"]).is_empty(),
+            collision_sets_of(&["ab/c", "a"], ICASE).is_empty(),
             "a path prefix that is not a whole directory does not collide"
         );
     }
 
     #[test]
+    fn collision_sets_group_nfc_nfd_normalization_variants() {
+        let nfc = "caf\u{00e9}.txt";
+        let nfd = "cafe\u{0301}.txt";
+        let mut group = collision_sets_of(&[nfc, nfd, "ok.txt"], PRECOMPOSE)
+            .pop()
+            .expect("one group");
+        group.sort_unstable();
+        let mut expected = [nfc, nfd];
+        expected.sort_unstable();
+        assert_eq!(group, expected);
+        assert!(collision_sets_of(&[nfc, nfd], WorktreePathCollisionOptions::default()).is_empty());
+    }
+
+    #[test]
     fn collision_sets_ignore_hash_collisions_between_distinct_paths() {
         assert_eq!(memihash(b"f02398b.txt"), memihash(b"f0688b8.txt"));
-        assert!(collision_sets_of(&["f02398b.txt", "f0688b8.txt"]).is_empty());
+        assert!(collision_sets_of(&["f02398b.txt", "f0688b8.txt"], ICASE).is_empty());
         assert_eq!(
-            collision_sets_of(&["f02398b.txt/x", "f0688b8.txt"]),
+            collision_sets_of(&["f02398b.txt/x", "f0688b8.txt"], ICASE),
             Vec::<Vec<&str>>::new()
         );
     }
@@ -1228,7 +1432,7 @@ mod tests {
             index.push_entry_unsorted(dummy_entry(path));
         }
         index.sort();
-        let collided = icase_checkout_collision_paths(&index, true);
+        let collided = icase_checkout_collision_paths(&index, ICASE);
         assert_eq!(
             collided,
             vec![
@@ -1238,7 +1442,7 @@ mod tests {
                 "file.txt".to_owned(),
             ]
         );
-        let (files, _) = icase_worktree_file_stats(&index, None, true);
+        let (files, _) = icase_worktree_file_stats(&index, None, ICASE);
         assert_eq!(files, 2);
     }
 
@@ -1477,7 +1681,7 @@ mod tests {
         index.push_entry_unsorted(file);
         index.push_entry_unsorted(alias);
         index.sort();
-        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, true);
+        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, ICASE);
         assert!(!map.is_auto_stage_loser(b"file.txt"));
         assert!(map.is_auto_stage_loser(b"File.txt"));
     }
@@ -1498,7 +1702,7 @@ mod tests {
         index.push_entry_unsorted(upper);
         index.push_entry_unsorted(lower);
         index.sort();
-        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, true);
+        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, ICASE);
         assert!(!map.is_auto_stage_loser(b"Docs/guide.md"));
         assert!(map.is_auto_stage_loser(b"docs/guide.md"));
         assert!(map.worktree_oid_is_collision_sibling_blob(b"Docs/guide.md", two, one));
@@ -1518,8 +1722,30 @@ mod tests {
         index.push_entry_unsorted(file);
         index.push_entry_unsorted(alias);
         index.sort();
-        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, true);
+        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, ICASE);
         assert!(!map.is_auto_stage_loser(b"file.txt"));
+    }
+
+    #[test]
+    fn nfc_collision_loser_skips_auto_stage() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        let nfc = "caf\u{00e9}.txt";
+        let nfd = "cafe\u{0301}.txt";
+        std::fs::write(wt.join(nfd), b"on-disk\n").expect("write");
+        let on_disk = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        let other = ObjectId::from_hex("2222222222222222222222222222222222222222").unwrap();
+        let mut index = Index::new();
+        let mut winner = dummy_entry(nfc);
+        winner.oid = on_disk;
+        let mut loser = dummy_entry(nfd);
+        loser.oid = other;
+        index.push_entry_unsorted(winner);
+        index.push_entry_unsorted(loser);
+        index.sort();
+        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, PRECOMPOSE);
+        assert!(!map.is_auto_stage_loser(nfd.as_bytes()));
+        assert!(map.is_auto_stage_loser(nfc.as_bytes()));
     }
 
     #[test]
@@ -1537,13 +1763,13 @@ mod tests {
         index.sort();
         let wt = std::path::Path::new(".");
         let t0 = std::time::Instant::now();
-        let _ = icase_checkout_collision_paths(&index, true);
+        let _ = icase_checkout_collision_paths(&index, ICASE);
         let collide_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let t1 = std::time::Instant::now();
-        let _ = icase_worktree_file_stats(&index, Some(wt), true);
+        let _ = icase_worktree_file_stats(&index, Some(wt), ICASE);
         let stats_ms = t1.elapsed().as_secs_f64() * 1000.0;
         let t2 = std::time::Instant::now();
-        let _ = IcaseCheckoutCollisionMap::from_index(wt, &index, true);
+        let _ = IcaseCheckoutCollisionMap::from_index(wt, &index, ICASE);
         let map_ms = t2.elapsed().as_secs_f64() * 1000.0;
         eprintln!(
             "icase 20k entries: collide={collide_ms:.2}ms stats={stats_ms:.2}ms map={map_ms:.2}ms"
@@ -1575,7 +1801,7 @@ mod tests {
             index.push_entry_unsorted(dummy_entry(path));
         }
         index.sort();
-        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, true);
+        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, ICASE);
         assert!(
             !map.is_auto_stage_loser(b"f02398b.txt"),
             "dentry winner must not be treated as a collision loser"

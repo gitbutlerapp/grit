@@ -685,8 +685,12 @@ fn stage_inner_on_index(
         )
         .parallelism();
     let ignorecase = rules_config.ignore_case();
-    let icase_collisions =
-        ignorecase.then(|| IcaseCheckoutCollisionMap::from_index(work_tree, index, true));
+    let precompose_unicode = rules_config.precompose_unicode();
+    let collision_opts =
+        crate::path_icase::worktree_path_collision_options(ignorecase, precompose_unicode);
+    let icase_collisions = collision_opts
+        .active()
+        .then(|| IcaseCheckoutCollisionMap::from_index(work_tree, index, collision_opts));
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
     let icase_dir_map = Stage0IcaseDirSpellingMap::from_index(index, ignorecase);
     let icase_volume_folds_case = ignorecase && worktree_filesystem_case_insensitive(work_tree);

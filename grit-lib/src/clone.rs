@@ -1039,9 +1039,13 @@ fn perform_clone_checkout(
         repo, None, &tree, progress, cancel,
     )?;
     let index = repo.load_index()?;
-    let ignorecase = repo.config().snapshot()?.ignore_case();
+    let cfg = repo.config().snapshot()?;
+    let collision_opts = crate::path_icase::worktree_path_collision_options(
+        cfg.ignore_case(),
+        cfg.precompose_unicode(),
+    );
     let (files, worktree_bytes) =
-        crate::path_icase::icase_worktree_file_stats(&index, repo.work_tree(), ignorecase);
+        crate::path_icase::icase_worktree_file_stats(&index, repo.work_tree(), collision_opts);
     let (submodule_paths, bare_gitlink_paths) =
         classify_gitlink_paths(repo, gitlink_paths_in_index(&index));
     Ok((

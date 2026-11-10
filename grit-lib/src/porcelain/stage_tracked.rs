@@ -329,13 +329,11 @@ fn stage_tracked_modifications_in_index_body(
         .snapshot()
         .ok()
         .is_some_and(|cfg| cfg.ignore_case());
-    let icase_collisions = if ignorecase {
-        Some(crate::path_icase::IcaseCheckoutCollisionMap::from_index(
-            work_tree, index, true,
-        ))
-    } else {
-        None
-    };
+    let collision_opts =
+        crate::path_icase::worktree_path_collision_options(ignorecase, precompose_unicode);
+    let icase_collisions = collision_opts.active().then(|| {
+        crate::path_icase::IcaseCheckoutCollisionMap::from_index(work_tree, index, collision_opts)
+    });
     for raw_path in &unmerged_paths {
         if !tracked_scan_includes_path(restrict_to_paths, raw_path) {
             continue;

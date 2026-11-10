@@ -807,19 +807,21 @@ fn index_stage0_paths_under(index: &Index, prefix: &str) -> Vec<String> {
 fn build_restore_icase_collision_plan(
     work_tree: &Path,
     index: &Index,
-    ignorecase: bool,
+    collision_opts: crate::path_icase::WorktreePathCollisionOptions,
     write_destinations: &[String],
 ) -> RestoreIcaseCollisionPlan {
     let mut plan = RestoreIcaseCollisionPlan::default();
-    if !ignorecase || write_destinations.is_empty() {
+    if !collision_opts.active() || write_destinations.is_empty() {
         return plan;
     }
-    if !crate::path_icase::worktree_filesystem_case_insensitive(work_tree) {
+    if collision_opts.ignorecase
+        && !crate::path_icase::worktree_filesystem_case_insensitive(work_tree)
+    {
         return plan;
     }
     plan.enabled = true;
     let dest_lookup = RestoreDestinationFoldLookup::new(write_destinations);
-    let groups = IcaseIndexCollisionGroups::from_index(index, true);
+    let groups = IcaseIndexCollisionGroups::from_index(index, collision_opts);
     let mut to_remove = BTreeSet::new();
     for dest in write_destinations {
         for member in groups.collision_sibling_paths_except(dest) {
@@ -964,7 +966,10 @@ fn apply_worktree_restore_inner(
         cancel,
     } = ctx;
     let config = repo.config().snapshot()?;
-    let ignorecase = config.ignore_case();
+    let collision_opts = crate::path_icase::worktree_path_collision_options(
+        config.ignore_case(),
+        config.precompose_unicode(),
+    );
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
 
     if !worktree_from_tree {
@@ -996,7 +1001,7 @@ fn apply_worktree_restore_inner(
         let icase_plan = build_restore_icase_collision_plan(
             work_tree,
             index_out,
-            ignorecase,
+            collision_opts,
             &write_destinations,
         );
         apply_restore_icase_collision_plan(
@@ -1068,8 +1073,12 @@ fn apply_worktree_restore_inner(
         })
         .cloned()
         .collect();
-    let icase_plan =
-        build_restore_icase_collision_plan(work_tree, index_out, ignorecase, &write_destinations);
+    let icase_plan = build_restore_icase_collision_plan(
+        work_tree,
+        index_out,
+        collision_opts,
+        &write_destinations,
+    );
     apply_restore_icase_collision_plan(
         work_tree,
         index_out,

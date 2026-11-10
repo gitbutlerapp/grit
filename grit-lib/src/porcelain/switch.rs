@@ -160,24 +160,31 @@ impl SwitchOutcome {
 }
 
 fn switch_path_collisions(repo: &Repository, index: &Index) -> Result<Vec<String>> {
-    Ok(if ignores_case(repo)? {
-        crate::path_icase::icase_checkout_collision_paths(index, true)
+    let opts = worktree_path_collision_options(repo)?;
+    Ok(if opts.active() {
+        crate::path_icase::icase_checkout_collision_paths(index, opts)
     } else {
         Vec::new()
     })
 }
 
 /// [`switch_path_collisions`] of the index on disk, read (and sparse-expanded) only when the
-/// repository ignores case.
+/// repository uses worktree path collision rules.
 fn switch_path_collisions_on_disk(repo: &Repository) -> Result<Vec<String>> {
-    if !ignores_case(repo)? {
+    if !worktree_path_collision_options(repo)?.active() {
         return Ok(Vec::new());
     }
     switch_path_collisions(repo, &repo.load_index()?)
 }
 
-fn ignores_case(repo: &Repository) -> Result<bool> {
-    Ok(repo.config().snapshot()?.ignore_case())
+fn worktree_path_collision_options(
+    repo: &Repository,
+) -> Result<crate::path_icase::WorktreePathCollisionOptions> {
+    let cfg = repo.config().snapshot()?;
+    Ok(crate::path_icase::worktree_path_collision_options(
+        cfg.ignore_case(),
+        cfg.precompose_unicode(),
+    ))
 }
 
 pub(crate) struct PreparedSwitch {

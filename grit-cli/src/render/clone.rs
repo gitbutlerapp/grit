@@ -575,7 +575,7 @@ pub fn render_path_collision_warning(
     }
     outln!(
         w,
-        "warning: these tracked paths collide on this filesystem (case-insensitive paths share one file); only one path from each group exists on disk:"
+        "warning: these tracked paths collide on this filesystem (case or Unicode normalization); only one path from each group exists on disk:"
     );
     for path in paths {
         outln!(w, "  '{path}'");
