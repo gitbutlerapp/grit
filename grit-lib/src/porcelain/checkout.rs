@@ -714,10 +714,15 @@ fn checkout_populated_tree(
         &mut lock,
         &mut journal,
     );
-    let ignorecase = journal.finish(repo, result)?;
+    let _ignorecase = journal.finish(repo, result)?;
 
-    let path_collisions = if ignorecase {
-        crate::path_icase::icase_checkout_collision_paths(&loaded_index, true)
+    let config = repo.config().snapshot()?;
+    let collision_opts = crate::path_icase::worktree_path_collision_options(
+        config.ignore_case(),
+        config.precompose_unicode(),
+    );
+    let path_collisions = if collision_opts.active() {
+        crate::path_icase::icase_checkout_collision_paths(&loaded_index, collision_opts)
     } else {
         Vec::new()
     };

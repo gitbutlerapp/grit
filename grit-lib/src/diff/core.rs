@@ -6095,8 +6095,11 @@ fn diff_index_to_worktree_inner(
     let mode_policy = crate::index::WorktreeModePolicy::from_config(&config);
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(&config));
     let ignorecase = config.ignore_case();
-    let icase_collisions = ignorecase
-        .then(|| crate::path_icase::IcaseCheckoutCollisionMap::from_index(work_tree, index, true));
+    let collision_opts =
+        crate::path_icase::worktree_path_collision_options(ignorecase, precompose_unicode);
+    let icase_collisions = collision_opts.active().then(|| {
+        crate::path_icase::IcaseCheckoutCollisionMap::from_index(work_tree, index, collision_opts)
+    });
     let hash_blobs_without_write = options.hash_blobs_without_write;
 
     let mut result = Vec::new();
