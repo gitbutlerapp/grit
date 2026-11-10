@@ -1402,8 +1402,8 @@ struct TrackedLine {
     current_idx: usize,
     ignored: bool,
     source_path: Option<String>,
-    /// Merge hand-off this line arrived through (`0` for the starting suspect). Lines of
-    /// different hand-offs can share a queued suspect but never compete for a parent line.
+    /// Merge hand-off this line arrived through (`0` for the starting suspect). Multiple
+    /// hand-offs can queue on the same suspect and compete for a parent line in one pass.
     origin: u32,
 }
 
@@ -3190,10 +3190,9 @@ fn compute_blame_with_session(
             }
 
             let mut remaining = std::mem::take(&mut pending);
-            // Stamps dedupe parent lines within one hand-off; grouping lets each group
-            // start a fresh stamp generation.
-            remaining.sort_by_key(|t| t.origin);
             let mut any_parent_has_path = false;
+            let mut seen_parent_blobs: std::collections::HashSet<ObjectId> =
+                std::collections::HashSet::new();
             for i in 0..parents.len() {
                 if remaining.is_empty() {
                     break;
@@ -3237,19 +3236,18 @@ fn compute_blame_with_session(
                 let Some((blob, mode)) = resolved else {
                     continue;
                 };
+                if !seen_parent_blobs.insert(blob) {
+                    continue;
+                }
                 let renamed_parent = parent_path != current_path;
                 any_parent_has_path = true;
                 parent_blobs[i] = Some((p, blob, mode, parent_path.clone()));
                 if blob == current_blob_oid {
                     par_lines_vec[i] = Some(Arc::clone(&cur_lines_arc));
                     maps[i] = Some(session.identity_line_map(line_count));
+                    session.merge_line_stamps[i].begin_pass(line_count);
                     let mut next_remaining: Vec<TrackedLine> = Vec::new();
-                    let mut pass_origin = None;
                     for t in remaining {
-                        if pass_origin != Some(t.origin) {
-                            pass_origin = Some(t.origin);
-                            session.merge_line_stamps[i].begin_pass(line_count);
-                        }
                         if t.current_idx < line_count
                             && session.merge_line_stamps[i].is_unused(t.current_idx)
                         {
@@ -3299,12 +3297,8 @@ fn compute_blame_with_session(
                 let map = &map_arc;
                 let par_lines = &par_lines_arc;
                 let parent_line_count = par_lines.len();
-                let mut pass_origin = None;
+                session.merge_line_stamps[i].begin_pass(parent_line_count);
                 for t in remaining {
-                    if pass_origin != Some(t.origin) {
-                        pass_origin = Some(t.origin);
-                        session.merge_line_stamps[i].begin_pass(parent_line_count);
-                    }
                     let idx = t.current_idx;
                     let cur_line = cur_lines_arc.comparison_line(idx, session.whitespace);
                     let m = map.get(idx).copied().flatten();

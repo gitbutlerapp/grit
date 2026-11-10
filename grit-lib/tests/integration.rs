@@ -120,6 +120,8 @@ mod blame_line_map_regression;
 #[cfg(feature = "full-tests")]
 #[path = "blame_line_range_git_compat.rs"]
 mod blame_line_range_git_compat;
+#[path = "blame_merge_stamp_regression.rs"]
+mod blame_merge_stamp_regression;
 #[cfg(feature = "full-tests")]
 #[path = "blame_non_utf8_git_compat.rs"]
 mod blame_non_utf8_git_compat;
