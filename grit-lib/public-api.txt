@@ -14095,6 +14095,7 @@ pub grit_lib::path_validate::PathComponentError::DotDot
 pub grit_lib::path_validate::PathComponentError::DotGit
 pub grit_lib::path_validate::PathComponentError::Empty
 pub grit_lib::path_validate::PathComponentError::HfsDotGit
+pub grit_lib::path_validate::PathComponentError::ContainsBackslash
 pub grit_lib::path_validate::PathComponentError::NtfsBackslash
 pub grit_lib::path_validate::PathComponentError::NtfsDotGit
 pub grit_lib::path_validate::PathComponentError::NtfsDriveOrStream

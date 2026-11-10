@@ -127,6 +127,9 @@ pub enum PathComponentError {
     /// Backslash introduces an NTFS `.git` segment in the component.
     #[error("path component contains a backslash before a .git alias")]
     NtfsBackslash,
+    /// Backslash appears in the component on Windows (`core.protectNTFS`).
+    #[error("path component contains a backslash")]
+    ContainsBackslash,
     /// DOS drive prefix or NTFS alternate-data-stream syntax in the component.
     #[error("path component uses a forbidden NTFS drive or stream prefix")]
     NtfsDriveOrStream,
@@ -215,6 +218,12 @@ pub fn validate_component(
             if scan_ntfs_backslash_dot_special(name_str, ntfs_backslash_dotdot_tail) {
                 return Err(PathComponentError::NtfsBackslash);
             }
+            if scan_ntfs_backslash_dotgit(name_str) {
+                return Err(PathComponentError::NtfsBackslash);
+            }
+        }
+        if name.contains(&b'\\') {
+            return Err(PathComponentError::ContainsBackslash);
         }
     }
     let audit = audit_tree_entry_name(name, opts);
@@ -456,8 +465,8 @@ fn has_dos_drive_prefix_bytes(name: &[u8]) -> bool {
 
 /// Windows `core.protectNTFS` rules for one tree/index component.
 ///
-/// Tree entry names may embed `\` segment separators on NTFS; each piece is
-/// validated the same way Git does for `verify_path` on Windows.
+/// Git may scan `\`-delimited pieces when checking for `.git` aliases and `..`
+/// segments; plain backslashes in the name are rejected separately on Windows.
 fn validate_win32_path_segment(path: &[u8]) -> Result<(), PathComponentError> {
     if path.is_empty() {
         return Ok(());
@@ -691,6 +700,20 @@ mod tests {
             b"1git~1",
         ] {
             assert!(!may_alias_dotgit(name), "pre-filter skips {name:?}");
+        }
+    }
+
+    #[test]
+    fn ntfs_backslash_in_plain_filename() {
+        let name = b"back\\slash.txt";
+        if cfg!(windows) {
+            assert_eq!(
+                validate_component(name, BLOB, FSCK, WT_KIND).unwrap_err(),
+                PathComponentError::ContainsBackslash,
+            );
+            assert!(validate_component(name, BLOB, OFF, WT_KIND).is_ok());
+        } else {
+            assert!(validate_component(name, BLOB, FSCK, WT_KIND).is_ok());
         }
     }
 
