@@ -308,6 +308,39 @@ pub struct IndexEntry {
     pub base_index_pos: u32,
 }
 
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for IndexEntry {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mode = crate::objects::FileMode::new(self.mode);
+        let mut out = serializer.serialize_struct("IndexEntry", 14)?;
+        out.serialize_field("ctime_sec", &self.ctime_sec)?;
+        out.serialize_field("ctime_nsec", &self.ctime_nsec)?;
+        out.serialize_field("mtime_sec", &self.mtime_sec)?;
+        out.serialize_field("mtime_nsec", &self.mtime_nsec)?;
+        out.serialize_field("dev", &self.dev)?;
+        out.serialize_field("ino", &self.ino)?;
+        out.serialize_field("mode", &mode)?;
+        out.serialize_field("uid", &self.uid)?;
+        out.serialize_field("gid", &self.gid)?;
+        out.serialize_field("size", &self.size)?;
+        out.serialize_field("oid", &self.oid)?;
+        out.serialize_field("flags", &self.flags)?;
+        out.serialize_field("flags_extended", &self.flags_extended)?;
+        out.serialize_field(
+            "path",
+            &crate::serde_format::path_bytes_for_json(&self.path),
+        )?;
+        out.serialize_field("base_index_pos", &self.base_index_pos)?;
+        out.serialize_field("stage", &self.stage())?;
+        out.end()
+    }
+}
+
 impl IndexEntry {
     /// Merge stage (0 = normal, 1–3 = conflict stages).
     #[must_use]

@@ -204,6 +204,7 @@ pub struct StatBar {
 
 /// One file's row in a [`DiffStat`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct FileStat {
     /// Display path (new side, or old for deletions).
     pub path: String,
@@ -312,6 +313,21 @@ impl DiffStat {
 impl FromIterator<FileStat> for DiffStat {
     fn from_iter<I: IntoIterator<Item = FileStat>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect())
+    }
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for DiffStat {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut out = serializer.serialize_struct("DiffStat", 2)?;
+        out.serialize_field("files", self.files())?;
+        out.serialize_field("totals", &self.totals())?;
+        out.end()
     }
 }
 

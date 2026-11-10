@@ -44,6 +44,39 @@ fn result_models_implement_serialize() {
     assert_serialize::<grit_lib::objects::ObjectKind>();
     assert_serialize::<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>();
     assert_serialize::<grit_lib::revwalk::DescribedCommit>();
+    assert_serialize::<grit_lib::porcelain::merge::IntegrateBranchOutcome>();
+    assert_serialize::<grit_lib::porcelain::pull::PullOutcome>();
+    assert_serialize::<grit_lib::porcelain::pull::PullResult>();
+    assert_serialize::<grit_lib::porcelain::pull::PullCheck>();
+    assert_serialize::<grit_lib::remote::clone::CloneOutcome>();
+    assert_serialize::<grit_lib::porcelain::checkout::CheckoutOutcome>();
+    assert_serialize::<grit_lib::porcelain::clean::CleanOutcome>();
+    assert_serialize::<grit_lib::config::ConfigEntry>();
+    assert_serialize::<grit_lib::porcelain::tag::CreateTagOutcome>();
+    assert_serialize::<grit_lib::diff::DiffStat>();
+    assert_serialize::<grit_lib::diff::FileDiff>();
+    assert_serialize::<grit_lib::maintenance::GcStats>();
+    assert_serialize::<grit_lib::index::IndexEntry>();
+    assert_serialize::<grit_lib::porcelain::paths::MoveOutcome>();
+    assert_serialize::<grit_lib::repo_handles::NoteListing>();
+    assert_serialize::<grit_lib::objects::ObjectInfo>();
+    assert_serialize::<grit_lib::porcelain::paths::RemoveOutcome>();
+    assert_serialize::<grit_lib::porcelain::replay::ReplayOutcome>();
+    assert_serialize::<grit_lib::porcelain::restore::RestoreOutcome>();
+    assert_serialize::<grit_lib::revwalk::rev_list::RevListResult>();
+    assert_serialize::<grit_lib::porcelain::add::StageOutcome>();
+    assert_serialize::<grit_lib::stash::StashPushResult>();
+    assert_serialize::<grit_lib::refs::branch_tracking::UpstreamStatus>();
+    assert_serialize::<grit_lib::objects::TreeEntry>();
+    assert_serialize::<grit_lib::bundle::UnbundleOutcome>();
+    assert_serialize::<grit_lib::revwalk::history::UndoOutcome>();
+    assert_serialize::<grit_lib::remote::serve::UploadOutcome>();
+    assert_serialize::<grit_lib::refs::branch_tracking::BranchSummary>();
+    assert_serialize::<grit_lib::refs::branch_tracking::TargetComparison>();
+    assert_serialize::<grit_lib::refs::listing::RefListing>();
+    assert_serialize::<grit_lib::refs::reflog::ReflogEntry>();
+    assert_serialize::<grit_lib::remote::serve::ReceiveOutcome>();
+    assert_serialize::<grit_lib::revwalk::history::RebasePlan>();
 }
 
 fn assert_deserialize<T: serde::de::DeserializeOwned>() {}
@@ -259,6 +292,53 @@ fn commit_author_info_serializes_rfc3339_date() {
 }
 
 #[test]
+fn index_entry_and_branch_summary_json_shapes() {
+    use grit_lib::index::IndexEntry;
+    use grit_lib::objects::{FileMode, ObjectId};
+    use grit_lib::refs::branch_tracking::BranchSummary;
+    use time::OffsetDateTime;
+
+    let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("oid");
+    let entry = IndexEntry {
+        ctime_sec: 0,
+        ctime_nsec: 0,
+        mtime_sec: 0,
+        mtime_nsec: 0,
+        dev: 0,
+        ino: 0,
+        mode: FileMode::REGULAR.bits(),
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid,
+        flags: 0,
+        flags_extended: None,
+        path: b"src/main.rs".to_vec(),
+        base_index_pos: 0,
+    };
+    let json = serde_json::to_value(&entry).expect("IndexEntry");
+    assert_eq!(json["path"], "src/main.rs");
+    assert_eq!(json["mode"], "100644");
+
+    let summary = BranchSummary {
+        name: "main".into(),
+        full_ref: "refs/heads/main".into(),
+        is_remote: false,
+        current: true,
+        oid,
+        subject: Some("init".into()),
+        committer_time: Some(OffsetDateTime::UNIX_EPOCH),
+        upstream: None,
+        worktree: None,
+    };
+    let json = serde_json::to_value(&summary).expect("BranchSummary");
+    let date = json["committer_time"].as_str().expect("date");
+    assert!(
+        date == "1970-01-01T00:00:00+00:00" || date == "1970-01-01T00:00:00Z",
+        "{date}"
+    );
+}
+
 fn stash_and_branch_outcomes_serialize() {
     let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("oid");
     let entry = grit_lib::stash::StashEntry {

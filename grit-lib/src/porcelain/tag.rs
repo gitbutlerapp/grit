@@ -284,6 +284,7 @@ pub struct CreateTagRequest {
 
 /// Result of [`create_tag`].
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct CreateTagOutcome {
     /// Short tag name (without `refs/tags/`).
     pub name: String,
@@ -296,6 +297,7 @@ pub struct CreateTagOutcome {
     /// Whether the tag object was signed (always false for lightweight tags).
     pub signed: bool,
     /// Present when a tree-sha256 claim was computed and written on the tag object.
+    #[cfg_attr(feature = "serde-models", serde(skip))]
     pub tree_sha256: Option<TagTreeSha256Outcome>,
     /// When `force` replaced an existing tag, the previous ref target.
     pub replaced: Option<ObjectId>,

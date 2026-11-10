@@ -83,6 +83,7 @@ pub struct BundleHeader {
 
 /// A single ref entry returned from [`Bundle::unbundle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct UnbundledRef {
     /// Full ref name (e.g. `refs/heads/main`).
     pub name: String,
@@ -109,6 +110,24 @@ pub struct BundleVerifyReport {
     /// Prerequisites exist as objects but their exclusive history is incomplete in the ODB (not
     /// ref-reachable and not a fully readable dangling graph).
     pub prerequisites_not_connected: bool,
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for UnbundleOutcome {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut pack_object_ids: Vec<_> = self.pack_object_ids.iter().copied().collect();
+        pack_object_ids.sort_unstable();
+        let mut out = serializer.serialize_struct("UnbundleOutcome", 3)?;
+        out.serialize_field("refs", &self.refs)?;
+        out.serialize_field("transfer", &self.transfer)?;
+        out.serialize_field("pack_object_ids", &pack_object_ids)?;
+        out.end()
+    }
 }
 
 impl BundleVerifyReport {

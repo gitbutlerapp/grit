@@ -75,3 +75,20 @@ impl std::fmt::Display for ErrorSummary {
 }
 
 impl std::error::Error for ErrorSummary {}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for ErrorSummary {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut out = serializer.serialize_struct("ErrorSummary", 4)?;
+        out.serialize_field("kind", self.kind())?;
+        out.serialize_field("area", self.area())?;
+        out.serialize_field("message", self.message())?;
+        out.serialize_field("cancelled", &self.is_cancelled())?;
+        out.end()
+    }
+}

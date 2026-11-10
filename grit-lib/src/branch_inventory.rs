@@ -50,6 +50,7 @@ pub struct BranchListQuery {
 
 /// Upstream of a local branch when `branch.<name>.merge` / `.remote` is set.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct UpstreamStatus {
     /// Full upstream ref (`refs/remotes/...` or `refs/heads/...`).
     pub full_ref: String,
@@ -88,6 +89,31 @@ pub struct BranchSummary {
     pub upstream: Option<UpstreamStatus>,
     /// Linked worktree path when this branch is checked out there (Git `worktreepath`).
     pub worktree: Option<PathBuf>,
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for BranchSummary {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let committer_time = self
+            .committer_time
+            .map(crate::serde_format::offset_date_time_rfc3339);
+        let mut out = serializer.serialize_struct("BranchSummary", 10)?;
+        out.serialize_field("name", &self.name)?;
+        out.serialize_field("full_ref", &self.full_ref)?;
+        out.serialize_field("is_remote", &self.is_remote)?;
+        out.serialize_field("current", &self.current)?;
+        out.serialize_field("oid", &self.oid)?;
+        out.serialize_field("subject", &self.subject)?;
+        out.serialize_field("committer_time", &committer_time)?;
+        out.serialize_field("upstream", &self.upstream)?;
+        out.serialize_field("worktree", &self.worktree)?;
+        out.end()
+    }
 }
 
 /// Configured upstream for local branch `branch` (short name, no `refs/heads/`).

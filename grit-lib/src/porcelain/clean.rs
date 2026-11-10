@@ -62,6 +62,7 @@ fn clean_scope_includes_ignored(scope: CleanScope) -> bool {
 
 /// Result of [`Checkout::clean`](crate::repo_handles::Checkout::clean).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct CleanOutcome {
     /// Repository-relative paths removed (or that would be removed when `dry_run`).
     pub removed: Vec<String>,

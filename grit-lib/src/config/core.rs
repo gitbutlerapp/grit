@@ -109,6 +109,8 @@ use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
 
 /// The scope (origin) of a configuration value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum ConfigScope {
     /// System-wide configuration (`/etc/gitconfig`).
     System,
@@ -150,6 +152,7 @@ pub struct ConfigValueOrigin {
 
 /// A single configuration entry with its origin metadata.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct ConfigEntry {
     /// Fully-qualified key in canonical form: `section.subsection.name`
     /// (section and name lowercased; subsection preserves case).

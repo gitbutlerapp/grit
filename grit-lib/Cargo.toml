@@ -41,8 +41,10 @@ test-support = []
 # Forward `trace_span!` to the `tracing` crate (zero cost when disabled).
 tracing = ["dep:tracing"]
 # Derive or implement `serde::Serialize` on result models (`StatusModel`, `DiffEntry`,
-# `LoadedCommit`, commit/switch/reset/fetch/push/stash/rebase outcomes, blame/describe/tag/worktree
-# results, `Signature`, `Error`, …).
+# `LoadedCommit`, merge/pull/clone/checkout/stage/restore/clean outcomes, branch listing,
+# refs/reflog/index/diff stat and structured hunks, `GcStats`, `RevListResult`, serve
+# pack outcomes, commit/switch/reset/fetch/push/stash/rebase outcomes, blame/describe/tag/worktree
+# results, `Signature`, `Error`, …). See `tests/serde_models.rs`.
 serde-models = []
 # Lay out grit-lib's hot code path (hot-text.ld) contiguously in every binary that links the
 # library, so short operations fault in fewer code pages. x86_64 Linux GNU (LLD) only; a

@@ -118,6 +118,8 @@ pub struct RefQuery {
 
 /// Class of ref for display and JSON (`head`, `remote`, `tag`, …).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum RefKind {
     /// Local branch (`refs/heads/`).
     Head,
@@ -132,6 +134,7 @@ pub enum RefKind {
 /// One ref returned from [`References::query`](super::handle::References::query) or
 /// [`query_listings_from_pairs`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct RefListing {
     /// Full ref name (for example `refs/tags/v1.0`).
     pub full_name: String,

@@ -279,6 +279,8 @@ impl CloneOptions {
 
 /// Initial checkout disposition after [`clone`] (before working-tree checkout).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum CloneHead {
     /// Checked out on a local branch that tracks the remote.
     Branch(String),
@@ -319,6 +321,8 @@ impl CloneHead {
 
 /// Whether [`clone`] checked out the default branch or left the work tree empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum CloneCheckout {
     /// The default branch tip was fetched and should be checked out.
     CheckedOut(ObjectId),
@@ -395,6 +399,34 @@ impl CloneOutcome {
     #[must_use]
     pub fn filter_ignored(&self) -> bool {
         self.filter.is_some() && !self.filter_sent
+    }
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for CloneOutcome {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut out = serializer.serialize_struct("CloneOutcome", 15)?;
+        out.serialize_field("url", &self.url)?;
+        out.serialize_field("path", &self.path)?;
+        out.serialize_field("head", &self.head)?;
+        out.serialize_field("checkout_oid", &self.checkout_oid)?;
+        out.serialize_field("checkout", &self.checkout)?;
+        out.serialize_field("branches_with_commits", &self.branches_with_commits)?;
+        out.serialize_field("transfer", &self.transfer)?;
+        out.serialize_field("branches", &self.branches)?;
+        out.serialize_field("tags", &self.tags)?;
+        out.serialize_field("files", &self.files)?;
+        out.serialize_field("worktree_bytes", &self.worktree_bytes)?;
+        out.serialize_field("path_collisions", &self.path_collisions)?;
+        out.serialize_field("submodule_paths", &self.submodule_paths)?;
+        out.serialize_field("bare_gitlink_paths", &self.bare_gitlink_paths)?;
+        out.serialize_field("bare", &self.bare)?;
+        out.end()
     }
 }
 

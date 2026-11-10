@@ -103,6 +103,7 @@ pub struct StageOptions {
 
 /// Paths returned by [`stage`] (repository-relative, `/` separators).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct StageOutcome {
     /// New untracked paths staged at stage 0.
     pub added: Vec<String>,

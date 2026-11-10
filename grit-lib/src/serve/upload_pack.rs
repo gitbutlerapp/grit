@@ -44,6 +44,7 @@ const V0_CAPABILITIES: &[&str] = &[
 
 /// Summary of one completed or partial upload-pack session.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct UploadOutcome {
     /// Bytes written to the client (advertisement, negotiation, sideband, pack).
     pub bytes_written: u64,

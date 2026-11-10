@@ -1775,6 +1775,7 @@ pub(crate) fn store_stash(
 
 /// Result of a successful [`RepositoryStash::push`](crate::repo_handles::RepositoryStash::push).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct StashPushResult {
     /// The W commit object id stored on `refs/stash`.
     pub oid: ObjectId,

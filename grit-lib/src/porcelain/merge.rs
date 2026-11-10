@@ -876,6 +876,8 @@ impl From<IntegrateBranchOptions> for MergeOptions {
 
 /// Result of integrating another branch into the current one ([`integrate_branch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum IntegrateBranchOutcome {
     /// The current branch already contains the other tip.
     UpToDate,

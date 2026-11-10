@@ -327,6 +327,7 @@ fn resolve_parent_edge(
 
 /// Counters emitted as `GIT_TRACE2_EVENT` for Bloom generation (`commit-graph.c`).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct BloomWriteStats {
     /// Commits that received a newly computed Bloom filter chunk.
     pub filter_computed: u32,

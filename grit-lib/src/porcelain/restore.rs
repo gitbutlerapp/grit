@@ -77,6 +77,7 @@ pub struct RestoreOptions {
 
 /// Outcome of a restore operation: paths written and paths removed in each target.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct RestoreOutcome {
     /// Paths whose working tree file was created or updated.
     pub restored: Vec<String>,

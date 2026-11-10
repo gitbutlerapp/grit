@@ -302,6 +302,8 @@ pub(crate) fn upstream_ref_for_merge(
 
 /// Where a `ComparisonBase` came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum BaseSource {
     /// The branch's configured upstream (`branch.<name>.remote` / `branch.<name>.merge`).
     Upstream,
@@ -317,6 +319,7 @@ pub enum BaseSource {
 
 /// A resolved branch that another branch is measured against.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct ComparisonBase {
     /// Short display name: the full ref abbreviated (`origin/main`) for an upstream, or the
     /// candidate as configured or listed in [`DEFAULT_TARGET_CANDIDATES`] for a target.
@@ -349,6 +352,7 @@ pub struct TargetComparisonOptions {
 
 /// Ahead-of-target view of the current branch (`grit shortlog` / `grit ahead`).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct TargetComparison {
     /// Current branch short name.
     pub branch: String,
