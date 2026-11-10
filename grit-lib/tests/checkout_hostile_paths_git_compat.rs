@@ -134,6 +134,7 @@ fn hostile_case_metas() -> &'static [HostileCaseMeta] {
             windows_only: false,
         },
         windows_case("ntfs backslash"),
+        windows_case("backslash plain filename"),
         case("ntfs backslash dotgit config"),
         case("symlink gitmodules"),
         windows_case("win32 reserved aux directory"),
@@ -181,6 +182,7 @@ fn hostile_tree_body(
         "ntfs index allocation" => tree_entry("100644", b".git::$INDEX_ALLOCATION", blob_hex),
         "hfs dotgit" => tree_entry("100644", ".gI\u{200c}T".as_bytes(), blob_hex),
         "ntfs backslash" => tree_entry("100644", br"a\..\x", blob_hex),
+        "backslash plain filename" => tree_entry("100644", b"back\\slash.txt", blob_hex),
         "ntfs backslash dotgit config" => tree_entry("100644", b".git\\config", blob_hex),
         "symlink gitmodules" => tree_entry("120000", b".gitmodules", symlink_target_hex),
         "gitmodules ads" => tree_entry("100644", b".gitmodules::$DATA", blob_hex),
@@ -548,6 +550,7 @@ fn win32_only_names_check_out_off_windows_like_git() {
         "win32 reserved com1 with extension",
         "win32 trailing dot directory",
         "win32 invalid character",
+        "backslash plain filename",
     ] {
         let parent = tempfile::tempdir().expect("parent");
         let upstream = parent.path().join("upstream.git");
