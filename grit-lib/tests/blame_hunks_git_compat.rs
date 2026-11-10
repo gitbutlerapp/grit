@@ -1,5 +1,7 @@
 //! Compare `BlameResult::hunks()` and `original_path` with `git blame --line-porcelain`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::process::Command;
 
@@ -151,6 +153,8 @@ fn grit_blame_hunks(
                 line_range,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("blame_file");
     result.hunks()
@@ -210,7 +214,12 @@ fn blame_hunks_match_git_after_rename() {
 
     let result = repo
         .diff()
-        .blame("after.txt", &BlameOptions::default())
+        .blame(
+            "after.txt",
+            &BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("blame");
     assert_eq!(result.lines[0].original_path, "before.txt");
     let porcelain = git_output(dir, &["blame", "--porcelain", "after.txt"]);
@@ -314,6 +323,8 @@ fn blame_hunks_match_git_across_rename_edit_and_subtree_move() {
                     line_range: range.map(|(a, b)| a..=b),
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )
             .unwrap();
         // Commit, path and line must navigate to the attributed source, even after

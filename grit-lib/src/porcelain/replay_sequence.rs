@@ -258,7 +258,14 @@ pub(crate) fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<V
                 full_history: true,
                 ..RevListOptions::default()
             };
-            let walk = rev_list(repo, &positive, &negative, &walk_opts)?;
+            let walk = rev_list(
+                repo,
+                &positive,
+                &negative,
+                &walk_opts,
+                &mut crate::progress::NullProgress,
+                crate::progress::CancelToken::never_ref(),
+            )?;
             let mut commits = walk.commits;
             commits.retain(|oid| *oid != exclude);
             if commits.is_empty() {

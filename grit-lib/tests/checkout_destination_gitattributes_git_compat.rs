@@ -1,5 +1,7 @@
 //! Checkout smudge uses `.gitattributes` from the destination tree, not the pre-checkout worktree.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;

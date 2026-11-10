@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use grit_lib::config::ConfigSet;
@@ -200,6 +202,8 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
                 &[String::from("main"), String::from("feature")],
                 &[],
                 &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
             )?;
             let _ = repo
                 .revwalk()
@@ -218,6 +222,8 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
             objects: true,
             ..RevListOptions::default()
         },
+        &mut NullProgress,
+        &CancelToken::never(),
     )?;
     assert!(!roots.commits.is_empty());
     let _ = repo
@@ -250,6 +256,8 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
             &old_main,
             &tip,
             &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .map(|r| r.entries)?;
     let cfg = ConfigSet::new();

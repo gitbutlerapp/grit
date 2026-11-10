@@ -11,6 +11,9 @@ use crate::error::Result;
 use crate::merge_base::{push_describe_heap_key, CommitGraphCache, PaintKey};
 use crate::objects::ObjectId;
 use crate::objects::{oid_hash_map, oid_hash_set, OidHashMap, OidHashSet};
+use crate::progress::{
+    CancelToken, HistoryWalkStride, HistoryWalkStrideState, ProgressPhase, ProgressSink,
+};
 use crate::refs::listing::{
     creator_date, query_refs, RefKind, RefListing, RefNamespace, RefQuery, RefQueryOptions,
 };
@@ -114,7 +117,13 @@ impl<'repo> RevWalk<'repo> {
     /// # Errors
     ///
     /// Propagates rev-parse, ref listing, object read, and rev-list count errors.
-    pub fn describe(&self, rev: &str, opts: &DescribeOptions) -> Result<Option<DescribedCommit>> {
+    pub fn describe(
+        &self,
+        rev: &str,
+        opts: &DescribeOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<Option<DescribedCommit>> {
         let repo = self.repository();
         let commit = peel_to_commit_for_merge_base(repo, resolve_revision(repo, rev)?)?;
         let candidates = collect_tag_candidates(repo, opts)?;
@@ -131,8 +140,15 @@ impl<'repo> RevWalk<'repo> {
             return Ok(Some(build_described(repo, commit, &unique[*idx], 0, opts)?));
         }
 
-        let Some((winner_idx, distance)) =
-            nearest_tag_by_walk(repo, commit, &unique, &peel_to_index, opts.first_parent)?
+        let Some((winner_idx, distance)) = nearest_tag_by_walk(
+            repo,
+            commit,
+            &unique,
+            &peel_to_index,
+            opts.first_parent,
+            progress,
+            cancel,
+        )?
         else {
             return Ok(None);
         };
@@ -205,11 +221,21 @@ fn nearest_tag_by_walk(
     unique: &[TagCandidate],
     peel_to_index: &OidHashMap<usize>,
     first_parent: bool,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<Option<(usize, usize)>> {
     let mut cache = CommitGraphCache::with_commit_graph(repo, true);
     let generation_ranked = cache.generation_ranked_walk_from(commit)?;
     if !generation_ranked {
-        return nearest_tag_by_fixpoint(repo, commit, unique, peel_to_index, first_parent);
+        return nearest_tag_by_fixpoint(
+            repo,
+            commit,
+            unique,
+            peel_to_index,
+            first_parent,
+            progress,
+            cancel,
+        );
     }
     nearest_tag_heap_walk(
         repo,
@@ -218,6 +244,8 @@ fn nearest_tag_by_walk(
         unique,
         peel_to_index,
         first_parent,
+        progress,
+        cancel,
     )
 }
 
@@ -228,8 +256,11 @@ fn nearest_tag_heap_walk(
     unique: &[TagCandidate],
     peel_to_index: &OidHashMap<usize>,
     first_parent: bool,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<Option<(usize, usize)>> {
     let within_words = unique.len().max(1);
+    let mut walk_stride = HistoryWalkStrideState::default();
 
     let mut seen = oid_hash_set();
     let mut processed = oid_hash_set();
@@ -244,6 +275,12 @@ fn nearest_tag_heap_walk(
     let mut seen_commits = 0usize;
 
     while let Some(key) = heap.pop() {
+        HistoryWalkStride::poll(
+            progress,
+            cancel,
+            ProgressPhase::Describing,
+            &mut walk_stride,
+        )?;
         let cur = key.oid;
         if processed.contains(&cur) {
             continue;
@@ -309,6 +346,8 @@ fn nearest_tag_by_fixpoint(
     unique: &[TagCandidate],
     peel_to_index: &OidHashMap<usize>,
     first_parent: bool,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<Option<(usize, usize)>> {
     let tag_count = unique.len();
     if tag_count == 0 {
@@ -316,7 +355,8 @@ fn nearest_tag_by_fixpoint(
     }
     let within_words = tag_count.max(1);
     let mut cache = CommitGraphCache::with_commit_graph(repo, true);
-    let (reachable_order, parents_of) = collect_describe_reachable(&mut cache, head, first_parent)?;
+    let (reachable_order, parents_of) =
+        collect_describe_reachable(&mut cache, head, first_parent, progress, cancel)?;
     if reachable_order.is_empty() {
         return Ok(None);
     }
@@ -396,13 +436,22 @@ fn collect_describe_reachable(
     cache: &mut CommitGraphCache<'_>,
     head: ObjectId,
     first_parent: bool,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<(Vec<ObjectId>, OidHashMap<Vec<ObjectId>>)> {
+    let mut walk_stride = HistoryWalkStrideState::default();
     let mut reachable_order = Vec::new();
     let mut seen = oid_hash_set();
     let mut queue = VecDeque::from([head]);
     let mut parents_of: OidHashMap<Vec<ObjectId>> = oid_hash_map();
 
     while let Some(cur) = queue.pop_front() {
+        HistoryWalkStride::poll(
+            progress,
+            cancel,
+            ProgressPhase::Describing,
+            &mut walk_stride,
+        )?;
         if !seen.insert(cur) {
             continue;
         }
@@ -736,6 +785,8 @@ mod tests {
                     tags: true,
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )?
             .expect("described");
         assert_eq!(d.peeled, c1);
@@ -753,7 +804,12 @@ mod tests {
         tag_annotated(&repo, "outer", inner_tag_oid(&repo, "inner"), "outer");
         let d = repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?
             .expect("described");
         assert_eq!(d.peeled, base);
         assert_eq!(d.distance, 1);
@@ -782,6 +838,8 @@ mod tests {
                 tags: true,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )?;
         assert!(d.is_some());
         Ok(())
@@ -804,6 +862,8 @@ mod tests {
                     tags: true,
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )?
             .expect("described");
         assert_eq!(d.peeled, c3);
@@ -820,7 +880,12 @@ mod tests {
         tag_annotated(&repo, "ann", c1, "m");
         let d = repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?
             .expect("described");
         assert_eq!(d.tag_oid, inner_tag_oid(&repo, "ann"));
         assert_eq!(d.distance, 1);
@@ -833,7 +898,12 @@ mod tests {
         let _c = empty_commit(&repo, "only");
         assert!(repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never()
+            )?
             .is_none());
         Ok(())
     }
@@ -854,12 +924,18 @@ mod tests {
         tag_annotated(&repo, "a-far", c1, "far");
         tag_annotated(&repo, "z-near", c3, "near");
         let opts = DescribeOptions::default();
-        let before = repo.revwalk().describe("HEAD", &opts)?.expect("before");
+        let before = repo
+            .revwalk()
+            .describe("HEAD", &opts, &mut NullProgress, &CancelToken::never())?
+            .expect("before");
         assert_eq!(tag_short_name(&before), "z-near");
         assert_eq!(before.distance, 1);
         repo.maintenance()
             .write_commit_graph(&CommitGraphOptions::default())?;
-        let after = repo.revwalk().describe("HEAD", &opts)?.expect("after");
+        let after = repo
+            .revwalk()
+            .describe("HEAD", &opts, &mut NullProgress, &CancelToken::never())?
+            .expect("after");
         assert_eq!(tag_short_name(&after), "z-near");
         assert_eq!(after.distance, 1);
         Ok(())
@@ -885,6 +961,8 @@ mod tests {
                 tags: true,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )?;
         assert_eq!(all.as_ref().map(tag_short_name), Some("side-tag"));
         let fp = repo
@@ -896,6 +974,8 @@ mod tests {
                     first_parent: true,
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )?
             .expect("first-parent");
         assert_eq!(tag_short_name(&fp), "old");
@@ -912,7 +992,12 @@ mod tests {
         tag_annotated(&repo, "atag", c1, "a");
         let d = repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?
             .expect("described");
         assert_eq!(tag_short_name(&d), "atag");
         assert_eq!(d.distance, 1);
@@ -938,6 +1023,8 @@ mod tests {
                 match_glob: Some("release-*".to_owned()),
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )?;
         assert!(d.is_some());
         assert!(d.unwrap().tag.as_str().contains("release-1"));
@@ -972,6 +1059,8 @@ mod tests {
                     tags: true,
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )?
             .expect("described");
         assert_eq!(tag_short_name(&d), "on-main");
@@ -1019,6 +1108,8 @@ mod tests {
                     tags: true,
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )?
             .expect("described");
         assert_eq!(tag_short_name(&d), "t-tagged");
@@ -1161,6 +1252,8 @@ mod tests {
                     tags: true,
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )?
             .expect("described");
         assert_eq!(tag_short_name(&d), "t-tagged");
@@ -1193,6 +1286,8 @@ mod tests {
                     tags: true,
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )?
             .expect("described");
         assert_eq!(tag_short_name(&d), "t-tagged");
@@ -1262,7 +1357,12 @@ mod tests {
 
         let d = repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?
             .expect("described without within-bit overflow");
         assert_eq!(tag_short_name(&d), "t20");
         assert_eq!(d.peeled, tagged);
@@ -1297,7 +1397,12 @@ mod tests {
         reset_describe_distance_counts();
         let d = repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?
             .expect("described");
         assert_eq!(d.distance, 1);
         assert_eq!(
@@ -1370,7 +1475,12 @@ mod tests {
         reset_describe_heap_processed();
         let described = repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?
             .expect("described");
         assert!(
             describe_distance_counts() <= 1,
@@ -1424,7 +1534,12 @@ mod tests {
         reset_commit_parent_lookups();
         let d = repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?
             .expect("described");
         assert_eq!(d.distance, TAG_EVERY - 1);
         let lookups = commit_parent_lookups();
@@ -1463,7 +1578,12 @@ mod tests {
         reset_commit_parent_lookups();
         let d = repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?
             .expect("described");
         assert_eq!(d.distance, 1);
         let lookups = commit_parent_lookups();

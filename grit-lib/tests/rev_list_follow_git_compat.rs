@@ -1,5 +1,7 @@
 //! Path-limited history with `--follow` vs system `git log --follow`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::path::Path;
@@ -26,6 +28,8 @@ fn grit_follow_commits_with(
                 limit,
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit follow walk")
         .into_iter()
@@ -199,6 +203,8 @@ fn follow_without_flag_stops_at_rename() {
                 pathspec: Pathspec::scoped(["new.txt"], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("no-follow walk");
     assert_eq!(oids.len(), 2, "rename and edit2 only without follow");

@@ -40,6 +40,7 @@ use crate::odb::Odb;
 use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
 use crate::partial_clone::{stored_remote_filter, ObjectFilterSpec};
+use crate::progress::{CancelToken, NullProgress};
 use crate::repo::error::FilesOnlyOperation;
 use crate::repo::Repository;
 

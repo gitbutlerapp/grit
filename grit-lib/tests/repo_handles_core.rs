@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::fs;
 
 use std::sync::Arc;
@@ -160,7 +162,10 @@ fn rev_walk_resolve_and_list_match_git() {
         reverse: false,
         ..RevListOptions::default()
     };
-    let result = repo.revwalk().walk("HEAD", &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .walk("HEAD", &opts, &mut NullProgress, &CancelToken::never())
+        .expect("rev-list");
     let grit_hex: Vec<String> = result.commits.iter().map(|c| c.to_hex()).collect();
 
     let git_list = git(wt, &["rev-list", "HEAD"]);

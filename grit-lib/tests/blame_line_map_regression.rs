@@ -1,5 +1,7 @@
 //! Regression for blame line maps on moved includes (#1610).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::blame::{build_line_map, BlameDiffAlgorithm};
 
 #[test]
@@ -100,7 +102,15 @@ fn blame_merge_moved_include_matches_git() {
 /// Assert `blame_file` attributes every line of `path` to the commit `git blame` reports.
 fn assert_blame_matches_git(root: &Path, path: &str) {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
-    let result = repo.diff().blame(path, &BlameOptions::default()).unwrap();
+    let result = repo
+        .diff()
+        .blame(
+            path,
+            &BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap();
     let mut cmd = Command::new("git");
     cmd.current_dir(root).args(["blame", "--porcelain", path]);
     git_env(&mut cmd);

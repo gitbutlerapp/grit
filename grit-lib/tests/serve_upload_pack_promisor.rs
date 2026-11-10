@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};

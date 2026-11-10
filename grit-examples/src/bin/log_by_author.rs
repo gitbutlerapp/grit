@@ -2,6 +2,8 @@
 //!
 //! Source for the library guide "Revwalk" page (included in the docs site).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use anyhow::Result;
 use std::path::Path;
 use std::sync::Arc;
@@ -38,7 +40,9 @@ fn main() -> Result<()> {
         commit_filter: Some(filter),
         ..RevListOptions::default()
     };
-    let result = repo.revwalk().rev_list(&tips, &[], &opts)?;
+    let result =
+        repo.revwalk()
+            .rev_list(&tips, &[], &opts, &mut NullProgress, &CancelToken::never())?;
     for oid in &result.commits {
         println!("{oid}");
     }

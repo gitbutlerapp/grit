@@ -1,6 +1,8 @@
 //! Public custom [`Odb`](grit_lib::objects::odb::Odb) backends via
 //! [`RepositoryOptions::with_object_store`].
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::diff::TreeDiffOptions;
 use std::fs;
 use std::path::Path;
@@ -252,7 +254,13 @@ fn memory_primary_revwalk_diff_without_loose_objects() {
     let tip = commit.to_hex();
     let listed = repo
         .revwalk()
-        .rev_list(&[tip.clone()], &[], &RevListOptions::default())
+        .rev_list(
+            &[tip.clone()],
+            &[],
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     assert_eq!(listed.commits.len(), 1);
     assert_eq!(listed.commits[0], commit);

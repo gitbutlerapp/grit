@@ -1,5 +1,7 @@
 //! Broad `rev_list` / `diff` API sweeps on synthetic repos (coverage-oriented).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{CopyDetection, DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::error::Error;
@@ -74,9 +76,13 @@ fn symmetric_range_ancestry_and_object_roots() -> grit_lib::error::Result<()> {
         in_commit_order: true,
         ..RevListOptions::default()
     };
-    let out = repo
-        .revwalk()
-        .rev_list(&[String::from("main")], &[], &opts)?;
+    let out = repo.revwalk().rev_list(
+        &[String::from("main")],
+        &[],
+        &opts,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
     assert_eq!(out.commits.len(), 2);
     Ok(())
 }
@@ -138,7 +144,13 @@ fn diff_postprocess_across_commit_pair() -> grit_lib::error::Result<()> {
     assert!(!processed.is_empty());
 
     let via_commits = diff
-        .commits(&base, &tip, &TreeDiffOptions::default())?
+        .commits(
+            &base,
+            &tip,
+            &TreeDiffOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?
         .entries;
     assert!(!via_commits.is_empty());
     let _ = repo
@@ -223,9 +235,13 @@ fn long_merged_history_object_walk_and_decoration() -> grit_lib::error::Result<(
             max_count: Some(96),
             ..RevListOptions::default()
         };
-        let _ =
-            repo.revwalk()
-                .rev_list(&[String::from("main"), String::from("side")], &[], &opts)?;
+        let _ = repo.revwalk().rev_list(
+            &[String::from("main"), String::from("side")],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?;
     }
     let _ = repo.revwalk().rev_list(
         &[
@@ -238,6 +254,8 @@ fn long_merged_history_object_walk_and_decoration() -> grit_lib::error::Result<(
             objects: true,
             ..RevListOptions::default()
         },
+        &mut NullProgress,
+        &CancelToken::never(),
     )?;
     Ok(())
 }

@@ -1,5 +1,7 @@
 //! NFD argv pathspecs match NFC index paths when precompose is enabled (issue #1007).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{

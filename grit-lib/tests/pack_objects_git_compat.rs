@@ -1,6 +1,8 @@
 //! Git compatibility for [`grit_lib::objects::pack_objects`] packs: `index-pack --strict`, `fsck`,
 //! thin-pack fix, size parity vs `git pack-objects --revs`, and SHA-256 repos.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_test_support::rev_parse;
 use std::io::Write;
 use std::path::Path;

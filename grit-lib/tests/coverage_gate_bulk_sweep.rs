@@ -1,5 +1,7 @@
 //! Broad API sweeps to ratchet history and total line coverage toward the 80/85 gate.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::fs;
@@ -258,9 +260,13 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
                 filter_print_omitted: true,
                 ..RevListOptions::default()
             };
-            let out = repo
-                .revwalk()
-                .rev_list(&[String::from("main")], &[], &opts)?;
+            let out = repo.revwalk().rev_list(
+                &[String::from("main")],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?;
             assert!(!out.commits.is_empty());
         }
     }
@@ -277,7 +283,13 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
         filter: Some(ObjectFilter::BlobLimit(4096)),
         ..RevListOptions::default()
     };
-    let _ = repo.revwalk().rev_list(&[], &[], &filtered)?;
+    let _ = repo.revwalk().rev_list(
+        &[],
+        &[],
+        &filtered,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
     let _ = repo
         .revwalk()
         .merge_bases(&[tip, mid], grit_lib::revwalk::MergeBaseMode::All)?;

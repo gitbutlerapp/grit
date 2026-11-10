@@ -1,5 +1,7 @@
 //! Pickaxe (`-S` / `-G`) vs system `git log`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::path::Path;
@@ -37,7 +39,13 @@ fn grit_pickaxe_log(
         ..RevListOptions::default()
     };
     repo.revwalk()
-        .rev_list(&["HEAD".into()], &[], &opts)
+        .rev_list(
+            &["HEAD".into()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list")
         .commits
         .into_iter()
@@ -593,7 +601,13 @@ fn pickaxe_first_parent_diffs_merges_against_first_parent_matches_git() {
     };
     let grit_oids: Vec<String> = repo
         .revwalk()
-        .rev_list(&["HEAD".into()], &[], &opts)
+        .rev_list(
+            &["HEAD".into()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list")
         .commits
         .into_iter()

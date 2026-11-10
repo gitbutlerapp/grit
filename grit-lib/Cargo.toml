@@ -523,6 +523,11 @@ name = "history_rebase_bin"
 path = "tests/history_rebase_bin.rs"
 required-features = ["full-tests"]
 
+[[test]]
+name = "revwalk_cancel_progress"
+path = "tests/revwalk_cancel_progress.rs"
+required-features = ["test-support"]
+
 [[bench]]
 name = "pack_frontier"
 harness = false

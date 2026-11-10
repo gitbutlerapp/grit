@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::diff::{CopyDetection, DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
@@ -146,9 +148,13 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
             max_count: Some(20),
             ..RevListOptions::default()
         };
-        let out = repo
-            .revwalk()
-            .rev_list(&[String::from("main")], &[], &opts)?;
+        let out = repo.revwalk().rev_list(
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?;
         assert!(!out.commits.is_empty());
     }
 
@@ -173,7 +179,13 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
     assert!(raw.iter().any(|e| e.status == DiffStatus::Modified));
     let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
     let _ = diff.tree_to_tree(Some(&old_tree), Some(&new_tree), &renames)?;
-    let _ = diff.commits(&base, &head, &renames)?;
+    let _ = diff.commits(
+        &base,
+        &head,
+        &renames,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
     let copies = renames
         .with_copies(CopyDetection::FindHarder(50))
         .with_threads(Some(ThreadPolicy::default()));

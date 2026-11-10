@@ -1,5 +1,7 @@
 //! Smoke test for [`support::history_harness`].
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -24,7 +26,13 @@ fn history_harness_smoke_three_commit_dag_matches_grit_rev_list() {
     };
     let grit_result = grit_repo
         .revwalk()
-        .rev_list(&[String::from("main")], &[], &opts)
+        .rev_list(
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     let grit_oids = grit_result.commits;
 

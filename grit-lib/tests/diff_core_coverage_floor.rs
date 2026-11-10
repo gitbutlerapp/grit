@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
     BreakRewrites, CopyDetection, RenameDetection, SubmoduleIgnoreMode, TreeDiffOptions,
@@ -102,7 +104,13 @@ fn diff_core_many_tree_and_index_paths() -> grit_lib::error::Result<()> {
         let _ = diff.detect_renames(raw, prev_tree.as_ref(), &opts)?;
         if let (Some(p_tree), Some(p_commit)) = (prev_tree, prev_commit) {
             let head = commit(&odb, new_tree, Some(p_commit), i);
-            let _ = diff.commits(&p_commit, &head, &renames)?;
+            let _ = diff.commits(
+                &p_commit,
+                &head,
+                &renames,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?;
             let mut index = Index::new();
             index.entries_mut().push(index_entry("shared.txt", b_new));
             index.entries_mut().push(index_entry(&f_name, b_old));

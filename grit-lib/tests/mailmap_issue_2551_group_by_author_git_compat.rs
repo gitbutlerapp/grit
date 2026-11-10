@@ -1,5 +1,7 @@
 //! Issue #2551: mailmap lines with name-only remainder or trailing comment after second pair.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::fs;
 use std::process::Command;
 
@@ -62,9 +64,12 @@ fn group_by_author_mailmap_issue_2551_matches_git_shortlog_sne() -> grit_lib::er
     )?;
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::default())?;
-    let oids = repo
-        .revwalk()
-        .commits(&["HEAD"], &RevWalkListOptions::default())?;
+    let oids = repo.revwalk().commits(
+        &["HEAD"],
+        &RevWalkListOptions::default(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
     let table = repo.revwalk().mailmap_for_grouping(true)?;
     let groups =
         repo.revwalk()

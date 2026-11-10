@@ -1,5 +1,7 @@
 //! `git log -p` patch output parity (Myers default and histogram).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::io::Cursor;
@@ -65,7 +67,13 @@ fn grit_log_patch(repo: &Repository, limit: usize, diff: DiffOptions) -> Vec<u8>
     };
     let result = repo
         .revwalk()
-        .rev_list(&["HEAD".to_owned()], &[], &opts)
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     let config = repo
         .config()
@@ -126,6 +134,8 @@ fn log_patch_full_header_separates_commits_like_git() {
                 max_count: Some(15),
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("rev-list");
     let config = repo

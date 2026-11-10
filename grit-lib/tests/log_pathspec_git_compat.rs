@@ -1,5 +1,7 @@
 //! Path-limited `rev_walk` log order vs system `git log --format=%H`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 mod support;
 
 use grit_lib::revwalk::RevWalkListOptions;
@@ -72,6 +74,8 @@ fn log_pathspec_literal_matches_git() {
                 pathspec: Pathspec::scoped([path], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit commits");
     assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
@@ -93,6 +97,8 @@ fn log_pathspec_glob_matches_git() {
                 pathspec: Pathspec::scoped([pattern], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit commits");
     assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
@@ -114,6 +120,8 @@ fn log_pathspec_exclude_matches_git() {
                 pathspec: Pathspec::scoped([spec], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit commits");
     assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
@@ -135,6 +143,8 @@ fn log_pathspec_icase_matches_git() {
                 pathspec: Pathspec::scoped([spec], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit commits");
     assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
@@ -156,6 +166,8 @@ fn log_pathspec_after_rename_matches_git() {
                 pathspec: Pathspec::scoped([path], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit commits");
     assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
@@ -178,6 +190,8 @@ fn log_pathspec_rename_follow_matches_git() {
                 follow: true,
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit commits");
     assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);

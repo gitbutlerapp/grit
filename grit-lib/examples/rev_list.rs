@@ -2,6 +2,8 @@
 //!
 //! Run: `cargo run -p grit-lib --example rev_list`
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::refs;
@@ -69,9 +71,13 @@ fn main() -> grit_lib::error::Result<()> {
     let _root_commit = make_initial_commit(&repo)?;
 
     let opts = RevListOptions::default();
-    let result = repo
-        .revwalk()
-        .rev_list(&[String::from("HEAD")], &[], &opts)?;
+    let result = repo.revwalk().rev_list(
+        &[String::from("HEAD")],
+        &[],
+        &opts,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
 
     println!("commits from HEAD (oldest-first internal order may vary):");
     for oid in &result.commits {

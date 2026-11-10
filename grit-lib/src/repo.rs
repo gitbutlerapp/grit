@@ -50,6 +50,7 @@ use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
 use crate::objects::{parse_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::progress::{CancelToken, NullProgress};
 use crate::refs::store::{RefName, RefNameRef};
 use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
@@ -1252,7 +1253,12 @@ impl Repository {
         let mut out = Vec::new();
         for spec in specs {
             let commits = if crate::rev_parse::is_top_level_range(spec) {
-                walk.commits(&[spec], &walk_options)?
+                walk.commits(
+                    &[spec],
+                    &walk_options,
+                    &mut NullProgress,
+                    CancelToken::never_ref(),
+                )?
             } else {
                 vec![crate::rev_parse::resolve_revision_without_index_dwim(
                     self, spec,

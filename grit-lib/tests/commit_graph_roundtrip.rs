@@ -1,5 +1,7 @@
 //! Commit-graph and Bloom filter round-trips with system `git` (t5318/t5324/t5328 scenarios).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -157,7 +159,13 @@ fn grit_rev_list_topo(repo: &Repository, tip: &str, use_graph: bool) -> Vec<Obje
         ..Default::default()
     };
     repo.revwalk()
-        .rev_list(&[tip.to_owned()], &[], &opts)
+        .rev_list(
+            &[tip.to_owned()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev_list")
         .commits
 }

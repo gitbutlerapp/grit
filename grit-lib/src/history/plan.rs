@@ -30,6 +30,7 @@ use super::types::{
 use crate::refs::store::RefName;
 
 use super::PlanningError;
+use crate::progress::{CancelToken, NullProgress};
 use crate::replay_merge_session::ReplayMergeSession;
 
 // hygiene: resumable replay control (thread-local for parallel tests)
@@ -347,7 +348,15 @@ fn plan_rewrite_with_order_impl(
             ..RevListOptions::default()
         };
 
-        let walk = rev_list(repo, &tips, &negative, &walk_opts).map_err(library_err)?;
+        let walk = rev_list(
+            repo,
+            &tips,
+            &negative,
+            &walk_opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )
+        .map_err(library_err)?;
         let mut commits_to_replay: Vec<ObjectId> = walk.commits;
         if !commits_to_replay.contains(&oldest) {
             commits_to_replay.insert(0, oldest);

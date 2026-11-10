@@ -1,5 +1,7 @@
 //! GC/repack with `pack.compression=0` / `core.compression=0` uses stored zlib (issue #1653).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;

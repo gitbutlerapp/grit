@@ -1,5 +1,7 @@
 //! Integration tests for typed [`RevParseError`] and [`RevListError`] variants.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::error::RevisionError;
@@ -115,7 +117,13 @@ fn sparse_blob_unreadable_for_missing_spec() {
     opts.filter = Some(ObjectFilter::SparseOid("missing:path".into()));
     let err = repo
         .revwalk()
-        .rev_list(&[tip.to_hex()], &[], &opts)
+        .rev_list(
+            &[tip.to_hex()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap_err();
     assert!(matches!(
         err,
@@ -133,7 +141,13 @@ fn sparse_filter_unparsable_when_commit_not_blob() {
     opts.filter = Some(ObjectFilter::SparseOid(tip.to_hex()));
     let err = repo
         .revwalk()
-        .rev_list(&[tip.to_hex()], &[], &opts)
+        .rev_list(
+            &[tip.to_hex()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap_err();
     assert!(matches!(
         err,
@@ -155,7 +169,13 @@ fn sparse_filter_unparsable_on_invalid_utf8_blob() {
     opts.filter = Some(ObjectFilter::SparseOid(blob.to_hex()));
     let err = repo
         .revwalk()
-        .rev_list(&[tip.to_hex()], &[], &opts)
+        .rev_list(
+            &[tip.to_hex()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap_err();
     assert!(matches!(
         err,

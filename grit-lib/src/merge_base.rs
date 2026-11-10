@@ -19,6 +19,7 @@ use crate::objects::{
     OidHashSet,
 };
 use crate::pack_bitmap::BitmapIndex;
+use crate::progress::{CancelToken, NullProgress};
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
 use crate::repo::Repository;
@@ -4789,12 +4790,16 @@ mod tests {
                         use_commit_graph: true,
                         ..Default::default()
                     },
+                    &mut crate::progress::NullProgress,
+                    crate::progress::CancelToken::never_ref(),
                 )?
                 .commit_count()
             } else {
                 repo.revwalk().count(
                     &["main~20..main"],
-                    &crate::revwalk::RevWalkListOptions::default(),
+                    &RevWalkListOptions::default(),
+                    &mut NullProgress,
+                    CancelToken::never_ref(),
                 )?
             };
             assert_eq!(count, 20);
@@ -5671,11 +5676,21 @@ mod tests {
         let token_refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
         let revwalk = repo
             .revwalk()
-            .commits(&token_refs, &RevWalkListOptions::default())
+            .commits(
+                &token_refs,
+                &RevWalkListOptions::default(),
+                &mut NullProgress,
+                CancelToken::never_ref(),
+            )
             .expect("revwalk commits");
         let revwalk_count = repo
             .revwalk()
-            .count(&token_refs, &RevWalkListOptions::default())
+            .count(
+                &token_refs,
+                &RevWalkListOptions::default(),
+                &mut NullProgress,
+                CancelToken::never_ref(),
+            )
             .expect("revwalk count");
 
         assert!(!listed.contains(&fixture.skewed));

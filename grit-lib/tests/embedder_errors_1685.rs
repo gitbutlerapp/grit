@@ -89,7 +89,12 @@ fn blame_file_missing_path_is_path_not_in_revision() {
     let (_base, repo, _head) = repo_with_one_commit();
     let err = repo
         .diff()
-        .blame("nope.txt", &Default::default())
+        .blame(
+            "nope.txt",
+            &Default::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap_err();
     assert_blame_path_not_in_revision(err, "nope.txt", "HEAD");
 }

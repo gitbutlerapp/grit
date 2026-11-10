@@ -1,5 +1,7 @@
 //! `log --graph` commit order matches `git log --graph --format=%H`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -54,15 +56,20 @@ fn log_graph_order_matches_git_on_merge_fixture() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::default()).expect("open");
     let grit_order: Vec<String> = repo
         .revwalk()
-        .commits(&["HEAD"], &{
-            let mut walk = (&RevWalkListOptions {
-                limit: Some(100),
-                ..Default::default()
-            })
-                .clone();
-            walk.graph = true;
-            walk
-        })
+        .commits(
+            &["HEAD"],
+            &{
+                let mut walk = (&RevWalkListOptions {
+                    limit: Some(100),
+                    ..Default::default()
+                })
+                    .clone();
+                walk.graph = true;
+                walk
+            },
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("graph walk")
         .into_iter()
         .map(|o| o.to_hex())

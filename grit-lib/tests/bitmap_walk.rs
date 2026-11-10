@@ -1,5 +1,7 @@
 //! Bitmap reachability engine vs object walk and system Git.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::collections::HashSet;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -65,7 +67,13 @@ fn grit_object_set(
     };
     let result = repo
         .revwalk()
-        .rev_list(&wants, &haves, &opts)
+        .rev_list(
+            &wants,
+            &haves,
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     let mut set = HashSet::new();
     for oid in &result.commits {

@@ -1,5 +1,7 @@
 //! Issue #2359: file/directory merge keeps the directory and parks the file at `path~label`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 
 use crate::support::{git, git_ls_files_stage, open_grit_repo};

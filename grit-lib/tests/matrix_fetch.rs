@@ -45,6 +45,8 @@
 #![cfg(feature = "http-ureq")]
 #![cfg(unix)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_test_support::{free_port, git, rev_parse};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};

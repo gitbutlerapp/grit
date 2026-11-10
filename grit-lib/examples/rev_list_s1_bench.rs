@@ -2,6 +2,8 @@
 //!
 //! Run: `GRIT_GIT_GIT_BARE=/path/to/git.git cargo run -p grit-lib --release --example rev_list_s1_bench`
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::time::Instant;
 
@@ -26,9 +28,13 @@ fn main() -> grit_lib::error::Result<()> {
     let mut object_count = 0usize;
     for _ in 0..7 {
         let start = Instant::now();
-        let result = repo
-            .revwalk()
-            .rev_list(&[String::from("v1.0.0")], &[], &opts)?;
+        let result = repo.revwalk().rev_list(
+            &[String::from("v1.0.0")],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?;
         object_count = result.objects.len();
         times.push(start.elapsed().as_secs_f64());
     }

@@ -1,5 +1,7 @@
 //! Git parity for `git blame -w` / ignore-all-space line comparison.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::process::Command;
 
@@ -114,6 +116,8 @@ fn grit_blame_w(repo: &Repository, file: &str) -> Vec<PorcelainLine> {
                 whitespace: WhitespaceMode::ignore_all_space(),
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("blame_file");
     let mut out: Vec<PorcelainLine> = result

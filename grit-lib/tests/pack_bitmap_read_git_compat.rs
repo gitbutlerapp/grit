@@ -1,5 +1,7 @@
 //! Pack / MIDX `.bitmap` read compatibility with system Git.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::collections::HashSet;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -67,7 +69,7 @@ fn reachability_positions(repo: &Repository, index: &BitmapIndex, tip: &ObjectId
     };
     let result = repo
         .revwalk()
-        .rev_list(&[hex], &[], &opts)
+        .rev_list(&[hex], &[], &opts, &mut NullProgress, &CancelToken::never())
         .expect("rev-list");
     let mut out = HashSet::new();
     for oid in result

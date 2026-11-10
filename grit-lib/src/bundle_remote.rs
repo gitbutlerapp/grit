@@ -89,7 +89,14 @@ pub fn resolve_bundle_spec(repo: &Repository, options: &BundleCreateOptions) -> 
         all_refs,
         ..Default::default()
     };
-    let revs = crate::rev_list::rev_list(repo, &positive_specs, &negative_specs, &rev_opts)?;
+    let revs = crate::rev_list::rev_list(
+        repo,
+        &positive_specs,
+        &negative_specs,
+        &rev_opts,
+        &mut crate::progress::NullProgress,
+        crate::progress::CancelToken::never_ref(),
+    )?;
 
     let include = if all_refs {
         refs_for_bundle_header(repo)?

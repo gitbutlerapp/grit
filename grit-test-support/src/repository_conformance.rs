@@ -223,7 +223,13 @@ fn commit_history_row(out: &CommitOutcome) -> (ObjectId, String, ChangeId) {
 fn log_main(repo: &Repository) -> Vec<(ObjectId, String, ChangeId)> {
     let revwalk = repo.revwalk();
     let walked = revwalk
-        .rev_list(&["HEAD".to_owned()], &[], &RevListOptions::default())
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     let decorations = revwalk
         .decorations(&DecorationOptions::default())
@@ -834,7 +840,12 @@ fn run_snapshot_on_repo(
 
     let blame = repo
         .diff()
-        .blame("story.txt", &grit_lib::blame::BlameOptions::default())
+        .blame(
+            "story.txt",
+            &grit_lib::blame::BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("blame");
     let blame_commits: Vec<_> = blame.lines.iter().map(|l| l.commit).collect();
 
@@ -1368,7 +1379,13 @@ fn case_git_roundtrip(fixture: &impl BackendFixture) {
 
     let revwalk = repo.revwalk();
     let walked = revwalk
-        .rev_list(&["HEAD".to_owned()], &[], &RevListOptions::default())
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     let grit_hashes: BTreeSet<_> = walked.commits.iter().map(|o| o.to_hex()).collect();
     assert_eq!(git_hashes, grit_hashes);

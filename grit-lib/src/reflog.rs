@@ -16,6 +16,7 @@ use crate::ident::Signature;
 use crate::index::MODE_TREE;
 use crate::merge_base;
 use crate::objects::{parse_commit, parse_tree, CommitRef, ObjectId, ObjectKind, OidHashMap};
+use crate::progress::{CancelToken, NullProgress};
 use crate::refs::store::{RefNameRef, RefStore as _, RefStoreError};
 use crate::refs::{self, reflog_file_path};
 use crate::repo::Repository;

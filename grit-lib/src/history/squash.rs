@@ -22,6 +22,7 @@ use super::reword::normalize_rewrite_message;
 use super::types::RefScope;
 use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
 use super::PlanningError;
+use crate::progress::{CancelToken, NullProgress};
 
 /// How to choose the message on the squashed commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,7 +150,14 @@ fn resolve_squash_range(
         use_commit_graph: true,
         ..RevListOptions::default()
     };
-    let walk = rev_list(repo, &positive, &negative, &walk_opts)?;
+    let walk = rev_list(
+        repo,
+        &positive,
+        &negative,
+        &walk_opts,
+        &mut crate::progress::NullProgress,
+        crate::progress::CancelToken::never_ref(),
+    )?;
     let commits = walk.commits;
     if commits.is_empty() {
         return Err(HistoryError::Planning(PlanningError::SquashRevisionRangeEmpty).into());

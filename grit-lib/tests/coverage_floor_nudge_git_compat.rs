@@ -1,5 +1,7 @@
 //! Git-oracle repo exercises to nudge total and revwalk floors over committed gates.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use grit_lib::blame::BlameOptions;
@@ -94,6 +96,8 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
                 &[String::from("HEAD")],
                 &[String::from("HEAD~15")],
                 &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
             )?;
         }
     }
@@ -123,6 +127,8 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
                     line_range: Some(1..=2),
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )?;
             assert!(!blame.lines.is_empty());
         }
@@ -152,9 +158,13 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
             max_count: Some(96),
             ..RevListOptions::default()
         };
-        let _ = repo
-            .revwalk()
-            .rev_list(&[String::from("HEAD")], &[], &opts)?;
+        let _ = repo.revwalk().rev_list(
+            &[String::from("HEAD")],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?;
     }
 
     let merge_tip = repo.odb().read(&tip.parse().expect("tip"))?;
@@ -172,6 +182,8 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
                     p1,
                     p2,
                     &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+                    &mut NullProgress,
+                    &CancelToken::never(),
                 )
                 .map(|r| r.entries)?;
             let _ = repo

@@ -1,5 +1,7 @@
 //! Rev-list with commit-graph Bloom filters (revision.c paths).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -49,7 +51,13 @@ fn rev_list_uses_bloom_filters_with_pathspec() {
     };
     let out = repo
         .revwalk()
-        .rev_list(&["HEAD".to_owned()], &[], &opts)
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     assert!(!out.commits.is_empty());
     let guard = stats.lock().unwrap_or_else(|e| e.into_inner());

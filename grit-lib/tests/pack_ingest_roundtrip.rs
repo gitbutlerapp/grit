@@ -5,6 +5,8 @@
 //! under every [`grit_lib::objects::index_pack::IngestPackOptions`] variant, and cross-checks installed
 //! packs with `git verify-pack -v` and `git fsck --strict`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::error::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;

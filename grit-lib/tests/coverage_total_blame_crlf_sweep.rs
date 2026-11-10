@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::apply::parse_patch;
 use grit_lib::blame::BlameOptions;
 use grit_lib::objects::ObjectKind;
@@ -70,6 +72,8 @@ fn blame_crlf_apply_and_pathspec_deep_sweep() -> grit_lib::error::Result<()> {
                     line_range: range,
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )?;
             assert!(!blame.lines.is_empty());
         }

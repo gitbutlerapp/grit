@@ -1,5 +1,7 @@
 //! Rev-list ordering, limiting, and range tests vs system `git` (history harness).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 use grit_lib::error::RevisionError;
 
@@ -178,21 +180,41 @@ fn default_order_unlimited_matches_bounded_and_git() {
     let walk = grit.revwalk();
 
     let unlimited = walk
-        .commits(&["HEAD"], &RevWalkListOptions::default())
+        .commits(
+            &["HEAD"],
+            &RevWalkListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("commits unlimited");
     let huge_limit = RevWalkListOptions {
         limit: Some(1_000_000),
         ..RevWalkListOptions::default()
     };
     let bounded = walk
-        .commits(&["HEAD"], &huge_limit)
+        .commits(
+            &["HEAD"],
+            &huge_limit,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("commits huge limit");
     let rev_walk = walk
-        .walk("HEAD", &RevListOptions::default())
+        .walk(
+            "HEAD",
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("RevWalk::walk")
         .commits;
     let iter: Vec<ObjectId> = walk
-        .commits_iter("HEAD", &RevWalkCommitIterOptions::default())
+        .commits_iter(
+            "HEAD",
+            &RevWalkCommitIterOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("commits_iter")
         .collect::<Result<_, _>>()
         .expect("commits_iter items");
@@ -221,6 +243,8 @@ fn default_order_unlimited_matches_bounded_and_git() {
                     limit: Some(n),
                     ..RevWalkListOptions::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )
             .expect("limited prefix");
         assert_eq!(prefix, limited, "prefix {n}");
@@ -409,7 +433,13 @@ fn t6013_reverse_matches_git() {
         opts.use_commit_graph = use_graph;
         let result = grit
             .revwalk()
-            .rev_list(&[String::from("main")], &[root_hex.clone()], &opts)
+            .rev_list(
+                &[String::from("main")],
+                &[root_hex.clone()],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("boundary rev_list");
         let grit_seq: Vec<ObjectId> = if opts.reverse {
             result
@@ -475,7 +505,13 @@ fn t6013_max_count_boundary_path_limited_parents_match_git() {
         run_opts.use_commit_graph = use_graph;
         let result = grit
             .revwalk()
-            .rev_list(&[String::from("main")], &[root_hex.clone()], &run_opts)
+            .rev_list(
+                &[String::from("main")],
+                &[root_hex.clone()],
+                &run_opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("max-count boundary rev_list");
         let mut grit_seq = result.commits;
         grit_seq.extend(result.boundary_commits);
@@ -534,7 +570,13 @@ fn t6005_max_count_skip_match_git() {
     };
     let grit_count = grit
         .revwalk()
-        .rev_list(&[String::from("main")], &[], &opts)
+        .rev_list(
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("count")
         .commit_count();
     assert_eq!(grit_count, count_git);
@@ -677,7 +719,13 @@ fn t6100_in_order_matches_git() {
         opts.use_commit_graph = use_graph;
         let result = grit
             .revwalk()
-            .rev_list(&[String::from("HEAD")], &[], &opts)
+            .rev_list(
+                &[String::from("HEAD")],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("in-order walk");
         let mut grit_oids = Vec::new();
         for (i, commit) in result.commits.iter().enumerate() {
@@ -789,7 +837,13 @@ fn assert_replace_graft_history_matches_git(
 
     let result = grit
         .revwalk()
-        .rev_list(&[String::from("HEAD")], &[], &RevListOptions::default())
+        .rev_list(
+            &[String::from("HEAD")],
+            &[],
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("revs");
     assert_eq!(result.commits.len(), 2, "{label}: grit count");
 
@@ -857,7 +911,13 @@ fn replace_graft_on_ancestor_stitches_history_issue_2473() {
     .expect("open no-replace");
     let raw = grit_raw
         .revwalk()
-        .rev_list(&[String::from("HEAD")], &[], &RevListOptions::default())
+        .rev_list(
+            &[String::from("HEAD")],
+            &[],
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("raw revs");
     assert_eq!(raw.commits.len(), 4);
 }
@@ -900,7 +960,10 @@ fn symmetric_diff_left_right_cherry_mark_match_git() {
         "symmetric cherry-mark order",
     );
 
-    let result = grit.revwalk().rev_list(&pos, &neg, &opts).expect("cherry");
+    let result = grit
+        .revwalk()
+        .rev_list(&pos, &neg, &opts, &mut NullProgress, &CancelToken::never())
+        .expect("cherry");
     for line in git_lines {
         let stripped = line.trim_start_matches(['<', '>', '=', ' '].as_ref());
         let oid: ObjectId = stripped.split_whitespace().next().unwrap().parse().unwrap();
@@ -919,7 +982,7 @@ fn cherry_mark_walk(repo: &grit_lib::repo::Repository, token: &str) -> RevListRe
         ..RevWalkListOptions::default()
     };
     repo.revwalk()
-        .rev_list_result(&[token], &opts)
+        .rev_list_result(&[token], &opts, &mut NullProgress, &CancelToken::never())
         .expect("cherry-mark walk")
 }
 
@@ -1045,7 +1108,9 @@ fn cherry_mark_and_left_right_require_one_symmetric_range() {
         },
     ] {
         for tokens in [&["feat"][..], &["main..feat"], &["old-feat...feat", "main"]] {
-            let err = walk.rev_list_result(tokens, &opts).unwrap_err();
+            let err = walk
+                .rev_list_result(tokens, &opts, &mut NullProgress, &CancelToken::never())
+                .unwrap_err();
             assert!(
                 matches!(
                     err,
@@ -1079,7 +1144,14 @@ fn cherry_mark_and_left_right_require_one_symmetric_range() {
         left_right: true,
         ..RevWalkListOptions::default()
     };
-    let result = walk.rev_list_result(&["old-feat...feat"], &opts).unwrap();
+    let result = walk
+        .rev_list_result(
+            &["old-feat...feat"],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap();
     let git_marks: Vec<(char, ObjectId)> =
         git_rev_list_lines(wt, &["--left-right", "old-feat...feat"])
             .iter()
@@ -1145,7 +1217,13 @@ fn t6000_misc_ranges_and_boundary_match_git() {
         opts.use_commit_graph = use_graph;
         let result = grit
             .revwalk()
-            .rev_list(&[String::from("main")], &[String::from("root")], &opts)
+            .rev_list(
+                &[String::from("main")],
+                &[String::from("root")],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("boundary walk");
         let mut grit_seq = result.commits;
         grit_seq.extend(result.boundary_commits);
@@ -1262,7 +1340,13 @@ fn t4217_boundary_since_until_match_git() {
         opts.use_commit_graph = use_graph;
         let result = grit
             .revwalk()
-            .rev_list(&[String::from("main")], &[], &opts)
+            .rev_list(
+                &[String::from("main")],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("since boundary rev_list");
         let mut grit_seq = result.commits;
         grit_seq.extend(result.boundary_commits);
@@ -1287,7 +1371,13 @@ fn t4217_boundary_since_until_match_git() {
         opts.use_commit_graph = use_graph;
         let result = grit
             .revwalk()
-            .rev_list(&[String::from("main")], &[], &opts)
+            .rev_list(
+                &[String::from("main")],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("until boundary rev_list");
         let mut grit_seq = result.commits;
         grit_seq.extend(result.boundary_commits);
@@ -1330,7 +1420,13 @@ fn simplify_by_decoration_boundary_match_git() {
         walk_opts.use_commit_graph = use_graph;
         let result = grit
             .revwalk()
-            .rev_list(&[String::from("main")], &[], &walk_opts)
+            .rev_list(
+                &[String::from("main")],
+                &[],
+                &walk_opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("simplify-by-decoration boundary rev_list");
         let mut grit_seq = result.commits;
         grit_seq.extend(result.boundary_commits);
@@ -1572,6 +1668,8 @@ fn rev_list_broad_ordering_and_limit_flags_match_git() {
                 count: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit count")
         .commit_count();
@@ -1725,6 +1823,8 @@ fn rev_list_objects_and_filters_match_git() {
                 objects: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit objects walk");
     let mut grit_set: std::collections::BTreeSet<ObjectId> =
@@ -1746,6 +1846,8 @@ fn rev_list_objects_and_filters_match_git() {
                 filter: Some(ObjectFilter::BlobNone),
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("blob none");
     let mut grit_bn: std::collections::BTreeSet<ObjectId> =
@@ -1782,6 +1884,8 @@ fn rev_list_objects_and_filters_match_git() {
                 objects: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit count objects")
         .count_with_objects_total();
@@ -1847,7 +1951,7 @@ fn rev_list_option_smoke_exercises_library_paths() {
     for opts in combos {
         let _ = grit
             .revwalk()
-            .rev_list(&specs, &[], &opts)
+            .rev_list(&specs, &[], &opts, &mut NullProgress, &CancelToken::never())
             .expect("rev_list smoke");
     }
 }

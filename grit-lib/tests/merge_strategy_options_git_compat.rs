@@ -1,5 +1,7 @@
 //! Merge strategy options (`-X`, conflict style, unrelated histories) vs system `git`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;

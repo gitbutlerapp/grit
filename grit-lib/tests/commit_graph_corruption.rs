@@ -1,5 +1,7 @@
 //! Commit-graph parse/load corruption handling (t5318/t5324 scenarios).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::error::ObjectError;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -392,7 +394,13 @@ fn grit_rev_list(repo: &Repository, tip: &str, use_graph: bool) -> Vec<ObjectId>
         ..Default::default()
     };
     repo.revwalk()
-        .rev_list(&[tip.to_owned()], &[], &opts)
+        .rev_list(
+            &[tip.to_owned()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev_list")
         .commits
 }

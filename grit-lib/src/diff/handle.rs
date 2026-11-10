@@ -793,8 +793,10 @@ impl<'repo> Diff<'repo> {
         &self,
         path: &str,
         options: &crate::blame::BlameOptions,
+        progress: &mut dyn crate::progress::ProgressSink,
+        cancel: &crate::progress::CancelToken,
     ) -> Result<crate::blame::BlameResult> {
-        crate::blame::blame_file(self.repo, path, options)
+        crate::blame::blame_file(self.repo, path, options, progress, cancel)
     }
 
     /// Resolve a Git-style `-L` range for blame on `path` at a fixed start commit.

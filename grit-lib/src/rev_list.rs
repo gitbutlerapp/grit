@@ -64,10 +64,12 @@ use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::pathspec::{pathspec_has_attr_magic, PathspecMatcher};
-use crate::progress::{poll_watch, CancelToken};
+use crate::progress::{
+    poll_watch, CancelToken, HistoryWalkStride, HistoryWalkStrideState, ProgressPhase, ProgressSink,
+};
 
-fn cancel_watch_for_walk(cancel: &Option<CancelToken>) -> Option<Arc<AtomicBool>> {
-    cancel.as_ref().map(CancelToken::watch_arc)
+fn cancel_watch_for_walk(cancel: &CancelToken) -> Arc<AtomicBool> {
+    cancel.watch_arc()
 }
 use crate::reflog::{read_reflog_on_store, reflog_refs_on_store};
 use crate::refs;
@@ -1088,6 +1090,8 @@ pub(crate) fn rev_list(
     positive_specs: &[String],
     negative_specs: &[String],
     options: &RevListOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<RevListResult> {
     rev_list_with_context(
         repo,
@@ -1095,6 +1099,8 @@ pub(crate) fn rev_list(
         negative_specs,
         options,
         RevListWalkContext::default(),
+        progress,
+        cancel,
     )
 }
 
@@ -1104,8 +1110,12 @@ pub(crate) fn rev_list_with_context(
     negative_specs: &[String],
     options: &RevListOptions,
     context: RevListWalkContext,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<RevListResult> {
     crate::trace::trace_span!("grit.revwalk.setup");
+    let mut walk_stride = HistoryWalkStrideState::default();
+    let cancel_watch = cancel_watch_for_walk(cancel);
     if let Some(spec) = positive_specs
         .iter()
         .chain(negative_specs)
@@ -1261,17 +1271,30 @@ pub(crate) fn rev_list_with_context(
         options,
         &repo_config,
         context,
+        progress,
+        cancel,
     )? {
+        if walk_stride.started {
+            progress.finish();
+        }
+        return Ok(result);
+    }
+
+    if let Some(result) = try_bounded_parent_filter_limit_list(
+        repo, &include, &exclude, options, context, progress, cancel,
+    )? {
+        if walk_stride.started {
+            progress.finish();
+        }
         return Ok(result);
     }
 
     if let Some(result) =
-        try_bounded_parent_filter_limit_list(repo, &include, &exclude, options, context)?
+        try_bounded_limit_list(repo, &include, &exclude, options, context, progress, cancel)?
     {
-        return Ok(result);
-    }
-
-    if let Some(result) = try_bounded_limit_list(repo, &include, &exclude, options, context)? {
+        if walk_stride.started {
+            progress.finish();
+        }
         return Ok(result);
     }
 
@@ -1620,6 +1643,9 @@ pub(crate) fn rev_list_with_context(
                     &traversable,
                     &included,
                     false,
+                    progress,
+                    cancel,
+                    &mut walk_stride,
                 )?
             } else if dense_path_limited && !include.is_empty() {
                 date_order_walk_through_dropped(
@@ -1628,9 +1654,21 @@ pub(crate) fn rev_list_with_context(
                     &dense_traversable,
                     &included,
                     false,
+                    progress,
+                    cancel,
+                    &mut walk_stride,
                 )?
             } else {
-                date_order_walk_through_dropped(&mut graph, &include, &included, &included, false)?
+                date_order_walk_through_dropped(
+                    &mut graph,
+                    &include,
+                    &included,
+                    &included,
+                    false,
+                    progress,
+                    cancel,
+                    &mut walk_stride,
+                )?
             }
         }
         OrderingMode::DateOrderWalk | OrderingMode::AuthorDateWalk => {
@@ -1648,6 +1686,9 @@ pub(crate) fn rev_list_with_context(
                     &traversable,
                     &included,
                     author_dates,
+                    progress,
+                    cancel,
+                    &mut walk_stride,
                 )?
             } else if dense_path_limited && !include.is_empty() {
                 // Path-limiting may have dropped the user tips from `included`; traverse the full
@@ -1659,9 +1700,20 @@ pub(crate) fn rev_list_with_context(
                     &dense_traversable,
                     &included,
                     author_dates,
+                    progress,
+                    cancel,
+                    &mut walk_stride,
                 )?
             } else {
-                date_order_walk(&mut graph, &included, &include, author_dates)?
+                date_order_walk(
+                    &mut graph,
+                    &included,
+                    &include,
+                    author_dates,
+                    progress,
+                    cancel,
+                    &mut walk_stride,
+                )?
             }
         }
         OrderingMode::Topo => graph_order_topo_sort(&mut graph, &included, &discovery_order)?,
@@ -1740,8 +1792,15 @@ pub(crate) fn rev_list_with_context(
             let mut dense_opts = options.clone();
             dense_opts.sparse = false;
             dense_opts.path_graph_reorder = false;
-            let dense_result =
-                rev_list_with_context(repo, positive_specs, negative_specs, &dense_opts, context)?;
+            let dense_result = rev_list_with_context(
+                repo,
+                positive_specs,
+                negative_specs,
+                &dense_opts,
+                context,
+                progress,
+                cancel,
+            )?;
             let dense_ordered = reorder_path_limited_graph_commits(
                 repo,
                 &dense_result.commits,
@@ -2004,7 +2063,7 @@ pub(crate) fn rev_list_with_context(
     let (objects, omitted_objects, missing_objects, per_commit_object_counts, object_segments) =
         if options.objects {
             repo.odb().with_pack_read_context(|| {
-                let cancel = cancel_watch_for_walk(&options.cancel);
+                let cancel = Some(cancel_watch.clone());
                 let mut object_walk_tree_state = TreeWalkState::new(cancel.clone());
                 let excluded_object_ids = excluded_object_root_ids(
                     repo,
@@ -2163,6 +2222,9 @@ pub(crate) fn rev_list_with_context(
         None
     };
 
+    if walk_stride.started {
+        progress.finish();
+    }
     Ok(RevListResult {
         commits: ordered,
         objects,
@@ -2877,6 +2939,9 @@ fn date_order_walk_through_dropped(
     traversable: &HashSet<ObjectId>,
     emit: &HashSet<ObjectId>,
     author_dates: bool,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+    walk_stride: &mut HistoryWalkStrideState,
 ) -> Result<Vec<ObjectId>> {
     let mut heap = BinaryHeap::new();
     let mut queued: HashSet<ObjectId> = HashSet::new();
@@ -2897,6 +2962,7 @@ fn date_order_walk_through_dropped(
     let mut emitted = HashSet::new();
     let mut out = Vec::with_capacity(emit.len());
     while let Some(item) = heap.pop() {
+        HistoryWalkStride::poll(progress, cancel, ProgressPhase::WalkingHistory, walk_stride)?;
         if emit.contains(&item.oid) && emitted.insert(item.oid) {
             out.push(item.oid);
         }
@@ -2930,6 +2996,9 @@ pub(crate) fn date_order_walk(
     selected: &HashSet<ObjectId>,
     tip_order: &[ObjectId],
     author_dates: bool,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+    walk_stride: &mut HistoryWalkStrideState,
 ) -> Result<Vec<ObjectId>> {
     let mut unfinished_children: HashMap<ObjectId, usize> =
         selected.iter().map(|&oid| (oid, 0usize)).collect();
@@ -2985,6 +3054,7 @@ pub(crate) fn date_order_walk(
     let mut emitted = HashSet::new();
     let mut out = Vec::with_capacity(selected.len());
     while let Some(item) = heap.pop() {
+        HistoryWalkStride::poll(progress, cancel, ProgressPhase::WalkingHistory, walk_stride)?;
         if !emitted.insert(item.oid) {
             continue;
         }
@@ -6438,6 +6508,9 @@ fn streaming_date_walk<'r>(
     excluded: &RangeWalkHide,
     author_dates: bool,
     since_cutoff: Option<i64>,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+    walk_stride: &mut HistoryWalkStrideState,
     mut visit: impl FnMut(&mut CommitGraph<'r>, ObjectId) -> Result<WalkControl>,
 ) -> Result<()> {
     let mut heap = BinaryHeap::new();
@@ -6455,6 +6528,7 @@ fn streaming_date_walk<'r>(
         next_seq += 1;
     }
     while let Some(CommitDateKey { oid, date, .. }) = heap.pop() {
+        HistoryWalkStride::poll(progress, cancel, ProgressPhase::WalkingHistory, walk_stride)?;
         if visit(graph, oid)? == WalkControl::Stop {
             break;
         }
@@ -6536,6 +6610,8 @@ pub(crate) struct CommitStream<'repo> {
     seen: usize,
     emitted: usize,
     errored: Option<Error>,
+    cancel: CancelToken,
+    walk_stride: HistoryWalkStrideState,
     _pack: crate::pack_store::PackReadContextGuard,
 }
 
@@ -6575,6 +6651,11 @@ impl Iterator for CommitStream<'_> {
             return Some(Err(err));
         }
         loop {
+            if self.emitted % crate::progress::CANCEL_POLL_STRIDE == 0 {
+                if self.cancel.poll().is_err() {
+                    return Some(Err(Error::Cancelled));
+                }
+            }
             let CommitDateKey { oid, date, .. } = self.heap.pop()?;
             if self
                 .until
@@ -6632,7 +6713,11 @@ pub(crate) fn open_commit_stream<'repo>(
     include: &[ObjectId],
     exclude: &[ObjectId],
     params: &CommitStreamParams,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<CommitStream<'repo>> {
+    let _ = progress;
+    let cancel = cancel.clone();
     if include.is_empty() {
         return Ok(CommitStream {
             graph: CommitGraph::with_commit_graph(repo, params.first_parent, true),
@@ -6648,6 +6733,8 @@ pub(crate) fn open_commit_stream<'repo>(
             seen: 0,
             emitted: 0,
             errored: None,
+            cancel,
+            walk_stride: HistoryWalkStrideState::default(),
             _pack: repo.odb().pack_read_context_guard(),
         });
     }
@@ -6672,6 +6759,8 @@ pub(crate) fn open_commit_stream<'repo>(
         seen: 0,
         emitted: 0,
         errored: None,
+        cancel,
+        walk_stride: HistoryWalkStrideState::default(),
         _pack: pack,
     };
     for &tip in include {
@@ -6703,7 +6792,10 @@ fn try_bounded_commit_filter_limit_list(
     options: &RevListOptions,
     repo_config: &ConfigSet,
     context: RevListWalkContext,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<Option<RevListResult>> {
+    let mut walk_stride = HistoryWalkStrideState::default();
     let filter = options.commit_filter.as_ref().filter(|f| f.is_active());
     let pickaxe = options.pickaxe.as_ref();
     let pickaxe_renames = PickaxeRenames::from_config(repo_config);
@@ -6768,6 +6860,9 @@ fn try_bounded_commit_filter_limit_list(
                     &excluded,
                     author_dates,
                     since_frontier,
+                    progress,
+                    cancel,
+                    &mut walk_stride,
                     |graph, oid| {
                         let mut consider = true;
                         if since.is_some() || until.is_some() {
@@ -6880,7 +6975,10 @@ fn try_bounded_parent_filter_limit_list(
     exclude: &[ObjectId],
     options: &RevListOptions,
     context: RevListWalkContext,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<Option<RevListResult>> {
+    let mut walk_stride = HistoryWalkStrideState::default();
     if include.is_empty() || !can_use_bounded_parent_filter_limit_list(options) {
         return Ok(None);
     }
@@ -6910,26 +7008,36 @@ fn try_bounded_parent_filter_limit_list(
         let walk_extent = context.retained_commit_extent;
         graph.keep_unreleased_commit_bytes(walk_extent);
         let mut matched_seen = 0usize;
-        streaming_date_walk(&mut graph, include, &excluded, false, None, |graph, oid| {
-            let parent_count = graph.parent_count_for_filter(oid)?;
-            if parent_count >= min_p && parent_count <= max_p {
-                matched_seen += 1;
-                if matched_seen > options.skip && max_count.is_none_or(|m| ordered.len() < m) {
-                    ordered.push(oid);
-                    if options.retain_commit_data {
-                        let payload =
-                            retain_commit_payload_for_list(repo, graph, oid, walk_extent)?;
-                        commit_data.insert(oid, &payload);
+        streaming_date_walk(
+            &mut graph,
+            include,
+            &excluded,
+            false,
+            None,
+            progress,
+            cancel,
+            &mut walk_stride,
+            |graph, oid| {
+                let parent_count = graph.parent_count_for_filter(oid)?;
+                if parent_count >= min_p && parent_count <= max_p {
+                    matched_seen += 1;
+                    if matched_seen > options.skip && max_count.is_none_or(|m| ordered.len() < m) {
+                        ordered.push(oid);
+                        if options.retain_commit_data {
+                            let payload =
+                                retain_commit_payload_for_list(repo, graph, oid, walk_extent)?;
+                            commit_data.insert(oid, &payload);
+                        }
                     }
                 }
-            }
-            graph.release_commit_bytes(oid);
-            Ok(if max_count.is_some_and(|m| ordered.len() >= m) {
-                WalkControl::Stop
-            } else {
-                WalkControl::Continue
-            })
-        })?;
+                graph.release_commit_bytes(oid);
+                Ok(if max_count.is_some_and(|m| ordered.len() >= m) {
+                    WalkControl::Stop
+                } else {
+                    WalkControl::Continue
+                })
+            },
+        )?;
         Ok(())
     })?;
 
@@ -7176,6 +7284,8 @@ fn try_bounded_limit_list(
     exclude: &[ObjectId],
     options: &RevListOptions,
     context: RevListWalkContext,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<Option<RevListResult>> {
     // Excluded tips bound the walk on their own: painting the hide side stops at the merge-base
     // frontier, so even an unlimited `A..B` only visits the range instead of both closures.
@@ -7200,10 +7310,14 @@ fn try_bounded_limit_list(
         )?));
     }
     if can_stream_default_order(exclude, options) {
-        return streaming_default_order_list(repo, include, options, context).map(Some);
+        return streaming_default_order_list(repo, include, options, context, progress, cancel)
+            .map(Some);
     }
     if can_stream_since_cutoff_order(exclude, options) {
-        return streaming_since_cutoff_bounded_list(repo, include, options, context).map(Some);
+        return streaming_since_cutoff_bounded_list(
+            repo, include, options, context, progress, cancel,
+        )
+        .map(Some);
     }
     let need = options
         .skip
@@ -7271,7 +7385,10 @@ fn streaming_default_order_list(
     include: &[ObjectId],
     options: &RevListOptions,
     context: RevListWalkContext,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<RevListResult> {
+    let mut walk_stride = HistoryWalkStrideState::default();
     let max_count = options.max_count.unwrap_or(usize::MAX);
     let mut ordered = Vec::with_capacity(max_count.min(4096));
     let mut commit_data = WalkedCommits::default();
@@ -7289,6 +7406,9 @@ fn streaming_default_order_list(
                 &RangeWalkHide::empty(),
                 false,
                 None,
+                progress,
+                cancel,
+                &mut walk_stride,
                 |g, oid| {
                     seen += 1;
                     if seen > options.skip {
@@ -7324,7 +7444,10 @@ fn streaming_since_cutoff_bounded_list(
     include: &[ObjectId],
     options: &RevListOptions,
     context: RevListWalkContext,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<RevListResult> {
+    let mut walk_stride = HistoryWalkStrideState::default();
     let max_count = options.max_count;
     let mut ordered = Vec::with_capacity(max_count.unwrap_or(64).min(4096));
     let (match_count, commit_data) =
@@ -7347,6 +7470,9 @@ fn streaming_since_cutoff_bounded_list(
                     &RangeWalkHide::empty(),
                     false,
                     since,
+                    progress,
+                    cancel,
+                    &mut walk_stride,
                     |g, oid| {
                         let ts = g.committer_time(oid);
                         let in_window =
@@ -8656,7 +8782,14 @@ pub(crate) fn upload_pack_shallow_rev_list_state(
         ..Default::default()
     };
 
-    let res = rev_list(repo, &positive, &negative, &options)?;
+    let res = rev_list(
+        repo,
+        &positive,
+        &negative,
+        &options,
+        &mut crate::progress::NullProgress,
+        crate::progress::CancelToken::never_ref(),
+    )?;
     let included: HashSet<ObjectId> = res.commits.iter().copied().collect();
     let border_commits = border_commits_for_included(repo, &included);
     let border_set: HashSet<ObjectId> = border_commits.iter().copied().collect();
@@ -10395,7 +10528,14 @@ mod tests {
             preserve_simplify_merges_graph_merges: true,
             ..RevListOptions::default()
         };
-        let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let out = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         let linkage = out.log_graph_linkage.expect("linkage");
         assert_eq!(out.commits.len(), 2);
         for oid in &out.commits {
@@ -10570,7 +10710,14 @@ mod tests {
             filter_provided_objects,
             ..Default::default()
         };
-        let result = rev_list(repo, &[], &[], &opts)?;
+        let result = rev_list(
+            repo,
+            &[],
+            &[],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         let mut set: BTreeSet<ObjectId> = result
             .commits
             .iter()
@@ -10766,6 +10913,8 @@ mod tests {
             &[String::from("main")],
             &[],
             &RevListOptions::default(),
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )
         .expect("all");
         assert!(all.commits.contains(&tip));
@@ -10778,6 +10927,8 @@ mod tests {
                 maximal_only: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )
         .expect("maximal");
         assert!(!maximal.commits.is_empty());
@@ -10792,6 +10943,8 @@ mod tests {
                 full_history: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )
         .expect("simplify");
 
@@ -10803,6 +10956,8 @@ mod tests {
                 parent_rewrite: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )
         .expect("parents");
         assert_eq!(with_parents.commits.len(), all.commits.len());
@@ -11021,7 +11176,14 @@ mod tests {
             commit_graph_read_changed_paths: true,
             ..Default::default()
         };
-        let result = rev_list(&repo, &[tip_hex], &[hide_hex], &opts)?;
+        let result = rev_list(
+            &repo,
+            &[tip_hex],
+            &[hide_hex],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         assert_eq!(result.commits, expected);
         Ok(())
     }
@@ -11126,7 +11288,14 @@ mod tests {
             commit_graph_read_changed_paths: true,
             ..Default::default()
         };
-        let result = rev_list(&repo, &[tip_hex], &[hide_hex], &opts)?;
+        let result = rev_list(
+            &repo,
+            &[tip_hex],
+            &[hide_hex],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         assert_eq!(result.commits, expected);
         assert!(
             !result.commits.contains(&root),
@@ -11151,7 +11320,14 @@ mod tests {
             use_commit_graph: true,
             ..Default::default()
         };
-        let result = rev_list(&repo, &[tip.to_hex()], &[hide.to_hex()], &opts)?;
+        let result = rev_list(
+            &repo,
+            &[tip.to_hex()],
+            &[hide.to_hex()],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         assert_eq!(result.commits, vec![tip]);
         Ok(())
     }
@@ -11173,7 +11349,14 @@ mod tests {
             ..Default::default()
         };
         reset_commit_parent_lookups();
-        let result = rev_list(&repo, &[tip.to_hex()], &[hide.to_hex()], &opts)?;
+        let result = rev_list(
+            &repo,
+            &[tip.to_hex()],
+            &[hide.to_hex()],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         let lookups = commit_parent_lookups();
         assert_eq!(result.commits, vec![tip]);
         assert!(
@@ -11250,7 +11433,14 @@ mod since_cutoff_frontier_tests {
         };
 
         reset_commit_parent_lookups();
-        let result = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let result = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         assert_eq!(result.commit_count(), 1);
         let lookups = commit_parent_lookups();
         assert!(
@@ -11264,7 +11454,14 @@ mod since_cutoff_frontier_tests {
             use_commit_graph: false,
             ..RevListOptions::default()
         };
-        let listed = rev_list(&repo, &[String::from("main")], &[], &list_opts)?;
+        let listed = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &list_opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         assert_eq!(listed.commits.len(), 1);
         assert_eq!(listed.commits[0], tip);
         assert!(
@@ -11360,7 +11557,15 @@ mod since_cutoff_frontier_tests {
             ),
         ] {
             let expected = git_rev_list_count(dir.path(), &git_args);
-            let actual = rev_list(&repo, &[String::from("main")], &[], &opts)?.commit_count();
+            let actual = rev_list(
+                &repo,
+                &[String::from("main")],
+                &[],
+                &opts,
+                &mut crate::progress::NullProgress,
+                crate::progress::CancelToken::never_ref(),
+            )?
+            .commit_count();
             assert_eq!(actual, expected, "git args {git_args:?}");
         }
 
@@ -11390,6 +11595,8 @@ mod since_cutoff_frontier_tests {
                 use_commit_graph: false,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?
         .commit_count();
         assert_eq!(actual, expected, "count with --skip and --since");
@@ -11552,12 +11759,21 @@ mod line_coverage_tests {
                         use_commit_graph: false,
                         ..RevListOptions::default()
                     };
-                    let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+                    let _ = rev_list(
+                        &repo,
+                        &[String::from("main")],
+                        &[],
+                        &opts,
+                        &mut crate::progress::NullProgress,
+                        crate::progress::CancelToken::never_ref(),
+                    )?;
                     let _ = rev_list(
                         &repo,
                         &[String::from("main")],
                         &[String::from("^main~3")],
                         &opts,
+                        &mut crate::progress::NullProgress,
+                        crate::progress::CancelToken::never_ref(),
                     );
                 }
             }
@@ -11573,6 +11789,8 @@ mod line_coverage_tests {
             &[String::from("main")],
             &[],
             &RevListOptions::default(),
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?
         .commits;
         assert!(commits.len() >= 4);
@@ -11597,6 +11815,8 @@ mod line_coverage_tests {
             &[String::from("main")],
             &[],
             &RevListOptions::default(),
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?
         .commits;
         let base = all[all.len() / 2];
@@ -11614,6 +11834,8 @@ mod line_coverage_tests {
                 count: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert!(quiet.reachable_commit_count.is_some() || !all.is_empty());
         Ok(())
@@ -11668,7 +11890,14 @@ mod line_coverage_tests {
                     ordering: OrderingMode::DateOrderWalk,
                     ..RevListOptions::default()
                 };
-                let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+                let out = rev_list(
+                    &repo,
+                    &[String::from("main")],
+                    &[],
+                    &opts,
+                    &mut crate::progress::NullProgress,
+                    crate::progress::CancelToken::never_ref(),
+                )?;
                 if objects {
                     assert!(!out.commits.is_empty());
                 }
@@ -11688,6 +11917,8 @@ mod line_coverage_tests {
                 left_right: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )
         .expect_err("raw symmetric range");
         assert!(matches!(
@@ -11730,8 +11961,22 @@ mod line_coverage_tests {
                         ignore_missing: true,
                         ..RevListOptions::default()
                     };
-                    let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
-                    let _ = rev_list(&repo, &[String::from("side")], &[], &opts)?;
+                    let _ = rev_list(
+                        &repo,
+                        &[String::from("main")],
+                        &[],
+                        &opts,
+                        &mut crate::progress::NullProgress,
+                        crate::progress::CancelToken::never_ref(),
+                    )?;
+                    let _ = rev_list(
+                        &repo,
+                        &[String::from("side")],
+                        &[],
+                        &opts,
+                        &mut crate::progress::NullProgress,
+                        crate::progress::CancelToken::never_ref(),
+                    )?;
                 }
             }
         }
@@ -11747,6 +11992,8 @@ mod line_coverage_tests {
             &[String::from("main")],
             &[],
             &RevListOptions::default(),
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         let bottom = listed
             .commits
@@ -11803,10 +12050,24 @@ mod line_coverage_tests {
                     ignore_missing: true,
                     ..RevListOptions::default()
                 };
-                let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+                let _ = rev_list(
+                    &repo,
+                    &[String::from("main")],
+                    &[],
+                    &opts,
+                    &mut crate::progress::NullProgress,
+                    crate::progress::CancelToken::never_ref(),
+                )?;
                 let mut all_refs_opts = opts.clone();
                 all_refs_opts.all_refs = true;
-                let _ = rev_list(&repo, &[], &[], &all_refs_opts)?;
+                let _ = rev_list(
+                    &repo,
+                    &[],
+                    &[],
+                    &all_refs_opts,
+                    &mut crate::progress::NullProgress,
+                    crate::progress::CancelToken::never_ref(),
+                )?;
             }
         }
         Ok(())
@@ -11841,7 +12102,14 @@ mod line_coverage_tests {
                     quiet: false,
                     ..RevListOptions::default()
                 };
-                let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+                let _ = rev_list(
+                    &repo,
+                    &[String::from("main")],
+                    &[],
+                    &opts,
+                    &mut crate::progress::NullProgress,
+                    crate::progress::CancelToken::never_ref(),
+                )?;
             }
         }
         Ok(())
@@ -11856,7 +12124,14 @@ mod line_coverage_tests {
             ordering: OrderingMode::AuthorDateTopo,
             ..RevListOptions::default()
         };
-        let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let out = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         assert!(!out.commits.is_empty());
         Ok(())
     }
@@ -11877,7 +12152,14 @@ mod line_coverage_tests {
             right_only: false,
             ..RevListOptions::default()
         };
-        let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let _ = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         let opts2 = RevListOptions {
             ordering: OrderingMode::DateOrderWalk,
             reverse: true,
@@ -11890,6 +12172,8 @@ mod line_coverage_tests {
             &[String::from("main"), String::from("side")],
             &[],
             &opts2,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         Ok(())
     }
@@ -11955,7 +12239,14 @@ mod line_coverage_tests {
             filter: Some(ObjectFilter::ObjectType(FilterObjectKind::Tree)),
             ..RevListOptions::default()
         };
-        let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let _ = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         let _ = tag_targets(&repo)?;
         Ok(())
     }
@@ -11996,6 +12287,8 @@ mod line_coverage_tests {
                 count: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         let not_lines = ["--not", "--branches", "--tags", "--remotes"];
         let (_npos, nneg, _nall, _npaths) =
@@ -12058,6 +12351,8 @@ mod line_coverage_tests {
                     ignore_missing: true,
                     ..RevListOptions::default()
                 },
+                &mut crate::progress::NullProgress,
+                crate::progress::CancelToken::never_ref(),
             )?;
         }
         Ok(())
@@ -12071,6 +12366,8 @@ mod line_coverage_tests {
             &[String::from("main")],
             &[],
             &RevListOptions::default(),
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert!(listed.commits.len() >= 4);
         let first_parent = listed.commits[0];
@@ -12096,7 +12393,14 @@ mod line_coverage_tests {
             parent_rewrite: true,
             ..RevListOptions::default()
         };
-        let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let out = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         assert!(!out.commits.is_empty());
         Ok(())
     }
@@ -12114,6 +12418,8 @@ mod line_coverage_tests {
                 reverse: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert!(bounded.commits.len() <= 8);
 
@@ -12125,6 +12431,8 @@ mod line_coverage_tests {
                 ordering: OrderingMode::Topo,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         let limited_topo = rev_list(
             &repo,
@@ -12135,6 +12443,8 @@ mod line_coverage_tests {
                 max_count: Some(12),
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert_eq!(
             limited_topo.commits,
@@ -12152,6 +12462,8 @@ mod line_coverage_tests {
                 path_graph_reorder: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert_eq!(graph_topo_flags.commits, limited_topo.commits);
 
@@ -12163,6 +12475,8 @@ mod line_coverage_tests {
                 ignore_missing: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert!(empty_ok.commits.is_empty());
 
@@ -12187,6 +12501,8 @@ mod line_coverage_tests {
                 no_object_names: false,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert!(!tagged.objects.is_empty());
         Ok(())
@@ -12263,13 +12579,22 @@ mod line_coverage_tests {
                     ignore_missing: true,
                     ..RevListOptions::default()
                 };
-                let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+                let _ = rev_list(
+                    &repo,
+                    &[String::from("main")],
+                    &[],
+                    &opts,
+                    &mut crate::progress::NullProgress,
+                    crate::progress::CancelToken::never_ref(),
+                )?;
                 if mask % 17 == 0 {
                     let _ = rev_list(
                         &repo,
                         &[String::from("main"), String::from("side")],
                         &[],
                         &opts,
+                        &mut crate::progress::NullProgress,
+                        crate::progress::CancelToken::never_ref(),
                     )?;
                 }
             }
@@ -12322,12 +12647,21 @@ mod line_coverage_tests {
                         max_count: Some(96),
                         ..RevListOptions::default()
                     };
-                    let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+                    let _ = rev_list(
+                        &repo,
+                        &[String::from("main")],
+                        &[],
+                        &opts,
+                        &mut crate::progress::NullProgress,
+                        crate::progress::CancelToken::never_ref(),
+                    )?;
                     let _ = rev_list(
                         &repo,
                         &[String::from("main"), String::from("side")],
                         &[],
                         &opts,
+                        &mut crate::progress::NullProgress,
+                        crate::progress::CancelToken::never_ref(),
                     )?;
                 }
             }
@@ -12382,7 +12716,14 @@ mod line_coverage_tests {
                 ..RevListOptions::default()
             },
         ] {
-            let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+            let _ = rev_list(
+                &repo,
+                &[String::from("main")],
+                &[],
+                &opts,
+                &mut crate::progress::NullProgress,
+                crate::progress::CancelToken::never_ref(),
+            )?;
         }
 
         repack_all(
@@ -12411,6 +12752,8 @@ mod line_coverage_tests {
                 filter: Some(ObjectFilter::BlobLimit(8192)),
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         let _c2 = c2;
         Ok(())
@@ -12439,6 +12782,8 @@ mod line_coverage_tests {
                 paths: vec!["tracked.txt".into()],
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert!(!ordered.commits.is_empty());
         let _tag = tag;
@@ -12462,6 +12807,8 @@ mod line_coverage_tests {
                 filter_provided_objects: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert!(!with_root.objects.is_empty());
         let _blob = blob;
@@ -12489,6 +12836,8 @@ mod line_coverage_tests {
                 filter_print_omitted: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
         assert!(walked.objects.iter().any(|(o, _)| *o == blob));
 
@@ -12502,6 +12851,8 @@ mod line_coverage_tests {
                 objects: true,
                 ..RevListOptions::default()
             },
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )
         .expect_err("unsupported tag type");
         assert!(matches!(err, Error::Object(ObjectError::Corrupt { .. })));
@@ -12549,6 +12900,8 @@ mod line_coverage_tests {
                     filter: filter.clone(),
                     ..RevListOptions::default()
                 },
+                &mut crate::progress::NullProgress,
+                crate::progress::CancelToken::never_ref(),
             )?;
             let listed: HashSet<ObjectId> = walked.objects.iter().map(|(o, _)| *o).collect();
             for tag in [first, second, nested, on_empty_change] {
@@ -12579,7 +12932,14 @@ mod line_coverage_tests {
             use_bitmap_index: false,
             ..Default::default()
         };
-        let listed = rev_list(&repo, &[], &[], &opts)?;
+        let listed = rev_list(
+            &repo,
+            &[],
+            &[],
+            &opts,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
+        )?;
         assert!(listed.reachable_commit_count.is_some());
         assert_eq!(
             repo.odb().hot_path_metrics().commit_parse_calls(),

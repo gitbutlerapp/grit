@@ -1,5 +1,7 @@
 //! Rev-list history simplification, object walks, and filters (upstream t60xx / t4216).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 use grit_lib::error::RevisionError;
 
@@ -145,6 +147,8 @@ fn t6111_treesame_matches_git() {
             &[String::from("rw6111-m")],
             &[String::from("rw6111-f")],
             &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("ancestry")
         .commits;
@@ -173,6 +177,8 @@ fn treesame_show_pulls_exercises_simplify_merge_paths() {
                     paths: vec!["content.txt".to_owned()],
                     ..RevListOptions::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )
             .expect("show-pulls walk");
         assert!(!out.commits.is_empty());
@@ -202,7 +208,13 @@ fn t4216_bloom_and_no_bloom_identical() {
         };
         let out = grit_repo
             .revwalk()
-            .rev_list(&["HEAD".to_owned()], &[], &opts)
+            .rev_list(
+                &["HEAD".to_owned()],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("rev-list");
         assert_eq!(out.commits, git_oids, "bloom={use_bloom}");
     }
@@ -241,6 +253,8 @@ fn t6018_ref_globs_and_exclude_match_git() {
             &pos.iter().map(|s| s.clone()).collect::<Vec<_>>(),
             &[],
             &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("rev-list")
         .commits;
@@ -327,7 +341,13 @@ fn t6022_missing_actions_match_git() {
         };
         let result = grit_repo
             .revwalk()
-            .rev_list(&[String::from("HEAD")], &[], &opts)
+            .rev_list(
+                &[String::from("HEAD")],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("walk");
         let mut grit_set: HashSet<ObjectId> = result.commits.into_iter().collect();
         grit_set.extend(result.objects.into_iter().map(|(o, _)| o));
@@ -366,9 +386,13 @@ fn t6102_unexpected_object_types_typed_error() {
         objects: true,
         ..RevListOptions::default()
     };
-    let result = grit_repo
-        .revwalk()
-        .rev_list(&[blob_hex, broken_tree_hex.clone()], &[], &opts);
+    let result = grit_repo.revwalk().rev_list(
+        &[blob_hex, broken_tree_hex.clone()],
+        &[],
+        &opts,
+        &mut NullProgress,
+        &CancelToken::never(),
+    );
     match result {
         Err(Error::Revision(RevisionError::List(RevListError::UnexpectedObjectKind {
             ..
@@ -390,7 +414,13 @@ fn t6102_unexpected_object_types_typed_error() {
     let git_lone = git_rev_list_object_set(wt, &["--objects", &broken_blob_hex]);
     let grit_lone = grit_repo
         .revwalk()
-        .rev_list(&[broken_blob_hex.clone()], &[], &opts)
+        .rev_list(
+            &[broken_blob_hex.clone()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("lone malformed tree walk");
     let mut grit_lone_set: HashSet<ObjectId> =
         grit_lone.objects.into_iter().map(|(o, _)| o).collect();
@@ -400,7 +430,13 @@ fn t6102_unexpected_object_types_typed_error() {
     let tree_hex = git(wt, &["rev-parse", "HEAD^{tree}"]).trim().to_string();
     let err = grit_repo
         .revwalk()
-        .rev_list(&[tree_hex, broken_blob_hex], &[], &opts)
+        .rev_list(
+            &[tree_hex, broken_blob_hex],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect_err("non-blob seen");
     assert!(matches!(
         err,
@@ -433,7 +469,13 @@ fn t6017_stdin_revision_specs_match_git_semantics() {
     let git_oids = git_rev_list(wt, &["HEAD", "^HEAD~1"]);
     let grit_oids = grit_repo
         .revwalk()
-        .rev_list(&pos, &neg, &RevListOptions::default())
+        .rev_list(
+            &pos,
+            &neg,
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list")
         .commits;
     assert_eq!(grit_oids, git_oids);
@@ -468,7 +510,13 @@ fn t6004_path_limited_trivial_optimization_matches_git() {
     };
     let grit = grit_repo
         .revwalk()
-        .rev_list(&[commit.clone()], &[], &opts)
+        .rev_list(
+            &[commit.clone()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     assert_eq!(grit.commits.len(), 1);
 }
@@ -487,7 +535,13 @@ fn t6110_first_parent_boundary_matches_git() {
     };
     let result = grit_repo
         .revwalk()
-        .rev_list(&[String::from("HEAD")], &[String::from("HEAD^")], &opts)
+        .rev_list(
+            &[String::from("HEAD")],
+            &[String::from("HEAD^")],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     let mut grit_lines: Vec<(bool, ObjectId)> =
         result.commits.into_iter().map(|oid| (false, oid)).collect();
@@ -511,7 +565,7 @@ fn reachable_objects_all_refs_with_filter() {
         };
         let out = grit_repo
             .revwalk()
-            .rev_list(&[], &[], &opts)
+            .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
             .expect("rev-list");
         out.commits.len() + out.objects.len()
     };

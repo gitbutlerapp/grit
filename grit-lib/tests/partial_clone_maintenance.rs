@@ -1,5 +1,7 @@
 //! Offline maintenance preserves Git's promisor/local pack boundary (#2065).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::error::ObjectError;
 use std::collections::HashSet;
 use std::fs;

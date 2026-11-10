@@ -4,6 +4,8 @@
 //!
 //! Run (release only): `GRIT_S1_BENCH=1 cargo test -p grit-lib --release --test rev_list_s1_git`
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::time::Instant;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -39,7 +41,13 @@ fn rev_list_objects_v1_s1_median_under_ceiling() {
         let start = Instant::now();
         let result = repo
             .revwalk()
-            .rev_list(&[String::from("v1.0.0")], &[], &opts)
+            .rev_list(
+                &[String::from("v1.0.0")],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("rev-list");
         assert!(
             !result.objects.is_empty(),

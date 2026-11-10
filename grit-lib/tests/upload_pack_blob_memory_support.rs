@@ -1,3 +1,5 @@
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::Path;

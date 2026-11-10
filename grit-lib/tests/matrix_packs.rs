@@ -22,6 +22,8 @@
 //! cleanly only when a genuinely unavailable feature (e.g. `--object-format=sha256`)
 //! is missing, and even then the SHA-1 happy path remains fully asserted.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_test_support::git;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;

@@ -1,5 +1,7 @@
 //! Large-repo grit pick / stash apply compatibility with system `git`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;

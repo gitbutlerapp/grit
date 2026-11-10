@@ -115,7 +115,9 @@ fn count(repo: &Repository, refs: Vec<RefSelection>) -> usize {
         refs,
         ..RevWalkListOptions::default()
     };
-    repo.revwalk().count(&[], &options).expect("count")
+    repo.revwalk()
+        .count(&[], &options, &mut NullProgress, &CancelToken::never())
+        .expect("count")
 }
 
 fn sorted(mut v: Vec<String>) -> Vec<String> {
@@ -126,7 +128,11 @@ fn sorted(mut v: Vec<String>) -> Vec<String> {
 /// Two commits on `main`, a `side` branch at the first, a tag on the first and a linked
 /// worktree on a new branch, queried through rev-walk and worktree APIs.
 fn battery(repo: &Repository, wt: &Path, linked: &Path) -> Observed {
-    fs::write(wt.join("f"), "x\n").expect("write");
+    fs::write(
+        wt.join("f", &mut NullProgress, &CancelToken::never()),
+        "x\n",
+    )
+    .expect("write");
     let first = commit_all(repo, "hello world");
     repo.branches()
         .create(&BranchCreateOptions::at_head("side"))

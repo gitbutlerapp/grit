@@ -10,6 +10,7 @@ use crate::error::{Error, Result};
 use crate::mailmap::{load_mailmap_table, MailmapTable};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::pack::{read_object_from_pack_at_offset, PackIndex, SingleLocalPackReader};
+use crate::progress::{CancelToken, NullProgress};
 use crate::repo::Repository;
 use crate::rev_list::{
     try_bitmap_reachable_commit_set_for_specs, try_for_each_bitmap_reachable_commit_from_specs,
@@ -79,7 +80,12 @@ impl RevWalk<'_> {
         if options.count_only {
             return count_authors_from_rev_walk(repo, tokens, walk_options, mailmap);
         }
-        let oids = self.commits(tokens, walk_options)?;
+        let oids = self.commits(
+            tokens,
+            walk_options,
+            &mut NullProgress,
+            CancelToken::never_ref(),
+        )?;
         group_commits_by_author(repo, &oids, mailmap, options)
     }
 
@@ -252,7 +258,13 @@ fn count_authors_from_rev_walk(
             )
         });
     }
-    let oids = rev_list_commits_for_author_group(repo, tokens, walk_options)?;
+    let oids = rev_list_commits_for_author_group(
+        repo,
+        tokens,
+        walk_options,
+        &mut NullProgress,
+        CancelToken::never_ref(),
+    )?;
     count_authors_from_commit_oids(repo, &oids, mailmap)
 }
 

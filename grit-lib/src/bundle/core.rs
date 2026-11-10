@@ -1213,7 +1213,14 @@ fn filtered_pack_objects(
         missing_action: MissingAction::Error,
         ..Default::default()
     };
-    let walk = crate::rev_list::rev_list(repo, &positive, &negative, &options)?;
+    let walk = crate::rev_list::rev_list(
+        repo,
+        &positive,
+        &negative,
+        &options,
+        &mut crate::progress::NullProgress,
+        crate::progress::CancelToken::never_ref(),
+    )?;
     Ok(collect_filtered_send_list(&walk, have_closure))
 }
 

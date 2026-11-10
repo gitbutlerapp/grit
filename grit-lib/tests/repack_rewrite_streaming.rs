@@ -1,5 +1,7 @@
 //! Release-gated timing guard for repack rewrite on an existing single pack.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;

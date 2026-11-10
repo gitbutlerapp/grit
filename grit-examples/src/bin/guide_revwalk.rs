@@ -2,6 +2,8 @@
 //!
 //! Source for the library guide "Revwalk" page (included in the docs site).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
@@ -30,10 +32,21 @@ fn main() -> Result<()> {
         if !left.is_empty() {
             negative.push(left.to_owned());
         }
-        repo.revwalk().rev_list(&positive, &negative, &options)?
+        repo.revwalk().rev_list(
+            &positive,
+            &negative,
+            &options,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?
     } else {
-        repo.revwalk()
-            .rev_list(std::slice::from_ref(&range), &[], &options)?
+        repo.revwalk().rev_list(
+            std::slice::from_ref(&range),
+            &[],
+            &options,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?
     };
 
     for oid in &result.commits {

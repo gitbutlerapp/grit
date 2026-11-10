@@ -138,7 +138,7 @@ cargo run -p grit-examples --bin guide_embedding
 [`Diff::blame`](rustdoc:grit_lib::diff::Diff::blame),
 [`compute_blame`](rustdoc:grit_lib::blame::compute_blame), and
 [`Diff::resolve_blame_line_range`](rustdoc:grit_lib::diff::Diff::resolve_blame_line_range)
-take **repository-relative** paths: the same string names the same file no matter
+take **repository-relative** paths. Like [`RevWalk::commits`](rustdoc:grit_lib::revwalk::RevWalk::commits) and [`RevWalk::describe`](rustdoc:grit_lib::revwalk::RevWalk::describe), they accept a [`ProgressSink`](rustdoc:grit_lib::progress::ProgressSink) and [`CancelToken`](rustdoc:grit_lib::progress::CancelToken) after their options (use [`NullProgress`](rustdoc:grit_lib::progress::NullProgress) and [`CancelToken::never`](rustdoc:grit_lib::progress::CancelToken::never) when unused): the same string names the same file no matter
 where the host process is running. Pass status paths unchanged. For a raw byte
 path, build the input with `repo_relpath::storage_string`. Non-UTF-8 paths and
 names beginning with the reserved `grit+pathhex:` prefix are escaped. Absolute
@@ -185,6 +185,7 @@ Nothing is written to the object database.
 
 ```rust
 use grit_lib::blame::{BlameFinalSource, BlameOptions};
+use grit_lib::progress::{CancelToken, NullProgress};
 
 # fn editor(repo: &grit_lib::repo::Repository, buffer: Vec<u8>) -> grit_lib::error::Result<()> {
 let result = repo.diff().blame(
@@ -193,6 +194,8 @@ let result = repo.diff().blame(
         final_source: BlameFinalSource::Contents(buffer),
         ..BlameOptions::default()
     },
+    &mut NullProgress,
+    &CancelToken::never(),
 )?;
 for line in result.lines.iter().filter(|line| line.not_committed) {
     println!("unsaved or uncommitted: {}", line.content);

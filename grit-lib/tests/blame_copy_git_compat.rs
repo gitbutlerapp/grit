@@ -1,5 +1,7 @@
 //! Compare copy detection with `git blame --porcelain -C` levels.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::process::Command;
 
@@ -167,7 +169,10 @@ fn grit_blame_with_options(
     file: &str,
     options: &BlameOptions,
 ) -> Vec<PorcelainLine> {
-    let result = repo.diff().blame(file, options).expect("blame_file");
+    let result = repo
+        .diff()
+        .blame(file, options, &mut NullProgress, &CancelToken::never())
+        .expect("blame_file");
     let mut out = Vec::new();
     for line in result.lines {
         out.push(PorcelainLine {

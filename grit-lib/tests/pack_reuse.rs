@@ -1,5 +1,7 @@
 //! Verbatim pack reuse and streaming upload-pack (Git `index-pack --strict`).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;

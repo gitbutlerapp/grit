@@ -1,5 +1,7 @@
 //! `rev-list` bitmap acceleration and commit-graph count fast paths.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::collections::HashSet;
 use std::process::Command;
 
@@ -80,7 +82,10 @@ fn write_commit_graph(repo: &RepoFixture) {
 }
 
 fn grit_count(repo: &Repository, opts: RevListOptions) -> usize {
-    let result = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
+        .expect("rev-list");
     if opts.count && opts.objects {
         result.count_with_objects_total()
     } else {
@@ -89,7 +94,10 @@ fn grit_count(repo: &Repository, opts: RevListOptions) -> usize {
 }
 
 fn grit_object_set(repo: &Repository, opts: RevListOptions) -> HashSet<ObjectId> {
-    let result = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
+    let result = repo
+        .revwalk()
+        .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
+        .expect("rev-list");
     let mut set = HashSet::new();
     set.extend(result.commits);
     set.extend(result.objects.iter().map(|(o, _)| *o));
@@ -110,7 +118,10 @@ fn count_all_matches_git() {
         use_commit_graph: false,
         ..Default::default()
     };
-    let listed = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
+    let listed = repo
+        .revwalk()
+        .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
+        .expect("rev-list");
     assert!(
         listed.bitmap_object_format,
         "pure count-only --all should use pack bitmaps"
@@ -135,7 +146,10 @@ fn count_objects_matches_git_use_bitmap_index() {
         ..Default::default()
     };
     assert_eq!(grit_count(&repo, opts.clone()), git_n);
-    let listed = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
+    let listed = repo
+        .revwalk()
+        .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
+        .expect("rev-list");
     assert!(listed.bitmap_object_format);
 }
 
@@ -154,7 +168,10 @@ fn count_objects_auto_bitmap_without_flag() {
         ..Default::default()
     };
     assert_eq!(grit_count(&repo, opts.clone()), git_n);
-    let listed = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
+    let listed = repo
+        .revwalk()
+        .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
+        .expect("rev-list");
     assert!(listed.bitmap_object_format);
 }
 
@@ -228,7 +245,10 @@ fn incompatible_options_fall_back() {
     ];
 
     for opts in cases {
-        let result = repo.revwalk().rev_list(&[], &[], &opts).expect("rev-list");
+        let result = repo
+            .revwalk()
+            .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
+            .expect("rev-list");
         assert!(
             !result.bitmap_object_format,
             "expected fallback for incompatible rev-list options"
@@ -282,6 +302,8 @@ fn objects_max_count_one_use_bitmap_index_matches_git_and_skips_bitmap() {
                 use_commit_graph: true,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("rev-list unlimited");
     assert!(
@@ -303,7 +325,13 @@ fn objects_max_count_one_use_bitmap_index_matches_git_and_skips_bitmap() {
     };
     let result = repo
         .revwalk()
-        .rev_list(&["HEAD".into()], &[], &opts)
+        .rev_list(
+            &["HEAD".into()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     assert!(
         !result.bitmap_object_format,
@@ -403,7 +431,7 @@ fn grit_rev_list_object_set(
     };
     let result = repo
         .revwalk()
-        .rev_list(&pos, &neg, &opts)
+        .rev_list(&pos, &neg, &opts, &mut NullProgress, &CancelToken::never())
         .expect("rev-list");
     let mut set = HashSet::new();
     set.extend(result.commits);
@@ -575,7 +603,7 @@ fn grit_rev_list_object_set_with_filter(
     };
     let result = repo
         .revwalk()
-        .rev_list(&pos, &neg, &opts)
+        .rev_list(&pos, &neg, &opts, &mut NullProgress, &CancelToken::never())
         .expect("rev-list");
     let mut set = HashSet::new();
     set.extend(result.commits);

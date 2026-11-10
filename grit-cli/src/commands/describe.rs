@@ -1,5 +1,7 @@
 //! `grit describe` — nearest tag and distance for a commit.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use anyhow::Result;
 use grit_lib::revwalk::{DescribeOptions, DescribedCommit};
 
@@ -50,6 +52,8 @@ impl From<DescribedCommit> for DescribeOutcome {
 }
 
 pub fn run(args: &DescribeCliArgs) -> Result<Option<DescribeOutcome>> {
+    let _interrupt = crate::interrupt::InterruptCancel::install();
+    let cancel = crate::interrupt::process_cancel_token();
     let repo = context::discover()?;
     let opts = DescribeOptions {
         tags: args.tags,
@@ -57,7 +61,9 @@ pub fn run(args: &DescribeCliArgs) -> Result<Option<DescribeOutcome>> {
         first_parent: args.first_parent,
         abbrev: args.abbrev,
     };
-    let described = repo.revwalk().describe(&args.rev, &opts)?;
+    let described = repo
+        .revwalk()
+        .describe(&args.rev, &opts, &mut NullProgress, &cancel)?;
     Ok(described.map(DescribeOutcome::from))
 }
 

@@ -3,6 +3,8 @@
 //! Full-history walks answer parents and dates from a commit-graph written by system `git`,
 //! without reading commit objects (issue #1745).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::fs;
@@ -100,7 +102,13 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
     };
     let without = repo
         .revwalk()
-        .rev_list(&["HEAD".to_owned()], &[], &opts_base)
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &opts_base,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("walk");
     let with_graph = RevListOptions {
         count: true,
@@ -108,7 +116,13 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
     };
     let with = repo
         .revwalk()
-        .rev_list(&["HEAD".to_owned()], &[], &with_graph)
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &with_graph,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("graph walk");
     // A count may come from a count-only walk that lists nothing; the listing is checked apart.
     let listed = repo
@@ -120,6 +134,8 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
                 use_commit_graph: false,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("list walk");
     assert_eq!(listed.commits.len(), 80);
@@ -190,7 +206,13 @@ fn list(
         ..options.clone()
     };
     repo.revwalk()
-        .rev_list(&["HEAD".to_owned()], &[], &options)
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &options,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev_list")
         .commits
 }

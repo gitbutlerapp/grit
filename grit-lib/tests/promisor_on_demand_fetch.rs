@@ -313,6 +313,8 @@ fn rename_detection_prefetch_batched_past_rename_limit() {
             &revision(&repo, "HEAD~1"),
             &revision(&repo, "HEAD"),
             &renames,
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("commit diff with renames")
         .entries;
@@ -357,6 +359,8 @@ fn tree_diff_prefetch_batched_past_rename_limit() {
             &revision(&repo, "HEAD~1"),
             &revision(&repo, "HEAD"),
             &renames,
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("commit diff with renames")
         .entries;

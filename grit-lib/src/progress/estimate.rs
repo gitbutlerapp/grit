@@ -93,6 +93,9 @@ impl Stage {
             ProgressPhase::TransferringBundle => None,
             // Not part of a clone.
             ProgressPhase::StagingFiles => None,
+            ProgressPhase::WalkingHistory | ProgressPhase::Blaming | ProgressPhase::Describing => {
+                None
+            }
         }
     }
 }

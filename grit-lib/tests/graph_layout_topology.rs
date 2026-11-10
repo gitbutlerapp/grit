@@ -1,5 +1,7 @@
 //! Lane topology tests for [`grit_lib::revwalk::GraphLayout`].
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::collections::HashSet;
@@ -32,11 +34,16 @@ fn graph_layout_criss_cross_topology() -> grit_lib::error::Result<()> {
         &[("m2", "refs/heads/main")],
     );
     let repo = Repository::discover(Some(wt), &RepositoryOptions::default())?;
-    let walk = repo.revwalk().commits(&["main"], &{
-        let mut walk = (&RevWalkListOptions::default()).clone();
-        walk.graph = true;
-        walk
-    })?;
+    let walk = repo.revwalk().commits(
+        &["main"],
+        &{
+            let mut walk = (&RevWalkListOptions::default()).clone();
+            walk.graph = true;
+            walk
+        },
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
     let visible: HashSet<ObjectId> = walk.iter().copied().collect();
     let inputs: Vec<GraphCommitInput> = walk
         .iter()
@@ -86,16 +93,21 @@ fn graph_layout_filtered_parents_rewrite() -> grit_lib::error::Result<()> {
         .grep("history harness".to_owned())
         .build()
         .expect("grep pattern");
-    let walk = repo.revwalk().commits(&["main"], &{
-        let mut walk = (&RevWalkListOptions {
-            commit_filter: Some(std::sync::Arc::new(filter)),
-            limit: Some(10),
-            ..Default::default()
-        })
-            .clone();
-        walk.graph = true;
-        walk
-    })?;
+    let walk = repo.revwalk().commits(
+        &["main"],
+        &{
+            let mut walk = (&RevWalkListOptions {
+                commit_filter: Some(std::sync::Arc::new(filter)),
+                limit: Some(10),
+                ..Default::default()
+            })
+                .clone();
+            walk.graph = true;
+            walk
+        },
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
     assert!(
         walk.len() >= 2,
         "grep filter should still emit multiple matching commits"

@@ -27,6 +27,7 @@ use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet, TreeRefIter};
 use crate::odb::store::PrunableObjectStore;
 use crate::odb::{Odb, PruneTarget};
+use crate::progress::{CancelToken, NullProgress};
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::refs::{self, Ref};
 

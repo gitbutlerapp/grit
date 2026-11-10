@@ -995,7 +995,14 @@ fn rev_list_filtered_objects(
         },
         ..Default::default()
     };
-    let result = crate::rev_list::rev_list(&repo, &wants, &haves, &opts)?;
+    let result = crate::rev_list::rev_list(
+        &repo,
+        &wants,
+        &haves,
+        &opts,
+        &mut crate::progress::NullProgress,
+        crate::progress::CancelToken::never_ref(),
+    )?;
     stop.poll()?;
     let mut ordered = Vec::new();
     let mut seen = HashSet::new();

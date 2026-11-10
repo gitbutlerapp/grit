@@ -1,5 +1,7 @@
 //! Rename detection for [`grit_lib::diff::diff_commits_with_renames`] vs `git diff -M`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -56,6 +58,8 @@ fn diff_commits_with_renames_reports_pure_rename() {
             &base,
             &tip,
             &TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50)),
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .map(|r| r.entries)
         .expect("diff_commits_with_renames");

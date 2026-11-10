@@ -102,7 +102,12 @@ fn shallow_boundary_blame_matches_git_boundary_marker() {
 
     let result = repo
         .diff()
-        .blame("README", &BlameOptions::default())
+        .blame(
+            "README",
+            &BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap();
     assert!(
         result.lines.iter().any(|l| l.boundary),

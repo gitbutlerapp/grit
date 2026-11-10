@@ -3,6 +3,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::objects::{serialize_tag, ObjectId, ObjectKind, TagData};
 use grit_lib::refs::store::RefName;
 use grit_lib::repo::{InitOptions, Repository};
@@ -141,7 +143,7 @@ fn describe_seed6593_skewed_merge_matches_git_rev_list_without_commit_graph() {
         if !has_ancestor_tag {
             assert!(
                 repo.revwalk()
-                    .describe(&head_hex, &opts)
+                    .describe(&head_hex, &opts, &mut NullProgress, &CancelToken::never())
                     .expect("describe")
                     .is_none(),
                 "sample {sample} head {head_hex}: expected no ancestor tag"
@@ -150,7 +152,7 @@ fn describe_seed6593_skewed_merge_matches_git_rev_list_without_commit_graph() {
         }
         let described = repo
             .revwalk()
-            .describe(&head_hex, &opts)
+            .describe(&head_hex, &opts, &mut NullProgress, &CancelToken::never())
             .expect("describe")
             .unwrap_or_else(|| panic!("describe None for sample {sample} head {head_hex}"));
         let grit_tag = described

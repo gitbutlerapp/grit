@@ -1,5 +1,7 @@
 //! MIDX reachability bitmap writer compatibility with system Git.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::midx_support;
 
 use std::collections::HashSet;
@@ -168,7 +170,7 @@ fn reachability_positions(repo: &Repository, index: &BitmapIndex, tip: &ObjectId
     };
     let result = repo
         .revwalk()
-        .rev_list(&[hex], &[], &opts)
+        .rev_list(&[hex], &[], &opts, &mut NullProgress, &CancelToken::never())
         .expect("rev-list");
     let mut out = HashSet::new();
     for oid in result

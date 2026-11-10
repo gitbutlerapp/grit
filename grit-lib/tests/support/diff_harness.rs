@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -768,7 +770,10 @@ pub fn commits_diff_raw(
     tip: &ObjectId,
     opts: &TreeDiffOptions,
 ) -> Vec<String> {
-    let result = repo.diff().commits(base, tip, opts).expect("commits");
+    let result = repo
+        .diff()
+        .commits(base, tip, opts, &mut NullProgress, &CancelToken::never())
+        .expect("commits");
     grit_raw_lines(&result.entries)
 }
 

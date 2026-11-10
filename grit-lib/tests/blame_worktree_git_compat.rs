@@ -1,6 +1,8 @@
 //! `blame_file` on uncommitted content (worktree file or caller buffer) against system
 //! `git blame`, which blames such content as a fake commit on top of `HEAD`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::error::DiffError;
 use grit_lib::error::RevisionError;
 use std::path::Path;
@@ -90,7 +92,9 @@ fn worktree_options() -> BlameOptions {
 }
 
 fn blame(repo: &Repository, path: &str, options: &BlameOptions) -> BlameResult {
-    repo.diff().blame(path, options).expect("blame_file")
+    repo.diff()
+        .blame(path, options, &mut NullProgress, &CancelToken::never())
+        .expect("blame_file")
 }
 
 /// Three commits touching `f.txt`, so attributions span several commits.
@@ -319,7 +323,12 @@ fn untracked_file_is_not_in_head() {
     let repo = open_repo(root);
     let err = repo
         .diff()
-        .blame("untracked.txt", &worktree_options())
+        .blame(
+            "untracked.txt",
+            &worktree_options(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap_err();
     assert!(
         matches!(&err, Error::Revision(RevisionError::Parse(_))),
@@ -335,7 +344,15 @@ fn missing_worktree_file_is_an_error() {
     history(root);
     std::fs::remove_file(root.join("f.txt")).unwrap();
     let repo = open_repo(root);
-    assert!(repo.diff().blame("f.txt", &worktree_options()).is_err());
+    assert!(repo
+        .diff()
+        .blame(
+            "f.txt",
+            &worktree_options(),
+            &mut NullProgress,
+            &CancelToken::never()
+        )
+        .is_err());
     // The committed file can still be blamed.
     assert_eq!(
         blame(&repo, "f.txt", &BlameOptions::default()).lines.len(),
@@ -701,7 +718,15 @@ fn bare_repository_rejects_worktree_but_accepts_contents() {
         &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
     );
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open bare");
-    let err = repo.diff().blame("f.txt", &worktree_options()).unwrap_err();
+    let err = repo
+        .diff()
+        .blame(
+            "f.txt",
+            &worktree_options(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(err, Error::Diff(DiffError::BlameWorktreeBareRepository)),
         "unexpected error: {err:?}"

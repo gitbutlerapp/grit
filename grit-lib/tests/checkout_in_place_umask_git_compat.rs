@@ -1,5 +1,7 @@
 //! In-place regular-file checkout must preserve restrictive permissions like system `git`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 #[cfg(unix)]
 mod unix {
     use std::os::unix::fs::PermissionsExt;

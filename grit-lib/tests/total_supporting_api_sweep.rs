@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::apply::{
     inflate_binary_payload, materialize_binary_patch_forward, materialize_binary_patch_reverse,
     parse_patch, write_git_binary_patch,
@@ -68,6 +70,8 @@ fn blame_apply_binary_and_trailer_sweep() -> grit_lib::error::Result<()> {
             line_range: None,
             ..Default::default()
         },
+        &mut NullProgress,
+        &CancelToken::never(),
     )?;
     assert!(!blame.lines.is_empty());
 

@@ -1,5 +1,7 @@
 //! Additional `rev_list` walks on synthetic repos to exercise simplification and object paths.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -103,7 +105,13 @@ fn path_limited_simplify_and_full_history() {
         };
         let out = repo
             .revwalk()
-            .rev_list(&[tip.to_hex()], &[], &opts)
+            .rev_list(
+                &[tip.to_hex()],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("rev-list");
         assert!(!out.commits.is_empty());
     }
@@ -128,7 +136,13 @@ fn object_walk_filters() {
     };
     let out = repo
         .revwalk()
-        .rev_list(&[tip.to_hex()], &[], &opts)
+        .rev_list(
+            &[tip.to_hex()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("objects");
     assert!(!out.objects.is_empty());
 }
@@ -169,7 +183,13 @@ fn merge_history_simplify_sparse_and_ordering() {
         };
         let out = repo
             .revwalk()
-            .rev_list(&[tip.to_hex()], &[], &opts)
+            .rev_list(
+                &[tip.to_hex()],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("walk");
         assert!(!out.commits.is_empty());
     }
@@ -196,7 +216,13 @@ fn rev_list_limit_boundary_cherry_and_all_refs() {
     };
     let out = repo
         .revwalk()
-        .rev_list(&[tip.to_hex()], &[], &opts)
+        .rev_list(
+            &[tip.to_hex()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("limited");
     assert!(out.commits.len() <= 2);
     assert!(!out.objects.is_empty());
@@ -234,7 +260,7 @@ fn shallow_and_filtered_reachability() {
             ..RevListOptions::default()
         };
         repo.revwalk()
-            .rev_list(&[], &[], &opts)
+            .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
             .expect("walk")
             .objects
             .len()
@@ -257,7 +283,13 @@ fn tagged_tip_object_walk_and_symmetric_range() {
     };
     let out = repo
         .revwalk()
-        .rev_list(&[String::from("refs/tags/v1")], &[], &opts)
+        .rev_list(
+            &[String::from("refs/tags/v1")],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("tag walk");
     assert!(!out.objects.is_empty());
     let range = repo
@@ -269,6 +301,8 @@ fn tagged_tip_object_walk_and_symmetric_range() {
                 left_right: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("range");
     assert!(!range.commits.is_empty());
@@ -301,6 +335,8 @@ fn dense_pathspec_visibility_and_parent_filters() {
                 unpacked_only: false,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("parents filter");
     assert_eq!(out.commits.len(), 1);
@@ -313,5 +349,7 @@ fn dense_pathspec_visibility_and_parent_filters() {
             filter: Some(sparse),
             ..RevListOptions::default()
         },
+        &mut NullProgress,
+        &CancelToken::never(),
     );
 }

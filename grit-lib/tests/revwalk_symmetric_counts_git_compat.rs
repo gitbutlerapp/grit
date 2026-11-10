@@ -1,5 +1,7 @@
 //! Symmetric count queries over Git- and grit-written commit graphs.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 mod support;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -140,8 +142,12 @@ fn parent_navigation_and_counts_match_git_across_storage() {
             assert_eq!(
                 repo.odb()
                     .with_pack_read_context(|| {
-                        repo.revwalk()
-                            .left_right_counts(&[range], &RevWalkListOptions::default())
+                        repo.revwalk().left_right_counts(
+                            &[range],
+                            &RevWalkListOptions::default(),
+                            &mut NullProgress,
+                            &CancelToken::never(),
+                        )
                     })
                     .unwrap(),
                 git_counts(wt, range),

@@ -60,6 +60,12 @@ pub enum ProgressPhase {
     WritingObjects,
     /// Streaming a pack to a remote during push (counted in bytes).
     SendingObjects,
+    /// Walking commit history (rev-list, log, describe reachability).
+    WalkingHistory,
+    /// Running blame over history.
+    Blaming,
+    /// Resolving `git describe` tag candidates.
+    Describing,
 }
 
 impl ProgressPhase {
@@ -73,7 +79,10 @@ impl ProgressPhase {
             | Self::ResolvingDeltas
             | Self::CopyingObjects
             | Self::CompressingObjects
-            | Self::WritingObjects => ProgressUnit::Objects,
+            | Self::WritingObjects
+            | Self::WalkingHistory
+            | Self::Blaming
+            | Self::Describing => ProgressUnit::Objects,
             Self::CheckingOutFiles | Self::StagingFiles => ProgressUnit::Files,
             Self::TransferringBundle | Self::SendingObjects => ProgressUnit::Bytes,
         }
@@ -244,6 +253,39 @@ pub(crate) fn report_object_progress_stride(
     if total == Some(done) && *last_reported < done {
         sink.set(done);
         *last_reported = done;
+    }
+}
+
+/// Coarse progress/cancel state for commit and object history walks.
+#[derive(Debug, Default)]
+pub(crate) struct HistoryWalkStrideState {
+    pub(crate) started: bool,
+    steps: u64,
+    last_reported: u64,
+}
+
+/// Poll cancel and report object progress during history walks.
+pub(crate) struct HistoryWalkStride;
+
+impl HistoryWalkStride {
+    /// Begin the phase on first call, then poll `cancel` every [`CANCEL_POLL_STRIDE`] steps and
+    /// report counts via [`report_object_progress_stride`].
+    pub fn poll(
+        sink: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+        phase: ProgressPhase,
+        state: &mut HistoryWalkStrideState,
+    ) -> crate::error::Result<()> {
+        if !state.started {
+            sink.start(phase, None);
+            state.started = true;
+        }
+        state.steps += 1;
+        if state.steps as usize % CANCEL_POLL_STRIDE == 0 {
+            poll_cancel(sink, cancel)?;
+        }
+        report_object_progress_stride(sink, state.steps, &mut state.last_reported, None);
+        Ok(())
     }
 }
 

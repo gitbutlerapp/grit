@@ -6,6 +6,8 @@
 //! Build the CLI first, then run:
 //! `cargo build --release -p grit-cli && GRIT_STATUS_PERF=1 cargo test -p grit-lib --test status_50k_perf_git_compat --release -- --test-threads=1`
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -100,7 +102,7 @@ fn sample_edits(root: &std::path::Path, seed: u64) {
         .arg("-c")
         .arg(format!(
             "import os,random; random.seed({seed}); root=r'{root_s}'; files=[]
-for dp,_,fns in os.walk(root):
+for dp,_,fns in os.walk(root, &mut NullProgress, &CancelToken::never()):
  if '.git' in dp.split(os.sep): continue
  for fn in fns: files.append(os.path.join(dp,fn))
 for p in random.sample(files,{EDIT_COUNT}):
@@ -117,7 +119,7 @@ fn touch_mtimes_only(root: &std::path::Path, seed: u64) {
         .arg("-c")
         .arg(format!(
             "import os,random; random.seed({seed}); root=r'{root_s}'; files=[]
-for dp,_,fns in os.walk(root):
+for dp,_,fns in os.walk(root, &mut NullProgress, &CancelToken::never()):
  if '.git' in dp.split(os.sep): continue
  for fn in fns: files.append(os.path.join(dp,fn))
 for p in random.sample(files,{EDIT_COUNT}):

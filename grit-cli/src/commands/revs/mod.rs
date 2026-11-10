@@ -1,5 +1,7 @@
 //! `grit revs` — list or count commits matching revision ranges.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context;
 use crate::pathspec_args::{promote_long_magic_pathspecs_from_revs, TrailingPathspecArgs};
@@ -73,6 +75,8 @@ pub fn run(
     mode: RevsMode,
     emit: RevsEmitKind,
 ) -> Result<RevsOutcome> {
+    let _interrupt = crate::interrupt::InterruptCancel::install();
+    let cancel = crate::interrupt::process_cancel_token();
     let RevsMode {
         count, left_right, ..
     } = mode;
@@ -106,7 +110,7 @@ pub fn run(
             });
         }
         if left_right {
-            let lr = walk.left_right_counts(&token_refs, &opts)?;
+            let lr = walk.left_right_counts(&token_refs, &opts, &mut NullProgress, &cancel)?;
             return Ok(RevsOutcome {
                 commits: Vec::new(),
                 lines: Vec::new(),
@@ -116,7 +120,7 @@ pub fn run(
                 next: None,
             });
         }
-        let n = walk.count(&token_refs, &opts)?;
+        let n = walk.count(&token_refs, &opts, &mut NullProgress, &cancel)?;
         return Ok(RevsOutcome {
             commits: Vec::new(),
             lines: Vec::new(),
@@ -142,7 +146,8 @@ pub fn run(
     fetch_opts.retain_commit_data = true;
     fetch_opts.left_right = left_right;
     fetch_opts.cherry_mark = mode.cherry_mark;
-    let mut list_result = walk.rev_list_result(&token_refs, &fetch_opts)?;
+    let mut list_result =
+        walk.rev_list_result(&token_refs, &fetch_opts, &mut NullProgress, &cancel)?;
     let (oids, truncated) = truncate_oid_list(
         std::mem::take(&mut list_result.commits),
         rev.max_count(),

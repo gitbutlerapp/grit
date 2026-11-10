@@ -7,6 +7,8 @@
 
 #![cfg(target_os = "linux")]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;

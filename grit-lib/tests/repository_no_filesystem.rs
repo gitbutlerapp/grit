@@ -251,7 +251,12 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
     // log
     let walked = repo
         .revwalk()
-        .walk("main", &RevListOptions::default())
+        .walk(
+            "main",
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("walk");
     assert_eq!(walked.commits, vec![ours, base]);
     let subjects = walked
@@ -332,6 +337,8 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
                 start: Some(merge_commit),
                 ..BlameOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("blame");
     let blamed = blame

@@ -1,5 +1,7 @@
 //! Checkout delete rollback must preserve symlinks when the spool crosses devices (#1968).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 #[cfg(unix)]
 mod unix {
     use std::os::unix::fs::{symlink, PermissionsExt};

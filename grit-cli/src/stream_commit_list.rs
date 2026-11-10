@@ -1,5 +1,7 @@
 //! Incremental commit listing for `log` and `revs` on plain date-order walks.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use anyhow::{Context, Result};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -131,7 +133,12 @@ pub fn open_plain_stream<'repo>(
     stream_opts.retain_commit_data = true;
     stream_opts.retained_commit_extent = extent;
     repo.revwalk()
-        .commits_stream(tokens, &stream_opts)?
+        .commits_stream(
+            tokens,
+            &stream_opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?
         .context("plain walk should stream")
 }
 

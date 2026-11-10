@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -165,6 +167,8 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
                 &[String::from("main"), String::from("side")],
                 &[],
                 &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
             )?;
         }
     }
@@ -183,6 +187,8 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
             paths: vec!["tracked.txt".into()],
             ..RevListOptions::default()
         },
+        &mut NullProgress,
+        &CancelToken::never(),
     )?;
     assert!(path_limited.commits.is_empty());
     let via_handle = walk.walk(
@@ -192,6 +198,8 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
             left_right: true,
             ..RevListOptions::default()
         },
+        &mut NullProgress,
+        &CancelToken::never(),
     )?;
     // `side` is merged into `main`: the linear commits above the fork plus the merge, all left.
     assert_eq!(via_handle.commits.len(), 1100 - 1100 / 3 - 1 + 1);

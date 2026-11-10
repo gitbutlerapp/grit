@@ -1,6 +1,8 @@
 //! A repository whose object store and ref store are both injected needs no git directory
 //! layout on disk: no `HEAD`, `objects/` or `refs/`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::error::RefError;
 use std::fs;
 use std::path::Path;
@@ -91,7 +93,13 @@ fn exercise(repo: &Repository, refs: &MemoryRefStore) {
     );
     let walked = repo
         .revwalk()
-        .rev_list(&["HEAD".to_owned()], &[], &RevListOptions::default())
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     assert_eq!(walked.commits, vec![second, first]);
 }

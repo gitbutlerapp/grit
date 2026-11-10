@@ -1,5 +1,7 @@
 //! Git parity for blame ignore-revision lists (upstream `t8013` intent).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::error::DiffError;
 use std::path::Path;
 use std::process::Command;
@@ -151,6 +153,8 @@ fn grit_blame(repo: &Repository, file: &str, ignore: &IgnoreParams<'_>) -> Vec<P
                 ignore: loaded,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("blame_file");
     let mut out: Vec<PorcelainLine> = result
@@ -467,6 +471,8 @@ fn line_range_through_ignored_commit() {
                 ignore: grit_loaded,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .unwrap();
     let parsed = parse_git_blame_porcelain(&git_lines);

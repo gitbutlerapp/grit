@@ -1,5 +1,7 @@
 //! Patch-ID and hooks library integration tests (task #1479).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::patch_ids::PatchIdMode;
 use grit_lib::objects::ObjectId;
@@ -233,7 +235,12 @@ fn patch_ids_and_cherry_mark_match_git_on_ranges_split_across_workers() {
     };
     let result = repo
         .revwalk()
-        .rev_list_result(&["old-topic...topic"], &opts)
+        .rev_list_result(
+            &["old-topic...topic"],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("cherry-mark");
     assert_eq!(result.cherry_matches.len(), 40);
     assert!(result

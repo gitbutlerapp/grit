@@ -1,6 +1,8 @@
 //! Focused ports of upstream `t/t6019-rev-list-ancestry-path.sh` and `t/t6000-rev-list-misc.sh`
 //! (`--unpacked` object walk) for grit vs system `git` parity.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::collections::HashSet;
@@ -189,6 +191,8 @@ fn t6019_criss_cross_ancestry_path_empty_matches_git() {
                 ancestry_path: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit xcb..xbc")
         .commits;
@@ -239,6 +243,8 @@ fn t6000_rev_list_unpacked_objects_matches_git() {
                 quiet: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("grit --all --unpacked --objects");
     let mut grit_set: HashSet<ObjectId> = HashSet::new();

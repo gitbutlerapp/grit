@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -565,7 +567,13 @@ pub fn grit_rev_list_commits_in_repo(
 ) -> Result<Vec<ObjectId>> {
     Ok(repo
         .revwalk()
-        .rev_list(positive, negative, options)?
+        .rev_list(
+            positive,
+            negative,
+            options,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?
         .commits)
 }
 
@@ -613,7 +621,13 @@ pub fn grit_rev_list_object_set(
     };
     let result = repo
         .revwalk()
-        .rev_list(positive, negative, &opts)
+        .rev_list(
+            positive,
+            negative,
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list objects");
     let mut set = HashSet::new();
     for oid in result.commits {

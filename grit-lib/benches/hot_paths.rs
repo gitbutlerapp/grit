@@ -2,6 +2,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 mod hot_paths_fixture;
 mod sparse_transition_fixture;
 use sparse_transition_fixture::bench_sparse_transitions;

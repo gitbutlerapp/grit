@@ -1,5 +1,7 @@
 //! Author grouping matches `git shortlog -sne` (counts, order, mailmap).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::fs;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -239,9 +241,12 @@ fn group_by_author_matches_git_shortlog_sne() -> grit_lib::error::Result<()> {
     commit_as(root, "Alice", "alice@example.com", "a3");
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::default())?;
-    let oids = repo
-        .revwalk()
-        .commits(&["HEAD"], &RevWalkListOptions::default())?;
+    let oids = repo.revwalk().commits(
+        &["HEAD"],
+        &RevWalkListOptions::default(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
     let table = repo.revwalk().mailmap_for_grouping(true)?;
     let groups =
         repo.revwalk()

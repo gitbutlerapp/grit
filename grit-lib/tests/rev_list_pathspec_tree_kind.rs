@@ -1,5 +1,7 @@
 //! Path-limited revision walks must not treat non-tree commit `tree` headers as trees.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -61,7 +63,13 @@ fn pathspec_log_skips_commit_when_tree_header_points_at_blob() {
         paths: vec!["tracked.txt".to_owned()],
         ..Default::default()
     };
-    let result = open.revwalk().rev_list(&["HEAD".to_owned()], &[], &opts);
+    let result = open.revwalk().rev_list(
+        &["HEAD".to_owned()],
+        &[],
+        &opts,
+        &mut NullProgress,
+        &CancelToken::never(),
+    );
     match result {
         Err(_) => {}
         Ok(out) => assert!(

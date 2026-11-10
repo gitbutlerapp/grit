@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
@@ -173,7 +175,16 @@ fn grit_object_ids(bare: &Path, patterns: &str) -> HashSet<ObjectId> {
         filter: Some(filter),
         ..Default::default()
     };
-    let result = repo.revwalk().rev_list(&[head], &[], &opts).unwrap();
+    let result = repo
+        .revwalk()
+        .rev_list(
+            &[head],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap();
     let mut out = HashSet::new();
     out.extend(result.commits);
     for (oid, _) in result.objects {
@@ -272,7 +283,16 @@ fn grit_blob_paths(bare: &Path, patterns: &str) -> Vec<String> {
         filter: Some(filter),
         ..Default::default()
     };
-    let result = repo.revwalk().rev_list(&[head], &[], &opts).unwrap();
+    let result = repo
+        .revwalk()
+        .rev_list(
+            &[head],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap();
     let mut lines = String::new();
     for (oid, path) in result.objects {
         if path.is_empty() {

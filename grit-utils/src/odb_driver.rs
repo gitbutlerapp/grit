@@ -14,6 +14,7 @@ use grit_lib::objects::pack::{
     read_object_from_pack_at_offset, read_pack_index_cached, PackIndex, SingleLocalPackReader,
 };
 use grit_lib::objects::{parse_commit, Object, ObjectId, ObjectKind};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::remote::serve::{ProtocolVersion, ServeOptions, UploadPack};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{RevListOptions, RevListResult};
@@ -224,7 +225,10 @@ pub fn rev_list_objects(repo: &Repository) -> Result<()> {
     };
     let result = repo
         .odb()
-        .with_pack_read_context(|| repo.revwalk().rev_list(&[], &[], &opts))
+        .with_pack_read_context(|| {
+            repo.revwalk()
+                .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
+        })
         .context("rev-list --objects --all")?;
     let mut stdout = io::stdout().lock();
     for commit in &result.commits {
@@ -250,7 +254,13 @@ pub fn log_patch(repo: &Repository, limit: usize) -> Result<()> {
         };
         let result = repo
             .revwalk()
-            .rev_list(&["HEAD".to_owned()], &[], &opts)
+            .rev_list(
+                &["HEAD".to_owned()],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .context("rev-list for log")?;
         let config = repo
             .config()
@@ -276,7 +286,9 @@ pub fn rev_walk_count_head_since(repo: &Repository, since: i64) -> Result<()> {
             limit: Some(20),
             ..RevWalkListOptions::default()
         };
-        let n = repo.revwalk().count(&["HEAD"], &opts)?;
+        let n = repo
+            .revwalk()
+            .count(&["HEAD"], &opts, &mut NullProgress, &CancelToken::never())?;
         println!("{n}");
         Ok(())
     })
@@ -287,7 +299,12 @@ pub fn rev_walk_describe_head(repo: &Repository) -> Result<()> {
     repo.odb().with_pack_read_context(|| {
         let described = repo
             .revwalk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?
             .ok_or_else(|| anyhow::anyhow!("no reachable tag"))?;
         println!(
             "{}-{}-{}",
@@ -306,9 +323,12 @@ pub fn rev_walk_describe_head(repo: &Repository) -> Result<()> {
 /// Symmetric left/right counts (`rev-list --left-right --count`).
 pub fn rev_walk_left_right_count(repo: &Repository, range: &str) -> Result<()> {
     repo.odb().with_pack_read_context(|| {
-        let counts = repo
-            .revwalk()
-            .left_right_counts(&[range], &RevWalkListOptions::default())?;
+        let counts = repo.revwalk().left_right_counts(
+            &[range],
+            &RevWalkListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?;
         println!("{} {}", counts.left, counts.right);
         Ok(())
     })
@@ -334,7 +354,13 @@ pub fn rev_list_count_author_head(repo: &Repository, author: &str) -> Result<()>
     };
     let result = repo
         .revwalk()
-        .rev_list(&["HEAD".to_string()], &[], &opts)
+        .rev_list(
+            &["HEAD".to_string()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .context("rev-list --count --author HEAD")?;
     println!("{}", result.commit_count());
     Ok(())
@@ -350,7 +376,13 @@ pub fn rev_list_author_n_head(repo: &Repository, author: &str, max_count: usize)
     };
     let result = repo
         .revwalk()
-        .rev_list(&["HEAD".to_string()], &[], &opts)
+        .rev_list(
+            &["HEAD".to_string()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .context("rev-list --author -n HEAD")?;
     println!("{}", result.commits.len());
     Ok(())
@@ -366,7 +398,13 @@ pub fn rev_list_head(repo: &Repository) -> Result<()> {
     };
     let result = repo
         .revwalk()
-        .rev_list(&["HEAD".to_string()], &[], &opts)
+        .rev_list(
+            &["HEAD".to_string()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .context("rev-list HEAD")?;
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
     for oid in &result.commits {
@@ -384,7 +422,13 @@ pub fn rev_list_count_head(repo: &Repository) -> Result<()> {
     };
     let result = repo
         .revwalk()
-        .rev_list(&["HEAD".to_string()], &[], &opts)
+        .rev_list(
+            &["HEAD".to_string()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .context("rev-list --count HEAD")?;
     let n = result.commit_count();
     println!("{n}");
@@ -438,6 +482,8 @@ pub fn blame_porcelain_with_range(
                 line_range,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .context("blame_file")?;
 
@@ -557,7 +603,7 @@ pub fn rev_list_count(repo: &Repository) -> Result<()> {
     };
     let result = repo
         .revwalk()
-        .rev_list(&[], &[], &opts)
+        .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
         .context("rev-list --count --all")?;
     let n = result.commit_count();
     println!("{n}");
@@ -576,7 +622,10 @@ pub fn rev_list_count_objects(repo: &Repository) -> Result<()> {
     };
     let result = repo
         .odb()
-        .with_pack_read_context(|| repo.revwalk().rev_list(&[], &[], &opts))
+        .with_pack_read_context(|| {
+            repo.revwalk()
+                .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
+        })
         .context("rev-list --count --objects --all")?;
     let n = result.count_with_objects_total();
     println!("{n}");

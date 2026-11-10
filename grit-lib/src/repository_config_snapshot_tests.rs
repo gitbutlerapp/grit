@@ -138,6 +138,8 @@ mod tests {
                 &["HEAD".to_string()],
                 &[],
                 &RevListOptions::default(),
+                &mut crate::progress::NullProgress,
+                crate::progress::CancelToken::never_ref(),
             )
             .unwrap();
         });

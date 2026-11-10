@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{serialize_tag, ObjectId, ObjectKind, TagData};
@@ -39,6 +41,8 @@ fn describe_distance_matches_git_rev_list_count() {
                 tags: true,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("describe")
         .expect("some tag");
@@ -72,7 +76,12 @@ fn describe_clock_skew_fixture_matches_git_rev_list_count() {
 
     let described = repo
         .revwalk()
-        .describe("main", &DescribeOptions::default())
+        .describe(
+            "main",
+            &DescribeOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("describe")
         .expect("tag");
     let git_count = git(wt, &["rev-list", "--count", "refs/tags/t20..main"])
@@ -127,7 +136,7 @@ fn assert_describe_matches_git_rev_list(
 ) {
     let described = repo
         .revwalk()
-        .describe(rev, opts)
+        .describe(rev, opts, &mut NullProgress, &CancelToken::never())
         .expect("describe")
         .expect("tag expected");
     let tag_short = described
@@ -173,7 +182,7 @@ fn describe_merge_ladder_matches_git() {
             .to_owned();
         let described = repo
             .revwalk()
-            .describe(rev, &opts)
+            .describe(rev, &opts, &mut NullProgress, &CancelToken::never())
             .expect("describe")
             .expect("tag expected");
         let tag_short = described
@@ -206,6 +215,8 @@ fn describe_merge_ladder_matches_git() {
                     match_glob: Some("t1*".into()),
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never()
             )
             .expect("describe")
             .expect("tag")
@@ -219,7 +230,9 @@ fn describe_merge_ladder_matches_git() {
                 &DescribeOptions {
                     match_glob: Some("t1*".into()),
                     ..Default::default()
-                }
+                },
+                &mut NullProgress,
+                &CancelToken::never()
             )
             .expect("describe")
             .expect("tag")
@@ -234,6 +247,8 @@ fn describe_merge_ladder_matches_git() {
                     match_glob: Some("ss*".into()),
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never()
             )
             .expect("describe")
             .expect("tag")
@@ -310,7 +325,12 @@ fn describe_diamond_merge_matches_git() {
     .expect("open");
     let described = repo
         .revwalk()
-        .describe("HEAD", &DescribeOptions::default())
+        .describe(
+            "HEAD",
+            &DescribeOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("describe")
         .expect("some tag");
     let tag_short = described

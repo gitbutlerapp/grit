@@ -1,5 +1,7 @@
 //! Path-limited `rev-list` / `rev_list` honors `:(attr:...)` like Git (issue #2356).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::process::Command;
 
@@ -60,7 +62,13 @@ fn grit_rev_list(repo: &Repository, spec: &str) -> Vec<ObjectId> {
         ..RevListOptions::default()
     };
     repo.revwalk()
-        .rev_list(&["HEAD".into()], &[], &opts)
+        .rev_list(
+            &["HEAD".into()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev_list")
         .commits
 }
@@ -87,7 +95,13 @@ fn rev_list_attr_pathspec_non_matching_attr_is_empty_while_unfiltered_is_not() {
     assert!(git_rev_list(dir.path(), ":(attr:no-such-attr)").is_empty());
     let all = repo
         .revwalk()
-        .rev_list(&["HEAD".into()], &[], &RevListOptions::default())
+        .rev_list(
+            &["HEAD".into()],
+            &[],
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("all")
         .commits;
     assert!(all.len() > 5);

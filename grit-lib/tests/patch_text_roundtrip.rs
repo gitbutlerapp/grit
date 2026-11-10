@@ -1,5 +1,7 @@
 //! `write_patch` / `--patch-text` round-trip vs system `git diff --binary` and `git apply`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::objects::FileMode;
 use std::io::Cursor;
 use std::process::Command;
@@ -73,7 +75,13 @@ fn grit_patch_structured(repo: &Repository, base: &str, tip: &str) -> Vec<u8> {
     let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
     let mut entries = repo
         .diff()
-        .commits(&base_oid, &tip_oid, &renames)
+        .commits(
+            &base_oid,
+            &tip_oid,
+            &renames,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("diff")
         .entries;
     entries.sort_by(|a, b| a.path().cmp(b.path()));

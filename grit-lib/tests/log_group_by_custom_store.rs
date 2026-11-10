@@ -6,6 +6,8 @@
 //! backend reports for the same history, loose and after a repack with a bitmap and a
 //! commit-graph.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::fs;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};

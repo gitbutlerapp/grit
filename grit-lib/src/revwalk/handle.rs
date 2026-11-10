@@ -2,6 +2,7 @@
 use crate::error::Result;
 use crate::object_inspect::ResolvedObject;
 use crate::objects::ObjectId;
+use crate::progress::{CancelToken, ProgressSink};
 use crate::repo::Repository;
 use crate::rev_list::{
     open_commit_stream, rev_list, CommitExtent, CommitStreamParams, RevListOptions, RevListResult,
@@ -60,8 +61,10 @@ impl<'repo> RevWalk<'repo> {
         positive: &[String],
         negative: &[String],
         options: &RevListOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
     ) -> Result<RevListResult> {
-        rev_list(self.repo, positive, negative, options)
+        rev_list(self.repo, positive, negative, options, progress, cancel)
     }
 
     /// Resolve revision `specs` to commit tips the way a history walk reads its arguments:
@@ -129,7 +132,13 @@ impl<'repo> RevWalk<'repo> {
     /// # Examples
     ///
     /// See the library guide page on [revision walking](https://grit-scm.com/docs/library/revwalk/).
-    pub fn walk(&self, spec: &str, options: &RevListOptions) -> Result<RevListResult> {
+    pub fn walk(
+        &self,
+        spec: &str,
+        options: &RevListOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<RevListResult> {
         if !is_single_walk_spec(spec) {
             return Err(RevListError::UnsupportedWalkSpec {
                 spec: spec.to_owned(),
@@ -147,7 +156,14 @@ impl<'repo> RevWalk<'repo> {
         } else {
             Cow::Borrowed(options)
         };
-        rev_list(self.repo, &parsed.positive, &parsed.negative, &options)
+        rev_list(
+            self.repo,
+            &parsed.positive,
+            &parsed.negative,
+            &options,
+            progress,
+            cancel,
+        )
     }
 
     /// Lazy commit-only iterator for one revision `spec` (same single-token rules as [`Self::walk`]).
@@ -164,6 +180,8 @@ impl<'repo> RevWalk<'repo> {
         &self,
         spec: &str,
         options: &RevWalkCommitIterOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
     ) -> Result<RevWalkCommitIter<'repo>> {
         if !is_single_walk_spec(spec) {
             return Err(RevListError::UnsupportedWalkSpec {
@@ -186,7 +204,7 @@ impl<'repo> RevWalk<'repo> {
             retained_commit_extent: CommitExtent::Whole,
         };
         Ok(RevWalkCommitIter {
-            inner: open_commit_stream(self.repo, &include, &exclude, &params)?,
+            inner: open_commit_stream(self.repo, &include, &exclude, &params, progress, cancel)?,
         })
     }
 
@@ -281,7 +299,7 @@ mod commit_iter_tests {
         };
         let ids: Vec<_> = repo
             .revwalk()
-            .commits_iter("HEAD", &options)
+            .commits_iter("HEAD", &options, &mut NullProgress, &CancelToken::never())
             .expect("iter")
             .collect::<Result<Vec<_>>>()
             .expect("walk");
@@ -299,11 +317,18 @@ mod commit_iter_tests {
             limit: Some(10),
             ..Default::default()
         };
-        let all: Vec<_> = open_commit_stream(&repo, std::slice::from_ref(&newest), &[], &params)
-            .expect("stream")
-            .map(|item| item.map(|row| row.oid))
-            .collect::<Result<Vec<_>>>()
-            .expect("walk");
+        let all: Vec<_> = open_commit_stream(
+            &repo,
+            std::slice::from_ref(&newest),
+            &[],
+            &params,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("stream")
+        .map(|item| item.map(|row| row.oid))
+        .collect::<Result<Vec<_>>>()
+        .expect("walk");
         assert_eq!(all.len(), 4);
 
         let future = i64::MAX;
@@ -315,6 +340,8 @@ mod commit_iter_tests {
                 since: Some(future),
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("stream")
         .map(|item| item.map(|row| row.oid))

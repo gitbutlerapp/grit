@@ -1,5 +1,7 @@
 //! Compare `diff_commits` file sets with `git diff --raw` for the same OIDs.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::diff::TreeDiffOptions;
 use std::path::Path;
 
@@ -53,7 +55,13 @@ fn diff_commits_matches_git_raw_file_set() {
     .expect("open");
     let entries = repo
         .diff()
-        .commits(&c1, &c2, &TreeDiffOptions::default())
+        .commits(
+            &c1,
+            &c2,
+            &TreeDiffOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .map(|r| r.entries)
         .expect("diff_commits");
     let mut grit_paths: Vec<_> = entries.iter().map(|e| e.path().to_owned()).collect();
@@ -85,7 +93,13 @@ fn diff_commits_two_commit_endpoints_match_git() {
     .expect("open");
     let entries = repo
         .diff()
-        .commits(&base, &tip, &TreeDiffOptions::default())
+        .commits(
+            &base,
+            &tip,
+            &TreeDiffOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .map(|r| r.entries)
         .expect("diff");
     assert!(

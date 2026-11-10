@@ -113,7 +113,13 @@ fn git_packed_history_reads_through_a_read_source() {
     .expect("open layered");
     let walked = layered
         .revwalk()
-        .rev_list(&[tip.to_hex()], &[], &RevListOptions::default())
+        .rev_list(
+            &[tip.to_hex()],
+            &[],
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     let expected: Vec<String> = git(&history, &["rev-list", "main"])
         .lines()

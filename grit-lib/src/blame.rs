@@ -1685,6 +1685,8 @@ fn pass_overlay_to_parents(
                 walk.first_parent_only,
                 walk.grafts,
                 walk.indent_heuristic,
+                &mut crate::progress::NullProgress,
+                crate::progress::CancelToken::never_ref(),
             )?;
             result.extend(copy_lines);
             remaining = left;
@@ -2934,6 +2936,8 @@ pub fn compute_blame(
             line_range,
             None,
             &mut session,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )
     };
     if bounded_odb.is_some() {
@@ -3048,8 +3052,11 @@ fn compute_blame_with_session(
     line_range: Option<RangeInclusive<usize>>,
     overlay: Option<&BlameOverlay>,
     session: &mut BlameSession<'_>,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<Vec<BlameLine>> {
     let blamed_path = file_path.to_owned();
+    let mut blame_stride = crate::progress::HistoryWalkStrideState::default();
     let mut commit_cache = BlameCommitCache::default();
     let (start_lines, blob_oid, blob_mode) = match overlay {
         Some(overlay) => (
@@ -3159,6 +3166,12 @@ fn compute_blame_with_session(
     // suspect goes back through the queue so commits are visited newest first and shared
     // ancestors are reached once.
     'blame_loop: loop {
+        crate::progress::HistoryWalkStride::poll(
+            progress,
+            cancel,
+            crate::progress::ProgressPhase::Blaming,
+            &mut blame_stride,
+        )?;
         if pending.is_empty() || !queue.is_empty() {
             if !pending.is_empty() {
                 let lines = walk_lines
@@ -3334,6 +3347,8 @@ fn compute_blame_with_session(
                         None,
                         None,
                         session,
+                        progress,
+                        cancel,
                     )?;
                     parent_lines.push(Some(p_lines));
                     parent_blames.push(Some(p_blame));
@@ -3729,6 +3744,8 @@ fn compute_blame_with_session(
                         first_parent_only,
                         grafts,
                         indent_heuristic,
+                        progress,
+                        cancel,
                     )?;
                     result.extend(copy_lines);
                     for t in remaining {
@@ -4089,6 +4106,8 @@ fn compute_blame_with_session(
                         first_parent_only,
                         grafts,
                         indent_heuristic,
+                        progress,
+                        cancel,
                     )?;
                     result.extend(copy_lines);
                     for t in left {
@@ -4248,6 +4267,8 @@ fn load_copy_source_blame(
     indent_heuristic: bool,
     session: &mut BlameSession<'_>,
     cache: &mut CopySourceCache,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<(Arc<BlobLines>, Vec<BlameLine>)> {
     if let Some(entry) = cache.get(path) {
         return Ok((Arc::clone(&entry.0), entry.1.clone()));
@@ -4271,6 +4292,8 @@ fn load_copy_source_blame(
         None,
         None,
         session,
+        progress,
+        cancel,
     )?;
     cache.insert(
         path.to_owned(),
@@ -4305,6 +4328,8 @@ fn copy_detect_attribute_pending(
     first_parent_only: bool,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
     indent_heuristic: bool,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<(Vec<TrackedLine>, Vec<TrackedLine>, Vec<BlameLine>)> {
     if pending.is_empty() {
         return Ok((pending, Vec::new(), Vec::new()));
@@ -4471,6 +4496,8 @@ fn copy_detect_attribute_pending(
                         indent_heuristic,
                         session,
                         &mut source_cache,
+                        progress,
+                        cancel,
                     )?;
                     made_progress = true;
                     if m.suspect_start > 0 {
@@ -5392,6 +5419,8 @@ pub(crate) fn blame_file(
     repo: &Repository,
     path: &str,
     options: &BlameOptions,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<BlameResult> {
     let start_oid = resolve_blame_start(repo, options.start)?;
     let file_path = normalize_blame_path(repo, path);
@@ -5453,6 +5482,8 @@ pub(crate) fn blame_file(
                 options.line_range.clone(),
                 overlay.as_ref(),
                 &mut session,
+                progress,
+                cancel,
             )?;
 
             let mut boundary_cache: HashMap<ObjectId, bool> = HashMap::new();
@@ -6682,6 +6713,8 @@ mod tests {
                 start: Some(tip),
                 ..Default::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )?;
         assert_eq!(result.lines.len(), 1);
         assert_eq!(result.lines[0].content, "hello");
@@ -6765,6 +6798,8 @@ mod tests {
             None,
             None,
             &mut session,
+            &mut crate::progress::NullProgress,
+            crate::progress::CancelToken::never_ref(),
         )?;
 
         assert_eq!(lines.len(), 40);
@@ -6848,6 +6883,8 @@ mod tests {
                 line_range: Some(1..=10),
                 ..Default::default()
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )?;
         assert!(!result.lines.is_empty());
         Ok(())

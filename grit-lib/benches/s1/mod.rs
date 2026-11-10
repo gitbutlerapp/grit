@@ -4,6 +4,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -52,7 +54,13 @@ pub fn run_rev_list_objects_v1(repo: &Repository) -> usize {
     };
     let result = repo
         .revwalk()
-        .rev_list(&[String::from("v1.0.0")], &[], &opts)
+        .rev_list(
+            &[String::from("v1.0.0")],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list s1");
     result.objects.len()
 }

@@ -1,5 +1,7 @@
 //! `grit blame` — show who last modified each line of a file.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::collections::BTreeMap;
 
 use anyhow::{bail, Context, Result};
@@ -62,6 +64,8 @@ pub fn run(
     contents: Option<String>,
     now: time::OffsetDateTime,
 ) -> Result<BlameOutcome> {
+    let _interrupt = crate::interrupt::InterruptCancel::install();
+    let cancel = crate::interrupt::process_cancel_token();
     let (rev_pos, file) = match (rev_pos, file) {
         (None, Some(file)) => (None, file),
         (Some(rev), Some(file)) => (Some(rev), file),
@@ -138,7 +142,9 @@ pub fn run(
     options.whitespace = whitespace;
     options.copy_detection = copy_detection;
     options.move_detection = move_detection || copy_detection.count() > 0;
-    let result = repo.diff().blame(&blame_path, &options)?;
+    let result = repo
+        .diff()
+        .blame(&blame_path, &options, &mut NullProgress, &cancel)?;
 
     outcome_from_result(
         &repo,

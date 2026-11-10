@@ -103,7 +103,13 @@ fn commit_empty(repo: &Repository, message: &str) -> ObjectId {
 fn log(repo: &Repository) -> Vec<(ObjectId, String, Vec<String>)> {
     let revwalk = repo.revwalk();
     let walked = revwalk
-        .rev_list(&["HEAD".to_owned()], &[], &RevListOptions::default())
+        .rev_list(
+            &["HEAD".to_owned()],
+            &[],
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
     let decorations = revwalk
         .decorations(&DecorationOptions::default())

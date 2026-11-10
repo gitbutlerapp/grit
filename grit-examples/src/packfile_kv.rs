@@ -495,6 +495,7 @@ pub fn run_custom_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
 
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::objects::{serialize_tree, TreeEntry};
+    use grit_lib::progress::{CancelToken, NullProgress};
     use grit_lib::refs::store::RefName;
     use grit_lib::repo::{InitOptions, Repository};
     use grit_lib::revwalk::rev_list::RevListOptions;
@@ -541,9 +542,13 @@ pub fn run_custom_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
     )?;
 
     let tip = commit.to_hex();
-    let listed =
-        repo.revwalk()
-            .rev_list(std::slice::from_ref(&tip), &[], &RevListOptions::default())?;
+    let listed = repo.revwalk().rev_list(
+        std::slice::from_ref(&tip),
+        &[],
+        &RevListOptions::default(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
     let grit_log: Vec<String> = listed.commits.iter().map(ObjectId::to_hex).collect();
 
     let loose = LooseStore::new(objects_dir.clone(), HashAlgo::Sha1, Compression::default());

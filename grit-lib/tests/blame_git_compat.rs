@@ -1,5 +1,7 @@
 //! Compare `blame_file` attributions with `git blame --line-porcelain`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::error::RevisionError;
 use std::path::Path;
 use std::process::Command;
@@ -141,6 +143,8 @@ fn grit_blame(
                 line_range,
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("blame_file");
     let mut out: Vec<PorcelainLine> = result
@@ -272,7 +276,12 @@ fn blame_from_subdirectory_cwd_is_repository_relative() {
 
     let err = repo
         .diff()
-        .blame("f.txt", &BlameOptions::default())
+        .blame(
+            "f.txt",
+            &BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap_err();
     match err {
         Error::Revision(RevisionError::Parse(RevParseError::PathNotInRevision {
@@ -1032,7 +1041,12 @@ fn commit_identity_and_summary(dir: &Path, commit: &ObjectId) -> (String, String
 fn assert_commit_metadata_matches(repo: &Repository, dir: &Path, file: &str) {
     let result = repo
         .diff()
-        .blame(file, &BlameOptions::default())
+        .blame(
+            file,
+            &BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("blame_file");
     assert!(!result.lines.is_empty());
     for line in &result.lines {
@@ -1342,7 +1356,12 @@ fn blame_through_commits_missing_author_or_committer_matches_git_loose_and_packe
     let blame_all = |repo: &Repository| {
         ["f.txt", "g.txt"].map(|file| {
             repo.diff()
-                .blame(file, &BlameOptions::default())
+                .blame(
+                    file,
+                    &BlameOptions::default(),
+                    &mut NullProgress,
+                    &CancelToken::never(),
+                )
                 .expect("blame_file")
         })
     };
@@ -1352,7 +1371,12 @@ fn blame_through_commits_missing_author_or_committer_matches_git_loose_and_packe
             let git_meta = git_porcelain_metadata(root, file);
             let result = repo
                 .diff()
-                .blame(file, &BlameOptions::default())
+                .blame(
+                    file,
+                    &BlameOptions::default(),
+                    &mut NullProgress,
+                    &CancelToken::never(),
+                )
                 .expect("blame_file");
             for line in &result.lines {
                 let info = result.commits.get(&line.commit).expect("metadata");
@@ -1823,7 +1847,12 @@ fn blame_final_newline_changes_match_git() {
                 }
                 let result = repo
                     .diff()
-                    .blame("a.txt", &BlameOptions::default())
+                    .blame(
+                        "a.txt",
+                        &BlameOptions::default(),
+                        &mut NullProgress,
+                        &CancelToken::never(),
+                    )
                     .unwrap();
                 let bodies: Vec<_> = text
                     .split_inclusive('\n')
@@ -1919,6 +1948,8 @@ fn blame_copy_matching_preserves_final_newline() {
                             },
                             ..Default::default()
                         },
+                        &mut NullProgress,
+                        &CancelToken::never(),
                     )
                     .unwrap();
                 let lines: Vec<_> = result

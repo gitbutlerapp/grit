@@ -1,5 +1,7 @@
 //! `-L` line range resolution matches `git blame --porcelain -L …`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::process::Command;
 
@@ -123,6 +125,8 @@ fn grit_blame_range(
                 line_range: Some(range),
                 ..Default::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("blame_file");
     let mut out: Vec<PorcelainLine> = result
@@ -330,6 +334,8 @@ fn packed_deep_history_range_matches_git_across_pack_layouts() {
                         line_range: Some(1..=3),
                         ..Default::default()
                     },
+                    &mut NullProgress,
+                    &CancelToken::never(),
                 )
                 .expect("blame");
             let porcelain = git_output(
@@ -395,6 +401,8 @@ fn ranged_blame_visits_history_across_many_packs() {
                     line_range: Some(1..=3),
                     ..Default::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )
             .expect("blame");
         for (line, content) in result.lines.iter().zip(["first", "second", "third"]) {

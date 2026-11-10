@@ -7,6 +7,7 @@ use crate::merge_base::{
     count_commits_reachable_excluding_ancestors_of, merge_bases_all, ReachableCountFilter,
 };
 use crate::objects::ObjectId;
+use crate::progress::{CancelToken, ProgressSink};
 use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
 use crate::repo::Repository;
 use std::sync::Arc;
@@ -401,6 +402,8 @@ pub(crate) fn rev_list_commits_for_author_group(
     repo: &Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<Vec<ObjectId>> {
     if ref_walk_is_empty_ref_selection(repo, tokens, walk)? {
         return Ok(Vec::new());
@@ -408,7 +411,15 @@ pub(crate) fn rev_list_commits_for_author_group(
     let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, walk)?;
     let (mut opts, context) = rev_list_options_from_walk(repo, walk, &parsed, all_refs, false)?;
     opts.use_bitmap_index = true;
-    let result = rev_list_with_context(repo, &positive, &parsed.negative, &opts, context)?;
+    let result = rev_list_with_context(
+        repo,
+        &positive,
+        &parsed.negative,
+        &opts,
+        context,
+        progress,
+        cancel,
+    )?;
     Ok(result.commits)
 }
 
@@ -475,7 +486,10 @@ fn try_single_positive_bounded_page(
     repo: &Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
+    progress: &mut dyn ProgressSink,
+    _cancel: &CancelToken,
 ) -> Result<Option<RevListResult>> {
+    let _ = progress;
     if !walk_list_is_single_positive_bounded_page(walk) || tokens.len() != 1 {
         return Ok(None);
     }
@@ -569,6 +583,8 @@ impl<'repo> RevWalk<'repo> {
         &self,
         tokens: &[&str],
         walk: &RevWalkListOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
     ) -> Result<Option<RevWalkCommitStream<'repo>>> {
         if !rev_walk_list_supports_stream(walk) {
             return Ok(None);
@@ -588,6 +604,8 @@ impl<'repo> RevWalk<'repo> {
                 &[],
                 &[],
                 &params,
+                progress,
+                cancel,
             )?)));
         }
         let (tips, hide) = resolve_log_walk_tips_and_hide(self.repository(), tokens, walk)?;
@@ -605,6 +623,8 @@ impl<'repo> RevWalk<'repo> {
             &tips,
             &hide,
             &params,
+            progress,
+            cancel,
         )?)))
     }
 
@@ -618,8 +638,16 @@ impl<'repo> RevWalk<'repo> {
     /// # Errors
     ///
     /// Propagates rev-parse and rev-list errors.
-    pub fn commits(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<Vec<ObjectId>> {
-        Ok(self.rev_list_result(tokens, options)?.commits)
+    pub fn commits(
+        &self,
+        tokens: &[&str],
+        options: &RevWalkListOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<Vec<ObjectId>> {
+        Ok(self
+            .rev_list_result(tokens, options, progress, cancel)?
+            .commits)
     }
 
     /// Like [`Self::commits`], but retains bounded `--graph` linkage when available, and the
@@ -635,11 +663,15 @@ impl<'repo> RevWalk<'repo> {
         &self,
         tokens: &[&str],
         options: &RevWalkListOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
     ) -> Result<crate::rev_list::RevListResult> {
         let repo = self.repository();
         let sides = options.left_right || options.cherry_mark;
         if !sides {
-            if let Some(result) = try_single_positive_bounded_page(repo, tokens, options)? {
+            if let Some(result) =
+                try_single_positive_bounded_page(repo, tokens, options, progress, cancel)?
+            {
                 return Ok(result);
             }
         }
@@ -651,7 +683,15 @@ impl<'repo> RevWalk<'repo> {
             single_symmetric_range(tokens, &parsed)?;
         }
         let (opts, context) = rev_list_options_from_walk(repo, options, &parsed, all_refs, false)?;
-        rev_list_with_context(repo, &positive, &parsed.negative, &opts, context)
+        rev_list_with_context(
+            repo,
+            &positive,
+            &parsed.negative,
+            &opts,
+            context,
+            progress,
+            cancel,
+        )
     }
 
     /// Count reachable commits without collecting them, using the commit-graph when loaded.
@@ -663,7 +703,13 @@ impl<'repo> RevWalk<'repo> {
     /// # Errors
     ///
     /// Propagates rev-parse and rev-list errors.
-    pub fn count(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<usize> {
+    pub fn count(
+        &self,
+        tokens: &[&str],
+        options: &RevWalkListOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<usize> {
         let repo = self.repository();
         if ref_walk_is_empty_ref_selection(repo, tokens, options)? {
             return Ok(0);
@@ -726,7 +772,15 @@ impl<'repo> RevWalk<'repo> {
             );
         }
         let (opts, context) = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
-        let result = rev_list_with_context(repo, &positive, &parsed.negative, &opts, context)?;
+        let result = rev_list_with_context(
+            repo,
+            &positive,
+            &parsed.negative,
+            &opts,
+            context,
+            progress,
+            cancel,
+        )?;
         commit_count_from_result(result)
     }
 
@@ -762,6 +816,8 @@ impl<'repo> RevWalk<'repo> {
         &self,
         tokens: &[&str],
         options: &RevWalkListOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
     ) -> Result<LeftRightCounts> {
         let repo = self.repository();
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
@@ -804,14 +860,29 @@ impl<'repo> RevWalk<'repo> {
         let left_count = {
             let mut left_opts = opts.clone();
             left_opts.left_only = true;
-            rev_list_with_context(repo, &positive, &parsed.negative, &left_opts, ctx)?
-                .commit_count()
+            rev_list_with_context(
+                repo,
+                &positive,
+                &parsed.negative,
+                &left_opts,
+                ctx,
+                progress,
+                cancel,
+            )?
+            .commit_count()
         };
         let mut right_opts = opts;
         right_opts.right_only = true;
-        let right_count =
-            rev_list_with_context(repo, &positive, &parsed.negative, &right_opts, ctx)?
-                .commit_count();
+        let right_count = rev_list_with_context(
+            repo,
+            &positive,
+            &parsed.negative,
+            &right_opts,
+            ctx,
+            progress,
+            cancel,
+        )?
+        .commit_count();
         Ok(LeftRightCounts {
             left: left_count,
             right: right_count,
@@ -838,6 +909,7 @@ impl<'repo> RevWalk<'repo> {
 mod tests {
     use super::*;
     use crate::error::RefError;
+    use crate::progress::{CancelToken, NullProgress};
 
     #[test]
     fn split_double_dot_token_without_repo() {
@@ -862,7 +934,10 @@ mod tests {
     fn count_with_empty_tokens_and_no_ref_selection_still_errors() {
         let (_dir, repo) = repo_with_commits(1);
         let walk = RevWalkListOptions::default();
-        let err = repo.revwalk().count(&[], &walk).expect_err("no revisions");
+        let err = repo
+            .revwalk()
+            .count(&[], &walk, &mut NullProgress, &CancelToken::never())
+            .expect_err("no revisions");
         assert!(
             matches!(err, Error::Ref(RefError::Invalid { detail: ref m }) if m == "no revisions specified"),
             "{err:?}"
@@ -898,12 +973,12 @@ mod tests {
         let tokens = ["HEAD"];
         let listed = repo
             .revwalk()
-            .rev_list_result(&tokens, &walk)
+            .rev_list_result(&tokens, &walk, &mut NullProgress, &CancelToken::never())
             .expect("list")
             .commits;
         let streamed: Vec<_> = repo
             .revwalk()
-            .commits_stream(&tokens, &walk)
+            .commits_stream(&tokens, &walk, &mut NullProgress, &CancelToken::never())
             .expect("stream")
             .expect("some")
             .map(|item| item.expect("walk").oid)
@@ -936,7 +1011,7 @@ mod tests {
                 ..RevWalkListOptions::default()
             };
             repo.revwalk()
-                .commits_stream(&["HEAD"], &walk)
+                .commits_stream(&["HEAD"], &walk, &mut NullProgress, &CancelToken::never())
                 .expect("stream")
                 .expect("some")
                 .map(|item| {
@@ -973,7 +1048,7 @@ mod tests {
         };
         let mut stream = repo
             .revwalk()
-            .commits_stream(&["HEAD"], &walk)
+            .commits_stream(&["HEAD"], &walk, &mut NullProgress, &CancelToken::never())
             .expect("stream")
             .expect("some");
         let collected: Vec<_> = stream.by_ref().take(2).map(|r| r.unwrap().oid).collect();
@@ -981,7 +1056,12 @@ mod tests {
         drop(stream);
         let all = repo
             .revwalk()
-            .rev_list_result(&["HEAD"], &RevWalkListOptions::default())
+            .rev_list_result(
+                &["HEAD"],
+                &RevWalkListOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("list")
             .commits;
         assert_eq!(all.len(), 5);

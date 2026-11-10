@@ -7,6 +7,8 @@
 //! replacement refs must change the count exactly as they change Git's, and a corrupt commit
 //! entry must fail the count as it fails Git's.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
@@ -127,6 +129,8 @@ fn assert_counts_match_git(wt: &Path, specs: &[&str]) {
                 count: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .unwrap_or_else(|e| panic!("rev_list({specs:?}) count: {e}"))
         .commit_count();
@@ -292,7 +296,12 @@ fn count_fails_like_git_on_a_bad_zlib_checksum_after_the_headers() {
     let repo = open(&wt);
     assert!(
         repo.revwalk()
-            .count(&["HEAD"], &RevWalkListOptions::default())
+            .count(
+                &["HEAD"],
+                &RevWalkListOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never()
+            )
             .is_err(),
         "RevWalk::count must reject the corrupt commit"
     );
@@ -304,7 +313,9 @@ fn count_fails_like_git_on_a_bad_zlib_checksum_after_the_headers() {
                 &RevListOptions {
                     count: true,
                     ..RevListOptions::default()
-                }
+                },
+                &mut NullProgress,
+                &CancelToken::never()
             )
             .is_err(),
         "rev_list count must reject the corrupt commit"

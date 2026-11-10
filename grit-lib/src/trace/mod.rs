@@ -87,7 +87,12 @@ mod tests {
             .unwrap();
             let _ = opened
                 .revwalk()
-                .walk("HEAD", &RevListOptions::default())
+                .walk(
+                    "HEAD",
+                    &RevListOptions::default(),
+                    &mut NullProgress,
+                    CancelToken::never_ref(),
+                )
                 .unwrap();
         });
 

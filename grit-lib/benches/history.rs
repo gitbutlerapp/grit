@@ -2,6 +2,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 mod s1;
 mod s7;
 
@@ -32,7 +34,13 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
             let result = fx
                 .repo
                 .revwalk()
-                .rev_list(&[String::from("HEAD")], &[], &opts)
+                .rev_list(
+                    &[String::from("HEAD")],
+                    &[],
+                    &opts,
+                    &mut NullProgress,
+                    &CancelToken::never(),
+                )
                 .expect("rev-list");
             black_box(result.commits.len())
         });
@@ -49,7 +57,13 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
             let result = fx
                 .repo
                 .revwalk()
-                .rev_list(&[String::from("HEAD")], &[], &opts)
+                .rev_list(
+                    &[String::from("HEAD")],
+                    &[],
+                    &opts,
+                    &mut NullProgress,
+                    &CancelToken::never(),
+                )
                 .expect("rev-list");
             black_box(result.commit_count())
         });
@@ -66,7 +80,13 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
             let result = fx
                 .repo
                 .revwalk()
-                .rev_list(&[String::from("HEAD")], &[], &opts)
+                .rev_list(
+                    &[String::from("HEAD")],
+                    &[],
+                    &opts,
+                    &mut NullProgress,
+                    &CancelToken::never(),
+                )
                 .expect("rev-list");
             black_box(result.commits.len())
         });
@@ -102,7 +122,13 @@ fn revwalk_group(c: &mut Criterion, ordering: OrderingMode, label: &str) {
                         let result = fx
                             .repo
                             .revwalk()
-                            .rev_list(&[String::from("HEAD")], &[], &opts)
+                            .rev_list(
+                                &[String::from("HEAD")],
+                                &[],
+                                &opts,
+                                &mut NullProgress,
+                                &CancelToken::never(),
+                            )
                             .expect("rev-list");
                         black_box(result.commits.len())
                     });
@@ -192,7 +218,13 @@ fn bench_revwalk_filter(c: &mut Criterion) {
             let result = fx
                 .repo
                 .revwalk()
-                .rev_list(&[String::from("HEAD")], &[], &opts)
+                .rev_list(
+                    &[String::from("HEAD")],
+                    &[],
+                    &opts,
+                    &mut NullProgress,
+                    &CancelToken::never(),
+                )
                 .expect("rev-list");
             black_box(result.commits.len())
         });
@@ -217,7 +249,13 @@ fn bench_revwalk_filter(c: &mut Criterion) {
                     let mut result = fixture
                         .repo
                         .revwalk()
-                        .rev_list(&[String::from("HEAD")], &[], &opts)
+                        .rev_list(
+                            &[String::from("HEAD")],
+                            &[],
+                            &opts,
+                            &mut NullProgress,
+                            &CancelToken::never(),
+                        )
                         .expect("rev-list");
                     black_box(
                         fixture
@@ -279,7 +317,13 @@ fn bench_revwalk_limit_near_full_history(c: &mut Criterion) {
                     let result = fx
                         .repo
                         .revwalk()
-                        .rev_list(&[String::from("HEAD")], &[], &opts)
+                        .rev_list(
+                            &[String::from("HEAD")],
+                            &[],
+                            &opts,
+                            &mut NullProgress,
+                            &CancelToken::never(),
+                        )
                         .expect("rev-list");
                     black_box(result.commits.len())
                 });
@@ -314,7 +358,13 @@ fn bench_revwalk_log_limit(c: &mut Criterion) {
                 let result = fx
                     .repo
                     .revwalk()
-                    .rev_list(&[String::from("HEAD")], &[], &opts)
+                    .rev_list(
+                        &[String::from("HEAD")],
+                        &[],
+                        &opts,
+                        &mut NullProgress,
+                        &CancelToken::never(),
+                    )
                     .expect("rev-list");
                 black_box((result.commits.len(), result.commit_data.len()))
             });
@@ -334,7 +384,13 @@ fn bench_describe_many_tags(c: &mut Criterion) {
         let commits = fx
             .repo
             .revwalk()
-            .rev_list(&[String::from("HEAD")], &[], &opts)
+            .rev_list(
+                &[String::from("HEAD")],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("rev-list")
             .commits;
         for (i, oid) in commits.iter().enumerate().step_by(50) {
@@ -365,6 +421,8 @@ fn bench_describe_many_tags(c: &mut Criterion) {
                                     tags: true,
                                     ..Default::default()
                                 },
+                                &mut NullProgress,
+                                &CancelToken::never(),
                             )
                             .expect("describe"),
                     )
@@ -398,7 +456,13 @@ fn bench_log_first_1000_gitgit_like(c: &mut Criterion) {
                     let result = fx
                         .repo
                         .revwalk()
-                        .rev_list(&[String::from("HEAD")], &[], &opts)
+                        .rev_list(
+                            &[String::from("HEAD")],
+                            &[],
+                            &opts,
+                            &mut NullProgress,
+                            &CancelToken::never(),
+                        )
                         .expect("rev-list");
                     black_box(result.commits.len())
                 });

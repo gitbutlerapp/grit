@@ -1,6 +1,8 @@
 //! Upstream-style `--stdin` ref pseudo-options (`--branches`, `--tags`, `--remotes`, `--glob`).
 //! Behavioral parity vs `git rev-list --stdin` (t6017 / t6018 extensions).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use grit_lib::revwalk::rev_list::RevListOptions;
@@ -69,7 +71,13 @@ fn grit_stdin_rev_list(
     }
     grit_repo
         .revwalk()
-        .rev_list(&pos, &neg, &walk_opts)
+        .rev_list(
+            &pos,
+            &neg,
+            &walk_opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list")
         .commits
 }

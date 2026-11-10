@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::TreeDiffOptions;
 use grit_lib::objects::ObjectKind;
@@ -74,7 +76,15 @@ fn repository_init_variants_and_handle_exercise() -> grit_lib::error::Result<()>
     let _ = repo
         .index()
         .load(&grit_lib::index::IndexLoadOptions::default())?;
-    let _ = repo.revwalk().walk("HEAD", &RevListOptions::default()).ok();
+    let _ = repo
+        .revwalk()
+        .walk(
+            "HEAD",
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .ok();
     let _ = repo
         .diff()
         .tree_to_tree(None, None, &TreeDiffOptions::default())

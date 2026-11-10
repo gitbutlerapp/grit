@@ -18,6 +18,7 @@ use grit_lib::objects::commit_graph::CommitGraphChain;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{Repository, RepositoryError};
 use grit_lib::revwalk::RevWalkListOptions;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
@@ -232,7 +233,12 @@ fn graph_file_under_objects_does_not_invent_commits_for_a_custom_store() {
     assert_eq!(
         files
             .revwalk()
-            .count(&["main"], &RevWalkListOptions::default())
+            .count(
+                &["main"],
+                &RevWalkListOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never()
+            )
             .expect("files"),
         git_count(dir.path(), "main")
     );
@@ -247,9 +253,12 @@ fn graph_file_under_objects_does_not_invent_commits_for_a_custom_store() {
     }));
     let custom = open_custom(dir.path(), Arc::clone(&store), None).expect("open");
 
-    let counted = custom
-        .revwalk()
-        .count(&["main"], &RevWalkListOptions::default());
+    let counted = custom.revwalk().count(
+        &["main"],
+        &RevWalkListOptions::default(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    );
     assert!(
         matches!(counted, Err(Error::Object(ObjectError::NotFound { .. }))),
         "the walk must reach the store's missing parent, not take it from the graph file: {counted:?}"
@@ -292,11 +301,17 @@ fn attached_graph_answers_walks_like_the_files_backend_without_commit_reads() {
     for (range, endpoint_reads) in [("main", 0), ("main~40..main", 1), ("side..main", 0)] {
         let expected = git_count(dir.path(), range);
         assert_eq!(
-            files.revwalk().count(&[range], &all).expect("files"),
+            files
+                .revwalk()
+                .count(&[range], &all, &mut NullProgress, &CancelToken::never())
+                .expect("files"),
             expected
         );
         assert_eq!(
-            custom.revwalk().count(&[range], &all).expect("custom"),
+            custom
+                .revwalk()
+                .count(&[range], &all, &mut NullProgress, &CancelToken::never())
+                .expect("custom"),
             expected
         );
         assert_eq!(
@@ -370,7 +385,12 @@ fn commits_newer_than_the_attached_graph_are_still_walked() {
     assert_eq!(
         custom
             .revwalk()
-            .count(&["main"], &RevWalkListOptions::default())
+            .count(
+                &["main"],
+                &RevWalkListOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never()
+            )
             .expect("count"),
         expected
     );
@@ -410,7 +430,12 @@ fn built_graph_is_byte_identical_to_the_files_writer_and_verified_by_git() {
             assert_eq!(
                 reopened
                     .revwalk()
-                    .count(&[range], &RevWalkListOptions::default())
+                    .count(
+                        &[range],
+                        &RevWalkListOptions::default(),
+                        &mut NullProgress,
+                        &CancelToken::never()
+                    )
                     .expect("grit count"),
                 git_count(dir.path(), range),
                 "{range} through the installed graph"
@@ -439,7 +464,12 @@ fn graph_written_by_git_attaches_to_a_custom_store() {
     assert_eq!(
         custom
             .revwalk()
-            .count(&["main"], &RevWalkListOptions::default())
+            .count(
+                &["main"],
+                &RevWalkListOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never()
+            )
             .expect("count"),
         git_count(dir.path(), "main")
     );

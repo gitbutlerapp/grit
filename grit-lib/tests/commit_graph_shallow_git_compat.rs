@@ -1,6 +1,8 @@
 //! Commit-graph writes in repositories whose parent lists are rewritten (shallow clones,
 //! `info/grafts`, replace refs): grit must not leave a graph that system `git` rejects.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;

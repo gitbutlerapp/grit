@@ -31,6 +31,7 @@ use crate::index::Index;
 use crate::objects::odb::Odb;
 use crate::objects::{FileMode, ObjectId};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
+use crate::progress::{CancelToken, NullProgress};
 use crate::repo::Repository;
 use crate::repo::RepositoryError;
 use crate::state::resolve_head_for_repository;

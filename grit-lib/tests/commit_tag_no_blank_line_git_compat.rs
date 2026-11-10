@@ -107,7 +107,12 @@ fn headers_only_commit_and_tag_match_git() {
 
     let oids = repo
         .revwalk()
-        .commits(&["main"], &RevWalkListOptions::default())
+        .commits(
+            &["main"],
+            &RevWalkListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev walk");
     assert_eq!(oids.len(), 2);
     assert!(oids.contains(&commit_oid));

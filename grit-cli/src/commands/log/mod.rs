@@ -4,6 +4,8 @@
 //! shows one page of commits, newest first, and when there's more, a `--cursor` token for
 //! the next page. On a terminal it shows the whole history through the pager.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use anyhow::{bail, Context, Result};
 use grit_lib::diff::{CommitFilesManyOptions, DiffOptions};
 use grit_lib::gitbutler::GitButlerWorkspace;
@@ -289,6 +291,8 @@ pub fn run(
     output_mode: LogEmitKind,
     page: LogPage,
 ) -> Result<LogOutcome> {
+    let _interrupt = crate::interrupt::InterruptCancel::install();
+    let cancel = crate::interrupt::process_cancel_token();
     if display.group_by.is_some() {
         if format.any_format_flag() {
             bail!("`grit log` cannot combine diff format flags with `--group-by`");
@@ -384,7 +388,15 @@ pub fn run(
     walk_opts.graph = display.graph;
 
     if display.group_by == Some(LogGroupBy::Author) {
-        return run_log_group_by_author(&repo, &token_refs, &walk_opts, &rev, display, output_mode);
+        return run_log_group_by_author(
+            &repo,
+            &token_refs,
+            &walk_opts,
+            &rev,
+            display,
+            output_mode,
+            &cancel,
+        );
     }
 
     let needs_rev_walk = display.graph
@@ -421,7 +433,7 @@ pub fn run(
             CommitExtent::Whole
         };
         let mut list_result = walk
-            .rev_list_result(&token_refs, &fetch_opts)
+            .rev_list_result(&token_refs, &fetch_opts, &mut NullProgress, &cancel)
             .context("could not list commits")?;
         let parsed = std::mem::take(&mut list_result.commit_data);
         let graph_linkage = list_result.log_graph_linkage.take();
@@ -599,6 +611,7 @@ fn run_log_group_by_author(
     rev: &RevSelectArgs,
     display: LogDisplayOptions,
     output_mode: LogEmitKind,
+    cancel: &CancelToken,
 ) -> Result<LogOutcome> {
     let use_mailmap = rev_select::log_mailmap_enabled(repo, rev.no_mailmap);
     let max_count = rev.max_count();
@@ -615,7 +628,7 @@ fn run_log_group_by_author(
             fetch_opts.limit = fetch_limit_plus_one(Some(limit));
             let oids = repo
                 .revwalk()
-                .commits(token_refs, &fetch_opts)
+                .commits(token_refs, &fetch_opts, &mut NullProgress, &cancel)
                 .context("could not list commits")?;
             let (oids, truncated) = truncate_oid_list(oids, Some(limit), reverse);
             let grouped = repo
@@ -658,7 +671,7 @@ fn run_log_group_by_author(
     fetch_opts.limit = fetch_limit_plus_one(max_count);
     let oids = repo
         .revwalk()
-        .commits(token_refs, &fetch_opts)
+        .commits(token_refs, &fetch_opts, &mut NullProgress, &cancel)
         .context("could not list commits")?;
     let (oids, truncated) = truncate_oid_list(oids, max_count, reverse);
     let grouped = repo

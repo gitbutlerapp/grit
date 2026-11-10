@@ -2,6 +2,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::hint::black_box;
 use std::io::Cursor;
 

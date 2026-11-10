@@ -1,5 +1,7 @@
 //! `grit repack` — pack loose objects and remove redundant packs.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use anyhow::Result;
 use grit_lib::maintenance::{RepackOptions, RepackStats};
 

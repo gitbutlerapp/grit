@@ -1,5 +1,7 @@
 //! `rev-list` commit filters vs system `git rev-list` (author, committer, grep, mailmap).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::path::Path;
@@ -260,7 +262,13 @@ fn assert_rev_list_filter_matches_git(worktree: &Path, repo: &Repository, args: 
         opts.use_commit_graph = use_graph;
         let result = repo
             .revwalk()
-            .rev_list(&positive, &negative, &opts)
+            .rev_list(
+                &positive,
+                &negative,
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect("rev_list");
         if parsed.count {
             let git_n = git_rev_list_count(worktree, args);
@@ -579,6 +587,8 @@ fn mailmap_author_matches_git() {
                     use_commit_graph: use_graph,
                     ..RevListOptions::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )
             .expect("rev_list")
             .commits;
@@ -588,7 +598,7 @@ fn mailmap_author_matches_git() {
             .count(
                 &["main"],
                 &grit_lib::revwalk::RevWalkListOptions {
-                    commit_filter: Some(filter.clone()),
+                    commit_filter: Some(filter.clone(), &mut NullProgress, &CancelToken::never()),
                     ..Default::default()
                 },
             )
@@ -749,6 +759,8 @@ fn bounded_filters_retain_only_selected_rows_across_git_storage_formats() {
                                     use_commit_graph: storage == "commit-graph",
                                     ..Default::default()
                                 },
+                                &mut NullProgress,
+                                &CancelToken::never(),
                             )
                             .expect("bounded walk");
                         assert_eq!(
@@ -834,7 +846,7 @@ fn filtered_counts_across_shared_ancestry_and_exclusions_match_git() {
             .count(
                 &["main", "side"],
                 &grit_lib::revwalk::RevWalkListOptions {
-                    commit_filter: Some(filter),
+                    commit_filter: Some(filter, &mut NullProgress, &CancelToken::never()),
                     ..Default::default()
                 },
             )
@@ -1009,7 +1021,13 @@ fn bounded_filter_since_until_matches_git() {
     };
     let result = repo
         .revwalk()
-        .rev_list(&positive, &negative, &opts)
+        .rev_list(
+            &positive,
+            &negative,
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev_list without max_count");
     assert_eq!(result.commits, git_oids);
 }
@@ -1115,7 +1133,13 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
     };
     let result = repo
         .revwalk()
-        .rev_list(&positive, &negative, &opts)
+        .rev_list(
+            &positive,
+            &negative,
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev_list");
     assert_eq!(result.commits, git_oids);
 
@@ -1150,7 +1174,13 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
     );
     let grit_n = repo
         .revwalk()
-        .rev_list(&positive, &negative, &opts)
+        .rev_list(
+            &positive,
+            &negative,
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("count rev_list")
         .commit_count();
     assert_eq!(grit_n, git_n);
@@ -1168,7 +1198,13 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
     };
     assert!(
         repo.revwalk()
-            .rev_list(&["main".to_owned()], &[], &opts)
+            .rev_list(
+                &["main".to_owned()],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never()
+            )
             .is_err(),
         "unbounded walk must read the missing grandparent"
     );
@@ -1186,7 +1222,13 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
     };
     let result = repo
         .revwalk()
-        .rev_list(&positive, &negative, &opts)
+        .rev_list(
+            &positive,
+            &negative,
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("since-bounded without -n");
     assert_eq!(result.commits, git_oids);
     let count_filter = CommitFilterBuilder::new()
@@ -1202,7 +1244,13 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
     };
     assert!(
         repo.revwalk()
-            .rev_list(&["main".to_owned()], &[], &opts)
+            .rev_list(
+                &["main".to_owned()],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never()
+            )
             .is_err(),
         "count without --since must read the missing grandparent"
     );
@@ -1441,7 +1489,13 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
     };
     let result = repo
         .revwalk()
-        .rev_list(&positive, &negative, &opts)
+        .rev_list(
+            &positive,
+            &negative,
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("since path filter walk");
     let git_oids = git_rev_list(
         wt,
@@ -1481,7 +1535,13 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
     };
     assert!(
         repo.revwalk()
-            .rev_list(&["main".to_owned()], &[], &opts)
+            .rev_list(
+                &["main".to_owned()],
+                &[],
+                &opts,
+                &mut NullProgress,
+                &CancelToken::never()
+            )
             .is_err(),
         "unbounded path filter walk must read the missing grandparent"
     );
@@ -1547,6 +1607,8 @@ fn left_right_count_with_author_filter_matches_git() {
                 commit_filter: Some(filter),
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("counts");
     assert_eq!(grit.left, git_left);

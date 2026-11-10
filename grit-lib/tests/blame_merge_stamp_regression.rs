@@ -1,5 +1,7 @@
 //! Merge blame with repeated lines must match `git blame` (issue #2574).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::process::Command;
 
@@ -88,7 +90,12 @@ fn assert_blame_matches_git(dir: &Path, file: &str) {
     let repo = Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open");
     let grit = repo
         .diff()
-        .blame(file, &BlameOptions::default())
+        .blame(
+            file,
+            &BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("blame");
     assert_eq!(git_lines.len(), grit.lines.len(), "line count");
     for ((fl, git_oid), line) in git_lines.iter().zip(grit.lines.iter()) {

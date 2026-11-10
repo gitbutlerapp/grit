@@ -1,5 +1,7 @@
 //! Switch must fail when a checkout deletion cannot remove a file (issue #1968).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 #[cfg(unix)]
 mod unix {
     use std::os::unix::fs::PermissionsExt;

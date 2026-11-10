@@ -1,5 +1,7 @@
 //! Issue #1093: theirs-side rename + ours-side edit must merge at the rename target with edited content.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;

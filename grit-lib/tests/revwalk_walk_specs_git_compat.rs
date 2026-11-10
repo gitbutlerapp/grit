@@ -6,6 +6,8 @@
 //! Symmetric ranges list commits in Git's exact order and only read history down to the
 //! merge-base frontier (issue #2109).
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::error::RevisionError;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -58,7 +60,12 @@ fn git_rev_list(wt: &Path, spec: &str) -> Vec<String> {
 
 fn walk_hex(repo: &Repository, spec: &str) -> Vec<String> {
     repo.revwalk()
-        .walk(spec, &RevListOptions::default())
+        .walk(
+            spec,
+            &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap_or_else(|e| panic!("walk({spec}): {e}"))
         .commits
         .iter()
@@ -68,7 +75,12 @@ fn walk_hex(repo: &Repository, spec: &str) -> Vec<String> {
 
 fn commits_hex(repo: &Repository, spec: &str) -> Vec<String> {
     repo.revwalk()
-        .commits(&[spec], &RevWalkListOptions::default())
+        .commits(
+            &[spec],
+            &RevWalkListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap_or_else(|e| panic!("commits([{spec}]): {e}"))
         .iter()
         .map(|oid| oid.to_hex())
@@ -138,6 +150,8 @@ fn walk_symmetric_range_honours_max_count_and_left_right() {
                 max_count: Some(2),
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("walk -n 2");
     let expected: Vec<String> = git(&wt, &["rev-list", "-n", "2", "main...topic"])
@@ -155,6 +169,8 @@ fn walk_symmetric_range_honours_max_count_and_left_right() {
                 left_right: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("walk --left-right");
     let git_marks: BTreeSet<String> = git(&wt, &["rev-list", "--left-right", "main...topic"])
@@ -190,7 +206,12 @@ fn walk_rejects_specs_that_need_the_token_api() {
     ] {
         let err = repo
             .revwalk()
-            .walk(spec, &RevListOptions::default())
+            .walk(
+                spec,
+                &RevListOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .expect_err(spec);
         match err {
             Error::Revision(RevisionError::List(RevListError::UnsupportedWalkSpec {
@@ -266,6 +287,8 @@ fn walk_keeps_literal_ellipses_in_selectors_and_paths() {
             &[":/fix...up".to_owned(), "main^{/fix...up}".to_owned()],
             &[],
             &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("selectors with literal dots are single revisions");
     assert_eq!(
@@ -288,6 +311,8 @@ fn rev_list_rejects_unexpanded_symmetric_range() {
             &["main...topic".to_owned()],
             &[],
             &RevListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect_err("raw A...B must not resolve to its merge base");
     assert!(
@@ -423,7 +448,12 @@ fn assert_symmetric_ranges_match_git(wt: &Path) {
             .expect("git count");
         assert_eq!(
             repo.revwalk()
-                .count(&[spec], &RevWalkListOptions::default())
+                .count(
+                    &[spec],
+                    &RevWalkListOptions::default(),
+                    &mut NullProgress,
+                    &CancelToken::never()
+                )
                 .expect("count"),
             count,
             "count([{spec}]) vs git"
@@ -439,6 +469,8 @@ fn assert_symmetric_ranges_match_git(wt: &Path) {
                         limit: Some(limit),
                         ..RevWalkListOptions::default()
                     },
+                    &mut NullProgress,
+                    &CancelToken::never(),
                 )
                 .expect("commits -n")
                 .iter()
@@ -506,7 +538,12 @@ fn symmetric_range_walk_stops_at_merge_base_frontier() {
         }
         assert_eq!(
             repo.revwalk()
-                .count(&[spec], &RevWalkListOptions::default())
+                .count(
+                    &[spec],
+                    &RevWalkListOptions::default(),
+                    &mut NullProgress,
+                    &CancelToken::never()
+                )
                 .unwrap_or_else(|e| panic!("count([{spec}]): {e}")),
             expected.len(),
             "count([{spec}])"
@@ -520,6 +557,8 @@ fn symmetric_range_walk_stops_at_merge_base_frontier() {
                 limit: Some(2),
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("commits -n 2")
         .iter()
@@ -570,7 +609,12 @@ fn double_dot_range_under_committer_date_skew_matches_git_without_commit_graph()
     let tokens = [positive.as_str(), hide_token.as_str()];
     let listed = repo
         .revwalk()
-        .commits(&tokens, &RevWalkListOptions::default())
+        .commits(
+            &tokens,
+            &RevWalkListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("commits");
     assert_eq!(listed.len(), expected_count);
     assert_eq!(
@@ -579,7 +623,12 @@ fn double_dot_range_under_committer_date_skew_matches_git_without_commit_graph()
     );
     assert_eq!(
         repo.revwalk()
-            .count(&tokens, &RevWalkListOptions::default())
+            .count(
+                &tokens,
+                &RevWalkListOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never()
+            )
             .expect("count"),
         expected_count
     );

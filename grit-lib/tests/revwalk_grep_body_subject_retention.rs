@@ -1,5 +1,7 @@
 //! Regression: `--grep` on body-only text when walks retain through-subject commit bytes.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::path::Path;
@@ -26,7 +28,9 @@ fn grit_rev_list_oids(
     tokens: &[&str],
     opts: &RevWalkListOptions,
 ) -> Vec<ObjectId> {
-    repo.rev_walk().commits(tokens, opts).expect("grit commits")
+    repo.rev_walk()
+        .commits(tokens, opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit commits")
 }
 
 #[test]

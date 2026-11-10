@@ -1,5 +1,7 @@
 //! Object-walk roots: tagged commits, treeish paths, filters, and missing objects vs `git`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::collections::HashSet;
@@ -72,6 +74,8 @@ fn object_walk_filters_and_missing_print_match_git() {
                 missing_action: MissingAction::Print,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("missing=print");
     assert!(
@@ -116,6 +120,8 @@ fn object_walk_combine_filter_provided_objects_match_git() {
                 filter_provided_objects: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("combine walk");
     let mut grit_set = HashSet::new();
@@ -142,6 +148,8 @@ fn object_walk_annotated_tag_on_blob_peels_like_git() {
                 objects: true,
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("tagged blob walk");
     let mut grit_set = HashSet::new();
@@ -174,6 +182,8 @@ fn object_walk_sparse_pathspec_limits_objects_match_git() {
                 paths: vec!["dir/".to_owned()],
                 ..RevListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("sparse objects");
     let mut grit_paths = HashSet::new();
@@ -266,6 +276,8 @@ fn nested_annotated_tag_tips_peel_like_git() {
                 &owned(positive),
                 &owned(negative),
                 &RevListOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
             )
             .expect("commit walk")
             .commits

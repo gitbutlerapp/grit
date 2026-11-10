@@ -1,5 +1,7 @@
 //! Public API regression: [`grit_lib::revwalk::rev_list::RevListResult::object_segments`].
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectKind;
@@ -74,7 +76,13 @@ fn rev_list_object_segments_one_per_commit_plus_roots_trailer() {
     };
     let result = repo
         .revwalk()
-        .rev_list(&[child.to_hex()], &[], &opts)
+        .rev_list(
+            &[child.to_hex()],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("rev-list");
 
     assert_eq!(result.commits.len(), 2);

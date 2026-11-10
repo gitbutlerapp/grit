@@ -2,6 +2,8 @@
 #![cfg(feature = "full-tests")]
 #![allow(clippy::unwrap_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::path::Path;
 use std::process::Command;
 
@@ -68,7 +70,12 @@ fn blame_file_revision_reports_encoding_lossy_and_bytes() {
     let (_tmp, repo) = init_latin1_repo();
     let result = repo
         .diff()
-        .blame("l1.txt", &BlameOptions::default())
+        .blame(
+            "l1.txt",
+            &BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap();
     assert_latin1_lines(&result);
 }
@@ -79,7 +86,10 @@ fn blame_file_worktree_reports_encoding_lossy_and_bytes() {
     std::fs::write(tmp.path().join("l1.txt"), LATIN1_FILE).unwrap();
     let mut options = BlameOptions::default();
     options.final_source = BlameFinalSource::Worktree;
-    let result = repo.diff().blame("l1.txt", &options).unwrap();
+    let result = repo
+        .diff()
+        .blame("l1.txt", &options, &mut NullProgress, &CancelToken::never())
+        .unwrap();
     assert_latin1_lines(&result);
 }
 
@@ -88,7 +98,10 @@ fn blame_file_contents_reports_encoding_lossy_and_bytes() {
     let (_tmp, repo) = init_latin1_repo();
     let mut options = BlameOptions::default();
     options.final_source = BlameFinalSource::Contents(LATIN1_FILE.to_vec());
-    let result = repo.diff().blame("l1.txt", &options).unwrap();
+    let result = repo
+        .diff()
+        .blame("l1.txt", &options, &mut NullProgress, &CancelToken::never())
+        .unwrap();
     assert_latin1_lines(&result);
 }
 
@@ -111,7 +124,12 @@ fn mixed_encoding_flags_only_invalid_lines() {
     let (_tmp, repo) = init_mixed_repo();
     let result = repo
         .diff()
-        .blame("mixed.txt", &BlameOptions::default())
+        .blame(
+            "mixed.txt",
+            &BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap();
     assert_eq!(result.lines.len(), 2);
     assert_eq!(result.lines[0].content, "plain ascii");
@@ -136,7 +154,12 @@ fn utf8_blame_stays_lossless() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
     let result = repo
         .diff()
-        .blame("utf8.txt", &BlameOptions::default())
+        .blame(
+            "utf8.txt",
+            &BlameOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .unwrap();
     assert_eq!(result.lines.len(), 2);
     for line in &result.lines {
@@ -169,7 +192,10 @@ fn non_utf8_line_diff_blames_child_commit_like_git() {
     let child_oid = ObjectId::from_hex(child_head.trim()).unwrap();
     let mut options = BlameOptions::default();
     options.start = Some(child_oid);
-    let result = repo.diff().blame("l1.txt", &options).unwrap();
+    let result = repo
+        .diff()
+        .blame("l1.txt", &options, &mut NullProgress, &CancelToken::never())
+        .unwrap();
     assert_eq!(result.lines[0].commit, child_oid);
     assert_eq!(result.lines[1].commit, parent_oid);
 }

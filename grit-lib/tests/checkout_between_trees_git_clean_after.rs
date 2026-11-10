@@ -1,5 +1,7 @@
 //! After `checkout_between_trees`, system `git` sees a clean index and worktree.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;

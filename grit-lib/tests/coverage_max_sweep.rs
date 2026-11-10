@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use grit_lib::apply::parse_patch;
 use grit_lib::blame::BlameOptions;
 use grit_lib::config::ConfigSet;
@@ -110,9 +112,13 @@ fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
             max_count: Some(64),
             ..RevListOptions::default()
         };
-        let _ = repo
-            .revwalk()
-            .rev_list(&[String::from("main")], &[], &opts)?;
+        let _ = repo.revwalk().rev_list(
+            &[String::from("main")],
+            &[],
+            &opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )?;
     }
     let _ = repo
         .revwalk()
@@ -124,6 +130,8 @@ fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
             line_range: None,
             ..Default::default()
         },
+        &mut NullProgress,
+        &CancelToken::never(),
     )?;
     assert!(!blame.lines.is_empty());
     Ok(())
@@ -161,7 +169,13 @@ fn diff_index_worktree_and_patch_parse_sweep() -> grit_lib::error::Result<()> {
     let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
     let _ = diff.tree_to_tree(Some(&t1), Some(&t2), &TreeDiffOptions::default())?;
     let _ = diff.tree_to_tree(Some(&t1), Some(&t2), &renames)?;
-    let _ = diff.commits(&base, &tip, &renames)?;
+    let _ = diff.commits(
+        &base,
+        &tip,
+        &renames,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )?;
     let copies = renames
         .clone()
         .with_copies(CopyDetection::FindHarder(50))

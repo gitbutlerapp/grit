@@ -1,5 +1,7 @@
 //! Rev-walk query API vs system `git rev-list` / `git merge-base`.
 
+use grit_lib::progress::{CancelToken, NullProgress};
+
 use crate::support;
 
 use std::collections::HashMap;
@@ -46,7 +48,9 @@ fn grit_rev_list_oids(
     tokens: &[&str],
     opts: &RevWalkListOptions,
 ) -> Vec<ObjectId> {
-    repo.revwalk().commits(tokens, opts).expect("grit commits")
+    repo.revwalk()
+        .commits(tokens, opts, &mut NullProgress, &CancelToken::never())
+        .expect("grit commits")
 }
 
 fn grit_rev_list_count(repo: &Repository, tokens: &[&str], opts: &RevWalkListOptions) -> usize {
@@ -686,6 +690,8 @@ fn left_right_counts_no_merges_match_git() {
                 merges: MergeFilter::NoMerges,
                 ..RevWalkListOptions::default()
             },
+            &mut NullProgress,
+            &CancelToken::never(),
         )
         .expect("no-merges counts");
     assert_eq!(grit_counts, git_counts);
@@ -882,7 +888,12 @@ fn merge_heavy_range_counts_match_git_with_filters() {
             args.push("old...topic");
             assert_eq!(
                 repo.revwalk()
-                    .left_right_counts(&["old...topic"], opts)
+                    .left_right_counts(
+                        &["old...topic"],
+                        opts,
+                        &mut NullProgress,
+                        &CancelToken::never()
+                    )
                     .expect("left/right counts"),
                 git_rev_list_left_right_count(wt, &args),
                 "{args:?}, commit-graph: {with_graph}"
@@ -909,7 +920,12 @@ fn left_right_counts_match_git_rev_list_left_right_count() {
     let token = "main...side";
     let git_counts = git_rev_list_left_right_count(wt, &[token]);
     let grit_counts = walk
-        .left_right_counts(&[token], &RevWalkListOptions::default())
+        .left_right_counts(
+            &[token],
+            &RevWalkListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("left/right counts");
     assert_eq!(grit_counts, git_counts);
 }
@@ -984,7 +1000,12 @@ fn left_right_counts_first_parent_shapes_match_git() {
     ] {
         let git_counts = git_rev_list_left_right_count(wt, &[token]);
         let grit_counts = walk
-            .left_right_counts(&[token], &RevWalkListOptions::default())
+            .left_right_counts(
+                &[token],
+                &RevWalkListOptions::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )
             .unwrap_or_else(|e| panic!("{token}: {e}"));
         assert_eq!(grit_counts, git_counts, "{token}");
 
@@ -996,6 +1017,8 @@ fn left_right_counts_first_parent_shapes_match_git() {
                     first_parent: true,
                     ..RevWalkListOptions::default()
                 },
+                &mut NullProgress,
+                &CancelToken::never(),
             )
             .unwrap_or_else(|e| panic!("{token} --first-parent: {e}"));
         assert_eq!(grit_fp, git_fp, "{token} --first-parent");
@@ -1024,7 +1047,12 @@ fn upstream_range_at_u_matches_git() {
     let git_counts = git_rev_list_left_right_count(wt, &[token]);
     let grit_counts = repo
         .revwalk()
-        .left_right_counts(&[token], &RevWalkListOptions::default())
+        .left_right_counts(
+            &[token],
+            &RevWalkListOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("upstream symmetric counts");
     assert_eq!(grit_counts, git_counts);
 }
@@ -1087,7 +1115,7 @@ fn grit_rev_list_sides(
     };
     let result = repo
         .revwalk()
-        .rev_list_result(&[token], &opts)
+        .rev_list_result(&[token], &opts, &mut NullProgress, &CancelToken::never())
         .unwrap_or_else(|e| panic!("{token}: {e}"));
     result
         .commits
@@ -1153,7 +1181,7 @@ fn exclude_first_parent_only_keeps_second_parent_ancestry_of_exclusions() {
     );
     let listed = repo
         .revwalk()
-        .walk("R..main", &opts)
+        .walk("R..main", &opts, &mut NullProgress, &CancelToken::never())
         .expect("rev_list")
         .commits;
     assert_eq!(listed, vec![oids["M"], oids["d"], oids["c"], oids["b"]]);
