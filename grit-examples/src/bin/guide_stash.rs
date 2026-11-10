@@ -2,8 +2,6 @@
 //!
 //! Source for the library guide "Stash" page (included in the docs site).
 
-use grit_lib::progress::{CancelToken, NullProgress};
-
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
