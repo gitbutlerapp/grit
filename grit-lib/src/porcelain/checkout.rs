@@ -671,6 +671,12 @@ impl ProgressSink for ChunkProgressSink<'_> {
 pub struct CheckoutOutcome {
     /// Stage-0 paths that share a worktree slot when `core.ignorecase` is set.
     pub path_collisions: Vec<String>,
+    /// Distinct stage-0 blob paths after checkout (populated-tree checkouts only).
+    pub files: u64,
+    /// Worktree byte total for clone summaries (populated-tree checkouts only).
+    pub worktree_bytes: u64,
+    /// Stage-0 gitlink paths present after checkout (populated-tree checkouts only).
+    pub gitlink_paths: Vec<String>,
 }
 
 fn populated_blob_to_added_diff(blob: &PopulatedTreeBlob) -> DiffEntry {
@@ -727,7 +733,27 @@ fn checkout_populated_tree(
     } else {
         Vec::new()
     };
-    Ok(CheckoutOutcome { path_collisions })
+    let (files, worktree_bytes) = crate::path_icase::index_stage0_worktree_summary(
+        &loaded_index,
+        repo.work_tree(),
+        collision_opts,
+    );
+    let gitlink_paths = stage0_gitlink_paths(&loaded_index);
+    Ok(CheckoutOutcome {
+        path_collisions,
+        files,
+        worktree_bytes,
+        gitlink_paths,
+    })
+}
+
+fn stage0_gitlink_paths(index: &Index) -> Vec<String> {
+    index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
+        .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+        .collect()
 }
 
 /// Body of [`checkout_populated_tree`]; returns `core.ignorecase`.
@@ -3852,6 +3878,12 @@ fn execute_checkout_write_changes_chunk(
         .collect();
     if write_jobs.len() >= BULK_ADD_CHECKOUT_MIN {
         precreate_checkout_parent_dirs(work_tree, &write_jobs, dir_cache);
+        if changes
+            .iter()
+            .all(|c| c.status == crate::diff::DiffStatus::Added)
+        {
+            dir_cache.set_assume_fresh_paths(true);
+        }
     } else {
         for job in &write_jobs {
             dir_cache.ensure_parents(work_tree, &job.path)?;
@@ -5766,6 +5798,8 @@ pub(crate) struct LeadingDirCache {
     ready: HashSet<PathBuf>,
     protect: ProtectOptions,
     has_symlinks: bool,
+    /// Bulk additions with parents already created: destination paths are absent on disk.
+    assume_fresh_paths: bool,
 }
 
 fn precreate_checkout_parent_dirs(
@@ -5811,7 +5845,18 @@ impl LeadingDirCache {
             ready: HashSet::new(),
             protect,
             has_symlinks,
+            assume_fresh_paths: false,
         }
+    }
+
+    /// Skip pre-write metadata on paths that cannot exist yet (bulk populated-tree checkout).
+    pub(crate) fn set_assume_fresh_paths(&mut self, assume: bool) {
+        self.assume_fresh_paths = assume;
+    }
+
+    #[must_use]
+    pub(crate) fn assume_fresh_paths(&self) -> bool {
+        self.assume_fresh_paths
     }
 
     #[must_use]
@@ -5830,6 +5875,7 @@ impl LeadingDirCache {
             ready: source.ready.clone(),
             protect: source.protect,
             has_symlinks: source.has_symlinks,
+            assume_fresh_paths: source.assume_fresh_paths,
         }
     }
 
@@ -6051,25 +6097,29 @@ fn write_worktree_content(
 
     // Remove existing file/dir/symlink at target path. Use symlink_metadata + is_symlink so we
     // replace symlinked paths (e.g. `D` → `untracked`) before creating a real directory tree.
-    if let Ok(meta) = fs::symlink_metadata(&abs_path) {
-        if meta.file_type().is_symlink() {
-            io_with_path(
-                rel_path,
-                WorktreePathOperation::Remove,
-                fs::remove_file(&abs_path),
-            )?;
-        } else if meta.is_dir() {
-            io_with_path(
-                rel_path,
-                WorktreePathOperation::Remove,
-                fs::remove_dir_all(&abs_path),
-            )?;
-        } else {
-            io_with_path(
-                rel_path,
-                WorktreePathOperation::Remove,
-                fs::remove_file(&abs_path),
-            )?;
+    if !dir_cache.assume_fresh_paths() {
+        #[cfg(test)]
+        syscall_probe::note_metadata(&abs_path, syscall_probe::MetadataKind::ExistingPath);
+        if let Ok(meta) = fs::symlink_metadata(&abs_path) {
+            if meta.file_type().is_symlink() {
+                io_with_path(
+                    rel_path,
+                    WorktreePathOperation::Remove,
+                    fs::remove_file(&abs_path),
+                )?;
+            } else if meta.is_dir() {
+                io_with_path(
+                    rel_path,
+                    WorktreePathOperation::Remove,
+                    fs::remove_dir_all(&abs_path),
+                )?;
+            } else {
+                io_with_path(
+                    rel_path,
+                    WorktreePathOperation::Remove,
+                    fs::remove_file(&abs_path),
+                )?;
+            }
         }
     }
 
@@ -6139,6 +6189,7 @@ mod syscall_probe {
     pub enum MetadataKind {
         Directory,
         WrittenFile,
+        ExistingPath,
     }
 
     thread_local! {
@@ -6176,6 +6227,16 @@ mod syscall_probe {
                 .map(|(_, v)| *v)
                 .max()
                 .unwrap_or(0)
+        })
+    }
+
+    pub fn existing_path_probe_total() -> u32 {
+        COUNTS.with(|c| {
+            c.borrow()
+                .iter()
+                .filter(|((_, k), _)| *k == MetadataKind::ExistingPath)
+                .map(|(_, v)| *v)
+                .sum()
         })
     }
 }
@@ -6845,6 +6906,71 @@ mod tests {
         assert_eq!(rec.started[0].1, Some(changes.len() as u64));
         assert_eq!(rec.file_units, changes.len() as u64);
         assert_eq!(rec.finished, 1);
+    }
+
+    #[test]
+    fn populated_tree_checkout_skips_pre_write_metadata_on_bulk_add() {
+        syscall_probe::reset();
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        let mut paths = Vec::new();
+        for d in 0..10 {
+            for f in 0..50 {
+                let rel = format!("dir{d}/f{f:03}.txt");
+                let parent = wt.join(format!("dir{d}"));
+                fs::create_dir_all(&parent).expect("mkdir");
+                fs::write(
+                    parent.join(format!("f{f:03}.txt")),
+                    format!("body {d}-{f}\n"),
+                )
+                .expect("write");
+                paths.push(rel);
+            }
+        }
+        let mut index = repo.load_index().expect("index");
+        for rel in &paths {
+            let abs = wt.join(rel);
+            let data = fs::read(&abs).expect("read");
+            let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
+            let e = entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("entry");
+            index.add_or_replace(e);
+        }
+        index.sort();
+        let to_tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
+            .expect("tree");
+        for rel in &paths {
+            let _ = fs::remove_file(wt.join(rel));
+        }
+        for d in 0..10 {
+            let _ = fs::remove_dir(wt.join(format!("dir{d}")));
+        }
+        syscall_probe::reset();
+        let outcome = checkout_between_trees_with_progress(
+            &repo,
+            None,
+            &to_tree,
+            &mut NullProgress,
+            CancelToken::never_ref(),
+        )
+        .expect("checkout");
+        assert_eq!(outcome.files, 500);
+        assert_eq!(
+            syscall_probe::existing_path_probe_total(),
+            0,
+            "populated-tree bulk checkout must not probe for existing paths"
+        );
+        assert!(
+            syscall_probe::max_per_written_file() <= 1,
+            "each written file should incur at most one post-write metadata call"
+        );
     }
 
     #[test]

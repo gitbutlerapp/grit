@@ -1049,15 +1049,6 @@ fn clone_after_claim(
     })
 }
 
-fn gitlink_paths_in_index(index: &crate::index::Index) -> Vec<String> {
-    index
-        .entries
-        .iter()
-        .filter(|e| e.stage() == 0 && e.mode == crate::index::MODE_GITLINK)
-        .map(|e| String::from_utf8_lossy(&e.path).into_owned())
-        .collect()
-}
-
 type CloneCheckoutStats = (u64, u64, Vec<String>, Vec<String>, Vec<String>);
 
 fn perform_clone_checkout(
@@ -1070,19 +1061,11 @@ fn perform_clone_checkout(
     let checkout = crate::porcelain::checkout::checkout_between_trees_with_progress(
         repo, None, &tree, progress, cancel,
     )?;
-    let index = repo.load_index()?;
-    let cfg = repo.config().snapshot()?;
-    let collision_opts = crate::path_icase::worktree_path_collision_options(
-        cfg.ignore_case(),
-        cfg.precompose_unicode(),
-    );
-    let (files, worktree_bytes) =
-        crate::path_icase::icase_worktree_file_stats(&index, repo.work_tree(), collision_opts);
     let (submodule_paths, bare_gitlink_paths) =
-        classify_gitlink_paths(repo, gitlink_paths_in_index(&index));
+        classify_gitlink_paths(repo, checkout.gitlink_paths);
     Ok((
-        files,
-        worktree_bytes,
+        checkout.files,
+        checkout.worktree_bytes,
         checkout.path_collisions,
         submodule_paths,
         bare_gitlink_paths,

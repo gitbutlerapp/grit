@@ -1061,6 +1061,19 @@ fn compare_icase_spelling_preference(a: &str, b: &str) -> std::cmp::Ordering {
         .then_with(|| a.cmp(b))
 }
 
+/// Count stage-0 blob files and indexed byte total for clone/checkout summaries.
+///
+/// When `ignorecase` is set, collision-free paths use index sizes only; disk is read once per
+/// case-collision group to learn the on-disk length of the winning spelling.
+#[must_use]
+pub(crate) fn index_stage0_worktree_summary(
+    index: &Index,
+    work_tree: Option<&Path>,
+    collision_opts: WorktreePathCollisionOptions,
+) -> (u64, u64) {
+    icase_worktree_file_stats(index, work_tree, collision_opts)
+}
+
 /// Count distinct worktree blob slots and total indexed bytes after an ignorecase checkout.
 #[must_use]
 pub fn icase_worktree_file_stats(
@@ -1114,7 +1127,9 @@ pub fn icase_worktree_file_stats(
     for (i, path) in paths.iter().enumerate() {
         if !in_set[i] {
             files += 1;
-            bytes += group_bytes(&[path]);
+            if let Some(entry) = index.get(path.as_bytes(), 0) {
+                bytes += u64::from(entry.size);
+            }
         }
     }
     for set in &sets {
@@ -1445,6 +1460,49 @@ mod tests {
         );
         let (files, _) = icase_worktree_file_stats(&index, None, ICASE);
         assert_eq!(files, 2);
+    }
+
+    #[test]
+    fn icase_worktree_file_stats_collision_free_skips_worktree_metadata() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        let mut index = Index::new();
+        const N: usize = 500;
+        for i in 0..N {
+            let path = format!("dir/f{i:05}.txt");
+            std::fs::create_dir_all(wt.join("dir")).expect("mkdir");
+            std::fs::write(wt.join(&path), b"x").expect("write");
+            index.push_entry_unsorted(dummy_entry(&path));
+        }
+        index.sort();
+        let _probe = crate::test_support::counters::reset_worktree_metadata_probe(wt);
+        let (files, _) = icase_worktree_file_stats(&index, Some(wt), ICASE);
+        assert_eq!(files, N as u64);
+        assert_eq!(
+            crate::test_support::counters::worktree_metadata_probe_count(),
+            0,
+            "collision-free ignorecase stats must use index sizes only"
+        );
+    }
+
+    #[test]
+    fn icase_worktree_file_stats_collision_group_stats_disk_once() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::write(wt.join("file.txt"), b"on-disk\n").expect("write");
+        let mut index = Index::new();
+        for path in ["file.txt", "File.txt"] {
+            index.push_entry_unsorted(dummy_entry(path));
+        }
+        index.sort();
+        let _probe = crate::test_support::counters::reset_worktree_metadata_probe(wt);
+        let (files, bytes) = icase_worktree_file_stats(&index, Some(wt), ICASE);
+        assert_eq!(files, 1);
+        assert_eq!(bytes, 8);
+        assert!(
+            crate::test_support::counters::worktree_metadata_probe_count() <= 2,
+            "one collision group should need at most one dentry pass"
+        );
     }
 
     #[test]
