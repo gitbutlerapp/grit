@@ -560,7 +560,7 @@ fn render_bundle_failure(
     Ok(())
 }
 
-/// Warn that tracked paths collide on a case-insensitive filesystem (human mode only).
+/// Warn that tracked paths collide on this filesystem (human mode only).
 ///
 /// # Errors
 ///
