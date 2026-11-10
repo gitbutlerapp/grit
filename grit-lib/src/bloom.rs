@@ -31,6 +31,22 @@ const BITS_PER_WORD: u64 = 8;
 /// `BLOOMDATA_HEADER_LEN` constant.
 pub const BLOOMDATA_HEADER_LEN: usize = 12;
 
+/// Git uses 7; cap untrusted on-disk headers so embedders never spin or OOM.
+pub(crate) const MAX_BLOOM_NUM_HASHES: u32 = 32;
+/// Reasonable upper bound for `bits_per_entry` when building or reading filters.
+pub(crate) const MAX_BLOOM_BITS_PER_ENTRY: u32 = 4096;
+
+/// Returns false when a BDAT header's hash settings cannot fit or are absurd.
+pub(crate) fn bloom_bdat_header_ok(num_hashes: u32, bits_per_entry: u32, bdat_len: u64) -> bool {
+    num_hashes <= MAX_BLOOM_NUM_HASHES
+        && bits_per_entry <= MAX_BLOOM_BITS_PER_ENTRY
+        && (num_hashes as u64) <= bdat_len
+}
+
+fn bloom_num_hash_iterations(settings: &BloomFilterSettings) -> usize {
+    (settings.num_hashes.min(MAX_BLOOM_NUM_HASHES)) as usize
+}
+
 #[inline]
 fn rotate_left(value: u32, count: u32) -> u32 {
     value.rotate_left(count)
@@ -160,6 +176,9 @@ fn murmur3_seeded(seed: u32, data: &[u8], hash_version: u32) -> u32 {
 
 /// Hash values for one path string (same length as `settings.num_hashes`).
 pub fn bloom_key_hashes(data: &[u8], settings: &BloomFilterSettings) -> Vec<u32> {
+    if settings.num_hashes > MAX_BLOOM_NUM_HASHES {
+        return Vec::new();
+    }
     let seed0 = 0x293ae76f_u32;
     let seed1 = 0x7e646e2c_u32;
     let hash0 = murmur3_seeded(seed0, data, settings.hash_version);
@@ -182,7 +201,7 @@ fn add_key_to_filter(key: &[u32], filter: &mut [u8], settings: &BloomFilterSetti
     if mod_bits == 0 {
         return;
     }
-    for i in 0..settings.num_hashes as usize {
+    for i in 0..bloom_num_hash_iterations(settings) {
         let Some(&h) = key.get(i) else {
             break;
         };
@@ -211,7 +230,7 @@ pub fn bloom_filter_contains(
     if mod_bits == 0 {
         return Err(BloomFilterInvalid);
     }
-    for i in 0..settings.num_hashes as usize {
+    for i in 0..bloom_num_hash_iterations(settings) {
         let Some(&h) = key.get(i) else {
             return Err(BloomFilterInvalid);
         };
@@ -299,6 +318,11 @@ pub fn build_bloom_filter_data(
     if raw_diff_entries > max || changed_paths.len() > max {
         return (vec![0xff], BloomBuildOutcome::TruncatedLarge);
     }
+    if settings.bits_per_entry > MAX_BLOOM_BITS_PER_ENTRY
+        || settings.num_hashes > MAX_BLOOM_NUM_HASHES
+    {
+        return (vec![0xff], BloomBuildOutcome::TruncatedLarge);
+    }
     let n_unique = changed_paths.len();
     let bits_total = n_unique.saturating_mul(settings.bits_per_entry as usize);
     let mut word_len = bits_total.div_ceil(8);
@@ -367,5 +391,19 @@ mod tests {
         assert!(set.contains("deep"));
         assert!(set.contains("deep/nested"));
         assert!(set.contains("deep/nested/file.txt"));
+    }
+
+    #[test]
+    fn absurd_bloom_num_hashes_does_not_allocate() {
+        let settings = BloomFilterSettings {
+            num_hashes: u32::MAX,
+            ..BloomFilterSettings::default()
+        };
+        assert!(bloom_key_hashes(b"path", &settings).is_empty());
+        let mut paths = BTreeSet::new();
+        paths.insert("a.txt".to_owned());
+        let (data, outcome) = build_bloom_filter_data(&paths, 1, &settings);
+        assert_eq!(outcome, BloomBuildOutcome::TruncatedLarge);
+        assert_eq!(data, vec![0xff]);
     }
 }

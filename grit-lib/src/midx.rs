@@ -2219,6 +2219,10 @@ pub fn verify_midx(objects_dir: &Path) -> std::result::Result<(), Vec<String>> {
             }
         }
     }
+    if names.len() != num_packs {
+        errors.push("multi-pack-index pack-name chunk is too short".to_owned());
+        return Err(errors);
+    }
 
     // --- checksum ---
     if !midx_checksum_is_valid(data) {
@@ -2226,8 +2230,9 @@ pub fn verify_midx(objects_dir: &Path) -> std::result::Result<(), Vec<String>> {
     }
 
     // --- load each referenced pack (failed to load pack) ---
-    let mut pack_indexes: Vec<Option<PackIndex>> = Vec::with_capacity(num_packs);
-    for i in 0..num_packs {
+    let pack_count = names.len();
+    let mut pack_indexes: Vec<Option<PackIndex>> = Vec::with_capacity(pack_count);
+    for i in 0..pack_count {
         // Load the pack idx without verifying its trailing checksum: `git
         // multi-pack-index verify` uses `open_pack_index`, which only parses the
         // index header/tables. The 64-bit-offset tests deliberately corrupt a
@@ -2866,19 +2871,27 @@ fn midx_load_for_read(
         }
     }
 
-    let mut pack_names: Vec<String> = Vec::with_capacity(num_packs);
+    if num_packs > pn_len {
+        diagnostics.warn(Warning::MidxChunkTableError {
+            detail: "multi-pack-index pack count exceeds pack-name chunk".to_owned(),
+        });
+        return Ok(MidxLoadResult::Skip);
+    }
     let blob = &data[pn_off..pn_off + pn_len];
-    let mut start = 0usize;
-    for _ in 0..num_packs {
-        let Some(rel) = blob[start..].iter().position(|&b| b == 0) else {
-            return Err(MidxError::PackNameChunkTooShort.into());
-        };
-        let name = match std::str::from_utf8(&blob[start..start + rel]) {
-            Ok(s) => s.to_string(),
-            Err(_) => return Err(MidxError::PackNameChunkTooShort.into()),
-        };
-        pack_names.push(name);
-        start += rel + 1;
+    let pack_names = match parse_pack_names_blob(blob) {
+        Ok(names) => names,
+        Err(_) => {
+            diagnostics.warn(Warning::MidxChunkTableError {
+                detail: "multi-pack-index pack-name chunk is too short".to_owned(),
+            });
+            return Ok(MidxLoadResult::Skip);
+        }
+    };
+    if pack_names.len() != num_packs {
+        diagnostics.warn(Warning::MidxChunkTableError {
+            detail: "multi-pack-index pack count does not match pack-name chunk".to_owned(),
+        });
+        return Ok(MidxLoadResult::Skip);
     }
 
     let payload_end = data.len() - hash_len;
@@ -4021,6 +4034,49 @@ mod tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
+    fn corrupt_midx_num_packs_skips_without_oom() {
+        let Some((tmp, oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let objects = tmp.path().join(".git/objects");
+        let pack_dir = objects.join("pack");
+        let midx_path = pack_dir.join("multi-pack-index");
+        let mut bytes = fs::read(&midx_path).expect("read midx");
+        bytes[8..12].copy_from_slice(&0xffff_ffffu32.to_be_bytes());
+        fs::write(&midx_path, &bytes).expect("corrupt num_packs");
+        super::midx_cache::evict_pack_dir(&pack_dir);
+        clear_pack_cache();
+
+        use crate::diagnostics::{CollectingDiagnostics, NullDiagnostics};
+        use crate::pack_map::PackData;
+        let hash_version = super::repo_midx_hash_version_for_objects_dir(&objects);
+        let owned = PackData::from_owned(std::fs::read(&midx_path).expect("reread"));
+        let collected = CollectingDiagnostics::new();
+        let loaded = super::midx_load_for_read(owned.as_ref(), hash_version, &collected)
+            .expect("corrupt pack count must not abort");
+        assert!(matches!(loaded, super::MidxLoadResult::Skip));
+        assert!(
+            collected
+                .warnings()
+                .iter()
+                .any(|w| matches!(w, crate::diagnostics::Warning::MidxChunkTableError { .. })),
+            "warnings: {:?}",
+            collected.warnings()
+        );
+        let errs = super::verify_midx(&objects).expect_err("verify rejects bogus pack count");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("pack-name") || e.contains("too short")),
+            "{errs:?}"
+        );
+        let via_midx =
+            try_read_object_via_midx(&objects, &oid).expect("corrupt header must not fatal");
+        assert!(via_midx.is_none());
+        read_object_from_packs(&objects, &oid).expect("pack fallback");
+        let _ = super::midx_load_for_read(owned.as_ref(), hash_version, &NullDiagnostics);
+    }
+
     fn flipped_midx_checksum_warns_and_reads_from_pack() {
         let Some((tmp, oid)) = midx_fixture(true) else {
             eprintln!("SKIP: git unavailable for MIDX fixture");
