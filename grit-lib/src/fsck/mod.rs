@@ -1273,8 +1273,8 @@ fn verify_pack_objects(
         }
         let pack_path = idx_path.with_extension("pack");
         let (prep, trailer_issue) = match prepare_pack_for_object_fsck(idx_path) {
-            Ok(v) => v,
-            Err(Error::Object(ObjectError::PackIndexChecksumMismatch { .. })) => {
+            Ok(Some((pack, trailer))) => (pack, trailer),
+            Ok(None) => {
                 issues.push(FsckIssue::IdxMismatch { pack: pack_path });
                 progress.set((i + 1) as u64);
                 continue;

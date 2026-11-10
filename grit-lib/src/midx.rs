@@ -502,18 +502,20 @@ pub(crate) mod midx_cache {
         }
 
         fn validate_packs(&self, diagnostics: &dyn DiagnosticSink) {
-            for idx_name in &self.pack_names {
+            for (pack_id, idx_name) in self.pack_names.iter().enumerate() {
+                let pack_id = u32::try_from(pack_id).unwrap_or(u32::MAX);
+                if self.open_pack_index(pack_id).is_some() {
+                    continue;
+                }
                 let idx_path = self.pack_dir.join(idx_name);
                 if !idx_path.is_file() {
                     continue;
                 }
-                if crate::pack::read_pack_index_no_verify(&idx_path).is_err() {
-                    let mut pack_path = idx_path.clone();
-                    pack_path.set_extension("pack");
-                    diagnostics.warn(Warning::MidxPackIndexUnavailable {
-                        pack: pack_path.display().to_string(),
-                    });
-                }
+                let mut pack_path = idx_path.clone();
+                pack_path.set_extension("pack");
+                diagnostics.warn(Warning::MidxPackIndexUnavailable {
+                    pack: pack_path.display().to_string(),
+                });
             }
         }
 
