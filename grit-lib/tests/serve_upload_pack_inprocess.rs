@@ -9,6 +9,7 @@ use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::serve::{ProtocolVersion, ServeError, ServeOptions, UploadPack};
 use grit_lib::repo::{InitOptions, Repository};
 use std::io::Cursor;
+use std::time::{Duration, Instant};
 
 fn pkt_line(payload: &str) -> Vec<u8> {
     let bytes = payload.as_bytes();
@@ -65,8 +66,30 @@ fn v0_stateless_fetch_with_have_flush(want: ObjectId, have: ObjectId) -> Vec<u8>
 }
 
 fn v0_stateless_fetch_body(want: ObjectId) -> Vec<u8> {
+    v0_stateless_fetch_body_many(want, 1)
+}
+
+fn v0_stateless_fetch_body_many(want: ObjectId, duplicates: usize) -> Vec<u8> {
     let caps = "multi_ack_detailed side-band-64k thin-pack no-progress include-tag ofs-delta";
     let mut body = pkt_line(&format!("want {} {caps}\n", want.to_hex()));
+    let line = pkt_line(&format!("want {}\n", want.to_hex()));
+    for _ in 1..duplicates {
+        body.extend_from_slice(&line);
+    }
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line("done"));
+    body.extend_from_slice(b"0000");
+    body
+}
+
+fn v2_stateless_fetch_body_many(want: ObjectId, duplicates: usize) -> Vec<u8> {
+    let mut body = pkt_line("command=fetch\n");
+    body.extend_from_slice(&pkt_line("agent=grit-cov\n"));
+    body.extend_from_slice(&pkt_line(&format!("want {0}\n", want.to_hex())));
+    let line = pkt_line(&format!("want {0}\n", want.to_hex()));
+    for _ in 1..duplicates {
+        body.extend_from_slice(&line);
+    }
     body.extend_from_slice(b"0000");
     body.extend_from_slice(&pkt_line("done"));
     body.extend_from_slice(b"0000");
@@ -352,7 +375,123 @@ fn upload_pack_stateful_v0_rejects_non_advertised_ancestor_want() {
     );
 }
 
+/// Issue #2587: duplicate wants of a reachable non-tip must not redo reachability work.
 #[test]
+fn upload_pack_stateless_v0_many_duplicate_wants_reachable_non_tip() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let chain = seed_linear_commits(&repo, 400);
+    let root = chain[0];
+
+    let mut single_out = Vec::new();
+    let t0 = Instant::now();
+    UploadPack::new(
+        &repo,
+        &mut test_serve_opts(ProtocolVersion::V0, false, true),
+    )
+    .run(
+        &mut Cursor::new(v0_stateless_fetch_body(root)),
+        &mut single_out,
+    )
+    .expect("single want");
+    let single_elapsed = t0.elapsed();
+
+    let mut many_out = Vec::new();
+    let t1 = Instant::now();
+    UploadPack::new(
+        &repo,
+        &mut test_serve_opts(ProtocolVersion::V0, false, true),
+    )
+    .run(
+        &mut Cursor::new(v0_stateless_fetch_body_many(root, 5_000)),
+        &mut many_out,
+    )
+    .expect("many duplicate wants");
+    let many_elapsed = t1.elapsed();
+
+    assert!(single_out.starts_with(b"0008NAK\n"));
+    assert!(many_out.starts_with(b"0008NAK\n"));
+    let single_pack = sideband_band1(&single_out["0008NAK\n".len()..]);
+    let many_pack = sideband_band1(&many_out["0008NAK\n".len()..]);
+    assert_eq!(
+        single_pack, many_pack,
+        "duplicate wants must produce the same pack"
+    );
+    assert!(
+        many_elapsed < single_elapsed * 20 + Duration::from_millis(500),
+        "5000 duplicate wants took {many_elapsed:?}; single want took {single_elapsed:?}"
+    );
+}
+
+#[test]
+fn upload_pack_stateless_v2_many_duplicate_wants_reachable_non_tip() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let chain = seed_linear_commits(&repo, 400);
+    let root = chain[0];
+
+    UploadPack::new(
+        &repo,
+        &mut test_serve_opts(ProtocolVersion::V2, false, true),
+    )
+    .run(
+        &mut Cursor::new(v2_stateless_fetch_body_many(root, 2_000)),
+        &mut Vec::new(),
+    )
+    .expect("v2 fetch with duplicate wants");
+}
+
+#[test]
+fn upload_pack_stateless_v0_many_duplicate_wants_unreachable_ref() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let (_tip, _mid, unreachable) = seed_fork(&repo);
+
+    let t0 = Instant::now();
+    let err = UploadPack::new(
+        &repo,
+        &mut test_serve_opts(ProtocolVersion::V0, false, true),
+    )
+    .run(
+        &mut Cursor::new(v0_stateless_fetch_body_many(unreachable, 3_000)),
+        &mut Vec::new(),
+    )
+    .expect_err("unreachable want");
+    let elapsed = t0.elapsed();
+    assert!(
+        err.to_string().contains("not our ref"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "unreachable duplicate wants should fail fast, took {elapsed:?}"
+    );
+}
+
 fn upload_pack_stateless_v2_want_reachable_non_tip() {
     let dir = tempfile::tempdir().expect("tempdir");
     Repository::init(
@@ -894,6 +1033,58 @@ fn upload_pack_cancelled_before_start_writes_no_pack() {
         .expect_err("cancelled");
     assert!(matches!(err, ServeError::Cancelled));
     assert!(!out.windows(4).any(|w| w == b"PACK"));
+}
+
+/// Nested annotated tags (outer → inner → commit), refs deleted; want outer's tag object.
+#[test]
+fn upload_pack_stateless_v0_want_nested_annotated_tag_refs_removed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let wt = dir.path().join("wt");
+    grit_test_support::git(dir.path(), &["init", "-q", &wt.to_string_lossy()]);
+    grit_test_support::git(&wt, &["commit", "-q", "--allow-empty", "-m", "c"]);
+    grit_test_support::git(&wt, &["tag", "-a", "inner", "-m", "inner"]);
+    let inner = grit_test_support::git(&wt, &["rev-parse", "refs/tags/inner"])
+        .trim()
+        .to_owned();
+    grit_test_support::git(&wt, &["tag", "-a", "outer", "-m", "outer", &inner]);
+    let outer =
+        ObjectId::from_hex(grit_test_support::git(&wt, &["rev-parse", "refs/tags/outer"]).trim())
+            .expect("outer tag");
+    std::fs::remove_file(wt.join(".git/refs/tags/inner")).expect("drop inner");
+    std::fs::remove_file(wt.join(".git/refs/tags/outer")).expect("drop outer");
+
+    let repo = Repository::open(&wt.join(".git"), &RepositoryOptions::empty()).expect("open");
+    let mut pack_out = Vec::new();
+    UploadPack::new(
+        &repo,
+        &mut test_serve_opts(ProtocolVersion::V0, false, true),
+    )
+    .run(
+        &mut Cursor::new(v0_stateless_fetch_body(outer)),
+        &mut pack_out,
+    )
+    .expect("nested tag want must be reachable through peel chain");
+    assert!(pack_out.starts_with(b"0008NAK\n"));
+    let pack = sideband_band1(&pack_out["0008NAK\n".len()..]);
+    assert!(pack.starts_with(b"PACK"));
+
+    let mut git_body = pkt_line(&format!(
+        "want {} multi_ack_detailed side-band-64k ofs-delta\n",
+        outer.to_hex()
+    ));
+    git_body.extend_from_slice(b"0000");
+    git_body.extend_from_slice(&pkt_line("done\n"));
+    git_body.extend_from_slice(b"0000");
+    let git_out = grit_test_support::git_cmd(&["upload-pack", "--stateless-rpc", "."])
+        .in_dir(&wt.join(".git"))
+        .stdin(git_body)
+        .suc()
+        .stdout;
+    assert!(git_out.as_bytes().starts_with(b"0008NAK\n"));
+    assert!(
+        git_out.as_bytes().windows(4).any(|w| w == b"PACK"),
+        "git should return a pack"
+    );
 }
 
 /// Annotated tag on a blob reachable from `main`, with the tag ref removed (smart HTTP race).

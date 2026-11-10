@@ -166,15 +166,16 @@ pub(crate) fn validate_wants(
     if extra.is_empty() {
         return Ok(());
     }
+    let unique_extra = dedupe_object_ids(&extra);
 
     if stateless_rpc {
-        validate_stateless_extra_wants(repo, &extra)?;
+        validate_stateless_extra_wants(repo, &unique_extra)?;
         return Ok(());
     }
 
     if policy.allow_tip_sha1_in_want {
         let tips = repository_tip_commits(repo)?;
-        for w in &extra {
+        for w in &unique_extra {
             if !tips.contains(w) {
                 return Err(ServeError::NotOurRef(*w).into());
             }
@@ -183,6 +184,11 @@ pub(crate) fn validate_wants(
     }
 
     Err(ServeError::NotOurRef(extra[0]).into())
+}
+
+fn dedupe_object_ids(ids: &[ObjectId]) -> Vec<ObjectId> {
+    let mut seen = HashSet::new();
+    ids.iter().filter(|id| seen.insert(**id)).copied().collect()
 }
 
 fn advertised_object_ids(tips: &HashSet<ObjectId>, head: Option<ObjectId>) -> HashSet<ObjectId> {
@@ -197,15 +203,50 @@ fn advertised_object_ids(tips: &HashSet<ObjectId>, head: Option<ObjectId>) -> Ha
 fn validate_stateless_extra_wants(repo: &Repository, wants: &[ObjectId]) -> Result<()> {
     let tips = repository_tip_commits(repo)?;
     let ref_objects = repository_ref_object_ids(repo)?;
+    let mut targets: HashSet<ObjectId> = HashSet::new();
+    let mut checks: Vec<(ObjectId, ObjectId)> = Vec::new();
     for w in wants {
-        if ref_objects.contains(w) {
+        if ref_objects.contains(w) || tips.contains(w) {
             continue;
         }
-        if !object_reachable_from_tip_commits(repo, *w, &tips)? {
+        if !repo.odb().contains(w)? {
             return Err(ServeError::NotOurRef(*w).into());
+        }
+        let target = want_reachability_target(repo, *w)?;
+        targets.insert(target);
+        checks.push((*w, target));
+    }
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let found = reachable_targets_from_tip_closure(repo, &tips, &targets)?;
+    for (want, target) in checks {
+        if !found.contains(&target) {
+            return Err(ServeError::NotOurRef(want).into());
         }
     }
     Ok(())
+}
+
+/// For annotated tag wants, reachability follows the fully peeled object id.
+fn want_reachability_target(repo: &Repository, want: ObjectId) -> Result<ObjectId> {
+    let mut current = want;
+    let mut seen = HashSet::new();
+    loop {
+        if !seen.insert(current) {
+            return Ok(want);
+        }
+        let Ok(obj) = repo.odb().read(&current) else {
+            return Ok(want);
+        };
+        if obj.kind != ObjectKind::Tag {
+            return Ok(current);
+        }
+        let Ok(tag) = crate::objects::parse_tag(&obj.data) else {
+            return Ok(want);
+        };
+        current = tag.object;
+    }
 }
 
 /// Direct ref targets (unpeeled), including annotated tag objects on refs.
@@ -220,84 +261,24 @@ fn repository_ref_object_ids(repo: &Repository) -> Result<HashSet<ObjectId>> {
     Ok(ids)
 }
 
-/// Whether `want` is reachable from current tip commits (ancestor of some tip).
-fn object_reachable_from_tip_commits(
+/// Which of `targets` appear in the object closure reachable from `tips`.
+fn reachable_targets_from_tip_closure(
     repo: &Repository,
-    want: ObjectId,
     tips: &HashSet<ObjectId>,
-) -> Result<bool> {
-    if tips.contains(&want) {
-        return Ok(true);
+    targets: &HashSet<ObjectId>,
+) -> Result<HashSet<ObjectId>> {
+    let mut found = HashSet::new();
+    if targets.is_empty() {
+        return Ok(found);
     }
-    if !repo.odb().contains(&want)? {
-        return Ok(false);
-    }
-    let Ok(obj) = repo.odb().read(&want) else {
-        return Ok(false);
-    };
-    match obj.kind {
-        ObjectKind::Commit => commit_is_ancestor_of_some_tip(repo, want, tips),
-        ObjectKind::Tag => {
-            let Ok(tag) = crate::objects::parse_tag(&obj.data) else {
-                return Ok(false);
-            };
-            reachable_object_from_tips(repo, tag.object, tips)
-        }
-        ObjectKind::Tree | ObjectKind::Blob => object_reachable_in_tip_closure(repo, want, tips),
-    }
-}
-
-/// Reachability of a non-tag object from ref tips (tag targets and nested tags).
-fn reachable_object_from_tips(
-    repo: &Repository,
-    object: ObjectId,
-    tips: &HashSet<ObjectId>,
-) -> Result<bool> {
-    if tips.contains(&object) {
-        return Ok(true);
-    }
-    if !repo.odb().contains(&object)? {
-        return Ok(false);
-    }
-    let Ok(obj) = repo.odb().read(&object) else {
-        return Ok(false);
-    };
-    match obj.kind {
-        ObjectKind::Commit => commit_is_ancestor_of_some_tip(repo, object, tips),
-        ObjectKind::Tree | ObjectKind::Blob => object_reachable_in_tip_closure(repo, object, tips),
-        ObjectKind::Tag => {
-            let Ok(tag) = crate::objects::parse_tag(&obj.data) else {
-                return Ok(false);
-            };
-            reachable_object_from_tips(repo, tag.object, tips)
-        }
-    }
-}
-
-fn commit_is_ancestor_of_some_tip(
-    repo: &Repository,
-    want: ObjectId,
-    tips: &HashSet<ObjectId>,
-) -> Result<bool> {
-    for tip in tips {
-        if want == *tip || crate::merge_base::is_ancestor(repo, want, *tip)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-/// Tree/blob wants: walk from tips until `target` appears (early exit).
-fn object_reachable_in_tip_closure(
-    repo: &Repository,
-    target: ObjectId,
-    tips: &HashSet<ObjectId>,
-) -> Result<bool> {
     let mut seen = HashSet::new();
     let mut queue: VecDeque<ObjectId> = tips.iter().copied().collect();
     while let Some(oid) = queue.pop_front() {
-        if oid == target {
-            return Ok(true);
+        if targets.contains(&oid) {
+            found.insert(oid);
+            if found.len() == targets.len() {
+                return Ok(found);
+            }
         }
         if !seen.insert(oid) {
             continue;
@@ -327,7 +308,7 @@ fn object_reachable_in_tip_closure(
             ObjectKind::Blob => {}
         }
     }
-    Ok(false)
+    Ok(found)
 }
 
 /// Peeled commit tips for every ref in the repository (including hidden refs).
@@ -384,7 +365,9 @@ fn reachable_from_repository_tips(repo: &Repository) -> Result<HashSet<ObjectId>
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     use crate::config::environment::RepositoryOptions;
     use crate::objects::{ObjectId, ObjectKind};
@@ -393,7 +376,10 @@ mod tests {
     };
     use crate::repo::{InitOptions, Repository};
 
-    use super::{repository_ref_object_ids, resolve_want_ref};
+    use super::{
+        dedupe_object_ids, repository_ref_object_ids, resolve_want_ref, validate_wants,
+        UploadPackPolicy,
+    };
 
     fn memory_serve_repo() -> (tempfile::TempDir, Repository, Arc<MemoryRefStore>, ObjectId) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -475,5 +461,159 @@ mod tests {
         let (_dir, repo, _store, commit) = memory_serve_repo();
         let ids = repository_ref_object_ids(&repo).expect("ids");
         assert!(ids.contains(&commit));
+    }
+
+    fn seed_linear_commits(repo: &Repository, n: usize) -> Vec<ObjectId> {
+        let empty_tree =
+            ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("empty tree");
+        let _ = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Tree, &[] as &[u8]);
+        let mut parent: Option<ObjectId> = None;
+        let mut chain = Vec::new();
+        for i in 1..=n {
+            let mut body = format!("tree {}\n", empty_tree.to_hex());
+            if let Some(p) = parent {
+                body.push_str(&format!("parent {}\n", p.to_hex()));
+            }
+            body.push_str("author T <t@e.com> 100 +0000\ncommitter T <t@e.com> 100 +0000\n\n");
+            body.push_str(&format!("c{i}\n"));
+            let oid = repo
+                .odb()
+                .write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+                .expect("commit");
+            chain.push(oid);
+            parent = Some(oid);
+        }
+        if let Some(tip) = chain.last().copied() {
+            std::fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n"))
+                .expect("ref");
+        }
+        chain
+    }
+
+    fn fork_side_commit(repo: &Repository) -> ObjectId {
+        let empty_tree =
+            ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("empty tree");
+        let root_body = format!(
+            "tree {}\nauthor T <t@e.com> 100 +0000\ncommitter T <t@e.com> 100 +0000\n\nroot\n",
+            empty_tree.to_hex()
+        );
+        let root = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Commit, root_body.as_bytes())
+            .expect("root");
+        let side_body = format!(
+            "tree {}\nparent {}\nauthor T <t@e.com> 101 +0000\ncommitter T <t@e.com> 101 +0000\n\nside\n",
+            empty_tree.to_hex(),
+            root.to_hex()
+        );
+        repo.odb()
+            .write_loose_materialize(ObjectKind::Commit, side_body.as_bytes())
+            .expect("side")
+    }
+
+    #[test]
+    fn dedupe_object_ids_preserves_first_occurrence_order() {
+        let a = ObjectId::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let b = ObjectId::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+        let ids = vec![a, b, a, a, b];
+        assert_eq!(dedupe_object_ids(&ids), vec![a, b]);
+    }
+
+    /// Issue #2587: duplicate stateless wants must not repeat reachability work.
+    #[test]
+    fn validate_wants_stateless_many_duplicates_of_reachable_ancestor() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("main"),
+        )
+        .expect("init");
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+        let chain = seed_linear_commits(&repo, 500);
+        let tip = chain[chain.len() - 1];
+        let root = chain[0];
+        let advertised: HashSet<ObjectId> = [tip].into_iter().collect();
+        let config = repo.config().snapshot().expect("config");
+        let policy = UploadPackPolicy::from_config(config.as_ref());
+        let dup_wants: Vec<ObjectId> = (0..5_000).map(|_| root).collect();
+
+        let t0 = Instant::now();
+        validate_wants(&repo, &advertised, Some(tip), &[root], &policy, true).expect("single want");
+        let single = t0.elapsed();
+
+        let t1 = Instant::now();
+        validate_wants(&repo, &advertised, Some(tip), &dup_wants, &policy, true)
+            .expect("duplicate wants");
+        let many = t1.elapsed();
+        assert!(
+            many < single * 20 + Duration::from_millis(200),
+            "5000 duplicates took {many:?}; one want took {single:?}"
+        );
+    }
+
+    #[test]
+    fn validate_wants_stateless_nested_annotated_tag_refs_removed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wt = dir.path().join("wt");
+        grit_test_support::git(dir.path(), &["init", "-q", &wt.to_string_lossy()]);
+        grit_test_support::git(&wt, &["commit", "-q", "--allow-empty", "-m", "c"]);
+        grit_test_support::git(&wt, &["tag", "-a", "inner", "-m", "inner"]);
+        let inner = grit_test_support::git(&wt, &["rev-parse", "refs/tags/inner"])
+            .trim()
+            .to_owned();
+        grit_test_support::git(&wt, &["tag", "-a", "outer", "-m", "outer", &inner]);
+        let outer = ObjectId::from_hex(
+            grit_test_support::git(&wt, &["rev-parse", "refs/tags/outer"]).trim(),
+        )
+        .expect("outer");
+        std::fs::remove_file(wt.join(".git/refs/tags/inner")).expect("drop inner");
+        std::fs::remove_file(wt.join(".git/refs/tags/outer")).expect("drop outer");
+
+        let repo = Repository::open(&wt.join(".git"), &RepositoryOptions::empty()).expect("open");
+        let tip = ObjectId::from_hex(grit_test_support::git(&wt, &["rev-parse", "HEAD"]).trim())
+            .expect("tip");
+        let advertised: HashSet<ObjectId> = [tip].into_iter().collect();
+        let config = repo.config().snapshot().expect("config");
+        let policy = UploadPackPolicy::from_config(config.as_ref());
+        validate_wants(&repo, &advertised, Some(tip), &[outer], &policy, true)
+            .expect("nested annotated tag want must validate");
+    }
+
+    #[test]
+    fn validate_wants_stateless_many_duplicates_unreachable_fail_fast() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("main"),
+        )
+        .expect("init");
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+        let chain = seed_linear_commits(&repo, 5);
+        let tip = chain[chain.len() - 1];
+        let unreachable = fork_side_commit(&repo);
+        let advertised: HashSet<ObjectId> = [tip].into_iter().collect();
+        let config = repo.config().snapshot().expect("config");
+        let policy = UploadPackPolicy::from_config(config.as_ref());
+        let dup_wants: Vec<ObjectId> = (0..2_000).map(|_| unreachable).collect();
+
+        let t0 = Instant::now();
+        let err = validate_wants(&repo, &advertised, Some(tip), &dup_wants, &policy, true)
+            .expect_err("unreachable");
+        let elapsed = t0.elapsed();
+        assert!(err.to_string().contains("not our ref"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains(&unreachable.to_hex()),
+            "unexpected: {err}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "unreachable duplicates should fail quickly, took {elapsed:?}"
+        );
     }
 }
