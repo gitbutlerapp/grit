@@ -1,7 +1,6 @@
 //! Coverage for the `repo.diff()` entry points: metadata diffs between trees, commits, the
 //! index and the work tree under each `TreeDiffOptions` knob, plus the content methods.
 
-use grit_lib::progress::{CancelToken, NullProgress};
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -482,13 +481,7 @@ fn commits_diff_their_trees_and_reject_non_commits() {
     let diff = fx.repo.diff();
     for options in [TreeDiffOptions::default(), renames()] {
         let via_commits = diff
-            .commits(
-                &fx.base_commit,
-                &fx.tip_commit,
-                &options,
-                &mut NullProgress,
-                &CancelToken::never(),
-            )
+            .commits(&fx.base_commit, &fx.tip_commit, &options)
             .expect("commits");
         let via_trees = diff
             .tree_to_tree(Some(&fx.base_tree), Some(&fx.tip_tree), &options)
@@ -500,8 +493,6 @@ fn commits_diff_their_trees_and_reject_non_commits() {
             &fx.base_tree,
             &fx.tip_commit,
             &TreeDiffOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
         )
         .expect_err("a tree is not a commit");
     assert!(

@@ -169,13 +169,7 @@ fn diff_index_worktree_and_patch_parse_sweep() -> grit_lib::error::Result<()> {
     let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
     let _ = diff.tree_to_tree(Some(&t1), Some(&t2), &TreeDiffOptions::default())?;
     let _ = diff.tree_to_tree(Some(&t1), Some(&t2), &renames)?;
-    let _ = diff.commits(
-        &base,
-        &tip,
-        &renames,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )?;
+    let _ = diff.commits(&base, &tip, &renames)?;
     let copies = renames
         .clone()
         .with_copies(CopyDetection::FindHarder(50))

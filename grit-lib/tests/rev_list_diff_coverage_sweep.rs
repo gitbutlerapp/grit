@@ -144,13 +144,7 @@ fn diff_postprocess_across_commit_pair() -> grit_lib::error::Result<()> {
     assert!(!processed.is_empty());
 
     let via_commits = diff
-        .commits(
-            &base,
-            &tip,
-            &TreeDiffOptions::default(),
-            &mut NullProgress,
-            &CancelToken::never(),
-        )?
+        .commits(&base, &tip, &TreeDiffOptions::default())?
         .entries;
     assert!(!via_commits.is_empty());
     let _ = repo

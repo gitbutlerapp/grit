@@ -4797,8 +4797,8 @@ mod tests {
                 repo.revwalk().count(
                     &["main~20..main"],
                     &RevWalkListOptions::default(),
-                    &mut NullProgress,
-                    CancelToken::never_ref(),
+                    &mut crate::progress::NullProgress,
+                    crate::progress::CancelToken::never_ref(),
                 )?
             };
             assert_eq!(count, 20);
@@ -5678,8 +5678,8 @@ mod tests {
             .commits(
                 &token_refs,
                 &RevWalkListOptions::default(),
-                &mut NullProgress,
-                CancelToken::never_ref(),
+                &mut crate::progress::NullProgress,
+                crate::progress::CancelToken::never_ref(),
             )
             .expect("revwalk commits");
         let revwalk_count = repo
@@ -5687,8 +5687,8 @@ mod tests {
             .count(
                 &token_refs,
                 &RevWalkListOptions::default(),
-                &mut NullProgress,
-                CancelToken::never_ref(),
+                &mut crate::progress::NullProgress,
+                crate::progress::CancelToken::never_ref(),
             )
             .expect("revwalk count");
 

@@ -179,13 +179,7 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
     assert!(raw.iter().any(|e| e.status == DiffStatus::Modified));
     let renames = TreeDiffOptions::default().with_renames(RenameDetection::Similarity(50));
     let _ = diff.tree_to_tree(Some(&old_tree), Some(&new_tree), &renames)?;
-    let _ = diff.commits(
-        &base,
-        &head,
-        &renames,
-        &mut NullProgress,
-        &CancelToken::never(),
-    )?;
+    let _ = diff.commits(&base, &head, &renames)?;
     let copies = renames
         .with_copies(CopyDetection::FindHarder(50))
         .with_threads(Some(ThreadPolicy::default()));
