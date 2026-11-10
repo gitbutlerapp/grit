@@ -202,6 +202,8 @@ grit-bench daily validate target/bench/blobless-reset.json
 
 Its prepare hook creates fresh blobless clients outside each timed iteration. Correctness checks enforce clean worktrees, strict fsck and a bounded pack count.
 
+`gc/default@synth-10k` works the same way: before each timed run, its prepare hook resets synth-10k to the fixture's base commit and adds 40 empty commits as loose objects. Each prepare puts a fresh nonce in those commit messages. Without it, a prepare that runs within a second of the previous one recreates byte-identical commits that the last `gc` already packed, git writes nothing loose, and the timed run measures a gc with nothing to do (about 13 ms instead of about 140 ms). The prepare fails when the newest seeded commit is not stored loose.
+
 ## Startup relocation comparison
 
 Startup changes need separate `release` and shipping `dist` measurements. Keep

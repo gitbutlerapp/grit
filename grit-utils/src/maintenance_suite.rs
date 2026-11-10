@@ -53,15 +53,34 @@ fn clone_deep_worktree(git: &Path, bare: &Path) -> Result<PathBuf> {
     Ok(dest)
 }
 
+/// Add `GRIT_BENCH_GC_SEED_COUNT` (default 40) empty commits on `HEAD` as loose objects.
+///
+/// Each call tags its messages with a fresh nonce. Without it, a prepare that lands in the same
+/// second as an earlier one recreates byte-identical commits; git finds those already packed by
+/// the previous timed `gc` and writes nothing loose, so the timed run would find nothing to pack.
+///
+/// # Errors
+///
+/// Fails when a `git` command fails or the newest seeded commit is not stored loose.
 pub(crate) fn seed_loose_objects(git: &Path, repo: &Path) -> Result<()> {
     let count = std::env::var("GRIT_BENCH_GC_SEED_COUNT")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(40);
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        OffsetDateTime::now_utc().unix_timestamp_nanos()
+    );
     for i in 0..count {
         let mut cmd = Command::new(git);
-        cmd.args(["commit", "--allow-empty", "-m", &format!("gc-bench-{i}")])
-            .current_dir(repo);
+        cmd.args([
+            "commit",
+            "--allow-empty",
+            "-m",
+            &format!("gc-bench-{i} {nonce}"),
+        ])
+        .current_dir(repo);
         git_env(&mut cmd);
         cmd.env("GIT_AUTHOR_NAME", "t")
             .env("GIT_AUTHOR_EMAIL", "t@example.com")
@@ -75,6 +94,32 @@ pub(crate) fn seed_loose_objects(git: &Path, repo: &Path) -> Result<()> {
             );
         }
     }
+    if count > 0 {
+        ensure_head_is_loose(git, repo)?;
+    }
+    Ok(())
+}
+
+fn ensure_head_is_loose(git: &Path, repo: &Path) -> Result<()> {
+    let mut cmd = Command::new(git);
+    cmd.args(["rev-parse", "HEAD", "--git-path", "objects"])
+        .current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git rev-parse HEAD")?;
+    if !out.status.success() {
+        anyhow::bail!("rev-parse failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let stdout = String::from_utf8(out.stdout).context("rev-parse stdout")?;
+    let mut lines = stdout.lines();
+    let (Some(oid), Some(objects)) = (lines.next(), lines.next()) else {
+        anyhow::bail!("rev-parse printed no oid and objects path");
+    };
+    let (fanout, rest) = oid.split_at_checked(2).context("short HEAD oid")?;
+    let loose = repo.join(objects).join(fanout).join(rest);
+    anyhow::ensure!(
+        loose.is_file(),
+        "seeded commit {oid} is not a loose object; gc would have nothing to pack"
+    );
     Ok(())
 }
 
@@ -343,6 +388,73 @@ mod prepare_tests {
         std::env::set_var("GRIT_BENCH_MAINTENANCE_BARE", bare.to_str().unwrap());
         run_prepare_maintenance(&git, Some(worktree.as_path()))?;
         std::env::remove_var("GRIT_BENCH_MAINTENANCE_BARE");
+        Ok(())
+    }
+
+    fn git_out(git: &Path, repo: &Path, args: &[&str]) -> Result<String> {
+        let mut cmd = Command::new(git);
+        cmd.args(args).current_dir(repo);
+        git_env(&mut cmd);
+        cmd.env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com");
+        let out = cmd.output()?;
+        anyhow::ensure!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        Ok(String::from_utf8(out.stdout)?.trim().to_owned())
+    }
+
+    fn loose_object_count(repo: &Path) -> Result<usize> {
+        let mut count = 0;
+        for dir in fs::read_dir(repo.join(".git/objects"))? {
+            let dir = dir?;
+            let name = dir.file_name();
+            if name.len() == 2 && dir.file_type()?.is_dir() {
+                count += fs::read_dir(dir.path())?.count();
+            }
+        }
+        Ok(count)
+    }
+
+    /// Back-to-back prepares (reset to base, seed) after a gc packed the previous seeds must
+    /// still leave every seeded commit loose, or `gc/default` times a no-op.
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn reseeding_after_gc_in_the_same_second_still_writes_loose_objects() -> Result<()> {
+        let git = PathBuf::from("git");
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path();
+        git_out(&git, repo, &["init", "-q"])?;
+        git_out(&git, repo, &["commit", "--allow-empty", "-qm", "base"])?;
+        let base = git_out(&git, repo, &["rev-parse", "HEAD"])?;
+        git_out(&git, repo, &["repack", "-adq"])?;
+        git_out(&git, repo, &["prune-packed"])?;
+        for round in 0..3 {
+            git_out(&git, repo, &["reset", "-q", "--hard", &base])?;
+            seed_loose_objects(&git, repo)?;
+            let seeded: usize = git_out(
+                &git,
+                repo,
+                &["rev-list", "--count", &format!("{base}..HEAD")],
+            )?
+            .parse()?;
+            assert!(seeded > 0, "round {round}: nothing seeded");
+            assert_eq!(
+                loose_object_count(repo)?,
+                seeded,
+                "round {round}: every seeded commit must be a new loose object"
+            );
+            git_out(&git, repo, &["repack", "-adq"])?;
+            git_out(&git, repo, &["prune-packed"])?;
+            assert_eq!(loose_object_count(repo)?, 0);
+        }
         Ok(())
     }
 }
