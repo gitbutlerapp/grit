@@ -16952,6 +16952,8 @@ pub grit_lib::porcelain::CommitError::NothingStagedToCommit
 pub grit_lib::porcelain::CommitError::NothingStagedToCommit::unstaged: usize
 pub grit_lib::porcelain::CommitError::NothingStagedToCommit::untracked: usize
 pub grit_lib::porcelain::CommitError::NothingToCommit
+pub grit_lib::porcelain::CommitError::WorktreeCaseCollision
+pub grit_lib::porcelain::CommitError::WorktreeCaseCollision::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::CommitError::PartialCommitDuringMerge
 pub grit_lib::porcelain::CommitError::PartialCommitDuringReplay
 pub grit_lib::porcelain::CommitError::PatchApply(grit_lib::error::ApplyError)
@@ -30475,6 +30477,12 @@ impl core::marker::Unpin for grit_lib::porcelain::status::UntrackedMode
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::UntrackedMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::UntrackedMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::UntrackedMode
+#[non_exhaustive] pub struct grit_lib::status::CaseCollisionGroup
+pub grit_lib::status::CaseCollisionGroup::paths: alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::status::filter_guidance_for_case_collisions(grit_lib::porcelain::status::StatusGuidance, &[alloc::string::String], &std::collections::HashSet<alloc::string::String>) -> grit_lib::porcelain::status::StatusGuidance
+pub fn grit_lib::status::path_in_worktree_case_collision(&str, &[grit_lib::status::CaseCollisionGroup]) -> bool
+pub fn grit_lib::status::worktree_case_collision_groups(&grit_lib::repo::Repository, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::status::CaseCollisionGroup>>
+pub fn grit_lib::status::worktree_case_collision_paths(&[grit_lib::status::CaseCollisionGroup]) -> std::collections::HashSet<alloc::string::String>
 pub struct grit_lib::status::ConflictGroup
 pub grit_lib::status::ConflictGroup::kind: grit_lib::operation::ConflictKind
 pub grit_lib::status::ConflictGroup::paths: alloc::vec::Vec<alloc::string::String>
@@ -30520,6 +30528,7 @@ pub fn grit_lib::status::Status<'repo>::expand_untracked_for_staging(&self, &mut
 pub fn grit_lib::status::Status<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::status::Status<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::status::Status<'repo>::run(&self, &grit_lib::porcelain::status::StatusOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::status::StatusModel>
+pub fn grit_lib::status::Status<'repo>::worktree_case_collisions(&self, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::status::CaseCollisionGroup>>
 pub fn grit_lib::status::Status<'repo>::untracked(&self, &mut grit_lib::index::Index, &grit_lib::status::UntrackedOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>)>
 pub fn grit_lib::status::Status<'repo>::untracked_with_meta(&self, &mut grit_lib::index::Index, &grit_lib::status::UntrackedOptions, core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, grit_lib::porcelain::status::UntrackedCollectMeta)>
 impl<'repo> core::clone::Clone for grit_lib::status::Status<'repo>

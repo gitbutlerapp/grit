@@ -516,6 +516,20 @@ fn empty_commit_message_error() -> anyhow::Error {
     })
 }
 
+fn worktree_case_collision_commit_error(paths: &[String]) -> anyhow::Error {
+    let summary =
+        "tracked paths collide on this filesystem and cannot be staged or committed".to_owned();
+    let hint = "use a case-sensitive volume, or run `grit reset --hard` to match the index to HEAD";
+    anyhow::Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            paths: Some(paths.to_vec()),
+            hint: Some(hint.to_owned()),
+            ..StructuredJsonError::new(summary.clone(), ErrorKind::WorktreeCaseCollision)
+        },
+        human: summary,
+    })
+}
+
 fn nothing_staged_commit_error(unstaged: usize, untracked: usize) -> anyhow::Error {
     let total = unstaged + untracked;
     let files = if total == 1 { "file" } else { "files" };
@@ -534,6 +548,9 @@ fn nothing_staged_commit_error(unstaged: usize, untracked: usize) -> anyhow::Err
 
 fn map_commit_error(err: Error) -> anyhow::Error {
     match err {
+        Error::Commit(CommitError::WorktreeCaseCollision { paths }) => {
+            worktree_case_collision_commit_error(&paths)
+        }
         Error::Commit(CommitError::NothingStagedToCommit {
             unstaged,
             untracked,

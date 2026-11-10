@@ -570,15 +570,57 @@ pub fn render_path_collision_warning(
     mode: OutputMode,
     paths: &[String],
 ) -> Result<()> {
-    if paths.is_empty() || mode != OutputMode::Human {
+    if paths.is_empty() {
         return Ok(());
     }
-    outln!(
-        w,
-        "warning: these tracked paths collide on this filesystem (case or Unicode normalization); only one path from each group exists on disk:"
-    );
-    for path in paths {
-        outln!(w, "  '{path}'");
+    match mode {
+        OutputMode::Human => {
+            outln!(
+                w,
+                "warning: these tracked paths collide on this filesystem (case or Unicode normalization); only one path from each group exists on disk:"
+            );
+            for path in paths {
+                outln!(w, "  '{path}'");
+            }
+        }
+        OutputMode::Markdown => {
+            outln!(
+                w,
+                "> **Warning:** these tracked paths collide on this filesystem (case or Unicode normalization); only one path from each group exists on disk:"
+            );
+            for path in paths {
+                outln!(w, "> - `{path}`");
+            }
+        }
+        OutputMode::Json => {}
+    }
+    Ok(())
+}
+
+/// Path-collision warning plus a way out when staging or commit is blocked (status, add, commit).
+///
+/// # Errors
+///
+/// Returns an error when writing to `w` fails.
+pub fn render_worktree_case_collision_guidance(
+    w: &mut dyn Write,
+    mode: OutputMode,
+    paths: &[String],
+) -> Result<()> {
+    render_path_collision_warning(w, mode, paths)?;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    match mode {
+        OutputMode::Human => outln!(
+            w,
+            "hint: use a case-sensitive volume, or run `grit reset --hard` to match the index to HEAD"
+        ),
+        OutputMode::Markdown => outln!(
+            w,
+            "> **Hint:** use a case-sensitive volume, or run `grit reset --hard` to match the index to HEAD."
+        ),
+        OutputMode::Json => {}
     }
     Ok(())
 }

@@ -18,9 +18,14 @@
 //! # }
 //! ```
 
+mod case_collision;
 mod handle;
 mod summary;
 
+pub use case_collision::{
+    filter_guidance_for_case_collisions, path_in_worktree_case_collision,
+    worktree_case_collision_groups, worktree_case_collision_paths, CaseCollisionGroup,
+};
 pub use handle::{Status, UntrackedCachePolicy, UntrackedOptions};
 pub use summary::{StatusSummary, StatusSummaryOptions};
 

@@ -87,6 +87,8 @@ pub enum ErrorKind {
     NothingStaged,
     /// Genuinely nothing to commit (clean tree or auto-stage cancel-out).
     NothingToCommit,
+    /// Tracked paths collide on a case-insensitive filesystem and cannot be staged or committed.
+    WorktreeCaseCollision,
     /// Not inside a Git repository (or any parent directory is one).
     NotARepository,
     /// `grit commit` without `-m`, `-F`, amend/reuse, or a pending merge message.
@@ -178,6 +180,7 @@ impl ErrorKind {
             Self::GitDirPathIo,
             Self::NothingStaged,
             Self::NothingToCommit,
+            Self::WorktreeCaseCollision,
             Self::NotARepository,
             Self::CommitMessageRequired,
             Self::EmptyCommitMessage,

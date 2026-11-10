@@ -4,7 +4,7 @@
 //! a thin wrapper over the library.
 
 use crate::pathspec_args::PathspecArgs;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use grit_lib::apply::{apply_patch_to_index_and_write, IndexApplyOptions};
 use grit_lib::diff::DiffSide;
 use grit_lib::error::Error as LibError;
@@ -179,6 +179,7 @@ pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
         staged_lines: BTreeMap::new(),
         no_paths: false,
         embedded_gitlinks: Vec::new(),
+        worktree_case_collisions: Vec::new(),
         path_display: PathDisplayOptions::from_repo(&repo).ok(),
     })
 }
@@ -231,8 +232,21 @@ pub fn run(
         progress,
         &crate::interrupt::process_cancel_token(),
     )?;
-    Ok(AddOutcome::from_stage(outcome, dry_run, no_paths)
-        .with_path_display(PathDisplayOptions::from_repo(&repo).ok()))
+    let index = repo
+        .index()
+        .load(&grit_lib::index::IndexLoadOptions::default())
+        .context("could not load index")?;
+    let worktree_case_collisions = repo
+        .status()
+        .worktree_case_collisions(&index)
+        .context("could not detect path collisions")?
+        .into_iter()
+        .map(|g| crate::render::add::AddWorktreeCaseCollisionJson { paths: g.paths })
+        .collect();
+    Ok(
+        AddOutcome::from_stage(outcome, dry_run, no_paths, worktree_case_collisions)
+            .with_path_display(PathDisplayOptions::from_repo(&repo).ok()),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

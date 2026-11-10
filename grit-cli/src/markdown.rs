@@ -800,7 +800,19 @@ pub fn print_add_outcome(
     } else {
         "Staged"
     };
-    if outcome.count == 0 && outcome.no_paths {
+    if !outcome.worktree_case_collisions.is_empty() {
+        let flat: Vec<String> = outcome
+            .worktree_case_collisions
+            .iter()
+            .flat_map(|g| g.paths.clone())
+            .collect();
+        crate::render::clone::render_worktree_case_collision_guidance(
+            w,
+            crate::output::OutputMode::Markdown,
+            &flat,
+        )?;
+    }
+    if outcome.count == 0 && outcome.no_paths && outcome.worktree_case_collisions.is_empty() {
         outln!(w, "Nothing to stage — working tree clean.");
         return Ok(());
     }

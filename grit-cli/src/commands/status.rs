@@ -18,8 +18,10 @@ use grit_lib::refs::branch_tracking::{
 };
 use grit_lib::revwalk::AbbrevLength;
 use grit_lib::state::{HeadState, InProgressOperation, NextStep};
-use grit_lib::status::StatusOptions;
-use grit_lib::status::StatusSummaryOptions;
+use grit_lib::status::{
+    filter_guidance_for_case_collisions, worktree_case_collision_paths, StatusOptions,
+    StatusSummaryOptions,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -32,6 +34,13 @@ use clap::Args;
 
 /// Maximum number of commits to list in the status shortlog before summarizing.
 pub(crate) const SHORTLOG_LIMIT: usize = 10;
+
+/// Case-insensitive tracked paths that share one work-tree file in `--json` output.
+#[derive(Serialize, JsonSchema)]
+pub struct WorktreeCaseCollisionJson {
+    /// Index spellings in the collision group.
+    pub paths: Vec<String>,
+}
 
 /// One unmerged path in `--json` output.
 #[derive(Serialize, JsonSchema)]
@@ -119,6 +128,9 @@ pub struct StatusOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
     pub warnings: Vec<crate::diagnostics::WarningRecord>,
+    /// Tracked path groups that collide on this case-insensitive work tree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub worktree_case_collisions: Vec<WorktreeCaseCollisionJson>,
     /// When the branch is shared (`grit share`): the other members' heads, as last fetched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(default)]
@@ -161,6 +173,9 @@ pub struct StatusOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     pub(crate) short_lines: Vec<String>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub(crate) worktree_case_collision_paths: Vec<String>,
     #[serde(skip)]
     #[schemars(skip)]
     pub(crate) interrupted_rewrite_lock_holder: Option<LockHolderJson>,
@@ -502,7 +517,24 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         .map(|e| change_json_with_worktree(e, work_tree))
         .collect();
     let clean = model.is_clean();
-    let guidance = summary.guidance;
+    let worktree_case_collisions = repo
+        .status()
+        .worktree_case_collisions(&model.index)
+        .context("could not detect path collisions")?;
+    let collision_json: Vec<WorktreeCaseCollisionJson> = worktree_case_collisions
+        .iter()
+        .map(|g| WorktreeCaseCollisionJson {
+            paths: g.paths.clone(),
+        })
+        .collect();
+    let blocked = worktree_case_collision_paths(&worktree_case_collisions);
+    let unstaged_paths: Vec<String> = model
+        .unstaged
+        .iter()
+        .filter_map(|e| e.new_path.clone().or_else(|| e.old_path.clone()))
+        .collect();
+    let guidance = filter_guidance_for_case_collisions(summary.guidance, &unstaged_paths, &blocked);
+    let worktree_case_collision_paths: Vec<String> = blocked.into_iter().collect();
 
     let path_display = PathDisplayOptions::from_repo(&repo).ok();
     let short_lines = if args.short {
@@ -536,6 +568,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     Ok(StatusOutcome {
         shared,
         warnings: sink.warnings(),
+        worktree_case_collisions: collision_json,
         branch,
         detached: matches!(model.head, HeadState::Detached { .. }),
         head: model.head.oid().map(ObjectId::to_hex),
@@ -573,6 +606,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         integration_hint,
         short_format: args.short,
         short_lines,
+        worktree_case_collision_paths,
         interrupted_rewrite_lock_holder,
         workspace_rows,
     })

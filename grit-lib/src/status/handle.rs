@@ -281,6 +281,34 @@ impl<'repo> Status<'repo> {
     ) -> Result<bool> {
         status_diff_entry_matches_pathspec_typed(self.repo, entry, pathspec)
     }
+
+    /// Case-insensitive path groups whose work-tree bytes cannot be committed faithfully.
+    ///
+    /// # Errors
+    ///
+    /// Propagates repository, config, and work-tree failures from
+    /// [`crate::status::worktree_case_collision_groups`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grit_lib::index::IndexLoadOptions;
+    /// use grit_lib::repo::{InitOptions, Repository};
+    ///
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// let dir = tempfile::tempdir()?;
+    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+    /// let index = repo.index().load(&IndexLoadOptions::default())?;
+    /// assert!(repo.status().worktree_case_collisions(&index)?.is_empty());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn worktree_case_collisions(
+        &self,
+        index: &Index,
+    ) -> Result<Vec<crate::status::CaseCollisionGroup>> {
+        crate::status::worktree_case_collision_groups(self.repo, index)
+    }
 }
 
 impl StatusOptions {

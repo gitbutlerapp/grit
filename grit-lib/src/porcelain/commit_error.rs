@@ -35,6 +35,13 @@ pub enum CommitError {
     #[error("nothing to commit")]
     NothingToCommit,
 
+    /// Tracked paths collide on this case-insensitive work tree and cannot be staged or committed.
+    #[error("tracked paths collide on this filesystem")]
+    WorktreeCaseCollision {
+        /// Index spellings in each active collision group (flattened, sorted).
+        paths: Vec<String>,
+    },
+
     /// No staged changes for a staged-only commit, but the work tree has unstaged or untracked paths.
     #[error("nothing staged to commit")]
     NothingStagedToCommit {
@@ -94,6 +101,7 @@ impl CommitError {
             Self::PartialCommitDuringMerge => "partial_commit_during_merge",
             Self::PartialCommitDuringReplay => "partial_commit_during_replay",
             Self::NothingToCommit => "nothing_to_commit",
+            Self::WorktreeCaseCollision { .. } => "worktree_case_collision",
             Self::NothingStagedToCommit { .. } => "nothing_staged_to_commit",
             Self::AmendUnborn => "amend_unborn",
             Self::InvalidIdentity(..) => "invalid_identity",

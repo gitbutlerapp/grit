@@ -16,6 +16,12 @@ use crate::ui::PathDisplayOptions;
 
 const HUMAN_PATH_LIMIT: usize = 10;
 
+/// Case-insensitive tracked paths that share one work-tree file in `--json` output.
+#[derive(Serialize, JsonSchema, Clone)]
+pub struct AddWorktreeCaseCollisionJson {
+    pub paths: Vec<String>,
+}
+
 /// Result of `grit add`: paths staged or that would be staged.
 #[derive(Serialize, JsonSchema)]
 pub struct AddOutcome {
@@ -39,13 +45,21 @@ pub struct AddOutcome {
     /// Nested repositories newly recorded as gitlinks (mode 160000).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub embedded_gitlinks: Vec<String>,
+    /// Case-insensitive path groups blocking staging on this work tree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub worktree_case_collisions: Vec<AddWorktreeCaseCollisionJson>,
     #[serde(skip)]
     #[schemars(skip)]
     pub(crate) path_display: Option<PathDisplayOptions>,
 }
 
 impl AddOutcome {
-    pub(crate) fn from_stage(outcome: StageOutcome, dry_run: bool, no_paths: bool) -> Self {
+    pub(crate) fn from_stage(
+        outcome: StageOutcome,
+        dry_run: bool,
+        no_paths: bool,
+        worktree_case_collisions: Vec<AddWorktreeCaseCollisionJson>,
+    ) -> Self {
         let count = outcome.total();
         Self {
             added: outcome.added,
@@ -59,6 +73,7 @@ impl AddOutcome {
             staged_lines: BTreeMap::new(),
             no_paths,
             embedded_gitlinks: outcome.embedded_gitlinks,
+            worktree_case_collisions,
             path_display: None,
         }
     }
@@ -82,6 +97,7 @@ impl AddOutcome {
             staged_lines: outcome.staged_lines,
             no_paths: false,
             embedded_gitlinks: Vec::new(),
+            worktree_case_collisions: Vec::new(),
             path_display: None,
         }
     }
@@ -113,8 +129,18 @@ impl HumanRender for AddOutcome {
             "Staged"
         };
         let paths = self.all_paths();
+        if !self.worktree_case_collisions.is_empty() {
+            let flat: Vec<String> = self
+                .worktree_case_collisions
+                .iter()
+                .flat_map(|g| g.paths.clone())
+                .collect();
+            crate::render::clone::render_worktree_case_collision_guidance(w, ctx.mode, &flat)?;
+        }
         match paths.len() {
-            0 if self.no_paths => outln!(w, "Nothing to stage — working tree clean."),
+            0 if self.no_paths && self.worktree_case_collisions.is_empty() => {
+                outln!(w, "Nothing to stage — working tree clean.");
+            }
             0 => {}
             1 => outln!(w, "{prefix} {}", self.format_path(paths[0])),
             n => {
