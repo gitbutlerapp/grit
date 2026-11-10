@@ -63,7 +63,7 @@ fn log_on_terminal(dir: &Path, args: &[&str], pager: &str) -> String {
             &mut slave,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &size,
+            &mut size,
         )
     };
     assert_eq!(rc, 0, "openpty failed");
@@ -122,7 +122,7 @@ fn log_on_terminal_without_pager_in_path(dir: &Path, args: &[&str], path: &str) 
             &mut slave,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &size,
+            &mut size,
         )
     };
     assert_eq!(rc, 0, "openpty failed");
