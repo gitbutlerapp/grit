@@ -913,6 +913,55 @@ fn git_repack_single_pack(root: &std::path::Path) -> (std::path::PathBuf, std::p
 }
 
 #[test]
+fn corrupt_idx_fanout_with_midx_is_idx_mismatch() {
+    let (dir, repo) = init_repo();
+    one_commit(&repo);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    git(dir.path(), &["multi-pack-index", "write"]);
+    let pack_dir = dir.path().join(".git/objects/pack");
+    let idx = fs::read_dir(&pack_dir)
+        .expect("rd")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("idx");
+    let pack = idx.with_extension("pack");
+    let mut perms = fs::metadata(&idx).expect("meta").permissions();
+    perms.set_readonly(false);
+    fs::set_permissions(&idx, perms).expect("chmod");
+    let mut bytes = fs::read(&idx).expect("read idx");
+    bytes[8..12].copy_from_slice(&0xffff_ffffu32.to_be_bytes());
+    fs::write(&idx, &bytes).expect("write idx");
+
+    grit_lib::objects::pack::clear_pack_cache();
+    grit_lib::objects::midx::evict_midx_read_cache_for_pack_dir(&pack_dir);
+
+    let start = std::time::Instant::now();
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(30),
+        "fsck took {:?}",
+        start.elapsed()
+    );
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| matches!(i, FsckIssue::IdxMismatch { pack: p } if *p == pack)),
+        "{:?}",
+        report.issues
+    );
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|i| matches!(i, FsckIssue::PackChecksum { pack: p } if *p == pack)),
+        "{:?}",
+        report.issues
+    );
+}
+
+#[test]
 fn corrupt_idx_trailer_is_idx_mismatch() {
     let (dir, repo) = init_repo();
     one_commit(&repo);

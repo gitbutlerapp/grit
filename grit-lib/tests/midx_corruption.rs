@@ -580,6 +580,52 @@ fn find_chunk(data: &[u8], id: u32) -> Option<(usize, usize)> {
     find_midx_chunk(data, id)
 }
 
+fn corrupt_idx_fanout_first_slot(idx_path: &std::path::Path) {
+    let mut bytes = fs::read(idx_path).expect("read idx");
+    bytes[8..12].copy_from_slice(&0xffff_ffffu32.to_be_bytes());
+    let mut perms = fs::metadata(idx_path).expect("meta").permissions();
+    perms.set_readonly(false);
+    fs::set_permissions(idx_path, perms).expect("chmod");
+    fs::write(idx_path, &bytes).expect("write idx");
+}
+
+#[test]
+fn corrupt_pack_idx_with_midx_negative_contains_do_not_rebuild_chain() {
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_lib::repo::Repository;
+    use std::time::{Duration, Instant};
+
+    let Some((repo, objects, head)) = corrupt_fixture() else {
+        eprintln!("SKIP: fixture");
+        return;
+    };
+    git_write_midx(&repo);
+    let pack_dir = objects.join("pack");
+    let idx = midx_support::pack_idx_paths(&objects)
+        .into_iter()
+        .next()
+        .expect("at least one idx");
+    corrupt_idx_fanout_first_slot(&idx);
+    clear_pack_cache();
+    grit_lib::objects::midx::evict_midx_read_cache_for_pack_dir(&pack_dir);
+
+    let repo = Repository::discover(Some(repo.path()), &RepositoryOptions::from_process())
+        .expect("discover");
+    let start = Instant::now();
+    let _ = repo.objects().contains(&head).expect("warm");
+    for i in 0..300u128 {
+        let hex = format!("{:040x}", i.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        let oid = ObjectId::from_hex(&hex).expect("oid");
+        let _ = repo.objects().contains(&oid).expect("contains");
+    }
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "300 negative contains with corrupt idx + MIDX took {:?}",
+        elapsed
+    );
+}
+
 #[test]
 fn pack_names_reject_out_of_bounds_pnam_without_panicking() {
     use grit_lib::objects::midx::read_midx_pack_idx_names;

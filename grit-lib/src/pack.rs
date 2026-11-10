@@ -912,6 +912,13 @@ pub(crate) mod pack_cache {
         });
     }
 
+    /// On-disk signature for a pack index that failed to parse and is skipped until it changes.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    struct IdxTombstone {
+        mtime: SystemTime,
+        size: u64,
+    }
+
     struct CachedDir {
         dir_mtime: SystemTime,
         indexes: Vec<Arc<PackIndex>>,
@@ -919,6 +926,8 @@ pub(crate) mod pack_cache {
         midx_pack_names: HashSet<String>,
         /// True after [`idx_paths_on_disk`] matched the cached index set at [`Self::dir_mtime`].
         idx_listing_verified: bool,
+        /// Unreadable `.idx` files still present on disk (path + signature at last scan).
+        idx_tombstones: HashMap<PathBuf, IdxTombstone>,
     }
 
     struct CachedIdx {
@@ -1359,8 +1368,102 @@ pub(crate) mod pack_cache {
         !idx.pack_path.is_file()
     }
 
+    fn idx_tombstone_hit(idx_path: &Path) -> bool {
+        let Some(pack_dir) = idx_path.parent() else {
+            return false;
+        };
+        let store = catalog_store();
+        let Some(stored) = store.with_catalog_read(|g| {
+            g.by_dir
+                .get(pack_dir)
+                .and_then(|c| c.idx_tombstones.get(idx_path).copied())
+        }) else {
+            return false;
+        };
+        file_signature(idx_path) == Some((stored.mtime, stored.size))
+    }
+
+    fn remember_idx_tombstone(idx_path: &Path) {
+        let Some(pack_dir) = idx_path.parent() else {
+            return;
+        };
+        let Some((mtime, size)) = file_signature(idx_path) else {
+            return;
+        };
+        let store = catalog_store();
+        let _ = store.try_with_catalog(|g| {
+            let entry = g
+                .by_dir
+                .entry(pack_dir.to_path_buf())
+                .or_insert_with(|| CachedDir {
+                    dir_mtime: dir_mtime(pack_dir),
+                    indexes: Vec::new(),
+                    midx_mtime: SystemTime::UNIX_EPOCH,
+                    midx_pack_names: HashSet::new(),
+                    idx_listing_verified: false,
+                    idx_tombstones: HashMap::new(),
+                });
+            entry
+                .idx_tombstones
+                .insert(idx_path.to_path_buf(), IdxTombstone { mtime, size });
+        });
+    }
+
+    fn forget_idx_tombstone(idx_path: &Path) {
+        let Some(pack_dir) = idx_path.parent() else {
+            return;
+        };
+        let store = catalog_store();
+        let _ = store.try_with_catalog(|g| {
+            if let Some(cached) = g.by_dir.get_mut(pack_dir) {
+                cached.idx_tombstones.remove(idx_path);
+            }
+        });
+    }
+
+    fn prune_idx_tombstones(cached: &mut CachedDir) {
+        cached
+            .idx_tombstones
+            .retain(|path, tomb| file_signature(path) == Some((tomb.mtime, tomb.size)));
+    }
+
+    fn known_idx_paths(cached: &CachedDir) -> HashSet<PathBuf> {
+        let mut out: HashSet<PathBuf> = cached
+            .indexes
+            .iter()
+            .map(|idx| idx.idx_path.clone())
+            .collect();
+        out.extend(cached.idx_tombstones.keys().cloned());
+        out
+    }
+
+    fn collect_idx_tombstones(
+        pack_dir: &Path,
+        loaded: &[Arc<PackIndex>],
+    ) -> HashMap<PathBuf, IdxTombstone> {
+        let Ok(on_disk) = idx_paths_on_disk(pack_dir) else {
+            return HashMap::new();
+        };
+        let loaded: HashSet<_> = loaded.iter().map(|idx| idx.idx_path.as_path()).collect();
+        let mut tombstones = HashMap::new();
+        for path in on_disk {
+            if loaded.contains(path.as_path()) {
+                continue;
+            }
+            if let Some((mtime, size)) = file_signature(&path) {
+                tombstones.insert(path, IdxTombstone { mtime, size });
+            }
+        }
+        tombstones
+    }
+
     /// Get a parsed pack index from cache, parsing from disk only on cache miss.
     pub fn get_index(idx_path: &Path) -> Result<Arc<PackIndex>> {
+        if idx_tombstone_hit(idx_path) {
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("unreadable pack index {}", idx_path.display()),
+            }));
+        }
         if let Some(hit) = cached_index(idx_path) {
             if index_cache_hit_stale(&hit) {
                 PACK_INDEXES.with(|cell| {
@@ -1384,7 +1487,15 @@ pub(crate) mod pack_cache {
             }
         }
         crate::trace::trace_span!("grit.pack.index.open");
-        let parsed = Arc::new(read_pack_index_no_verify(idx_path)?);
+        let parsed = match read_pack_index_no_verify(idx_path) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                remember_idx_tombstone(idx_path);
+                return Err(err);
+            }
+        };
+        forget_idx_tombstone(idx_path);
+        let parsed = Arc::new(parsed);
         store.with_catalog(|g| {
             g.by_idx.insert(
                 idx_path.to_path_buf(),
@@ -1414,6 +1525,7 @@ pub(crate) mod pack_cache {
                             midx_mtime: SystemTime::UNIX_EPOCH,
                             midx_pack_names: HashSet::new(),
                             idx_listing_verified: true,
+                            idx_tombstones: HashMap::new(),
                         },
                     );
                 });
@@ -1439,6 +1551,7 @@ pub(crate) mod pack_cache {
         }
 
         let midx_pack_names = load_midx_pack_names(&pack_dir);
+        let idx_tombstones = collect_idx_tombstones(&pack_dir, &out);
         with_current(|g| {
             #[cfg(any(test, feature = "test-support"))]
             {
@@ -1454,6 +1567,7 @@ pub(crate) mod pack_cache {
                     midx_mtime: midx_pack_names.0,
                     midx_pack_names: midx_pack_names.1,
                     idx_listing_verified: false,
+                    idx_tombstones,
                 },
             );
         });
@@ -1578,10 +1692,65 @@ pub(crate) mod pack_cache {
         rescan_dir_indexes_for_store(store, objects_dir)
     }
 
+    fn idx_tombstone_hit_for_store(store: &crate::pack_store::PackStore, idx_path: &Path) -> bool {
+        let Some(pack_dir) = idx_path.parent() else {
+            return false;
+        };
+        let Some(stored) = store.with_catalog_read(|g| {
+            g.by_dir
+                .get(pack_dir)
+                .and_then(|c| c.idx_tombstones.get(idx_path).copied())
+        }) else {
+            return false;
+        };
+        file_signature(idx_path) == Some((stored.mtime, stored.size))
+    }
+
+    fn remember_idx_tombstone_for_store(store: &crate::pack_store::PackStore, idx_path: &Path) {
+        let Some(pack_dir) = idx_path.parent() else {
+            return;
+        };
+        let Some((mtime, size)) = file_signature(idx_path) else {
+            return;
+        };
+        let _ = store.try_with_catalog(|g| {
+            let entry = g
+                .by_dir
+                .entry(pack_dir.to_path_buf())
+                .or_insert_with(|| CachedDir {
+                    dir_mtime: dir_mtime(pack_dir),
+                    indexes: Vec::new(),
+                    midx_mtime: SystemTime::UNIX_EPOCH,
+                    midx_pack_names: HashSet::new(),
+                    idx_listing_verified: false,
+                    idx_tombstones: HashMap::new(),
+                });
+            entry
+                .idx_tombstones
+                .insert(idx_path.to_path_buf(), IdxTombstone { mtime, size });
+        });
+    }
+
+    fn forget_idx_tombstone_for_store(store: &crate::pack_store::PackStore, idx_path: &Path) {
+        let Some(pack_dir) = idx_path.parent() else {
+            return;
+        };
+        let _ = store.try_with_catalog(|g| {
+            if let Some(cached) = g.by_dir.get_mut(pack_dir) {
+                cached.idx_tombstones.remove(idx_path);
+            }
+        });
+    }
+
     fn get_index_for_store(
         store: &crate::pack_store::PackStore,
         idx_path: &Path,
     ) -> Result<Arc<PackIndex>> {
+        if idx_tombstone_hit_for_store(store, idx_path) {
+            return Err(Error::Object(ObjectError::Corrupt {
+                detail: format!("unreadable pack index {}", idx_path.display()),
+            }));
+        }
         if let Some(hit) =
             store.with_catalog_read(|g| g.by_idx.get(idx_path).map(|c| Arc::clone(&c.idx)))
         {
@@ -1593,7 +1762,15 @@ pub(crate) mod pack_cache {
             });
         }
         crate::trace::trace_span!("grit.pack.index.open");
-        let parsed = Arc::new(read_pack_index_no_verify(idx_path)?);
+        let parsed = match read_pack_index_no_verify(idx_path) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                remember_idx_tombstone_for_store(store, idx_path);
+                return Err(err);
+            }
+        };
+        forget_idx_tombstone_for_store(store, idx_path);
+        let parsed = Arc::new(parsed);
         store.with_catalog(|g| {
             g.by_idx.insert(
                 idx_path.to_path_buf(),
@@ -1623,6 +1800,7 @@ pub(crate) mod pack_cache {
                             midx_mtime: SystemTime::UNIX_EPOCH,
                             midx_pack_names: HashSet::new(),
                             idx_listing_verified: true,
+                            idx_tombstones: HashMap::new(),
                         },
                     );
                 });
@@ -1646,6 +1824,7 @@ pub(crate) mod pack_cache {
             out.push(refresh_pack_sidecar_flags(idx));
         }
         let midx_pack_names = load_midx_pack_names(&pack_dir);
+        let idx_tombstones = collect_idx_tombstones(&pack_dir, &out);
         store.with_catalog(|g| {
             #[cfg(any(test, feature = "test-support"))]
             {
@@ -1661,6 +1840,7 @@ pub(crate) mod pack_cache {
                     midx_mtime: midx_pack_names.0,
                     midx_pack_names: midx_pack_names.1,
                     idx_listing_verified: false,
+                    idx_tombstones,
                 },
             );
         });
@@ -1739,25 +1919,23 @@ pub(crate) mod pack_cache {
                 untrust_pack_listing_for_miss(objects_dir);
             }
         }
-        let cached_paths = store.with_catalog_read(|g| {
-            g.by_dir.get(&pack_dir).map(|c| {
-                c.indexes
-                    .iter()
-                    .map(|idx| idx.idx_path.clone())
-                    .collect::<HashSet<_>>()
-            })
+        let listing_matches = store.with_catalog(|g| {
+            let Some(c) = g.by_dir.get_mut(&pack_dir) else {
+                return false;
+            };
+            prune_idx_tombstones(c);
+            let cached_paths = known_idx_paths(c);
+            let Ok(on_disk) = idx_paths_on_disk(&pack_dir) else {
+                return false;
+            };
+            if on_disk == cached_paths {
+                c.idx_listing_verified = true;
+                true
+            } else {
+                false
+            }
         });
-        let Some(cached_paths) = cached_paths else {
-            rescan_dir_indexes_for_store(store, objects_dir)?;
-            return Ok(true);
-        };
-        let on_disk = idx_paths_on_disk(&pack_dir)?;
-        if on_disk == cached_paths {
-            store.with_catalog(|g| {
-                if let Some(c) = g.by_dir.get_mut(&pack_dir) {
-                    c.idx_listing_verified = true;
-                }
-            });
+        if listing_matches {
             return Ok(false);
         }
         rescan_dir_indexes_for_store(store, objects_dir)?;
@@ -1816,25 +1994,23 @@ pub(crate) mod pack_cache {
                 untrust_pack_listing_for_miss(objects_dir);
             }
         }
-        let cached_paths = store.with_catalog_read(|g| {
-            g.by_dir.get(&pack_dir).map(|c| {
-                c.indexes
-                    .iter()
-                    .map(|idx| idx.idx_path.clone())
-                    .collect::<HashSet<_>>()
-            })
+        let listing_matches = store.with_catalog(|g| {
+            let Some(c) = g.by_dir.get_mut(&pack_dir) else {
+                return false;
+            };
+            prune_idx_tombstones(c);
+            let cached_paths = known_idx_paths(c);
+            let Ok(on_disk) = idx_paths_on_disk(&pack_dir) else {
+                return false;
+            };
+            if on_disk == cached_paths {
+                c.idx_listing_verified = true;
+                true
+            } else {
+                false
+            }
         });
-        let Some(cached_paths) = cached_paths else {
-            rescan_dir_indexes(objects_dir)?;
-            return Ok(true);
-        };
-        let on_disk = idx_paths_on_disk(&pack_dir)?;
-        if on_disk == cached_paths {
-            store.with_catalog(|g| {
-                if let Some(c) = g.by_dir.get_mut(&pack_dir) {
-                    c.idx_listing_verified = true;
-                }
-            });
+        if listing_matches {
             return Ok(false);
         }
         rescan_dir_indexes(objects_dir)?;
@@ -2997,20 +3173,30 @@ pub(crate) enum PackFsckTrailerIssue {
 
 /// Load pack bytes and header records for per-object fsck even when the pack trailer is wrong.
 ///
-/// Returns a trailer/index checksum issue separately so callers can still inflate objects.
+/// Returns [`None`] when the `.idx` cannot be read. Otherwise returns the pack and an optional
+/// trailer/index checksum issue so callers can still inflate objects.
 pub(crate) fn prepare_pack_for_object_fsck(
     idx_path: &Path,
-) -> Result<(VerifiedPackForFsck, Option<PackFsckTrailerIssue>)> {
-    let (idx, pack_bytes, records) = verify_pack_structure_and_records(idx_path, false)?;
+) -> Result<Option<(VerifiedPackForFsck, Option<PackFsckTrailerIssue>)>> {
+    let idx = match read_pack_index(idx_path) {
+        Ok(idx) => idx,
+        Err(Error::Object(ObjectError::PackIndexChecksumMismatch { .. }))
+        | Err(Error::Object(ObjectError::Corrupt { .. })) => {
+            return Ok(None);
+        }
+        Err(err) => return Err(err),
+    };
+    let (idx, pack_bytes, records) =
+        verify_pack_structure_and_records_with_index(idx_path, idx, false)?;
     let trailer = pack_trailer_fsck_issue(idx_path, &idx, &pack_bytes);
-    Ok((
+    Ok(Some((
         VerifiedPackForFsck {
             idx,
             pack_bytes,
             records,
         },
         trailer,
-    ))
+    )))
 }
 
 fn pack_trailer_fsck_issue(
@@ -3068,6 +3254,14 @@ fn verify_pack_structure_and_records(
     verify_pack_trailer: bool,
 ) -> Result<(PackIndex, Arc<PackData>, Vec<VerifyObjectRecord>)> {
     let idx = read_pack_index(idx_path)?;
+    verify_pack_structure_and_records_with_index(idx_path, idx, verify_pack_trailer)
+}
+
+fn verify_pack_structure_and_records_with_index(
+    idx_path: &Path,
+    idx: PackIndex,
+    verify_pack_trailer: bool,
+) -> Result<(PackIndex, Arc<PackData>, Vec<VerifyObjectRecord>)> {
     let idx_file_bytes = fs::read(idx_path).map_err(Error::Io)?;
     let pack_bytes = PackData::open_with_min_len(&idx.pack_path, 0)?;
     let hb = idx.hash_bytes();
