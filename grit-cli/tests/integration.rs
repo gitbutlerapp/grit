@@ -224,6 +224,8 @@ mod diff_exit_code_quiet;
 #[cfg(feature = "full-tests")]
 #[path = "diff_format_flags.rs"]
 mod diff_format_flags;
+#[path = "diff_hunk_funcname_context.rs"]
+mod diff_hunk_funcname_context;
 #[cfg(feature = "full-tests")]
 #[path = "diff_invalid_pathspec.rs"]
 mod diff_invalid_pathspec;

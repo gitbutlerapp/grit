@@ -189,7 +189,8 @@ pub fn structured_text_diff(
     new_text: &str,
     options: DiffOptions,
 ) -> StructuredTextDiff {
-    let mut hunks = line_engine::line_hunks(old_text, new_text, &options, options.function_context);
+    let mut hunks =
+        line_engine::line_hunks(old_text, new_text, &options, options.function_context, None);
     if options.word_level_inline {
         apply_word_level_inline(&mut hunks, old_text, new_text);
     }
@@ -371,14 +372,23 @@ pub(crate) fn old_line_bodies_for_context(text: &str) -> Vec<&str> {
 pub(crate) fn enclosing_function_context(
     lines: &[&str],
     old_start_1based: usize,
+    funcname_matcher: Option<&crate::userdiff::FuncnameMatcher>,
 ) -> Option<String> {
     if old_start_1based == 0 {
         return None;
     }
-    function_context(lines, old_start_1based.saturating_sub(1))
+    function_context(lines, old_start_1based.saturating_sub(1), funcname_matcher)
 }
 
-fn function_context(lines: &[&str], start_0based: usize) -> Option<String> {
+fn function_context(
+    lines: &[&str],
+    start_0based: usize,
+    funcname_matcher: Option<&crate::userdiff::FuncnameMatcher>,
+) -> Option<String> {
+    if let Some(matcher) = funcname_matcher {
+        let header = format!("@@ -{},1 +0,0 @@", start_0based.saturating_add(1));
+        return crate::diff::core::extract_function_context(&header, lines, Some(matcher), None);
+    }
     lines[..start_0based.min(lines.len())]
         .iter()
         .rev()
@@ -386,6 +396,29 @@ fn function_context(lines: &[&str], start_0based: usize) -> Option<String> {
             let first = line.chars().next()?;
             (first.is_alphabetic() || first == '_').then(|| line.trim_end().to_owned())
         })
+}
+
+/// Fill [`StructuredHunk::context`] from a path's diff driver when not already set (`-W`).
+pub(crate) fn apply_patch_funcname_to_hunks(
+    hunks: &mut [StructuredHunk],
+    old_text: &str,
+    funcname_matcher: Option<&crate::userdiff::FuncnameMatcher>,
+) {
+    let Some(matcher) = funcname_matcher else {
+        return;
+    };
+    let old_lines = old_line_bodies_for_context(old_text);
+    for hunk in hunks.iter_mut() {
+        if hunk.context.is_some() {
+            continue;
+        }
+        let header = format!(
+            "@@ -{},{} +{},{} @@",
+            hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines
+        );
+        hunk.context =
+            crate::diff::core::extract_function_context(&header, &old_lines, Some(matcher), None);
+    }
 }
 
 fn reconcile_segments_with_line(segments: &mut Vec<StructuredSegment>, full_line: &str) {

@@ -232,12 +232,19 @@ pub(crate) fn line_hunks(
     new_content: &str,
     options: &DiffOptions,
     enclosing_function_context: bool,
+    funcname_matcher: Option<&crate::userdiff::FuncnameMatcher>,
 ) -> Vec<StructuredHunk> {
     if !options.whitespace.is_active() && old_content == new_content {
         return Vec::new();
     }
     let body = unified_hunk_body_for_diff_options(old_content, new_content, options);
-    structured_hunks_from_unified_body(&body, old_content, new_content, enclosing_function_context)
+    structured_hunks_from_unified_body(
+        &body,
+        old_content,
+        new_content,
+        enclosing_function_context,
+        funcname_matcher,
+    )
 }
 
 fn structured_hunks_from_unified_body(
@@ -245,6 +252,7 @@ fn structured_hunks_from_unified_body(
     old_content: &str,
     new_content: &str,
     enclosing_function_context: bool,
+    funcname_matcher: Option<&crate::userdiff::FuncnameMatcher>,
 ) -> Vec<StructuredHunk> {
     if body.is_empty() {
         return Vec::new();
@@ -253,7 +261,7 @@ fn structured_hunks_from_unified_body(
     let after_ends_nl = new_content.ends_with('\n');
     let before_count = line_count(old_content);
     let after_count = line_count(new_content);
-    let old_line_bodies = if enclosing_function_context {
+    let old_line_bodies = if enclosing_function_context || funcname_matcher.is_some() {
         super::old_line_bodies_for_context(old_content)
     } else {
         Vec::new()
@@ -345,8 +353,19 @@ fn structured_hunks_from_unified_body(
                     .min()
                     .or_else(|| structured_lines.iter().filter_map(|l| l.old).min())
                     .and_then(|old_line_no| {
-                        super::enclosing_function_context(&old_line_bodies, old_line_no)
+                        super::enclosing_function_context(
+                            &old_line_bodies,
+                            old_line_no,
+                            funcname_matcher,
+                        )
                     })
+            } else if let Some(matcher) = funcname_matcher {
+                crate::diff::core::extract_function_context(
+                    header,
+                    &old_line_bodies,
+                    Some(matcher),
+                    None,
+                )
             } else {
                 None
             };

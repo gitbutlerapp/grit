@@ -281,3 +281,148 @@ driver_case!(
     "alpha <- function() {\n  old\n}\n",
     "alpha <- function() {\n  new\n}\n"
 );
+
+fn grit_worktree_patch_hunk_headers(root: &Path) -> Vec<String> {
+    use std::io::Cursor;
+
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_lib::diff::{
+        write_patch_resolved, DiffOptions, PatchResolvedSide, PatchSide, PatchTextOptions,
+        RenameDetection,
+    };
+    use grit_lib::repo::Repository;
+    use grit_test_support::rev_parse;
+
+    let repo = Repository::open(root, &RepositoryOptions::default()).expect("open repo");
+    let mut uncommitted = repo.diff().uncommitted().expect("uncommitted");
+    let head_tree = rev_parse(root, "HEAD^{tree}");
+    let entries = uncommitted
+        .worktree_entries(Some(&head_tree), RenameDetection::Off)
+        .expect("entries");
+    let changes = uncommitted
+        .load_worktree_changes(entries.clone())
+        .expect("changes");
+    let resolved: Vec<PatchResolvedSide> = entries
+        .into_iter()
+        .zip(changes)
+        .map(|(entry, fc)| PatchResolvedSide {
+            entry,
+            old: PatchSide::Bytes(fc.old_bytes.data),
+            new: PatchSide::Worktree,
+        })
+        .collect();
+    let opts = PatchTextOptions::from_repo(&repo, DiffOptions::default()).expect("patch opts");
+    let mut out = Cursor::new(Vec::new());
+    write_patch_resolved(&repo, &resolved, &opts, &mut out).expect("write_patch_resolved");
+    String::from_utf8_lossy(&out.into_inner())
+        .lines()
+        .filter(|l| l.starts_with("@@"))
+        .map(|l| l.to_owned())
+        .collect()
+}
+
+fn assert_worktree_hunk_headers_match_git(
+    c_cpp_before: &str,
+    c_cpp_after: &str,
+    pl_before: &str,
+    pl_after: &str,
+) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    std::fs::write(
+        root.join(".gitattributes"),
+        "*.c diff=cpp\n*.pl diff=perl\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("a.c"), c_cpp_before).unwrap();
+    std::fs::write(root.join("a.pl"), pl_before).unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["init", "-q", "-b", "main"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git init");
+    Command::new("git")
+        .current_dir(root)
+        .args(["add", "."])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git add");
+    Command::new("git")
+        .current_dir(root)
+        .args(["commit", "-m", "base", "--author", "T <t@e.com>"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_EMAIL", "t@e.com")
+        .env("GIT_COMMITTER_EMAIL", "t@e.com")
+        .env("GIT_AUTHOR_NAME", "T")
+        .env("GIT_COMMITTER_NAME", "T")
+        .status()
+        .expect("git commit");
+    std::fs::write(root.join("a.c"), c_cpp_after).unwrap();
+    std::fs::write(root.join("a.pl"), pl_after).unwrap();
+    let git_hdrs = git_diff_hunk_headers(root);
+    let grit_hdrs = grit_worktree_patch_hunk_headers(root);
+    assert_eq!(
+        git_hdrs, grit_hdrs,
+        "gitattributes diff drivers: hunk headers differ from git diff"
+    );
+}
+
+#[test]
+fn userdiff_attr_cpp_goto_and_perl_foreach_match_git() {
+    let c_before = "int f(int x)\n{\n\tif (x)\n\t\tgoto out;\n\tx++;\n\tx++;\n\tx++;\n\tx++;\n\tx++;\n\tx++;\n\tx++;\nout:\n\tx++;\n\tx++;\n\tx++;\n\tx++;\n\treturn x;\n}\n";
+    let c_after = c_before.replace("return x;", "return x + 1;");
+    let pl_before = "use strict;\nforeach my $x (1..3) {\n    print \"a\\n\";\n    print \"b\\n\";\n    print \"c\\n\";\n    print \"d\\n\";\n    print \"e\\n\";\n    print \"f\\n\";\n}\nprint \"end\\n\";\n";
+    let pl_after = pl_before.replace("end", "END");
+    assert_worktree_hunk_headers_match_git(c_before, &c_after, pl_before, &pl_after);
+}
+
+#[test]
+fn userdiff_attr_custom_xfuncname_match_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    std::fs::write(root.join(".gitattributes"), "*.xyz diff=custom\n").unwrap();
+    std::fs::write(root.join("a.xyz"), "CUSTOM foo:\n    old\n").unwrap();
+    Command::new("git")
+        .current_dir(root)
+        .args(["init", "-q", "-b", "main"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git init");
+    Command::new("git")
+        .current_dir(root)
+        .args(["config", "diff.custom.xfuncname", "^CUSTOM .*:$"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git config");
+    Command::new("git")
+        .current_dir(root)
+        .args(["add", "."])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git add");
+    Command::new("git")
+        .current_dir(root)
+        .args(["commit", "-m", "base", "--author", "T <t@e.com>"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_EMAIL", "t@e.com")
+        .env("GIT_COMMITTER_EMAIL", "t@e.com")
+        .env("GIT_AUTHOR_NAME", "T")
+        .env("GIT_COMMITTER_NAME", "T")
+        .status()
+        .expect("git commit");
+    std::fs::write(root.join("a.xyz"), "CUSTOM foo:\n    new\n").unwrap();
+    let git_hdrs = git_diff_hunk_headers(root);
+    let grit_hdrs = grit_worktree_patch_hunk_headers(root);
+    assert_eq!(
+        git_hdrs, grit_hdrs,
+        "custom xfuncname driver: hunk headers differ from git diff"
+    );
+}

@@ -371,6 +371,32 @@ impl<'repo> Diff<'repo> {
         collect_files_for_target(self.repo, target, pathspec.specs(), opts.clone())
     }
 
+    /// Patch-style rows from [`FileChange`] values with `.gitattributes` funcname context.
+    ///
+    /// # Errors
+    ///
+    /// Propagates attribute and config errors.
+    pub fn file_diffs_from_changes(
+        &self,
+        changes: &[FileChange],
+        opts: DiffOptions,
+    ) -> Result<Vec<FileDiff>> {
+        crate::diff::targets::file_diffs_from_changes(self.repo, changes, opts)
+    }
+
+    /// Patch-style rows from tree diff entries with `.gitattributes` funcname context.
+    ///
+    /// # Errors
+    ///
+    /// Propagates object database and attribute errors.
+    pub fn file_diffs_from_entries(
+        &self,
+        entries: Vec<DiffEntry>,
+        opts: DiffOptions,
+    ) -> Result<Vec<FileDiff>> {
+        crate::diff::targets::file_diffs_from_entries(self.repo, entries, opts)
+    }
+
     /// Per-file diffs at `detail` for entries from a metadata diff.
     ///
     /// Applies [`DiffOptions::renames`] to the entries first (Git's default `-M50`); pass
@@ -477,6 +503,40 @@ impl<'repo> Diff<'repo> {
             config.as_ref(),
             &self.repo.thread_policy(),
             visit,
+        )
+    }
+
+    /// Like [`Self::for_each_structured`], but each visit receives a [`FileDiff`] with
+    /// `.gitattributes` funcname context on hunks.
+    ///
+    /// # Errors
+    ///
+    /// Propagates object database, attribute, parallel diff and `visit` errors.
+    pub fn for_each_file_diff(
+        &self,
+        entries: &[DiffEntry],
+        options: &DiffOptions,
+        mut visit: impl FnMut(FileDiff) -> Result<()>,
+    ) -> Result<()> {
+        use crate::diff::funcname_attrs::PatchFuncnameAttrs;
+        use crate::diff::targets::{file_diff_from_tree_structured, include_file_in_diff};
+
+        let config = self.repo.config().snapshot()?;
+        let funcname_attrs = PatchFuncnameAttrs::load_for_diff(self.repo)?;
+        crate::diff::tree_content::for_each_tree_diff_structured(
+            self.repo.odb(),
+            entries,
+            options.clone(),
+            config.as_ref(),
+            &self.repo.thread_policy(),
+            |t| {
+                let file =
+                    file_diff_from_tree_structured(self.repo, config.as_ref(), &funcname_attrs, t);
+                if include_file_in_diff(&file, options) {
+                    visit(file)?;
+                }
+                Ok(())
+            },
         )
     }
 

@@ -1,11 +1,10 @@
 //! Map grit-lib structured diff rows into CLI [`FileDiff`] DTOs.
 
 use grit_lib::diff::structured::StructuredLineKind;
-use grit_lib::diff::DiffOptions;
 use grit_lib::diff::{
     annotate_structured_hunks, line_stat_for_target_file, presentation_hunks_from_listed,
-    presentation_hunks_from_tree, AnnotatedStructuredHunk, DiffDetail, DiffSide, FileChange,
-    ListedFileDiff, TreeDiffStructured,
+    presentation_hunks_from_tree, AnnotatedStructuredHunk, DiffDetail, DiffSide, ListedFileDiff,
+    TreeDiffStructured,
 };
 
 use super::{FileDiff, Hunk, Line, LineKind, LineStatJson, Segment};
@@ -93,6 +92,7 @@ pub fn map_listed_file(f: ListedFileDiff, detail: DiffDetail) -> FileDiff {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn cli_file_from_tree(t: TreeDiffStructured) -> FileDiff {
     let hunks = cli_hunks_from_annotated(presentation_hunks_from_tree(&t));
     let e = t.entry;
@@ -127,34 +127,32 @@ pub fn cli_file_from_tree(t: TreeDiffStructured) -> FileDiff {
     }
 }
 
-pub fn cli_file_from_file_change(
-    fc: &FileChange,
-    diff_options: DiffOptions,
+pub fn cli_file_from_target_file_diff(
+    f: grit_lib::diff::FileDiff,
     side: DiffSide,
     peer_hunks: &[grit_lib::diff::structured::StructuredHunk],
     assign_hunk_ids: bool,
 ) -> FileDiff {
-    let structured = fc.structured(diff_options);
     let hunks = cli_hunks_from_annotated(annotate_structured_hunks(
         side,
-        &fc.path,
-        structured.hunks,
+        &f.path,
+        f.hunks,
         peer_hunks,
         assign_hunk_ids,
     ));
     FileDiff {
-        path: fc.path.clone(),
-        old_path: fc.old_path.clone(),
-        status: fc.status.into(),
-        old_mode: structured.old_mode,
-        new_mode: structured.new_mode,
-        old_encoding_lossy: structured.old_encoding_lossy,
-        new_encoding_lossy: structured.new_encoding_lossy,
-        binary: fc.binary,
-        old_size: fc.binary.then_some(fc.old_bytes.byte_len()),
-        new_size: fc.binary.then_some(fc.new_bytes.byte_len()),
-        content_changed: fc.content_changed,
-        similarity: fc.similarity,
+        path: f.path,
+        old_path: f.old_path,
+        status: f.status.into(),
+        old_mode: f.old_mode,
+        new_mode: f.new_mode,
+        old_encoding_lossy: f.old_encoding_lossy,
+        new_encoding_lossy: f.new_encoding_lossy,
+        binary: f.binary,
+        old_size: f.binary.then_some(f.old_size),
+        new_size: f.binary.then_some(f.new_size),
+        content_changed: f.content_changed,
+        similarity: None,
         stat: None,
         combined_status: None,
         hunks: Some(hunks),
