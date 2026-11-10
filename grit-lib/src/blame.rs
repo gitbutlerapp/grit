@@ -388,6 +388,7 @@ fn blame_lines_equal(a: &str, b: &str, ws: crate::diff::WhitespaceMode) -> bool 
 /// out (identical on both sides); `shared` yields the comparison text of at least those whose
 /// text is in the edited middle, and Myers counts their occurrences the way xdiff counts every
 /// record of the files.
+#[allow(clippy::too_many_arguments)]
 fn blame_compacted_line_ops<'s>(
     old: &[&str],
     new: &[&str],
@@ -396,6 +397,7 @@ fn blame_compacted_line_ops<'s>(
     diff_algorithm: BlameDiffAlgorithm,
     indent_heuristic: bool,
     ws: crate::diff::WhitespaceMode,
+    scratch: Option<&mut BlamePairDiffScratch>,
 ) -> Vec<DiffOp> {
     use similar::TextDiff;
 
@@ -426,7 +428,16 @@ fn blame_compacted_line_ops<'s>(
         let mut interner = LineInterner::with_capacity(old_cmp.len() + new_cmp.len());
         let ids1 = interner.intern_all(old_cmp);
         let ids2 = interner.intern_all(new_cmp);
-        let mut shared_counts = vec![0u32; interner.len()];
+        let nclasses = interner.len();
+        let mut local_shared_counts;
+        let shared_counts: &mut [u32] = if let Some(scratch) = scratch {
+            scratch.shared_counts.clear();
+            scratch.shared_counts.resize(nclasses, 0);
+            &mut scratch.shared_counts
+        } else {
+            local_shared_counts = vec![0u32; nclasses];
+            &mut local_shared_counts
+        };
         for line in shared {
             if let Some(id) = interner.get(&ws.normalize_line_for_compare(line)) {
                 shared_counts[id as usize] += 1;
@@ -435,7 +446,7 @@ fn blame_compacted_line_ops<'s>(
         return crate::diff::line_diff_ops_git_xdiff_compacted_ids(
             &ids1,
             &ids2,
-            &shared_counts,
+            shared_counts,
             shared_records,
             old,
             new,
@@ -562,6 +573,7 @@ pub fn build_line_map(
 /// Like [`build_line_map_with_changed_flags`], for blob lines.
 ///
 /// `affix` is [`slide_safe_affix`] of the two blobs.
+#[allow(clippy::too_many_arguments)]
 fn build_line_map_with_changed_flags_owned(
     old: &BlobLines,
     new: &BlobLines,
@@ -570,6 +582,7 @@ fn build_line_map_with_changed_flags_owned(
     indent_heuristic: bool,
     with_changed_flags: bool,
     ws: crate::diff::WhitespaceMode,
+    scratch: &mut BlamePairDiffScratch,
 ) -> (Vec<Option<usize>>, Vec<bool>) {
     windowed_line_map(
         old,
@@ -579,6 +592,7 @@ fn build_line_map_with_changed_flags_owned(
         indent_heuristic,
         with_changed_flags,
         ws,
+        Some(scratch),
     )
 }
 
@@ -600,6 +614,7 @@ fn build_line_map_with_changed_flags(
         indent_heuristic,
         with_changed_flags,
         ws,
+        None,
     )
 }
 
@@ -609,6 +624,7 @@ fn build_line_map_with_changed_flags(
 /// [`blame_trimmed_tail_lines`]). Lines outside [`slide_safe_affix`] plus
 /// [`COMPACTION_CONTEXT`] map straight through, which is what compacting the whole files would
 /// give them; they still count as occurrences for the Myers line classification.
+#[allow(clippy::too_many_arguments)]
 fn windowed_line_map<L: BlameLines + ?Sized>(
     old: &L,
     new: &L,
@@ -617,6 +633,7 @@ fn windowed_line_map<L: BlameLines + ?Sized>(
     indent_heuristic: bool,
     with_changed_flags: bool,
     ws: crate::diff::WhitespaceMode,
+    scratch: Option<&mut BlamePairDiffScratch>,
 ) -> (Vec<Option<usize>>, Vec<bool>) {
     let trimmed_tail = blame_trimmed_tail_lines(old, new, affix, ws);
     let (safe_prefix, safe_suffix) = (affix.safe_prefix, affix.safe_suffix);
@@ -665,6 +682,7 @@ fn windowed_line_map<L: BlameLines + ?Sized>(
         diff_algorithm,
         indent_heuristic,
         ws,
+        scratch,
     );
     let window_map = crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_w.len());
     let map = (0..lo)
@@ -1493,6 +1511,7 @@ fn pass_overlay_to_parents(
             walk.indent_heuristic,
             false,
             ws,
+            &mut session.pair_diff_scratch,
         );
         session.merge_line_stamps[i].begin_pass(par.len());
         let origin = if i == 0 {
@@ -2027,6 +2046,26 @@ enum BlobStorage {
     Binary(Arc<Vec<u8>>),
 }
 
+/// Line-text lookup for one blob (parent duplicate detection during blame).
+#[derive(Clone)]
+struct BlobLineTextIndex {
+    by_line_hash: hashbrown::HashMap<u64, Vec<usize>>,
+}
+
+fn blame_line_lookup_hash(line: &str, ws: crate::diff::WhitespaceMode) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let key = ws.normalize_line_for_compare(line);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.as_ref().hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Reused scratch for one blame pair diff (Myers shared-count vector).
+#[derive(Default)]
+struct BlamePairDiffScratch {
+    shared_counts: Vec<u32>,
+}
+
 /// Blob bytes split into lines without per-line `String` allocations.
 #[derive(Clone)]
 struct BlobLines {
@@ -2035,6 +2074,8 @@ struct BlobLines {
     line_ends: Arc<Vec<usize>>,
     compare_bodies: OnceLock<Arc<Vec<String>>>,
     compare_records: OnceLock<Arc<Vec<String>>>,
+    text_index: OnceLock<Arc<BlobLineTextIndex>>,
+    ws_text_index: OnceLock<Arc<BlobLineTextIndex>>,
 }
 
 impl BlobLines {
@@ -2055,6 +2096,8 @@ impl BlobLines {
             line_ends: Arc::new(line_ends),
             compare_bodies: OnceLock::new(),
             compare_records: OnceLock::new(),
+            text_index: OnceLock::new(),
+            ws_text_index: OnceLock::new(),
         }
     }
 
@@ -2162,6 +2205,61 @@ impl BlobLines {
             .collect()
     }
 
+    fn build_text_index(&self, ws: crate::diff::WhitespaceMode) -> Arc<BlobLineTextIndex> {
+        let mut by_line_hash: hashbrown::HashMap<u64, Vec<usize>> =
+            hashbrown::HashMap::with_capacity(self.len());
+        for i in 0..self.len() {
+            let hash = blame_line_lookup_hash(self.comparison_line(i, ws), ws);
+            by_line_hash.entry(hash).or_default().push(i);
+        }
+        Arc::new(BlobLineTextIndex { by_line_hash })
+    }
+
+    fn text_index(&self, ws: crate::diff::WhitespaceMode) -> Arc<BlobLineTextIndex> {
+        if ws.normalizes_line_compare() {
+            self.ws_text_index
+                .get_or_init(|| self.build_text_index(ws))
+                .clone()
+        } else {
+            self.text_index
+                .get_or_init(|| self.build_text_index(ws))
+                .clone()
+        }
+    }
+
+    fn parent_has_matching_line(
+        parent: &BlobLineTextIndex,
+        child_line: &str,
+        ws: crate::diff::WhitespaceMode,
+    ) -> bool {
+        parent
+            .by_line_hash
+            .contains_key(&blame_line_lookup_hash(child_line, ws))
+    }
+
+    fn first_parent_index_with_text(
+        parent: &BlobLineTextIndex,
+        child_line: &str,
+        ws: crate::diff::WhitespaceMode,
+    ) -> Option<usize> {
+        parent
+            .by_line_hash
+            .get(&blame_line_lookup_hash(child_line, ws))
+            .and_then(|i| i.first().copied())
+    }
+
+    fn parent_has_other_line_with_text(
+        parent: &BlobLineTextIndex,
+        child_line: &str,
+        ws: crate::diff::WhitespaceMode,
+        exclude_parent_idx: usize,
+    ) -> bool {
+        parent
+            .by_line_hash
+            .get(&blame_line_lookup_hash(child_line, ws))
+            .is_some_and(|indices| indices.iter().any(|&i| i != exclude_parent_idx))
+    }
+
     fn to_vec(&self) -> Vec<String> {
         (0..self.len())
             .map(|i| self.line_display(i).content)
@@ -2253,6 +2351,7 @@ struct BlameSession<'a> {
     identity_line_maps: HashMap<usize, Arc<Vec<Option<usize>>>>,
     pack: SessionPackReader,
     merge_line_stamps: Vec<LineUseStamp>,
+    pair_diff_scratch: BlamePairDiffScratch,
     #[cfg(test)]
     diffed_pairs: Vec<(ObjectId, ObjectId)>,
 }
@@ -2283,6 +2382,7 @@ impl<'a> BlameSession<'a> {
             identity_line_maps: HashMap::new(),
             pack: SessionPackReader::default(),
             merge_line_stamps: Vec::new(),
+            pair_diff_scratch: BlamePairDiffScratch::default(),
             #[cfg(test)]
             diffed_pairs: Vec::new(),
         }
@@ -2491,6 +2591,7 @@ impl<'a> BlameSession<'a> {
                 indent_heuristic,
                 true,
                 ws,
+                &mut self.pair_diff_scratch,
             )
         } else {
             (
@@ -2502,6 +2603,7 @@ impl<'a> BlameSession<'a> {
                     indent_heuristic,
                     false,
                     ws,
+                    &mut self.pair_diff_scratch,
                 )
                 .0,
                 Vec::new(),
@@ -3598,16 +3700,22 @@ fn compute_blame_with_session(
                 let diff_line_map = maps.diff_line_map.as_slice();
                 let line_map = maps.line_map.as_slice();
                 let stop_blame_on_current = maps.stop_blame_on_current.as_slice();
-                let inserted_line_duplicates_parent = pending.iter().any(|t| {
-                    t.current_idx < cur_lines_arc.len()
-                        && (0..par_lines_arc.len()).any(|i| {
-                            blame_lines_equal(
-                                cur_lines_arc.comparison_line(t.current_idx, session.whitespace),
-                                par_lines_arc.comparison_line(i, session.whitespace),
-                                session.whitespace,
+                let ws = session.whitespace;
+                let mut par_index: Option<Arc<BlobLineTextIndex>> = None;
+                let mut parent_line_index =
+                    || par_index.get_or_insert_with(|| par_lines_arc.text_index(ws)).clone();
+                let inserted_line_duplicates_parent = if copy_depth > 0 || move_detection {
+                    pending.iter().any(|t| {
+                        t.current_idx < cur_lines_arc.len()
+                            && BlobLines::parent_has_matching_line(
+                                &parent_line_index(),
+                                cur_lines_arc.comparison_line(t.current_idx, ws),
+                                ws,
                             )
-                        })
-                });
+                    })
+                } else {
+                    false
+                };
                 let mut introduced_for_copy = Vec::new();
 
                 for t in pending.drain(..) {
@@ -3656,18 +3764,12 @@ fn compute_blame_with_session(
                                 && !is_ignored
                             {
                                 let duplicates_earlier_parent_line =
-                                    (0..par_lines_arc.len()).any(|i| {
-                                        i != t.current_idx
-                                            && blame_lines_equal(
-                                                cur_lines_arc.comparison_line(
-                                                    t.current_idx,
-                                                    session.whitespace,
-                                                ),
-                                                par_lines_arc
-                                                    .comparison_line(i, session.whitespace),
-                                                session.whitespace,
-                                            )
-                                    });
+                                    BlobLines::parent_has_other_line_with_text(
+                                        &parent_line_index(),
+                                        cur_lines_arc.comparison_line(t.current_idx, ws),
+                                        ws,
+                                        t.current_idx,
+                                    );
                                 if duplicates_earlier_parent_line {
                                     still_pending.push(TrackedLine {
                                         final_lineno: t.final_lineno,
@@ -3726,15 +3828,11 @@ fn compute_blame_with_session(
                                 ));
                             }
                         } else {
-                            let line_text =
-                                cur_lines_arc.comparison_line(t.current_idx, session.whitespace);
-                            if let Some(parent_idx) = (0..par_lines_arc.len()).find(|&i| {
-                                blame_lines_equal(
-                                    par_lines_arc.comparison_line(i, session.whitespace),
-                                    line_text,
-                                    session.whitespace,
-                                )
-                            }) {
+                            if let Some(parent_idx) = BlobLines::first_parent_index_with_text(
+                                &parent_line_index(),
+                                cur_lines_arc.comparison_line(t.current_idx, ws),
+                                ws,
+                            ) {
                                 still_pending.push(TrackedLine {
                                     final_lineno: t.final_lineno,
                                     current_idx: parent_idx,
@@ -3743,8 +3841,7 @@ fn compute_blame_with_session(
                                     origin: t.origin,
                                 });
                                 continue;
-                            }
-                            if blame_pending_needs_relocation_detect(
+                            } else if blame_pending_needs_relocation_detect(
                                 copy_depth,
                                 move_detection,
                                 inserted_line_duplicates_parent,
@@ -5577,6 +5674,7 @@ mod tests {
             );
             assert!(affix.is_empty());
             assert_eq!(need.len(), 1);
+            let mut scratch = BlamePairDiffScratch::default();
             for algorithm in [
                 BlameDiffAlgorithm::Myers,
                 BlameDiffAlgorithm::Histogram,
@@ -5591,6 +5689,7 @@ mod tests {
                     true,
                     true,
                     exact,
+                    &mut scratch,
                 );
                 assert_eq!(map, vec![Some(0), None]);
                 assert_eq!(flags, vec![false, true]);
@@ -5611,6 +5710,7 @@ mod tests {
                     true,
                     true,
                     ws,
+                    &mut scratch,
                 );
                 assert_eq!(map, vec![Some(0), Some(1)]);
                 assert_eq!(flags, vec![false, false]);
@@ -5738,6 +5838,7 @@ mod tests {
         let old_lines = BlobLines::from_content(old.map(|l| format!("{l}\n")).concat());
         let new_lines = BlobLines::from_content(new.map(|l| format!("{l}\n")).concat());
         let exact = crate::diff::WhitespaceMode::default();
+        let mut scratch = BlamePairDiffScratch::default();
         let (map, flags) = build_line_map_with_changed_flags_owned(
             &old_lines,
             &new_lines,
@@ -5746,6 +5847,7 @@ mod tests {
             true,
             true,
             exact,
+            &mut scratch,
         );
         assert_eq!(map, vec![None, Some(1), Some(2), None, None, None, Some(3)]);
         assert_eq!(flags, vec![true, false, false, true, true, true, false]);
@@ -5932,6 +6034,7 @@ mod tests {
                     algorithm,
                     indent_heuristic,
                     exact,
+                    None,
                 );
                 let mut expected =
                     crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_v.len());
@@ -5942,8 +6045,16 @@ mod tests {
                         new_v.len(),
                     );
                 expected_flags.resize(new.len(), false);
-                let (map, flags) =
-                    windowed_line_map(old, new, affix, algorithm, indent_heuristic, true, exact);
+                let (map, flags) = windowed_line_map(
+                    old,
+                    new,
+                    affix,
+                    algorithm,
+                    indent_heuristic,
+                    true,
+                    exact,
+                    None,
+                );
                 assert_eq!(map, expected, "{label} {algorithm:?} {indent_heuristic}");
                 assert_eq!(
                     flags, expected_flags,
