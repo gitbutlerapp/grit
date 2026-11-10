@@ -595,6 +595,9 @@ mod resolve_verify_quiet_cli;
 #[path = "restore_hunks.rs"]
 mod restore_hunks;
 #[cfg(feature = "full-tests")]
+#[path = "restore_icase_collision_2575.rs"]
+mod restore_icase_collision_2575;
+#[cfg(feature = "full-tests")]
 #[path = "restore_interrupt.rs"]
 mod restore_interrupt;
 #[cfg(feature = "full-tests")]

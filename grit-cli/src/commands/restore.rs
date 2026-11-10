@@ -19,6 +19,7 @@ impl From<RestoreOutcome> for RestoreCliOutcome {
         Self {
             restored: value.restored,
             removed: value.removed,
+            path_collisions: value.path_collisions,
             restored_hunks: BTreeMap::new(),
             restored_lines: BTreeMap::new(),
             dry_run: false,
@@ -37,6 +38,7 @@ impl From<RestoreHunksOutcome> for RestoreCliOutcome {
         Self {
             restored: value.restored,
             removed: value.removed,
+            path_collisions: Vec::new(),
             restored_hunks,
             restored_lines: value.restored_lines,
             dry_run: value.dry_run,

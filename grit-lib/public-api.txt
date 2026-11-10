@@ -16183,6 +16183,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::restore::RestoreOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::restore::RestoreOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::restore::RestoreOptions
 pub struct grit_lib::porcelain::restore::RestoreOutcome
+pub grit_lib::porcelain::restore::RestoreOutcome::path_collisions: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::restore::RestoreOutcome::removed: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::restore::RestoreOutcome::restored: alloc::vec::Vec<alloc::string::String>
 impl core::clone::Clone for grit_lib::porcelain::restore::RestoreOutcome

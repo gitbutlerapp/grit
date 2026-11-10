@@ -6,6 +6,12 @@
     "dry_run": {
       "type": "boolean"
     },
+    "path_collisions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "removed": {
       "items": {
         "type": "string"

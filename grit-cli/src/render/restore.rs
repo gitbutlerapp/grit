@@ -8,6 +8,8 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::output::outln;
+use crate::output::OutputMode;
+use crate::render::clone::render_path_collision_warning;
 use crate::render::list::format_inline_code;
 use crate::render::{HumanRender, MarkdownRender, RenderContext};
 use crate::ui::PathDisplayOptions;
@@ -17,6 +19,8 @@ use crate::ui::PathDisplayOptions;
 pub struct RestoreCliOutcome {
     pub restored: Vec<String>,
     pub removed: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_collisions: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub restored_hunks: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -43,7 +47,7 @@ impl RestoreCliOutcome {
 }
 
 impl HumanRender for RestoreCliOutcome {
-    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let prefix = if self.dry_run {
             "Would restore"
         } else {
@@ -55,14 +59,15 @@ impl HumanRender for RestoreCliOutcome {
         for path in &self.removed {
             outln!(w, "Removed {}", self.format_path(path));
         }
+        render_path_collision_warning(w, ctx.mode, &self.path_collisions)?;
         Ok(())
     }
 }
 
 impl MarkdownRender for RestoreCliOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Restore");
-        if self.restored.is_empty() && self.removed.is_empty() {
+        if self.restored.is_empty() && self.removed.is_empty() && self.path_collisions.is_empty() {
             outln!(w, "\nNo paths changed.");
             return Ok(());
         }
@@ -77,6 +82,17 @@ impl MarkdownRender for RestoreCliOutcome {
             outln!(w, "\n### Removed");
             for path in &self.removed {
                 let shown = format_inline_code(&self.format_path(path));
+                outln!(w, "- {shown}");
+            }
+        }
+        if !self.path_collisions.is_empty() && ctx.mode == OutputMode::Markdown {
+            outln!(w, "\n### Path collisions");
+            outln!(
+                w,
+                "> Case-insensitive paths share one dentry; only one spelling exists on disk."
+            );
+            for path in &self.path_collisions {
+                let shown = format_inline_code(path);
                 outln!(w, "- {shown}");
             }
         }
