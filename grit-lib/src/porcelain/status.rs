@@ -5046,6 +5046,63 @@ mod status_op_tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
+    fn status_autocrlf_append_size_drift_matches_git_without_content_reads() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        grit_test_support::git(root, &["init", "-q", "-b", "main", "."]);
+        grit_test_support::git(root, &["config", "user.email", "t@example.com"]);
+        grit_test_support::git(root, &["config", "user.name", "Test"]);
+        grit_test_support::git(root, &["config", "core.autocrlf", "true"]);
+        fs::write(root.join("n.txt"), b"one\ntwo\n").unwrap();
+        grit_test_support::git(root, &["add", "n.txt"]);
+        grit_test_support::git(root, &["commit", "-qm", "c"]);
+        let mut content = fs::read(root.join("n.txt")).unwrap();
+        content.extend_from_slice(b"three\n");
+        fs::write(root.join("n.txt"), content).unwrap();
+
+        let git_porcelain = grit_test_support::git(root, &["status", "--porcelain"]);
+        assert!(
+            git_porcelain
+                .lines()
+                .any(|l| l.ends_with(" n.txt") && l.contains('M')),
+            "git must list appended file as modified: {git_porcelain:?}"
+        );
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let metrics = repo.odb().hot_path_metrics();
+        metrics.reset_blob_content_reads();
+        metrics.set_blob_counting(true);
+        let model = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .unwrap();
+        metrics.set_blob_counting(false);
+        assert_eq!(
+            model.unstaged.len(),
+            1,
+            "grit must match git's unstaged modified count"
+        );
+        assert_eq!(model.unstaged[0].path(), "n.txt");
+        assert_eq!(model.unstaged[0].new_oid, crate::diff::zero_oid());
+        assert_eq!(
+            metrics.blob_content_reads(),
+            0,
+            "append size drift must not open the worktree file"
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
     fn status_unstaged_delete_and_untracked_add_not_rename() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
