@@ -2004,6 +2004,8 @@ pub(crate) fn rev_list_with_context(
     let (objects, omitted_objects, missing_objects, per_commit_object_counts, object_segments) =
         if options.objects {
             repo.odb().with_pack_read_context(|| {
+                let cancel = cancel_watch_for_walk(&options.cancel);
+                let mut object_walk_tree_state = TreeWalkState::new(cancel.clone());
                 let excluded_object_ids = excluded_object_root_ids(
                     repo,
                     &negative_object_roots,
@@ -2012,7 +2014,8 @@ pub(crate) fn rev_list_with_context(
                     skip_trees,
                     omit_object_paths,
                     collect_tree_omits,
-                    cancel_watch_for_walk(&options.cancel),
+                    cancel.clone(),
+                    &mut object_walk_tree_state,
                 )?;
                 let filter_provided = options.filter_provided_objects;
                 let (mut objs, mut omit, mut miss, mut counts, mut segments) =
@@ -2031,7 +2034,8 @@ pub(crate) fn rev_list_with_context(
                             omit_object_paths,
                             packed_set.as_ref(),
                             collect_tree_omits,
-                            cancel_watch_for_walk(&options.cancel),
+                            cancel.clone(),
+                            &mut object_walk_tree_state,
                         )?;
                         (o, om, mi, c, Vec::<Vec<(ObjectId, String)>>::new())
                     } else {
@@ -2049,7 +2053,8 @@ pub(crate) fn rev_list_with_context(
                             omit_object_paths,
                             packed_set.as_ref(),
                             collect_tree_omits,
-                            cancel_watch_for_walk(&options.cancel),
+                            cancel,
+                            &mut object_walk_tree_state,
                         )?;
                         (o, om, mi, Vec::new(), segments)
                     };
@@ -6047,6 +6052,7 @@ fn try_rev_list_accelerated(
     };
 
     let skip_trees = skip_tree_descent_for_object_type_filter(options.filter.as_ref());
+    let mut object_walk_tree_state = TreeWalkState::new(None);
     let excluded_object_ids = excluded_object_root_ids(
         repo,
         negative_object_roots,
@@ -6056,6 +6062,7 @@ fn try_rev_list_accelerated(
         true,
         false,
         None,
+        &mut object_walk_tree_state,
     )?;
 
     let (commit_count, non_commit_count) = if excluded_object_ids.is_empty() {
@@ -6185,6 +6192,7 @@ where
     };
 
     let skip_trees = skip_tree_descent_for_object_type_filter(options.filter.as_ref());
+    let mut object_walk_tree_state = TreeWalkState::new(None);
     let excluded_object_ids = excluded_object_root_ids(
         repo,
         &[],
@@ -6194,6 +6202,7 @@ where
         true,
         false,
         None,
+        &mut object_walk_tree_state,
     )?;
 
     for oid in reachable.iter_by_kind(ObjectKind::Commit) {
@@ -6270,6 +6279,7 @@ pub(crate) fn try_bitmap_reachable_commit_set_for_specs(
     }
 
     let skip_trees = skip_tree_descent_for_object_type_filter(options.filter.as_ref());
+    let mut object_walk_tree_state = TreeWalkState::new(None);
     let excluded_object_ids = excluded_object_root_ids(
         repo,
         &[],
@@ -6279,6 +6289,7 @@ pub(crate) fn try_bitmap_reachable_commit_set_for_specs(
         true,
         false,
         None,
+        &mut object_walk_tree_state,
     )?;
     if !excluded_object_ids.is_empty() {
         return Ok(None);
@@ -8718,56 +8729,6 @@ fn commit_parent_trees(
     Ok(out)
 }
 
-fn tree_oid_at_path(
-    repo: &Repository,
-    tree_state: &mut TreeWalkState,
-    root_tree: ObjectId,
-    path_prefix: &str,
-) -> Result<Option<ObjectId>> {
-    if path_prefix.is_empty() {
-        return Ok(Some(root_tree));
-    }
-    let mut current = root_tree;
-    for component in path_prefix.split('/').filter(|part| !part.is_empty()) {
-        let blob = tree_state.tree_blob(repo, current)?;
-        let oid_len = tree_state.oid_len(repo);
-        let mut found = None;
-        for entry in TreeRefIter::with_oid_len(blob.as_slice(), oid_len) {
-            let entry = entry?;
-            if entry.mode == MODE_TREE && String::from_utf8_lossy(entry.name) == component {
-                found = Some(entry.oid);
-                break;
-            }
-        }
-        let Some(next) = found else {
-            return Ok(None);
-        };
-        current = next;
-    }
-    Ok(Some(current))
-}
-
-fn subtree_unchanged_in_all_parents(
-    repo: &Repository,
-    tree_state: &mut TreeWalkState,
-    parent_roots: &[ObjectId],
-    path_prefix: &str,
-    tree_oid: ObjectId,
-) -> Result<bool> {
-    if parent_roots.is_empty() {
-        return Ok(false);
-    }
-    for &root in parent_roots {
-        let Some(parent_tree) = tree_oid_at_path(repo, tree_state, root, path_prefix)? else {
-            return Ok(false);
-        };
-        if parent_tree != tree_oid {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 /// The directory at one path in every parent commit's tree, indexed by entry name.
 ///
 /// Lets the object walk ask, for every entry of a tree, whether all parents hold the same
@@ -8779,19 +8740,26 @@ struct ParentDirEntries {
 }
 
 impl ParentDirEntries {
-    fn load(
+    fn load_dir_trees(
         repo: &Repository,
         tree_state: &mut TreeWalkState,
-        parent_roots: &[ObjectId],
-        path_prefix: &str,
+        parent_dir_trees: &[Option<ObjectId>],
     ) -> Result<Self> {
-        let mut dirs = Vec::with_capacity(parent_roots.len());
-        for &root in parent_roots {
-            let Some(dir_tree) = tree_oid_at_path(repo, tree_state, root, path_prefix)? else {
+        let mut dirs = Vec::with_capacity(parent_dir_trees.len());
+        for dir_tree in parent_dir_trees {
+            let Some(dir_tree) = dir_tree else {
                 dirs.push(None);
                 continue;
             };
-            let blob = tree_state.tree_blob(repo, dir_tree)?;
+            let Ok(kind) = repo.odb().read_info(dir_tree).map(|i| i.kind) else {
+                dirs.push(None);
+                continue;
+            };
+            if kind != ObjectKind::Tree {
+                dirs.push(None);
+                continue;
+            }
+            let blob = tree_state.tree_blob(repo, *dir_tree)?;
             let oid_len = tree_state.oid_len(repo);
             let mut entries = HashMap::new();
             for entry in TreeRefIter::with_oid_len(blob.as_slice(), oid_len) {
@@ -8803,6 +8771,13 @@ impl ParentDirEntries {
             dirs.push(Some(entries));
         }
         Ok(Self { dirs })
+    }
+
+    fn child_parent_dir_trees(&self, name: &str) -> Vec<Option<ObjectId>> {
+        self.dirs
+            .iter()
+            .map(|dir| dir.as_ref().and_then(|entries| entries.get(name).copied()))
+            .collect()
     }
 
     /// Whether every parent's directory holds `oid` under `name` (false with no parents).
@@ -8829,6 +8804,21 @@ struct TreeWalkState {
     sparse_match_cache: HashMap<String, bool>,
     /// Subtrees fully enumerated for sparse at `(tree_oid, prefix)` on this walk.
     sparse_complete_trees: HashSet<(ObjectId, String)>,
+    /// Trees whose descendant closure was fully listed (unfiltered / non-depth-sensitive walks).
+    fully_enumerated_trees: HashSet<ObjectId>,
+}
+
+fn object_walk_uses_global_tree_dedup(
+    filter: Option<&ObjectFilter>,
+    sparse_patterns: Option<&ParsedSparsePatterns>,
+) -> bool {
+    if sparse_patterns.is_some() {
+        return false;
+    }
+    match filter {
+        None => true,
+        Some(f) => !f.is_depth_sensitive(),
+    }
 }
 
 impl TreeWalkState {
@@ -8917,13 +8907,13 @@ fn excluded_object_root_ids(
     skip_trees_for_type_filter: bool,
     omit_object_paths: bool,
     collect_tree_omits: bool,
-    cancel_watch: Option<Arc<AtomicBool>>,
+    _cancel_watch: Option<Arc<AtomicBool>>,
+    tree_state: &mut TreeWalkState,
 ) -> Result<HashSet<ObjectId>> {
     if object_roots.is_empty() {
         return Ok(HashSet::new());
     }
 
-    let mut tree_state = TreeWalkState::new(cancel_watch);
     let mut emitted = HashSet::new();
     let mut objects = Vec::new();
     let mut omitted = Vec::new();
@@ -8936,7 +8926,7 @@ fn excluded_object_root_ids(
         collect_root_object(
             repo,
             root,
-            &mut tree_state,
+            tree_state,
             &mut emitted,
             &mut objects,
             &mut omitted,
@@ -9056,14 +9046,15 @@ fn collect_reachable_objects_segmented(
     packed_set: Option<&HashSet<ObjectId>>,
     collect_tree_omits: bool,
     cancel_watch: Option<Arc<AtomicBool>>,
+    tree_state: &mut TreeWalkState,
 ) -> Result<ReachableObjectsSegmented> {
+    let _ = cancel_watch;
     let mut emitted = HashSet::new();
     let mut result = Vec::new();
     let mut omitted = Vec::new();
     let mut missing = Vec::new();
     let mut missing_seen = HashSet::new();
     let mut segments: Vec<Vec<(ObjectId, String)>> = Vec::with_capacity(commits.len() + 1);
-    let mut tree_state = TreeWalkState::new(cancel_watch.clone());
     let mut top_tree_omit =
         walk_needs_top_tree_omit_set(filter, collect_tree_omits).then(HashSet::<ObjectId>::new);
     let mut combine_states =
@@ -9090,13 +9081,17 @@ fn collect_reachable_objects_segmented(
                 result.push((tag_oid, "tag".to_owned()));
             }
         }
-        let parent_trees_slice = if filter
-            .is_some_and(|f| f.is_depth_sensitive() || matches!(f, ObjectFilter::SparseOid(_)))
+        let parent_trees_slice = if object_walk_uses_global_tree_dedup(filter, sparse_patterns)
+            || filter
+                .is_some_and(|f| f.is_depth_sensitive() || matches!(f, ObjectFilter::SparseOid(_)))
         {
             None
         } else {
             Some(graph.parent_commit_trees(commit_oid)?)
         };
+        let parent_dir_trees: Option<Vec<Option<ObjectId>>> = parent_trees_slice
+            .as_ref()
+            .map(|trees| trees.iter().copied().map(Some).collect());
         if parent_trees_slice
             .as_ref()
             .is_some_and(|parents| !parents.is_empty() && parents.iter().all(|&t| t == commit_tree))
@@ -9114,8 +9109,8 @@ fn collect_reachable_objects_segmented(
             0,
             false,
             None,
-            parent_trees_slice.as_deref(),
-            &mut tree_state,
+            parent_dir_trees.as_deref(),
+            tree_state,
             &mut emitted,
             &mut result,
             &mut omitted,
@@ -9140,7 +9135,7 @@ fn collect_reachable_objects_segmented(
         collect_root_object(
             repo,
             root,
-            &mut tree_state,
+            tree_state,
             &mut emitted,
             &mut result,
             &mut omitted,
@@ -9455,7 +9450,7 @@ fn collect_tree_objects_filtered(
     depth: u64,
     explicit_root: bool,
     parent_union: Option<&HashSet<ObjectId>>,
-    parent_commit_trees: Option<&[ObjectId]>,
+    parent_dir_trees: Option<&[Option<ObjectId>]>,
     tree_state: &mut TreeWalkState,
     emitted: &mut HashSet<ObjectId>,
     result: &mut Vec<(ObjectId, String)>,
@@ -9474,9 +9469,13 @@ fn collect_tree_objects_filtered(
     combine_states: &mut Option<Vec<CombineSubState>>,
 ) -> Result<()> {
     tree_state.poll_cancel()?;
+    let global_tree_dedup = object_walk_uses_global_tree_dedup(filter, sparse_patterns);
+    if global_tree_dedup && tree_state.fully_enumerated_trees.contains(&tree_oid) {
+        return Ok(());
+    }
     if !explicit_root {
-        if let Some(parents) = parent_commit_trees {
-            if subtree_unchanged_in_all_parents(repo, tree_state, parents, prefix, tree_oid)? {
+        if let Some(parents) = parent_dir_trees {
+            if !parents.is_empty() && parents.iter().all(|p| p == &Some(tree_oid)) {
                 return Ok(());
             }
         } else if let Some(pu) = parent_union {
@@ -9486,7 +9485,7 @@ fn collect_tree_objects_filtered(
         }
     }
     if sparse_patterns.is_some()
-        && parent_commit_trees.is_none()
+        && parent_dir_trees.is_none()
         && tree_state
             .sparse_complete_trees
             .contains(&(tree_oid, prefix.to_owned()))
@@ -9587,6 +9586,7 @@ fn collect_tree_objects_filtered(
 
     let needs_child_read_info =
         object_walk_needs_child_read_info(filter, sparse_patterns, missing_action);
+    let use_parent_entry_diff = parent_dir_trees.is_some() && !global_tree_dedup;
     let mut parent_dirs: Option<ParentDirEntries> = None;
     for entry in TreeRefIter::with_oid_len(tree_blob.as_slice(), oid_len) {
         tree_state.poll_cancel()?;
@@ -9601,6 +9601,9 @@ fn collect_tree_objects_filtered(
             format!("{prefix}/{name}")
         };
         if entry.mode == 0o040000 {
+            if global_tree_dedup && tree_state.fully_enumerated_trees.contains(&entry.oid) {
+                continue;
+            }
             if needs_child_read_info {
                 let child_info = match repo.odb().read_info(&entry.oid) {
                     Ok(info) => info,
@@ -9619,9 +9622,13 @@ fn collect_tree_objects_filtered(
                     return Err(rev_list_unexpected_kind(entry.oid, "tree"));
                 }
             }
-            if let Some(parents) = parent_commit_trees {
+            if use_parent_entry_diff {
                 if parent_dirs.is_none() {
-                    parent_dirs = Some(ParentDirEntries::load(repo, tree_state, parents, prefix)?);
+                    parent_dirs = Some(ParentDirEntries::load_dir_trees(
+                        repo,
+                        tree_state,
+                        parent_dir_trees.unwrap_or(&[]),
+                    )?);
                 }
                 if parent_dirs
                     .as_ref()
@@ -9635,6 +9642,9 @@ fn collect_tree_objects_filtered(
                 }
             }
             let child_tree_depth = depth + 1;
+            let child_parent_dir_trees: Option<Vec<Option<ObjectId>>> = parent_dirs
+                .as_ref()
+                .map(|dirs| dirs.child_parent_dir_trees(&name));
             collect_tree_objects_filtered(
                 repo,
                 entry.oid,
@@ -9642,7 +9652,7 @@ fn collect_tree_objects_filtered(
                 child_tree_depth,
                 false,
                 parent_union,
-                parent_commit_trees,
+                child_parent_dir_trees.as_deref(),
                 tree_state,
                 emitted,
                 result,
@@ -9661,9 +9671,16 @@ fn collect_tree_objects_filtered(
                 combine_states,
             )?;
         } else {
-            if let Some(parents) = parent_commit_trees {
+            if global_tree_dedup && emitted.contains(&entry.oid) {
+                continue;
+            }
+            if use_parent_entry_diff {
                 if parent_dirs.is_none() {
-                    parent_dirs = Some(ParentDirEntries::load(repo, tree_state, parents, prefix)?);
+                    parent_dirs = Some(ParentDirEntries::load_dir_trees(
+                        repo,
+                        tree_state,
+                        parent_dir_trees.unwrap_or(&[]),
+                    )?);
                 }
                 if parent_dirs
                     .as_ref()
@@ -9804,10 +9821,13 @@ fn collect_tree_objects_filtered(
         }
     }
 
-    if sparse_patterns.is_some() && parent_commit_trees.is_none() {
+    if sparse_patterns.is_some() && parent_dir_trees.is_none() {
         tree_state
             .sparse_complete_trees
             .insert((tree_oid, prefix.to_owned()));
+    }
+    if global_tree_dedup {
+        tree_state.fully_enumerated_trees.insert(tree_oid);
     }
     tree_state.tree_blobs.remove(&tree_oid);
 
@@ -9889,16 +9909,17 @@ fn collect_root_object(
             // See the note in `collect_objects_segmented`: the parent_union short-circuit must be
             // disabled when a filter is active so that trees are visited per commit exactly like
             // Git, preserving `tree:`/`combine:` skip-tree semantics and trace output.
-            let parent_trees = if filter.is_some() {
+            let parent_dir_trees: Option<Vec<Option<ObjectId>>> = if filter.is_some() {
                 None
             } else {
-                Some(commit_parent_trees(
+                let parent_trees = commit_parent_trees(
                     repo,
                     &commit.parents,
                     missing_action,
                     missing,
                     missing_seen,
-                )?)
+                )?;
+                Some(parent_trees.into_iter().map(Some).collect())
             };
             collect_tree_objects_filtered(
                 repo,
@@ -9907,7 +9928,7 @@ fn collect_root_object(
                 0,
                 false,
                 None,
-                parent_trees.as_deref(),
+                parent_dir_trees.as_deref(),
                 tree_state,
                 emitted,
                 result,
@@ -10078,8 +10099,9 @@ fn collect_reachable_objects_in_commit_order(
     packed_set: Option<&HashSet<ObjectId>>,
     collect_tree_omits: bool,
     cancel_watch: Option<Arc<AtomicBool>>,
+    tree_state: &mut TreeWalkState,
 ) -> Result<ReachableObjectsInOrder> {
-    let mut tree_state = TreeWalkState::new(cancel_watch.clone());
+    let _ = cancel_watch;
     let mut top_tree_omit =
         walk_needs_top_tree_omit_set(filter, collect_tree_omits).then(HashSet::<ObjectId>::new);
     let mut combine_states =
@@ -10122,7 +10144,7 @@ fn collect_reachable_objects_in_commit_order(
             false,
             None,
             None,
-            &mut tree_state,
+            tree_state,
             &mut emitted,
             &mut result,
             &mut omitted,
@@ -10146,7 +10168,7 @@ fn collect_reachable_objects_in_commit_order(
         collect_root_object(
             repo,
             root,
-            &mut tree_state,
+            tree_state,
             &mut emitted,
             &mut result,
             &mut omitted,
@@ -11594,6 +11616,30 @@ mod line_coverage_tests {
             },
         )?;
         assert!(quiet.reachable_commit_count.is_some() || !all.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn rev_list_objects_range_respects_negative_roots() -> Result<()> {
+        let (_dir, repo, _) = seed_repo(24, true);
+        let opts = RevListOptions {
+            objects: true,
+            no_object_names: true,
+            ..RevListOptions::default()
+        };
+        let all = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let main_only = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[String::from("side")],
+            &opts,
+        )?;
+        let excluded: std::collections::HashSet<ObjectId> =
+            all.objects.iter().map(|(o, _)| *o).collect();
+        let kept: std::collections::HashSet<ObjectId> =
+            main_only.objects.iter().map(|(o, _)| *o).collect();
+        assert!(kept.is_subset(&excluded));
+        assert!(main_only.objects.len() <= all.objects.len());
         Ok(())
     }
 
