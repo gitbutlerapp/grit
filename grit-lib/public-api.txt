@@ -1770,6 +1770,8 @@ pub grit_lib::commits::CommitError::Signing
 pub grit_lib::commits::CommitError::Signing::program: alloc::string::String
 pub grit_lib::commits::CommitError::Signing::status: core::option::Option<i32>
 pub grit_lib::commits::CommitError::Signing::stderr: alloc::boxed::Box<alloc::string::String>
+pub grit_lib::commits::CommitError::WorktreeCaseCollision
+pub grit_lib::commits::CommitError::WorktreeCaseCollision::paths: alloc::vec::Vec<alloc::string::String>
 impl grit_lib::porcelain::CommitError
 pub fn grit_lib::porcelain::CommitError::kind_name(&self) -> &'static str
 impl grit_lib::porcelain::CommitError
@@ -4736,7 +4738,7 @@ pub fn grit_lib::diff::Diff<'_>::commit_files_many(&self, &[grit_lib::objects::O
 pub fn grit_lib::diff::Diff<'_>::commit_files_many_work(&self, &[grit_lib::diff::CommitFilesManyInput], &grit_lib::worktree::pathspec::Pathspec, grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 pub fn grit_lib::diff::Diff<'_>::commit_line_totals(&self, &[grit_lib::objects::ObjectId], &grit_lib::worktree::pathspec::Pathspec, grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<core::option::Option<grit_lib::diff::DiffTotals>>>
 impl<'repo> grit_lib::diff::Diff<'repo>
-pub fn grit_lib::diff::Diff<'repo>::blame(&self, &str, &grit_lib::blame::BlameOptions) -> grit_lib::error::Result<grit_lib::blame::BlameResult>
+pub fn grit_lib::diff::Diff<'repo>::blame(&self, &str, &grit_lib::blame::BlameOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::blame::BlameResult>
 pub fn grit_lib::diff::Diff<'repo>::resolve_blame_line_range(&self, grit_lib::objects::ObjectId, &str, &str) -> core::result::Result<core::ops::range::RangeInclusive<usize>, grit_lib::line_range::LineRangeError>
 pub fn grit_lib::diff::Diff<'repo>::resolve_blame_line_range_with_options(&self, &str, &str, &grit_lib::blame::BlameOptions) -> core::result::Result<core::ops::range::RangeInclusive<usize>, grit_lib::line_range::LineRangeError>
 impl<'repo> grit_lib::diff::Diff<'repo>
@@ -14088,6 +14090,7 @@ pub fn grit_lib::parallel::try_par_map_force<T, R, E, F>(&[T], grit_lib::paralle
 pub fn grit_lib::parallel::try_par_map_with_local<T, R, E, S, Init, F>(&[T], grit_lib::parallel::ParallelOptions, usize, Init, F) -> core::result::Result<alloc::vec::Vec<R>, grit_lib::parallel::ParallelHashError<E>> where T: core::marker::Sync, R: core::marker::Send, E: core::marker::Send + 'static, S: core::marker::Send, Init: core::ops::function::Fn() -> S + core::marker::Sync, F: core::ops::function::Fn(&mut S, &T) -> core::result::Result<R, E> + core::marker::Sync
 pub mod grit_lib::path_validate
 #[non_exhaustive] pub enum grit_lib::path_validate::PathComponentError
+pub grit_lib::path_validate::PathComponentError::ContainsBackslash
 pub grit_lib::path_validate::PathComponentError::ContainsNul
 pub grit_lib::path_validate::PathComponentError::ContainsSlash
 pub grit_lib::path_validate::PathComponentError::Dot
@@ -14095,7 +14098,6 @@ pub grit_lib::path_validate::PathComponentError::DotDot
 pub grit_lib::path_validate::PathComponentError::DotGit
 pub grit_lib::path_validate::PathComponentError::Empty
 pub grit_lib::path_validate::PathComponentError::HfsDotGit
-pub grit_lib::path_validate::PathComponentError::ContainsBackslash
 pub grit_lib::path_validate::PathComponentError::NtfsBackslash
 pub grit_lib::path_validate::PathComponentError::NtfsDotGit
 pub grit_lib::path_validate::PathComponentError::NtfsDriveOrStream
@@ -14574,7 +14576,10 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch::Start
 pub fn grit_lib::porcelain::branch::upstream_tracking_display(&str, &str) -> alloc::string::String
 pub mod grit_lib::porcelain::checkout
 pub struct grit_lib::porcelain::checkout::CheckoutOutcome
+pub grit_lib::porcelain::checkout::CheckoutOutcome::files: u64
+pub grit_lib::porcelain::checkout::CheckoutOutcome::gitlink_paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::checkout::CheckoutOutcome::path_collisions: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::checkout::CheckoutOutcome::worktree_bytes: u64
 impl core::clone::Clone for grit_lib::porcelain::checkout::CheckoutOutcome
 pub fn grit_lib::porcelain::checkout::CheckoutOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::checkout::CheckoutOutcome
@@ -16953,8 +16958,6 @@ pub grit_lib::porcelain::CommitError::NothingStagedToCommit
 pub grit_lib::porcelain::CommitError::NothingStagedToCommit::unstaged: usize
 pub grit_lib::porcelain::CommitError::NothingStagedToCommit::untracked: usize
 pub grit_lib::porcelain::CommitError::NothingToCommit
-pub grit_lib::porcelain::CommitError::WorktreeCaseCollision
-pub grit_lib::porcelain::CommitError::WorktreeCaseCollision::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::CommitError::PartialCommitDuringMerge
 pub grit_lib::porcelain::CommitError::PartialCommitDuringReplay
 pub grit_lib::porcelain::CommitError::PatchApply(grit_lib::error::ApplyError)
@@ -16962,6 +16965,8 @@ pub grit_lib::porcelain::CommitError::Signing
 pub grit_lib::porcelain::CommitError::Signing::program: alloc::string::String
 pub grit_lib::porcelain::CommitError::Signing::status: core::option::Option<i32>
 pub grit_lib::porcelain::CommitError::Signing::stderr: alloc::boxed::Box<alloc::string::String>
+pub grit_lib::porcelain::CommitError::WorktreeCaseCollision
+pub grit_lib::porcelain::CommitError::WorktreeCaseCollision::paths: alloc::vec::Vec<alloc::string::String>
 impl grit_lib::porcelain::CommitError
 pub fn grit_lib::porcelain::CommitError::kind_name(&self) -> &'static str
 impl grit_lib::porcelain::CommitError
@@ -18215,9 +18220,11 @@ pub fn grit_lib::prelude::resolve_initial_branch(&grit_lib::config::environment:
 pub type grit_lib::prelude::Result<T> = core::result::Result<T, grit_lib::error::Error>
 pub mod grit_lib::progress
 #[non_exhaustive] pub enum grit_lib::progress::ProgressPhase
+pub grit_lib::progress::ProgressPhase::Blaming
 pub grit_lib::progress::ProgressPhase::CheckingOutFiles
 pub grit_lib::progress::ProgressPhase::CompressingObjects
 pub grit_lib::progress::ProgressPhase::CopyingObjects
+pub grit_lib::progress::ProgressPhase::Describing
 pub grit_lib::progress::ProgressPhase::EnumeratingObjects
 pub grit_lib::progress::ProgressPhase::IndexingObjects
 pub grit_lib::progress::ProgressPhase::ReceivingObjects
@@ -18225,6 +18232,7 @@ pub grit_lib::progress::ProgressPhase::ResolvingDeltas
 pub grit_lib::progress::ProgressPhase::SendingObjects
 pub grit_lib::progress::ProgressPhase::StagingFiles
 pub grit_lib::progress::ProgressPhase::TransferringBundle
+pub grit_lib::progress::ProgressPhase::WalkingHistory
 pub grit_lib::progress::ProgressPhase::WritingObjects
 impl grit_lib::progress::ProgressPhase
 pub fn grit_lib::progress::ProgressPhase::default_unit(self) -> grit_lib::progress::ProgressUnit
@@ -27035,26 +27043,26 @@ pub fn grit_lib::revwalk::handle::RevWalk<'repo>::merge_base_for_diff(&self, gri
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::merge_bases(&self, &[grit_lib::objects::ObjectId], grit_lib::revwalk::MergeBaseMode) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::reachable_excluding(&self, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::revwalk::ReachableWalkOptions) -> grit_lib::error::Result<(usize, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_stream(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::RevWalkCommitStream<'repo>>>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::count(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<usize>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::left_right_counts(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<grit_lib::revwalk::LeftRightCounts>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_stream(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::RevWalkCommitStream<'repo>>>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::count(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<usize>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::left_right_counts(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::LeftRightCounts>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::parse_tokens(&self, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::RevWalkParsedSpecs>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::rev_list_result(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::rev_list_result(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::symmetric_range_tips(&self, &[&str]) -> grit_lib::error::Result<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_iter(&self, &str, &grit_lib::revwalk::RevWalkCommitIterOptions) -> grit_lib::error::Result<grit_lib::revwalk::handle::RevWalkCommitIter<'repo>>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_iter(&self, &str, &grit_lib::revwalk::RevWalkCommitIterOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::handle::RevWalkCommitIter<'repo>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::parse_stdin_specs(&self, &[alloc::string::String], &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::handle::StdinRevisionSpecs>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::resolve_commits(&self, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::resolve_object(&self, &str) -> grit_lib::error::Result<grit_lib::revwalk::object_inspect::ResolvedObject>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::rev_list(&self, &[alloc::string::String], &[alloc::string::String], &grit_lib::revwalk::rev_list::RevListOptions) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::rev_list(&self, &[alloc::string::String], &[alloc::string::String], &grit_lib::revwalk::rev_list::RevListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::shallow_boundary_oids(&self) -> std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::tag_targets(&self) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::walk(&self, &str, &grit_lib::revwalk::rev_list::RevListOptions) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::walk(&self, &str, &grit_lib::revwalk::rev_list::RevListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::describe(&self, &str, &grit_lib::revwalk::DescribeOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::DescribedCommit>>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::describe(&self, &str, &grit_lib::revwalk::DescribeOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::DescribedCommit>>
 impl<'repo> core::clone::Clone for grit_lib::revwalk::handle::RevWalk<'repo>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::revwalk::handle::RevWalk<'repo>
@@ -29703,26 +29711,26 @@ pub fn grit_lib::revwalk::handle::RevWalk<'repo>::merge_base_for_diff(&self, gri
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::merge_bases(&self, &[grit_lib::objects::ObjectId], grit_lib::revwalk::MergeBaseMode) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::reachable_excluding(&self, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::revwalk::ReachableWalkOptions) -> grit_lib::error::Result<(usize, alloc::vec::Vec<grit_lib::objects::ObjectId>)>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_stream(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::RevWalkCommitStream<'repo>>>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::count(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<usize>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::left_right_counts(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<grit_lib::revwalk::LeftRightCounts>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_stream(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::RevWalkCommitStream<'repo>>>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::count(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<usize>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::left_right_counts(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::LeftRightCounts>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::parse_tokens(&self, &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::RevWalkParsedSpecs>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::rev_list_result(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::rev_list_result(&self, &[&str], &grit_lib::revwalk::RevWalkListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::symmetric_range_tips(&self, &[&str]) -> grit_lib::error::Result<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_iter(&self, &str, &grit_lib::revwalk::RevWalkCommitIterOptions) -> grit_lib::error::Result<grit_lib::revwalk::handle::RevWalkCommitIter<'repo>>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::commits_iter(&self, &str, &grit_lib::revwalk::RevWalkCommitIterOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::handle::RevWalkCommitIter<'repo>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::parse_stdin_specs(&self, &[alloc::string::String], &[&str]) -> grit_lib::error::Result<grit_lib::revwalk::handle::StdinRevisionSpecs>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::resolve_commits(&self, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::resolve_object(&self, &str) -> grit_lib::error::Result<grit_lib::revwalk::object_inspect::ResolvedObject>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::rev_list(&self, &[alloc::string::String], &[alloc::string::String], &grit_lib::revwalk::rev_list::RevListOptions) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::rev_list(&self, &[alloc::string::String], &[alloc::string::String], &grit_lib::revwalk::rev_list::RevListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::shallow_boundary_oids(&self) -> std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::tag_targets(&self) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::walk(&self, &str, &grit_lib::revwalk::rev_list::RevListOptions) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::walk(&self, &str, &grit_lib::revwalk::rev_list::RevListOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::revwalk::rev_list::RevListResult>
 impl<'repo> grit_lib::revwalk::handle::RevWalk<'repo>
-pub fn grit_lib::revwalk::handle::RevWalk<'repo>::describe(&self, &str, &grit_lib::revwalk::DescribeOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::DescribedCommit>>
+pub fn grit_lib::revwalk::handle::RevWalk<'repo>::describe(&self, &str, &grit_lib::revwalk::DescribeOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::DescribedCommit>>
 impl<'repo> core::clone::Clone for grit_lib::revwalk::handle::RevWalk<'repo>
 pub fn grit_lib::revwalk::handle::RevWalk<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::revwalk::handle::RevWalk<'repo>
@@ -30480,10 +30488,21 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::Un
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::UntrackedMode
 #[non_exhaustive] pub struct grit_lib::status::CaseCollisionGroup
 pub grit_lib::status::CaseCollisionGroup::paths: alloc::vec::Vec<alloc::string::String>
-pub fn grit_lib::status::filter_guidance_for_case_collisions(grit_lib::porcelain::status::StatusGuidance, &[alloc::string::String], &std::collections::HashSet<alloc::string::String>) -> grit_lib::porcelain::status::StatusGuidance
-pub fn grit_lib::status::path_in_worktree_case_collision(&str, &[grit_lib::status::CaseCollisionGroup]) -> bool
-pub fn grit_lib::status::worktree_case_collision_groups(&grit_lib::repo::Repository, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::status::CaseCollisionGroup>>
-pub fn grit_lib::status::worktree_case_collision_paths(&[grit_lib::status::CaseCollisionGroup]) -> std::collections::HashSet<alloc::string::String>
+impl core::clone::Clone for grit_lib::status::CaseCollisionGroup
+pub fn grit_lib::status::CaseCollisionGroup::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::status::CaseCollisionGroup
+impl core::cmp::PartialEq for grit_lib::status::CaseCollisionGroup
+pub fn grit_lib::status::CaseCollisionGroup::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::status::CaseCollisionGroup
+pub fn grit_lib::status::CaseCollisionGroup::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::status::CaseCollisionGroup
+impl core::marker::Freeze for grit_lib::status::CaseCollisionGroup
+impl core::marker::Send for grit_lib::status::CaseCollisionGroup
+impl core::marker::Sync for grit_lib::status::CaseCollisionGroup
+impl core::marker::Unpin for grit_lib::status::CaseCollisionGroup
+impl core::marker::UnsafeUnpin for grit_lib::status::CaseCollisionGroup
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::status::CaseCollisionGroup
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::status::CaseCollisionGroup
 pub struct grit_lib::status::ConflictGroup
 pub grit_lib::status::ConflictGroup::kind: grit_lib::operation::ConflictKind
 pub grit_lib::status::ConflictGroup::paths: alloc::vec::Vec<alloc::string::String>
@@ -30529,9 +30548,9 @@ pub fn grit_lib::status::Status<'repo>::expand_untracked_for_staging(&self, &mut
 pub fn grit_lib::status::Status<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::status::Status<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::status::Status<'repo>::run(&self, &grit_lib::porcelain::status::StatusOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::status::StatusModel>
-pub fn grit_lib::status::Status<'repo>::worktree_case_collisions(&self, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::status::CaseCollisionGroup>>
 pub fn grit_lib::status::Status<'repo>::untracked(&self, &mut grit_lib::index::Index, &grit_lib::status::UntrackedOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>)>
 pub fn grit_lib::status::Status<'repo>::untracked_with_meta(&self, &mut grit_lib::index::Index, &grit_lib::status::UntrackedOptions, core::option::Option<&grit_lib::worktree::worktree_rules::WorktreeRules>, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, grit_lib::porcelain::status::UntrackedCollectMeta)>
+pub fn grit_lib::status::Status<'repo>::worktree_case_collisions(&self, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::status::CaseCollisionGroup>>
 impl<'repo> core::clone::Clone for grit_lib::status::Status<'repo>
 pub fn grit_lib::status::Status<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::status::Status<'repo>
@@ -30675,8 +30694,12 @@ impl core::marker::Unpin for grit_lib::status::UntrackedOptions
 impl core::marker::UnsafeUnpin for grit_lib::status::UntrackedOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::status::UntrackedOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::status::UntrackedOptions
+pub fn grit_lib::status::filter_guidance_for_case_collisions(grit_lib::porcelain::status::StatusGuidance, &[alloc::string::String], &std::collections::hash::set::HashSet<alloc::string::String>) -> grit_lib::porcelain::status::StatusGuidance
 pub fn grit_lib::status::format_porcelain_v2(&grit_lib::porcelain::status::StatusModel, &grit_lib::prelude::Odb, core::option::Option<&std::path::Path>) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::status::path_in_worktree_case_collision(&str, &[grit_lib::status::CaseCollisionGroup]) -> bool
 pub fn grit_lib::status::short_status_lines(&grit_lib::porcelain::status::StatusModel) -> alloc::vec::Vec<grit_lib::porcelain::status::StatusShortLine>
+pub fn grit_lib::status::worktree_case_collision_groups(&grit_lib::repo::Repository, &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::status::CaseCollisionGroup>>
+pub fn grit_lib::status::worktree_case_collision_paths(&[grit_lib::status::CaseCollisionGroup]) -> std::collections::hash::set::HashSet<alloc::string::String>
 pub mod grit_lib::tree_sha256
 #[non_exhaustive] pub enum grit_lib::tree_sha256::MissingSubmoduleReason
 pub grit_lib::tree_sha256::MissingSubmoduleReason::MissingCommit
