@@ -183,7 +183,8 @@ pub(crate) fn ancestor_kind(path: &Path) -> AncestorKind {
             GetFileAttributesW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
             INVALID_FILE_ATTRIBUTES,
         };
-        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        let api_path = crate::git_path::win32_file_api_path(path);
+        let mut wide: Vec<u16> = api_path.as_os_str().encode_wide().collect();
         if !wide.contains(&0) {
             wide.push(0);
             // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the call.
@@ -1185,7 +1186,9 @@ fn lookup_lone_blob_in_directory(
             }
         }
         Err(Error::Io(e))
-            if e.kind() == io::ErrorKind::NotFound || e.kind() == io::ErrorKind::NotADirectory =>
+            if (e.kind() == io::ErrorKind::NotFound
+                || e.kind() == io::ErrorKind::NotADirectory)
+                && !crate::git_path::win32_absolute_path_exceeds_max_path(abs_dir) =>
         {
             BlobDiskLookup::Missing
         }
@@ -1778,12 +1781,20 @@ fn read_directory_map(
         match crate::windows_dir_listing::read_listing_cached(listing_cache, abs_dir, expected) {
             Ok(listing) => Ok(DirectoryReadOutcome::Listed(listing)),
             Err(Error::Io(e))
-                if e.kind() == io::ErrorKind::NotFound
-                    || e.kind() == io::ErrorKind::NotADirectory =>
+                if (e.kind() == io::ErrorKind::NotFound
+                    || e.kind() == io::ErrorKind::NotADirectory)
+                    && !crate::git_path::win32_absolute_path_exceeds_max_path(abs_dir) =>
             {
                 Ok(DirectoryReadOutcome::Missing)
             }
             Err(Error::Io(e)) if e.kind() == io::ErrorKind::PermissionDenied => {
+                Ok(DirectoryReadOutcome::Inaccessible(e))
+            }
+            Err(Error::Io(e))
+                if (e.kind() == io::ErrorKind::NotFound
+                    || e.kind() == io::ErrorKind::NotADirectory)
+                    && crate::git_path::win32_absolute_path_exceeds_max_path(abs_dir) =>
+            {
                 Ok(DirectoryReadOutcome::Inaccessible(e))
             }
             Err(e) => Err(e),

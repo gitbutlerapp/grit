@@ -37,7 +37,8 @@ mod imp {
     use crate::worktree_scan::BlobDiskStat;
 
     fn path_to_wide(path: &Path) -> Vec<u16> {
-        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        let api_path = crate::git_path::win32_file_api_path(path);
+        let mut wide: Vec<u16> = api_path.as_os_str().encode_wide().collect();
         if wide.last() != Some(&0) {
             wide.push(0);
         }
