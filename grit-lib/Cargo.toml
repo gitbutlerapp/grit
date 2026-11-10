@@ -514,6 +514,11 @@ path = "tests/upload_pack_loose_blob_memory.rs"
 required-features = ["full-tests"]
 
 [[test]]
+name = "upload_pack_duplicate_want_memory"
+path = "tests/upload_pack_duplicate_want_memory.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "checkout_wide_tree_rss"
 path = "tests/checkout_wide_tree_rss.rs"
 required-features = ["full-tests"]
