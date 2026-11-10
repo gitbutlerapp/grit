@@ -270,33 +270,33 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `bundle` | 325 | 17 | 0 | 0 | 0 |
 | `change_id` | 139 | 25 | 2 | 2 | 0 |
 | `command_runner` | 484 | 90 | 1 | 0 | 1 |
-| `commit` | 305 | 77 | 3 | 0 | 2 |
-| `commits` | 270 | 59 | 0 | 0 | 0 |
+| `commit` | 305 | 78 | 3 | 0 | 2 |
+| `commits` | 270 | 60 | 0 | 0 | 0 |
 | `config` | 1,030 | 775 | 0 | 0 | 0 |
 | `diagnostics` | 132 | 17 | 0 | 0 | 0 |
 | `diff` | 2,348 | 182 | 10 | 5 | 4 |
 | `divergence` | 243 | 5 | 0 | 0 | 0 |
-| `error` | 1,513 | 382 | 0 | 0 | 0 |
+| `error` | 1,513 | 383 | 0 | 0 | 0 |
 | `gitbutler` | 62 | 4 | 0 | 1 | 0 |
 | `ident` | 237 | 62 | 0 | 0 | 0 |
-| `index` | 976 | 180 | 1 | 1 | 0 |
+| `index` | 976 | 181 | 1 | 1 | 0 |
 | `line_range` | 45 | 1 | 0 | 0 | 0 |
 | `list_limit` | 23 | 3 | 0 | 0 | 0 |
 | `lockfile` | 148 | 13 | 1 | 0 | 1 |
 | `maintenance` | 1,169 | 57 | 0 | 0 | 0 |
 | `merge` | 1,116 | 61 | 16 | 3 | 1 |
 | `notes` | 129 | 15 | 0 | 0 | 0 |
-| `objects` | 2,472 | 711 | 2 | 4 | 1 |
+| `objects` | 2,472 | 712 | 2 | 4 | 1 |
 | `operation` | 215 | 27 | 0 | 0 | 0 |
 | `ownership_check` | 79 | 4 | 0 | 0 | 0 |
 | `parallel` | 130 | 32 | 1 | 0 | 0 |
 | `path_validate` | 142 | 7 | 0 | 0 | 0 |
-| `porcelain` | 2,807 | 298 | 8 | 2 | 2 |
+| `porcelain` | 2,807 | 299 | 8 | 2 | 2 |
 | `prelude` | 1,174 | 9 | 0 | 0 | 0 |
-| `progress` | 230 | 439 | 0 | 0 | 3 |
-| `refs` | 2,193 | 248 | 8 | 5 | 3 |
+| `progress` | 230 | 440 | 0 | 0 | 3 |
+| `refs` | 2,193 | 249 | 8 | 5 | 3 |
 | `remote` | 4,947 | 225 | 1 | 3 | 1 |
-| `repo` | 451 | 847 | 11 | 2 | 2 |
+| `repo` | 451 | 848 | 11 | 2 | 2 |
 | `repo_handles` | 867 | 53 | 4 | 0 | 4 |
 | `revwalk` | 2,968 | 209 | 2 | 2 | 2 |
 | `stash` | 339 | 28 | 0 | 3 | 0 |
@@ -313,26 +313,26 @@ Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.t
 | --- | --- | ---: | ---: |
 | `branches` | `grit_lib::repo_handles::Branches<'_>` | 32 | 28 |
 | `bundles` | `grit_lib::repo_handles::RepositoryBundles<'_>` | 29 | 16 |
-| `checkout` | `grit_lib::repo_handles::Checkout<'_>` | 32 | 96 |
-| `commits` | `grit_lib::commits::Commits<'_>` | 25 | 131 |
+| `checkout` | `grit_lib::repo_handles::Checkout<'_>` | 32 | 97 |
+| `commits` | `grit_lib::commits::Commits<'_>` | 25 | 132 |
 | `config` | `grit_lib::config::Config<'_>` | 567 | 98 |
 | `diagnostics` | `grit_lib::diagnostics::DiagnosticsHandle` | 18 | 1 |
 | `diff` | `grit_lib::diff::Diff<'_>` | 516 | 90 |
 | `history` | `grit_lib::revwalk::history::History<'_>` | 213 | 40 |
 | `hooks` | `grit_lib::repo_handles::RepositoryHooks<'_>` | 28 | 10 |
-| `index` | `grit_lib::index::IndexFile<'_>` | 41 | 196 |
+| `index` | `grit_lib::index::IndexFile<'_>` | 41 | 197 |
 | `maintenance` | `grit_lib::maintenance::Maintenance<'_>` | 34 | 49 |
 | `merge` | `grit_lib::merge::Merge<'_>` | 142 | 33 |
 | `notes` | `grit_lib::repo_handles::RepositoryNotes<'_>` | 33 | 14 |
 | `objects` | `grit_lib::objects::Objects<'_>` | 29 | 28 |
 | `operation` | `grit_lib::operation::Operations<'_>` | 23 | 12 |
-| `references` | `grit_lib::refs::References<'_>` | 36 | 231 |
+| `references` | `grit_lib::refs::References<'_>` | 36 | 232 |
 | `reflogs` | `grit_lib::repo_handles::RepositoryReflogs<'_>` | 24 | 21 |
 | `remotes` | `grit_lib::repo_handles::RepositoryRemotes<'_>` | 44 | 89 |
 | `revwalk` | `grit_lib::revwalk::handle::RevWalk<'_>` | 164 | 156 |
 | `snapshot_checkouts` | `grit_lib::repo_handles::RepositorySnapshotCheckouts<'_>` | 39 | 4 |
 | `stash` | `grit_lib::repo_handles::RepositoryStash<'_>` | 34 | 28 |
-| `status` | `grit_lib::status::Status<'_>` | 100 | 340 |
+| `status` | `grit_lib::status::Status<'_>` | 100 | 341 |
 | `tags` | `grit_lib::repo_handles::Tags<'_>` | 23 | 18 |
 | `workspace_snapshot` | `grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'_>` | 21 | 0 |
 | `worktrees` | `grit_lib::repo_handles::RepositoryWorktrees<'_>` | 31 | 26 |
